@@ -2722,6 +2722,61 @@ mod tests {
     }
 
     #[test]
+    fn computed_hides_are_kept_through_a_rename_and_in_every_undo_step() {
+        // #22153: what a computation hid stays hidden beside what was hidden meanwhile, also
+        // when it renamed a body, and undoing any of its steps keeps the hide made meanwhile.
+        let boxes = |s: &mut Session| {
+            for name in ["Peg", "Master", "Door", "Cabinet"] {
+                run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name}));
+            }
+        };
+        let mut s = Session::default();
+        boxes(&mut s);
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        let mut computed = s.scratch();
+        run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
+        run(&mut computed, "browser.visibility", json!({"items": ["Master"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["Cabinet"], "visible": false}));
+        s.accept_computed(computed).unwrap();
+        let shown = |s: &Session, names: &[&str]| names.iter().map(|name| s.body_visible(name)).collect::<Vec<_>>();
+        assert_eq!(shown(&s, &["Stud", "Master", "Door", "Cabinet"]), [false, false, true, false], "rename, run hide and hide meanwhile");
+
+        let mut s = Session::default();
+        boxes(&mut s);
+        let mut computed = s.scratch();
+        run(&mut computed, "browser.visibility", json!({"items": ["Master"], "visible": false}));
+        run(&mut computed, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["Cabinet"], "visible": false}));
+        s.accept_computed(computed).unwrap();
+        let all = ["Master", "Door", "Cabinet"];
+        assert_eq!(shown(&s, &all), [false, false, false]);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(shown(&s, &all), [false, true, false], "undoing the second step keeps the first and the hide meanwhile");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(shown(&s, &all), [true, true, false], "undoing the first step keeps the hide meanwhile");
+        run(&mut s, "edit.redo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(shown(&s, &all), [false, false, false]);
+    }
+
+    #[test]
+    fn computed_visibility_merges_large_hidden_sets_by_membership() {
+        // Ten thousand hidden bodies, a few changed: the result is the live list with them.
+        let start: Vec<String> = (0..10_000).map(|i| format!("B{i}")).collect();
+        let mut ran = start.clone();
+        ran.retain(|b| b != "B5");
+        ran.push("New".into());
+        let mut live = start.clone();
+        live.push("Meanwhile".into());
+        crate::merge_hidden(&mut live, &start, &ran);
+        assert_eq!(live.len(), 10_001);
+        assert!(!live.contains(&"B5".to_string()) && live.contains(&"New".to_string()) && live.contains(&"Meanwhile".to_string()));
+        let mut unchanged = live.clone();
+        crate::merge_hidden(&mut unchanged, &ran, &ran);
+        assert_eq!(unchanged, live, "a computation that hid and showed nothing leaves the list as it is");
+    }
+
+    #[test]
     fn body_rename_reusing_a_hidden_name_preserves_visibility_and_history() {
         for computed in [false, true] {
             for hidden in [false, true] {

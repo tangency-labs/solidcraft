@@ -21,6 +21,7 @@ impl Model {
         let reusable = !self.no_cache
             && self.primed.is_empty()
             && !doc.has_capture_position_timeline()
+            && !self.has_pending_import_checks()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
@@ -242,6 +243,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         touching,
         shell_piece_order,
         kernel_piece_order,
+        least_face_piece_order,
         pattern_names_in_order,
         inserted,
         link_faces,
@@ -263,6 +265,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *profile_frame == b.profile_frame
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
+        && *least_face_piece_order == b.least_face_piece_order
         && *pattern_names_in_order == b.pattern_names_in_order
         && *inserted == b.inserted
         && *link_faces == b.link_faces

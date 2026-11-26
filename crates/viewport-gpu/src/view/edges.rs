@@ -380,10 +380,22 @@ impl Edges {
         if cfg!(test) { base | wgpu::BufferUsages::COPY_SRC } else { base }
     }
 
+    /// Whether the edge-argument buffer is missing (for example after a refused allocation) and
+    /// needs another [`Self::write`] even when the shown placements did not change.
+    pub(super) fn args_missing(&self) -> bool {
+        self.args.is_none()
+    }
+
     /// The buffer the edge draw arguments are drawn from (for tests).
     #[cfg(test)]
     pub(super) fn args(&self) -> Option<wgpu::Buffer> {
         self.args.clone()
+    }
+
+    /// Drop the argument buffer to simulate a refused allocation (for tests).
+    #[cfg(test)]
+    pub(super) fn clear_args(&mut self) {
+        self.args = None;
     }
 
     /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
@@ -405,10 +417,9 @@ impl Edges {
         self.on_gpu = false;
         let (instances, args) = self.contents(parts);
         if was_on_gpu || self.args.is_none() {
-            // Leaving a GPU cull: its argument buffer is shared with `Indirect` (which writes
-            // triangle arguments at offset 0), so allocate a private buffer instead of clobbering
-            // it.
-            self.args = super::buffer_init(device, "sc_edge_args", &args, Self::args_usage());
+            // Leaving a GPU cull (or retrying after a refused allocation): allocate a private
+            // argument buffer instead of clobbering `Indirect`'s shared buffer at offset 0.
+            self.args = crate::buffer_init(device, "sc_edge_args", &args, Self::args_usage()).ok();
         } else if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
         }
