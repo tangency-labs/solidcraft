@@ -7804,11 +7804,11 @@ fn leaning_block(w: f64, h: f64, taper: f64, height: f64) -> Body {
 /// centre C r / cos(a/2) from O on the bisector; its section is the kite O T1 C T2 less the
 /// sector C T1 T2 of angle a, whose centroid lies 2 r sin(a/2) / (3 a/2) from C towards O. A
 /// chamfer's section is the triangle O (d u1) (d u2). Each is a section S of area A whose
-/// points lie a depth z (A z_bar in all) below the top.
+/// points lie a depth z (A `z_bar` in all) below the top.
 ///
 /// Along the edge the section is cut by the two long walls, which lean out by taper: at
 /// depth z they stand l/2 + z tan(taper) either side of the edge's middle. The cut takes
-/// the integral over S of (l + 2 z tan(taper)), which is A l + 2 tan(taper) A z_bar, in
+/// the integral over S of (l + 2 z tan(taper)), which is A l + 2 tan(taper) A `z_bar`, in
 /// closed form, whatever the ends' slant (the walls are planes, and S lies inside them).
 fn leaning_end_cut(round: bool, size: f64, l: f64, taper: f64) -> f64 {
     let a = std::f64::consts::FRAC_PI_2 - taper;
