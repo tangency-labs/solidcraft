@@ -141,7 +141,7 @@ pub fn conic_polyline(a: Vec2, apex: Vec2, b: Vec2, rho: f64) -> Vec<Vec2> {
 /// Natural cubic interpolation through `p` (chord-length parameters): per span the cubic
 /// Hermite data (start, end, start tangent, end tangent) in span-parameter units.
 fn fit_spans(p: &[Vec2]) -> Vec<(Vec2, Vec2, Vec2, Vec2)> {
-    solidcraft_kernel::services::fit_projection::natural_spans(p).unwrap_or_default()
+    solidcraft_kernel::curves::natural_spans(p).unwrap_or_default()
 }
 
 fn hermite(p0: Vec2, p1: Vec2, t0: Vec2, t1: Vec2, s: f64) -> Vec2 {
@@ -220,7 +220,7 @@ pub fn end_curvature(f: &dyn Fn(f64) -> Vec2, at_end: bool) -> Vec2 {
 
 /// The cubic Bézier pieces of a fit spline (exact: each span is a cubic Hermite).
 pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
-    solidcraft_kernel::services::fit_projection::fit_beziers(p, false).unwrap_or_default()
+    solidcraft_kernel::curves::fit_beziers(p, false).unwrap_or_default()
 }
 
 /// Fit pieces in the explicitly selected interpolation mode.
@@ -228,7 +228,7 @@ pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<
     if periodic {
         crate::periodic_beziers(p)
     } else {
-        solidcraft_kernel::services::fit_projection::fit_beziers(p, false).map_err(|e| crate::SketchError::Invalid(e.to_string()))
+        solidcraft_kernel::curves::fit_beziers(p, false).map_err(|e| crate::SketchError::Invalid(e.to_string()))
     }
 }
 

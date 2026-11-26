@@ -38,5 +38,10 @@
     "document.newer_drawing": "图纸“{drawing}”由较新版本的 SolidCraft 保存（格式 {format}，此版本最高可读取 {reads}）。如有缺失，请更新。",
     "document.newer_drawing_change": "图纸“{drawing}”由较新版本的 SolidCraft 保存（格式 {format}，包含此版本未知的 `{change}`）。如有缺失，请更新。",
     "document.newer_drawing_not_read": "SolidCraft 无法读取图纸“{drawing}”中的 {what}。保存时会保留此内容。"
+  },
+  "fr": {
+    "document.newer_drawing": "Le dessin « {drawing} » a été enregistré avec une version plus récente de SolidCraft (format {format} ; cette version lit jusqu’au format {reads}). Si des éléments manquent, mettez SolidCraft à jour.",
+    "document.newer_drawing_change": "Le dessin « {drawing} » a été enregistré avec une version plus récente de SolidCraft (format {format} avec « {change} », inconnu de cette version). Si des éléments manquent, mettez SolidCraft à jour.",
+    "document.newer_drawing_not_read": "SolidCraft n’a pas pu lire {what} dans le dessin « {drawing} ». Cet élément sera conservé lors de l’enregistrement."
   }
 }

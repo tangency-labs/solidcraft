@@ -28,6 +28,7 @@ struct App {
     panel_visible: bool,
     interactive: bool,
     forms: Vec<(String, Value)>,
+    messages: Vec<(craft_plugin::LogLevel, String)>,
 }
 impl PluginHost for App {
     fn open_form(&mut self, entry: &str, params: &Value) -> Result<()> {
@@ -129,7 +130,12 @@ impl PluginHost for App {
         self.panel_visible = visible;
         Ok(())
     }
-    fn log(&mut self, _: &str) {}
+    fn log(&mut self, message: &str) {
+        self.messages.push((craft_plugin::LogLevel::Info, message.to_string()));
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        self.messages.push((level, message.to_string()));
+    }
     fn progress(&mut self, _: f32, _: &str) {}
     fn is_cancelled(&self) -> bool {
         self.cancelled
@@ -1178,6 +1184,26 @@ fn form_import_requires_capability_and_refuses_programmatic_hosts() {
     let mut hostile = state(App::default());
     hostile.forms = true;
     assert!(forms::Host::open(&mut hostile, "../entry".into(), "{}".into()).is_err());
+}
+
+#[test]
+fn log_preserves_severity_level_and_message() {
+    use crate::native::log::Host;
+    let mut st = state(App::default());
+    st.log(crate::native::log::Level::Debug, "diagnostic details".into());
+    st.log(crate::native::log::Level::Info, "normal progress".into());
+    st.log(crate::native::log::Level::Warn, "warning: mortise cheek is thin".into());
+    st.log(crate::native::log::Level::Error, "fatal error occurred\r\n".into());
+
+    assert_eq!(
+        st.host.messages,
+        vec![
+            (craft_plugin::LogLevel::Debug, "diagnostic details".into()),
+            (craft_plugin::LogLevel::Info, "normal progress".into()),
+            (craft_plugin::LogLevel::Warn, "warning: mortise cheek is thin".into()),
+            (craft_plugin::LogLevel::Error, "fatal error occurred".into()),
+        ]
+    );
 }
 
 #[test]
@@ -2504,6 +2530,39 @@ fn file_aware_hooks_read_optional_user_settings_without_publishing_or_writing() 
     let (_, result) = crate::update_fields(app, &manifest, &component, "convert", &json!({}), &request);
     assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn parallel_dialog_tests_do_not_share_prefix_read_slots() {
+    let reads = prefix_reads();
+    let mut releases = Vec::new();
+    let mut replies = Vec::new();
+    for _ in 0..MAX_PREFIX_READS {
+        let (release, blocked) = mpsc::channel();
+        let reply = start_prefix_read(prefix_reads(), move || {
+            blocked.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        releases.push(release);
+        replies.push(reply);
+    }
+    // Repeated calls on this thread still share the limit.
+    assert_eq!(reads.load(Ordering::Acquire), MAX_PREFIX_READS);
+    let refused = start_prefix_read(prefix_reads(), || Ok(()));
+    assert!(matches!(refused, Err(HostError::LimitExceeded { .. })));
+
+    // Another test can read while every permit on this thread is occupied.
+    let other = std::thread::spawn(|| {
+        start_prefix_read(prefix_reads(), || Ok(7_u8)).and_then(|reply| wait_prefix(&reply, Instant::now() + Duration::from_secs(5)))
+    })
+    .join();
+    for (release, reply) in releases.into_iter().zip(replies) {
+        release.send(()).unwrap();
+        reply.recv().unwrap().unwrap();
+    }
+    assert_eq!(reads.load(Ordering::Acquire), 0);
+    assert_eq!(other.unwrap().unwrap(), 7);
 }
 
 #[test]

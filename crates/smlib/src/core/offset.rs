@@ -15,8 +15,8 @@
 //! solid as the capi does since tangency-labs/smlib#17.
 //!
 //! A draft tilts planes and, since tangency-labs/smlib#27, turns a cylinder about the pull into
-//! a cone (solidcore's `Cone::lean_cylinder`, solidcore#1545), and since smlib#53 a cone about the
-//! pull into the cone its generators turned make. A draft's tilted faces go in through solidcore's
+//! a cone, and since smlib#53 a cone about the pull into the cone its generators turned make: the
+//! surface solidcore's draft gives (`draft_surface`), with its draft definition. A draft's tilted faces go in through solidcore's
 //! `SmBrep::LocalOperation` ([`local_operation`]). The capi's check that it moved some face
 //! (`moved_faces`) marks the replacement surfaces; solidcore names a surface by its owning face, so
 //! the mark goes on the picked faces, which it stays with through the operation (solidcore#1875).
@@ -26,17 +26,14 @@ use solidcore::SolidError;
 use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::Shape;
-use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_curve::ControlPointForm;
-use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::nurbs::knots::Side;
+use solidcore::offset::draft::{Draft, DraftRefusal, draft_surface};
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::query::api_queries::{face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
-use solidcore::surface::cone::Cone;
-use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId};
@@ -141,7 +138,7 @@ fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Option<FaceuseId>> {
 /// `SmApiShellBrepFull(b, distance, TRUE, TRUE, TRUE, open, r)`: convex edges extended, results
 /// merged, side walls made at a sheet's edges, and (as the fork does, 5448b9a) a thickened
 /// sheet's coplanar side walls one face.
-fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
+pub(super) fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
     let options = ShellOptions {
         offset: OffsetOptions { distance, extend_convex_edges: true, merge_results: true },
         create_offset_solid: true,
@@ -151,9 +148,10 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
     solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
-/// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
-fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64) -> solidcore::Result<Brep> {
-    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: true, merge_results: true })
+/// `SmApiOffsetBrepFull(b, distance, extend, TRUE, r)`: the convex edges extended until the
+/// moved faces meet (`extend`, as the capi always does), or rounded by the distance.
+fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64, extend: bool) -> solidcore::Result<Brep> {
+    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: extend, merge_results: true })
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
@@ -289,7 +287,7 @@ pub(crate) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Bo
             return Ok(Err(Error::Argument));
         }
         if symmetric {
-            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness))? {
+            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness, true))? {
                 Ok(moved) => moved,
                 Err(e) => return Ok(Err(e)),
             };
@@ -314,6 +312,26 @@ pub(crate) fn offset_sheet(body: &Body, distance: f64) -> Result<Body> {
     Ok(w)
 }
 
+/// The closed solid `body` grown by `distance` along its faces' outward normals (negative: shrunk):
+/// the convex edges extended until the moved faces meet, or (`round`) rounded with `distance` as
+/// the radius, so every point of the result's surface is `distance` from the body's. A body that is
+/// not a closed manifold solid is [`Error::Argument`]; a result that is not one is
+/// [`Error::NotSolid`].
+pub(crate) fn offset_solid(body: &Body, distance: f64, round: bool) -> Result<Body> {
+    if !distance_ok(distance) {
+        return Err(Error::Argument);
+    }
+    on_copy("smlib_offset_solid", body, |k, mut w| {
+        if !brep_p2::is_manifold_solid(&w)? {
+            return Ok(Err(Error::Argument));
+        }
+        match called(offset_brep_full(k, &mut w, distance, !round))? {
+            Ok(r) => finish(r, true),
+            Err(e) => Ok(Err(e)),
+        }
+    })
+}
+
 /// A unit vector from `v`, as `smlib_draft`'s `unit`; `None` for a vector too short or not
 /// finite.
 fn unit(v: [f64; 3]) -> Option<Vec3> {
@@ -325,115 +343,20 @@ fn unit(v: [f64; 3]) -> Option<Vec3> {
     (len > 1e-12 && len.is_finite()).then(|| u * (1.0 / len))
 }
 
-/// `outward_normal`: the outward normal of face `f` (its outer faceuse `fu`) at `at`, a point on
-/// it: its surface's normal there, turned with the outer faceuse. `None` where SMLib cannot place
-/// the point on the surface (the capi's `STEPInversionAnswered` also takes a point outside the
-/// domain or off the surface by more than its tolerance; solidcore's inversion answers those with
-/// a status, so they are `None` here: the face's own internal point is neither).
-fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) -> solidcore::Result<Option<Vec3>> {
-    let Some(surf) = b.face(f)?.surface.as_ref() else { return Ok(None) };
-    let Some((step, _)) = answer(surf.step_inversion(k, &surf.step_uv_domain(), at, 1e6, None))? else { return Ok(None) };
-    let Some(nurb) = answer(surf.convert_uv_from_step_to_nurbs(k, step))? else { return Ok(None) };
-    let Some(mut n) = answer(surf.evaluate_normal(k, nurb, Side::Left, Side::Left))? else { return Ok(None) };
-    if b.faceuse(fu)?.orientation != OrientType::Same {
-        n = -n;
-    }
-    Ok(Some(n))
-}
-
 /// A face the draft cannot tilt, refused for what about it the draft cannot handle (#18541), in
 /// the words `solidcore_ops::offset::draft` gives the same refusal where they fit this check.
 fn cannot_draft(why: &'static str) -> Error {
     Error::Refused(solidcore_ops::Error::Unsupported(why))
 }
 
-/// A drafted cone's radius would reach zero within the face's span.
-const CONE_CLOSES: &str = "a drafted cone would close within the face";
-
-/// `drafted_cone` (tangency-labs/smlib#27, #53): the cone a face on the cone or cylinder `cyl` about
-/// the pull (its outward normal `n` at `inside`) becomes drafted by `angle` about its circle on the
-/// neutral plane (through `origin`, normal `normal`), so that it leans in going along `pull`: its
-/// generators turned by `angle` in their planes through the axis, about that circle. With R0 the
-/// radius on the neutral plane and t the slope of the radius going along the pull (0 for a
-/// cylinder), the radius h along the pull from that circle is R0 + h tan(atan(t) - s angle), s = 1
-/// where the face looks away from the axis (a pin), -1 where it looks towards it (a hole). It is
-/// the surface's own NURB with each control point moved radially by the new radius over the old at
-/// its height, so it keeps the surface's parameters and the face's UV trims stay valid: for a
-/// cylinder solidcore's `Cone::lean_cylinder` (solidcore#1545), for a cone the same edit on
-/// [`Cone::base_mut`]. Refused ([`cannot_draft`]) when the pull does not run along the axis, the
-/// axis is parallel to the neutral plane, the neutral plane is at or past the cone's apex, or the
-/// cone would close within the face's span;
-/// [`Error::Unsupported`] when the cone's frame or net cannot be read or edited.
-#[allow(clippy::too_many_arguments)] // the capi's drafted_cone
-fn drafted_cone(
-    k: &Kernel,
-    cyl: &Cone,
-    n: Vec3,
-    inside: Point3,
-    origin: Point3,
-    normal: Vec3,
-    pull: Vec3,
-    angle: f64,
-) -> solidcore::Result<Out<Cone>> {
-    let frame = cyl.canonical().origin;
-    let z = frame.x_axis().cross(frame.y_axis());
-    let len = z.length();
-    if !(len > 0.0 && len.is_finite()) {
-        return Ok(Err(Error::Unsupported));
+/// solidcore's refusal to draft a cone or cylinder, in the words the app's draft has used: an axis
+/// in the neutral plane is one parallel to it; the rest as solidcore-ops words them (a neutral
+/// plane at or past a cone's apex among them, which the kernel tells apart).
+fn cone_refused(r: DraftRefusal) -> Error {
+    match r {
+        DraftRefusal::AxisInNeutralPlane => cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane"),
+        r => Error::Refused(solidcore_ops::offset::draft_refused(r)),
     }
-    let z = z * (1.0 / len);
-    let sense = z.dot(pull);
-    if (sense.abs() - 1.0).abs() > 1e-9 {
-        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is not along the pull")));
-    }
-    let axis = frame.origin();
-    let toward = z.dot(normal);
-    if toward.abs() < 1e-12 {
-        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane")));
-    }
-    // The hinge circle's centre: the axis on the neutral plane, at the cone's height v0.
-    let v0 = (origin - axis).dot(normal) / toward;
-    let centre = axis + z * v0;
-    let radial = (inside - centre) - pull * (inside - centre).dot(pull);
-    let s = if radial.dot(n) >= 0.0 { 1.0 } else { -1.0 };
-    // The cone's radius is linear in its height along z; along the pull it changes by `slope` per
-    // unit, and drafted by `turned`.
-    let r0 = cyl.radius(v0);
-    let slope = (cyl.radius(1.0) - cyl.radius(0.0)) * sense;
-    let turned = (slope.atan() - s * angle).tan();
-    if !(r0 > 0.0) {
-        return Ok(Err(cannot_draft("the neutral plane is at or past a drafted cone's apex")));
-    }
-    if !turned.is_finite() {
-        return Ok(Err(cannot_draft(CONE_CLOSES)));
-    }
-    if cyl.is_cylinder() {
-        return Ok(answer(cyl.lean_cylinder(k, turned * sense, v0))?.ok_or(Error::Unsupported));
-    }
-    let mut cone = cyl.clone();
-    let net = cone.base_mut();
-    let (nu, nv) = (net.number_control_points(SurfParamType::U), net.number_control_points(SurfParamType::V));
-    for i in 0..nu {
-        for j in 0..nv {
-            let Some((p, w)) = answer(net.control_point(ControlPointForm::EuclideanRational, i, j))? else {
-                return Ok(Err(Error::Unsupported));
-            };
-            let h = (p - centre).dot(pull);
-            let (was, now) = (cyl.radius(v0 + h * sense), r0 + h * turned);
-            if !(was > 0.0 && now > 0.0) {
-                return Ok(Err(cannot_draft(CONE_CLOSES)));
-            }
-            let foot = centre + pull * h;
-            if answer(net.set_control_point(ControlPointForm::EuclideanRational, i, j, foot + (p - foot) * (now / was), w))?.is_none() {
-                return Ok(Err(Error::Unsupported));
-            }
-        }
-    }
-    // `CopyAndAddAnalytics`: the cone's analytic data from its edited NURB.
-    if answer(cone.rebuild_step_from_nurb_parameters(k))?.is_none() {
-        return Ok(Err(Error::Unsupported));
-    }
-    Ok(Ok(cone))
 }
 
 /// The capi's `Before` mark on what `SmBrep::LocalOperation` is to move: above the history's tag.
@@ -469,7 +392,7 @@ pub(super) fn moved_faces(w: &mut Brep) -> solidcore::Result<bool> {
 
 /// `smlib_draft`: its checks, the solid check, the pick, then `draft_faces`: each picked face (a
 /// plane parallel to the pull) gets a copy of its plane turned by `angle` about its line on the
-/// neutral plane, and a cylinder about the pull the cone `drafted_cone` gives
+/// neutral plane, and a cylinder or cone about the pull the cone solidcore's `draft_surface` gives
 /// (tangency-labs/smlib#27); `SmBrep::LocalOperation` extends or trims the faces around them to
 /// meet the tilted surfaces.
 pub(crate) fn draft(
@@ -507,18 +430,17 @@ pub(crate) fn draft(
             let (Some(surf), Some(fu)) = (face.surface.as_ref(), fu) else {
                 return Ok(Err(Error::Status(INVALID_INPUT)));
             };
-            // A cylinder about the pull drafted becomes a cone (`drafted_cone`).
-            if let SurfaceKind::Cone(c) = surf.kind_with_nurb(k)? {
-                let cyl = (**c).clone();
-                let Some(inside) = answer(face_internal_point(k, &mut w, f))? else {
-                    return Ok(Err(Error::Status(INVALID_INPUT)));
+            // A cylinder or cone about the pull drafted becomes the cone solidcore's draft gives
+            // (`draft_surface`: its generators turned about its circle on the neutral plane),
+            // carrying its draft definition, so that the local operation knows it for a draft.
+            if let SurfaceKind::Cone(_) = surf.kind_with_nurb(k)? {
+                let Ok(the_draft) = Draft::new(p3(neutral_origin), normal, along, angle) else {
+                    return Ok(Err(Error::Argument));
                 };
-                let Some(n) = outward_normal(k, &w, f, fu, inside)? else {
-                    return Ok(Err(Error::Status(INVALID_INPUT)));
-                };
-                match drafted_cone(k, &cyl, n, inside, p3(neutral_origin), normal, along, angle)? {
-                    Ok(cone) => surfaces.push(Surface::from(cone)),
-                    Err(e) => return Ok(Err(e)),
+                match answer(draft_surface(k, &w, f, &the_draft))? {
+                    Some(Ok(cone)) => surfaces.push(cone),
+                    Some(Err(r)) => return Ok(Err(cone_refused(r))),
+                    None => return Ok(Err(Error::Unsupported)),
                 }
                 continue;
             }
