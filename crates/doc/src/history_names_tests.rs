@@ -386,3 +386,41 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
     let only = FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face: 0 }], change: solidcraft_kernel::history::Change::Kept };
     assert!(from_origins(&only, &[one], 1).is_none());
 }
+
+/// The pieces of a round panel's cap a fold parted are numbered (`F2:top#1`, `F2:top#2`, #21300).
+/// A later sheet feature that keeps both pieces (Unfold) carries each number to the same piece
+/// only: neither answers to the other's name, so a sketch on one never moves to the other.
+#[test]
+fn a_numbered_sheet_cap_piece_answers_only_to_its_own_number_after_a_later_sheet_feature() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+                "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                           {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}},
+            {"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"},
+            {"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+             "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"},
+            {"id": 31, "name": "Unfold1", "type": "sheet_unfold"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let caps: Vec<usize> = (0..names.faces.len()).filter(|&f| crate::naming::strip_piece(&names.faces[f]) != names.faces[f]).collect();
+    let cap_names: Vec<&String> = caps.iter().map(|&f| &names.faces[f]).collect();
+    for want in ["F2:top#1", "F2:top#2", "F2:bottom#1", "F2:bottom#2"] {
+        assert!(cap_names.iter().any(|n| *n == want), "{cap_names:?}");
+    }
+    for &f in &caps {
+        let others: Vec<&String> =
+            names.info[f].aliases.iter().chain(&names.info[f].synonyms).filter(|a| **a != names.faces[f] && cap_names.contains(a)).collect();
+        assert!(others.is_empty(), "{} answers to {others:?}", names.faces[f]);
+    }
+}

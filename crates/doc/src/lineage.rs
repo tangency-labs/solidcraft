@@ -822,8 +822,13 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
             },
             (SheetPart::Hole { .. } | SheetPart::Drill { .. }, _) => Vec::new(),
             // A cap's place is the rank of the piece it is on among its panel's pieces (see
-            // `FaceNamer::part`): it is a piece of the cap the body before had, at whatever place.
-            (SheetPart::Cap { .. }, _) => on(&x.part),
+            // `FaceNamer::part`). With as many pieces as the body before had, it is the piece at
+            // its own place, never the others (a numbered piece answers only to its own number);
+            // where a fold parted the panel anew, a piece of the cap the body before had.
+            (SheetPart::Cap { .. }, _) => match had.get(x) {
+                Some(same) if on(&x.part).len() == shared_part.get(&x.part).copied().unwrap_or(0) => same.clone(),
+                _ => on(&x.part),
+            },
             _ => had.get(x).cloned().unwrap_or_default(),
         };
         if !source.is_empty() {
