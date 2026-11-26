@@ -539,6 +539,12 @@ constraint in one undo step. Both constraints can be selected and deleted indepe
 either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
 full side, retained as construction geometry, just like a manually constrained midpoint.
 
+**Horizontal** and **Vertical**, in the Constrain drop-down, take the same picks but always go the
+way they say, whichever way the line or the points run now; a line running the other way is turned
+keeping its length. While either is on, a thin dashed guide runs along its direction through the
+cursor. Scripts call them as `sketch.constraint.horizontal` and `sketch.constraint.vertical`, with
+`line` or `points` and no `mode`.
+
 Scripts use the same command, with a midpoint reference in the `points` array:
 
 ```json

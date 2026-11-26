@@ -2183,3 +2183,109 @@ fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
     s.selection = pick(&circle);
     assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
 }
+
+/// Horizontal and Vertical on their own go the way they say, not the nearer way that
+/// Horizontal/Vertical picks: a line drawn nearly vertical can be made horizontal, and two points
+/// nearly level can be put one above the other. Their length and first end stay where they were.
+#[test]
+fn horizontal_and_vertical_go_the_way_they_say() {
+    for (id, from, to) in [("sketch.constraint.horizontal", [10.0, 10.0], [13.0, 40.0]), ("sketch.constraint.vertical", [10.0, 10.0], [40.0, 13.0])] {
+        let horizontal = id.ends_with(".horizontal");
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [from, to], "infer": false, "connect": false}));
+        run(&mut s, id, json!({"line": "l1"}));
+        let sk = sketch(&s);
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. }) == horizontal
+                && matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })),
+            "{id}"
+        );
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let d = b - a;
+        if horizontal {
+            assert!(d.y.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        } else {
+            assert!(d.x.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        }
+        // A mode the combined command would read is not one these take: the command decides.
+        let mut s = new_sketch();
+        run(&mut s, "sketch.point", json!({"point": [0, 20], "id": "p", "connect": false}));
+        run(&mut s, "sketch.point", json!({"point": [30, 21], "id": "q", "connect": false}));
+        run(&mut s, id, json!({"points": ["p", "q"]}));
+        let sk = sketch(&s);
+        let (p, q) = (sk.point(sk.resolve_point("p").unwrap()).unwrap(), sk.point(sk.resolve_point("q").unwrap()).unwrap());
+        let kind = &sk.constraints.last().unwrap().kind;
+        if horizontal {
+            assert!(matches!(kind, ConstraintKind::HorizontalPoints { .. }) && (p.y - q.y).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        } else {
+            assert!(matches!(kind, ConstraintKind::VerticalPoints { .. }) && (p.x - q.x).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        }
+    }
+}
+
+/// Horizontal on a line running the other way, exactly vertical or nearly, and Vertical on one
+/// lying flat, turn the line keeping its length (it would otherwise shrink to its short extent,
+/// or to nothing): about its middle when both ends are free, about a fixed end when one is.
+#[test]
+fn horizontal_and_vertical_turn_a_line_running_the_other_way_keeping_its_length() {
+    for (id, to) in [
+        ("sketch.constraint.horizontal", [10.0, 40.0]),
+        ("sketch.constraint.horizontal", [13.0, 40.0]),
+        ("sketch.constraint.vertical", [40.0, 10.0]),
+        ("sketch.constraint.vertical", [40.0, 13.0]),
+    ] {
+        for fixed_start in [false, true] {
+            let horizontal = id.ends_with(".horizontal");
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points": [[10.0, 10.0], to], "infer": false, "connect": false}));
+            if fixed_start {
+                run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.start"}));
+            }
+            let length = (Vec2::new(to[0], to[1]) - Vec2::new(10.0, 10.0)).len();
+            run(&mut s, id, json!({"line": "l1"}));
+            let sk = sketch(&s);
+            let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+            let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+            let d = b - a;
+            let case = format!("{id} to {to:?}, fixed start {fixed_start}: {a:?} {b:?}");
+            assert!((d.len() - length).abs() < 1e-6, "{case}: length {} not {length}", d.len());
+            assert!(if horizontal { d.y.abs() < 1e-6 && d.x > 0.0 } else { d.x.abs() < 1e-6 && d.y > 0.0 }, "{case}");
+            if fixed_start {
+                assert!((a - Vec2::new(10.0, 10.0)).len() < 1e-9, "{case}: the fixed end stays");
+            } else {
+                let middle = (Vec2::new(to[0], to[1]) + Vec2::new(10.0, 10.0)) * 0.5;
+                assert!(((a + b) * 0.5 - middle).len() < 1e-6, "{case}: turned about its middle");
+            }
+        }
+    }
+}
+
+/// A selection the combined tool takes, Horizontal and Vertical take too, without a `mode`: one
+/// line, two points, or a point and a line (aligned with the line's middle).
+#[test]
+fn horizontal_and_vertical_take_the_selection_without_a_mode() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 10]], "infer": false, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [5, 30], "id": "p", "connect": false}));
+    let line = crate::Sel::SketchCurve { id: "l1".into(), sketch: None };
+    let point = crate::Sel::SketchPoint { id: "p".into() };
+    for id in ["sketch.constraint.horizontal", "sketch.constraint.vertical"] {
+        let spec = crate::find_command(id).unwrap();
+        s.selection = vec![line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"line": "l1"})), "{id}");
+        s.selection = vec![point.clone(), line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", {"midpoint": "l1"}]})), "{id}");
+        s.selection = vec![point.clone(), crate::Sel::SketchPoint { id: "l1.start".into() }];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", "l1.start"]})), "{id}");
+    }
+    // The vertical one runs on the point and line: the point goes above the line's middle.
+    s.selection = vec![point, line];
+    let p = crate::find_command("sketch.constraint.vertical").unwrap().for_selection(&s).unwrap();
+    run(&mut s, "sketch.constraint.vertical", p);
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point("p").unwrap()).unwrap();
+    let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+    let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+    assert!((at.x - (a.x + b.x) / 2.0).abs() < 1e-6, "{at:?} {a:?} {b:?}");
+}
