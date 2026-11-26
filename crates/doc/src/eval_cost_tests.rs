@@ -6893,6 +6893,114 @@ fn saved_model_states_share_origin_frames() {
     );
 }
 
+/// Replays main's eager per-step joint solving over `model.results` (solving on the initial empty
+/// state and after every `CapturePosition` or body-changing feature `< marker`), so tests can
+/// compare `CaptureStepper`'s lazy solves directly against main's eager solve rather than only
+/// comparing lazy runs with each other.
+fn eager_capture_occurrences(doc: &Document, model: &Model) -> BTreeMap<u64, Mat> {
+    let vals = super::evaluation_values(doc).0;
+    let mut d = doc.clone();
+    for o in &mut d.occurrences {
+        if let Some(base) = o.base_transform {
+            o.transform = base;
+        }
+    }
+    for j in &mut d.assembly.joints {
+        if j.kind == crate::joints::JointKind::Rigid {
+            continue;
+        }
+        if let Some(base) = &j.base_values {
+            let dofs = j.kind.dofs().len();
+            let mut q = base.clone();
+            q.resize(dofs, 0.0);
+            for i in 0..dofs {
+                let expr = j.base_exprs.get(i).and_then(|e| e.clone());
+                if let Some(e) = &expr {
+                    let kind = if j.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
+                    if let Ok(v) = super::val(&vals, e, kind)
+                        && v.is_finite()
+                        && v.abs() < 1e9
+                        && let Some(slot) = q.get_mut(i)
+                    {
+                        *slot = v;
+                    }
+                }
+                j.exprs.set_value(i, expr);
+            }
+            crate::joints::clamp(j, &mut q);
+            j.values = q;
+        }
+    }
+    let solve = |d: &mut Document, state: &ModelState| {
+        if !d.assembly.joints.iter().any(|j| !j.suppressed) {
+            return;
+        }
+        let has_base_joints = d.assembly.joints.iter().any(|j| !j.suppressed && j.base_values.is_some());
+        let mut sol = crate::joints::solve_holding_with_analysis(d, state, &BTreeMap::new(), crate::joints::Analysis::Placement);
+        if !has_base_joints {
+            let moved_occs: std::collections::BTreeSet<u64> = d
+                .features
+                .iter()
+                .filter_map(|f| match &f.kind {
+                    FeatureKind::CapturePosition { moves, .. } => Some(moves.iter().map(|m| m.occurrence)),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            sol.world.retain(|occ, _| !moved_occs.contains(occ));
+        }
+        if !sol.world.is_empty() || !sol.values.is_empty() {
+            d.apply_joint_solution(&sol);
+        }
+    };
+    solve(&mut d, &ModelState::default());
+    let marker = doc.marker.unwrap_or(usize::MAX);
+    let mut prev_state = Arc::new(ModelState::default());
+    for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate() {
+        if i >= marker || f.suppressed || r.skipped || r.error.is_some() {
+            continue;
+        }
+        let is_capture = if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
+            let _ = d.apply_capture_position_step(&vals, moves);
+            for cj in joints {
+                let resolved = crate::assembly::eval_captured_joint(&d, &vals, cj).unwrap_or_else(|_| cj.clone());
+                if let Some(j) = d.assembly.joints.iter_mut().find(|j| j.id == resolved.joint)
+                    && j.kind != crate::joints::JointKind::Rigid
+                {
+                    let dofs = j.kind.dofs().len();
+                    let mut q = resolved.values.clone();
+                    q.resize(dofs, 0.0);
+                    crate::joints::clamp(j, &mut q);
+                    j.values = q;
+                    for k in 0..dofs {
+                        j.exprs.set_value(k, resolved.exprs.get(k).and_then(|e| e.clone()));
+                    }
+                }
+            }
+            true
+        } else {
+            false
+        };
+        if is_capture || super::bodies_changed(&prev_state, &r.state) {
+            solve(&mut d, &r.state);
+        }
+        prev_state = r.state.clone();
+    }
+    d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()
+}
+
+fn assert_occurrences_close(actual: &BTreeMap<u64, Mat>, expected: &BTreeMap<u64, Mat>, label: &str) {
+    assert_eq!(actual.len(), expected.len(), "{label}: occurrence count mismatch");
+    for (occ, exp) in expected {
+        let act = actual.get(occ).unwrap_or_else(|| panic!("{label}: missing occurrence {occ}"));
+        for (c, (ac, ec)) in act.iter().zip(exp.iter()).enumerate() {
+            for (r, (av, ev)) in ac.iter().zip(ec.iter()).enumerate() {
+                assert!((av - ev).abs() < 1e-9, "{label}: occ {occ} mat[{c}][{r}] = {av} vs eager {ev}");
+            }
+        }
+    }
+}
+
 #[test]
 fn capture_position_lazy_step_joints_match_cold_and_reduce_solves() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap};
@@ -7011,6 +7119,16 @@ fn capture_position_lazy_step_joints_match_cold_and_reduce_solves() {
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
     assert_eq!(model.resolved_occurrences(), cold.resolved_occurrences());
     assert_eq!(model.resolved_joints(), cold.resolved_joints());
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "slider lazy vs eager");
+    let ta = model.resolved_occurrences().get(&occ_a).expect("occ_a transform");
+    let tb = model.resolved_occurrences().get(&occ_b).expect("occ_b transform");
+    assert!(apply_point(ta, Vec3::ZERO).dist(Vec3::new(25.0, 0.0, 0.0)) < 1e-6, "occ_a shifted by dx=25mm");
+    assert!(
+        apply_point(tb, pick).dist(Vec3::new(30.0, 5.0, 25.0)) < 1e-6,
+        "slider on built face must land pick at (30, 5, 25), got {:?}",
+        apply_point(tb, pick)
+    );
     assert!(
         eval_counts.step_joint_solves <= 4,
         "lazy component-scoped joints should avoid solving on every unrelated feature, got {}",
@@ -7187,6 +7305,8 @@ fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "remove preserves pose vs eager");
     let t = model.resolved_occurrences().get(&occ_b).expect("occ_b transform");
     let landed = apply_point(t, pick);
     assert!(landed.dist(Vec3::new(50.0, 0.0, 0.0)) < 1e-6, "batched create + remove must preserve the last valid joint pose, landed at {landed:?}");
@@ -7194,6 +7314,137 @@ fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
     let saved = model.saved(&doc).expect("saved model");
     let adopted = Model::adopt(&doc, &saved).expect("adopt saved model");
     assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert!(adopted.is_current(&doc));
+}
+
+#[test]
+fn capture_position_revolute_joint_on_built_faces_matches_eager_solve() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
+    let mut doc = Document::new("revolute built faces vs eager");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let comp_c = doc.add_component(Some("C"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    let add_box = |doc: &mut Document, comp: u64, origin: Vec3, name: Option<&str>| {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(origin),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = comp;
+        if let Some(n) = name {
+            f.body_names = vec![n.into()];
+        }
+        id
+    };
+    add_box(&mut doc, comp_a, Vec3::ZERO, Some("ABox"));
+    add_box(&mut doc, comp_b, Vec3::ZERO, Some("BBox"));
+    add_box(&mut doc, comp_b, Vec3::new(20.0, 0.0, 0.0), Some("BExtra"));
+    for k in 0..10 {
+        add_box(&mut doc, comp_c, Vec3::new(f64::from(k) * 15.0, 40.0, 0.0), None);
+    }
+
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let pick = Vec3::new(5.0, 5.0, 10.0);
+    let face_a = joints::face_name_at(&doc, &seed.state(), comp_a, pick, false).unwrap();
+    let face_b = joints::face_name_at(&doc, &seed.state(), comp_b, pick, false).unwrap();
+
+    // Remove an extra body in jointed component B without any intervening placement read to
+    // exercise the `Modified` solve boundary before CapturePosition drives the revolute joint.
+    let rem = doc.add_feature(FeatureKind::Remove { bodies: vec!["BExtra".into()] }, Some("RemoveBExtra")).unwrap();
+    doc.feature_mut(rem).unwrap().component = comp_b;
+
+    let angle = std::f64::consts::FRAC_PI_2;
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "RevAB".into(),
+        kind: JointKind::Revolute,
+        a: JointOrigin::new(occ_a, Snap::FaceCenter { pick, face: Some(face_a), x: Some(XRef::Dir(Vec3::X)) }),
+        b: JointOrigin::new(occ_b, Snap::FaceCenter { pick, face: Some(face_b), x: Some(XRef::Dir(Vec3::X)) }),
+        values: vec![angle],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: true,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: Some(vec![angle]),
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    doc.add_feature(
+        FeatureKind::CapturePosition { moves: Vec::new(), joints: vec![CapturedJoint { joint: 1, values: vec![angle], exprs: Vec::new() }] },
+        Some("CaptureRev"),
+    )
+    .unwrap();
+
+    for k in 10..20 {
+        add_box(&mut doc, comp_c, Vec3::new(f64::from(k) * 15.0, 40.0, 0.0), None);
+    }
+
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(0.0, 5.0), Vec2::new(10.0, 5.0))],
+    )
+    .unwrap();
+    let sk_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkRevB")).unwrap();
+    doc.feature_mut(sk_id).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    let eval_counts = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "revolute lazy vs eager");
+
+    let tb = model.resolved_occurrences().get(&occ_b).expect("occ_b transform");
+    let pivot = apply_point(tb, pick);
+    assert!(pivot.dist(pick) < 1e-6, "revolute pivot must stay at {pick:?}, got {pivot:?}");
+    let tip = apply_point(tb, Vec3::new(10.0, 5.0, 10.0));
+    assert!(tip.dist(Vec3::new(5.0, 10.0, 10.0)) < 1e-6, "90 deg revolute must rotate (10, 5, 10) to (5, 10, 10), got {tip:?}");
+    assert!(
+        eval_counts.step_joint_solves <= 5,
+        "lazy revolute stepping should still skip unrelated component C boxes, got {}",
+        eval_counts.step_joint_solves
+    );
+
+    let saved = model.saved(&doc).expect("saved model");
+    let adopted = Model::adopt(&doc, &saved).expect("adopt saved model with revolute joint");
+    assert_occurrences_close(adopted.resolved_occurrences(), &eager, "revolute adopt vs eager");
     assert!(adopted.is_current(&doc));
 }
 

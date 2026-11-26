@@ -5886,7 +5886,7 @@ impl Model {
                 failed = s.failed;
                 rolled_results = s.rolled_results;
                 if let Some(stepper) = stepper.as_mut() {
-                    stepper.restore(s.occurrence_transforms, s.joint_states, s.joints_dirty, s.all_joints_resolved, s.fallback_states);
+                    stepper.restore(s.occurrence_transforms, s.joint_states, s.joints_dirty, s.all_joints_resolved);
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
@@ -6289,7 +6289,6 @@ impl Model {
                         joint_states: stepper.as_ref().map(CaptureStepper::joint_states),
                         joints_dirty: stepper.as_ref().is_some_and(CaptureStepper::joints_dirty),
                         all_joints_resolved: stepper.as_ref().is_some_and(CaptureStepper::all_joints_resolved),
-                        fallback_states: stepper.as_ref().map_or_else(Vec::new, CaptureStepper::fallback_states),
                         resolved_joints: resolved_joints.clone(),
                     };
                     let failure = overlap::Failure {
@@ -6543,6 +6542,32 @@ fn diff_iter<'a, T: 'a>(mut ai: impl Iterator<Item = &'a T>, mut bi: impl Iterat
     }
 }
 
+/// Whether `doc`'s active joints and rigid groups form a kinematic loop (a cycle in the
+/// occurrence graph with root `0` and grounded occurrences contracted into a single fixed ground
+/// vertex). Tree-only assemblies never run `close_loops`, so adding new geometry in jointed
+/// components can coalesce into one solve without altering joint values.
+fn has_joint_loops(doc: &Document) -> bool {
+    let grounded: std::collections::HashSet<u64> = doc.occurrences.iter().filter(|o| o.grounded).map(|o| o.id).collect();
+    let mut parent: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
+    let find = |parent: &std::collections::HashMap<u64, u64>, mut x: u64| -> u64 {
+        while let Some(&p) = parent.get(&x) {
+            x = p;
+        }
+        x
+    };
+    let node = |occ: u64| if occ == 0 || grounded.contains(&occ) { 0 } else { occ };
+    let rigid_groups = doc.rigid_group_joints();
+    for j in doc.assembly.joints.iter().filter(|j| !j.suppressed).chain(&rigid_groups) {
+        let a = find(&parent, node(j.a.occurrence));
+        let b = find(&parent, node(j.b.occurrence));
+        if a == b {
+            return true;
+        }
+        parent.insert(a, b);
+    }
+    false
+}
+
 /// Tracks per-step occurrence transforms and joint values along a timeline with `CapturePosition`
 /// or `Occurrence::base_transform`, deferring `solve_step_joints_with` until a feature or caller
 /// actually observes `doc.occurrences` and skipping solves when edits only touch geometry that no
@@ -6551,6 +6576,7 @@ pub(super) struct CaptureStepper {
     doc: Document,
     has_active_joints: bool,
     has_base_joints: bool,
+    has_joint_loops: bool,
     moved_occs: std::collections::BTreeSet<u64>,
     joint_components: std::collections::HashSet<u64>,
     joint_sketches: std::collections::HashSet<u64>,
@@ -6561,10 +6587,6 @@ pub(super) struct CaptureStepper {
     feature_component: std::collections::HashMap<u64, u64>,
     joints_dirty: bool,
     all_joints_resolved: bool,
-    /// Intermediate states before mutating/removing joint-relevant geometry while `joints_dirty`
-    /// is set, replayed only if the deferred solve fails to resolve a joint so it preserves its
-    /// last valid pose.
-    fallback_states: Vec<Arc<ModelState>>,
 }
 
 impl CaptureStepper {
@@ -6604,6 +6626,7 @@ impl CaptureStepper {
             }
             let has_active_joints = d.assembly.joints.iter().any(|j| !j.suppressed);
             let has_base_joints = has_active_joints && d.assembly.joints.iter().any(|j| !j.suppressed && j.base_values.is_some());
+            let has_joint_loops = has_active_joints && has_joint_loops(&d);
             let moved_occs = if has_active_joints && !has_base_joints {
                 d.features
                     .iter()
@@ -6678,6 +6701,7 @@ impl CaptureStepper {
                 doc: d,
                 has_active_joints,
                 has_base_joints,
+                has_joint_loops,
                 moved_occs,
                 joint_components,
                 joint_sketches,
@@ -6688,7 +6712,6 @@ impl CaptureStepper {
                 feature_component,
                 joints_dirty: has_active_joints,
                 all_joints_resolved: !has_active_joints,
-                fallback_states: Vec::new(),
             }
         })
     }
@@ -6702,30 +6725,7 @@ impl CaptureStepper {
             return;
         }
         self.joints_dirty = false;
-        let fallbacks = std::mem::take(&mut self.fallback_states);
-        if !self.doc.assembly.joints.iter().any(|j| !j.suppressed) {
-            self.all_joints_resolved = true;
-            return;
-        }
-        #[cfg(test)]
-        cost_tests::count(|c| c.step_joint_solves += 1);
-        let mut sol = crate::joints::solve_holding_with_analysis(&self.doc, state, &BTreeMap::new(), crate::joints::Analysis::Placement);
-        if !sol.errors.is_empty() && !fallbacks.is_empty() {
-            // Replay intermediate states whose geometry was later modified or removed while
-            // joints were batched, so unresolved joints preserve their last valid pose.
-            for fb in &fallbacks {
-                solve_step_joints_with(&mut self.doc, fb, self.has_base_joints, &self.moved_occs);
-            }
-            self.all_joints_resolved = solve_step_joints_with(&mut self.doc, state, self.has_base_joints, &self.moved_occs);
-            return;
-        }
-        self.all_joints_resolved = sol.errors.is_empty();
-        if !self.has_base_joints {
-            sol.world.retain(|occ, _| !self.moved_occs.contains(occ));
-        }
-        if !sol.world.is_empty() || !sol.values.is_empty() {
-            self.doc.apply_joint_solution(&sol);
-        }
+        self.all_joints_resolved = solve_step_joints_with(&mut self.doc, state, self.has_base_joints, &self.moved_occs);
     }
 
     pub(super) fn flush_for_feature(&mut self, f: &Feature, state: &ModelState) {
@@ -6739,7 +6739,7 @@ impl CaptureStepper {
         resolved_joints: &mut BTreeMap<u64, crate::CapturedJoint>,
         vals: &BTreeMap<String, Value>,
         f: &Feature,
-        before: &Arc<ModelState>,
+        before: &ModelState,
         state: &ModelState,
     ) {
         if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
@@ -6770,14 +6770,19 @@ impl CaptureStepper {
             match self.joint_inputs_change(before, state) {
                 JointInputChange::None => {}
                 JointInputChange::Added => {
+                    if self.has_joint_loops && self.joints_dirty {
+                        self.flush(before);
+                    }
                     self.joints_dirty = true;
                 }
                 JointInputChange::Modified => {
+                    // Keep a solve boundary before modifying or removing geometry that a pending
+                    // joint solve may depend on, so the last valid pose and solver seed match
+                    // eager step-by-step solving.
                     if self.joints_dirty {
-                        self.fallback_states.push(before.clone());
-                    } else {
-                        self.joints_dirty = true;
+                        self.flush(before);
                     }
+                    self.joints_dirty = true;
                 }
             }
         }
@@ -6804,17 +6809,12 @@ impl CaptureStepper {
         self.all_joints_resolved
     }
 
-    fn fallback_states(&self) -> Vec<Arc<ModelState>> {
-        self.fallback_states.clone()
-    }
-
     fn restore(
         &mut self,
         occurrence_transforms: Option<Vec<Mat>>,
         joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
         joints_dirty: bool,
         all_joints_resolved: bool,
-        fallback_states: Vec<Arc<ModelState>>,
     ) {
         if let Some(transforms) = occurrence_transforms {
             for (o, t) in self.doc.occurrences.iter_mut().zip(transforms) {
@@ -6829,7 +6829,6 @@ impl CaptureStepper {
         }
         self.joints_dirty = joints_dirty;
         self.all_joints_resolved = all_joints_resolved;
-        self.fallback_states = fallback_states;
     }
 
     fn body_component(&self, b: &ModelBody) -> u64 {
@@ -6885,96 +6884,21 @@ impl CaptureStepper {
     }
 
     fn feature_reads_placements(&self, f: &Feature, st: &ModelState) -> bool {
-        use crate::walk::Walk;
-        if f.profile_frame.is_some() {
+        if placement_digest(&self.doc, f, Some(st)) != 0 {
             return true;
         }
-        if f.kind.profile_sels().into_iter().any(|(sk, _)| self.feature_component.get(&sk).copied() != Some(f.component)) {
-            return true;
-        }
-        if let FeatureKind::Revolve { axis, .. } | FeatureKind::SurfaceRevolve { axis, .. } = &f.kind {
-            match axis {
-                AxisRef::Model { .. } => return true,
-                AxisRef::SketchLine { sketch: Some(sketch), .. } if self.feature_component.get(sketch).copied() != Some(f.component) => {
-                    return true;
-                }
-                AxisRef::Construction { name }
-                    if self.doc.find_feature(name.as_ref()).is_some_and(|feature| feature.component != f.component)
-                        || st.construct.iter().any(|c| c.name == *name && self.feature_component.get(&c.feature).copied() != Some(f.component)) =>
-                {
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        let mut datums = Vec::new();
-        let mut foreign = std::collections::BTreeSet::new();
-        f.kind.walk_geometry(&mut |g| match g {
-            crate::feature_geometry::Geo::Plane(p) => {
-                plane_datum_paths(p, &mut datums);
-                plane_construction_owners(&self.doc, f.component, p, &mut foreign);
-            }
-            crate::feature_geometry::Geo::Construct(g) => {
-                geo_datum_paths(g, &mut datums);
-                geo_construction_owners(&self.doc, f.component, g, &mut foreign);
-            }
-            _ => {}
-        });
-        if !datums.is_empty() || !foreign.is_empty() {
-            return true;
-        }
+        // Kinds that can read placements during evaluation even when `placement_digest` returns 0.
         match &f.kind {
-            FeatureKind::CapturePosition { .. }
-            | FeatureKind::FrameGusset { .. }
-            | FeatureKind::Coil { axis_ref: Some(_), .. }
-            | FeatureKind::Sweep { .. }
-            | FeatureKind::SurfaceSweep { .. }
-            | FeatureKind::Pipe { .. }
-            | FeatureKind::Loft { .. }
-            | FeatureKind::SurfaceLoft { .. }
-            | FeatureKind::FrameMember { .. }
-            | FeatureKind::SurfaceNetwork { .. }
-            | FeatureKind::MeshReduce { .. }
-            | FeatureKind::BoundingSolid { contents: true, .. }
-            | FeatureKind::Combine { .. }
-            | FeatureKind::FrameCope { .. }
-            | FeatureKind::Pattern { .. }
-            | FeatureKind::Hole { points: Some(_), .. }
-            | FeatureKind::Rib { .. }
-            | FeatureKind::FramePlate { .. }
-            | FeatureKind::FrameEndCap { .. }
-            | FeatureKind::FrameTrim { .. }
-            | FeatureKind::ConstructionAxis { .. }
-            | FeatureKind::ConstructionPoint { .. }
-            | FeatureKind::Move { rotate_about: Some(_), .. }
-            | FeatureKind::Align { .. } => true,
-            FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. }
-                if extent.to.is_some() || extent.from.is_some() || extent.to2.is_some() =>
-            {
-                true
-            }
-            FeatureKind::SurfaceExtrude { to_next: true, .. } | FeatureKind::Revolve { to: Some(_), .. } => true,
-            FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() || bodies.is_empty() => true,
-            FeatureKind::Split { tool: Some(_), tool_plane, tool_sheet, .. } if *tool_plane || !tool_sheet.is_extended() => true,
-            FeatureKind::Sketch { plane, sketch } => {
-                crate::face_anchor::plane_face_anchor(plane).is_some()
-                    || plane_reads_geometry(plane)
-                    || sketch.links.iter().any(|l| !l.frozen)
-                    || sketch.wire_constraints.iter().any(|c| c.kind.model_plane().is_some())
-            }
-            FeatureKind::ConstructionPlane { plane } => crate::face_anchor::plane_face_anchor(plane).is_some() || plane_reads_geometry(plane),
-            kind if drawn_tools_change_bodies(kind) => {
-                let (_, targets) = feature_op(f);
-                let names: &[String] = if targets.is_empty() { &f.participants } else { &targets };
-                if names.len() == 1 && names.first().is_some_and(|n| n == "*") {
-                    return true;
-                }
-                if names.is_empty() {
-                    return false;
-                }
-                names.iter().any(|name| !st.bodies.iter().any(|b| b.name == *name && self.body_component(b) == f.component))
-            }
-            _ => false,
+            FeatureKind::Align { .. }
+            | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. }
+            | FeatureKind::SurfaceRevolve { axis: AxisRef::Model { .. }, .. }
+            | FeatureKind::SheetConvert { .. }
+            | FeatureKind::SheetSurfaceConvert { .. }
+            | FeatureKind::SheetRecognize { .. }
+            | FeatureKind::SheetFold { .. } => true,
+            FeatureKind::ReplaceFace { target, .. } => crate::face_anchor::plane_face_anchor(target).is_some() || plane_reads_geometry(target),
+            FeatureKind::Mirror { placements, .. } => !placements.is_empty(),
+            _ => f.profile_frame.is_some(),
         }
     }
 }

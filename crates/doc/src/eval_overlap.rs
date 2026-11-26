@@ -41,7 +41,6 @@ pub(super) struct Saved {
     pub joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
     pub joints_dirty: bool,
     pub all_joints_resolved: bool,
-    pub fallback_states: Vec<Arc<ModelState>>,
     pub resolved_joints: std::collections::BTreeMap<u64, crate::CapturedJoint>,
 }
 
@@ -329,7 +328,6 @@ mod tests {
             joint_states: None,
             joints_dirty: false,
             all_joints_resolved: true,
-            fallback_states: Vec::new(),
             resolved_joints: Default::default(),
         }
     }
