@@ -5028,24 +5028,6 @@ fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// tangency-labs/solidcraft#22579: SolidCraft's export of a valid bent strip whose cuts leave
-/// edges of 6.955e-5 mm states the strip's largest tolerance, 9.17e-5 mm, so it is read again at
-/// a quarter of its shortest edge, 1.739e-5 mm. Two vertices lie off their edges' ends by
-/// 1.427e-5 and 1.345e-5 mm, more than half that. The check passes a vertex whose gap to an
-/// edge's end is at most half its tolerance, so each must carry at least twice its gap: read
-/// back, the strip passes the full check, as it did where it was built.
-#[test]
-fn a_finer_read_gives_each_vertex_twice_its_gap_from_its_edges_ends() {
-    let ex = p21::parse(include_str!("../tests/fixtures/bent_strip_micrometre_cuts.step")).unwrap();
-    let s = one_solid(&ex);
-    assert!(s.notes.iter().any(|n| n.contains("read at 1.739e-5 mm")), "{:?}", s.notes);
-    assert_eq!(counts(&s.brep), [2, 1, 9, 20, 13]);
-    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
-    assert!(body.is_manifold_solid().unwrap());
-    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{report}");
-}
-
 #[test]
 fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
     // A cube 10 x 20 x 30: its shortest edge is 10 mm. Read finer, an edge that lies off its

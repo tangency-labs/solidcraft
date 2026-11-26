@@ -646,6 +646,25 @@ fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
     assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
 }
 
+/// SolidCraft's export of a valid bent strip whose cuts leave edges 6.955e-5 mm long (#22579). The
+/// file states the strip's largest tolerance, 9.17e-5 mm, so the part is read again at a quarter
+/// of its shortest edge, 1.739e-5 mm. One vertex lies 1.427e-5 mm off its line edge's end. The
+/// kernel keeps half of a record's tolerance as the vertex's zone, and SMLib's check passes a
+/// vertex only when its gap to an edge's end is at most half that zone, so the read must give it
+/// at least four times its gap. Then the strip comes in closed, with its 9 faces, and passes the
+/// full check, as it does where it was built.
+#[test]
+fn a_part_read_finer_than_its_file_states_keeps_its_vertices_within_their_tolerances() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/bent_strip_micrometre_cuts.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed, "{:?}", imp.warnings);
+    assert_eq!(body.body.face_count(), 9);
+    assert!(imp.warnings.iter().any(|w| w.ends_with("read at 1.739e-5 mm")), "{:?}", imp.warnings);
+    assert_eq!(crate::validation::failing_check(&body.body).unwrap(), None, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+}
+
 /// The midpoint rule over n even steps of [a, b].
 fn midpoint(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
     let h = (b - a) / n as f64;
