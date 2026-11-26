@@ -30,11 +30,11 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::sweep::screw::MAX_STATIONS;
 use solidcore::sweep::screw::{
     screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, screw_sweep_with,
     Walls,
 };
-use solidcore::sweep::screw::MAX_STATIONS;
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::face;
 use solidcore::SolidError;
@@ -342,7 +342,9 @@ fn issue_22577_a_thread_of_202_turns_builds() {
         3 * (halves + 1) + 3 * halves
     );
     assert_eq!(p1::vertices(&b, None).unwrap().len(), 3 * (halves + 1));
-    assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 1);
+    // one closed boundary: the solid's region and the infinite one, a shell each
+    assert_eq!(p1::regions(&b, None).unwrap().len(), 2);
+    assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 2);
     // Pappus: the section's area times 2 pi times its centroid's radius, per turn. Each
     // wall lies within `tol` of its screw surface, so the volume is off by at most `tol`
     // times the walls' area; a wall of a line of length l is at most l times the helix at

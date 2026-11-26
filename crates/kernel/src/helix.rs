@@ -200,19 +200,20 @@ mod tests {
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
     }
 
-    /// #22577: a thread along a whole rod, a V 1 wide at radius 8.5 with its point at 7.2, 202
-    /// turns of pitch 1.25 (the bound was 200). Its top line runs along the axis, so its three
-    /// walls come in 404 half turns, between two caps. Pappus gives the volume, off by at most
-    /// the tolerance (a ten-thousandth of the pitch) times the walls' area, each wall at most its
-    /// line's length times the helix at its outer end.
+    /// #22577: the issue's thread along a whole rod, a V 1 wide at radius 8.5 with its point at
+    /// 7.2, on the XZ plane about the X axis from x = -1, 202 turns of pitch 1.25 (the bound was
+    /// 200). Its top line runs along the axis, so its three walls come in 404 half turns, between
+    /// two caps. Pappus gives the volume, off by at most the tolerance (a ten-thousandth of the
+    /// pitch) times the walls' area, each wall at most its line's length times the helix at its
+    /// outer end.
     #[test]
     fn a_coil_of_more_than_200_turns_builds() {
         use std::f64::consts::TAU;
         let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
-        let v = Loop2::polygon(&[Vec2::new(7.2, 0.5), Vec2::new(8.5, 0.0), Vec2::new(8.5, 1.0)]);
+        let v = Loop2::polygon(&[Vec2::new(-1.5, 8.5), Vec2::new(-0.5, 8.5), Vec2::new(-1.0, 7.2)]);
         let region = Region2 { outer: v, holes: vec![] };
         let (pitch, turns) = (1.25, 202.0);
-        let b = sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, pitch, turns).unwrap();
+        let b = sweep_helix(&pl, &region, Vec3::new(-1.0, 0.0, 0.0), Vec3::X, pitch, turns).unwrap();
         assert_eq!(b.face_count(), 3 * 404 + 2, "three walls in 404 half turns, two caps");
         let want = 0.5 * 1.3 * TAU * (7.2 + 8.5 + 8.5) / 3.0 * turns;
         let bound = pitch * 1e-4 * (1.0 + 2.0 * 0.5f64.hypot(1.3)) * (TAU * 8.5).hypot(pitch) * turns;
