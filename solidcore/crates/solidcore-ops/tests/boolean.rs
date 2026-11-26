@@ -4882,6 +4882,104 @@ fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
     }
 }
 
+/// A 40 × 30 × 10 box and an r 5 cylinder lying along its top face, 50 long so that it runs
+/// past both ends, sunk d into it just past the zone tolerance (1e-5 per edge, so t = 2e-5 for
+/// two edges), its seam at five angles from its lowest line (solidcraft#21194's sweep). The
+/// cylinder meets the top face in two lines h = √(2 r d − d²) either side of y = 15 (0.0297
+/// apart at d = 2.2e-5), leaving it at asin(h / r) = 0.17°. Between them the plane and the
+/// cylinder's lowest strip part to d at the middle and close again, and the sector search,
+/// stepping off a line until the two are more than t apart, must stop before the middle: past
+/// it the cylinder turns back up and is read on the other side of the plane. Aimed at 2t the
+/// steps went past it (union refused, the difference left the box whole), and upstream's step,
+/// aimed at t through 0, refused d = 2e-5 to 2.05e-5.
+///
+/// The top face keeps the two strips outside the lines in both operations, of area
+/// 40 (30 − 2h). The difference takes out the groove, the circular segment of depth d,
+/// r² · 2 asin(√(d / 2r)) − (r − d) h, over the box's 40, and its floor is the cylinder's arc
+/// between the lines, 2 r asin(h / r) wide; the union adds the cylinder less that groove.
+/// The faces cross at the small angle θ = asin(h / r), so each line is fixed along them only
+/// to the edge tolerance over sin θ (`booleans.md`, near-coincident strips): the areas are
+/// checked within 40 · 2 · 1e-5 / sin θ = 0.28 of the closed form, a quarter of the strip
+/// (1.15 to 1.19) a refused cut would leave.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_cylinder_sunk_just_past_the_tolerance_into_a_box_face_joins_and_cuts_it() {
+    all_fixes();
+    let r: f64 = 5.0;
+    for d in [2.05e-5, 2.1e-5, 2.2e-5] {
+        let h = (2.0 * r * d - d * d).sqrt();
+        let groove = (r * r * 2.0 * (d / (2.0 * r)).sqrt().asin() - (r - d) * h) * 40.0;
+        let top = 40.0 * (30.0 - 2.0 * h);
+        let floor = 40.0 * 2.0 * r * (h / r).asin();
+        let slack = 40.0 * 2.0 * 1e-5 / (h / r);
+        for seam in [0.0, 0.01, 0.6131, PI / 2.0, PI] {
+            let (sin, cos) = seam.sin_cos();
+            for op in [BooleanOp::Union, BooleanOp::Subtract] {
+                let case = format!("d {d}, seam {seam}, {op:?}");
+                let block = make_box([0.0; 3], [40.0, 30.0, 10.0]).unwrap();
+                // Its seam (the local x axis) at `seam` from straight down, its axis along x.
+                let cylinder = solidcore_ops::make_cylinder([0.0; 3], r, 50.0).unwrap();
+                cylinder
+                    .transform(&[
+                        [0.0, sin, -cos, 0.0],
+                        [0.0, cos, sin, 0.0],
+                        [1.0, 0.0, 0.0, 0.0],
+                        [-5.0, 15.0, 15.0 - d, 1.0],
+                    ])
+                    .unwrap();
+                let got = boolean(block, cylinder, op)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"))
+                    .unwrap();
+                assert_eq!(got.solid_count().unwrap(), 1, "{case}");
+                assert!(got.is_manifold_solid().unwrap(), "{case}");
+                assert!(got.check(CheckLevel::All).unwrap().is_valid(), "{case}");
+                let want = match op {
+                    BooleanOp::Union => 12_000.0 + PI * r * r * 50.0 - groove,
+                    _ => 12_000.0 - groove,
+                };
+                assert!(
+                    near(volume(&got), want),
+                    "{case}: {} vs {want}",
+                    volume(&got)
+                );
+                let (record, order) = got.to_record().unwrap();
+                let area_on = |on: &dyn Fn(&Surface) -> bool| -> f64 {
+                    (0..record.faces.len())
+                        .filter(|&f| on(&record.faces[f].surface))
+                        .map(|f| got.face_area(&order, f, 1e-10).unwrap())
+                        .sum()
+                };
+                let on_top = area_on(&|s| match s {
+                    Surface::Plane {
+                        origin,
+                        u_axis,
+                        v_axis,
+                    } => (origin[2] - 10.0).abs() < 1e-12 && u_axis[2] == 0.0 && v_axis[2] == 0.0,
+                    Surface::PlaneThrough {
+                        origin,
+                        u_point,
+                        v_point,
+                    } => [origin, u_point, v_point]
+                        .iter()
+                        .all(|p| (p[2] - 10.0).abs() < 1e-12),
+                    _ => false,
+                });
+                assert!(
+                    (on_top - top).abs() <= slack,
+                    "{case}: top {on_top} vs {top}"
+                );
+                if op == BooleanOp::Subtract {
+                    let on_cylinder = area_on(&|s| matches!(s, Surface::Cylinder { .. }));
+                    assert!(
+                        (on_cylinder - floor).abs() <= slack,
+                        "{case}: floor {on_cylinder} vs {floor}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The length of the line through (x, z) parallel to y that lies in the cube −20..20 less a
 /// Ø18 hole along each axis through its centre and Ø8 holes along x at y = −10 and y = 10
 /// (z = 0): 40 less the union of the y intervals the holes take. A hole along y (x² + z² < 81)
