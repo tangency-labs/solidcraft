@@ -264,6 +264,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
         shape.insert(i, s.ok_or_else(|| bad(CMD, "measuring a body failed"))??);
     }
 
+    let names = solidcraft_doc::WorldNames::new(doc, state);
     let mut occurrences = Vec::with_capacity(ids.len());
     let mut totals: Vec<Option<MassBody>> = Vec::with_capacity(ids.len());
     for (i, &id) in ids.iter().enumerate() {
@@ -283,7 +284,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
             let Some(s) = shape.get(&k) else { continue };
             let density = doc.density(&body.name);
             let mut entry = BodyMassEntry {
-                name: body.name.clone(),
+                name: names.name(&body.name, component, &path),
                 material: doc.body_material(&body.name),
                 density_g_cm3: density,
                 closed: s.closed,
@@ -301,14 +302,14 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
                     return Err(out_of_range());
                 }
                 if inertia.is_none() {
-                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", body.name));
+                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", entry.name));
                 }
                 parts.push(part);
                 entry.volume_mm3 = Some(volume);
                 entry.mass_kg = Some(mass);
             } else {
                 skipped += 1;
-                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", body.name));
+                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", entry.name));
             }
             bodies.push(entry);
         }

@@ -93,6 +93,30 @@ fn a_box_has_its_closed_form_mass_centre_and_inertia() {
 }
 
 #[test]
+fn repeated_occurrences_report_their_world_body_names() {
+    let mut s = Session::default();
+    let (component, first, body) = part(&mut s, "Block", [10.0, 20.0, 30.0], "Steel");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+
+    let r = run(&mut s, "assembly.mass_properties", json!({}));
+    let a = occurrence(&r, first);
+    let b = occurrence(&r, second);
+    let state = s.model.state();
+    let frames = s.doc.body_frames(&state);
+    for (id, entry) in [(first, a), (second, b)] {
+        let (name, _, _, _) = frames.iter().find(|(_, owner, path, _)| *owner == component && path == &[id]).unwrap();
+        assert_eq!(entry["bodies"][0]["name"], json!(name));
+        assert_eq!(entry["bodies"][0]["material"], "Steel");
+        near(num(&entry["bodies"][0]["volume_mm3"]), 6000.0, 1e-9);
+    }
+    assert_eq!(a["bodies"][0]["name"], json!(body));
+    assert_ne!(a["bodies"][0]["name"], b["bodies"][0]["name"]);
+    near(num(&a["mass"]["mass_kg"]), num(&b["mass"]["mass_kg"]), 1e-9);
+    near(num(&b["mass"]["center_of_mass_mm"][0]) - num(&a["mass"]["center_of_mass_mm"][0]), 100.0, 1e-9);
+}
+
+#[test]
 fn a_cylinder_matches_its_closed_form_within_the_tessellation() {
     let mut s = Session::default();
     run(&mut s, "component.create", json!({"name": "Shaft", "grounded": false}));
