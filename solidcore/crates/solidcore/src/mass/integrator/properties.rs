@@ -53,10 +53,11 @@
 //! the volume and volume moments do not depend on the origin; upstream integrates each
 //! face over its own trims, and the tolerant edges' gaps leak to first order in the
 //! tolerance. The area and area moments are closed the same way (#16854): in
-//! `brep_properties`, and in [`face_area`], [`face_centroid`], [`brep_area`] and
-//! [`brep_area_about`] (each face's closure's area group): upstream's area is the trims',
-//! off by the gap times the edges' length. [`face_properties`] and [`boundary_properties`]
-//! still integrate over the trims given, as upstream.
+//! `brep_properties` (its volume-bounding faces; a thick sheet face, integrated on its
+//! offset surfaces, is not closed), and in [`face_area`], [`face_centroid`], [`brep_area`]
+//! and [`brep_area_about`] (each face's closure's area group): upstream's area is the
+//! trims', off by the gap times the edges' length. [`face_properties`] and
+//! [`boundary_properties`] still integrate over the trims given, as upstream.
 //! [`brep_mass_properties`] and [`brep_mass_properties_estimated`] (through
 //! [`brep_properties_in_box`]) integrate about the middle of the body's exact box and
 //! scale their errors by that box's size (#17361): the loose box upstream takes holds the
@@ -1683,10 +1684,21 @@ const CLOSURE_TERMS: usize = 26;
 /// unit parameter area): the volume and the volume moments `4..8` (`..13`), in the layout
 /// of [`PrecisePropertyLayout`]'s volume terms (see `OdeIsoCurveLength`), then the area and
 /// the area moments `0..4` (`13..`), their area element `n . unit` for the face's unit
-/// normal `unit` (zero where the face has none).
-fn closure_integrands(x: Vec3, n: Vec3, unit: Vec3, out: &mut [f64; CLOSURE_TERMS]) {
-    let vd = x.z * n.z;
+/// normal `unit`. Without `all`, only the area and its first moments, the others zero: an
+/// area query squares no coordinate, as the face's own area-only integration does not.
+fn closure_integrands(x: Vec3, n: Vec3, unit: Vec3, all: bool, out: &mut [f64; CLOSURE_TERMS]) {
     let ad = n.dot(unit);
+    if !all {
+        for (o, v) in out
+            .iter_mut()
+            .skip(13)
+            .zip([ad, x.x * ad, x.y * ad, x.z * ad])
+        {
+            *o += v;
+        }
+        return;
+    }
+    let vd = x.z * n.z;
     let vals = [
         vd,
         x.x * vd,
@@ -1721,30 +1733,27 @@ fn closure_integrands(x: Vec3, n: Vec3, unit: Vec3, out: &mut [f64; CLOSURE_TERM
 }
 
 /// The unit normal `su x sv / |su x sv|` of a face's surface from its partials, the way
-/// round the face's area element and volume integrand take it (`OdeIsoCurveLength`); zero
-/// where the cross product is zero or not finite (a surface singularity, where a strip's
-/// area vector is zero too).
-fn unit_normal(su: Vec3, sv: Vec3) -> Vec3 {
+/// round the face's area element and volume integrand take it (`OdeIsoCurveLength`);
+/// `None` where the cross product is zero or not finite (a parametric singularity).
+fn unit_normal(su: Vec3, sv: Vec3) -> Option<Vec3> {
     let n = su.cross(sv);
     let l = n.length();
-    if l > 0.0 && l.is_finite() {
-        n * (1.0 / l)
-    } else {
-        Vec3::ZERO
-    }
+    (l > 0.0 && l.is_finite()).then(|| n * (1.0 / l))
 }
 
 /// The closure's terms over `w` in `[0, 1]` of the ruled patch `X = (1 - w) a + w c` at one
 /// value of its other parameter, `da` and `dc` the rails' derivatives in it, the area
-/// vector `X_t x X_w`, the face's unit normal `unit` ([`closure_integrands`]), into `out`
-/// (with `weight`). The integrands are polynomials of degree 4 in `w`, which the 3-point
-/// Gauss rule integrates exactly.
+/// vector `X_t x X_w`, the face's unit normal `unit` and `all` ([`closure_integrands`]),
+/// into `out` (with `weight`). The integrands are polynomials of degree 4 in `w`, which
+/// the 3-point Gauss rule integrates exactly.
+#[allow(clippy::too_many_arguments)] // the patch's two rails, the normal and the terms
 fn ruled_column(
     a: Vec3,
     da: Vec3,
     c: Vec3,
     dc: Vec3,
     unit: Vec3,
+    all: bool,
     weight: f64,
     out: &mut [f64; CLOSURE_TERMS],
 ) {
@@ -1760,7 +1769,7 @@ fn ruled_column(
             let x = a * (1.0 - w) + c * w;
             let xt = da * (1.0 - w) + dc * w;
             let mut col = [0.0; CLOSURE_TERMS];
-            closure_integrands(x, xt.cross(xw), unit, &mut col);
+            closure_integrands(x, xt.cross(xw), unit, all, &mut col);
             for (o, v) in out.iter_mut().zip(col) {
                 *o += 0.5 * wg * weight * v;
             }
@@ -1769,10 +1778,11 @@ fn ruled_column(
 }
 
 /// The closure's terms of the polygon `points` (relative to the origin), its area vector by
-/// the right-hand rule round them, the face's unit normal `unit` there: a fan of triangles
-/// from their centroid, each the ruled patch from the centroid to its side, whose
-/// integrands are polynomials of degree 4 in both parameters (3-point Gauss rules, exact).
-fn polygon_closure(points: &[Vec3], unit: Vec3, out: &mut [f64; CLOSURE_TERMS]) {
+/// the right-hand rule round them, the face's unit normal `unit` there and `all`
+/// ([`closure_integrands`]): a fan of triangles from their centroid, each the ruled patch
+/// from the centroid to its side, whose integrands are polynomials of degree 4 in both
+/// parameters (3-point Gauss rules, exact).
+fn polygon_closure(points: &[Vec3], unit: Vec3, all: bool, out: &mut [f64; CLOSURE_TERMS]) {
     if points.is_empty() {
         return;
     }
@@ -1799,7 +1809,16 @@ fn polygon_closure(points: &[Vec3], unit: Vec3, out: &mut [f64; CLOSURE_TERMS]) 
             let sides: &[f64] = if j == 0 { &[0.0] } else { &[-1.0, 1.0] };
             for &s in sides {
                 let t = 0.5 + 0.5 * s * node;
-                ruled_column(centre, zero, p + side * t, side, unit, 0.5 * wg, &mut tri);
+                ruled_column(
+                    centre,
+                    zero,
+                    p + side * t,
+                    side,
+                    unit,
+                    all,
+                    0.5 * wg,
+                    &mut tri,
+                );
             }
         }
         // the ruled patch's area vector is minus the triangle's right-hand one
@@ -1974,7 +1993,8 @@ fn gap_side(trim: Curve, vertex: Vec3) -> ClosureSide {
 /// integrated along the trims by [`kronrod_integrate`] to `accuracy` with the error scales
 /// of the face's own integration (`estimated_area`, see [`boundary_properties`]). The area
 /// group is the face's way round as its own area is taken over the same trims (not signed
-/// by its use's orientation, as the volume is).
+/// by its use's orientation, as the volume is). Without `all`, only the area and its first
+/// moments ([`closure_integrands`]).
 ///
 /// # Errors
 ///
@@ -1987,6 +2007,7 @@ fn gap_closure(
     origin: Point3,
     accuracy: f64,
     estimated_area: f64,
+    all: bool,
 ) -> Result<PreciseProperties> {
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     use crate::nurbs::knots::Side;
@@ -2162,21 +2183,42 @@ fn gap_closure(
         let [[p, sv], [su, _]] = pv;
         Ok((p, su, sv))
     };
+    // the face's unit normal at `uv` from its partials there, and where they are parallel or
+    // zero (a parametric singularity of a surface that is regular there, such as a plane's
+    // B-spline form) the surface's own normal; a non-finite one refuses, as a non-finite
+    // integrand does
+    let normal = |uv: Vec3, su: Vec3, sv: Vec3| -> Result<Vec3> {
+        let n = match unit_normal(su, sv) {
+            Some(n) => n,
+            None => surface.evaluate_normal(
+                k,
+                crate::geom::vector2d::Point2::new(uv.x, uv.y),
+                Side::Left,
+                Side::Left,
+            )?,
+        };
+        if [n.x, n.y, n.z].iter().all(|c| c.is_finite()) {
+            Ok(n)
+        } else {
+            Err(SolidError::mass(OP, MassFailure::Integrand))
+        }
+    };
     let missing = || null_defect(SHORT_EVALUATION);
     // the face integration's error scales: a length per extra dimension
     let length = (10.0 * estimated_area.sqrt())
         .max(face_box(k, b, f)?.min_distance(&Extent3d::from_point(origin)));
     let area_scale = estimated_area / 10.0;
-    let mut scale = [area_scale * length; CLOSURE_TERMS];
-    for (i, s) in scale.iter_mut().enumerate().skip(1) {
-        // then the area group's: its area, first moments and second moments
-        *s = match i {
-            1..=3 => area_scale * length.powi(2),
-            4..=12 => area_scale * length.powi(3),
-            13 => area_scale,
-            14..=16 => area_scale * length,
-            _ => area_scale * length.powi(2),
+    let mut scale = [0.0; CLOSURE_TERMS];
+    for (i, s) in scale.iter_mut().enumerate() {
+        // the volume group's (`..13`), then the area group's: its area, first moments and
+        // second moments
+        let power = match i {
+            0 | 14..=16 => 1,
+            4..=12 => 3,
+            13 => 0,
+            _ => 2,
         };
+        *s = area_scale * length.powi(power);
     }
     let accuracy = if accuracy < EFF_ZERO {
         EFF_ZERO_SQ
@@ -2189,9 +2231,13 @@ fn gap_closure(
         for side in sides.iter_mut() {
             let ivl = side.trim.natural_interval();
             let (c0, c1) = (ivl.min(), ivl.max());
-            let (p0, su0, sv0) = at(side.trim.evaluate_point(k, c0)?)?;
-            let (p1, su1, sv1) = at(side.trim.evaluate_point(k, c1)?)?;
-            let (n0, n1) = (unit_normal(su0, sv0), unit_normal(su1, sv1));
+            let (uv0, uv1) = (
+                side.trim.evaluate_point(k, c0)?,
+                side.trim.evaluate_point(k, c1)?,
+            );
+            let (p0, su0, sv0) = at(uv0)?;
+            let (p1, su1, sv1) = at(uv1)?;
+            let (n0, n1) = (normal(uv0, su0, sv0)?, normal(uv1, su1, sv1)?);
             side.trim_normals = if side.same { [n0, n1] } else { [n1, n0] };
             let Some((curve, e0, e1)) = &side.edge else {
                 // no edge curve: the strip is the cone from the trim to the vertex
@@ -2218,7 +2264,8 @@ fn gap_closure(
                             su * duv.x + sv * duv.y,
                             v - origin,
                             zero,
-                            unit_normal(su, sv),
+                            normal(uv, su, sv)?,
+                            all,
                             1.0,
                             &mut col,
                         );
@@ -2304,8 +2351,17 @@ fn gap_closure(
                         return Err(missing());
                     };
                     let mut col = [0.0; CLOSURE_TERMS];
-                    let unit = unit_normal(su, sv);
-                    ruled_column(p - origin, dp, ep - origin, de * slope, unit, 1.0, &mut col);
+                    let unit = normal(uv, su, sv)?;
+                    ruled_column(
+                        p - origin,
+                        dp,
+                        ep - origin,
+                        de * slope,
+                        unit,
+                        all,
+                        1.0,
+                        &mut col,
+                    );
                     for (o, c) in dy.iter_mut().zip(col) {
                         *o = c;
                     }
@@ -2327,22 +2383,21 @@ fn gap_closure(
             let polygon = [q_end, e_end, next.vertex, e_start, q_start].map(|p| p - origin);
             // the corner's area along the face's normal at the trim's end
             let [_, unit] = side.trim_normals;
-            polygon_closure(&polygon, unit, &mut sum);
+            polygon_closure(&polygon, unit, all, &mut sum);
         }
     }
     let mut out = PreciseProperties::default();
-    let (volume, area) = sum.split_at(13);
-    let term = |terms: &[f64], i: usize| terms.get(i).copied().unwrap_or(0.0);
-    let triple =
-        |terms: &[f64], i: usize| Vec3::new(term(terms, i), term(terms, i + 1), term(terms, i + 2));
-    out.volume = term(volume, 0);
-    out.area = term(area, 0);
+    // the volume group at `0`, the area group at `13`
+    let term = |i: usize| sum.get(i).copied().unwrap_or(0.0);
+    let triple = |i: usize| Vec3::new(term(i), term(i + 1), term(i + 2));
+    out.volume = term(0);
+    out.area = term(13);
     for (j, m) in out.moments.iter_mut().enumerate() {
         // moments 0..4 from the area group, 4..8 from the volume group, three terms each
         *m = if j < 4 {
-            triple(area, 1 + 3 * j)
+            triple(14 + 3 * j)
         } else {
-            triple(volume, 1 + 3 * (j - 4))
+            triple(1 + 3 * (j - 4))
         };
     }
     Ok(out)
@@ -2537,7 +2592,8 @@ fn properties_in_box(
                     // the face's as its area
                     if do_volume || do_area {
                         if closure.is_none() {
-                            closure = Some(gap_closure(k, b, f, origin, accuracy, estimated)?);
+                            closure =
+                                Some(gap_closure(k, b, f, origin, accuracy, estimated, true)?);
                         }
                         if let Some(c) = &closure {
                             let sign = if orientation == OrientType::Same {
@@ -2710,7 +2766,7 @@ fn closed_face_area(
         flags,
         true,
     )?;
-    let closure = gap_closure(k, b, f, origin, accuracy, estimated_area)?;
+    let closure = gap_closure(k, b, f, origin, accuracy, estimated_area, false)?;
     p.area += closure.area;
     if flags & PPF_AREA_FIRST_MOMENTS != 0 {
         let ([first, ..], [closure_first, ..]) = (&mut p.moments, closure.moments);
@@ -3497,6 +3553,67 @@ fn faces_area_about(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The closure's area group (#16854) over the square `[0, a]^2` at height `c`, its corners
+    /// counter-clockwise seen from `+z` and the face's normal `+z`: the square's area and its
+    /// area moments in closed form, in the slots `gap_closure` reads them from (13: area,
+    /// 14..: first, second, product and axial moments); its volume `c a^2` at slot 0. With
+    /// the face's normal `-z` the area is `-a^2`; without `all`, only the area and its first
+    /// moments, and a distant point squares no coordinate.
+    #[test]
+    fn polygon_closure_takes_the_square_s_area_and_area_moments() {
+        let (a, c) = (2.0_f64, 3.0_f64);
+        let square = [
+            Vec3::new(0.0, 0.0, c),
+            Vec3::new(a, 0.0, c),
+            Vec3::new(a, a, c),
+            Vec3::new(0.0, a, c),
+        ];
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let mut all = [0.0; CLOSURE_TERMS];
+        polygon_closure(&square, up, true, &mut all);
+        let (a2, a3, a4) = (a * a, a * a * a, a * a * a * a);
+        let expected = [
+            (0, c * a2),
+            (13, a2),
+            (14, a3 / 2.0),
+            (15, a3 / 2.0),
+            (16, c * a2),
+            (17, a4 / 3.0),
+            (18, a4 / 3.0),
+            (19, c * c * a2),
+            (20, c * a3 / 2.0),
+            (21, c * a3 / 2.0),
+            (22, a4 / 4.0),
+            (23, a4 / 3.0 + c * c * a2),
+            (24, a4 / 3.0 + c * c * a2),
+            (25, 2.0 * a4 / 3.0),
+        ];
+        for (i, want) in expected {
+            assert!(
+                (all[i] - want).abs() < 1e-12 * want.abs(),
+                "slot {i}: {} vs {want}",
+                all[i]
+            );
+        }
+        let mut down = [0.0; CLOSURE_TERMS];
+        polygon_closure(&square, -up, true, &mut down);
+        assert!((down[13] + a2).abs() < 1e-12 * a2, "{}", down[13]);
+        let mut area_only = [0.0; CLOSURE_TERMS];
+        polygon_closure(&square, up, false, &mut area_only);
+        for (i, v) in area_only.iter().enumerate() {
+            let want = if (13..17).contains(&i) { all[i] } else { 0.0 };
+            assert!(
+                (v - want).abs() <= 1e-12 * want.abs(),
+                "slot {i}: {v} vs {want}"
+            );
+        }
+        let far = square.map(|p| p + Vec3::new(1e155, 0.0, 0.0));
+        let mut far_area = [0.0; CLOSURE_TERMS];
+        polygon_closure(&far, up, false, &mut far_area);
+        assert!(far_area.iter().all(|v| v.is_finite()), "{far_area:?}");
+        assert!(unit_normal(up, up).is_none());
+    }
 
     /// The 15-point Gauss-Kronrod rule integrates `x^n` on `[-1, 1]` exactly up to degree 22
     /// and its embedded 7-point Gauss rule up to degree 13; and the 7-point rule's to 10 and 5.
