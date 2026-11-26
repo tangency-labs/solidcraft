@@ -590,6 +590,39 @@ mod tests {
         assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
     }
 
+    /// Valid cylinders far from the origin and across small, typical and large diameters joined
+    /// onto a box pass post-export decoded-record validation under both `EachStep` and
+    /// `EachFeature` (inline and detached).
+    #[test]
+    fn valid_cylinders_pass_decoded_record_validation() {
+        use solidcore_record::Vec3;
+        let far_base = Vec3::new(0.0, -1.0e6, 2.0e5);
+        for mode in [Validation::EachStep, Validation::EachFeature] {
+            let (cyl, _) = validating(mode, || crate::cylinder(far_base, Vec3::Z, 6.0, 25.0));
+            let cyl = cyl.unwrap_or_else(|e| panic!("far cylinder under {mode:?}: {e}"));
+            if mode == Validation::EachFeature {
+                check_kept(&cyl).unwrap_or_else(|e| panic!("far cylinder check_kept: {e}"));
+                let (cyl2, _) = validating(mode, || crate::cylinder(far_base, Vec3::Z, 6.0, 25.0));
+                detach_kept(&cyl2.unwrap()).run().unwrap_or_else(|e| panic!("far cylinder detach_kept: {e}"));
+            }
+        }
+
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 10.0)).unwrap();
+        for diameter in [0.2_f64, 20.0, 5000.0] {
+            let radius = diameter / 2.0;
+            for mode in [Validation::EachStep, Validation::EachFeature] {
+                let (joined, _) = validating(mode, || {
+                    let pin = crate::cylinder(Vec3::new(40.0, 25.0, 10.0), Vec3::Z, radius, 20.0)?;
+                    crate::boolean(&plate, &pin, crate::BoolOp::Union)
+                });
+                let joined = joined.unwrap_or_else(|e| panic!("diameter {diameter} under {mode:?}: {e}")).expect("non-empty join");
+                if mode == Validation::EachFeature {
+                    check_kept(&joined).unwrap_or_else(|e| panic!("diameter {diameter} check_kept: {e}"));
+                }
+            }
+        }
+    }
+
     #[test]
     fn modes_are_named_as_they_are_saved() {
         for v in Validation::ALL {
