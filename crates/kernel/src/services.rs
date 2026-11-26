@@ -21,7 +21,6 @@ pub use solidcore_ops::constraint;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
-pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mid_joint;
