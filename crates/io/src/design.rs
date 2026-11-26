@@ -1889,6 +1889,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
