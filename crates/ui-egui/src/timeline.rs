@@ -386,6 +386,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameCope { .. } => "frame_cope",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::FrameTrim { .. } => "frame_trim",
         FeatureKind::FramePlate { .. } => "frame_plate",
@@ -395,6 +396,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
         FeatureKind::CellGrid { .. } => "perforate",
+        FeatureKind::ShaftSpline { .. } => "shaft_spline",
         FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
@@ -2099,6 +2101,7 @@ mod tests {
             placements: Vec::new(),
             components: Vec::new(),
             occurrences: Vec::new(),
+            join: false,
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),

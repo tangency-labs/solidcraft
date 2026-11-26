@@ -1,5 +1,5 @@
+use crate::{self as ui_kit, BackingTooltipExt as _};
 use solidcraft_panel_layout::*;
-use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _};
 
 use super::runtime::{ContentOwner, ContentServices, PanelController};
 

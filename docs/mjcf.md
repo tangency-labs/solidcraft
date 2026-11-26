@@ -12,6 +12,7 @@ more than URDF, so the model keeps what a URDF has to drop:
 - A joint that closes a loop is kept as an equality constraint. URDF is a tree and leaves it out.
 - Motion links (gears, rack and pinion, screws) are equality constraints between two joints.
 
+- **Desktop:** **File → Export MJCF…**, then a name and a place for the `.xml`
 - **Commands:** `file.export_mjcf {"path": "robot.xml"}`, or `file.export {"path": "robot.xml",
   "format": "mjcf"}`
 - **MCP:** the `export` tool with `format: "mjcf"`
@@ -105,7 +106,6 @@ close a loop becomes an `<equality>` constraint between the bodies of its two si
 
 ## Not covered
 
-- A menu entry.
 - Actuators, sensors, and effort and velocity limits.
 - Decals and other pictures on the model.
 - Joint motion inside the copies of a component placed several times.

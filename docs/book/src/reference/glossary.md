@@ -272,6 +272,23 @@ and circular bends.
 - **For translators:** a member group can contain several separate stock pieces; selecting a
   group does not join those pieces into one length of stock.
 
+### cope
+
+A shaped member end that fits against the outside of one or more mating members.
+
+- **In SolidCraft:** `frame.cope` saves the round-tube member, mating members and original path
+  end in a `FrameCope` feature. The mating bores do not leave material inside the joint.
+- **Elsewhere:** fishmouth, saddle cut, tube notch.
+- **For translators:** a physical end treatment, rather than a drawing of nominal uncut stock.
+
+### cope template
+
+A full-size development of a member's actual end-cut profile onto its outer cylindrical surface.
+
+- **In SolidCraft:** `frame.export_cope_dxf` writes a millimetre DXF with an explicit seam,
+  axial datum, inward direction and scale check.
+- **For translators:** a printable cutting guide; it does not flatten the tube's bends.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.
@@ -442,6 +459,16 @@ its provenance, not its place.
 - **Don't use:** source (that is where the data came from), location, path.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
+
+### master spline
+
+One tooth left out, or one space filled, in a shaft spline, so that the hub goes on in one position only.
+
+- **In SolidCraft:** the `master_spline` parameter of `shaft_spline.insert` (`none`, `tooth_out`,
+  `wide_tooth`) and its `master_angle`.
+- **Don't use:** key, keyway (for the odd tooth).
+- **Elsewhere:** master spline, indexing spline.
+- **For translators:** not a sketch spline, which is a curve through points.
 
 ### material
 
@@ -746,6 +773,19 @@ computer (the 3D mouse, graphics, units) stay out. It is an app setting, not par
 - **Elsewhere:** settings profile, user profile, preferences set.
 - **For translators:** not a sketch profile and not a frame profile (see *Words with more than
   one meaning*, "Profile"), and not a design configuration.
+
+### shaft spline
+
+A ring of teeth along a round shaft that fits spaces in a hub, so that the hub turns with the shaft.
+
+A shaft spline is one feature that cuts the teeth into a picked shaft or bore, or makes a new
+splined shaft and hub.
+
+- **In SolidCraft:** `shaft_spline.insert` ("Shaft Spline"); the `shaft_spline` feature kind.
+- **Don't use:** gear (for a spline), keyed shaft.
+- **Elsewhere:** spline shaft, splined shaft, spline.
+- **For translators:** not a sketch spline, which is a curve through points, and not a gear that
+  transmits motion between two shafts.
 
 ### sketch
 

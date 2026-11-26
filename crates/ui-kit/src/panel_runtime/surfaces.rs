@@ -1,9 +1,9 @@
 //! Captured, paint-only surface readability. Geometry and authored theme intent stay unchanged.
 use std::sync::Arc;
 
+use crate as ui_kit;
 use egui::Color32;
 use solidcraft_panel_layout::{ContrastFailure, ContrastOutcome, PanelSurface};
-use solidcraft_ui_kit as ui_kit;
 
 use solidcraft_theme::Tokens;
 
