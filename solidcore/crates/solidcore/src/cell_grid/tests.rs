@@ -3000,30 +3000,56 @@ fn a_keep_out_may_follow_a_different_mode_than_the_field() {
 }
 
 #[test]
-fn a_keep_out_mode_of_free_leaves_the_margin_to_the_fields_own_edges() {
-    // Margin 3, field whole, keep-out free: cell i covers [12 i, 12 i + 10]. The field's edges
-    // keep the margin: i = 1..=7, 7 x 7 = 49 whole cells. A small keep-out in the gap between
-    // cells (3, 3), (4, 3), (3, 4) and (4, 4), 0.5 mm from each, drops none of them: it is free.
-    let field = [rect(0.0, 0.0, 100.0, 100.0), rect(46.5, 46.5, 47.5, 47.5)];
-    let spec = CellGridSpec {
-        margin: 3.0,
-        keepout_clip: Some(Clip::Free),
-        ..sk_spec(Clip::Whole)
+fn a_curved_field_edge_touching_a_cell_drops_it_when_the_fields_mode_is_whole_whatever_the_keep_outs(
+) {
+    // A margin needs every mode whole, so the split of the exact check between the field's edges
+    // and the keep-outs' shows only at margin 0, on a curve (a curve is measured exactly, a line
+    // or arc may touch the cell). The field is [0, 94] x [0, 100] with its right side a cubic
+    // bulging out from (94, 0) to (94, 100). Cell i covers [12 i, 12 i + 10], so cell (7, 0) has
+    // its corner exactly on the curve's end (94, 0); no other cell is within 0.002 mm of the
+    // curve (the next nearest is 6 mm from its end), and the cells i, j = 0..=7 all lie inside the
+    // field: 64. The curve touches (7, 0), so a whole field drops it: 63, the same with the
+    // keep-outs free (there are none; their mode is not the field's).
+    let curved = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(94.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(94.0, 0.0),
+                p1: v(109.0, 12.0),
+                p2: v(109.0, 88.0),
+                p3: v(94.0, 100.0),
+            },
+            Seg2::Line {
+                a: v(94.0, 100.0),
+                b: v(0.0, 100.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 100.0),
+                b: v(0.0, 0.0),
+            },
+        ],
     };
-    let plan = sk_run(&field, &sk_square(), &spec);
-    assert_eq!((plan.whole, plan.partial), (49, 0));
-    assert!(plan
-        .cells
-        .iter()
-        .all(|c| (1..=7).contains(&c.i) && (1..=7).contains(&c.j)));
-    // The other way round, the keep-out's mode is whole and the field's free: the four cells
-    // within 3 mm of the keep-out go, and the 64 cells inside the field keep to its edge.
-    let spec = CellGridSpec {
-        keepout_clip: Some(Clip::Whole),
-        ..sk_spec(Clip::Free)
+    let kept = |clip: Clip, keepout_clip: Option<Clip>| {
+        let spec = CellGridSpec {
+            keepout_clip,
+            ..sk_spec(clip)
+        };
+        let plan = sk_run(std::slice::from_ref(&curved), &sk_square(), &spec);
+        plan.cells
+            .iter()
+            .any(|c| (c.i, c.j) == (7, 0) && c.kind == CellKind::Whole)
     };
-    let plan = sk_run(&field, &sk_square(), &spec);
-    assert_eq!(plan.whole, 64 - 4);
+    assert!(
+        !kept(Clip::Whole, None),
+        "a whole field drops the cell the curve touches"
+    );
+    assert!(
+        !kept(Clip::Whole, Some(Clip::Free)),
+        "so does one whose keep-outs are free"
+    );
 }
 
 #[test]
@@ -3089,7 +3115,7 @@ fn a_very_shallow_arc_still_moves_the_default_origin_by_its_cap() {
     let arc = Seg2::Arc {
         center: v(2e4, 1000.0 - r * (t / 2.0).cos()),
         radius: r,
-        start: std::f64::consts::FRAC_PI_2 - t / 2.0,
+        start: FRAC_PI_2 - t / 2.0,
         sweep: t,
     };
     let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
