@@ -52,6 +52,8 @@ pub(crate) mod trim_hook;
 pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
+mod uvtc_trim_rows;
+#[cfg(test)]
 mod wr459_rows;
 #[cfg(test)]
 mod wr495_rows;
