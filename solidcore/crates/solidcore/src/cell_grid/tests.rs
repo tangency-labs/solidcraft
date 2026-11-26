@@ -3125,6 +3125,68 @@ fn a_clip_edge_with_its_middle_near_a_spike_of_the_cell_is_not_the_cells_own() {
 }
 
 #[test]
+fn a_clipped_piece_is_the_cells_own_only_on_one_outline_piece_of_its_kind() {
+    use crate::cell_grid::sketch::unchanged;
+    let one = |prims: Vec<Prim>, cell: &[Prim]| unchanged(&[(prims, 1.0)], cell, 1.0);
+    // An arc of radius 1000 about the origin from angle 0, sweeping 0.002 rad (a chord of 2 mm).
+    let t = 0.002;
+    let arc = Prim::arc(v(0.0, 0.0), 1000.0, 0.0, t);
+    let cell = [arc];
+    assert!(one(vec![arc], &cell), "the arc itself");
+    assert!(
+        one(
+            vec![Prim::arc(v(0.0, 0.0), 1000.0, t / 4.0, t / 2.0)],
+            &cell
+        ),
+        "a part of it"
+    );
+    assert!(
+        !one(vec![Prim::arc(v(0.0, 0.0), 1000.0, t, -t)], &cell),
+        "the same circle turned the other way"
+    );
+    assert!(
+        !one(vec![Prim::arc(v(0.0, 0.0), 1000.0, -t / 2.0, t)], &cell),
+        "starting before the outline arc, though inside the tolerance of its end"
+    );
+    // A circle of radius 1001 through the same two ends, bulging the same way. The chord is
+    // c = 2 * 1000 * sin(0.001) = 2 mm, so the sagitta c^2 / (8 r) is 4 / 8 * (1 / 1000 - 1 / 1001)
+    // = 5e-7 mm less at the middle: the ends and the middle are all within EPS of the outline
+    // arc, yet the circle is another, so it is a change.
+    let (p, q) = (arc.start(), arc.end());
+    let m = (p + q) * 0.5;
+    let half = p.distance(q) * 0.5;
+    let toward = m * (-1.0 / m.length());
+    let c2 = m + toward * (1001.0_f64 * 1001.0 - half * half).sqrt();
+    let (a, b) = (
+        (p.y - c2.y).atan2(p.x - c2.x),
+        (q.y - c2.y).atan2(q.x - c2.x),
+    );
+    let other = Prim::arc(c2, 1001.0, a, b - a);
+    assert!(arc.distance(other.start()) <= EPS && arc.distance(other.end()) <= EPS);
+    assert!(
+        arc.distance(other.mid()) <= EPS,
+        "{}",
+        arc.distance(other.mid())
+    );
+    assert!(!one(vec![other], &cell), "another circle");
+    // Lines: on one segment, or across two, and a line against an arc.
+    let square = [
+        Prim::line(v(0.0, 0.0), v(10.0, 0.0)),
+        Prim::line(v(10.0, 0.0), v(10.0, 10.0)),
+    ];
+    assert!(one(vec![Prim::line(v(2.0, 0.0), v(9.0, 1e-7))], &square));
+    assert!(
+        !one(vec![Prim::line(v(5.0, 0.0), v(10.0, 5.0))], &square),
+        "a corner cut"
+    );
+    assert!(
+        !one(vec![Prim::line(p, q)], &cell),
+        "a chord is not its arc"
+    );
+    assert!(!one(vec![arc], &square), "an arc is not a line");
+}
+
+#[test]
 fn the_neighbour_budget_leaves_out_the_cell_itself() {
     // A strip 0.5 wide and 999.8 tall on pitch 1 along the row and 1001 between rows, the web 0.5:
     // the reach is sqrt(499.9^2 + 0.25^2) = 499.9, so neighbours are looked for within

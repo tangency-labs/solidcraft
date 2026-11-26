@@ -314,22 +314,54 @@ struct Prepared {
 
 /// Whether the clip left the cell as it was: one piece, an outer loop, made only of the cell's own
 /// edges, so that no edge of the field or a keep-out entered it. A piece's edge is the cell's own
-/// when both its ends and its middle lie within [`EPS`] of one and the same piece of the cell's
-/// outline (a middle near some other piece, such as a thin spike's tip, proves nothing), so a notch
-/// is seen by its depth, not by the share of the cell's area it takes. A loss of more than a
+/// when it lies on one piece of the cell's outline of its own kind ([`on_piece`]), so a notch is
+/// seen by its depth, not by the share of the cell's area it takes. A loss of more than a
 /// rounding of the area (1e-9 of it) is a change at once.
-fn unchanged(pieces: &[(Vec<Prim>, f64)], cell: &[Prim], area: f64) -> bool {
+pub(super) fn unchanged(pieces: &[(Vec<Prim>, f64)], cell: &[Prim], area: f64) -> bool {
     let [(prims, piece_area)] = pieces else {
         return false;
     };
     if !((piece_area - area).abs() <= 1e-9 * area) {
         return false;
     }
-    prims.iter().all(|p| {
-        let marks = [p.start(), p.mid(), p.end()];
-        cell.iter()
-            .any(|c| marks.iter().all(|m| c.distance(*m) <= EPS))
-    })
+    prims.iter().all(|p| cell.iter().any(|c| on_piece(p, c)))
+}
+
+/// Whether the piece `p` lies on the outline piece `c`, to within [`EPS`], by exact geometry. A
+/// line lies on a line when both its ends do (a straight piece between two points of a segment is
+/// on it). An arc lies on an arc when the circles agree (centre and radius within `EPS`), it turns
+/// the same way, both its ends lie on the outline arc (so within its span) and it is no longer
+/// than it by more than `EPS` of length. A line against an arc, or an arc against a line, is not.
+fn on_piece(p: &Prim, c: &Prim) -> bool {
+    match (*p, *c) {
+        (Prim::Line { a, b, .. }, Prim::Line { .. }) => {
+            c.distance(a) <= EPS && c.distance(b) <= EPS
+        }
+        (
+            Prim::Arc {
+                c: pc,
+                r: pr,
+                sweep: ps,
+                p0,
+                p1,
+                ..
+            },
+            Prim::Arc {
+                c: cc,
+                r: cr,
+                sweep: cs,
+                ..
+            },
+        ) => {
+            pc.distance(cc) <= EPS
+                && (pr - cr).abs() <= EPS
+                && (ps >= 0.0) == (cs >= 0.0)
+                && (ps.abs() - cs.abs()) * cr <= EPS
+                && c.distance(p0) <= EPS
+                && c.distance(p1) <= EPS
+        }
+        _ => false,
+    }
 }
 
 /// What two neighbouring outlines that meet or nest do.
