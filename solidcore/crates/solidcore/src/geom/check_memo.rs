@@ -74,8 +74,9 @@ impl Stars {
     /// whose neighbourhood has no digest, or that a broken link leaves unreadable, has none.
     pub(crate) fn of(b: &Brep, salt: ContentId) -> Self {
         let mut out = Self::default();
+        let parts = Parts::of(b);
         for f in b.face_list().iter().copied() {
-            if let Some(d) = face_digest(b, f, salt) {
+            if let Some(d) = face_digest(b, f, salt, &parts) {
                 out.faces.insert(f, d);
             }
             if let Ok(face) = b.face(f) {
@@ -85,12 +86,12 @@ impl Stars {
             }
         }
         for e in b.edge_list().iter().copied() {
-            if let Some(d) = edge_digest(b, e, salt, &out.faces) {
+            if let Some(d) = edge_digest(b, e, salt, &parts, &out.faces) {
                 out.edges.insert(e, d);
             }
         }
         for v in b.vertex_list().iter().copied() {
-            if let Some(d) = vertex_digest(b, v, salt, &out.faces, &out.edges) {
+            if let Some(d) = vertex_digest(b, v, salt, &parts, &out.faces, &out.edges) {
                 out.vertices.insert(v, d);
             }
         }
@@ -210,7 +211,7 @@ pub(crate) fn vertex_clean(k: &Kernel, v: VertexId) -> bool {
 /// The digest of face `f`'s neighbourhood: its surface, tolerance and parameter domain, and
 /// loop by loop, edge use by edge use, each use's sense and trim, its edge's curve, interval
 /// and tolerance, and the point and tolerance of the vertex it starts at.
-fn face_digest(b: &Brep, f: FaceId, salt: ContentId) -> Option<ContentId> {
+fn face_digest(b: &Brep, f: FaceId, salt: ContentId, parts: &Parts) -> Option<ContentId> {
     use crate::topology::edgeuse::p1 as eu1;
     let mut d = Digest::new();
     d.tag(0xF);
@@ -230,7 +231,7 @@ fn face_digest(b: &Brep, f: FaceId, salt: ContentId) -> Option<ContentId> {
         if edgeuses.is_empty() {
             // a vertex loop
             for vu in crate::topology::loopuse::vertexuses(b, lu, None).ok()? {
-                vertex_point(b, crate::topology::vertexuse::vertex(b, vu?).ok()??, &mut d)?;
+                parts.vertex(b, crate::topology::vertexuse::vertex(b, vu?).ok()??, &mut d)?;
             }
         }
         for eu in edgeuses {
@@ -239,9 +240,9 @@ fn face_digest(b: &Brep, f: FaceId, salt: ContentId) -> Option<ContentId> {
             trim.content(&mut d)?;
             d.bool(holder == Some(eu));
             let e = eu1::edge(b, eu).ok()??;
-            edge_geometry(b, e, &mut d)?;
+            parts.edge(b, e, &mut d)?;
             let vu = eu1::vertexuse(b, eu).ok()??;
-            vertex_point(b, crate::topology::vertexuse::vertex(b, vu).ok()??, &mut d)?;
+            parts.vertex(b, crate::topology::vertexuse::vertex(b, vu).ok()??, &mut d)?;
         }
     }
     Some(d.finish())
@@ -253,16 +254,17 @@ fn edge_digest(
     b: &Brep,
     e: EdgeId,
     salt: ContentId,
+    parts: &Parts,
     faces: &HashMap<FaceId, ContentId>,
 ) -> Option<ContentId> {
     use crate::topology::edgeuse::p1 as eu1;
     let mut d = Digest::new();
     d.tag(0xE);
     d.hashed(&salt);
-    edge_geometry(b, e, &mut d)?;
+    parts.edge(b, e, &mut d)?;
     let edge = b.edge(e).ok()?;
     for v in edge.vertices {
-        vertex_point(b, v, &mut d)?;
+        parts.vertex(b, v, &mut d)?;
     }
     d.bool(edge.vertices[0] == edge.vertices[1]);
     let uses = &edge.edgeuses;
@@ -291,6 +293,7 @@ fn vertex_digest(
     b: &Brep,
     v: VertexId,
     salt: ContentId,
+    parts: &Parts,
     faces: &HashMap<FaceId, ContentId>,
     edges: &HashMap<EdgeId, ContentId>,
 ) -> Option<ContentId> {
@@ -298,7 +301,7 @@ fn vertex_digest(
     let mut d = Digest::new();
     d.tag(0x7);
     d.hashed(&salt);
-    vertex_point(b, v, &mut d)?;
+    parts.vertex(b, v, &mut d)?;
     let uses = &b.vertex(v).ok()?.vertexuses;
     d.usize(uses.len());
     for &vu in uses {
@@ -318,6 +321,65 @@ fn vertex_digest(
             None => d.bool(false),
         }
     }
+    Some(d.finish())
+}
+
+/// The digests of each edge's geometry ([`edge_geometry`]) and each vertex's point
+/// ([`vertex_point`]), taken once per [`Stars::of`]: a face, an edge and a vertex digest
+/// each write an edge's or a vertex's digest where they wrote its content. `None` for one
+/// whose content has none.
+struct Parts {
+    edges: HashMap<EdgeId, Option<ContentId>>,
+    vertices: HashMap<VertexId, Option<ContentId>>,
+}
+
+impl Parts {
+    fn of(b: &Brep) -> Self {
+        let edges = b
+            .edge_list()
+            .iter()
+            .map(|&e| (e, edge_geometry_id(b, e)))
+            .collect();
+        let vertices = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, vertex_point_id(b, v)))
+            .collect();
+        Self { edges, vertices }
+    }
+
+    /// Writes edge `e`'s geometry digest; `None` when it has none.
+    fn edge(&self, b: &Brep, e: EdgeId, d: &mut Digest) -> Option<()> {
+        let id = match self.edges.get(&e) {
+            Some(id) => (*id)?,
+            None => edge_geometry_id(b, e)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+
+    /// Writes vertex `v`'s point digest; `None` when it has none.
+    fn vertex(&self, b: &Brep, v: VertexId, d: &mut Digest) -> Option<()> {
+        let id = match self.vertices.get(&v) {
+            Some(id) => (*id)?,
+            None => vertex_point_id(b, v)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+}
+
+fn edge_geometry_id(b: &Brep, e: EdgeId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0xE6);
+    edge_geometry(b, e, &mut d)?;
+    Some(d.finish())
+}
+
+fn vertex_point_id(b: &Brep, v: VertexId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x76);
+    vertex_point(b, v, &mut d)?;
     Some(d.finish())
 }
 

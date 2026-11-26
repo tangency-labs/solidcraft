@@ -2801,12 +2801,7 @@ fn planar_line(ss: &SolvedSketch, ci: usize) -> Option<(Vec3, Vec3)> {
 /// Exact straight stock only: defining line points or one retained analytic line.
 /// A display polyline never turns a spline into straight member stock.
 fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<(Vec3, Vec3)>> {
-    paths::wire_line(w).map(|line| {
-        line.map(|p| {
-            let d = p.data();
-            (d.a, d.b)
-        })
-    })
+    paths::wire_line(w).map(|line| line.map(|p| (p.a, p.b)))
 }
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,

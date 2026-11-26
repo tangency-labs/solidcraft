@@ -51,6 +51,8 @@ pub struct UrdfOptions {
     pub mimic: bool,
     /// The design's decals, each written as a textured mesh in a visual of its component's links.
     pub decals: Vec<UrdfDecal>,
+    /// How closely the link meshes follow curved faces. Default: standard.
+    pub quality: crate::MeshQuality,
 }
 
 /// A decal for [`urdf`]: an image on a quad in its component's frame. It becomes a COLLADA mesh
@@ -441,7 +443,7 @@ fn parts(
         let mut shared = true;
         let mut fitted = Vec::new();
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
-            let (mut m, notes) = export_mesh_noted(&b.body, crate::MeshQuality::Standard)?;
+            let (mut m, notes) = export_mesh_noted(&b.body, options.quality)?;
             out.warnings.extend(notes.into_iter().map(|n| format!("body `{}`: {n}", b.name)));
             if let Some(o) = doc.model_body_offset(b) {
                 for p in &mut m.positions {
