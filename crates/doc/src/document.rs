@@ -1904,6 +1904,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(unitless = "SnapInset")]
         snap_inset: Option<Expr>,
+        /// Which pseudo-random pattern a voronoi grid uses: a whole number (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Seed")]
+        seed: Option<Expr>,
+        /// How far a voronoi cell's centre moves, 0 to 1 (0: the hexagonal grid's centres, 1: moved
+        /// as far as they can be; default: the kernel's).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Irregularity")]
+        irregularity: Option<Expr>,
+        /// Rounds each corner of a voronoi cell with this radius (default 0: sharp corners).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Corner radius")]
+        corner_radius: Option<Expr>,
         /// The least clearance from a cell to every edge of the field and its keep-outs, with
         /// `clip: whole` (default 0: a cell may touch an edge).
         #[serde(default, skip_serializing_if = "Option::is_none")]

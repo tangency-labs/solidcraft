@@ -21,6 +21,9 @@ pub enum CellShape {
     Circle,
     /// Regular polygons with `sides` sides on a [`DotGrid`].
     Polygon,
+    /// Irregular convex cells: the Voronoi cells of the hexagonal grid's centres, each moved by a
+    /// pseudo-random offset from `seed`.
+    Voronoi,
 }
 
 /// The grid of centres for circles and polygons.
@@ -74,6 +77,16 @@ pub struct CellGridSpec {
     /// With `Clip::Snap`, how many lattice lines further in each straight field edge moves.
     #[serde(default)]
     pub snap_inset: u32,
+    /// Which pseudo-random pattern a voronoi grid uses.
+    #[serde(default)]
+    pub seed: u32,
+    /// How far a voronoi cell's centre moves, 0 to 1 (0: the hexagonal grid's centres, 1: moved
+    /// as far as they can be).
+    #[serde(default)]
+    pub irregularity: f64,
+    /// Rounds each corner of a voronoi cell with this radius (0: sharp corners).
+    #[serde(default)]
+    pub corner_radius: f64,
 }
 
 /// How a cell's opening came about.

@@ -92,6 +92,9 @@ pub enum CellShape {
     /// Regular polygons with `sides` sides and inscribed diameter `size`, a flat at the bottom,
     /// on a [`DotGrid`].
     Polygon,
+    /// Irregular convex cells: the Voronoi cells of the hexagonal grid's centres, each moved by a
+    /// pseudo-random offset from `seed`.
+    Voronoi,
 }
 
 /// The grid of centres for circles and polygons, which have no grid of their own.
@@ -140,6 +143,13 @@ pub struct CellGridSpec {
     /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
     /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
     pub snap_inset: u32,
+    /// Which pseudo-random pattern a [`CellShape::Voronoi`] grid uses.
+    pub seed: u32,
+    /// How far a [`CellShape::Voronoi`] cell's centre moves, 0 to 1 (0: the hexagonal grid's
+    /// centres, 1: moved as far as they can be).
+    pub irregularity: f64,
+    /// Rounds each corner of a [`CellShape::Voronoi`] cell with this radius (0: sharp corners).
+    pub corner_radius: f64,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -158,6 +168,9 @@ impl Default for CellGridSpec {
             clip: Clip::Snap,
             keepout_clip: None,
             snap_inset: 0,
+            seed: 0,
+            irregularity: 0.7,
+            corner_radius: 0.0,
             margin: 0.0,
         }
     }
@@ -197,6 +210,18 @@ impl CellGridSpec {
                 "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
                     .into(),
             ));
+        }
+        if !(self.irregularity.is_finite() && (0.0..=1.0).contains(&self.irregularity)) {
+            return Err(CellGridError::Parameter(format!(
+                "the irregularity must be from 0 to 1, not {}",
+                self.irregularity
+            )));
+        }
+        if !(self.corner_radius.is_finite() && (0.0..=MAX_COORD).contains(&self.corner_radius)) {
+            return Err(CellGridError::Parameter(format!(
+                "the corner radius must be from 0 to {MAX_COORD} mm, not {}",
+                self.corner_radius
+            )));
         }
         if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
             return Err(CellGridError::Parameter(format!(
@@ -369,6 +394,11 @@ pub fn cell_center(spec: &CellGridSpec, i: i64, j: i64) -> Result<Vec2, CellGrid
 
 /// The cells of a grid over a field given as closed loops (see the module docs).
 pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
+    // VORONOI-TODO: plan voronoi cells here instead of refusing them.
+    if spec.shape == CellShape::Voronoi {
+        spec.validate()?;
+        return Err(CellGridError::Parameter("the voronoi shape is not built yet".into()));
+    }
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;

@@ -174,7 +174,8 @@ impl Lattice {
             bool,
             Vec<Vec<Vec2>>,
         ) = match shape {
-            CellShape::Hexagon => {
+            // A voronoi grid's centres are the hexagonal grid's.
+            CellShape::Hexagon | CellShape::Voronoi => {
                 let r = s / SQRT3;
                 let hex = (0..6)
                     .map(|k| {

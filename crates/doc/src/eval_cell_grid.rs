@@ -47,6 +47,9 @@ pub(crate) fn tools(
         clip,
         keepout_clip,
         snap_inset,
+        seed,
+        irregularity,
+        corner_radius,
         margin,
         depth,
         through_all,
@@ -119,6 +122,24 @@ pub(crate) fn tools(
                 n as u32
             }
             None => 0,
+        },
+        seed: match seed {
+            Some(e) => {
+                let n = val(vals, e, Kind::Unitless)?;
+                if !(n.is_finite() && n.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&n)) {
+                    return Err(DocError::Invalid(format!("the seed is a whole number from 0 to {}, not {n}", u32::MAX)));
+                }
+                n as u32
+            }
+            None => defaults.seed,
+        },
+        irregularity: match irregularity {
+            Some(e) => val(vals, e, Kind::Unitless)?,
+            None => defaults.irregularity,
+        },
+        corner_radius: match corner_radius {
+            Some(e) => val(vals, e, Kind::Length)?,
+            None => defaults.corner_radius,
         },
         margin: match margin {
             Some(e) => val(vals, e, Kind::Length)?,
