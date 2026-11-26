@@ -1514,6 +1514,18 @@ pub fn locate_thread_face_on_body(st: &ModelState, body: Option<&str>, name: &st
     locate_face_on_body_with(st, body, name, p, true)
 }
 
+/// Whether [`locate_face_on_body`] resolves `name` directly on `st.bodies[body_index]` without
+/// falling back to scanning other bodies in `st`.
+pub(crate) fn face_resolved_on_body(st: &ModelState, body_index: usize, name: &str, p: Vec3) -> bool {
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
+        return false;
+    }
+    let Some(b) = st.bodies.get(body_index).filter(|b| !b.body.is_mesh()) else {
+        return false;
+    };
+    locate_in(std::iter::once((body_index, b)), name, Some(p)).is_ok()
+}
+
 /// [`locate_face_on_body`] for a face that stands only for where it lies: an extrude's From or To
 /// face. When the named face is now split into pieces (a letter with a closed hole cut into it
 /// leaves an island of it, #22281), every piece lies on the face's own surface, so the piece the
