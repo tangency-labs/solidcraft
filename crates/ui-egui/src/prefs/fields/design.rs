@@ -83,6 +83,10 @@ macro_rules! design_preferences {
             origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
             /// The names the browser, dialogs and lists show for the origin planes (#6491).
             origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
+            /// The size of the origin planes' squares in the view, as a factor of the size they take on
+            /// screen by default (#21191). 1 draws them as before; the origin axes keep their length. A
+            /// saved value outside the accepted range (a hand edit) reads as 1.
+            origin_plane_scale: f32 = 1.0, PAGE_DESIGN, accept(ORIGIN_PLANE_SCALE);
             /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
             /// list light in a large design.
             parameter_list_rows: u16 = 50, PAGE_DESIGN;

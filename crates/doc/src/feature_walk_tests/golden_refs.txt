@@ -125,6 +125,8 @@ frame_member
 frame_member_sketch
   sketches: [1, 2]
   remap_refs: path_sketch, profile.sketch
+frame_cope
+  remap_bodies: member, tools[0]
 frame_trim
   remap_refs: members[0].feature, to[0].member.feature, to[1].plane.base.base.feature
 frame_plate
@@ -227,6 +229,8 @@ surface_blend
   remap_bodies: from.body
 surface_offset
   remap_bodies: body
+surface_midsurface
+  remap_bodies: body
 surface_blend
   remap_bodies: from.body
 surface_boundary
@@ -267,6 +271,7 @@ surface_trim_mutual
   remap_bodies: body, with
 move
   remap_bodies: bodies[0]
+capture_position
 import
 mesh_convert
   remap_bodies: body

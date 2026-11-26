@@ -45,7 +45,7 @@ pub fn within_profile_size(v: f64) -> bool {
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::services::frame_member::VERTICAL_TOLERANCE;
+pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::FRAME_VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -509,6 +509,56 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+/// The world direction a frame member's profile takes as up ([`member_axes`]): world +Z by default,
+/// or another world axis for a part drawn with that axis up (a part with Y up takes `Y`). Lines
+/// along it are the vertical members.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpAxis {
+    #[serde(rename = "X")]
+    X,
+    #[serde(rename = "-X")]
+    NegX,
+    #[serde(rename = "Y")]
+    Y,
+    #[serde(rename = "-Y")]
+    NegY,
+    #[default]
+    #[serde(rename = "Z")]
+    Z,
+    #[serde(rename = "-Z")]
+    NegZ,
+}
+
+/// Every [`UpAxis`] as JSON spells it.
+pub const UP_AXES: [&str; 6] = ["X", "-X", "Y", "-Y", "Z", "-Z"];
+
+impl UpAxis {
+    pub fn is_z(&self) -> bool {
+        *self == UpAxis::Z
+    }
+
+    /// The up direction, a world unit vector.
+    pub fn up(self) -> Vec3 {
+        match self {
+            UpAxis::X => Vec3::X,
+            UpAxis::NegX => -Vec3::X,
+            UpAxis::Y => Vec3::Y,
+            UpAxis::NegY => -Vec3::Y,
+            UpAxis::Z => Vec3::Z,
+            UpAxis::NegZ => -Vec3::Z,
+        }
+    }
+
+    /// The world direction a vertical member's profile x takes: world +X, or world +Y when X is
+    /// up.
+    pub fn across(self) -> Vec3 {
+        match self {
+            UpAxis::X | UpAxis::NegX => Vec3::Y,
+            _ => Vec3::X,
+        }
+    }
 }
 
 impl Anchor {
@@ -996,13 +1046,22 @@ pub fn mirrored(region: &Region2) -> Region2 {
 }
 
 /// The directions a member's profile x and y take in the world, for a member running along `d`
-/// (any length): the profile's y points up (world +Z) as far as the line allows and x = y × d, so
-/// x × y runs along the line; a vertical member's x is world +X (a line leaning less than
-/// [`VERTICAL_TOLERANCE`] counts as vertical, so rounding never turns a post). `angle` (radians) then turns the
-/// profile counter-clockwise about the line, seen looking back from its end. `None` for a
-/// direction of no length.
-pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    solidcraft_kernel::services::frame_member::member_axes(d, angle).ok().flatten()
+/// (any length): the profile's y points up (`up`, world +Z by default) as far as the line allows
+/// and x = y × d, so x × y runs along the line; a vertical member's x is [`UpAxis::across`] (a
+/// line leaning less than [`VERTICAL_TOLERANCE`] from `up` counts as vertical, so rounding never
+/// turns a post). `angle` (radians) then turns the profile counter-clockwise about the line, seen
+/// looking back from its end. `None` for a direction of no length. The kernel's member axes take
+/// world +Z as up; another up axis turns the world so that it is +Z and `across` is +X, and back.
+pub fn member_axes(d: Vec3, angle: f64, up: UpAxis) -> Option<(Vec3, Vec3)> {
+    let axes = |d| solidcraft_kernel::member_axes(d, angle).ok().flatten();
+    if up.is_z() {
+        return axes(d);
+    }
+    let (z, x) = (up.up(), up.across());
+    let y = z.cross(x);
+    let world = |v: Vec3| x * v.x + y * v.y + z * v.z;
+    let (ax, ay) = axes(Vec3::new(d.dot(x), d.dot(y), d.dot(z)))?;
+    Some((world(ax), world(ay)))
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the

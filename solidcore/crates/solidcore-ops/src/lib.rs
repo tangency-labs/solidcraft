@@ -102,11 +102,13 @@ pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod stop;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
+pub mod tube_cope;
 pub mod untrim;
 pub mod vertex_meet;
 
