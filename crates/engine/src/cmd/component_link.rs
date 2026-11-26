@@ -2779,6 +2779,8 @@ enum PostRefreshEntry {
 
 struct EvalJob {
     key: UpdateSourceKey,
+    display_name: String,
+    slot: usize,
     file: PathBuf,
     bytes: std::sync::Arc<Vec<u8>>,
     configuration: Option<SelectedConfiguration>,
@@ -3065,7 +3067,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let mut eval_jobs: Vec<EvalJob> = Vec::new();
     let mut seen_sources = std::collections::HashSet::new();
     for (slot, target) in targets.iter().enumerate() {
-        let TargetLink::Native { comp, link, old, file, canonical, flat, .. } = target else { continue };
+        let TargetLink::Native { comp, cname, link, old, file, canonical, flat, .. } = target else { continue };
         let read_key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
         let Some(Ok((bytes, _, bytes_hash))) = file_reads.get(&read_key) else { continue };
         // A link that has not recorded the properties it inherited (made before they were) is read again.
@@ -3086,6 +3088,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         if seen_sources.insert(source_key.clone()) {
             eval_jobs.push(EvalJob {
                 key: source_key,
+                display_name: cname.clone(),
+                slot,
                 file: file.clone(),
                 bytes: bytes.clone(),
                 configuration,
@@ -3097,6 +3101,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
     // Phase 2C: evaluate unique changed/uncached sources in parallel (including nested left-out
     // sub-assemblies via `BranchReading` and `SharedReads`).
+    let count = targets.len();
     let mut evaluated: std::collections::HashMap<UpdateSourceKey, std::result::Result<(PathBuf, EvaluatedLink), String>> =
         std::collections::HashMap::with_capacity(eval_jobs.len());
     let cores = link_cores();
@@ -3140,6 +3145,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                                 step_reads: 0,
                             };
                         }
+                        // A window running this off its thread names the design being read again (#5329).
+                        solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
                         let branch =
                             BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
                         let run = || eval_job_sequential(job, validation);
@@ -3164,6 +3171,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         for (job, outcome) in eval_jobs.into_iter().zip(par_results) {
             let Some(out) = outcome else {
                 if !solidcraft_doc::progress::cancelled() {
+                    solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
                     let res = eval_job_sequential(&job, validation);
                     evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
                 }
@@ -3180,13 +3188,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             if solidcraft_doc::progress::cancelled() {
                 break;
             }
+            // A window running this off its thread names the design being read again (#5329).
+            solidcraft_doc::progress::item(Some((&job.display_name, job.slot, count)));
             let res = eval_job_sequential(&job, validation).map(|eval| (job.file, eval));
             evaluated.insert(job.key, res);
         }
     }
 
     // Phase 3: apply all mutations in exact deterministic order without refreshing inside the loop.
-    let count = targets.len();
     let mut link_warnings: Vec<Vec<String>> = vec![Vec::new(); count];
     let mut failed: Vec<LinkFailure> = Vec::new();
     let mut read_components: Vec<u64> = Vec::new();
