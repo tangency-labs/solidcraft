@@ -8,11 +8,6 @@ pub(crate) fn active_sketch(app: &SolveApp) -> Option<u64> {
     (app.session.sketching_view == Some(painted)).then_some(app.session.active_sketch).flatten()
 }
 
-pub(crate) fn active_sheet_sketch(app: &SolveApp) -> Option<u64> {
-    let painted = app.viewport.compass_view.unwrap_or_else(|| app.docs.views.active().id);
-    app.session.active_sheet_sketch.as_ref().filter(|entry| entry.view == Some(painted)).map(|entry| entry.sketch)
-}
-
 pub(crate) fn name(app: &SolveApp, view: u64) -> Option<String> {
     if let Some(entry) = app.session.active_sheet_sketch.as_ref().filter(|entry| entry.view == Some(view)) {
         return app.session.doc.drawing(entry.drawing)?.sheet_sketch(entry.sketch).map(|sketch| sketch.name.clone());

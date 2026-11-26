@@ -424,7 +424,10 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
         Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
             assert!(*reversed);
-            assert!(axis.0.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9);
+            assert!(
+                solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9),
+                "{axis:?}"
+            );
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));
@@ -633,7 +636,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
-        ("solid.emboss", &["1"]),
+        ("solid.emboss", &["1", "", ""]),
         ("solid.offset_face", &["2"]),
         ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
         ("solid.pattern.path", &["20", ""]),
@@ -1313,6 +1316,103 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
         // Off in Preferences, nothing wakes.
         h.app.preferences.snap_points = false;
         assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
+    }
+}
+
+/// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
+/// or height and revolutions; the command gets exactly the chosen pair.
+#[test]
+fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.into_iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p).unwrap()
+    };
+    let shows = |h: &Harness, label: &str| {
+        let label = solidcraft_ui_text::tr(label);
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+    };
+    // Untouched: today's pair.
+    let keys = |p: &serde_json::Value| {
+        let mut keys: Vec<_> = p.as_object().unwrap().keys().filter(|k| matches!(k.as_str(), "height" | "pitch" | "revolutions")).cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.coil_path_height"));
+    // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "pitch"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
+    assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
+    // Back to the default pair: no height is sent.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    ok(&mut h);
+    let by_height = volume(&mut h.app.session);
+    // 20 high at pitch 8 is 2.5 turns.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 2.5, "pitch": 8, "section_size": 3, "operation": "new"})).unwrap();
+    let expected = volume(&mut reference.app.session);
+    assert!((by_height - expected).abs() <= expected * 1e-6, "{by_height} vs {expected}");
+    // Height and revolutions.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "revolutions"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
+    ok(&mut h);
+    // 20 high in 4 turns is a pitch of 5.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
+    let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
+    assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+}
+
+/// Combine's offset and rounding radius are lengths in the design's unit, as every other
+/// length field: in an inch design they are converted when the dialog applies (a bare 0.1 is
+/// 0.1 in, not 0.1 mm). Left empty, the radius stays empty, so the command leaves it out.
+#[test]
+fn combine_offset_and_radius_follow_the_design_unit() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.combine").unwrap_or_else(|| panic!("no dialog for solid.combine"));
+    if let crate::dialogs::Kind::Combine { operation, offset, radius, round_edges, .. } = &mut d.kind {
+        *operation = 2;
+        *offset = "0.1".into();
+        *round_edges = true;
+        *radius = String::new();
+    }
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["0.1".to_string()], "the offset only, the empty radius left out");
+    let mm = crate::length_input::eval(&h.app.session.doc, &values[0], solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "0.1 in an inch design: {mm} mm");
+    if let crate::dialogs::Kind::Combine { radius, .. } = &mut d.kind {
+        *radius = "0.05".into();
+    }
+    assert_eq!(crate::length_input::fields(&h.app.session.doc, &mut d.kind).len(), 2, "a typed radius is converted too");
+}
+
+/// Only a plain zero stands for no offset: an expression that is zero now, such as a
+/// parameter, is kept so the cut follows it when it changes.
+#[test]
+fn combine_offset_of_a_parameter_at_zero_is_kept() {
+    for zero in ["0", "0 mm", "0.0in", "(0) in", " 0 "] {
+        assert!(crate::dialogs::literal_zero(zero), "{zero}");
+    }
+    for kept in ["gap", "gap * 0", "0.1 mm", "", "1 - 1"] {
+        assert!(!crate::dialogs::literal_zero(kept), "{kept}");
     }
 }
 

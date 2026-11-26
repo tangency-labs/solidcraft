@@ -1,12 +1,14 @@
-use crate::ui_kit::BackingTooltipExt as _;
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
+use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _};
+
+use super::runtime::{ContentOwner, ContentServices, PanelController};
 
 /// Content receives this value separately from state/model/command services. All
 /// geometry is already in logical units; do not multiply it by egui UI scale.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelContext {
     pub instance: InstanceId,
-    pub owner: super::ContentOwner,
+    pub owner: ContentOwner,
     pub workspace: WorkspaceId,
     pub document: Option<DocumentId>,
     pub viewport: ViewportId,
@@ -39,12 +41,12 @@ impl PanelContext {
                 return Err(error(Rule::Placement, "native presentation has wrong local viewport"));
             }
         }
-        if let super::ContentOwner::Document(document) = &self.owner
+        if let ContentOwner::Document(document) = &self.owner
             && self.document.as_ref() != Some(document)
         {
             return Err(error(Rule::Placement, "presentation document differs from content owner"));
         }
-        if let super::ContentOwner::Workspace(workspace) = &self.owner
+        if let ContentOwner::Workspace(workspace) = &self.owner
             && self.workspace != *workspace
         {
             return Err(error(Rule::Placement, "presentation workspace differs from content owner"));
@@ -224,8 +226,8 @@ pub trait FramePanelContent {
         slot: ContentSlot,
         ui: &mut egui::Ui,
         context: &PanelContext,
-        content: &mut dyn super::PanelController,
-        services: &mut super::ContentServices<'_>,
+        content: &mut dyn PanelController,
+        services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
         if slot == ContentSlot::Inline { content.render_inline(ui, context, services) } else { content.render(slot, ui, context, services) }
     }
@@ -310,8 +312,8 @@ impl PanelHost for EguiPanelHost<'_> {
         let outer = rect(geometry.outer);
         let body = geometry.body.map(rect);
         let parent_clip = self.ui.clip_rect().intersect(outer);
-        let container = crate::ui_kit::Container::new(self.ui.ctx(), crate::ui_kit::Surface::Panel);
-        let frame = container.frame(self.ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
+        let container = ui_kit::Container::new(self.ui.ctx(), ui_kit::Surface::Panel);
+        let frame = container.frame(self.ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, ui_kit::frame::Side::Left).inner_margin(0);
         let mut failure = None;
         self.ui.scope_builder(
             egui::UiBuilder::new().scope_id(egui::Id::unique(("panel_runtime", &geometry.instance.0, &context.owner))).max_rect(outer),
@@ -348,7 +350,7 @@ impl PanelHost for EguiPanelHost<'_> {
                                             let response = ui
                                                 .push_id(&action.id.0, |ui| {
                                                     ui.add_enabled_ui(action.enabled, |ui| {
-                                                        crate::ui_kit::button(ui, action.label.as_str(), crate::ui_kit::Button::Small)
+                                                        ui_kit::button(ui, action.label.as_str(), ui_kit::Button::Small)
                                                     })
                                                     .inner
                                                 })
@@ -387,5 +389,3 @@ impl PanelHost for EguiPanelHost<'_> {
         Ok(())
     }
 }
-
-use super::{ContentServices, PanelController};
