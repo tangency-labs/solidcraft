@@ -26,12 +26,14 @@
 //!
 //! Deviations: a refusal is returned ([`TurnRefusal`]) for the executive to note
 //! (`NoteError` at the vertex) instead of noted here, and so is the fork's
-//! `NoteFitRadius(0, edge)` at the concave side edge (5e8c9c1, [`TurnRefusal::fit_edge`]).
-//! `%g` in the refusal's text is `fmt_g`. The torus and its loop
+//! `NoteFitRadius(0, edge)` at the concave side edge (5e8c9c1, [`TurnRefusal::fit_edge`]);
+//! not the fork's, the refusal there carries its side edge and radius as data
+//! ([`TurnRefusal::refusal`]). `%g` in the refusal's text is `fmt_g`. The torus and its loop
 //! are kept in [`SweptTurn`] from the edge geometry until the patch takes them. With the
 //! session's swept turns (`FilletSession::set_swept_turns`, the fork's `SetSweptTurns`;
 //! WR-697). No recursion.
 
+use crate::blend::blend_refusal::BlendRefusal;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_corner::topology::{
@@ -110,7 +112,7 @@ impl SweptTurn {
 /// `sm_TurnNotBuilt`: a turn the blend corner does not build, with the error and the
 /// reason the executive notes at the corner's vertex (`NoteError(vertex, SM_FIL_FAILURE,
 /// error, why)`); no corner is made.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TurnRefusal {
     /// `eError`: [`FilletErrorType::NoRoom`] or [`FilletErrorType::CornerUnsupported`].
     pub error: FilletErrorType,
@@ -120,6 +122,10 @@ pub struct TurnRefusal {
     /// the refusal), for the executive to note: the first round's edge at a sharp side edge
     /// the ball cannot pass.
     pub fit_edge: Option<EdgeId>,
+    /// Not the fork's: the refusal as data where it names a size, at a sharp side edge the
+    /// ball cannot pass ([`BlendRefusal::SweptTurnPastSharpEdge`]); `None` for a turn not
+    /// built yet.
+    pub refusal: Option<BlendRefusal>,
 }
 
 /// The executive's solvers as the Swept turn reads them.
@@ -292,6 +298,7 @@ pub fn classify_swept(
             error,
             comment: why.to_owned(),
             fit_edge: None,
+            refusal: None,
         }))
     };
     // a closed round meeting itself at an angle (the closed Turn, #2349) has one blended edge
@@ -380,6 +387,11 @@ pub fn classify_swept(
                 fmt_g(radius)
             ),
             fit_edge: eu1::edge(b, eu1_)?,
+            refusal: Some(BlendRefusal::SweptTurnPastSharpEdge {
+                vertex,
+                side_edge,
+                least_radius: radius,
+            }),
         }));
     }
 
