@@ -1624,6 +1624,20 @@ pub(crate) struct ProductionFrame<'a> {
     pub app: &'a mut crate::SolveApp,
     pub(super) state: ProductionState,
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ProductionFrame<'_> {
+    pub(super) fn finish_native_window(&mut self, active: &InstanceId, action: Option<&super::NativeWindowAction>, ctx: &egui::Context) {
+        if active.0 != Product::Assistant.id() {
+            return;
+        }
+        if matches!(action, Some(super::NativeWindowAction::Content(_, action)) if action.0 == "export-chat") {
+            crate::agent_chat::request_export(&mut self.app.agent_chat);
+        }
+        crate::agent_chat::finish_native_window(self.app, ctx);
+    }
+}
+
 impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_context_menu(&mut self, instance: &InstanceId, at: egui::Pos2) {
         if instance.0 == Product::History.id() {

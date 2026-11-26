@@ -6954,7 +6954,7 @@ fn markdown_snapshot_keeps_attachments_and_filters_chat_cards() {
                 Picture::new(b"secret-picture-bytes".to_vec(), "reference [front].png"),
                 Picture::shared(Arc::new(b"secret-view-bytes".to_vec()), "", true),
             ],
-            files: vec!["part.step".into()],
+            files: vec!["- draft.step".into(), "1. part.step".into(), "2) alternate.step".into()],
             context: Context { groups: vec![(1, "secret-context".into())], ..Context::default() },
         },
         Item::Agent { thought: true, text: "secret-thought".into() },
@@ -6976,7 +6976,9 @@ fn markdown_snapshot_keeps_attachments_and_filters_chat_cards() {
 
     for include_tools in [false, true] {
         let snapshot = export::markdown_snapshot(&items, include_tools);
-        assert!(snapshot.contains("Attachments:\n\n- part.step\n- reference \\[front\\].png\n- Model view\n"));
+        assert!(snapshot.contains(
+            "Attachments:\n\n- File: - draft.step\n- File: 1. part.step\n- File: 2) alternate.step\n- Image: reference \\[front\\].png\n- Image: Model view\n"
+        ));
         assert!(!snapshot.contains("secret-"), "picture bytes, selected model context and hidden cards stay out");
         assert!(!snapshot.contains("file.save"), "held operations stay out");
         assert_eq!(snapshot.contains("tool-result"), include_tools);
@@ -7017,7 +7019,7 @@ fn markdown_snapshot_keeps_complete_tools_and_distinguishes_unavailable_fields()
     let snapshot = export::markdown_snapshot(&items, true);
     assert!(snapshot.contains("Review it for paths and other sensitive data before sharing."));
     assert!(snapshot.contains("## Tool call: Measure\\n\\#\\# Another heading\n\n- Call ID: first\n- Kind: read\\`\n- Status: Completed"));
-    assert!(snapshot.contains(&serde_json::to_string_pretty(&input).unwrap()));
+    assert!(snapshot.contains(&format!("Input:\n\n```json\n{input}\n```\n\n")));
     assert!(snapshot.contains(&format!("Output:\n\n``````\n{result}``````\n\n")));
     assert!(snapshot.contains("Input: not retained.\n\nOutput:\n\n```\n```\n"));
     assert!(snapshot.contains("Input:\n\n```json\nnull\n```\n\nOutput: not retained."));
@@ -7025,12 +7027,15 @@ fn markdown_snapshot_keeps_complete_tools_and_distinguishes_unavailable_fields()
 
 #[test]
 fn markdown_snapshot_keeps_later_sections_out_of_an_unfinished_code_block() {
-    for fence in ["```", "~~~~"] {
-        let partial_reply = format!("The code is streaming:\n\n{fence}rust\nlet height = 10;  ");
-        let items = [Item::Agent { thought: false, text: partial_reply.clone() }, Item::Notice { text: "cancelled".into(), error: false }];
+    for (lead, indent, fence) in [("The code is streaming:", "", "```"), ("- Streaming code:", "  ", "~~~~")] {
+        let partial_reply = format!("{lead}\n\n{indent}{fence}rust\n{indent}let height = 10;  ");
+        let items = [
+            Item::Agent { thought: false, text: partial_reply.clone() },
+            Item::User { text: "Continue".into(), image: false, pictures: Vec::new(), files: Vec::new(), context: Context::default() },
+        ];
 
         let snapshot = export::markdown_snapshot(&items, true);
-        assert!(snapshot.contains(&format!("## Assistant\n\n{partial_reply}\n{fence}\n\n## Notice\n\n")));
+        assert!(snapshot.contains(&format!("## Assistant\n\n{partial_reply}\n{indent}{fence}\n\n## User\n\nContinue")));
     }
 }
 

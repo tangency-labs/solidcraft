@@ -18,13 +18,14 @@ pub(super) fn markdown_snapshot(items: &[Item], include_tools: bool) -> String {
                 push_message(&mut output, "User", text);
                 if !files.is_empty() || !pictures.is_empty() {
                     output.push_str("Attachments:\n\n");
-                    for name in files
-                        .iter()
-                        .map(String::as_str)
-                        .chain(pictures.iter().map(|picture| if picture.view { "Model view" } else { picture.note.as_str() }))
-                    {
-                        output.push_str("- ");
+                    for name in files {
+                        output.push_str("- File: ");
                         push_literal(&mut output, name);
+                        output.push('\n');
+                    }
+                    for picture in pictures {
+                        output.push_str("- Image: ");
+                        push_literal(&mut output, if picture.view { "Model view" } else { &picture.note });
                         output.push('\n');
                     }
                     output.push('\n');
@@ -47,7 +48,8 @@ pub(super) fn markdown_snapshot(items: &[Item], include_tools: bool) -> String {
                     None => "Not reported",
                 });
                 output.push_str("\n\n");
-                let arguments = input.as_ref().map(|value| serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()));
+                // Retention limits the compact JSON size. Indentation can greatly expand nested input.
+                let arguments = input.as_ref().map(serde_json::Value::to_string);
                 push_tool_field(&mut output, "Input", arguments.as_deref(), "json");
                 push_tool_field(&mut output, "Output", result.as_deref(), "");
             }
@@ -73,23 +75,25 @@ fn push_message(output: &mut String, role: &str, text: &str) {
     output.push_str(role);
     output.push_str("\n\n");
     output.push_str(text);
-    if let Some((marker, length)) = open_fence(text) {
+    if let Some((indent, marker, length)) = open_fence(text) {
         // A partial reply can end in a code block. End the block after the retained text so
         // subsequent headings do not render as part of the reply.
         if !text.ends_with('\n') {
             output.push('\n');
         }
+        output.extend(std::iter::repeat_n(' ', indent));
         output.extend(std::iter::repeat_n(char::from(marker), length));
     }
     output.push_str("\n\n");
 }
 
-/// Find a top-level Markdown code fence that has no closing line yet.
-fn open_fence(text: &str) -> Option<(u8, usize)> {
+/// Find an unclosed Markdown code fence with at most three leading spaces.
+fn open_fence(text: &str) -> Option<(usize, u8, usize)> {
     let mut open = None;
     for raw in text.split(['\n', '\r']) {
         let line = raw.trim_start_matches(' ');
-        if raw.len() - line.len() > 3 {
+        let indent = raw.len() - line.len();
+        if indent > 3 {
             continue;
         }
         let Some(marker @ (b'`' | b'~')) = line.as_bytes().first().copied() else { continue };
@@ -98,12 +102,12 @@ fn open_fence(text: &str) -> Option<(u8, usize)> {
             continue;
         }
         let rest = &line[length..];
-        if let Some((opened_with, opened_length)) = open {
+        if let Some((_, opened_with, opened_length)) = open {
             if marker == opened_with && length >= opened_length && rest.trim_matches([' ', '\t']).is_empty() {
                 open = None;
             }
         } else if marker == b'~' || !rest.contains('`') {
-            open = Some((marker, length));
+            open = Some((indent, marker, length));
         }
     }
     open

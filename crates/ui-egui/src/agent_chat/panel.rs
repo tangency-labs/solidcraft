@@ -494,7 +494,6 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
         if ui.is_enabled() {
             window_input(&mut app.agent_chat, &ctx, ui.max_rect());
             gallery_window(&mut app.agent_chat, &ctx);
-            export_dialog(&mut app.agent_chat, &ctx);
         }
         app.agent_chat.panel_rect = None;
         app.agent_chat.drop_rect = None;
@@ -504,6 +503,12 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     }
     light_hovered(app);
     run_actions(app, &ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finish_native_window(app: &mut SolveApp, ctx: &egui::Context) {
+    export_dialog(&mut app.agent_chat, ctx);
+    run_actions(app, ctx);
 }
 
 /// The controls and conversation alone, filling `ui` (the shared host's body, which has its own

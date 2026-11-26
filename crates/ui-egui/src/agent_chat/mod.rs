@@ -55,6 +55,8 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::finish_native_window;
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
 pub(crate) use panel::prepare_shared;

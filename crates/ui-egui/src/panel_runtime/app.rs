@@ -651,7 +651,16 @@ impl AppPanelRuntime {
                             let _blur = content.app.blur.begin(ui.ctx());
                             let before = crate::semantic_content::presented_owners(content.app);
                             let painted = solidcraft_ui_registry::isolated(|| {
-                                super::paint_native_window(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                                let action =
+                                    super::paint_native_window(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)?;
+                                if enabled
+                                    && !matches!(action, Some(WindowAction::Redock))
+                                    && ui.input(|input| input.viewport().visible() != Some(false))
+                                {
+                                    // Draw outside the panel body so its modal also works for a collapsed card.
+                                    content.finish_native_window(active, action.as_ref(), ui.ctx());
+                                }
+                                Ok(action)
                             });
                             // A window dropped before its panel measured its content fits
                             // it once measured, as the app's side cards do.
