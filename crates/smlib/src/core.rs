@@ -151,6 +151,17 @@ fn put_kernel(k: Option<Kernel>) {
     POOL.lock().unwrap_or_else(PoisonError::into_inner).put(k);
 }
 
+/// Every pooled kernel's profile (solidcore's `profile` feature), written as JSON Lines: the
+/// scopes and counted work of its calls so far. A kernel mid-call is not in the pool; calls one
+/// after another share one kernel, so sequential use is one tree.
+#[cfg(feature = "solidcore-profile")]
+pub(crate) fn write_kernel_profiles(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    for k in &POOL.lock().unwrap_or_else(PoisonError::into_inner).idle {
+        k.take_profile().write_jsonl(w)?;
+    }
+    Ok(())
+}
+
 /// What a call must not find from the calls before it: the same operation on the same bodies
 /// answers the same on any kernel, however much that kernel did first. (The stations it
 /// remembers; marks, identities and what is only kept to reuse memory change no answer, and a

@@ -274,6 +274,14 @@ fn main() -> ExitCode {
         (Ok(()), Some(Err(e))) => Err(e),
         (r, _) => r,
     };
+    // Solidcore's own profiler too (feature `solidcore-profile`), when a file is named: the
+    // kernel's scopes and counted work of this run, as JSON Lines, failing runs included.
+    #[cfg(feature = "solidcore-profile")]
+    if let Ok(path) = std::env::var("SOLIDCRAFT_KERNEL_PROFILE") {
+        if let Ok(mut file) = std::fs::File::create(&path) {
+            let _ = solidcraft_engine::kernel::write_kernel_profiles(&mut file);
+        }
+    }
     // The device that drew this run's pictures closes before the process exits: with it open, a
     // driver's exit handler can crash after the work is done (#19431).
     solidcraft_viewport_gpu::capture::close_shared_before_exit();

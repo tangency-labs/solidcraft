@@ -296,6 +296,17 @@ pub fn in_call() -> bool {
     core::in_call()
 }
 
+/// Every pooled kernel's profile (solidcore's `profile` feature), written as JSON Lines: the
+/// scopes and counted work of its calls so far (feature `solidcore-profile`).
+///
+/// # Errors
+///
+/// Those of writing to `w`.
+#[cfg(feature = "solidcore-profile")]
+pub fn write_kernel_profiles(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    core::write_kernel_profiles(w)
+}
+
 /// A panic inside a solidcore call, which the call catches as it catches any
 /// ([`Error::Internal`], the kernel replaced by a fresh one): the crash-report check
 /// (`diagnostics.crash_test`'s kernel mode). The crate's one deliberate panic.
