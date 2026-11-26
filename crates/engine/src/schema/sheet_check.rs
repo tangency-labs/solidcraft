@@ -16,8 +16,9 @@ pub struct CheckShopParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub body: Option<String>,
-    /// The shop: a built-in profile's id (`generic`, `pcbway`, `jlccnc`, `sendcutsend`), the path
-    /// of a profile file (ends in `.json`), or a profile object (`docs/formats/shop-rules.md`).
+    /// The shop: the built-in profile's id (`generic`), the id of one of your own presets
+    /// (`sheet.shop_presets` lists them), the path of a profile file (ends in `.json`), or a profile
+    /// object (`docs/formats/shop-rules.md`).
     pub shop: ShopParam,
     /// What the flat DXF is exported with, for the file rules (`file.dxf_single_layer`,
     /// `file.dxf_closed_contours`, `file.dxf_bend_lines`, `file.text_outlined`): the options
@@ -50,7 +51,7 @@ pub struct DxfCheckParams {
     pub hardware_notes: Option<bool>,
 }
 
-/// A check's `shop`: a built-in id or a file's path, or a profile as an object. The command reads
+/// A check's `shop`: a built-in or preset id or a file's path, or a profile as an object. The command reads
 /// and checks it, so its refusals name the rule and the value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShopParam {
@@ -74,7 +75,7 @@ impl JsonSchema for ShopParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A built-in shop profile's id (generic, pcbway, jlccnc, sendcutsend), a profile file's path (ends in .json), or the profile itself: {id?, name, note?, dxf_export?: {layers?: roles|single|cut, bend_lines?, bend_notes?, hardware_notes?, sources}, rules: [{id, unit?, process?, limits?, stock?, wanted?, sources?, disagreement?}]}.",
+            "description": "The built-in shop profile's id (generic), one of your shop presets' ids, a profile file's path (ends in .json), or the profile itself: {id?, name, note?, dxf_export?: {layers?: roles|single|cut, bend_lines?, bend_notes?, hardware_notes?, sources}, rules: [{id, unit?, process?, limits?, stock?, wanted?, sources?, disagreement?}]}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
                 {"type": "object", "required": ["name", "rules"]}
@@ -171,4 +172,76 @@ pub struct CheckShopResult {
     pub not_checked: Vec<ShopNotChecked>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// List the shop profiles there are to check against: the built-in one and your own presets.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ShopPresetsParams {
+    /// Also give this profile (`generic`, or a preset's id) as the object a preset is made from:
+    /// edit it and pass it to `sheet.save_shop_preset`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub profile: Option<String>,
+}
+
+/// What `sheet.shop_presets` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ShopPresetsResult {
+    /// The profiles that come with SolidCraft.
+    pub built_in: Vec<ShopInfo>,
+    /// Your own, in the order they were first saved.
+    pub presets: Vec<ShopInfo>,
+    /// The profile asked for, as an object (`docs/formats/shop-rules.md`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Value>,
+}
+
+/// Keep a shop rules profile as one of your presets, to check against by its id. Give the profile
+/// as an object (`profile`) or as the path of a profile file (`path`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SaveShopPresetParams {
+    /// The preset's name, 1 to 64 characters; the profile's own name when left out. It may not be
+    /// `Generic`, the built-in profile's.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub name: Option<String>,
+    /// The profile: `{id?, name?, note?, dxf_export?, rules: [...]}` (`docs/formats/shop-rules.md`).
+    /// Its `id` (lower case letters, digits, `_` and `-`) is the preset's, or one made from the
+    /// name when it has none; a preset of the same id is replaced. Not with `path`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "serde_json::Map<String, Value>")]
+    pub profile: Option<serde_json::Map<String, Value>>,
+    /// Or the path of a profile file (a `.json` file holding the profile object). Not with `profile`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub path: Option<String>,
+}
+
+/// What `sheet.save_shop_preset` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SaveShopPresetResult {
+    /// The id to give `sheet.check_shop`'s `shop`.
+    pub id: String,
+    pub name: String,
+    /// A preset of this id was there, and is now this one.
+    pub replaced: bool,
+}
+
+/// Remove one of your shop presets.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteShopPresetParams {
+    /// The preset's id (`sheet.shop_presets` lists them).
+    pub id: String,
+}
+
+/// What `sheet.delete_shop_preset` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteShopPresetResult {
+    pub deleted: ShopInfo,
 }

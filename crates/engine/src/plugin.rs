@@ -309,6 +309,7 @@ const FILE_COMMANDS: &[&str] = &[
     "sheet.check_shop",
     "sheet.export_bend_table",
     "sheet.export_dxf",
+    "sheet.save_shop_preset",
     "sketch.export_dxf",
     "sketch.export_svg",
     "timeline.export_script",

@@ -993,6 +993,11 @@ pub struct Session {
     /// save leaves them out of the file and an opened design starts without them. The user's,
     /// like `param_check`, so it survives opening and starting designs.
     pub keep_print_faces: bool,
+    /// The user's own shop rules profiles (#20113), offered by `sheet.check_shop` beside the built-in
+    /// one. A host preference, never saved in a design: the app holds them in its preferences and
+    /// hands them over, and scripts and the command line keep what they save for the session. Kept
+    /// when a design is opened or started, like `keep_print_faces`.
+    pub shop_presets: doc::shop_presets::Presets,
     /// Whether a save keeps the bodies of linked designs in the design's file. On for a new
     /// design. Off: `file.save` writes each link without its bodies, and opening the file reads
     /// them from the linked design files again (#8170). The design's own choice, set by
@@ -1527,6 +1532,7 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
+            shop_presets: Default::default(),
             linked_bodies: true,
             live_links: None,
             active_component: 0,
@@ -1623,6 +1629,7 @@ impl Session {
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
+        let shop_presets = std::mem::take(&mut self.shop_presets);
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -1660,6 +1667,7 @@ impl Session {
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
+        self.shop_presets = shop_presets;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -3867,6 +3875,7 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
+            shop_presets: self.shop_presets.clone(),
             linked_bodies: self.linked_bodies,
             live_links: None,
             active_component: self.active_component,

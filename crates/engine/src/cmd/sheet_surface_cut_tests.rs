@@ -1643,6 +1643,67 @@ fn the_flat_pattern_lists_each_hardware_hole() {
     assert_eq!(flat(&mut s)["hardware"].as_array().map(Vec::len), Some(2), "the stud's hole is gone");
 }
 
+fn page(says: &str) -> Value {
+    json!({"url": "https://example.com/rules", "read": "2026-11-25", "says": says})
+}
+
+fn multiple(times: f64) -> Value {
+    json!({"value": times, "relative_to": "thickness", "sources": [page("a multiple of the thickness")]})
+}
+
+fn file_rule(id: &str) -> Value {
+    json!({"id": id, "sources": [page("the file rule")]})
+}
+
+fn export(layers: &str, bend_lines: bool) -> Value {
+    json!({"layers": layers, "bend_lines": bend_lines, "sources": [page("the export it asks for")]})
+}
+
+/// The synthetic shops `sheet.check_shop` is held to below; none is a real shop, and they are
+/// saved as presets (`shops`) to check by id. `shop_a`: stock 0.5 to 6 mm, flange 4 T and 2.5 T
+/// (pages that disagree), one cut layer and no bend lines asked for. `shop_b`: no file rules, a
+/// layer per role with the bend lines asked for. `shop_c`: listed stock, one thickness all
+/// over, one cut layer with the bend lines apart asked for, closed contours, a line at each bend.
+fn shop_profile(id: &str) -> Value {
+    let (name, export, rules) = match id {
+        "shop_a" => (
+            "Shop A",
+            export("single", false),
+            vec![
+                json!({"id": "stock.thickness", "disagreement": true, "stock": [{"min_mm": 0.5, "max_mm": 6.0, "sources": [page("the sheets it cuts")]}]}),
+                json!({"id": "flange.min", "disagreement": true, "limits": [multiple(4.0), multiple(2.5)]}),
+                file_rule("file.dxf_single_layer"),
+                file_rule("file.dxf_closed_contours"),
+                file_rule("file.text_outlined"),
+            ],
+        ),
+        "shop_b" => (
+            "Shop B",
+            export("roles", true),
+            vec![json!({"id": "stock.thickness", "stock": [{"min_mm": 0.5, "max_mm": 6.0, "sources": [page("the sheets it cuts")]}]})],
+        ),
+        _ => (
+            "Shop C",
+            export("cut", true),
+            vec![
+                json!({"id": "stock.thickness", "stock": [{"thicknesses_mm": [1.5, 2.0, 3.0, 4.0, 6.0], "sources": [page("the sizes it stocks")]}]}),
+                file_rule("file.uniform_thickness"),
+                file_rule("file.dxf_single_layer"),
+                file_rule("file.dxf_closed_contours"),
+                json!({"id": "file.dxf_bend_lines", "bend_lines": "present", "sources": [page("a line at each bend")]}),
+            ],
+        ),
+    };
+    json!({"id": id, "name": name, "dxf_export": export, "rules": rules})
+}
+
+/// Save the three synthetic shops as presets, in this order: `shop_a`, `shop_b`, `shop_c`.
+fn shops(s: &mut Session) {
+    for id in ["shop_a", "shop_b", "shop_c"] {
+        run(s, "sheet.save_shop_preset", json!({"profile": shop_profile(id)}));
+    }
+}
+
 /// `sheet.check_shop` (#20113): the reply's findings of rule `id`.
 fn shop_findings(reply: &Value, id: &str) -> Vec<Value> {
     reply["findings"].as_array().cloned().unwrap_or_default().into_iter().filter(|f| f["rule"] == id).collect()
@@ -1686,21 +1747,22 @@ fn a_hole_under_the_shops_minimum_is_a_finding_with_the_limit() {
     assert!(f[0]["sources"].as_array().is_some_and(|u| !u.is_empty()));
 }
 
-/// JLCCNC stocks 0.5 to 6 mm: a 7 mm sheet is not stock.
+/// A shop that stocks 0.5 to 6 mm (`shop_b`): a 7 mm sheet is not stock.
 #[test]
 fn a_sheet_outside_the_shops_stock_is_a_finding() {
     let mut s = session();
+    shops(&mut s);
     rule(&mut s, "Thick", 7.0, 0.44, 7.0, 0.5);
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 7, "body_name": "Plate"}));
     run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, 7]}));
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "jlccnc"}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "shop_b"}));
     let f = shop_findings(&reply, "stock.thickness");
     assert_eq!(f.len(), 1, "{reply}");
     assert_eq!((f[0]["value"].as_f64(), f[0]["severity"].as_str()), (Some(7.0), Some("error")));
     assert!(f[0]["message"].as_str().unwrap_or("").contains("7 mm thick"));
-    // The same sheet is fine for a shop that stocks it.
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "sendcutsend"}));
-    assert_eq!(shop_findings(&reply, "stock.thickness").len(), 1, "SendCutSend: 7 mm is no listed size either");
+    // A shop with listed sizes has none of 7 mm either.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "shop_c"}));
+    assert_eq!(shop_findings(&reply, "stock.thickness").len(), 1, "shop_c: 7 mm is no listed size either");
 }
 
 /// A hole near a bend, measured as the flat has it: the generic limit is the strictest of
@@ -1755,8 +1817,9 @@ fn a_hole_is_measured_from_its_rim_to_the_edge() {
 #[test]
 fn a_countersink_is_said_not_to_be_checked_for_one_thickness() {
     let mut s = plate();
+    shops(&mut s);
     let said = |s: &mut Session| {
-        let reply = run(s, "sheet.check_shop", json!({"shop": "sendcutsend"}));
+        let reply = run(s, "sheet.check_shop", json!({"shop": "shop_c"}));
         reply["not_checked"]
             .as_array()
             .cloned()
@@ -1767,7 +1830,7 @@ fn a_countersink_is_said_not_to_be_checked_for_one_thickness() {
     run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
     assert!(!said(&mut s), "a plain hole thins nothing");
     run(&mut s, "solid.hole", json!({"position": [20, 30, T], "type": "countersink", "diameter": 3.35, "cs_diameter": 7.85, "cs_angle": "90 deg"}));
-    assert!(said(&mut s), "{}", run(&mut s, "sheet.check_shop", json!({"shop": "sendcutsend"})));
+    assert!(said(&mut s), "{}", run(&mut s, "sheet.check_shop", json!({"shop": "shop_c"})));
 }
 
 /// A perforation field's holes are not measured for spacing: the two spacing rules say so, and the
@@ -1815,10 +1878,11 @@ fn a_thread_of_another_body_is_not_the_sheets() {
 /// A flange's reach is measured in the flat, square to the bend, from where the bend starts: the
 /// plate's two sides of the bend reach as far as the flat's outline goes either side of the bend's
 /// zone (by hand, from the outline's extent and the zone's edges). A rule with a minimum between the
-/// two is broken by the shorter side alone, at the bend's middle; the built-in 4 T (8 mm) is met.
+/// two is broken by the shorter side alone, at the bend's middle; a preset's 4 T (8 mm) is held to.
 #[test]
 fn a_short_flange_is_a_shop_finding_with_the_reach_from_the_bend() {
     let mut s = plate();
+    shops(&mut s);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
     let flat = run(&mut s, "sheet.flat_pattern", json!({}));
     let ys: Vec<f64> = flat["outline"].as_array().unwrap().iter().flat_map(|l| l.as_array().unwrap().iter().filter_map(|p| p[1].as_f64())).collect();
@@ -1839,18 +1903,19 @@ fn a_short_flange_is_a_shop_finding_with_the_reach_from_the_bend() {
         let mid = (bend["start"][axis].as_f64().unwrap_or(f64::NAN) + bend["end"][axis].as_f64().unwrap_or(f64::NAN)) / 2.0;
         assert!((f[0]["at"][axis].as_f64().unwrap_or(f64::NAN) - mid).abs() < 1e-6, "{}", f[0]);
     }
-    // PCBWay's 4 T = 8 mm: a finding only for a side under 8 mm.
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "pcbway"}));
+    // shop_a's strictest, 4 T = 8 mm: a finding only for a side under 8 mm.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "shop_a"}));
     assert_eq!(shop_findings(&reply, "flange.min").len(), [below, above].iter().filter(|r| **r + 1e-9 < 8.0).count(), "{reply}");
 }
 
 /// The flat DXF's file rules are read from what the export would write: a plate with a bend and a
 /// cut-out puts its outline and the hole on two layers (CUT, OUTLINE) with the bend line on its
-/// own; SendCutSend wants one cut layer and a line at each bend. The options the call names move
+/// own; shop_c wants one cut layer and a line at each bend. The options the call names move
 /// the findings the way the export's would, and each finding names the option that fixes it.
 #[test]
 fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
     let mut s = plate();
+    shops(&mut s);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
     run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
     let check = |s: &mut Session, shop: &str, dxf: Value, id: &str| {
@@ -1858,31 +1923,31 @@ fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
         shop_findings(&reply, id).into_iter().map(|f| f["message"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()
     };
     // By default: two cut layers, the bend line apart from them.
-    let single = check(&mut s, "sendcutsend", json!({}), "file.dxf_single_layer");
+    let single = check(&mut s, "shop_c", json!({}), "file.dxf_single_layer");
     assert_eq!(single.len(), 1, "{single:?}");
     assert!(single[0].contains("on 2 layers (CUT and OUTLINE)") && single[0].contains("export with layers: cut"), "{}", single[0]);
-    assert!(check(&mut s, "sendcutsend", json!({}), "file.dxf_bend_lines").is_empty());
+    assert!(check(&mut s, "shop_c", json!({}), "file.dxf_bend_lines").is_empty());
     // With layers: single, the cut layer is one, and the bend line is on it too.
-    let one = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_single_layer");
+    let one = check(&mut s, "shop_c", json!({"layers": "single"}), "file.dxf_single_layer");
     assert_eq!(one.len(), 1, "{one:?}");
     assert!(one[0].contains("the 1 bend line(s) are on the cut layer too"), "{}", one[0]);
-    let lines = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_bend_lines");
+    let lines = check(&mut s, "shop_c", json!({"layers": "single"}), "file.dxf_bend_lines");
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("export with layers: cut") && !lines[0].contains("layers: roles"), "{}", lines[0]);
     // Without the bend lines: one layer is met, and the bend line is missing.
     let off = json!({"layers": "single", "bend_lines": false});
-    assert!(check(&mut s, "sendcutsend", off.clone(), "file.dxf_single_layer").is_empty());
-    let missing = check(&mut s, "sendcutsend", off, "file.dxf_bend_lines");
+    assert!(check(&mut s, "shop_c", off.clone(), "file.dxf_single_layer").is_empty());
+    let missing = check(&mut s, "shop_c", off, "file.dxf_bend_lines");
     assert_eq!(missing.len(), 1, "{missing:?}");
     assert!(missing[0].contains("leaves out the 1 bend line(s)") && missing[0].contains("export with bend_lines: true"), "{}", missing[0]);
     // The sheet has no junction cut and every contour closes; text is outlines until notes are asked.
-    assert!(check(&mut s, "sendcutsend", json!({}), "file.dxf_closed_contours").is_empty());
-    assert!(check(&mut s, "pcbway", json!({}), "file.text_outlined").is_empty());
-    let notes = check(&mut s, "pcbway", json!({"bend_notes": true}), "file.text_outlined");
+    assert!(check(&mut s, "shop_c", json!({}), "file.dxf_closed_contours").is_empty());
+    assert!(check(&mut s, "shop_a", json!({}), "file.text_outlined").is_empty());
+    let notes = check(&mut s, "shop_a", json!({"bend_notes": true}), "file.text_outlined");
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("1 note(s) as text entities") && notes[0].contains("export without bend_notes"), "{}", notes[0]);
-    // JLCCNC states no flat file rule: said, not passed.
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "jlccnc"}));
+    // shop_b states no flat file rule: said, not passed.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "shop_b"}));
     assert!(reply["not_checked"].as_array().unwrap().iter().any(|n| n["rule"] == "file.dxf_single_layer"), "{reply}");
     // A bad option is refused with its name.
     let bad = s.execute("sheet.check_shop", &json!({"shop": "generic", "dxf": {"layers": "many"}})).expect_err("accepted").to_string();
@@ -1890,12 +1955,13 @@ fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
 }
 
 /// With no `dxf`, the check starts from the export the shop recommends, and says which: a bent
-/// part with a cut-out has no file finding under any built-in shop (the bug: it was checked for
+/// part with a cut-out has no file finding under the shops (the bug: it was checked for
 /// one layer with the bend lines on it, an error about the export's settings and not the part).
 /// A `dxf` still overrides, and one layer with the bend lines on it is still an error.
 #[test]
 fn the_dxf_is_checked_as_the_shop_recommends_unless_the_call_says_otherwise() {
     let mut s = plate();
+    shops(&mut s);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
     run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
     let file_findings = |reply: &Value| -> Vec<String> {
@@ -1909,14 +1975,13 @@ fn the_dxf_is_checked_as_the_shop_recommends_unless_the_call_says_otherwise() {
             .collect()
     };
     let echo = |layers: &str, bend_lines: bool, from: &str| json!({"layers": layers, "bend_lines": bend_lines, "bend_notes": false, "hardware_notes": false, "from": from});
-    for (shop, layers, bend_lines) in
-        [("generic", "single", false), ("pcbway", "single", false), ("jlccnc", "roles", true), ("sendcutsend", "cut", true)]
+    for (shop, layers, bend_lines) in [("generic", "single", false), ("shop_a", "single", false), ("shop_b", "roles", true), ("shop_c", "cut", true)]
     {
         let reply = run(&mut s, "sheet.check_shop", json!({"shop": shop}));
         assert_eq!(file_findings(&reply), Vec::<String>::new(), "{shop}: {reply}");
         assert_eq!(reply["dxf"], echo(layers, bend_lines, "recommended"), "{shop}");
     }
-    // The recommendation is what the export writes: SendCutSend's one cut layer has the bend line
+    // The recommendation is what the export writes: shop_c's one cut layer has the bend line
     // on a layer of its own, and the cutter's file has no bend line at all.
     let cut = run(&mut s, "sheet.export_dxf", json!({"layers": "cut"}))["dxf"].as_str().unwrap_or_default().to_string();
     assert!(cut.contains("BEND_UP") || cut.contains("BEND_DOWN"), "bend lines keep their layer");
@@ -1924,7 +1989,7 @@ fn the_dxf_is_checked_as_the_shop_recommends_unless_the_call_says_otherwise() {
     assert!(!cutter.contains("BEND_UP") && !cutter.contains("BEND_DOWN"), "no bend line in the cutter's file");
     // The call's own options override: one layer with the bend line on it is an error for the
     // shop that would cut it and the shop that wants it marked apart, and the reply says so.
-    for shop in ["generic", "pcbway", "sendcutsend"] {
+    for shop in ["generic", "shop_a", "shop_c"] {
         let reply = run(&mut s, "sheet.check_shop", json!({"shop": shop, "dxf": {"layers": "single"}}));
         assert_eq!(reply["dxf"], echo("single", true, "asked"), "{shop}");
         let found = file_findings(&reply);
@@ -1958,10 +2023,11 @@ fn the_shop_is_a_built_in_id_or_a_profile_object_and_a_bad_one_is_refused() {
     assert_eq!(reply["shop"]["id"], "custom");
     let f = shop_findings(&reply, "hole.min_diameter");
     assert_eq!((f.len(), f[0]["limit"].as_f64()), (1, Some(10.0)), "{reply}");
-    assert_eq!(run(&mut s, "sheet.check_shop", json!({"shop": "PCBWay"}))["shop"]["name"], "PCBWay");
+    assert_eq!(run(&mut s, "sheet.check_shop", json!({"shop": "GENERIC"}))["shop"]["name"], "Generic", "ids ignore case");
     let before = s.doc.to_json();
     let refused = |s: &mut Session, p: Value| s.execute("sheet.check_shop", &p).expect_err(&format!("{p} was accepted")).to_string();
-    assert!(refused(&mut s, json!({"shop": "acme"})).contains("is not a shop profile"));
+    let unknown = refused(&mut s, json!({"shop": "acme"}));
+    assert!(unknown.contains("is not a shop profile") && unknown.contains("there are no presets saved"), "{unknown}");
     assert!(refused(&mut s, json!({"shop": {"name": "Bad", "rules": []}})).contains("`shop`"));
     assert!(
         refused(&mut s, json!({"shop": {"name": "Bad", "rules": [{"id": "hole.min_diameter", "limits": [{"value": 0, "sources": []}]}]}}))
@@ -1973,6 +2039,152 @@ fn the_shop_is_a_built_in_id_or_a_profile_object_and_a_bad_one_is_refused() {
     assert_eq!(s.doc.to_json(), before);
     let mut empty = session();
     assert!(refused(&mut empty, json!({"shop": "generic"})).contains("there is no sheet metal body"));
+}
+
+/// A profile that asks for holes of at least `diameter` mm (and for nothing else).
+fn hole_rule_profile(diameter: f64) -> Value {
+    json!({"rules": [{"id": "hole.min_diameter", "limits": [{"value": diameter, "sources": [page("a plain length")]}]}]})
+}
+
+/// Shop presets (#20113): saved from an object, from Generic's values and from a file, listed,
+/// checked against by id, replaced, deleted, and kept when another design is started; none of it
+/// touches the design.
+#[test]
+fn shop_presets_are_saved_listed_used_and_deleted() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
+    let design = s.doc.to_json();
+    let listed = |s: &mut Session| run(s, "sheet.shop_presets", json!({}));
+    let first = listed(&mut s);
+    assert_eq!(first["built_in"], json!([{"id": "generic", "name": "Generic"}]));
+    assert_eq!(first["presets"], json!([]));
+    assert!(first.get("profile").is_none());
+    // Saved from an object: the id is made from the name.
+    let saved = run(&mut s, "sheet.save_shop_preset", json!({"name": "My Shop", "profile": hole_rule_profile(10.0)}));
+    assert_eq!(saved, json!({"id": "my-shop", "name": "My Shop", "replaced": false}));
+    assert_eq!(listed(&mut s)["presets"], json!([{"id": "my-shop", "name": "My Shop"}]));
+    // Checked against by id, in any case: a 6 mm hole is under its 10 mm.
+    for id in ["my-shop", "MY-SHOP"] {
+        let reply = run(&mut s, "sheet.check_shop", json!({"shop": id}));
+        assert_eq!((reply["shop"]["id"].as_str(), reply["shop"]["name"].as_str()), (Some("my-shop"), Some("My Shop")), "{reply}");
+        let f = shop_findings(&reply, "hole.min_diameter");
+        assert_eq!((f.len(), f[0]["limit"].as_f64(), f[0]["value"].as_f64()), (1, Some(10.0), Some(6.0)), "{reply}");
+    }
+    // The same id saved again replaces it, in its place.
+    let again = run(&mut s, "sheet.save_shop_preset", json!({"name": "My Shop", "profile": hole_rule_profile(4.0)}));
+    assert_eq!(again["replaced"], true);
+    assert_eq!(listed(&mut s)["presets"].as_array().map(Vec::len), Some(1));
+    assert!(shop_findings(&run(&mut s, "sheet.check_shop", json!({"shop": "my-shop"})), "hole.min_diameter").is_empty(), "a 6 mm hole meets 4 mm");
+    // A preset that starts from Generic's values checks exactly as Generic does.
+    let generic = run(&mut s, "sheet.shop_presets", json!({"profile": "generic"}));
+    assert_eq!(generic["profile"]["id"], "generic");
+    let mine = run(&mut s, "sheet.save_shop_preset", json!({"name": "Mine", "profile": generic["profile"].clone()}));
+    assert_eq!(mine["id"], "mine");
+    let (a, b) = (run(&mut s, "sheet.check_shop", json!({"shop": "generic"})), run(&mut s, "sheet.check_shop", json!({"shop": "mine"})));
+    assert_eq!((&a["findings"], &a["checked"], &a["not_checked"], &a["dxf"]), (&b["findings"], &b["checked"], &b["not_checked"], &b["dxf"]));
+    assert_eq!((b["shop"]["id"].as_str(), b["shop"]["name"].as_str()), (Some("mine"), Some("Mine")));
+    // A preset's own object comes back to be edited.
+    let own = run(&mut s, "sheet.shop_presets", json!({"profile": "my-shop"}));
+    assert_eq!((own["profile"]["id"].as_str(), own["profile"]["name"].as_str()), (Some("my-shop"), Some("My Shop")));
+    // Saved from a file, under the profile's own name.
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-shop-preset-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let file = dir.join("acme.json");
+    let mut object = hole_rule_profile(8.0);
+    object["id"] = json!("acme");
+    object["name"] = json!("Acme Fab");
+    std::fs::write(&file, object.to_string()).unwrap_or_default();
+    let from_file = run(&mut s, "sheet.save_shop_preset", json!({"path": file.to_string_lossy()}));
+    assert_eq!(from_file, json!({"id": "acme", "name": "Acme Fab", "replaced": false}));
+    // A call that names the file as the shop still works, beside the presets.
+    let by_path = run(&mut s, "sheet.check_shop", json!({"shop": file.to_string_lossy()}));
+    assert_eq!(by_path["shop"]["id"], "acme");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(s.doc.to_json(), design, "no preset command changed the design");
+    // Starting another design keeps them: they are the user's, not the design's.
+    run(&mut s, "file.new", json!({}));
+    let ids: Vec<String> =
+        listed(&mut s)["presets"].as_array().cloned().unwrap_or_default().iter().filter_map(|p| p["id"].as_str().map(str::to_string)).collect();
+    assert_eq!(ids, ["my-shop", "mine", "acme"]);
+    // Deleting one removes it; the others stay, and the built-in one is no preset.
+    let gone = run(&mut s, "sheet.delete_shop_preset", json!({"id": "MINE"}));
+    assert_eq!(gone, json!({"deleted": {"id": "mine", "name": "Mine"}}));
+    assert_eq!(listed(&mut s)["presets"].as_array().map(Vec::len), Some(2));
+    let refused = s.execute("sheet.check_shop", &json!({"shop": "mine"})).expect_err("deleted").to_string();
+    assert!(refused.contains("is not a shop profile") && refused.contains("the presets are my-shop, acme"), "{refused}");
+}
+
+/// Input that is no profile is refused with the reason, nothing is kept, and nothing panics.
+#[test]
+fn a_bad_shop_preset_is_refused_with_the_reason_and_changes_nothing() {
+    let mut s = plate();
+    run(&mut s, "sheet.save_shop_preset", json!({"name": "Keep", "profile": hole_rule_profile(1.0)}));
+    let before = run(&mut s, "sheet.shop_presets", json!({}));
+    let design = s.doc.to_json();
+    let refused = |s: &mut Session, cmd: &str, p: Value| s.execute(cmd, &p).expect_err(&format!("{cmd} {p} was accepted")).to_string();
+    let save = |s: &mut Session, p: Value| refused(s, "sheet.save_shop_preset", p);
+    let good = hole_rule_profile(2.0);
+    // The built-in profile's name and id are not for a preset.
+    for p in [
+        json!({"name": "Generic", "profile": good.clone()}),
+        json!({"name": "generic", "profile": good.clone()}),
+        json!({"name": "Mine", "profile": {"id": "generic", "rules": good["rules"].clone()}}),
+    ] {
+        let e = save(&mut s, p.clone());
+        assert!(e.contains("`generic` is the built-in profile"), "{p}: {e}");
+    }
+    // Names.
+    assert!(save(&mut s, json!({"name": "", "profile": good.clone()})).contains("`name`"));
+    assert!(save(&mut s, json!({"name": "x".repeat(65), "profile": good.clone()})).contains("`name`"));
+    assert!(save(&mut s, json!({"name": "a\u{7}b", "profile": good.clone()})).contains("`name`"));
+    assert!(save(&mut s, json!({"name": "???", "profile": good.clone()})).contains("no letter or digit"));
+    assert!(save(&mut s, json!({"profile": good.clone()})).contains("`name`"), "no name anywhere");
+    assert!(save(&mut s, json!({"name": null, "profile": good.clone()})).contains("name"));
+    // What is given: one of the profile and the file.
+    assert!(save(&mut s, json!({"name": "X"})).contains("give either `profile`"));
+    assert!(save(&mut s, json!({"name": "X", "profile": good.clone(), "path": "/tmp/x.json"})).contains("give either `profile`"));
+    assert!(save(&mut s, json!({"name": "X", "profile": null})).contains("profile"));
+    assert!(save(&mut s, json!({"name": "X", "profile": "text"})).contains("profile"));
+    assert!(save(&mut s, json!({"name": "X", "profile": good.clone(), "colour": 1})).contains("colour"));
+    // The profile is held to the profile rules.
+    assert!(save(&mut s, json!({"name": "X", "profile": {"rules": []}})).contains("1 to"));
+    assert!(save(&mut s, json!({"name": "X", "profile": {"rules": 5}})).contains("the shop profile"));
+    assert!(save(&mut s, json!({"name": "X", "profile": hole_rule_profile(-1.0)})).contains("hole.min_diameter"));
+    assert!(save(&mut s, json!({"name": "X", "profile": {"id": "Bad Id", "rules": good["rules"].clone()}})).contains("lower case"));
+    let mut insecure = good.clone();
+    insecure["rules"][0]["limits"][0]["sources"][0]["url"] = json!("http://example.com");
+    assert!(save(&mut s, json!({"name": "X", "profile": insecure})).contains("https://"));
+    // Files: missing, not JSON, not an object.
+    assert!(save(&mut s, json!({"path": "/nonexistent/shop.json"})).contains("/nonexistent/shop.json"));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-shop-preset-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let write = |name: &str, text: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap_or_default();
+        path.to_string_lossy().to_string()
+    };
+    assert!(save(&mut s, json!({"path": write("text.json", "{not json")})).contains("is not JSON"));
+    assert!(save(&mut s, json!({"path": write("array.json", "[1, 2]"), "name": "X"})).contains("an object"));
+    let _ = std::fs::remove_dir_all(&dir);
+    // Delete.
+    assert!(refused(&mut s, "sheet.delete_shop_preset", json!({"id": "nobody"})).contains("is not a shop preset"));
+    assert!(refused(&mut s, "sheet.delete_shop_preset", json!({"id": "generic"})).contains("the built-in profile"));
+    assert!(refused(&mut s, "sheet.delete_shop_preset", json!({})).contains("id"));
+    assert!(refused(&mut s, "sheet.delete_shop_preset", json!({"id": ""})).contains("is not a shop preset"));
+    assert!(refused(&mut s, "sheet.shop_presets", json!({"profile": "nobody"})).contains("is not a shop profile"));
+    // Nothing was kept, and nothing about the design changed.
+    assert_eq!(run(&mut s, "sheet.shop_presets", json!({})), before);
+    assert_eq!(s.doc.to_json(), design);
+    // At most 32 presets: the 33rd is refused, and a replacement of one is not a new one.
+    for n in 0..31 {
+        run(&mut s, "sheet.save_shop_preset", json!({"name": format!("Shop number {n}"), "profile": good.clone()}));
+    }
+    assert_eq!(run(&mut s, "sheet.shop_presets", json!({}))["presets"].as_array().map(Vec::len), Some(32));
+    assert!(save(&mut s, json!({"name": "One too many", "profile": good.clone()})).contains("at most 32"));
+    assert_eq!(run(&mut s, "sheet.save_shop_preset", json!({"name": "Keep", "profile": good.clone()}))["replaced"], true);
+    assert_eq!(run(&mut s, "sheet.shop_presets", json!({}))["presets"].as_array().map(Vec::len), Some(32));
 }
 
 /// Volume removed by a through countersunk hole of bore radius `r`, outer countersink radius `rc`,
