@@ -162,7 +162,7 @@ Additional handles: `ribbon:workspace`, `ribbon:search`, and `ribbon:section:<TA
 
 The workspace popup is 470 px wide, anchored below the workspace column. Design and Render keep their existing menu actions and enablement; planned workspaces cannot be selected. Each row also publishes `workspace:menu:<design|render|animation|simulation|manufacture|drawing>`. The constraint cells publish `ribbon:constraint:<command id>` alongside their existing `button:` and `toolbar:` handles. No icon assets or command ids were added.
 
-Section lists use 30 px command rows, 20 px semantic icons, monospace shortcuts, hover pins and a pinning footer. `workspace::groups` optionally supplies headings and command order. MODEL / MODIFY uses EDGES, FACES, BODIES and SPECIALISE; unlisted commands follow the final heading in their original order. This ordering does not change promoted buttons or saved pins.
+Section lists use 30 px command rows, 20 px semantic icons, monospace shortcuts, a ⋯ menu on each row (which pins and unpins) and a pinning footer. `workspace::groups` optionally supplies headings and command order. MODEL / MODIFY uses EDGES, FACES, BODIES and SPECIALISE; unlisted commands follow the final heading in their original order. This ordering does not change promoted buttons or saved pins.
 
 Ribbon tooltips show the full command name in bold and its registered shortcut in a key cap. Existing Render catalog descriptions are reused; commands without prose descriptions show the header alone (and their existing disabled reason when applicable). Registry parameter syntax is not presented as a description.
 
