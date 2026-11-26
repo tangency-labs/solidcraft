@@ -771,7 +771,7 @@ pub(super) fn read_left_out_bodies(
     });
     if links.len() > 1 && budget > 1 && parent_refused == 0 && parent_again == 0 && !solidcraft_doc::progress::cancelled() {
         enum LeftOutJob {
-            Step { link_idx: usize, link: DesignLink, file: PathBuf, flat: bool },
+            Step { link_idx: usize, link: Box<DesignLink>, file: PathBuf, flat: bool },
             Design { link_indices: Vec<usize>, key: ReadKey, file: PathBuf, configuration: Option<SelectedConfiguration> },
         }
         enum LeftOutJobOut {
@@ -807,7 +807,7 @@ pub(super) fn read_left_out_bodies(
                 continue;
             }
             if link.step_names.is_some() {
-                jobs.push(LeftOutJob::Step { link_idx, link: link.clone(), file, flat: step_import_flat(doc, link) });
+                jobs.push(LeftOutJob::Step { link_idx, link: Box::new(link.clone()), file, flat: step_import_flat(doc, link) });
                 continue;
             }
             let target = absolute(&file);
@@ -2886,9 +2886,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(bytes) => Ok(bytes),
                 None => read_linked(s, comp, &link).map(|(_, _, bytes)| std::sync::Arc::from(bytes)),
             };
-            bytes.and_then(|bytes| {
-                parameters::link_bodies(s, &link, &file, &bytes, selected_configuration(&link), false).map_err(|e| e.to_string())
-            })
+            bytes.and_then(|bytes| parameters::link_bodies(s, &link, &file, &bytes, selected_configuration(&link), false).map_err(|e| e.to_string()))
         } else {
             match prefetched_sources.remove(&index) {
                 Some(res) => res,
