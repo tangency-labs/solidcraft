@@ -2803,14 +2803,19 @@ fn extrude_two_sides_tab_moves_directly_from_distance_to_distance_2() {
     h.step(&json!({"key": "Tab"})).unwrap();
     assert!(extrude_control_focused(&h, "dialog:Operation"), "Tab from Distance 2 should focus Operation directly");
 
-    // Clicking the Profiles pick field activates it; pressing Tab from there must enter Direction
-    // directly (not jump to the app bar) and drop the active highlight from Profiles.
+    // Clicking the Profiles pick field activates it; pressing Tab from there must enter the first
+    // control after the pick inputs (Name, then Direction) instead of jumping to the app bar, and
+    // drop the active highlight from Profiles.
     let profiles = crate::scenario::rect_of("dialog:field:Profiles").expect("Profiles field rect").center();
     h.step(&json!({"click": [profiles.x, profiles.y]})).unwrap();
     h.frames(2);
     assert_eq!(crate::scenario::count_of("dialog:selection:Profiles:active"), Some(1.0));
     h.step(&json!({"key": "Tab"})).unwrap();
-    assert!(extrude_control_focused(&h, "dialog:Direction"), "Tab from Profiles should focus Direction directly");
+    assert!(extrude_control_focused(&h, "dialog:Name"), "Tab from Profiles should focus Name directly");
+    h.frames(1);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Profiles:active"), Some(0.0), "Profiles must not stay highlighted while Name holds focus");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Direction"), "Tab from Name should focus Direction directly");
     h.frames(1);
     assert_eq!(
         crate::scenario::count_of("dialog:selection:Profiles:active"),

@@ -1296,7 +1296,7 @@ pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str
             if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 response.request_focus();
             }
-            if response.has_focus() {
+            if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
                 ui.painter().rect_stroke(response.rect, Tokens::get().control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
             }
             response
@@ -1374,7 +1374,7 @@ fn dropdown_menu_width(
     if let Some(icon) = leading_icon {
         paint_dropdown_icon(ui, response.rect, icon);
     }
-    if response.has_focus() {
+    if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
         ui.painter().rect_stroke(response.rect, t.control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
     }
     publish(ui, &response, egui::Role::ComboBox);
