@@ -35,6 +35,7 @@ solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 # A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
 solidcraft-design-preview = { path = "crates/design-preview" }
+solidcraft-icon-svg = { path = "crates/icon-svg" }
 solidcraft-engine = { path = "crates/engine" }
 # Without its default features, so an app built with `--no-default-features` leaves out what
 # they bring (usage statistics); each app turns them on in its own defaults.
@@ -108,6 +109,8 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std", 
 pgp = { version = "=0.21.1", default-features = false, features = ["wasm"] }
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
+# Plugin help links are parsed, never hand-split (MIT OR Apache-2.0; already in the lock file).
+url = "2.5"
 
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }

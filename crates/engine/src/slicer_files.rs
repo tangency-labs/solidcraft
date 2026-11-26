@@ -10,6 +10,10 @@ use std::time::{Duration, SystemTime};
 pub const KEEP: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Most numbered copies (`name-2.3mf`, …) tried when the file is locked.
 const MAX_COPIES: u32 = 9;
+/// Most temporary names tried when others are taken.
+const MAX_TEMP_NAMES: u32 = 32;
+/// Most version numbers tried when other sends took them first.
+const MAX_VERSION_TRIES: u32 = 64;
 
 /// The per-user folder: `%LOCALAPPDATA%\SolidCraft\slicer`, `~/Library/Caches/SolidCraft/slicer`
 /// or `$XDG_CACHE_HOME/solidcraft/slicer` (`~/.cache/solidcraft/slicer`).
@@ -49,18 +53,56 @@ pub fn stem(design: &str, path: Option<&str>, uid: u64, bodies: &[String]) -> St
             h = (h ^ u64::from(b)).wrapping_mul(0x100000001b3);
         }
     }
+    format!("{}-{:016x}", clean_name(design), h)
+}
+
+/// The design's name as a file name: letters, digits, `-`, `_` and spaces, at most 60 characters,
+/// `design` when nothing is left.
+fn clean_name(design: &str) -> String {
     let name: String = design.chars().take(60).map(|c| if c.is_alphanumeric() || "-_ ".contains(c) { c } else { '_' }).collect();
     let name = name.trim();
-    format!("{}-{:016x}", if name.is_empty() { "design" } else { name }, h)
+    if name.is_empty() { "design" } else { name }.to_string()
+}
+
+/// The name (no extension) of a copy saved in a folder the user chose (#18311): the design's name
+/// alone, with no hash, so the copies sit with the user's other files under a name they know.
+pub fn copy_stem(design: &str) -> String {
+    clean_name(design)
+}
+
+/// The number of the next `<stem>-v<N>.<ext>` in `dir`: one more than the highest there, 1 when
+/// there is none or the folder does not exist yet.
+pub fn next_version(dir: &Path, stem: &str, ext: &str) -> u32 {
+    let (head, tail) = (format!("{stem}-v"), format!(".{ext}"));
+    let Ok(entries) = std::fs::read_dir(dir) else { return 1 };
+    let highest = entries
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter_map(|name| name.strip_prefix(&head)?.strip_suffix(&tail)?.parse::<u32>().ok())
+        .max();
+    highest.map_or(1, |n| n.saturating_add(1))
 }
 
 /// Write `bytes` as `<stem>.<ext>` in `dir`: to a temporary name first, then renamed over the
 /// file, so the slicer never reads half a file. When the name can't be replaced (Windows keeps a
 /// file the slicer has open locked) the next free `<stem>-2.<ext>`, … is used; the flag says so.
 pub fn write(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, bool)> {
-    make_private(dir)?;
-    let tmp = dir.join(format!(".{stem}.{ext}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, bytes)?;
+    write_with(dir, stem, ext, bytes, true)
+}
+
+/// [`write`] into a folder the user chose: made if it is missing, and left with the permissions it
+/// has or is given by the system, not readable by its owner only.
+pub fn write_copy(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, bool)> {
+    write_with(dir, stem, ext, bytes, false)
+}
+
+fn write_with(dir: &Path, stem: &str, ext: &str, bytes: &[u8], private: bool) -> io::Result<(PathBuf, bool)> {
+    if private {
+        make_private(dir)?;
+    } else {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = write_tmp(dir, stem, ext, bytes)?;
     let mut failure = None;
     for n in 1..=MAX_COPIES {
         let target = dir.join(if n == 1 { format!("{stem}.{ext}") } else { format!("{stem}-{n}.{ext}") });
@@ -71,6 +113,52 @@ pub fn write(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(Pat
     }
     let _ = std::fs::remove_file(&tmp);
     Err(failure.unwrap_or_else(|| io::Error::other("no free file name")))
+}
+
+/// Write `bytes` to a temporary file in `dir` that did not exist: made exclusively, so a name
+/// another user left there (a link to a file of ours, in a folder others can write to) is never
+/// followed or truncated; a taken name moves on to the next.
+fn write_tmp(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    use std::io::Write as _;
+    for attempt in 0..MAX_TEMP_NAMES {
+        let tmp = dir.join(format!(".{stem}.{ext}.{}.{attempt}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(bytes) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(e);
+                }
+                return Ok(tmp);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::other("no free temporary file name"))
+}
+
+/// Write `bytes` as the next `<stem>-v<N>.<ext>` in a folder the user chose, made if it is
+/// missing, and say which `N`. A name that exists is never replaced: the file is made exclusively,
+/// and when another send took the number first the next one is tried.
+pub fn write_version(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, u32)> {
+    use std::io::Write as _;
+    std::fs::create_dir_all(dir)?;
+    let mut version = next_version(dir, stem, ext);
+    for _ in 0..MAX_VERSION_TRIES {
+        let target = dir.join(format!("{stem}-v{version}.{ext}"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(bytes) {
+                    let _ = std::fs::remove_file(&target);
+                    return Err(e);
+                }
+                return Ok((target, version));
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => version = version.saturating_add(1),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::other("no free version number"))
 }
 
 /// Delete the files in `dir` last changed before `now - keep`; how many went.
@@ -153,6 +241,73 @@ mod tests {
         assert!(numbered);
         assert_eq!(path.file_name().unwrap(), "part-2.3mf");
         assert_eq!(std::fs::read(&path).unwrap(), b"data");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_copy_is_named_after_the_design_and_numbered_past_the_highest_version() {
+        assert_eq!(copy_stem("Mount plate"), "Mount plate");
+        assert_eq!(copy_stem("a/b:c"), "a_b_c");
+        assert_eq!(copy_stem(""), "design");
+        let dir = scratch("versions");
+        assert_eq!(next_version(&dir, "plate", "3mf"), 1, "no folder yet");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["plate-v1.3mf", "plate-v7.3mf", "plate-v2.stl", "plate-vx.3mf", "other-v9.3mf", "plate.3mf"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        assert_eq!(next_version(&dir, "plate", "3mf"), 8);
+        assert_eq!(next_version(&dir, "plate", "stl"), 3);
+        assert_eq!(next_version(&dir, "other", "stl"), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_copy_makes_its_folder_and_does_not_make_it_private() {
+        let root = scratch("copy");
+        let dir = root.join("deeper");
+        let (path, numbered) = write_copy(&dir, "plate", "3mf", b"data").unwrap();
+        assert!(!numbered);
+        assert_eq!(std::fs::read(&path).unwrap(), b"data");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // A folder made the ordinary way, whatever the process umask: the copy's is no stricter.
+            let control = root.join("control");
+            std::fs::create_dir_all(&control).unwrap();
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), mode(&control));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_version_is_never_replaced_and_a_taken_number_moves_on() {
+        let dir = scratch("version");
+        let (one, n1) = write_version(&dir, "plate", "stl", b"first").unwrap();
+        let (two, n2) = write_version(&dir, "plate", "stl", b"second").unwrap();
+        assert_eq!((n1, n2), (1, 2));
+        assert_eq!((std::fs::read(&one).unwrap(), std::fs::read(&two).unwrap()), (b"first".to_vec(), b"second".to_vec()));
+        // A send that read the folder before the others wrote would pick 1 again: make that happen by
+        // taking the number it would find, and see it go to the next free one.
+        std::fs::write(dir.join("plate-v3.stl"), b"taken").unwrap();
+        let (_, n) = write_version(&dir, "plate", "stl", b"third").unwrap();
+        assert_eq!(n, 4);
+        assert_eq!(std::fs::read(dir.join("plate-v3.stl")).unwrap(), b"taken");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_link_in_the_copy_folder_is_not_followed() {
+        let dir = scratch("link");
+        std::fs::create_dir_all(&dir).unwrap();
+        let precious = dir.join("precious");
+        std::fs::write(&precious, b"keep me").unwrap();
+        // The temporary name a replacing send would try first, planted as a link to a file of ours.
+        std::os::unix::fs::symlink(&precious, dir.join(format!(".plate.stl.{}.0.tmp", std::process::id()))).unwrap();
+        let (path, _) = write_copy(&dir, "plate", "stl", b"mesh").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"mesh");
+        assert_eq!(std::fs::read(&precious).unwrap(), b"keep me");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

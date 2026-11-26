@@ -22,5 +22,8 @@
   },
   "zh": {
     "prefs.legacy_surface_toolbar": "使用旧版曲面工具栏"
+  },
+  "fr": {
+    "prefs.legacy_surface_toolbar": "Utiliser l’ancienne barre d’outils Surface"
   }
 }

@@ -5,6 +5,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
+use solidcraft_sketch::CurveKind;
 
 use crate::Session;
 
@@ -590,19 +591,86 @@ fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sk(&s).curves.len(), 2, "undo brings back the two separate lines");
 
-    // Refused: parallel lines, an end joined to a third line, a dimensioned length.
+    // Refused: an end joined to a third line, a dimensioned length. (Two parallel lines are
+    // joined by a half circle instead, #16238: see `a_fillet_of_two_parallel_lines_is_a_half_circle`.)
     let mut s = new_sketch();
-    let (pa, pb) = lines(&mut s, [[0.0, 0.0], [10.0, 0.0]], [[0.0, 5.0], [10.0, 5.0]]);
     let (la, lb) = lines(&mut s, [[0.0, 20.0], [10.0, 20.0]], [[20.0, 25.0], [20.0, 40.0]]);
     run(&mut s, "sketch.line", json!({"points": [format!("{la}.end"), [10, 30]], "connect": false}));
     let (da, db) = lines(&mut s, [[0.0, 50.0], [10.0, 50.0]], [[20.0, 55.0], [20.0, 70.0]]);
     run(&mut s, "sketch.dimension", json!({"entities": [da], "value": 10}));
     let before = sk(&s);
-    for (a, b, why) in [(&pa, &pb, "parallel"), (&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
+    for (a, b, why) in [(&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
         let e = s.execute("sketch.fillet", &json!({"a": a, "b": b, "radius": 2})).unwrap_err().to_string();
         assert!(e.contains(why), "{a}, {b}: {e}");
     }
     assert_eq!(sk(&s), before, "refusals change nothing");
+}
+
+/// Two parallel lines are joined by a half circle at the chosen end, tangent to both, and each
+/// line is cut back to its ends (#16238). Lines that lie on each other, or that do not overlap,
+/// are refused, and an ordinary corner fillet is as before.
+#[test]
+fn a_fillet_of_two_parallel_lines_is_a_half_circle() {
+    use solidcraft_sketch::{ConstraintKind, Shape};
+    use std::f64::consts::PI;
+    let line = |s: &mut Session, a: [f64; 2], b: [f64; 2]| {
+        curves(&run(s, "sketch.line", json!({"points": [a, b], "infer": false, "connect": false})))[0].clone()
+    };
+    let ends = |s: &Session, id: &str| {
+        let k = sk(s);
+        let CurveKind::Line { a, b } = k.curves[k.curve_index(id).unwrap()].kind else { panic!("a line") };
+        (k.point(a).unwrap(), k.point(b).unwrap())
+    };
+    let at = |p: solidcore_record::Vec2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
+    // Ten apart, the second line starting 5 in: the start end joins where both exist, at x = 5.
+    for (end, cx, bulge) in [("start", 5.0, -1.0), ("end", 20.0, 1.0)] {
+        let mut s = new_sketch();
+        let la = line(&mut s, [0.0, 0.0], [25.0, 0.0]);
+        let lb = line(&mut s, [5.0, 10.0], [20.0, 10.0]);
+        let r = run(&mut s, "sketch.fillet", json!({"a": la, "b": lb, "radius": 2, "end": end}));
+        assert!(solved(&s), "{end}: {r}");
+        let k = sk(&s);
+        assert_eq!(k.curves.len(), 3, "{end}: two lines and the arc");
+        let arc = k.curve_index(&curves(&r)[0]).unwrap();
+        let CurveKind::Arc { c, a, b } = k.curves[arc].kind else { panic!("an arc") };
+        let centre = k.point(c).unwrap();
+        assert!(at(centre, cx, 5.0), "{end}: {centre:?}");
+        for q in [a, b] {
+            assert!((k.point(q).unwrap().dist(centre) - 5.0).abs() < 1e-6, "{end}: radius 5");
+        }
+        // The arc's middle lies on the outer side.
+        let Some(Shape::Round { start, sweep, .. }) = k.shape(arc) else { panic!("a round") };
+        assert!((sweep.abs() - PI).abs() < 1e-6, "{end}: a half circle, sweep {sweep}");
+        let mid = start + sweep * 0.5;
+        assert!((mid.cos() * bulge - 1.0).abs() < 1e-6, "{end}: bulges to {bulge}");
+        let (a0, a1) = ends(&s, &la);
+        let (b0, b1) = ends(&s, &lb);
+        if end == "start" {
+            assert!(at(a0, 5.0, 0.0) && at(a1, 25.0, 0.0) && at(b0, 5.0, 10.0) && at(b1, 20.0, 10.0), "{a0:?} {a1:?} {b0:?} {b1:?}");
+        } else {
+            assert!(at(a0, 0.0, 0.0) && at(a1, 20.0, 0.0) && at(b0, 5.0, 10.0) && at(b1, 20.0, 10.0), "{a0:?} {a1:?} {b0:?} {b1:?}");
+        }
+        let tangents = k.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).count();
+        assert_eq!(tangents, 2, "{end}: tangent to both lines");
+    }
+    // Lines lying on each other, lines that do not overlap, a bad `end`: refused, nothing changed.
+    let mut s = new_sketch();
+    let la = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let on = line(&mut s, [20.0, 0.0], [30.0, 0.0]);
+    let apart = line(&mut s, [20.0, 10.0], [30.0, 10.0]);
+    let side = line(&mut s, [2.0, 10.0], [8.0, 10.0]);
+    let before = sk(&s);
+    for (b, end, why) in [(&on, "start", "parallel"), (&apart, "start", "do not overlap"), (&side, "bogus", "`end` must be")] {
+        let e = s.execute("sketch.fillet", &json!({"a": la, "b": b, "radius": 2, "end": end})).unwrap_err().to_string();
+        assert!(e.contains(why), "{b} {end}: {e}");
+    }
+    assert_eq!(sk(&s), before, "refusals change nothing");
+    // An ordinary corner is rounded as before (the `end` key does not matter).
+    let mut s = new_sketch();
+    let la = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let lb = line(&mut s, [20.0, 5.0], [20.0, 20.0]);
+    let r = run(&mut s, "sketch.fillet", json!({"a": la, "b": lb, "radius": 3}));
+    assert!(solved(&s) && sk(&s).curves.len() == 3 && curves(&r).len() == 1, "{r}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1006,4 +1074,219 @@ fn a_freeform_corner_keeps_what_its_line_side_and_its_partner_point_hold() {
     let kept = k.point_index(&id).expect("the fixed partner stays");
     assert!(k.points[kept].fixed);
     assert_ne!(k.resolve_point(&format!("{l}.end")), k.resolve_point(&format!("{c}.start")));
+}
+
+/// A 3D sketch with drawing off the plane turned on.
+fn new_sketch_3d() -> Session {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    s
+}
+
+/// The fit points of drawn 3D curve `id`.
+fn fit(s: &Session, id: &str) -> Vec<solidcore_record::Vec3> {
+    sk(s).wires.iter().find(|w| w.id == id).unwrap_or_else(|| panic!("no 3D curve {id}")).fit.clone()
+}
+
+/// The exact arc of drawn 3D curve `id`.
+fn arc3(s: &Session, id: &str) -> solidcraft_sketch::WireArc {
+    sk(s).wires.iter().find(|w| w.id == id).and_then(|w| w.arc).unwrap_or_else(|| panic!("{id} is not a 3D arc"))
+}
+
+fn wires_solved(s: &Session) -> bool {
+    s.model.state().sketch(s.active_sketch.unwrap()).unwrap().report.wires_ok()
+}
+
+fn near3(a: solidcore_record::Vec3, b: [f64; 3]) -> bool {
+    a.dist(solidcore_record::Vec3::new(b[0], b[1], b[2])) < 1e-6
+}
+
+/// #21319: Fillet on two drawn 3D lines that share an end point, for a tube bend. A line from
+/// (0,0,0) to (100,0,0) and one on to (100,0,80), rounded with radius 20: each line loses
+/// 20 / tan(45°) = 20 mm, and the arc is the quarter circle about (80,0,20). The path is then
+/// 80 + 10π + 60 = 171.416 mm long, and a pipe of 8 mm diameter with a 1 mm wall along it has
+/// π(4² − 3²) × 171.416 = 3769.63 mm³. One undo takes the fillet back.
+#[test]
+fn a_fillet_rounds_the_corner_of_two_3d_lines_with_a_tangent_arc() {
+    use std::f64::consts::PI;
+    let mut s = new_sketch_3d();
+    let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 80]]})));
+    let before = s.doc.to_json();
+    let r = run(&mut s, "sketch.fillet", json!({"a": c[0], "b": c[1], "radius": 20}));
+    let arc = curves(&r)[0].clone();
+    assert_eq!(curves(&r).len(), 1);
+    assert!(wires_solved(&s), "{r}");
+    assert!(near3(fit(&s, &c[0])[0], [0.0, 0.0, 0.0]) && near3(fit(&s, &c[0])[1], [80.0, 0.0, 0.0]), "{:?}", fit(&s, &c[0]));
+    assert!(near3(fit(&s, &c[1])[0], [100.0, 0.0, 20.0]) && near3(fit(&s, &c[1])[1], [100.0, 0.0, 80.0]), "{:?}", fit(&s, &c[1]));
+    let a = arc3(&s, &arc);
+    assert!(near3(a.center, [80.0, 0.0, 20.0]) && (a.radius - 20.0).abs() < 1e-9, "{a:?}");
+    assert!((solidcraft_sketch::arc_sweep(&a) - PI / 2.0).abs() < 1e-9, "{}", solidcraft_sketch::arc_sweep(&a));
+    assert!(near3(a.start, [80.0, 0.0, 0.0]) && near3(a.end, [100.0, 0.0, 20.0]), "{a:?}");
+    // Tangent to each line, and a radius dimension with a parameter of its own.
+    let k = sk(&s);
+    let tangents =
+        k.wire_constraints.iter().filter(|x| matches!(&x.kind, solidcraft_sketch::WireConstraintKind::Tangent { arc: on, .. } if *on == arc));
+    assert_eq!(tangents.count(), 2, "{:?}", k.wire_constraints);
+    let param = r["param"].as_str().expect("a radius parameter").to_string();
+    let radius = k.wire_constraints.iter().find(|x| matches!(&x.kind, solidcraft_sketch::WireConstraintKind::Radius { arc: on, .. } if *on == arc));
+    assert_eq!(radius.and_then(|x| x.param.clone()), Some(param), "{:?}", k.wire_constraints);
+    // The lines no longer meet at the corner: their joint is gone.
+    assert!(
+        !k.wire_constraints.iter().any(|x| matches!(x.kind, solidcraft_sketch::WireConstraintKind::Coincident { .. })),
+        "{:?}",
+        k.wire_constraints
+    );
+    // One undo takes the whole fillet back, and one redo brings it again.
+    let after = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), after);
+    // The pipe along the bent path.
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch = s.doc.features.last().unwrap().id;
+    run(&mut s, "solid.pipe", json!({"path_sketch": sketch, "path": [c[0], arc, c[1]], "diameter": 8, "wall": 1}));
+    let world = s.world_state().unwrap();
+    let volume = solidcraft_kernel::measure(&world.bodies.last().unwrap().body).unwrap().volume;
+    let expected = 7.0 * PI * (80.0 + 10.0 * PI + 60.0);
+    assert!((volume - expected).abs() < 0.5, "{volume} against {expected}");
+}
+
+/// #21319: the corner need not lie on the sketch plane, nor be square. Lines from (0,0,0) to
+/// (60,0,0) and on to (90,40,30) meet at θ with cos θ = −30 / √3400. Radius 10 takes
+/// d = 10 / tan(θ/2) off each line; the arc lies in the plane of the two lines, its centre
+/// 10 / sin(θ/2) from the corner along the bisector, and its ends square to the lines.
+#[test]
+fn a_fillet_on_3d_lines_lies_in_the_plane_of_the_two_lines() {
+    use solidcore_record::Vec3;
+    let mut s = new_sketch_3d();
+    let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [60, 0, 0], [90, 40, 30]]})));
+    let r = run(&mut s, "sketch.fillet", json!({"a": c[1], "b": c[0], "radius": 10}));
+    assert!(wires_solved(&s), "{r}");
+    let corner = Vec3::new(60.0, 0.0, 0.0);
+    let (u, v) = (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(30.0, 40.0, 30.0) * (1.0 / 3400f64.sqrt()));
+    let half = 0.5 * (-30.0 / 3400f64.sqrt()).acos();
+    let d = 10.0 / half.tan();
+    let (ta, tb) = (corner + u * d, corner + v * d);
+    assert!(fit(&s, &c[0])[1].dist(ta) < 1e-6 && fit(&s, &c[1])[0].dist(tb) < 1e-6, "{:?} {:?}", fit(&s, &c[0]), fit(&s, &c[1]));
+    let a = arc3(&s, &curves(&r)[0]);
+    let bisector = (u + v).normalized().unwrap();
+    assert!(a.center.dist(corner + bisector * (10.0 / half.sin())) < 1e-6, "{a:?}");
+    assert!((a.radius - 10.0).abs() < 1e-9, "{a:?}");
+    assert!(a.normal.cross(u.cross(v).normalized().unwrap()).len() < 1e-9, "the arc's plane is the lines' plane: {a:?}");
+    // The arc starts on the first line named (`c[1]`) and ends on the second, square to each.
+    assert!(a.start.dist(tb) < 1e-6 && a.end.dist(ta) < 1e-6, "{a:?}");
+    assert!((a.start - a.center).dot(v).abs() < 1e-6 && (a.end - a.center).dot(u).abs() < 1e-6, "{a:?}");
+    // The arc turns by the angle the path turns: π − θ.
+    assert!((solidcraft_sketch::arc_sweep(&a) - (std::f64::consts::PI - 2.0 * half)).abs() < 1e-9, "{}", solidcraft_sketch::arc_sweep(&a));
+}
+
+/// #21319: the radius stays editable. A path placed by fixed points keeps its sharp corner as a
+/// 3D point on both lines, which takes the corner's Fix; changing the radius parameter to 30 then
+/// moves the tangent points to 30 mm from the corner, and the far ends stay.
+#[test]
+fn a_3d_fillet_radius_can_be_edited_and_a_fixed_corner_stays_as_a_point() {
+    let mut s = new_sketch_3d();
+    let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 80]]})));
+    run(
+        &mut s,
+        "sketch.constraint.fix",
+        json!({"entities": [format!("{}.start", c[0]), format!("{}.end", c[0]), format!("{}.end", c[1])], "fixed": true}),
+    );
+    let r = run(&mut s, "sketch.fillet", json!({"a": c[0], "b": c[1], "radius": 20}));
+    assert!(wires_solved(&s), "{r}");
+    let corner = r["virtual_corners"][0].as_str().expect("the corner is kept").to_string();
+    assert!(near3(fit(&s, &corner)[0], [100.0, 0.0, 0.0]));
+    assert_eq!(r["moved_to_virtual_corner"].as_array().map(Vec::len), Some(1), "{r}");
+    let k = sk(&s);
+    let fixed = |wire: &str, index: usize| {
+        k.wire_constraints
+            .iter()
+            .any(|x| matches!(&x.kind, solidcraft_sketch::WireConstraintKind::Fix { p, .. } if p.wire == wire && p.index == index))
+    };
+    assert!(fixed(&corner, 0) && !fixed(&c[0], 1), "the Fix moved to the corner point: {:?}", k.wire_constraints);
+    run(&mut s, "parameters.change", json!({"name": r["param"], "expression": "30 mm"}));
+    assert!(wires_solved(&s));
+    assert!(near3(fit(&s, &c[0])[0], [0.0, 0.0, 0.0]) && near3(fit(&s, &c[0])[1], [70.0, 0.0, 0.0]), "{:?}", fit(&s, &c[0]));
+    assert!(near3(fit(&s, &c[1])[0], [100.0, 0.0, 30.0]) && near3(fit(&s, &c[1])[1], [100.0, 0.0, 80.0]), "{:?}", fit(&s, &c[1]));
+    let a = arc3(&s, &curves(&r)[0]);
+    assert!(near3(a.center, [70.0, 0.0, 30.0]) && (a.radius - 30.0).abs() < 1e-6, "{a:?}");
+}
+
+/// #21319: several 3D corners in one call share one radius, as planar corners do: the first arc
+/// carries the dimension and the others are equal to it.
+#[test]
+fn a_fillet_rounds_several_3d_corners_with_one_radius() {
+    let mut s = new_sketch_3d();
+    let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 80], [100, 60, 80]]})));
+    // The length of the middle line holds both corners.
+    run(&mut s, "sketch.dimension", json!({"entities": [c[1]], "value": 80}));
+    let r = run(&mut s, "sketch.fillet", json!({"points": [{"a": c[0], "b": c[1]}, {"a": c[1], "b": c[2]}], "radius": 15}));
+    assert!(wires_solved(&s), "{r}");
+    // It now measures between the two kept corner points, and the reply names it once.
+    let length = sk(&s)
+        .wire_constraints
+        .iter()
+        .find(|x| matches!(x.kind, solidcraft_sketch::WireConstraintKind::Distance { .. }))
+        .map(|x| x.id.clone())
+        .expect("the length dimension is kept");
+    assert_eq!(r["moved_to_virtual_corner"], json!([length]), "{r}");
+    assert_eq!(r["virtual_corners"].as_array().map(Vec::len), Some(2), "{r}");
+    let arcs = curves(&r);
+    assert_eq!(arcs.len(), 2);
+    assert!(near3(arc3(&s, &arcs[0]).center, [85.0, 0.0, 15.0]) && near3(arc3(&s, &arcs[1]).center, [100.0, 15.0, 65.0]));
+    assert!(near3(fit(&s, &c[1])[0], [100.0, 0.0, 15.0]) && near3(fit(&s, &c[1])[1], [100.0, 0.0, 65.0]), "{:?}", fit(&s, &c[1]));
+    let k = sk(&s);
+    let radii = k.wire_constraints.iter().filter(|x| matches!(x.kind, solidcraft_sketch::WireConstraintKind::Radius { .. })).count();
+    let equal = k
+        .wire_constraints
+        .iter()
+        .any(|x| matches!(&x.kind, solidcraft_sketch::WireConstraintKind::Equal { a, b, arcs: true } if *a == arcs[0] && *b == arcs[1]));
+    assert!(radii == 1 && equal, "{:?}", k.wire_constraints);
+}
+
+/// #21319: what Fillet does not round in 3D is refused with its reason, and the design stays as
+/// it was: lines that share no end point, lines in one straight line, a radius that needs more
+/// of a line than there is, a 3D arc or spline, and 3D corners mixed with planar ones. Chamfer
+/// still takes no 3D lines.
+#[test]
+fn a_fillet_on_3d_lines_refuses_what_has_no_corner_to_round() {
+    let mut s = new_sketch_3d();
+    let c = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 80]]})));
+    let apart = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 50, 0], [0, 50, 40]]})))[0].clone();
+    let straight = curves(&run(&mut s, "sketch.line3d", json!({"points": [[0, 90, 0], [10, 90, 5], [20, 90, 10]]})));
+    let arc = curves(&run(&mut s, "sketch.arc3d", json!({"start": [100, 0, 80], "through": [110, 0, 90], "end": [100, 0, 100]})))[0].clone();
+    let spline = curves(&run(&mut s, "sketch.spline3d", json!({"points": [[0, 0, 0], [-10, 5, 10], [-20, 0, 20]]})))[0].clone();
+    let flat = curves(&run(&mut s, "sketch.line", json!({"points": [[0, -50], [20, -50], [20, -30]]})));
+    let before = s.doc.to_json();
+    let mut refused = |cmd: &str, p: Value, why: &str| {
+        let e = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{cmd} {p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{cmd} {p}");
+    };
+    refused("sketch.fillet", json!({"a": c[0], "b": apart, "radius": 5}), "share an end point");
+    refused("sketch.fillet", json!({"a": c[0], "b": c[0], "radius": 5}), "two different 3D lines");
+    refused("sketch.fillet", json!({"a": straight[0], "b": straight[1], "radius": 5}), "one straight line");
+    // Radius 90 needs 90 mm of each line, and the second is 80 mm long.
+    refused("sketch.fillet", json!({"a": c[0], "b": c[1], "radius": 90}), "too large for that corner (it needs 90.000 mm of each line");
+    for other in [&arc, &spline] {
+        refused("sketch.fillet", json!({"a": c[1], "b": other, "radius": 5}), "not supported yet: filleting 3D or linked sketch curves");
+    }
+    refused(
+        "sketch.fillet",
+        json!({"points": [{"a": c[0], "b": c[1]}, {"a": flat[0], "b": flat[1]}], "radius": 5}),
+        "3D corners and corners on the sketch plane in separate steps",
+    );
+    // A list whose other corner has a 3D arc says so, not that the corner is on the plane.
+    refused(
+        "sketch.fillet",
+        json!({"points": [{"a": c[0], "b": c[1]}, {"a": c[1], "b": arc}], "radius": 5}),
+        "not supported yet: filleting 3D or linked sketch curves",
+    );
+    refused("sketch.fillet", json!({"point": format!("{}.end", c[0]), "radius": 5}), "a 3D corner is given as its two 3D lines");
+    refused(
+        "sketch.chamfer.equal_distance",
+        json!({"a": c[0], "b": c[1], "distance": 5}),
+        "not supported yet: chamfering 3D or linked sketch curves",
+    );
 }

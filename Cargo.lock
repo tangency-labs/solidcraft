@@ -1392,9 +1392,11 @@ dependencies = [
  "image",
  "naga",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]
@@ -5953,6 +5955,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "smed-client"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a18c5f0afc3df72c50e75d1b365fc086502453fb4bccdafec03e236ad5db7be"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "smithay-client-toolkit"
 version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6140,6 +6152,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "smed-client",
  "solidcraft-3dx-client",
  "solidcraft-control",
  "solidcraft-engine",
@@ -6295,6 +6308,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-dynamics",
  "solidcraft-geom",
+ "solidcraft-icon-svg",
  "solidcraft-io",
  "solidcraft-kernel",
  "solidcraft-panel-layout",
@@ -6359,6 +6373,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-icon-svg"
+version = "0.49.1"
+dependencies = [
+ "tiny-skia",
+]
+
+[[package]]
 name = "solidcraft-io"
 version = "0.49.1"
 dependencies = [
@@ -6409,6 +6430,7 @@ dependencies = [
 name = "solidcraft-kernel"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "log",
  "proptest",
  "rayon",
@@ -6433,6 +6455,7 @@ dependencies = [
 name = "solidcraft-kernel-api"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "serde",
  "serde_json",
  "solidcore-record",
@@ -6545,6 +6568,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
+ "winreg",
 ]
 
 [[package]]
@@ -6587,6 +6611,7 @@ name = "solidcraft-ui-egui"
 version = "0.49.1"
 dependencies = [
  "arboard",
+ "craft-plugin",
  "egui",
  "egui-wgpu",
  "flate2",
@@ -6599,6 +6624,7 @@ dependencies = [
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
+ "quote",
  "semver",
  "serde",
  "serde_json",
@@ -6611,6 +6637,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-kernel",
  "solidcraft-look",
+ "solidcraft-panel-layout",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-kit",
@@ -6642,6 +6669,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-color",
+ "solidcraft-icon-svg",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
@@ -6729,6 +6757,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "serde_json",
+ "sha2 0.10.9",
  "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-look",

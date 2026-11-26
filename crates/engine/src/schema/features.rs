@@ -16,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
-    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
-    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -420,10 +420,13 @@ pub struct ConeParams {
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
     /// The direction `height` is measured along: from the base towards the top when `height` is
-    /// positive. Default: Z.
+    /// positive. X, Y, Z or `[x, y, z]`, each a number or an expression with no unit
+    /// (`["0", "-sin(t)", "-cos(t)"]`), which the cone follows as the parameters change. A
+    /// parameter added as a plain number is a length: divide it by its unit (`"n / 1 mm"`).
+    /// Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// How the cone combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,
@@ -571,6 +574,10 @@ pub struct SurfaceSweepParams {
     pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -699,6 +706,21 @@ pub struct CombineParams {
     /// Keep the tool bodies as they are. Default: false (the combine uses them up).
     #[serde(default)]
     pub keep_tools: Option<bool>,
+    /// A cut only: how far each tool is grown along its faces' outward normals before it cuts
+    /// (negative: shrunk, for a press fit), so the cut leaves that clearance round it. The tool
+    /// bodies themselves are not changed. Default: 0.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// With `offset`: what the grown tool's convex edges become. Default: sharp.
+    #[serde(default)]
+    pub offset_edges: Option<OffsetEdgesParam>,
+    /// With `offset`: points on the tool faces that move; the other faces, and tools with none
+    /// of them, cut as they are. Default: every face of every tool.
+    #[serde(default)]
+    pub offset_faces: Option<ToolFacesParam>,
+    /// With `offset_edges: round`: the radius of the rounds. Default: the offset's size.
+    #[serde(default)]
+    pub offset_radius: Option<LengthExpr>,
     /// Move the result into a new component, made for it. Default: false.
     #[serde(default)]
     pub new_component: Option<bool>,

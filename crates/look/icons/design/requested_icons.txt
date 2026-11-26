@@ -101,6 +101,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dome	false
 dots	false
 draft	false
 draft_analysis	false
@@ -201,6 +202,7 @@ intersect	false
 intersection_curve	false
 iso_analysis	false
 iso_curve	false
+isolate	false
 joint	false
 joint_origin	false
 kofi	false
@@ -213,6 +215,7 @@ loft	false
 lookat	false
 material	false
 measure	false
+merge_lines	false
 mesh_body	false
 mesh_export	false
 mesh_reduce	false
@@ -330,6 +333,7 @@ shell	false
 shield	false
 silhouette	false
 sketch	false
+sketch3d	false
 sketch_break	false
 sketch_cancel	false
 sketch_chamfer	false
@@ -401,6 +405,7 @@ trim	false
 turn_around	false
 undo	false
 unfold	false
+unisolate	false
 update	false
 warning	false
 web	false
