@@ -1,71 +1,60 @@
-//! Local ISO A preview; this does not create a model weld or a drawing annotation.
+//! Live symbol shared by the panel and saved graphic, using its chosen convention (default ISO A).
 use super::*;
 use egui::{FontId, vec2};
 use solidcraft_engine::geom::weld;
 
 pub(crate) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
-    let (kind, value) = match state.weld_type {
-        WeldType::Fillet => (weld::Kind::Fillet, if state.size_by_leg { &state.size.z } else { &state.size.a }),
-        WeldType::Butt => (weld::Kind::SingleVButt, &state.size.s),
-        _ => return Err(weld::Invalid("unsupported panel type")),
-    };
-    let size = if kind == weld::Kind::SingleVButt && value.trim().is_empty() {
-        None // Empty s is full penetration, preserving contour, side and process.
-    } else {
-        let value = crate::ui_kit::parse_number(value).ok_or(weld::Invalid("size is not a number"))?;
-        Some(match kind {
-            weld::Kind::Fillet if state.size_by_leg => weld::Size::Leg(value),
-            weld::Kind::Fillet => weld::Size::Throat(value),
-            _ => weld::Size::ButtPenetration(value),
-        })
-    };
-    // The geometry subset supports counted chain fillets with length < centre pitch.
-    // Keep valid saved spans even where that subset cannot represent them.
-    let spans = if state.spans && kind == weld::Kind::Fillet && !state.staggered && !state.all_around {
+    use solidcraft_engine::doc::weld::{GROOVES, WeldSettings, WeldSpans};
+    let typ = state.weld_type.info().label.strip_prefix("ui.weld.type.").ok_or(weld::Invalid("unknown panel type"))?;
+    let mut size = std::collections::BTreeMap::new();
+    if state.weld_type == WeldType::Fillet {
+        let (key, value) = if state.size_by_leg { ("z", &state.size.z) } else { ("a", &state.size.a) };
+        size.insert(key.into(), crate::ui_kit::parse_number(value).ok_or(weld::Invalid("size is not a number"))?);
+        for (key, value) in [("z1", &state.size.z1), ("z2", &state.size.z2)] {
+            if !value.trim().is_empty() {
+                size.insert(key.into(), crate::ui_kit::parse_number(value).ok_or(weld::Invalid("leg is not a number"))?);
+            }
+        }
+    }
+    if (state.weld_type == WeldType::Fillet && !state.size.s.trim().is_empty()) || (state.weld_type == WeldType::Butt && state.partial_penetration) {
+        size.insert("s".into(), crate::ui_kit::parse_number(&state.size.s).ok_or(weld::Invalid("penetration is not a number"))?);
+    }
+    let spans = if state.spans {
         state
             .span_count
             .trim()
-            .parse::<u16>()
+            .parse::<u32>()
             .ok()
-            .filter(|n| (2..=10000).contains(n))
             .zip(crate::ui_kit::parse_number(&state.span_length))
             .zip(crate::ui_kit::parse_number(&state.span_pitch))
-            .filter(|((_, l), e)| {
-                (weld::MIN_DIMENSION_MM..=weld::MAX_DIMENSION_MM).contains(l) && *e <= weld::MAX_DIMENSION_MM && *e >= *l + weld::MIN_DIMENSION_MM
-            })
+            .map(|((count, length_mm), pitch_mm)| WeldSpans { count, length_mm, pitch_mm })
     } else {
         None
     };
-    let side = weld::WeldSide {
-        kind,
+    WeldSettings {
+        weld_type: typ.into(),
         size,
-        length_mm: spans.map(|((_, l), _)| l),
-        intermittent: spans.map(|((n, _), e)| weld::Intermittent { count: Some(n), pitch_mm: e }),
-        contour: Some(match state.face {
-            Face::Flat => weld::Contour::Flush,
-            Face::Convex => weld::Contour::Convex,
-            Face::Concave => weld::Contour::Concave,
-        }),
-    };
-    let (arrow_side, other_side) = if state.both_sides {
-        (Some(side.clone()), Some(side))
-    } else if on_other_side(state) {
-        (None, Some(side))
-    } else {
-        (Some(side), None)
-    };
-    let record = weld::Weld {
-        arrow_side,
-        other_side,
-        all_round: state.all_around,
-        field: state.field_weld,
-        tail: (!state.process.is_empty()).then(|| state.process.clone()),
-    };
-    record.validate()?;
-    Ok(record)
+        size_by_leg: state.size_by_leg,
+        groove: GROOVES.get(state.groove).copied().unwrap_or("v").into(),
+        penetration: if state.partial_penetration { "partial" } else { "full" }.into(),
+        face: match state.face {
+            Face::Flat => "flat",
+            Face::Convex => "convex",
+            Face::Concave => "concave",
+        }
+        .into(),
+        side: if on_other_side(state) { "other" } else { "arrow" }.into(),
+        spans,
+        staggered: state.staggered,
+        both_sides: state.both_sides,
+        all_around: state.all_around,
+        field_weld: state.field_weld,
+        process: (!state.process.is_empty()).then(|| state.process.clone()),
+        ..Default::default()
+    }
+    .symbol()
 }
-
-/// The weld sits on the far side of the joint: the symbol goes above the dashed line.
+/// Manufacturing side; `convention` chooses ISO A's identification-line position for it.
 fn on_other_side(state: &WeldPanelState) -> bool {
     state.side == 1
 }
@@ -73,7 +62,8 @@ fn on_other_side(state: &WeldPanelState) -> bool {
 fn basic(state: &WeldPanelState) -> Option<weld::Weld> {
     let kind = match state.weld_type {
         WeldType::Fillet => weld::Kind::Fillet,
-        WeldType::Butt => weld::Kind::SingleVButt,
+        WeldType::Butt if state.groove == 0 => weld::Kind::SquareButt,
+        WeldType::Butt if state.groove == 1 => weld::Kind::SingleVButt,
         _ => return None,
     };
     let side = Some(weld::WeldSide { kind, size: None, length_mm: None, intermittent: None, contour: None });
@@ -94,14 +84,22 @@ fn format_number(value: f64) -> weld::Result<(String, f64)> {
     Ok((shown.text, shown.value))
 }
 
-pub(super) fn drawing(ui: &Ui, record: &weld::Weld, t: &Tokens) -> weld::Result<weld::Drawing> {
-    // One continuous reference line, as on the board's strip (no dashed identification line).
-    let h = f64::from(t.font_caption);
+pub(crate) fn convention(state: &WeldPanelState) -> weld::Convention {
+    match state.symbol_standard.as_str() {
+        "iso2553_2019_b" => weld::Convention::Iso2553_2019B,
+        "aws_a2_4_2020" => weld::Convention::AwsA2_4_2020,
+        _ => weld::Convention::Iso2553_2019A {
+            identification: if on_other_side(state) { weld::IdentificationLine::Below } else { weld::IdentificationLine::Above },
+        },
+    }
+}
+
+pub(super) fn drawing(ui: &Ui, record: &weld::Weld, state: &WeldPanelState, t: &Tokens) -> weld::Result<weld::Drawing> {
+    let h = f64::from(t.font_body);
     let width = f64::from(t.space_2 / 2.0);
-    let mut drawing =
-        record.draw(weld::Convention::Iso2553_2019B, weld::Style { height_mm: h, width_mm: width }, format_number, |text, height| {
-            f64::from(ui.painter().layout_no_wrap(text.into(), FontId::proportional(height as f32), t.form_ink).size().x)
-        })?;
+    let mut drawing = record.draw(convention(state), weld::Style { height_mm: h, width_mm: width }, format_number, |text, height| {
+        f64::from(ui.painter().layout_no_wrap(text.into(), FontId::proportional(height as f32), t.form_ink).size().x)
+    })?;
     add_arrow(&mut drawing, h, width);
     Ok(drawing)
 }
@@ -126,22 +124,28 @@ fn add_arrow(drawing: &mut weld::Drawing, h: f64, width: f64) {
 }
 
 fn prepared(ui: &Ui, state: &WeldPanelState, t: &Tokens) -> (Option<weld::Drawing>, bool) {
-    let complete = record(state).and_then(|record| drawing(ui, &record, t));
+    let complete = record(state).and_then(|record| drawing(ui, &record, state, t));
     let defined = complete.is_ok();
-    (complete.ok().or_else(|| basic(state).and_then(|record| drawing(ui, &record, t).ok())), defined)
+    (complete.ok().or_else(|| basic(state).and_then(|record| drawing(ui, &record, state, t).ok())), defined)
 }
 
 /// The symbol keeps one scale whatever the state: four text heights of paper fill `height`.
 pub(super) fn scale(height: f32, t: &Tokens) -> f32 {
-    height / (4.0 * t.font_caption)
+    height / (6.0 * t.font_body)
 }
 
 /// Returns whether a complete symbol is defined; the caller uses that for the strip hint.
 pub(super) fn paint(ui: &Ui, rect: Rect, state: &WeldPanelState, t: &Tokens) -> bool {
     let (drawing, defined) = prepared(ui, state, t);
     let Some(drawing) = drawing else {
-        let icon = Rect::from_center_size(rect.center(), vec2(t.control_height + t.space_4, t.control_height + t.space_4));
-        crate::ui_kit::icons::paint_icon(ui.painter(), icon, "weld_symbol", 0.4);
+        let icon = Rect::from_center_size(
+            egui::pos2(rect.left() + t.space_24, rect.center().y),
+            vec2(t.control_height + t.space_4, t.control_height + t.space_4),
+        );
+        crate::ui_kit::icons::paint_icon(ui.painter(), icon, state.weld_type.info().icon, 0.4);
+        let hint = if state.weld_type == WeldType::Butt { "ui.weld.symbol.shape_unavailable" } else { "ui.weld.symbol.type_unavailable" };
+        let text = ui.painter().layout(tr(hint).into(), FontId::proportional(t.font_body), t.form_dim, (rect.width() - t.space_24 * 3.).max(0.));
+        ui.painter().galley(egui::pos2(icon.right() + t.space_8, rect.center().y - text.size().y / 2.), text, t.form_dim);
         return false;
     };
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));

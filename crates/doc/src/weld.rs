@@ -6,17 +6,20 @@ pub const MAX_WELDS: usize = 1000;
 pub const MAX_PICKS: usize = 256;
 pub const TYPES: &[&str] = &["fillet", "butt", "edge", "plug", "spot", "seam", "stud", "surfacing", "tack"];
 pub const PICK_KINDS: &[&str] = &["line", "groove", "point", "hole", "ring", "area"];
-pub const SIZE_KEYS: &[&str] = &["a", "z", "z1", "h", "s", "d", "fill", "w", "t", "l", "e"];
+pub const SIZE_KEYS: &[&str] = &["a", "z", "z1", "z2", "h", "s", "d", "w", "t", "l", "e", "n"];
+pub const SYMBOL_STANDARDS: &[&str] = &["iso2553_2019_a", "iso2553_2019_b", "aws_a2_4_2020"];
+pub const GROOVES: &[&str] = &["square", "v", "bevel", "u", "j", "y", "hy", "x", "k"];
 /// Size names belonging to the chosen type.
 pub fn size_keys(weld_type: &str) -> &'static [&'static str] {
     match weld_type {
-        "fillet" => &["a", "z", "z1"],
+        "fillet" => &["a", "z", "z1", "z2", "s"],
         "butt" => &["h", "s"],
-        "edge" | "seam" => &["w"],
-        "plug" => &["fill"],
-        "spot" | "stud" => &["d"],
-        "surfacing" => &["t"],
-        "tack" => &["l", "e"],
+        "edge" => &["w"],
+        "seam" => &["w", "l"],
+        "plug" => &["h", "e"],
+        "spot" | "stud" => &["d", "e"],
+        "surfacing" => &["t", "w"],
+        "tack" => &["l", "e", "n"],
         _ => &[],
     }
 }
@@ -72,6 +75,13 @@ impl WeldPick {
 #[serde(default, deny_unknown_fields)]
 pub struct WeldSettings {
     pub weld_type: String,
+    pub symbol_standard: String,
+    pub groove: String,
+    pub penetration: String,
+    pub root: String,
+    pub tack_mode: String,
+    pub root_gap: Option<f64>,
+    pub add_fillet: bool,
     pub picks: BTreeMap<String, Vec<WeldPick>>,
     pub size: BTreeMap<String, f64>,
     pub face: String,
@@ -101,6 +111,13 @@ impl Default for WeldSettings {
     fn default() -> Self {
         Self {
             weld_type: "fillet".into(),
+            symbol_standard: "iso2553_2019_a".into(),
+            groove: "v".into(),
+            penetration: "full".into(),
+            root: "as_welded".into(),
+            tack_mode: "pitch".into(),
+            root_gap: None,
+            add_fillet: false,
             picks: BTreeMap::new(),
             size: [("a".into(), 3.)].into_iter().collect(),
             face: "convex".into(),
@@ -129,6 +146,68 @@ impl Default for WeldSettings {
     }
 }
 impl WeldSettings {
+    /// Build the supported annotation subset from evaluated settings, also used by the form.
+    /// The caller retains unsupported choices in this settings record; no symbol is invented.
+    pub fn symbol(&self) -> solidcraft_geom::weld::Result<Weld> {
+        use solidcraft_geom::weld::{Contour, Intermittent, Invalid, Kind, Size, WeldSide};
+        let kind = match self.weld_type.as_str() {
+            "fillet" => Kind::Fillet,
+            "butt" if self.groove == "square" => Kind::SquareButt,
+            "butt" if self.groove == "v" => Kind::SingleVButt,
+            _ => return Err(Invalid("unsupported weld type or groove shape")),
+        };
+        let size = if kind == Kind::Fillet {
+            if self.size.contains_key("z1") || self.size.contains_key("z2") {
+                return Err(Invalid("unequal-leg callouts are not supported"));
+            }
+            let value = *self.size.get(if self.size_by_leg { "z" } else { "a" }).ok_or(Invalid("missing fillet size"))?;
+            Some(if let Some(total_mm) = self.size.get("s") {
+                Size::DeepPenetrationThroat {
+                    total_mm: *total_mm,
+                    nominal_mm: if self.size_by_leg { value / std::f64::consts::SQRT_2 } else { value },
+                }
+            } else if self.size_by_leg {
+                Size::Leg(value)
+            } else {
+                Size::Throat(value)
+            })
+        } else if self.penetration == "partial" {
+            Some(Size::ButtPenetration(*self.size.get("s").ok_or(Invalid("partial penetration requires s"))?))
+        } else {
+            None
+        };
+        let spans = self.spans.as_ref().filter(|s| {
+            kind == Kind::Fillet
+                && !self.staggered
+                && !self.all_around
+                && (2..=10000).contains(&s.count)
+                && dimension(s.length_mm)
+                && dimension(s.pitch_mm)
+                && s.pitch_mm >= s.length_mm + MIN_DIMENSION_MM
+        });
+        let side = WeldSide {
+            kind,
+            size,
+            length_mm: spans.map(|s| s.length_mm),
+            intermittent: spans.and_then(|s| u16::try_from(s.count).ok().map(|count| Intermittent { count: Some(count), pitch_mm: s.pitch_mm })),
+            contour: Some(match self.face.as_str() {
+                "flat" => Contour::Flush,
+                "concave" => Contour::Concave,
+                _ => Contour::Convex,
+            }),
+        };
+        let (arrow_side, other_side) = if self.both_sides {
+            (Some(side.clone()), Some(side))
+        } else if self.side == "other" {
+            (None, Some(side))
+        } else {
+            (Some(side), None)
+        };
+        let symbol = Weld { arrow_side, other_side, all_round: self.all_around, field: self.field_weld, tail: self.process.clone() };
+        symbol.validate()?;
+        Ok(symbol)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !TYPES.contains(&self.weld_type.as_str()) {
             return Err("unknown weld type".into());
@@ -152,6 +231,11 @@ impl WeldSettings {
             pick.validate()?;
         }
         for (name, value, allowed) in [
+            ("symbol_standard", self.symbol_standard.as_str(), SYMBOL_STANDARDS),
+            ("groove", self.groove.as_str(), GROOVES),
+            ("penetration", self.penetration.as_str(), &["full", "partial"][..]),
+            ("root", self.root.as_str(), &["as_welded", "melt_through", "backing_run"][..]),
+            ("tack_mode", self.tack_mode.as_str(), &["pitch", "count", "points"][..]),
             ("side", self.side.as_str(), &["arrow", "other"][..]),
             ("ends", self.ends.as_str(), &["square", "tapered", "rounded"][..]),
             ("spot_look", self.spot_look.as_str(), &["marks", "ball", "marks_ball", "marks_pin", "pin", "dent"][..]),
@@ -160,6 +244,24 @@ impl WeldSettings {
             if !allowed.contains(&value) {
                 return Err(format!("unknown {name}"));
             }
+        }
+        if self.weld_type == "butt" && (self.penetration == "partial") != self.size.contains_key("s") {
+            return Err("partial penetration requires s; full penetration omits s".into());
+        }
+        if self.weld_type == "tack" {
+            let valid = self.size.contains_key("l")
+                && match self.tack_mode.as_str() {
+                    "pitch" => self.size.contains_key("e") && !self.size.contains_key("n"),
+                    "count" => self.size.get("n").is_some_and(|v| v.fract() == 0.) && !self.size.contains_key("e"),
+                    "points" => self.size.len() == 1,
+                    _ => false,
+                };
+            if !valid {
+                return Err("tack sizes must match its mode; n must be a positive integer".into());
+            }
+        }
+        if self.root_gap.is_some_and(|v| !v.is_finite() || !(0.0..=MAX_DIMENSION_MM).contains(&v)) {
+            return Err("root gap must be finite and between 0 and 100000 mm".into());
         }
         if self.process.as_ref().is_some_and(|p| !(1..=3).contains(&p.len()) || !p.bytes().all(|b| b.is_ascii_digit())) {
             return Err("process must be 1-3 ASCII digits".into());

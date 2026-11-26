@@ -12,7 +12,7 @@ const DELETE: TypedContract<WeldDeleteParams> = TypedContract::new();
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("weld.create", "Weld", crate::checked!("weld.create", create)).begins_edit()
         .at("WELDMENTS", "CREATE").icon("weld").contract(&CREATE).output(output_schema_for::<WeldCreated>)
-        .params("weld_type: fillet|butt|edge|plug|spot|seam|stud|surfacing|tack; size?: type-specific {a,z,z1,h,s,d,fill,w,t,l,e: length expr}; picks?: grouped exact references; side?: arrow|other; process?: ISO 4063 text; density?, overlap?: optional expressions; spans?: {count,length_mm,pitch_mm}; ends?, spot_look?, reference_plane?: names; symbol?: settings symbol → id, number"),
+        .params("weld_type: fillet|butt|edge|plug|spot|seam|stud|surfacing|tack; size?: type-specific {a,z,z1,z2,h,s,d,w,t,l,e: length expr; n: positive integer}; picks?: grouped exact references; side?: arrow|other; process?: ISO 4063 text; density?, overlap?: optional expressions; spans?: {count,length_mm,pitch_mm}; symbol_standard?: iso2553_2019_a|iso2553_2019_b|aws_a2_4_2020; groove?, penetration?, root?, tack_mode?: names; root_gap?: length; add_fillet?: bool; ends?, spot_look?, reference_plane?: names; symbol?: settings symbol → id, number"),
     CommandSpec::new("weld.delete", "Delete Weld", crate::checked!("weld.delete", delete))
         .icon("delete").contract(&DELETE).output(output_schema_for::<WeldDeleted>).params("id: weld graphic identity → deleted"),
 ];
@@ -56,10 +56,14 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         let sizes = match raw.get("weld_type").and_then(Value::as_str) {
             Some("butt") => serde_json::json!({"h":1}),
             Some("edge" | "seam") => serde_json::json!({"w":6}),
-            Some("plug") => serde_json::json!({"fill":20}),
+            Some("plug") => serde_json::json!({"h":20}),
             Some("spot" | "stud") => serde_json::json!({"d":5}),
             Some("surfacing") => serde_json::json!({"t":2}),
-            Some("tack") => serde_json::json!({"l":5,"e":40}),
+            Some("tack") => match raw.get("tack_mode").and_then(Value::as_str) {
+                Some("count") => serde_json::json!({"l":5,"n":4}),
+                Some("points") => serde_json::json!({"l":5}),
+                _ => serde_json::json!({"l":5,"e":40}),
+            },
             _ => serde_json::json!({"a":3}),
         };
         raw.insert("size".into(), sizes);
@@ -75,7 +79,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         let mut evaluated = serde_json::Map::new();
         for key in values.keys() {
             let expr = req_expr(CMD, size, key)?;
-            let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
+            let value = s.doc.eval(&expr, if key == "n" { Kind::Unitless } else { Kind::Length }).map_err(|e| bad(CMD, e.to_string()))?;
             evaluated.insert(key.clone(), serde_json::json!(value));
         }
         raw.insert("size".into(), Value::Object(evaluated));
@@ -97,8 +101,16 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
         raw.insert("overlap".into(), serde_json::json!(value));
     }
+    if raw.contains_key("root_gap") {
+        let expr = req_expr(CMD, p, "root_gap")?;
+        let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
+        raw.insert("root_gap".into(), serde_json::json!(value));
+    }
     let settings: WeldSettings = serde_json::from_value(Value::Object(raw)).map_err(|e| bad(CMD, e.to_string()))?;
     settings.validate().map_err(|e| bad(CMD, e))?;
+    // The form may contain expressions it cannot evaluate locally. Build the same supported
+    // symbol after evaluation, retaining null for unsupported types and groove shapes.
+    let symbol = symbol.or_else(|| settings.symbol().ok());
     // Validate saved references against exact topology, never the display mesh.
     if settings.picks.values().flatten().any(|pick| pick.body.is_some()) {
         let state = s.world_state().map_err(|e| bad(CMD, e.to_string()))?;

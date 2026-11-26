@@ -36,7 +36,7 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     let ctx = context();
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    let board = ["type", "where", "size", "face", "extent", "process", "look", "notices", "advanced"];
+    let board = ["type", "where", "size", "advanced", "face", "extent", "process", "look", "notices"];
     println!(
         "Weld fillet measured heights: {:?}; total {}",
         m.sections.iter().map(|(key, rect)| (*key, rect.height())).collect::<Vec<_>>(),
@@ -47,7 +47,9 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     for key in board {
         assert!(section(&m, key).height() > 0.0);
     }
-    for pair in m.sections.windows(2) {
+    assert!(section(&m, "size").contains_rect(section(&m, "advanced")));
+    let outer: Vec<_> = m.sections.iter().filter(|(key, _)| *key != "advanced").collect();
+    for pair in outer.windows(2) {
         close(pair[0].1.bottom(), pair[1].1.top(), 0.5);
     }
     close(m.card.expect("card").height(), 3600.0, 0.5);
@@ -196,7 +198,7 @@ fn weld_panel_new_bead_and_advanced_keep_the_local_edits() {
     click(&ctx, &mut state, section(&m, "advanced").center());
     assert!(state.advanced_open);
     let (_, advanced) = render(&ctx, &mut state, false, vec![]);
-    assert_eq!(advanced.fields.len(), 3);
+    assert_eq!(advanced.fields.len(), 1);
     assert_eq!(state.size.a, "plate_thickness / 2");
 }
 
@@ -256,7 +258,7 @@ fn weld_panel_advanced_header_is_frameless_and_stays_inside_the_card() {
             for shape in &output.shapes {
                 inspect(&shape.shape, card, row, shape.clip_rect, &mut bounds, &mut text);
             }
-            assert_eq!(text.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), [tr("ui.weld.section.advanced"), tr("ui.weld.pro_fields")]);
+            assert_eq!(text.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), [tr("ui.weld.section.advanced")]);
             close(row.height(), 36.0, 0.5);
             println!("dark={dark}, open={open}: card {card:?}, painted {bounds:?}, Advanced {row:?}, text {text:?}");
         }
@@ -267,7 +269,7 @@ fn weld_panel_advanced_header_is_frameless_and_stays_inside_the_card() {
 fn weld_panel_whole_advanced_row_toggles_from_either_state() {
     for open in [false, true] {
         // Include the leading padding, chevron, title, hint and trailing padding.
-        for offset in [2.0, 20.0, 60.0, 180.0, 340.0] {
+        for offset in [2.0, 20.0, 60.0, 180.0, 300.0] {
             let ctx = context();
             let mut state = WeldPanelState::specimen(WeldType::Fillet, open);
             let (_, m) = render(&ctx, &mut state, false, vec![]);
@@ -374,7 +376,8 @@ fn weld_panel_horizontal_host_keeps_width_and_vertical_section_order() {
                 card.sections.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
                 baseline.sections.iter().map(|(key, _)| *key).collect::<Vec<_>>()
             );
-            for pair in card.sections.windows(2) {
+            let outer: Vec<_> = card.sections.iter().filter(|(key, _)| *key != "advanced").collect();
+            for pair in outer.windows(2) {
                 close(pair[0].1.bottom(), pair[1].1.top(), 0.5);
             }
         }
@@ -394,13 +397,14 @@ fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Sh
     solidcraft_theme::set_dark(dark);
     solidcraft_theme::apply(&ctx);
     // The pinned symbol row is wide: the symbol keeps one scale and is centred in it.
-    let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(320.0, 2.0 * Tokens::get().control_height + 8.0));
+    let rect =
+        Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(320.0, sections::chrome::symbol_band_height(&Tokens::get()) - 2.0 * Tokens::get().space_8));
     let mut defined = false;
     let mut expected_labels = Vec::new();
     let mut output = ctx.run_ui(RawInput::default(), |ui| {
         let t = Tokens::get();
         if let Ok(record) = symbol::record(state) {
-            expected_labels = symbol::drawing(ui, &record, &t).expect("valid symbol").text.into_iter().map(|text| text.text).collect();
+            expected_labels = symbol::drawing(ui, &record, state, &t).expect("valid symbol").text.into_iter().map(|text| text.text).collect();
         }
         defined = symbol::paint(ui, rect, state, &t);
     });
@@ -538,7 +542,7 @@ fn weld_symbol_invalid_sizes_paint_basic_geometry_without_panicking() {
             if typ == WeldType::Butt && value.is_empty() {
                 continue;
             } // Full penetration is valid.
-            let mut state = WeldPanelState { weld_type: typ, ..Default::default() };
+            let mut state = WeldPanelState { weld_type: typ, partial_penetration: typ == WeldType::Butt, ..Default::default() };
             state.size.a = value.into();
             state.size.s = value.into();
             let (defined, rect, shapes, labels) = symbol_frame(&state, false);
@@ -586,6 +590,7 @@ fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
     assert_eq!(record.tail.as_deref(), Some("141"));
     state.weld_type = WeldType::Butt;
     state.size.s = "2.50".into();
+    state.partial_penetration = true;
     state.face = Face::Concave;
     state.process = "135".into();
     let record = symbol::record(&state).expect("valid butt");
@@ -600,17 +605,13 @@ fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
 }
 
 #[test]
-fn weld_symbol_strip_has_one_reference_line_and_an_arrow_but_no_dashed_line() {
+fn weld_symbol_strip_has_iso_a_identification_line_and_arrow() {
     let (defined, _, shapes, _) = symbol_frame(&WeldPanelState::default(), false);
     assert!(defined);
-    assert!(
-        !shapes.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { .. })),
-        "a dashed identification line would be drawn as separate dash segments"
-    );
+    assert!(shapes.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { .. })), "ISO A identification dashes");
     let filled = shapes.iter().filter(|shape| matches!(shape, egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT)).count();
     assert!(filled >= 1, "the arrow head is a filled triangle");
 }
-
 #[test]
 fn weld_panel_type_defaults_and_filtered_process_tables() {
     use sections::look::numbers;
@@ -633,9 +634,9 @@ fn weld_panel_type_defaults_and_filtered_process_tables() {
         assert_eq!(numbers(typ), offered);
         assert_ne!(tr(&format!("{}.desc", typ.info().label)), format!("{}.desc", typ.info().label));
     }
-    state.tack_points = true;
+    state.tack_mode = 2;
     assert_eq!(state.where_kind(), WhereKind::Point);
-    state.tack_points = false;
+    state.tack_mode = 0;
     assert_eq!(state.where_kind(), WhereKind::Line);
     assert!(state.density.is_empty());
     assert!(state.overlap.is_empty());
@@ -676,5 +677,118 @@ fn weld_symbol_spans_use_length_count_and_centre_pitch_only_when_supported() {
         state.span_length = length.into();
         state.span_pitch = pitch.into();
         assert!(symbol::record(&state).unwrap().arrow_side.unwrap().intermittent.is_none());
+    }
+}
+
+#[test]
+fn weld_symbol_settings_change_painted_geometry_or_labels() {
+    let baseline = WeldPanelState::default();
+    let signature = |state: &WeldPanelState| {
+        let (defined, _, shapes, labels) = symbol_frame(state, false);
+        assert!(defined);
+        (format!("{shapes:?}"), labels)
+    };
+    let first = signature(&baseline);
+    let mut variants = Vec::new();
+    let mut state = baseline.clone();
+    state.pick_type(WeldType::Butt);
+    variants.push(("type", state));
+    let mut state = baseline.clone();
+    state.size.a = "4".into();
+    variants.push(("a", state));
+    let mut state = baseline.clone();
+    state.size_by_leg = true;
+    variants.push(("z", state));
+    let mut state = baseline.clone();
+    state.face = Face::Concave;
+    variants.push(("face", state));
+    let mut state = baseline.clone();
+    state.side = 1;
+    variants.push(("side", state));
+    let mut state = baseline.clone();
+    state.both_sides = true;
+    variants.push(("both", state));
+    let mut state = baseline.clone();
+    state.spans = true;
+    variants.push(("spans", state));
+    let mut state = baseline.clone();
+    state.process = "141".into();
+    variants.push(("process", state));
+    let mut state = baseline.clone();
+    state.size.s = "5".into();
+    variants.push(("deep throat", state));
+    let mut state = baseline.clone();
+    state.field_weld = true;
+    variants.push(("field", state));
+    let mut state = baseline.clone();
+    state.all_around = true;
+    variants.push(("all around", state));
+    for (name, state) in variants {
+        assert_ne!(first, signature(&state), "{name} must repaint");
+    }
+    let mut butt = WeldPanelState::default();
+    butt.pick_type(WeldType::Butt);
+    let full = signature(&butt);
+    butt.partial_penetration = true;
+    butt.size.s = "2.5".into();
+    assert_ne!(full, signature(&butt));
+    let partial = signature(&butt);
+    butt.size.s = "3".into();
+    assert_ne!(partial, signature(&butt));
+    butt.groove = 0;
+    assert_ne!(partial, signature(&butt));
+    let mut leg = baseline.clone();
+    leg.size_by_leg = true;
+    let first_leg = signature(&leg);
+    leg.size.z = "7".into();
+    assert_ne!(first_leg, signature(&leg));
+}
+
+#[test]
+fn weld_standards_use_the_decided_identification_position_and_keep_the_arrow() {
+    use solidcraft_engine::geom::weld::{Convention, IdentificationLine};
+    let mut state = WeldPanelState::default();
+    assert_eq!(symbol::convention(&state), Convention::Iso2553_2019A { identification: IdentificationLine::Above });
+    state.side = 1;
+    assert_eq!(symbol::convention(&state), Convention::Iso2553_2019A { identification: IdentificationLine::Below });
+    for (name, convention) in [("iso2553_2019_b", Convention::Iso2553_2019B), ("aws_a2_4_2020", Convention::AwsA2_4_2020)] {
+        state.symbol_standard = name.into();
+        state.size_by_leg = true;
+        assert_eq!(symbol::convention(&state), convention);
+        let (defined, _, shapes, _) = symbol_frame(&state, false);
+        assert!(defined);
+        assert!(
+            shapes.iter().any(|shape| matches!(shape,egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT)),
+            "{name} keeps the arrowhead"
+        );
+    }
+}
+
+#[test]
+fn weld_equal_leg_hint_uses_the_parsed_number_and_hides_for_expressions() {
+    let mut state = WeldPanelState::default();
+    state.size.a = "5".into();
+    assert_eq!(sections::size::leg_hint(&state).unwrap(), "z = 7.071 mm (equal legs)");
+    state.size_by_leg = true;
+    state.size.z = "10".into();
+    assert_eq!(sections::size::leg_hint(&state).unwrap(), "a = 7.071 mm (equal legs)");
+    for input in ["plate/2", "3 mm", "NaN", "inf", "", "-1"] {
+        state.size.z = input.into();
+        assert!(sections::size::leg_hint(&state).is_none(), "{input}");
+    }
+}
+
+#[test]
+fn weld_sketch_dimension_click_focuses_the_corresponding_field() {
+    let ctx = context();
+    let mut state = WeldPanelState { advanced_open: true, ..WeldPanelState::default() };
+    state.size.z1 = "4".into();
+    state.size.z2 = "6".into();
+    render(&ctx, &mut state, false, vec![]);
+    for letter in ["a", "z1", "z2"] {
+        let rect = solidcraft_ui_registry::rect_of(&format!("weld:dimension:{letter}")).unwrap();
+        click(&ctx, &mut state, rect.center());
+        assert!(ctx.memory(|m| m.focused().is_some()), "{letter} focuses an expression editor");
+        assert!(state.focus_dimension.is_none(), "{letter} was consumed by its field");
     }
 }

@@ -32,6 +32,7 @@ fn weld_new_bead_preserves_settings_and_cancel_does_not_run() {
     assert_eq!(state.panel.number, "W2");
     assert_eq!(state.panel.size.a, "6 mm");
     assert_eq!(app.session.doc.welds.len(), 1);
+    assert!(app.session.doc.welds[0].symbol.is_some(), "the engine builds the symbol after evaluating 6 mm");
     assert!(!event(&mut app, &mut d, WeldPanelEvent::Cancel));
     assert_eq!(app.session.doc.welds.len(), 1);
 }
@@ -143,8 +144,12 @@ fn weld_params_save_type_sizes_names_optional_values_and_symbols() {
     dialog.panel.size_by_leg = true;
     assert_eq!(params(&dialog).unwrap()["size"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["z"]);
     dialog.panel.advanced_open = true;
-    assert_eq!(params(&dialog).unwrap()["size"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["a", "z", "z1"]);
+    dialog.panel.size.z1 = "4".into();
+    dialog.panel.size.z2 = "6".into();
+    assert_eq!(params(&dialog).unwrap()["size"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["z", "z1", "z2"]);
     dialog.panel.spans = true;
+    dialog.panel.size.z1.clear();
+    dialog.panel.size.z2.clear();
     dialog.panel.span_count = "3".into();
     dialog.panel.span_length = "10".into();
     dialog.panel.span_pitch = "40".into();
@@ -158,4 +163,60 @@ fn weld_params_save_type_sizes_names_optional_values_and_symbols() {
     assert_eq!(s.doc.welds.last().unwrap().settings.density, Some(7850.));
     dialog.panel.span_count = "1.5".into();
     assert!(params(&dialog).is_err());
+}
+
+#[test]
+fn weld_tack_modes_and_butt_choices_save_only_applicable_dimensions() {
+    use crate::weld_panel::WeldType;
+    let mut dialog = WeldDialog::default();
+    dialog.panel.pick_type(WeldType::Tack);
+    for (mode, keys) in [(0, vec!["e", "l"]), (1, vec!["l", "n"]), (2, vec!["l"])] {
+        dialog.panel.tack_mode = mode;
+        let p = params(&dialog).unwrap();
+        assert_eq!(p["size"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), keys);
+        assert_eq!(p["tack_mode"], ["pitch", "count", "points"][mode]);
+        let mut app = app();
+        app.run("weld.create", p).unwrap();
+        assert_eq!(app.session.doc.welds.len(), 1);
+    }
+    dialog.panel.pick_type(WeldType::Butt);
+    dialog.panel.size.s = "2".into();
+    assert!(params(&dialog).unwrap()["size"].get("s").is_none());
+    dialog.panel.partial_penetration = true;
+    assert_eq!(params(&dialog).unwrap()["size"]["s"], "2");
+    for (groove, supported) in (0..9).map(|i| (i, i < 2)) {
+        dialog.panel.groove = groove;
+        let p = params(&dialog).unwrap();
+        assert_eq!(p["groove"], solidcraft_engine::doc::weld::GROOVES[groove]);
+        assert_eq!(!p["symbol"].is_null(), supported);
+    }
+    dialog.panel.root = 2;
+    dialog.panel.symbol_standard = "aws_a2_4_2020".into();
+    let p = params(&dialog).unwrap();
+    assert_eq!(p["root"], "backing_run");
+    assert_eq!(p["symbol_standard"], "aws_a2_4_2020");
+}
+
+#[test]
+fn weld_standard_preference_is_validated_reset_on_design_and_copied_at_start() {
+    let mut app = app();
+    assert_eq!(app.preferences.weld_symbol_standard, "iso2553_2019_a");
+    for standard in solidcraft_engine::doc::weld::SYMBOL_STANDARDS {
+        crate::prefs::control(&mut app, &json!({"weld_symbol_standard":standard})).unwrap();
+        let (kind, _) = start(&app, "weld.create").unwrap();
+        let Kind::Weld(dialog) = kind else { panic!() };
+        assert_eq!(dialog.panel.symbol_standard, *standard);
+        let p = params(&dialog).unwrap();
+        assert_eq!(p["symbol_standard"], *standard);
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        let restored: crate::prefs::Prefs = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.weld_symbol_standard, *standard);
+    }
+    for invalid in [json!("jis"), json!(3), json!(null)] {
+        let before = app.preferences.clone();
+        assert!(crate::prefs::control(&mut app, &json!({"weld_symbol_standard":invalid})).is_err());
+        assert_eq!(app.preferences, before);
+    }
+    crate::prefs::control(&mut app, &json!({"open":"Design","button":"defaults"})).unwrap();
+    assert_eq!(app.preferences.weld_symbol_standard, "iso2553_2019_a");
 }

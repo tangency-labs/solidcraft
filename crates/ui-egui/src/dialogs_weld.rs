@@ -16,6 +16,11 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<crate::selection::Se
     (id == "weld.create").then(|| {
         let mut state = WeldDialog::default();
         state.panel.number = next_number(app);
+        state.panel.symbol_standard = if solidcraft_engine::doc::weld::SYMBOL_STANDARDS.contains(&app.preferences.weld_symbol_standard.as_str()) {
+            app.preferences.weld_symbol_standard.clone()
+        } else {
+            "iso2553_2019_a".into()
+        };
         (Kind::Weld(Box::new(state)), Vec::new())
     })
 }
@@ -36,24 +41,40 @@ pub fn params(state: &WeldDialog) -> Result<Value, String> {
         ("a", &p.size.a),
         ("z", &p.size.z),
         ("z1", &p.size.z1),
+        ("z2", &p.size.z2),
         ("h", &p.size.h),
         ("s", &p.size.s),
         ("d", &p.size.d),
-        ("fill", &p.size.fill),
+        ("n", &p.size.n),
         ("l", &p.size.l),
         ("e", &p.size.e),
         ("t", &p.size.t),
         ("w", &p.size.w),
     ] {
-        let visible = p.weld_type != crate::weld_panel::WeldType::Fillet || p.advanced_open || key == if p.size_by_leg { "z" } else { "a" };
+        use crate::weld_panel::WeldType;
+        let visible = match p.weld_type {
+            WeldType::Fillet => key == if p.size_by_leg { "z" } else { "a" } || matches!(key, "z1" | "z2" | "s"),
+            WeldType::Butt => key != "s" || p.partial_penetration,
+            WeldType::Tack => key == "l" || (key == "e" && p.tack_mode == 0) || (key == "n" && p.tack_mode == 1),
+            WeldType::Seam | WeldType::Surfacing | WeldType::Plug | WeldType::Stud | WeldType::Spot | WeldType::Edge => true,
+        };
         if visible && solidcraft_engine::doc::weld::size_keys(weld_type).contains(&key) && !value.trim().is_empty() {
             size.insert(key.into(), json!(value));
         }
     }
     let ends = ["square", "tapered", "rounded"].get(p.ends).copied();
     let spot_look = ["marks", "ball", "marks_ball", "marks_pin", "pin", "dent"].get(p.spot_look).copied();
+    let root = ["as_welded", "melt_through", "backing_run"].get(p.root).copied().unwrap_or("as_welded");
+    let tack_mode = ["pitch", "count", "points"].get(p.tack_mode).copied().unwrap_or("pitch");
     let mut result = json!({
         "weld_type":weld_type, "picks":{}, "size":size,
+        "symbol_standard":p.symbol_standard,
+        "groove":solidcraft_engine::doc::weld::GROOVES.get(p.groove).copied().unwrap_or("v"),
+        "penetration":if p.partial_penetration {"partial"} else {"full"},
+        "root":root,
+        "tack_mode":tack_mode,
+        "root_gap":(!p.root_gap.trim().is_empty()).then_some(&p.root_gap),
+        "add_fillet":p.add_fillet,
         "face":match p.face {Face::Flat=>"flat",Face::Convex=>"convex",Face::Concave=>"concave"},
         "size_by_leg":p.size_by_leg,
         "blend_toes":p.blend_toes,

@@ -59,6 +59,7 @@ mod tests {
         assert_keys(
             input_schema_for::<WeldCreateParams>(),
             &[
+                "add_fillet",
                 "all_around",
                 "blend_toes",
                 "both_sides",
@@ -67,13 +68,17 @@ mod tests {
                 "ends",
                 "face",
                 "field_weld",
+                "groove",
                 "merge_crossing",
                 "overlap",
                 "passes_shown",
+                "penetration",
                 "penetration_shown",
                 "picks",
                 "process",
                 "reference_plane",
+                "root",
+                "root_gap",
                 "sharp_mitre",
                 "sheet_picked",
                 "side",
@@ -83,6 +88,8 @@ mod tests {
                 "spot_look",
                 "staggered",
                 "symbol",
+                "symbol_standard",
+                "tack_mode",
                 "tangent_chain",
                 "weld_type",
             ],
@@ -116,10 +123,24 @@ use std::collections::BTreeMap;
 pub struct WeldCreateParams {
     /// Type id: fillet, butt, edge, plug, spot, seam, stud, surfacing or tack.
     pub weld_type: String,
+    /// Symbol convention: iso2553_2019_a (default), iso2553_2019_b or aws_a2_4_2020.
+    pub symbol_standard: Option<String>,
+    /// Butt groove: square, v (default), bevel, u, j, y, hy, x or k.
+    pub groove: Option<String>,
+    /// Butt penetration: full (default, no s) or partial (requires s).
+    pub penetration: Option<String>,
+    /// Butt root: as_welded (default), melt_through or backing_run.
+    pub root: Option<String>,
+    /// Tack placement: pitch (default), count or points. Size n is a positive integer.
+    pub tack_mode: Option<String>,
+    /// Optional root gap in mm (zero is allowed).
+    pub root_gap: Option<LengthExpr>,
+    /// Add a fillet to the butt weld. Default: false.
+    pub add_fillet: Option<bool>,
     /// Pick groups: line, groove, point, hole, ring or area. Default: empty.
     #[serde(default)]
     pub picks: Option<BTreeMap<String, Vec<WeldPickParams>>>,
-    /// Named positive sizes in mm or length expressions: a,z,z1,h,s,d,fill,w,t,l,e. Default: the chosen type’s basic size.
+    /// Type-specific positive sizes: a,z,z1,z2,h,s,d,w,t,l,e (length expressions), n (unitless positive integer).
     #[serde(default)]
     pub size: Option<BTreeMap<String, LengthExpr>>,
     /// Face: flat, convex or concave. Default: flat for butt/plug, convex otherwise.

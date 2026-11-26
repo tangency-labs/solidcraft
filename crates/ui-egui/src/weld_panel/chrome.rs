@@ -50,8 +50,8 @@ pub(super) fn more_button(ui: &mut Ui, m: &mut Measurements, rect: Rect, t: &Tok
 }
 
 /// Height of the pinned symbol row above the shared Cancel / OK bar.
-pub(super) fn symbol_band_height(t: &Tokens) -> f32 {
-    t.control_height * 2.0 + t.space_16
+pub(in crate::weld_panel) fn symbol_band_height(t: &Tokens) -> f32 {
+    t.font_body * 6.0 + t.space_24
 }
 
 /// The live symbol as a full-width button in its own pinned row; true when clicked.

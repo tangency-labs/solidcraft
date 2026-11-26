@@ -1,4 +1,4 @@
-//! Board-driven, local-only weld editor. No weld command or model evaluation is wired yet.
+//! Local Weld form; the dialog adapter saves its settings and supported symbol through commands.
 //! The hidden public module is solely the native preview's entry point.
 
 use egui::{Rect, Ui};
@@ -85,10 +85,11 @@ pub struct SizeValues {
     pub a: String,
     pub z: String,
     pub z1: String,
+    pub z2: String,
     pub h: String,
     pub s: String,
     pub d: String,
-    pub fill: String,
+    pub n: String,
     pub l: String,
     pub e: String,
     pub t: String,
@@ -99,13 +100,14 @@ impl Default for SizeValues {
         Self {
             a: "3.0".into(),
             z: "4.2".into(),
-            z1: "3.0".into(),
+            z1: String::new(),
+            z2: String::new(),
             h: "1.0".into(),
             s: String::new(),
             d: "5.0".into(),
-            fill: "20".into(),
-            l: "5".into(),
-            e: "40".into(),
+            n: "4".into(),
+            l: String::new(),
+            e: String::new(),
             t: "2.0".into(),
             w: "6.0".into(),
         }
@@ -165,6 +167,13 @@ impl WeldNotice {
 pub struct WeldPanelState {
     pub number: String,
     pub weld_type: WeldType,
+    pub symbol_standard: String,
+    pub groove: usize,
+    pub partial_penetration: bool,
+    pub root: usize,
+    pub root_gap: String,
+    pub add_fillet: bool,
+    pub focus_dimension: Option<&'static str>,
     pub picks: Picks,
     pub size: SizeValues,
     pub size_by_leg: bool,
@@ -196,7 +205,7 @@ pub struct WeldPanelState {
     pub reference_plane: usize,
     pub notices: Vec<WeldNotice>,
     pub type_picker_open: bool,
-    pub tack_points: bool,
+    pub tack_mode: usize,
 }
 
 impl Default for WeldPanelState {
@@ -204,6 +213,13 @@ impl Default for WeldPanelState {
         Self {
             number: "W1".into(),
             weld_type: WeldType::Fillet,
+            symbol_standard: "iso2553_2019_a".into(),
+            groove: 1,
+            partial_penetration: false,
+            root: 0,
+            root_gap: String::new(),
+            add_fillet: false,
+            focus_dimension: None,
             picks: Picks::default(),
             size: SizeValues::default(),
             size_by_leg: false,
@@ -235,18 +251,26 @@ impl Default for WeldPanelState {
             reference_plane: 0,
             notices: Vec::new(),
             type_picker_open: false,
-            tack_points: false,
+            tack_mode: 0,
         }
     }
 }
 
 impl WeldPanelState {
     pub fn where_kind(&self) -> WhereKind {
-        if self.weld_type == WeldType::Tack && self.tack_points { WhereKind::Point } else { self.weld_type.info().kind }
+        if self.weld_type == WeldType::Tack && self.tack_mode == 2 { WhereKind::Point } else { self.weld_type.info().kind }
     }
     pub fn pick_type(&mut self, weld_type: WeldType) {
         self.weld_type = weld_type;
         self.process_search.clear();
+        if weld_type == WeldType::Tack {
+            if self.size.l.trim().is_empty() {
+                self.size.l = "5".into();
+            }
+            if self.size.e.trim().is_empty() {
+                self.size.e = "40".into();
+            }
+        }
         self.face = match weld_type {
             WeldType::Butt | WeldType::Plug => Face::Flat,
             _ => Face::Convex,

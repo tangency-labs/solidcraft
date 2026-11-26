@@ -8,12 +8,55 @@ use crate::*;
 mod weld_tests {
     use super::*;
     #[test]
+    fn weld_review_choices_evaluate_and_reject_hostile_values_atomically() {
+        let mut s = Session::default();
+        for groove in solidcraft_doc::weld::GROOVES {
+            s.execute("weld.create", &json!({"weld_type":"butt", "groove":groove, "penetration":"partial", "size":{"h":"1 mm","s":"2 mm"}, "root":"backing_run", "root_gap":"0 mm", "add_fillet":true, "symbol_standard":"iso2553_2019_b"})).unwrap();
+            let settings = &s.doc.welds.last().unwrap().settings;
+            assert_eq!(settings.groove, *groove);
+            assert_eq!(settings.size["s"], 2.);
+            assert_eq!(settings.root_gap, Some(0.));
+            assert!(settings.add_fillet);
+        }
+        s.execute("weld.create", &json!({"weld_type":"fillet", "size":{"a":3,"z1":4,"z2":6,"s":5}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["z2"], 6.);
+        for mode in ["pitch", "count", "points"] {
+            s.execute("weld.create", &json!({"weld_type":"tack", "tack_mode":mode})).unwrap();
+            assert_eq!(s.doc.welds.last().unwrap().settings.tack_mode, mode);
+        }
+        s.execute("weld.create", &json!({"weld_type":"tack","tack_mode":"count","size":{"l":"5 mm","n":"2+3"}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["n"], 5.);
+        let back = solidcraft_doc::format::read(&serde_json::to_string(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.welds, s.doc.welds);
+        for invalid in [
+            json!({"weld_type":"butt","groove":"unknown"}),
+            json!({"weld_type":"butt","penetration":"partial"}),
+            json!({"weld_type":"butt","size":{"h":1,"s":2}}),
+            json!({"weld_type":"butt","root":"unknown"}),
+            json!({"weld_type":"butt","root_gap":-1}),
+            json!({"weld_type":"butt","root_gap":"1/0"}),
+            json!({"weld_type":"fillet","symbol_standard":"jis"}),
+            json!({"weld_type":"fillet","symbol_standard":4}),
+            json!({"weld_type":"tack","tack_mode":"unknown"}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":1.5}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":0}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":"2 mm"}}),
+            json!({"weld_type":"tack","tack_mode":"points","size":{"l":5,"e":40}}),
+            json!({"weld_type":"plug","size":{"fill":20}}),
+        ] {
+            let before = s.doc.clone();
+            assert!(matches!(s.execute("weld.create", &invalid), Err(EngineError::BadParams { .. })), "{invalid}");
+            assert_eq!(s.doc, before);
+        }
+    }
+    #[test]
     fn weld_create_is_a_graphic_and_undoable() {
         let mut s = Session::default();
         let reply = s.execute("weld.create", &json!({"weld_type":"fillet","size":{"a":"0.25 in"}})).unwrap();
         assert_eq!(reply["number"], "W1");
         assert_eq!(s.doc.welds.len(), 1);
         assert_eq!(s.doc.welds[0].settings.size["a"], 6.35);
+        assert_eq!(s.doc.welds[0].symbol.as_ref().unwrap().arrow_side.as_ref().unwrap().size, Some(solidcraft_geom::weld::Size::Throat(6.35)));
         assert!(s.doc.features.is_empty());
         assert!(s.model.state().bodies.is_empty());
         assert_eq!(s.execute("weld.create", &json!({"weld_type":"spot"})).unwrap()["number"], "W2");

@@ -74,6 +74,11 @@ mod weld_tests {
             ("spot_look", "unknown"),
             ("reference_plane", "0"),
             ("face", "unknown"),
+            ("symbol_standard", "jis"),
+            ("groove", "double_v"),
+            ("penetration", "unknown"),
+            ("root", "unknown"),
+            ("tack_mode", "unknown"),
         ] {
             let mut raw = serde_json::to_value(&settings).unwrap();
             raw[field] = serde_json::json!(value);
@@ -85,6 +90,16 @@ mod weld_tests {
             settings.weld_type = (*typ).into();
             for key in crate::weld::SIZE_KEYS {
                 settings.size = [((*key).into(), 1.)].into_iter().collect();
+                if *typ == "butt" {
+                    settings.penetration = if *key == "s" { "partial" } else { "full" }.into();
+                }
+                if *typ == "tack" {
+                    settings.size.insert("l".into(), 5.);
+                    settings.tack_mode = if *key == "n" { "count" } else { "pitch" }.into();
+                    if *key != "n" {
+                        settings.size.insert("e".into(), 40.);
+                    }
+                }
                 assert_eq!(settings.validate().is_ok(), crate::weld::size_keys(typ).contains(key), "{typ}/{key}");
             }
         }
@@ -125,6 +140,42 @@ mod weld_tests {
         let mut value = serde_json::to_value(&doc).unwrap();
         value["welds"] = serde_json::json!([record(), record()]);
         assert!(crate::format::read(&value.to_string()).is_err());
+    }
+
+    #[test]
+    fn weld_choices_and_new_sizes_round_trip_without_changing_legacy_defaults() {
+        use crate::weld::WeldSettings;
+        let legacy: WeldSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.symbol_standard, "iso2553_2019_a");
+        assert_eq!((&*legacy.groove, &*legacy.penetration, &*legacy.root, &*legacy.tack_mode), ("v", "full", "as_welded", "pitch"));
+        for standard in crate::weld::SYMBOL_STANDARDS {
+            let mut r = record();
+            r.settings.symbol_standard = (*standard).into();
+            r.settings.root_gap = Some(0.);
+            r.settings.size.extend([("z1".into(), 4.), ("z2".into(), 6.), ("s".into(), 5.)]);
+            let back: crate::weld::WeldRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+            assert_eq!(back, r);
+        }
+        for (mode, sizes) in [("pitch", vec![("l", 5.), ("e", 40.)]), ("count", vec![("l", 5.), ("n", 4.)]), ("points", vec![("l", 5.)])] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: mode.into(),
+                size: sizes.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                ..Default::default()
+            };
+            settings.validate().unwrap();
+            let back: WeldSettings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+            assert_eq!(back, settings);
+        }
+        for n in [0., -1., 1.5, f64::NAN, f64::INFINITY] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: "count".into(),
+                size: [("l".into(), 5.), ("n".into(), n)].into_iter().collect(),
+                ..Default::default()
+            };
+            assert!(settings.validate().is_err());
+        }
     }
 }
 

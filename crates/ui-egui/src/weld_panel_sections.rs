@@ -1,15 +1,15 @@
 //! Compositions of kit controls using the weld board's spacing, expressed in theme metrics.
 use super::*;
 use crate::ui_kit::{self as kit, BackingTooltipExt as _, Button, Container, Surface};
-use crate::weld_figures::{SizeFigure, paint_size_figure};
+use crate::weld_figures::{FigureState, SizeFigure, paint_size_figure};
 use egui::{Align, Align2, FontId, Layout, RichText, Sense, UiBuilder, pos2, vec2};
 
 #[path = "weld_panel/chrome.rs"]
-mod chrome;
+pub(super) mod chrome;
 #[path = "weld_panel/look.rs"]
 pub(super) mod look;
 #[path = "weld_panel/size.rs"]
-mod size;
+pub(super) mod size;
 
 fn card_width(t: &Tokens) -> f32 {
     t.form_card_width + 2.0 * (t.space_24 + t.space_16)
@@ -41,6 +41,7 @@ fn rule(ui: &Ui, t: &Tokens, y: f32) {
 }
 
 fn section(ui: &mut Ui, t: &Tokens, m: &mut Measurements, key: &'static str, add: impl FnOnce(&mut Ui, &mut Measurements)) {
+    let section_index = m.sections.len();
     let top = ui.cursor().top();
     rule(ui, t, top);
     let left = ui.max_rect().left() + t.space_14;
@@ -56,7 +57,7 @@ fn section(ui: &mut Ui, t: &Tokens, m: &mut Measurements, key: &'static str, add
     let bottom = body.min_rect().bottom() + t.space_12;
     let rect = Rect::from_min_max(pos2(ui.max_rect().left(), top), pos2(ui.max_rect().right(), bottom));
     ui.allocate_rect(rect, Sense::hover());
-    m.sections.push((key, rect));
+    m.sections.insert(section_index, (key, rect));
 }
 
 fn grey(ui: &mut Ui, t: &Tokens, m: &mut Measurements, key: &'static str, text: &str) {
@@ -236,14 +237,12 @@ fn picks(state: &mut WeldPanelState) -> &mut Vec<String> {
 fn where_section(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurements, event: &mut WeldPanelEvent) {
     section(ui, t, m, "where", |ui, _| {
         if state.weld_type == WeldType::Tack {
-            let mut selected = usize::from(state.tack_points);
             kit::segmented(
                 ui,
-                &mut selected,
-                &[tr("ui.weld.kind.line"), tr("ui.weld.kind.point")],
+                &mut state.tack_mode,
+                &[tr("ui.weld.tack.pitch"), tr("ui.weld.tack.count"), tr("ui.weld.tack.points")],
                 kit::Segments { compact: true, ..Default::default() },
             );
-            state.tack_points = selected == 1;
         }
         let kind = state.where_kind();
         let groove = state.weld_type == WeldType::Butt;
@@ -279,12 +278,20 @@ fn where_section(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Me
                     picks(state).remove(index);
                     *event = WeldPanelEvent::PicksChanged;
                 }
-                if picks(state).is_empty() && kit::button(ui, tr("ui.weld.pick_geometry"), Button::Normal).clicked() {
+                let pick_label = match kind {
+                    WhereKind::Point => "ui.weld.pick.points",
+                    WhereKind::Hole => "ui.weld.pick.hole",
+                    WhereKind::Ring => "ui.weld.pick.stud",
+                    WhereKind::Line | WhereKind::Area => "ui.weld.pick.geometry",
+                };
+                if picks(state).is_empty() && kit::button(ui, tr(pick_label), Button::Normal).clicked() {
                     *event = WeldPanelEvent::Pick(kind);
                 }
             });
         });
-        let hint = if groove {
+        let hint = if state.weld_type == WeldType::Tack && kind == WhereKind::Point {
+            "ui.weld.where.tack_points"
+        } else if groove {
             "ui.weld.where.groove"
         } else {
             match kind {
@@ -300,9 +307,13 @@ fn where_section(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Me
         if groove {
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 + t.space_2, t.space_24 + t.space_2), Sense::hover());
-                kit::icons::paint_icon(ui.painter(), rect, "weld_groove_v", 1.0);
-                label(ui, "ui.weld.detected", t, false);
-                label(ui, "ui.weld.from_parts", t, true);
+                let shape = solidcraft_engine::doc::weld::GROOVES.get(state.groove).copied().unwrap_or("v");
+                kit::icons::paint_icon(ui.painter(), rect, &format!("weld_groove_{shape}"), 1.0);
+                ui.label(
+                    RichText::new(solidcraft_ui_text::format("ui.weld.groove.detected", &[("shape", tr(&format!("ui.weld.groove.{shape}")))]))
+                        .size(t.font_body)
+                        .color(t.form_dim),
+                );
             });
         } else if kind == WhereKind::Line {
             ui.horizontal(|ui| {
@@ -318,12 +329,20 @@ fn where_section(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Me
 }
 
 fn expression_unit(ui: &mut Ui, value: &mut String, unit: &str, t: &Tokens) -> Rect {
+    expression_unit_focus(ui, value, unit, t, false)
+}
+
+fn expression_unit_focus(ui: &mut Ui, value: &mut String, unit: &str, t: &Tokens, focus: bool) -> Rect {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), Sense::hover());
     let width = ui.painter().layout_no_wrap(tr(unit).into(), FontId::proportional(t.font_body), t.form_dim).size().x;
     let field = Rect::from_min_max(rect.min, pos2((rect.right() - width - t.space_6).max(rect.left()), rect.bottom()));
     let mut field_ui = child(ui, field, "expression");
     field_ui.set_clip_rect(ui.clip_rect().intersect(field));
-    kit::field(&mut field_ui, value);
+    let (_, response) = kit::checked_field(&mut field_ui, value, "", false);
+    if focus {
+        response.request_focus();
+        response.scroll_to_me(Some(Align::Center));
+    }
     ui.painter().text(rect.right_center(), Align2::RIGHT_CENTER, tr(unit), FontId::proportional(t.font_body), t.form_dim);
     rect
 }
@@ -333,13 +352,13 @@ fn face(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurement
         grey(ui, t, m, "face", tr("ui.weld.face.spot"));
         return;
     }
-    if matches!(state.weld_type, WeldType::Surfacing | WeldType::Stud | WeldType::Seam) {
+    if matches!(state.weld_type, WeldType::Surfacing | WeldType::Stud | WeldType::Seam | WeldType::Tack) {
         grey(ui, t, m, "face", tr("ui.weld.face.unused"));
         return;
     }
     section(ui, t, m, "face", |ui, m| {
         let choices = [
-            (Face::Flat, "weld_face_flat", if state.weld_type == WeldType::Plug { "ui.weld.flush" } else { "ui.weld.flat" }),
+            (Face::Flat, "weld_face_flat", "ui.weld.face.flat_flush"),
             (Face::Convex, "weld_face_convex", "ui.weld.convex"),
             (Face::Concave, "weld_face_concave", "ui.weld.concave"),
         ];
@@ -367,7 +386,9 @@ fn face(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurement
 
 fn extent(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurements) {
     if state.where_kind() != WhereKind::Line {
-        let id = if state.where_kind() == WhereKind::Point {
+        let id = if state.weld_type == WeldType::Tack {
+            "ui.weld.extent.tack_points".into()
+        } else if state.where_kind() == WhereKind::Point {
             "ui.weld.extent.spot".into()
         } else {
             format!("ui.weld.extent.{}", state.weld_type.info().label.trim_start_matches("ui.weld.type."))
@@ -377,21 +398,33 @@ fn extent(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measureme
     }
     section(ui, t, m, "extent", |ui, _| {
         kit::settings_form(ui, t.form_label_width + t.space_6, |ui| {
-            kit::sized_row(ui, tr("ui.weld.extent"), t.space_16, |ui| label(ui, "ui.weld.whole_edge", t, false));
-            kit::checkbox(ui, tr("ui.weld.spans"), &mut state.spans);
+            label(ui, "ui.weld.extent.whole_hint", t, true);
+            ui.horizontal_wrapped(|ui| {
+                kit::checkbox(ui, tr("ui.weld.spans_short"), &mut state.spans);
+                let mut selected = usize::from(state.staggered);
+                kit::segmented(
+                    ui,
+                    &mut selected,
+                    &[tr("ui.weld.chain"), tr("ui.weld.staggered")],
+                    kit::Segments { small: true, compact: true, ..Default::default() },
+                );
+                state.staggered = selected == 1;
+            });
             if state.spans {
-                kit::expr_row(ui, tr("ui.weld.spans.n"), &mut state.span_count);
-                kit::expr_row(ui, tr("ui.weld.spans.l"), &mut state.span_length);
-                kit::expr_row(ui, tr("ui.weld.spans.e"), &mut state.span_pitch);
+                kit::row(ui, tr("ui.weld.spans.n"), |ui| {
+                    let (_, response) = kit::checked_field(ui, &mut state.span_count, "", false);
+                    if state.focus_dimension == Some("n") {
+                        response.request_focus();
+                        response.scroll_to_me(Some(Align::Center));
+                        state.focus_dimension = None;
+                    }
+                });
+                dimension_row(ui, "l", &mut state.span_length, &mut state.focus_dimension, t);
+                dimension_row(ui, "e", &mut state.span_pitch, &mut state.focus_dimension, t);
             }
             toggle_chip(ui, "ui.weld.both_sides", "weld_both_sides", &mut state.both_sides);
-            kit::sized_row(ui, tr("ui.weld.corners"), t.space_16 + t.space_16 * 2.0, |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = t.space_2;
-                    label(ui, "ui.weld.automatic", t, false);
-                    label(ui, "ui.weld.corner_hint", t, true);
-                })
-            });
+            label(ui, "ui.weld.extent.corners_hint", t, true);
+            label(ui, "ui.weld.corner_hint", t, true);
         });
     });
 }
@@ -411,8 +444,8 @@ fn notices(ui: &mut Ui, state: &WeldPanelState, t: &Tokens, m: &mut Measurements
         });
         for (index, notice) in order {
             let (ink, fill) = match notice.kind {
-                NoticeKind::Warn => (t.pref_note, t.pref_note_fill),
-                NoticeKind::Clash | NoticeKind::Refusal | NoticeKind::Lost => (t.form_error, t.form_error_fill),
+                NoticeKind::Warn | NoticeKind::Clash => (t.warning, t.pref_note_fill),
+                NoticeKind::Refusal | NoticeKind::Lost => (t.form_error, t.form_error_fill),
                 NoticeKind::Info => (t.form_ink, t.selected_bg),
             };
             let frame = Container::floating_card(Surface::Navigation)
@@ -475,79 +508,20 @@ fn icon_name(kind: NoticeKind) -> &'static str {
 }
 
 fn advanced(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurements) {
-    if state.advanced_open {
-        section(ui, t, m, "pro", |ui, _| {
-            let heading_y = ui.cursor().top() - t.space_6 - (t.space_24 - t.space_2) / 2.0;
-            ui.painter().text(
-                pos2(ui.max_rect().right(), heading_y),
-                Align2::RIGHT_CENTER,
-                tr("ui.weld.pro_fields"),
-                FontId::proportional(t.font_caption),
-                t.form_dim,
-            );
-            kit::row(ui, tr("ui.weld.density"), |ui| expression_unit(ui, &mut state.density, "ui.weld.kg_m3", t));
-            label(ui, "ui.weld.no_mass_hint", t, true);
-            if state.weld_type == WeldType::Butt {
-                kit::row(ui, tr("ui.weld.overlap"), |ui| {
-                    kit::hint_field(ui, &mut state.overlap, &state.size.h);
-                });
-            }
-            if state.weld_type == WeldType::Fillet {
-                kit::checkbox(ui, tr("ui.weld.different_halves"), &mut state.different_halves);
-                kit::checkbox(ui, tr("ui.weld.sharp_mitre"), &mut state.sharp_mitre);
-                kit::checkbox(ui, tr("ui.weld.merge_crossing"), &mut state.merge_crossing);
-            }
-            if state.where_kind() == WhereKind::Line {
-                kit::row(ui, tr("ui.weld.spans_short"), |ui| {
-                    let mut selected = usize::from(state.staggered);
-                    kit::segmented(
-                        ui,
-                        &mut selected,
-                        &[tr("ui.weld.chain"), tr("ui.weld.staggered")],
-                        kit::Segments { compact: true, icons: &["weld_extent_chain", "weld_extent_staggered"], ..Default::default() },
-                    );
-                    state.staggered = selected == 1;
-                });
-                kit::row(ui, tr("ui.weld.ends"), |ui| {
-                    kit::segmented(
-                        ui,
-                        &mut state.ends,
-                        &[tr("ui.weld.square"), tr("ui.weld.tapered"), tr("ui.weld.rounded")],
-                        kit::Segments {
-                            compact: true,
-                            glyphs: Some(&|painter, rect, index, _| {
-                                kit::icons::paint_icon(
-                                    painter,
-                                    Rect::from_center_size(rect.center(), vec2(t.space_24, t.space_24)),
-                                    ["weld_end_square", "weld_end_tapered", "weld_end_rounded"].get(index).copied().unwrap_or("weld_end_square"),
-                                    1.0,
-                                )
-                            }),
-                            ..Default::default()
-                        },
-                    );
-                });
-                kit::choice_row(ui, tr("ui.weld.reference_plane"), "reference_plane", &mut state.reference_plane, &[tr("ui.weld.sketch_plane_off")]);
-                label(ui, "ui.weld.floating_hint", t, true);
-            }
-        });
+    // Tack has only Ends (it is a line type); point-mode tacks and Spot have no saved Advanced fields here.
+    if matches!(state.weld_type, WeldType::Spot) || (state.weld_type == WeldType::Tack && state.where_kind() != WhereKind::Line) {
+        return;
     }
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height + t.space_8), Sense::hover());
-    rule(ui, t, rect.top());
-    let disclosure = Rect::from_center_size(pos2(rect.left() + t.space_14 + t.space_6, rect.center().y), vec2(t.space_14, t.space_14));
-    // The kit exposes the disclosure glyph and its small button, but no full text row.
-    // One invisible hit area covers the whole row without painting over the rounded card.
+    let disclosure = Rect::from_center_size(pos2(rect.left() + t.space_6, rect.center().y), vec2(t.space_14, t.space_14));
     let response = ui.interact(rect, ui.make_persistent_id("advanced"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     kit::disclosure(ui.painter(), disclosure.center(), state.advanced_open, t.form_dim);
-    let text_rect = Rect::from_min_max(pos2(disclosure.right() + t.space_6, rect.top()), rect.max);
-    let title = ui.painter().layout_no_wrap(tr("ui.weld.section.advanced").into(), kit::type_face::semibold(t.font_label), t.form_ink);
-    ui.painter().galley(pos2(text_rect.left(), text_rect.center().y - title.size().y / 2.0), title.clone(), t.form_ink);
     ui.painter().text(
-        pos2(text_rect.left() + title.size().x + t.space_6, text_rect.center().y),
+        pos2(disclosure.right() + t.space_6, rect.center().y),
         Align2::LEFT_CENTER,
-        tr("ui.weld.pro_fields"),
-        FontId::proportional(t.font_label),
-        t.form_dim,
+        tr("ui.weld.section.advanced"),
+        kit::type_face::semibold(t.font_label),
+        t.form_ink,
     );
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), state.advanced_open, tr("ui.weld.section.advanced"))
@@ -558,8 +532,75 @@ fn advanced(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measure
         state.advanced_open = !state.advanced_open;
     }
     m.sections.push(("advanced", rect));
+    if !state.advanced_open {
+        return;
+    }
+    // The main sketch above also carries the advanced letters and redraws with these values.
+    match state.weld_type {
+        WeldType::Fillet => {
+            dimension_row(ui, "z1", &mut state.size.z1, &mut state.focus_dimension, t);
+            dimension_row(ui, "z2", &mut state.size.z2, &mut state.focus_dimension, t);
+            dimension_row(ui, "s", &mut state.size.s, &mut state.focus_dimension, t);
+        }
+        WeldType::Butt => {
+            kit::row(ui, tr("ui.weld.overlap"), |ui| {
+                let (_, response) = kit::checked_field(ui, &mut state.overlap, &state.size.h, false);
+                if state.focus_dimension == Some("o") {
+                    response.request_focus();
+                    response.scroll_to_me(Some(Align::Center));
+                    state.focus_dimension = None;
+                }
+            });
+            kit::checkbox(ui, tr("ui.weld.add_fillet"), &mut state.add_fillet);
+            kit::choice_row(
+                ui,
+                tr("ui.weld.root"),
+                "root",
+                &mut state.root,
+                &[tr("ui.weld.root.as_welded"), tr("ui.weld.root.melt_through"), tr("ui.weld.root.backing_run")],
+            );
+            let mut below = state.face == Face::Concave;
+            if kit::checkbox(ui, tr("ui.weld.butt.concave_below"), &mut below).changed() {
+                state.face = if below { Face::Concave } else { Face::Flat };
+            }
+            if below {
+                kit::warning_caption(ui, tr("ui.weld.butt.concave_below"), tr("ui.weld.butt.concave_warning"));
+            }
+        }
+        WeldType::Seam => {
+            dimension_row(ui, "l", &mut state.size.l, &mut state.focus_dimension, t);
+        }
+        WeldType::Plug | WeldType::Stud => {
+            dimension_row(ui, "e", &mut state.size.e, &mut state.focus_dimension, t);
+        }
+        WeldType::Surfacing => {
+            dimension_row(ui, "w", &mut state.size.w, &mut state.focus_dimension, t);
+            dimension_row(ui, "o", &mut state.overlap, &mut state.focus_dimension, t);
+        }
+        WeldType::Edge | WeldType::Tack | WeldType::Spot => {}
+    }
+    if matches!(state.weld_type, WeldType::Fillet | WeldType::Butt) {
+        dimension_row(ui, "b", &mut state.root_gap, &mut state.focus_dimension, t);
+    }
+    if matches!(state.weld_type, WeldType::Fillet | WeldType::Butt | WeldType::Edge | WeldType::Plug) {
+        kit::row(ui, tr("ui.weld.density"), |ui| expression_unit(ui, &mut state.density, "ui.weld.kg_m3", t));
+        label(ui, "ui.weld.no_mass_hint", t, true);
+    }
+    if state.where_kind() == WhereKind::Line {
+        kit::choice_row(ui, tr("ui.weld.ends"), "ends", &mut state.ends, &[tr("ui.weld.square"), tr("ui.weld.tapered"), tr("ui.weld.rounded")]);
+        kit::choice_row(ui, tr("ui.weld.reference_plane"), "reference_plane", &mut state.reference_plane, &[tr("ui.weld.sketch_plane_off")]);
+        label(ui, "ui.weld.floating_hint", t, true);
+    }
 }
 
+fn dimension_row(ui: &mut Ui, letter: &'static str, value: &mut String, focus: &mut Option<&'static str>, t: &Tokens) {
+    let requested = *focus == Some(letter);
+    let label = if letter == "b" { "ui.weld.root_gap".into() } else { format!("ui.weld.dim.{letter}") };
+    kit::row(ui, tr(&label), |ui| expression_unit_focus(ui, value, "ui.weld.mm", t, requested));
+    if requested {
+        *focus = None;
+    }
+}
 pub(super) fn show_body_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens) -> (WeldPanelEvent, Measurements) {
     let mut event = WeldPanelEvent::None;
     let mut measured = Measurements::default();
@@ -574,7 +615,6 @@ pub(super) fn show_body_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &To
         look::process(ui, state, t, &mut measured);
         look::show(ui, state, t, &mut measured);
         notices(ui, state, t, &mut measured, &mut event);
-        advanced(ui, state, t, &mut measured);
     });
     (event, measured)
 }
