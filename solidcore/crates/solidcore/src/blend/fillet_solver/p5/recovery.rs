@@ -804,19 +804,32 @@ impl Recovery<'_> {
                     self.start(rail)?
                 };
                 let record = self.fillets.fillet_vertex(vertex)?;
-                if record.fillet_vertex_type() != FilletVertexType::RailXExtendedEdgeuse {
-                    continue;
-                }
+                let vertex_type = record.fillet_vertex_type();
                 let Some(corner) = record.fillet_corner() else {
                     continue;
                 };
-                let Some(cap) = self.corners.lookup().corner(corner)?.end_cap.as_ref() else {
+                if vertex_type == FilletVertexType::RailXExtendedEdgeuse {
+                    let Some(cap) = self.corners.lookup().corner(corner)?.end_cap.as_ref() else {
+                        continue;
+                    };
+                    let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
+                        return Err(SolidError::blend_solver(OP, Solver::EndCapNotPlane));
+                    };
+                    normal = Some((plane.is_planar().0, plane.evaluate_normal()));
+                } else if matches!(
+                    vertex_type,
+                    FilletVertexType::JoinSection | FilletVertexType::Mate
+                ) {
+                    // (#13710) a deferred Join of chamfers of setbacks: its shared section's
+                    // plane, through the corner's vertex square to the edge there (the two
+                    // edges are tangent at it)
+                    let Some(plane) = self.deferred_join_plane(corner)? else {
+                        continue;
+                    };
+                    normal = Some(plane);
+                } else {
                     continue;
-                };
-                let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
-                    return Err(SolidError::blend_solver(OP, Solver::EndCapNotPlane));
-                };
-                normal = Some((plane.is_planar().0, plane.evaluate_normal()));
+                }
                 ends.push(self.fillets.vertex_point(vertex)?);
             }
             let (Some((origin, mut normal)), [a, b]) = (normal, ends.as_slice()) else {
@@ -853,6 +866,94 @@ impl Recovery<'_> {
             *slot = Some(section);
         }
         Ok(out)
+    }
+
+    /// Not upstream (#13710): the plane of a deferred Join's shared section
+    /// (`FilletCorner::deferred_join`), through the corner's vertex V square to the solver's
+    /// edge there (`C′` at V's parameter, the solver's drop of V on its edge): the plane the
+    /// Join's `calc_join_section` solves the native blend's section in. `None` for any
+    /// other corner, or a solver that is not a chamfer of setbacks (only those defer).
+    ///
+    /// # Errors
+    /// Those of the lookups, the drop and the edge's evaluation.
+    fn deferred_join_plane(&mut self, corner: FilletCornerId) -> Result<Option<(Point3, Vec3)>> {
+        if !self.corners.deferred_join(corner)? {
+            return Ok(None);
+        }
+        let Some(v) = self.corners.lookup().corner(corner)?.filleted_vertex() else {
+            return Ok(None);
+        };
+        let origin = self.target.vertex(v)?.point;
+        let k = self.k;
+        let Some(setback) = self.solver.setback_mut() else {
+            return Ok(None);
+        };
+        let s = setback.station_of(k, origin)?;
+        let jet = setback.jet(k, s)?;
+        Ok(Some((origin, jet.d1)))
+    }
+
+    /// Not upstream (#13710): before geometry `geom` is traced again through the sections
+    /// `ends` ([`Self::end_sections`]), its rail ends at a deferred Join take the section
+    /// there, solved on the geometry's supports as they are now (the face beyond, in a
+    /// tangent roll-over), in place of the one the vertex pass solved on the blend's own
+    /// supports (whose feet and parameters are not the piece's), as `calc_join_section`
+    /// sets a blend's rail ends at a Join. The trace then runs through them, and the Join's
+    /// later pass keeps them. Returns, for each end, whether its section went to such rail
+    /// ends (and is given to the trace by them, not again as an end).
+    ///
+    /// # Errors
+    /// Those of the lookups.
+    fn set_deferred_join_ends(
+        &mut self,
+        geom: FilletGeomId,
+        ends: &[Option<TsectPnt>; 2],
+    ) -> Result<[bool; 2]> {
+        let mut held = [false, false];
+        for ((section, at_end), slot) in ends.iter().zip([false, true]).zip(held.iter_mut()) {
+            let Some(section) = section else {
+                continue;
+            };
+            for which in 0..2 {
+                let rail = caller(
+                    self.fillets.geom(geom)?.rail(which),
+                    Solver::FilletGeomWithoutRail {
+                        fillet_geom: geom,
+                        side: which,
+                    },
+                )?;
+                let vertex = if at_end {
+                    self.end(rail)?
+                } else {
+                    self.start(rail)?
+                };
+                let record = self.fillets.fillet_vertex(vertex)?;
+                let vertex_type = record.fillet_vertex_type();
+                if !matches!(
+                    vertex_type,
+                    FilletVertexType::JoinSection | FilletVertexType::Mate
+                ) {
+                    continue;
+                }
+                let Some(corner) = record.fillet_corner() else {
+                    continue;
+                };
+                if !self.corners.deferred_join(corner)? {
+                    continue;
+                }
+                if let Some(vu) = self
+                    .fillets
+                    .vu_at_rail_end(vertex, Some(geom), None, None)?
+                {
+                    self.fillets
+                        .fillet_vertexuse_mut(vu)?
+                        .set_tsect_pnt(section);
+                    // the trace takes a Join section's rail end as a point, not a mate's
+                    *slot |= vertex_type == FilletVertexType::JoinSection;
+                }
+            }
+        }
+        Ok(held)
     }
 
     pub(super) fn process(
@@ -1423,7 +1524,14 @@ impl Recovery<'_> {
                         direction = values.get(1).copied();
                     }
                 }
-                let ends = self.end_sections(current_geom)?;
+                let mut ends = self.end_sections(current_geom)?;
+                // a deferred Join's section is given to the trace once, by its rail ends
+                let held = self.set_deferred_join_ends(current_geom, &ends)?;
+                for (slot, held) in ends.iter_mut().zip(held) {
+                    if held {
+                        *slot = None;
+                    }
+                }
                 if ends.iter().all(Option::is_none) {
                     ops.recalc(self, current_geom, analytic, direction)
                 } else {

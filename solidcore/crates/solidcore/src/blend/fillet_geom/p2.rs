@@ -4068,6 +4068,16 @@ impl FilletBrep {
                     .ok_or_else(|| defect(OP, SHORT_EVALUATION))?;
             }
 
+            // (#13710) a deferred Join's tangent roll-over piece keeps the rail ends its trace
+            // through the shared section's plane set (on its own offsets, the face beyond:
+            // `Recovery::set_deferred_join_ends`); the solver's offsets here are not its own
+            if deferred
+                && self.geom(g)?.fillet_geom_type()
+                    == crate::blend::fillet_geom::p1::FilletGeomType::TangentRollover
+            {
+                continue;
+            }
+
             // the ball's feet at the vertex, on each of the blend's faces
             let mut uvs = [Point2::new(0.0, 0.0); 2];
             for (ii, slot) in uvs.iter_mut().enumerate() {
@@ -4172,6 +4182,13 @@ impl FilletBrep {
             if at_cliff {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
+            }
+            // (#13710) a deferred Join's blend that is not native on a side has its foot
+            // there off its own face (`join::setback_seam_sides` defers only then, having
+            // found that foot over the trace's domains): its section is solved over the
+            // same domains, which a support trimmed to its face does not hold otherwise
+            if deferred {
+                [domain1, domain2] = fs.trace_domains(k)?;
             }
             let (found, tsect) = point_on_plane_solve(
                 k,

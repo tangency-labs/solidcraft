@@ -183,6 +183,27 @@ fn is_same_surface(
 }
 
 impl FilletSolver {
+    /// The base surface domains the trace seeks the feet over: each rail's natural domain,
+    /// extended as the trace extends it ([`Self::domain_extension`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the domains and the extension; a rail without its offset surface.
+    pub fn trace_domains(&self, k: &Kernel) -> Result<[Extent2d; 2]> {
+        use crate::blend::fillet_standard_solver::p1::SolverRails;
+        let mut out = [Extent2d::default(); 2];
+        for (rail, slot) in out.iter_mut().enumerate() {
+            let surface = self.rail(rail)?;
+            let domain = surface.base_surface().natural_uv_domain_with_nurb(k)?;
+            let size = self.domain_extension(k, Some(surface.base_surface()), &domain)?;
+            *slot = Extent2d::from_points(
+                Point2::new(domain.min().x - size.x, domain.min().y - size.y),
+                Point2::new(domain.max().x + size.x, domain.max().y + size.y),
+            );
+        }
+        Ok(out)
+    }
+
     /// `SetTraceReach(dReach, crabAcross)` (fork, WR-609): how far (3D) the trace's base
     /// surface domains reach past their own at least, across the edge (`0` = by the
     /// extension factor alone), and which parameter directions of each base surface

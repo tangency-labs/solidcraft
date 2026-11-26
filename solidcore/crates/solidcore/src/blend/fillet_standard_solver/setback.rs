@@ -965,18 +965,7 @@ impl SetbackFs {
     ///
     /// Those of the domains and the extension.
     pub fn trace_domains(&self, k: &Kernel) -> Result<[Extent2d; 2]> {
-        let solver = &self.curve_based.solver;
-        let mut out = [Extent2d::default(); 2];
-        for (rail, slot) in out.iter_mut().enumerate() {
-            let surface = solver.rail(rail)?;
-            let domain = surface.base_surface().natural_uv_domain_with_nurb(k)?;
-            let size = solver.domain_extension(k, Some(surface.base_surface()), &domain)?;
-            *slot = Extent2d::from_points(
-                Point2::new(domain.min().x - size.x, domain.min().y - size.y),
-                Point2::new(domain.max().x + size.x, domain.max().y + size.y),
-            );
-        }
-        Ok(out)
+        self.curve_based.solver.trace_domains(k)
     }
 
     /// `LoadJacobian` of the setback solver: with `x = [.. u1 v1 u2 v2 s ..]` (the UV points

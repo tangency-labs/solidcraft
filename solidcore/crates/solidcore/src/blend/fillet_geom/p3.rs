@@ -1890,6 +1890,14 @@ pub trait SplitCorners {
     fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
         Ok(self.lookup().corner(id)?.meets_itself())
     }
+    /// Not upstream (#13710): whether the corner is a deferred Join of chamfers of setbacks
+    /// (`FilletCorner::deferred_join`).
+    ///
+    /// # Errors
+    /// [`CornerLookup::corner`]'s for an id not in the table.
+    fn deferred_join(&self, id: FilletCornerId) -> Result<bool> {
+        Ok(self.lookup().corner(id)?.deferred_join)
+    }
 }
 
 /// A caller without an executive (a standalone entry point): no vertex has a corner
@@ -1906,6 +1914,11 @@ impl SplitCorners for NoCorners {
     }
     fn corner_mut(&mut self, _id: FilletCornerId) -> Result<&mut FilletCorner> {
         Err(broken_link(OP_SPLIT, NO_CORNER_TABLE))
+    }
+    /// Without an executive no Join is deferred (the topology that defers one is the
+    /// executive's).
+    fn deferred_join(&self, _id: FilletCornerId) -> Result<bool> {
+        Ok(false)
     }
 }
 
