@@ -465,6 +465,27 @@ fn curve_replica_is_its_parent_moved_and_scaled() {
     at_curve(&l, 1.0, [5.0, 6.0, 0.0]);
 }
 
+/// Some writers leave the operator's description out, writing `('',axis1,axis2,local_origin,
+/// scale,axis3)` (#2340): TURNED written that way is the same replica, and an operator with no
+/// axes, or with the global ones, moves the parent by its origin, whichever way it is written.
+#[test]
+fn curve_replica_reads_an_operator_written_without_its_description() {
+    let short = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',#5,$,#20,2.,#2);";
+    let c = curve(&format!("{short}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    at_curve(&c, 0.0, [5.0, 20.0, 0.0]);
+    at_curve(&c, FRAC_PI_2, [-15.0, 0.0, 0.0]);
+    for op in ["('','',$,$,#20,$,$)", "('',$,$,#20,$,$)", "('','',#3,#5,#20,1.,#2)", "('',#3,#5,#20,1.,#2)"] {
+        let l = curve(
+            &format!(
+                "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op};#10=LINE('',#1,#12);#12=VECTOR('',#3,3.);#11=CURVE_REPLICA('',#10,#21);"
+            ),
+            11,
+            MM,
+        );
+        at_curve(&l, 1.0, [8.0, 0.0, 0.0]);
+    }
+}
+
 #[test]
 fn curve_replica_scales_its_placement_with_the_file_units() {
     let inches = Units { len: 25.4, ang: 1.0 };
@@ -480,6 +501,48 @@ fn curve_replica_scales_its_placement_with_the_file_units() {
 fn curve_replica_round_trips() {
     let c = curve(&format!("{TURNED}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
     round_trip_curve(&c, &[0.0, 1.0, FRAC_PI_2, PI]);
+}
+
+/// A SURFACE_REPLICA (#2340) is its parent moved, as the same kind of surface with the parent's
+/// parameters, whether the operator is written with its description or without it. The operator
+/// turns x' = +Y, z' = +Z (so y' = -X) about the origin (5, 0, 0).
+#[test]
+fn surface_replica_is_its_parent_moved() {
+    for op in ["('','',#5,$,#20,1.,#2)", "('',#5,$,#20,1.,#2)"] {
+        let moved = format!("#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op};");
+        let p = surface(&format!("{moved}#10=PLANE('',#4);#11=SURFACE_REPLICA('',#10,#21);"), 11, MM);
+        assert!(matches!(*p, Surface::Plane { .. }), "{p:?}");
+        at_surface(&p, 1.0, 2.0, [3.0, 1.0, 0.0]);
+        let c = surface(&format!("{moved}#10=CYLINDRICAL_SURFACE('',#4,10.);#11=SURFACE_REPLICA('',#10,#21);"), 11, MM);
+        assert!(matches!(*c, Surface::Cylinder { radius: 10.0, .. }), "{c:?}");
+        at_surface(&c, 0.0, 3.0, [5.0, 10.0, 3.0]);
+        at_surface(&c, FRAC_PI_2, 3.0, [-5.0, 0.0, 3.0]);
+    }
+    // A sphere's parameters are angles, so it carries a scale: its radius grows with it.
+    let s = surface(
+        "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,2.,$);#10=SPHERICAL_SURFACE('',#4,10.);#11=SURFACE_REPLICA('',#10,#21);",
+        11,
+        MM,
+    );
+    at_surface(&s, 0.0, 0.0, [25.0, 0.0, 0.0]);
+}
+
+/// A scale stretches a plane's or a cylinder's length parameters, so the pcurves on it would no
+/// longer fit, and a mirror turns a surface over: both are refused, never read as a wrong surface.
+#[test]
+fn surface_replica_refuses_a_scale_its_surface_cannot_carry_and_a_mirror() {
+    let read = |data: &str| {
+        let ex = file(&format!("{BASE}#20=CARTESIAN_POINT('',(5.,0.,0.));#6=DIRECTION('',(0.,-1.,0.));{data}#11=SURFACE_REPLICA('',#10,#21);"));
+        Reader::new(&ex, MM).surface(11).map(|_| ()).unwrap_err()
+    };
+    let scaled = "#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,2.,$);";
+    let mirrored = "#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',#3,#6,#20,1.,#2);";
+    for parent in ["#10=PLANE('',#4);", "#10=CYLINDRICAL_SURFACE('',#4,10.);"] {
+        let e = read(&format!("{scaled}{parent}"));
+        assert!(e.starts_with("not supported yet: a SURFACE_REPLICA that scales"), "{e}");
+        let e = read(&format!("{mirrored}{parent}"));
+        assert_eq!(e, "not supported yet: a SURFACE_REPLICA that mirrors");
+    }
 }
 
 #[test]

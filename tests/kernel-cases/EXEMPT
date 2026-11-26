@@ -236,6 +236,7 @@ inspect.environment_map           display analysis: shading
 inspect.hole_stacks               read-only query: tested in crates/engine/src/cmd/hole_stacks_tests.rs
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
+inspect.socket_reach              read-only clearance query: tested in crates/engine/src/cmd/clearance_tests.rs
 inspect.zebra                     display analysis: shading
 joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
@@ -412,6 +413,7 @@ settings.profile.save             settings profiles: preferences saved, applied 
 shaft_spline.insert               crates/engine/src/cmd/shaft_spline_tests.rs (volumes and faces against hand-derived values) and the tooth outline tests in solidcore/crates/solidcore/src/teeth/tests.rs
 sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
+sheet.hardware                    a hole in a sheet's flat, no kernel operation of its own: crates/engine/src/cmd/sheet_surface_cut_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
@@ -457,6 +459,7 @@ sketch.construction_line.tangent_two  2D sketch only (the sketch solver and engi
 sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.create3d                   3D sketch lifecycle: a new sketch with 3D Sketch on (engine tests, sketch_3d_frame_tests.rs); no kernel operation
+sketch.crosshairs                 2D sketch only: two fixed construction lines (crates/engine/src/cmd/sketch_infinite_tests.rs); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.dimension_text             2D sketch only (the sketch solver and engine tests); no kernel operation

@@ -50,7 +50,9 @@ mod tests {
                 Some("surface")
             } else if c.panel == "CONSTRAINTS" {
                 Some("constraint")
-            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") || c.id.starts_with("sketch.construction_line") {
+            } else if matches!(c.id, "sketch.construction" | "sketch.centerline" | "sketch.crosshairs")
+                || c.id.starts_with("sketch.construction_line")
+            {
                 Some("construction")
             } else if c.id.starts_with("sketch.") && matches!(c.panel, "CREATE" | "MODIFY" | "PATTERN" | "FINISH SKETCH") {
                 Some("sketch")

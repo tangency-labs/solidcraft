@@ -24,6 +24,7 @@ pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
+pub use solidcore_ops::mesh;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::paper_gaps;
