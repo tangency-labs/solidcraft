@@ -345,23 +345,54 @@ fn a_gap_tab_to_the_bends_far_side_is_refused_as_past_it() {
     refused(&mut s, json!({"sketch": "Into"}), solidcraft_doc::sheet::TAB_PAST_BEND);
 }
 
-/// A tab over a cut across the bend at its end that cannot fill it, because what it would give
-/// back joins the bend that is left, keeps the result it had before tabs filled such cuts: the
-/// tab joins the outline and the cut keeps what it took (#22259). Past the base's side it adds
-/// 10 x 7.5, less the bend relief that opens there (the rule's: 2 wide, from 1 inside the
-/// tangent line y = 56): 75 - 2 x 2.5 = 70 mm2, through 2 mm. A tab that stops short of the bend
-/// that is left fills the cut under it as well, 10 x 2.5 more.
+/// A tab over a cut across the bend at its end (#22259). Stopping short of the bend that is left,
+/// it fills the cut under it: past the base's side it adds 10 x 7.5, less the bend relief that
+/// opens there (the rule's: 2 wide, from 1 inside the tangent line y = 56), 75 - 2 x 2.5 = 70
+/// mm2, and 10 x 2.5 of the cut, through 2 mm. Running on to the bend that is left (x = 20), what
+/// it would give back joins that bend and would bend with it: refused, the design as it was.
+/// Before tabs filled such cuts, that tab built (+140) with the part of it inside the base's
+/// outline missing, without saying so.
 #[test]
-fn a_tab_that_cannot_fill_a_cut_at_a_bends_end_keeps_its_result() {
-    for (to, more) in [(20.0, 0.0), (10.0, 25.0)] {
+fn a_tab_over_a_cut_at_a_bends_end_fills_it_or_is_refused() {
+    let mut s = Session::default();
+    gap_part(&mut s, false);
+    flat_cut(&mut s, [-1.0, 55.0], [20.0, GAP_FAR + 2.0]);
+    let cut = volume(&mut s);
+    top_rectangle(&mut s, "Side", [-10.0, 50.0], [10.0, 57.5]);
+    run(&mut s, "sheet.tab", json!({"sketch": "Side"}));
+    assert!((volume(&mut s) - cut - 2.0 * (70.0 + 25.0)).abs() < 1e-3, "{}", volume(&mut s) - cut);
+    assert!(contains(&s, [-5.0, 52.0, 1.0]));
+    assert!(contains(&s, [5.0, 55.5, 1.0]));
+
+    let mut s = Session::default();
+    gap_part(&mut s, false);
+    flat_cut(&mut s, [-1.0, 55.0], [20.0, GAP_FAR + 2.0]);
+    top_rectangle(&mut s, "Long", [-10.0, 50.0], [20.0, 57.5]);
+    refused(&mut s, json!({"sketch": "Long"}), solidcraft_doc::sheet::TAB_IN_BEND);
+}
+
+/// A tab in the gap that touches the bend that is left is refused (#22259), also when it runs
+/// off the base as well, where it adds material whatever the cut does: it is not built with its
+/// part in the gap missing. The design is as it was.
+#[test]
+fn a_gap_tab_that_cannot_fill_the_cut_is_refused_though_it_runs_off_the_base() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    top_rectangle(&mut s, "Down", [45.0, -10.0], [60.0, 57.5]);
+    refused(&mut s, json!({"sketch": "Down"}), solidcraft_doc::sheet::TAB_IN_BEND);
+}
+
+/// A gap tab that ends on the bend's far side is refused as running past the bend (#22259), also
+/// where the cut and the tab run on past the bend's end (x = 0): the cut keeps only what it takes
+/// of the sheet, so what the tab gives back runs along the far side from the bend's end. The same
+/// tab from the base's side is refused the same way.
+#[test]
+fn a_gap_tab_to_the_far_side_past_the_bends_end_is_refused_as_past_it() {
+    for (name, from) in [("Side", 0.0), ("Past", -10.0)] {
         let mut s = Session::default();
         gap_part(&mut s, false);
-        flat_cut(&mut s, [-1.0, 55.0], [20.0, GAP_FAR + 2.0]);
-        let cut = volume(&mut s);
-        top_rectangle(&mut s, "Side", [-10.0, 50.0], [to, 57.5]);
-        run(&mut s, "sheet.tab", json!({"sketch": "Side"}));
-        assert!((volume(&mut s) - cut - 2.0 * (70.0 + more)).abs() < 1e-3, "{to}: {}", volume(&mut s) - cut);
-        assert!(contains(&s, [-5.0, 52.0, 1.0]));
-        assert_eq!(contains(&s, [5.0, 55.5, 1.0]), more > 0.0, "{to}");
+        flat_cut(&mut s, [-1.0, 55.0], [20.0, GAP_FAR]);
+        top_rectangle(&mut s, name, [from, 50.0], [10.0, GAP_FAR]);
+        refused(&mut s, json!({"sketch": name}), solidcraft_doc::sheet::TAB_PAST_BEND);
     }
 }

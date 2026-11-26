@@ -89,9 +89,12 @@ impl SurfaceSheet {
 
     /// Joins `profile` (panel `i`'s chart) to panel `i`'s outline. Where it meets the sheet's
     /// cuts across joints (see [`Cut`]), it also gives back what they took there, as it fills a
-    /// hole cut inside its panel (see [`Self::fill_cuts`]). A tab that cannot fill them so, but
-    /// that joins the outline as a tab did before it could (the cuts keeping what they took),
-    /// keeps that result: a design that built then builds the same now.
+    /// hole cut inside its panel (see [`Self::fill_cuts`]), or it is refused, with the reason.
+    /// Before tabs could fill such cuts, a tab over one joined the outline and the cut kept what
+    /// it took under the tab, without saying so. So a saved design with such a tab rebuilds
+    /// differently: where the tab can fill the cut, with that material too (a tab over a cut at a
+    /// bend's end: +140 mm3 before, +190 now); where it cannot, refused, not built with part of
+    /// it missing.
     fn tab_on(&mut self, i: usize, profile: &[Region2]) -> Result<()> {
         let region = self.sheet.panels.get(i).map(|p| p.region.clone()).ok_or_else(|| DocError::Invalid("tab".into()))?;
         // The sheet's cuts across joints that the profile meets, each in panel `i`'s chart:
@@ -145,28 +148,11 @@ impl SurfaceSheet {
             strips
         };
         let whole = across(&[]);
-        let filled = match dev.as_ref().filter(|_| !met.is_empty()) {
-            None => return self.join_outline(i, profile, &region, &whole),
+        match dev.as_ref().filter(|_| !met.is_empty()) {
+            None => self.join_outline(i, profile, &region, &whole),
             Some(dev) => {
                 let met_cuts: Vec<Region2> = met.iter().map(|(_, c)| c.clone()).collect();
-                let mut work = self.clone();
-                work.fill_cuts(i, profile, &region, (&across(&met_cuts), &whole), dev, &met).map(|()| work)
-            }
-        };
-        match filled {
-            Ok(work) => {
-                *self = work;
-                Ok(())
-            }
-            Err(e) => {
-                let mut plain = self.clone();
-                match plain.join_outline(i, profile, &region, &whole) {
-                    Ok(()) => {
-                        *self = plain;
-                        Ok(())
-                    }
-                    Err(_) => Err(e),
-                }
+                self.fill_cuts(i, profile, &region, (&across(&met_cuts), &whole), dev, &met)
             }
         }
     }
