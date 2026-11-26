@@ -2528,6 +2528,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,

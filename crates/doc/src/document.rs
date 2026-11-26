@@ -1364,6 +1364,11 @@ pub enum FeatureKind {
         /// that fades out); none: the groove stops square there.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ease_out: Option<ThreadRunout>,
+        /// A modelled internal thread runs down to a blind hole's bottom, its last turn trimmed at
+        /// the plane of the bottom, instead of stopping clear of it (#22616): a printed part needs
+        /// no room for a tap's lead. Missing in older designs, whose threads stop clear as before.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        to_bottom: bool,
         /// The chamfered tip at the thread's free end (ISO 4753).
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         tip: crate::thread_forms::ThreadTip,
