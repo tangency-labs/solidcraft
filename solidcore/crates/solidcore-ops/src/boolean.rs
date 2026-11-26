@@ -299,8 +299,10 @@ fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
 
 /// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
 /// carried to the next level as it is), each union `SmApiBoolean`'s, with solids touching along
-/// edges or at vertices allowed. No tolerance is updated between the pairwise unions or after
-/// the last; a single body makes no union and is untouched.
+/// edges or at vertices allowed. Each pairwise result gets [`after_boolean`]'s tolerance
+/// update, as [`boolean`] does, so a later level unions a repaired operand and the result
+/// passes the same check a chain of single unions does. A single body makes no union and is
+/// untouched.
 ///
 /// # Errors
 /// [`Error::Argument`] for no body; [`Error::Empty`] for an empty result; [`Error::NotSolid`];
@@ -309,8 +311,8 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
     union_all_with(bodies, Contract::Closed)
 }
 
-/// [`union_all`] under `contract`. Under [`Contract::Proved`] each pairwise result gets
-/// [`after_boolean`]'s update as it is made, so a later level unions repaired operands.
+/// [`union_all`] under `contract`. Each pairwise result gets [`after_boolean`]'s update as
+/// it is made, so a later level unions repaired operands.
 ///
 /// # Errors
 /// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
@@ -335,9 +337,7 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
                         let mut a = a;
                         matched_tolerances(k, &mut a, &mut b)?;
                         let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
-                        if contract == Contract::Proved {
-                            after_boolean(k, &mut r)?;
-                        }
+                        after_boolean(k, &mut r)?;
                         next.push(r);
                     }
                     None => next.push(a),

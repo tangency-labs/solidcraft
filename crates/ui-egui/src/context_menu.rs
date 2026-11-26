@@ -2093,7 +2093,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
         .into_iter()
         .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
-        .filter(|spec| align.is_empty() || spec.id != "sketch.constraint.horizontal_vertical")
+        // Two points, or a point and a line, have their own Horizontal and Vertical rows (`align`).
+        .filter(|spec| {
+            align.is_empty()
+                || !matches!(spec.id, "sketch.constraint.horizontal_vertical" | "sketch.constraint.horizontal" | "sketch.constraint.vertical")
+        })
         .filter(|spec| spec.selection.is_some() && spec.disabled_refusal(&app.session).is_none())
         .filter_map(|spec| {
             solidcraft_engine::sketch_selection::params_for(spec.id, &app.session, &geometry).map(|params| cmd(app, spec.id, spec.label).with(params))

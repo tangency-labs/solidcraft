@@ -999,7 +999,7 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         );
     assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
     std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
-    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"host_calls":300,"deadline_ms":80000}}});
     std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
     let args = json!({"path":package}).to_string();
     let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());
@@ -1012,10 +1012,13 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
     assert!(stderr.contains("Sample: it asks for 200000000000 fuel, and plugins may use 100000000000."), "{stderr}");
     assert!(stderr.contains("max_fuel in the --plugin-limits file"), "{stderr}");
     let policy = scratch.0.join("limits.json");
-    std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
+    let allowed = json!({"max_fuel":u64::MAX,"max_memory_mib":512,"max_host_calls":300,"max_deadline_ms":80000});
+    std::fs::write(&policy, allowed.to_string()).unwrap();
     let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
     assert_eq!(high["within_host_limits"], true);
     assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(u64::MAX));
+    assert_eq!(high["host_limits"]["max_host_calls"], 300);
+    assert_eq!(high["host_limits"]["max_deadline_ms"], 80000);
     let output = cli().env_remove("RUST_LOG").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fuel_consumed="), "fuel diagnostics are opt-in");
@@ -1041,6 +1044,17 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         let output = cli().arg(format!("--plugin-limits={}", policy.display())).args(extra).output().unwrap();
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("controls local sessions"), "refuse before any connection attempt");
+    }
+    // Change only the ceiling under test from the policy that successfully ran this package.
+    // Require the startup diagnostic: failures during plugin.run instead name Sample.
+    for field in ["max_host_calls", "max_deadline_ms"] {
+        let mut bad = allowed.clone();
+        bad[field] = json!(0);
+        std::fs::write(&policy, bad.to_string()).unwrap();
+        let output = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{field}: {stderr}");
+        assert!(stderr.contains("error: plugin: invalid manifest field host_limits: requires positive"), "{field}: {stderr}");
     }
     for bad in [json!({"max_fuel":0}), json!({"max_memory_mib":4097}), json!({"max_fuel":1.25}), json!({"unknown":true})] {
         std::fs::write(&policy, bad.to_string()).unwrap();

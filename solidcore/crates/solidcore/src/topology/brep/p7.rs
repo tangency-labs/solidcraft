@@ -2232,6 +2232,20 @@ pub(crate) fn glue_edges_general_searching(
 
         let surv_eus = ed::edgeuses(b, surv, None, None)?;
         ed::add_oriented_eu_pair(b, surv, deu1, deu2, Some(sector))?;
+        // The moved edge uses now reference `surv`'s curve, interval and orientation, so
+        // any gaps cached against `del` are stale (#21432).
+        for moved in [deu1, deu2] {
+            let use_ = b.edgeuse_mut(moved)?;
+            use_.max_edge_face_gap.reset();
+            use_.edge_ccw_edge_gap.reset();
+            let (cw, vu) = (use_.cw, use_.vertexuse);
+            if let Some(cw) = cw {
+                b.edgeuse_mut(cw)?.edge_ccw_edge_gap.reset();
+            }
+            if let Some(vu) = vu {
+                b.vertexuse_mut(vu)?.vertex_edge_gap.reset();
+            }
+        }
 
         // the surviving edge was a wire: drop its wire edge uses and their vertex uses
         if surv_wire {

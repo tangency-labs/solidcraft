@@ -453,11 +453,41 @@ impl Model {
         self.saved(doc)
     }
 
+    /// Why [`Self::saved_if_checked`] would leave the model cache out for `doc`, if it cannot
+    /// save one right now (`None` when the model is ready to save or a feature has an error,
+    /// which the caller names specifically).
+    pub fn cache_skip_reason(&self, doc: &Document) -> Option<&'static str> {
+        if self.checking_imports() {
+            return Some("an imported file's parts were still being checked (a save once the check ends keeps it)");
+        }
+        if self.results.is_empty() {
+            return Some("the model has not been evaluated yet");
+        }
+        if self.checking_features() {
+            return Some("a feature's geometry check was still running (a save once it ends keeps it)");
+        }
+        if self.results.iter().any(|r| r.error.is_some()) {
+            return None;
+        }
+        if !self.is_current(doc) {
+            return Some("the model was not up to date with the design");
+        }
+        if has_legacy_names(doc) {
+            return Some("the design still uses legacy face or edge names");
+        }
+        if self.results.iter().any(|r| {
+            r.import_report.as_ref().is_some_and(|report| {
+                !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
+            })
+        }) {
+            return Some("an imported file's parts were healed after evaluation (a save once it updates keeps it)");
+        }
+        None
+    }
+
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
-        // An import its checks healed is fingerprinted with its heals, which a model read back
-        // does not have: it would never be taken.
         // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
         // model kept before they pass would open with results no check has passed.
         if self.results.is_empty()
@@ -465,7 +495,6 @@ impl Model {
             || self.results.iter().any(|r| r.error.is_some())
             || !self.is_current(doc)
             || has_legacy_names(doc)
-            || self.has_import_heals()
         {
             return None;
         }
@@ -475,7 +504,7 @@ impl Model {
             let mut pending = Vec::new();
             for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
-                    pending.push((k, report.clone()));
+                    pending.push((k, self.import_digests.heal_digest(feature.id), report.clone()));
                 }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
@@ -509,6 +538,15 @@ impl Model {
             {
                 out.insert("tolerance_heal".into(), json!(false));
             }
+            // Healed imports' digests: recorded only when any import was healed, so models without
+            // healed imports keep the same manifest layout.
+            if !self.import_digests.heals.is_empty()
+                && let Some(out) = records.as_object_mut()
+            {
+                let mut heals: Vec<(u64, String)> = self.import_digests.heals.iter().map(|(&id, (_, h))| (id, hex(h.digest()))).collect();
+                heals.sort_by_key(|(id, _)| *id);
+                out.insert("import_heals".into(), json!(heals));
+            }
             if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. })) {
                 records["round_member_records"] = json!(1);
             }
@@ -519,8 +557,9 @@ impl Model {
 }
 
 /// Imports of a saved model ([`Model::saved_now`]) whose SMLib check of their parts may still
-/// be running: by feature record, the report that holds the check.
-pub struct PendingChecks(Vec<(usize, Arc<kernel::ImportReport>)>);
+/// be running: by feature record, the heal digest already evaluated into the model (if any),
+/// and the report that holds the check.
+pub struct PendingChecks(Vec<(usize, Option<u64>, Arc<kernel::ImportReport>)>);
 
 impl PendingChecks {
     /// No import's check is left to wait for.
@@ -532,16 +571,16 @@ impl PendingChecks {
     /// import's report and warning as an import that waited for its check has them. A check a
     /// token stopped leaves its record as it was.
     ///
-    /// Returns whether `saved` stands: not when a check healed a part
-    /// ([`kernel::ImportChecks::heals`]), since its states hold the import as it was first shown,
-    /// and the model evaluates it again as its healed bodies (with other fingerprints). `saved`
-    /// is then left as it was.
+    /// Returns whether `saved` stands: not when a check healed a part that the saved states do
+    /// not yet carry ([`kernel::ImportChecks::heals`]), since its states hold the import as it
+    /// was first shown, and the model evaluates it again as its healed bodies (with other
+    /// fingerprints). `saved` is then left as it was.
     #[must_use]
     pub fn settle(self, saved: &mut SavedModel) -> bool {
-        if self.0.iter().any(|(_, report)| report.settled().is_some() && report.checks.heals().is_some()) {
+        if self.0.iter().any(|(_, known, report)| report.settled().is_some() && report.checks.heals().is_some_and(|h| *known != Some(h.digest()))) {
             return false;
         }
-        for (k, report) in self.0 {
+        for (k, _, report) in self.0 {
             let Some(settled) = report.settled() else { continue };
             let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
             match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
@@ -1124,6 +1163,9 @@ impl SavedModel {
         if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
             out.insert("tolerance_heal".into(), heal.clone());
         }
+        if let (Some(heals), Some(out)) = (self.records.get("import_heals"), records.as_object_mut()) {
+            out.insert("import_heals".into(), heals.clone());
+        }
         if let Some(version) = self.records.get("round_member_records") {
             records["round_member_records"] = version.clone();
         }
@@ -1175,7 +1217,21 @@ impl Model {
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
         // And under the tolerance heal preference it was evaluated with (on when not recorded).
         let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
-        let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        let mut import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        if let Some(heals) = records.get("import_heals") {
+            let entries = heals.as_array().filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: import heals"))?;
+            for entry in entries {
+                let pair = entry.as_array().filter(|p| p.len() == 2).ok_or_else(|| bad("saved model: import heals"))?;
+                let id = pair.first().and_then(Json::as_u64).ok_or_else(|| bad("saved model: import heals"))?;
+                let digest = unhex(pair.get(1).unwrap_or(&Json::Null))?;
+                if digest == 0 {
+                    return Err(bad("saved model: import heals"));
+                }
+                if heal && let Some((_, step_digest)) = import_digests.steps.get(&id) {
+                    import_digests.heals.insert(id, (*step_digest, ImportHeal::Digest(digest)));
+                }
+            }
+        }
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);

@@ -186,6 +186,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_silhouette::SurfaceSilhouette;
 use crate::intersect::surface_tracer::SurfaceTrace;
 use crate::kernel::Kernel;
+use std::borrow::Cow;
 
 #[cfg(test)]
 use crate::math::EFF_ZERO_DEG;
@@ -1265,6 +1266,16 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
 
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
+
+    /// The searches of the certified line pass this context's operation keeps for its
+    /// solves that repeat one on the same inputs
+    /// ([`crate::surface::surface::certified_line::LinePasses`]; not upstream). By default
+    /// none: every solve searches.
+    fn line_passes(
+        &self,
+    ) -> Option<&core::cell::RefCell<crate::surface::surface::certified_line::LinePasses>> {
+        None
+    }
 }
 
 /// A surface's cache handed to a solve that reads it
@@ -2209,20 +2220,36 @@ impl Surface {
         k: &Kernel,
         uv_domain: &Extent2d,
     ) -> Result<Option<Extent3d>> {
+        Ok(self
+            .certified_net(k)?
+            .and_then(|net| net.piece_box(uv_domain))
+            .filter(Extent3d::is_defined))
+    }
+
+    /// The net the surface is evaluated on, for the kinds whose net is the surface: a
+    /// B-spline's own, or the NURB of a cone, sphere, torus, surface of revolution or
+    /// surface of extrusion, made when missing; `None` for every other kind (not upstream;
+    /// the one list of these kinds, read by [`Surface::certified_bounding_box`] and the
+    /// certified line solve, [`super::certified_line`]). A B-spline whose net is a fitted
+    /// approximation of a definition ([`Surface::net_is_fitted`]: a swept wall, or an
+    /// evaluation copy of one) is evaluated on its net too, which is then not the surface:
+    /// the line solve refuses it there.
+    ///
+    /// # Errors
+    ///
+    /// Those of making a missing NURB.
+    pub(crate) fn certified_net(&self, k: &Kernel) -> Result<Option<Cow<'_, BSplineSurface>>> {
         Ok(match self.kind() {
-            SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
+            SurfaceKind::BSpline(s) => Some(Cow::Borrowed(s)),
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfRevolution(_) => {
-                self.analytic_base_with_nurb(k)?.piece_box(uv_domain)
+                Some(Cow::Borrowed(self.analytic_base_with_nurb(k)?))
             }
-            SurfaceKind::SurfOfExtrusion(_) => {
-                self.extrusion_base_with_nurb(k)?.piece_box(uv_domain)
-            }
+            SurfaceKind::SurfOfExtrusion(_) => Some(self.extrusion_base_with_nurb(k)?),
             _ => None,
-        }
-        .filter(Extent3d::is_defined))
+        })
     }
 
     /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses
@@ -4149,6 +4176,44 @@ pub fn is_node_valid<O: Copy + PartialEq>(
         NodeData::Surface(aux) => Ok(aux.node_class != NodeClass::Outside),
         _ => Err(SolidError::invalid_input(
             "surface::surface::p1::is_node_valid",
+            "surface cache node without surface data",
+        )),
+    }
+}
+
+/// Whether the surface tree node `node` lies wholly inside its face (not upstream): its
+/// trim classification is inside, or no point can be rejected by the face (a tree no
+/// surface cache owns, the solve's point test, `modes`, off, or a trimmed cache whose
+/// surface has no face: it keeps every point whatever built it,
+/// [`SurfaceCache::point_test_with_under`]). Otherwise a cache that is not current
+/// classifies no node while the face's point test still filters points, so its nodes are
+/// not inside.
+/// [`is_node_valid`] keeps a node on the face's border too; this tells the two apart for
+/// the certified line pass, whose component in a border node may straddle the trim.
+///
+/// # Errors
+///
+/// A surface cache node without surface data.
+pub(crate) fn is_node_inside<O: Copy + PartialEq>(
+    owner: Option<TreeOwner>,
+    cache: &SurfaceCache<O>,
+    modes: SolveModes,
+    node: &TreeNode<O>,
+) -> Result<bool> {
+    if !is_surface_cache_owner(owner) || !modes.point_test_enabled {
+        return Ok(true);
+    }
+    // (no face, so no trim to straddle; a face the cache cannot name stays undecided)
+    if cache.trimmed_dispatch && matches!(cache.face(), Ok(None)) {
+        return Ok(true);
+    }
+    if cache.face_was_modified || !cache.have_t_surface_cache {
+        return Ok(false);
+    }
+    match &node.data {
+        NodeData::Surface(aux) => Ok(aux.node_class == NodeClass::Inside),
+        _ => Err(SolidError::invalid_input(
+            "surface::surface::p1::is_node_inside",
             "surface cache node without surface data",
         )),
     }
