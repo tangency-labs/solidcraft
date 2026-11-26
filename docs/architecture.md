@@ -3,8 +3,8 @@
 <!-- ANCHOR: architecture -->
 | Layer | Crates | Role |
 |---|---|---|
-| L0 | `geom` | vectors, planes, profiles, meshes and their measures |
-| L1 | `sketch`, `kernel`, `render`, `dynamics` | constraint solver and profiles; the B-rep kernel boundary (the vendored `solidcore`); product rendering (render jobs and their backends) on the shared viewport renderer; multibody dynamics (rigid bodies, joints, forces, time integration) |
+| L0 | `geom`, `kernel-api` | vectors, planes, profiles, meshes and their measures; the kernel interface: the trait a kernel's adapter implements, its operations, inputs and errors ([design](design/kernel-layer.md)) |
+| L1 | `sketch`, `kernel`, `render`, `dynamics` | constraint solver and profiles; the B-rep kernel boundary: the router behind the kernel interface and solidcore's adapter, the only crate besides `smlib` that reaches solidcore beyond its record types; product rendering (render jobs and their backends) on the shared viewport renderer; multibody dynamics (rigid bodies, joints, forces, time integration) |
 | L2 | `doc` | parameters, expressions, the feature timeline and its incremental evaluation |
 | L3 | `io` | design files, STL/OBJ/STEP/3MF export, STEP and 3MF/STL/OBJ/glTF import features |
 | L4 | `engine` | the session and the command registry (everything is a command) |

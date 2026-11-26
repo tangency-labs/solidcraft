@@ -32,11 +32,12 @@
 use super::p1::{cull_or_refine_cci_in_3d, in_reach_region, src_zone_tol_3d_of, SourceReach};
 use super::p5::{insert_solutions, insert_solutions_mut, ClassGeometryMut};
 use super::CurveClassification;
+use crate::curve::contact::NativeSupport;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::context::ALL_MARKS;
@@ -44,7 +45,10 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use crate::geom::tol::{coincidence_tol_3d, contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones};
+use crate::geom::tol::{
+    coincidence_tol_3d, contact_tol_3d, within_coincidence_tol, xsect_tol3d,
+    xsect_tol_3d_from_zones,
+};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
@@ -54,8 +58,23 @@ use crate::surface::surface::p1::{map_to_2d, map_to_2d_on_curve};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::p1::FaceContainment;
 use crate::surface::trim_srf_cache::TrimSrfCache;
+use crate::EntityRef;
+
+use super::p1::missing_defect;
+use crate::error::intersect::IntersectFailure;
+use crate::error::Failure;
 
 const OP: &str = "intersect::curve_class::p9";
+
+/// Why the source curve's cache, just built, has no tree.
+const CURVE_CACHE_TREE: &str = "the source curve's cache, just built, has no tree or no top \
+     node, though the build makes the tree with its top node";
+
+/// An item of the face's surface cache with no handle or no record on the boundary given
+/// (upstream's `NER`, `SM_ERR_NULL_POINTER`).
+fn not_on_boundary() -> SolidError {
+    SolidError::intersect(OP, IntersectFailure::CacheItemNotOnBoundary)
+}
 
 /// Read-only `SmEdge` data, resolved through its owning B-rep.
 #[derive(Debug, Clone, Copy)]
@@ -186,7 +205,7 @@ impl SolutionObject for Side {
 
 fn curve<O: ClassObject>(g: &impl ClassGeometry<O>, handle: O) -> Result<&Curve> {
     g.curve(handle)
-        .ok_or_else(|| SolidError::intersect_missing(OP, "the curve behind the handle"))
+        .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::CurveHandleUnresolved))
 }
 fn lifted(k: &Kernel, uv: &Curve, surface: &Surface) -> Result<Curve> {
     Ok(Curve::from(CrvOnSurf::new(
@@ -250,9 +269,9 @@ impl<O: ClassObject> CurveClassification<O> {
         surface: &Surface,
         options: IntersectEdgesOptions,
     ) -> Result<()> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         let source = curve(geometry, source_handle)?;
         let lift;
         let working = if !options.uv_space_okay && source.dim() == 2 {
@@ -261,7 +280,9 @@ impl<O: ClassObject> CurveClassification<O> {
             lift = lifted(k, source, &unowned)?;
             &lift
         } else {
-            source
+            // (not upstream: a seam's ruling in the seam's place, the same curve,
+            // `ClassGeometry::intersect_curve`)
+            geometry.intersect_curve(source_handle).unwrap_or(source)
         };
         let source_zone = src_zone_tol_3d_of(k, Some(self));
         // the source curve's cache, kept across the edges (see `edge_solutions`)
@@ -315,9 +336,9 @@ impl<O: ClassObject> CurveClassification<O> {
         surface: Option<&Surface>,
         options: IntersectEdgesOptions,
     ) -> Result<()> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         let lift = {
             let source = curve(&*geometry, source_handle)?;
             if !options.uv_space_okay && source.dim() == 2 {
@@ -339,14 +360,19 @@ impl<O: ClassObject> CurveClassification<O> {
             let (mut solutions, tolerance) = {
                 let working = match &lift {
                     Some(l) => l,
-                    None => curve(&*geometry, source_handle)?,
+                    // (not upstream: a seam's ruling in the seam's place, the same
+                    // curve, `ClassGeometry::intersect_curve`)
+                    None => match geometry.intersect_curve(source_handle) {
+                        Some(c) => c,
+                        None => curve(&*geometry, source_handle)?,
+                    },
                 };
                 if edge.seam.is_some() && self.source_reach().is_none() {
                     // read once, for the first seam
                     let reach = self.source_reach_in(k, &*geometry, working)?;
                     self.set_source_reach(reach);
                 }
-                self.edge_solutions(
+                let (mut solutions, tolerance) = self.edge_solutions(
                     k,
                     &*geometry,
                     working,
@@ -355,7 +381,30 @@ impl<O: ClassObject> CurveClassification<O> {
                     edge,
                     options,
                     &mut source_cache,
-                )?
+                )?;
+                // not upstream (WR-647, #18064): a face/face curve's tangency range at an
+                // end vertex of the edge is the one contact at that vertex
+                if self.tangency_partner().is_some() {
+                    for solution in &mut solutions {
+                        // the witness only ever adds evidence: where it cannot run, the
+                        // classifier's own range stands; a cancellation stops the work
+                        match super::witness::tangency_point(
+                            k,
+                            &*geometry,
+                            self,
+                            working,
+                            source_handle,
+                            edge,
+                            solution,
+                            tolerance,
+                        ) {
+                            Ok(Some(point)) => *solution = point,
+                            Err(err) if err.is_cancelled() => return Err(err),
+                            Ok(None) | Err(_) => {}
+                        }
+                    }
+                }
+                (solutions, tolerance)
             };
             if !solutions.is_empty() {
                 // the insertion's surf/surf/surf refinement may edit the source curve
@@ -409,6 +458,106 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
             }
         }
+        // Certified native supports can separate ordinary material contacts.
+        let ordinary = !options.has_big_gaps && !self.doing_fillets();
+        let native_pair = matches!(
+            (working.kind(), target.kind()),
+            (
+                CurveKind::Ellipse(_),
+                CurveKind::Ellipse(_) | CurveKind::BSpline(_)
+            ) | (CurveKind::BSpline(_), CurveKind::Ellipse(_))
+        );
+        if ordinary && edge.seam.is_none() && native_pair {
+            if let (Some(source), Some(target)) = (
+                NativeSupport::curve(working, &self.interval()),
+                NativeSupport::curve(target, &edge.interval),
+            ) {
+                // Both are pure proofs; the curves' own separation is the cheaper one and
+                // settles most edges (a plate's holes against a new hole's curve), so the
+                // band test runs only for an edge it leaves open.
+                let foreign = || {
+                    source.zone(source_zone).is_some_and(|source_zone| {
+                        self.native_foreign_support()
+                            .is_some_and(|(support, zone)| {
+                                target.outside_surface(k, edge_zone, support, zone.max(source_zone))
+                            })
+                    })
+                };
+                if source.disjoint(k, source_zone, &target, edge_zone) || foreign() {
+                    return Ok((Vec::new(), tolerance));
+                }
+            }
+        }
+        // A chart endpoint proved off the source must not replace an interior CCI root.
+        let mut excluded_target_ends = [false; 2];
+        if ordinary && edge.seam.is_some() {
+            if let (Some(ends), Some((brep, EntityRef::Edge(native_edge)))) =
+                (edge.seam, geometry.topology_entity(edge.edge))
+            {
+                let (start, end) = crate::topology::edge::start_end_vertices(brep, native_edge)?;
+                let mut source = None;
+                for (((slot, end), vertex), parameter) in excluded_target_ends
+                    .iter_mut()
+                    .zip(ends)
+                    .zip([start, end])
+                    .zip([edge.interval.min(), edge.interval.max()])
+                {
+                    let (Some((point, zone)), Some(vertex)) = (end, vertex) else {
+                        continue;
+                    };
+                    if !zone.is_finite() || !edge_zone.is_finite() || zone < 0.0 || edge_zone < 0.0
+                    {
+                        continue;
+                    }
+                    let Some(at_end) = ignored(target.evaluate_point(k, parameter))? else {
+                        continue;
+                    };
+                    let size = point.max_dimension().max(at_end.max_dimension());
+                    if within_coincidence_tol(k, point.distance(at_end), zone, edge_zone, size) {
+                        let Some(vertex) =
+                            geometry.topology_handle_in(brep, EntityRef::Vertex(vertex))
+                        else {
+                            continue;
+                        };
+                        let Some(marker) = crate::intersect::point_class::periodic_trim_witness(
+                            k, geometry, vertex,
+                        )?
+                        else {
+                            continue;
+                        };
+                        let Some(source) = source
+                            .get_or_insert_with(|| NativeSupport::curve(working, &self.interval()))
+                        else {
+                            continue;
+                        };
+                        let end_apart = source.disjoint(
+                            k,
+                            source_zone,
+                            &NativeSupport::point(at_end),
+                            zone.max(edge_zone),
+                        ) || source.zone(source_zone).is_some_and(|source_zone| {
+                            self.native_foreign_support()
+                                .is_some_and(|(support, foreign_zone)| {
+                                    NativeSupport::point(at_end).outside_surface(
+                                        k,
+                                        zone.max(edge_zone),
+                                        support,
+                                        foreign_zone.max(source_zone),
+                                    )
+                                })
+                        });
+                        *slot = end_apart
+                            && marker.excluded_by(
+                                k,
+                                source,
+                                source_zone,
+                                zone.max(edge_zone),
+                                self.native_foreign_support(),
+                            );
+                    }
+                }
+            }
+        }
         let mut solutions = Vec::new();
         if core::ptr::eq(target, working) {
             let lo = max2(edge.interval.min(), self.interval().min());
@@ -453,6 +602,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     // rims, or a rim and a line, a hair less than tangent touch at one point
                     // (WR-787, #15429, #14599)
                     contact_tol_3d(k),
+                    excluded_target_ends,
                 )
             };
             let found = find(tolerance)?;
@@ -549,9 +699,9 @@ impl<O: ClassObject> CurveClassification<O> {
         face: &BoundaryFace<'_, O, C>,
         do_check_3d: bool,
     ) -> Result<()> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         let source = curve(geometry, source_handle)?;
         if source.dim() != 2 {
             return Err(SolidError::invalid_input(
@@ -603,9 +753,9 @@ impl<O: ClassObject> CurveClassification<O> {
         geometry: &impl ClassGeometry<O>,
         face: &BoundaryFace<'_, O, C>,
     ) -> Result<Option<CachedVisits<O>>> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         let source = curve(geometry, source_handle)?;
         let base = face.cache.base();
         if base.face_was_modified
@@ -623,19 +773,18 @@ impl<O: ClassObject> CurveClassification<O> {
         ) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::intersect_missing(
-                    OP,
-                    "the source curve's cache",
-                ))
+            Err(e) => {
+                return Err(Failure::new(OP, IntersectFailure::CurveCacheNotBuilt)
+                    .caused_by(e)
+                    .into_error())
             }
         };
         let tree = cache
             .tree()
-            .ok_or_else(|| SolidError::intersect_missing(OP, "the source curve cache's tree"))?;
-        let top = tree.top_node().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the source curve cache's top node")
-        })?;
+            .ok_or_else(|| missing_defect(OP, CURVE_CACHE_TREE))?;
+        let top = tree
+            .top_node()
+            .ok_or_else(|| missing_defect(OP, CURVE_CACHE_TREE))?;
         let mut domain = Extent2d::from_extent3d(&tree.node(top)?.bbox);
         domain.expand_absolute(EFF_ZERO_SQRT);
         let nodes = base.find_uv_nodes_built(k, &domain, false)?;
@@ -648,9 +797,13 @@ impl<O: ClassObject> CurveClassification<O> {
             return Ok(Some(visits));
         }
 
-        let tree = base
-            .tree()
-            .ok_or_else(|| SolidError::intersect_missing(OP, "the face cache's tree"))?;
+        let tree = base.tree().ok_or_else(|| {
+            missing_defect(
+                OP,
+                "the face's trimmed surface cache has no tree, though its uv nodes were just \
+                 found in it",
+            )
+        })?;
         for &id in &nodes {
             // skip all but the leaf nodes
             if tree.node(id)?.child1.is_some() {
@@ -658,10 +811,13 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             for item in &base.aux(id)?.vertex_list {
                 let vu = item.vertexuse.ok_or_else(|| {
-                    SolidError::intersect_missing(OP, "the vertex use of a face cache item")
+                    missing_defect(
+                        OP,
+                        "a vertex item of the face's surface cache has no vertex use, though \
+                         the cache implants each vertex use as its item",
+                    )
                 })?;
-                let vu = (face.cache_handle)(vu)
-                    .ok_or_else(|| SolidError::intersect_missing(OP, "the vertex use's handle"))?;
+                let vu = (face.cache_handle)(vu).ok_or_else(not_on_boundary)?;
                 // skip vertices that have already been processed
                 if visits.vertices.iter().any(|v| v.vertexuse == vu) {
                     continue;
@@ -672,9 +828,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     .flat_map(|lp| &lp.vertices)
                     .find(|v| v.vertexuse == vu)
                     .copied()
-                    .ok_or_else(|| {
-                        SolidError::intersect_missing(OP, "the boundary vertex of the vertex use")
-                    })?;
+                    .ok_or_else(not_on_boundary)?;
                 vertex.uv = item.uv_point;
                 visits.vertices.push(vertex);
             }
@@ -684,8 +838,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 continue;
             }
             for &eu in &base.aux(id)?.edgeuse_list {
-                let eu = (face.cache_handle)(eu)
-                    .ok_or_else(|| SolidError::intersect_missing(OP, "the edge use's handle"))?;
+                let eu = (face.cache_handle)(eu).ok_or_else(not_on_boundary)?;
                 // skip edgeuses already processed
                 if visits.edgeuses.iter().any(|e| e.edgeuse == eu) {
                     continue;
@@ -696,9 +849,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     .flat_map(|lp| &lp.edges)
                     .find(|e| e.edgeuse == eu)
                     .copied()
-                    .ok_or_else(|| {
-                        SolidError::intersect_missing(OP, "the boundary edge use of the edge use")
-                    })?;
+                    .ok_or_else(not_on_boundary)?;
                 visits.edgeuses.push(edgeuse);
             }
         }
@@ -718,9 +869,9 @@ impl<O: ClassObject> CurveClassification<O> {
         vertex: BoundaryVertex<O>,
         do_check_3d: bool,
     ) -> Result<()> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         let source = curve(geometry, source_handle)?;
         self.p9_vertex(k, geometry, source, surface, vertex, do_check_3d)
     }
@@ -738,9 +889,9 @@ impl<O: ClassObject> CurveClassification<O> {
         surface: &Surface,
         edgeuse: BoundaryEdgeuse<O>,
     ) -> Result<()> {
-        let source_handle = self.curve().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the classification's source curve")
-        })?;
+        let source_handle = self
+            .curve()
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
         self.p9_edgeuse(k, geometry, source_handle, surface, edgeuse, true)
     }
 
@@ -816,7 +967,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         let trim_handle = eu.trim_curve.ok_or_else(|| {
             if !cached {
-                return SolidError::intersect_missing(OP, "the edge use's trim curve");
+                return SolidError::intersect(OP, IntersectFailure::EdgeuseWithoutTrimCurve);
             }
             // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve (justified: findings.md topology.edgeuse_p3)
             // the boundary views are read-only `ClassGeometry` handles built from a
@@ -1044,10 +1195,9 @@ mod tests {
                 },
                 false
             ),
-            Err(ref e) if matches!(
-                e.intersect_failure(),
-                Some(crate::error::intersect::IntersectFailure::Missing(_))
-            ) && e.sm_status() == Some(crate::error::SM_ERR_NULL_POINTER)
+            Err(ref e) if e.intersect_failure()
+                == Some(&IntersectFailure::EdgeuseWithoutTrimCurve)
+                && e.sm_status() == Some(crate::error::SM_ERR_NULL_POINTER)
         ));
     }
     #[test]

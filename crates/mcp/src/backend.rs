@@ -15,6 +15,10 @@ use solidcraft_viewport::StandardView;
 /// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
+    /// When this backend can switch between sessions, select one for the entire batch.
+    fn batch_backend(&mut self) -> Option<&mut dyn Backend> {
+        None
+    }
     /// Whether this session supports `plugin.tools`. A remote backend asks the app's
     /// capabilities before sending this optional command; an older app gets no lookup.
     fn supports_plugin_tools(&mut self) -> bool {
@@ -185,6 +189,7 @@ impl Headless {
             "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
+            "document.selection" => Ok(json!({"selection": solidcraft_engine::selection_context::selection_reply(s)})),
             "ui.help" if p.get("item").is_none_or(Value::is_null) => {
                 Ok(json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT}))
             }

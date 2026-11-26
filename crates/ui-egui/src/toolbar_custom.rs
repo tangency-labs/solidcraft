@@ -31,6 +31,9 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
+    /// `"<workspace>/<tab>/<panel>"` → the order of the panel's drop-down, as the user dragged
+    /// it (#5080; only menus the user changed).
+    pub menus: BTreeMap<String, Vec<String>>,
     /// Pinned commands in enrolment order (#10223); `app_bar` owns their drawing order.
     pub quick_access: Vec<String>,
     /// One saved list for every movable application-bar control.
@@ -43,6 +46,21 @@ pub struct ToolbarCustom {
     pub app_bar_customizing: bool,
     /// The window asks whether to reset every tab (#11471; not kept).
     pub confirm_reset_all: bool,
+}
+
+/// Lists of command ids by panel key, as saved: at most 500 lists of 100 ids.
+fn id_lists(v: &Value) -> BTreeMap<String, Vec<String>> {
+    v.as_object()
+        .map(|o| {
+            o.iter()
+                .take(500)
+                .filter_map(|(k, v)| {
+                    let ids: Vec<String> = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
+                    Some((k.clone(), ids))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Most commands the quick-access bar holds.
@@ -60,6 +78,10 @@ impl ToolbarCustom {
 
     pub fn prefs(&self) -> Value {
         let mut value = json!({"version": 4, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access, "app_bar": self.app_bar.to_value()});
+        // Saved only once a menu was reordered, so other settings stay as they were.
+        if !self.menus.is_empty() {
+            value["menus"] = json!(self.menus);
+        }
         if let Some(object) = value.as_object_mut() {
             for (key, value) in &self.extra {
                 object.entry(key.clone()).or_insert_with(|| value.clone());
@@ -75,36 +97,15 @@ impl ToolbarCustom {
             .into_iter()
             .flatten()
             .filter(|(key, value)| {
-                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar") && (current || !value.is_array())
+                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar" | "menus")
+                    && (current || !value.is_array())
             })
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         let panels = if current { v.get("panels").unwrap_or(&Value::Null) } else { v };
-        self.panels = panels
-            .as_object()
-            .map(|o| {
-                o.iter()
-                    .take(500)
-                    .filter_map(|(k, v)| {
-                        let ids: Vec<String> = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
-                        Some((k.clone(), ids))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.gallery_buttons = v
-            .get("gallery_buttons")
-            .and_then(Value::as_object)
-            .map(|o| {
-                o.iter()
-                    .take(500)
-                    .filter_map(|(k, v)| {
-                        let ids = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
-                        Some((k.clone(), ids))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        self.panels = id_lists(panels);
+        self.gallery_buttons = id_lists(v.get("gallery_buttons").unwrap_or(&Value::Null));
+        self.menus = if current { id_lists(v.get("menus").unwrap_or(&Value::Null)) } else { BTreeMap::new() };
         // Saved ids are kept as they are, each once; one this version lacks is not drawn.
         self.quick_access.clear();
         for id in v.get("quick_access").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(100) {
@@ -279,14 +280,28 @@ pub fn panel_lists(tab: &str) -> PanelLists {
     lists.entry(tab.to_string()).or_insert_with(|| panel_lists_of(tab)).clone()
 }
 
+/// The Surface layout is selectable without invalidating the other tabs' cached lists.
+pub(crate) fn panel_lists_for(app: &SolveApp, tab: &str) -> PanelLists {
+    if tab == "SURFACE" && app.preferences.legacy_surface_toolbar {
+        static LEGACY: std::sync::LazyLock<PanelLists> = std::sync::LazyLock::new(|| panel_lists_of_layout("SURFACE", true));
+        return LEGACY.clone();
+    }
+    panel_lists(tab)
+}
+
 /// [`panel_lists`] worked out from the registry.
 fn panel_lists_of(tab: &str) -> PanelLists {
+    panel_lists_of_layout(tab, false)
+}
+
+fn panel_lists_of_layout(tab: &str, legacy_surface: bool) -> PanelLists {
     let specs = command_specs();
     crate::toolbar::panels(tab)
         .iter()
+        .map(|panel| if legacy_surface && *panel == "MESH" { "CONVERT" } else { *panel })
         .filter_map(|panel| {
-            let (cmds, n) = crate::workspace::layout(tab, panel, &specs)?;
-            (!cmds.is_empty() || *panel == "SELECT").then_some((*panel, cmds, n))
+            let (cmds, n) = crate::workspace::layout_for(tab, panel, &specs, legacy_surface)?;
+            (!cmds.is_empty() || panel == "SELECT").then_some((panel, cmds, n))
         })
         .collect()
 }
@@ -297,7 +312,7 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
+    let lists = panel_lists_for(app, tab);
     let ids: Vec<String> =
         lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
     ids
@@ -305,12 +320,12 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
 
 /// Where a command is a button on a tab now: its panel.
 pub fn pinned_on(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
-    panel_lists(tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
+    panel_lists_for(app, tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
 }
 
 /// The panel a command belongs to on a tab (its drop-down), or the tab's first panel.
-fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
-    let lists = panel_lists(tab);
+fn home_panel(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
+    let lists = panel_lists_for(app, tab);
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
@@ -328,7 +343,7 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if pinned_on(app, tab, id).is_some() || fixed(tab, "", id) {
         return Ok(());
     }
-    let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
@@ -409,11 +424,86 @@ pub fn quick_remove(app: &mut SolveApp, id: &str) {
     app.toolbar_custom.app_bar.items.retain(|p| p.id != format!("quick:{id}"));
 }
 
-/// Reset Toolbar: a tab's panels back to their defaults.
+/// Reset Toolbar: a tab's panels, and the order of their drop-downs, back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
+    app.toolbar_custom.menus.retain(|k, _| !k.starts_with(&prefix));
+}
+
+/// A drop-down's commands (as `workspace::grouped_commands` lists them) in the user's order
+/// (#5080). Within each group, the commands the saved order names take its order among the
+/// places they hold; any other (a command added since) keeps its place. The group's heading
+/// stays on its first command.
+pub fn order_grouped<'a>(
+    app: &SolveApp,
+    tab: &str,
+    panel: &str,
+    grouped: Vec<(Option<&'static str>, &'a CommandSpec)>,
+) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
+    let Some(saved) = app.toolbar_custom.menus.get(&key(tab, panel)) else { return grouped };
+    let groups = crate::workspace::groups(tab, panel);
+    let group_of = |id: &str| groups.iter().position(|g| g.ids.contains(&id));
+    let rank = |id: &str| saved.iter().position(|s| s == id);
+    let mut out = grouped;
+    let mut start = 0;
+    while start < out.len() {
+        let group = out.get(start).map(|(_, c)| group_of(c.id)).unwrap_or_default();
+        let end = (start..out.len()).find(|i| out.get(*i).is_some_and(|(_, c)| group_of(c.id) != group)).unwrap_or(out.len());
+        let heading = out.get(start).and_then(|(h, _)| *h);
+        let Some(run) = out.get_mut(start..end) else { break };
+        let slots: Vec<usize> = (0..run.len()).filter(|i| run.get(*i).is_some_and(|(_, c)| rank(c.id).is_some())).collect();
+        let mut named: Vec<_> = slots.iter().filter_map(|i| run.get(*i).map(|(_, c)| *c)).collect();
+        named.sort_by_key(|c| rank(c.id));
+        for (slot, c) in slots.iter().zip(named) {
+            if let Some(entry) = run.get_mut(*slot) {
+                entry.1 = c;
+            }
+        }
+        for (i, entry) in run.iter_mut().enumerate() {
+            entry.0 = if i == 0 { heading } else { None };
+        }
+        start = end;
+    }
+    out
+}
+
+/// Which group of `panel`'s drop-down command `id` is in (past the last for one in none).
+pub fn group_index(tab: &str, panel: &str, id: &str) -> usize {
+    let groups = crate::workspace::groups(tab, panel);
+    groups.iter().position(|g| g.ids.contains(&id)).unwrap_or(groups.len())
+}
+
+/// Move a command in its panel's drop-down before `before` (None: to the end), within its own
+/// group: a place in another group moves it to the nearest end of its own (#5080).
+/// Whether `id` is one of `panel`'s own commands, which [`move_in_menu`] can reorder. A command
+/// pinned there from another panel is shown in its drop-down but keeps its place (#5080).
+pub fn movable_in_menu(tab: &str, panel: &str, id: &str) -> bool {
+    panel_lists(tab).iter().any(|(p, cmds, _)| *p == panel && cmds.iter().any(|c| c.id == id))
+}
+
+pub fn move_in_menu(app: &mut SolveApp, tab: &str, panel: &str, id: &str, before: Option<&str>) {
+    let lists = panel_lists(tab);
+    let Some((_, cmds, _)) = lists.iter().find(|(p, ..)| *p == panel) else { return };
+    let order: Vec<&str> = order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect();
+    if !order.contains(&id) || before == Some(id) {
+        return;
+    }
+    let groups = crate::workspace::groups(tab, panel);
+    let group_of = |x: &str| groups.iter().position(|g| g.ids.contains(&x)).unwrap_or(groups.len());
+    let own = group_of(id);
+    let mut ids: Vec<&str> = order.into_iter().filter(|x| *x != id).collect();
+    let first = ids.iter().position(|x| group_of(x) == own);
+    let after_last = ids.iter().rposition(|x| group_of(x) == own).map(|i| i + 1);
+    let end_of_group = after_last.or(first).unwrap_or_else(|| ids.iter().position(|x| group_of(x) > own).unwrap_or(ids.len()));
+    let at = match before.and_then(|b| ids.iter().position(|x| *x == b).map(|i| (i, group_of(b)))) {
+        Some((i, g)) if g == own => i,
+        Some((_, g)) if g < own => first.unwrap_or(end_of_group),
+        _ => end_of_group,
+    };
+    ids.insert(at.min(ids.len()), id);
+    app.toolbar_custom.menus.insert(key(tab, panel), ids.into_iter().map(str::to_string).collect());
 }
 
 /// Every tab's buttons back to their defaults (`view.toolbar_reset_all`). Only the Design
@@ -422,6 +512,7 @@ pub fn reset_all(app: &mut SolveApp) {
     let prefix = format!("{WORKSPACE}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.menus.retain(|k, _| !k.starts_with(&prefix));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).
@@ -435,13 +526,16 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     } else {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
-    v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
+    v.push(
+        Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "status_pin").with(json!({ "command": id })),
+    );
     // The application bar's quick-access buttons (#10223).
     v.push(if app.toolbar_custom.quick_access.iter().any(|q| q == id) {
         Item::action("ui.quickAccessRemove", "Remove from Quick Access", "close").with(json!({ "command": id }))
     } else {
         Item::action("ui.quickAccessAdd", "Add to Quick Access", "plus").with(json!({ "command": id }))
     });
+    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "settings").with(json!({ "command": id })));
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
@@ -499,13 +593,15 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         }
         "ui.quickAccessRemove" => quick_remove(app, id),
         "ui.appBarReset" => app.toolbar_custom.reset_app_bar(),
+        "ui.shortcutKey" => crate::keymap::open_for(app, id),
         _ => {}
     }
 }
 
 /// Shortcut keys, S box favourites, toolbar and navigation bar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
-    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(), "navigation_bar": app.preferences.navigation_bar })
+    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(),
+        "navigation_bar": app.preferences.navigation_bar, "preview_reselect_modifier": app.preferences.preview_reselect_modifier })
 }
 
 /// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
@@ -522,8 +618,16 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
             serde_json::from_value::<crate::navigation_bar::NavigationBar>(value.clone()).map_err(|e| e.to_string())
         })
         .transpose()?;
+    let preview_modifier = v
+        .get("preview_reselect_modifier")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| format!("preview modifier: {error}"))?;
     if let Some(bar) = navigation_bar {
         app.preferences.navigation_bar = bar;
+    }
+    if let Some(binding) = preview_modifier {
+        app.preferences.preview_reselect_modifier = binding;
     }
     if let Some(s) = v.get("shortcuts") {
         app.keymap.load(s);
@@ -577,7 +681,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 .min(solidcraft_theme::Tokens::get().control_height * 20.0),
                         )
                         .show(ui, |ui| {
-                            for (panel, cmds, n) in panel_lists(&tab) {
+                            for (panel, cmds, n) in panel_lists_for(app, &tab) {
                                 if cmds.is_empty() {
                                     continue;
                                 }
@@ -809,6 +913,76 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod menu_order_tests {
+    use super::*;
+
+    /// A tab panel's drop-down ids as the menu shows them.
+    fn menu(app: &SolveApp, tab: &str, panel: &str) -> Vec<&'static str> {
+        let lists = panel_lists(tab);
+        let cmds = &lists.iter().find(|(p, ..)| *p == panel).unwrap().1;
+        order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect()
+    }
+
+    /// #5080: a command moves before another one of its menu; the order is saved with the
+    /// toolbar (only once a menu changed), comes back on load and goes with Reset Toolbar.
+    #[test]
+    fn a_menu_command_moves_and_the_order_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        let before = menu(&h.app, "MODEL", "CREATE");
+        assert!(!h.app.toolbar_custom.prefs().as_object().unwrap().contains_key("menus"), "nothing saved while no menu changed");
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.sphere", Some("solid.extrude"));
+        let after = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(after.first(), Some(&"solid.sphere"));
+        assert_eq!(after.len(), before.len());
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.extrude", None);
+        assert_eq!(menu(&h.app, "MODEL", "CREATE").last(), Some(&"solid.extrude"), "None: to the end");
+        let mut reloaded = ToolbarCustom::default();
+        reloaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(reloaded, h.app.toolbar_custom);
+        reset(&mut h.app, "MODEL");
+        assert_eq!(menu(&h.app, "MODEL", "CREATE"), before, "Reset Toolbar restores the order");
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.sphere", Some("solid.extrude"));
+        reset_all(&mut h.app);
+        assert_eq!(menu(&h.app, "MODEL", "CREATE"), before, "Reset All Tabs restores the order");
+    }
+
+    /// In a menu with group headings (MODEL MODIFY), a command stays in its group: a place in
+    /// a later group puts it at its group's end, an earlier one at its start; headings stay on
+    /// each group's first command.
+    #[test]
+    fn a_menu_command_stays_in_its_group() {
+        let mut h = crate::scenario::Harness::new();
+        move_in_menu(&mut h.app, "MODEL", "MODIFY", "solid.fillet", Some("solid.shell"));
+        let ids = menu(&h.app, "MODEL", "MODIFY");
+        assert_eq!(ids.get(..2), Some(&["solid.chamfer", "solid.fillet"][..]), "{ids:?}");
+        move_in_menu(&mut h.app, "MODEL", "MODIFY", "solid.scale", Some("solid.chamfer"));
+        let ids = menu(&h.app, "MODEL", "MODIFY");
+        let shell = ids.iter().position(|id| *id == "solid.shell").unwrap();
+        assert_eq!(ids.get(shell - 1), Some(&"solid.scale"), "to the start of its own group: {ids:?}");
+        let lists = panel_lists("MODEL");
+        let cmds = &lists.iter().find(|(p, ..)| *p == "MODIFY").unwrap().1;
+        let grouped = order_grouped(&h.app, "MODEL", "MODIFY", crate::workspace::grouped_commands("MODEL", "MODIFY", cmds));
+        let headings: Vec<_> = grouped.iter().filter_map(|(h, c)| h.map(|h| (h, c.id))).collect();
+        assert_eq!(headings.first(), Some(&("Edges", "solid.chamfer")));
+        assert!(headings.contains(&("Bodies", "solid.scale")), "{headings:?}");
+    }
+
+    /// A command the saved order doesn't name (added in a later version) keeps its built-in
+    /// place; an unknown saved id is ignored.
+    #[test]
+    fn a_command_the_saved_order_lacks_keeps_its_place() {
+        let mut h = crate::scenario::Harness::new();
+        let built_in = menu(&h.app, "MODEL", "CREATE");
+        let mut saved: Vec<String> = built_in.iter().filter(|id| **id != "solid.loft").rev().map(|id| id.to_string()).collect();
+        saved.push("no.such.command".into());
+        h.app.toolbar_custom.menus.insert(key("MODEL", "CREATE"), saved);
+        let ids = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(ids.iter().position(|id| *id == "solid.loft"), built_in.iter().position(|id| *id == "solid.loft"));
+        assert_eq!(ids.len(), built_in.len());
     }
 }
 

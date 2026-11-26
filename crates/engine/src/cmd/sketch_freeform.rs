@@ -59,7 +59,7 @@ impl Geometry {
                 .min_by(|a, b| a.1.dist(at).total_cmp(&b.1.dist(at)))
                 .ok_or_else(|| bad(cmd, "the curve has no shape")),
             Self::Rational(curve) => {
-                let hit = solidcore_ops::curve::closest_point(curve, [at.x, at.y, 0.0], 1e-9)
+                let hit = solidcraft_kernel::curves::closest_point(curve, [at.x, at.y, 0.0], 1e-9)
                     .map_err(|e| bad(cmd, e.to_string()))?
                     .ok_or_else(|| bad(cmd, "cannot locate point on spline"))?;
                 Ok((hit.parameter, Vec2::new(hit.point[0], hit.point[1])))
@@ -85,7 +85,8 @@ impl Geometry {
 /// Crossings of exact free-form spans. The record keeps each Bézier or rational conic bounded
 /// to its own knot domain, so crossings on another span's continuation are excluded.
 fn recorded(seg: &Seg2, cmd: &str) -> Result<solidcore_record::brep::Curve> {
-    let curve = solidcore_ops::sweep::Curve::from_seg2(seg, &solidcore_record::Plane::XY).ok_or_else(|| bad(cmd, "invalid curve span"))?;
+    let curve =
+        solidcraft_kernel::services::sweep::Curve::from_seg2(seg, &solidcore_record::Plane::XY).ok_or_else(|| bad(cmd, "invalid curve span"))?;
     curve.to_record().map(|record| record.curve).map_err(|error| bad(cmd, error.to_string()))
 }
 
@@ -102,7 +103,7 @@ fn support_hits(geo: &Geometry, shape: &Shape, infinite: bool, budget: &mut usiz
             Shape::Line { a, b } => {
                 let d = (b - a).normalized().ok_or_else(|| bad(cmd, "zero-length cutting line"))?;
                 let plane = Plane { origin: Vec3::new(a.x, a.y, 0.0), x: Vec3::new(d.x, d.y, 0.0), y: Vec3::Z };
-                let hits = solidcore_ops::curve::plane_crossings(curve, [0.0, 1.0], &plane).map_err(|e| bad(cmd, e.to_string()))?;
+                let hits = solidcraft_kernel::curves::plane_crossings(curve, [0.0, 1.0], &plane).map_err(|e| bad(cmd, e.to_string()))?;
                 out.extend(hits.into_iter().map(|hit| a + d * hit.x));
             }
             Shape::Round { c, r, .. } => {
@@ -117,7 +118,7 @@ fn support_hits(geo: &Geometry, shape: &Shape, infinite: bool, budget: &mut usiz
 }
 
 fn record_crossings(a: &RecordCurve, b: &RecordCurve, cmd: &str) -> Result<Vec<Vec2>> {
-    let hits = solidcore_ops::curve::crossings(a, b, None, 1e-7).map_err(|e| bad(cmd, e.to_string()))?;
+    let hits = solidcraft_kernel::curves::crossings(a, b, None, 1e-7).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(hits.into_iter().map(|hit| Vec2::new(hit.on_a[0], hit.on_a[1])).collect())
 }
 
@@ -134,7 +135,7 @@ fn cuts(sk: &Sketch, ci: usize, geo: &Geometry, cmd: &str) -> Result<Vec<Boundar
         if oi == ci
             || (shape.is_some() && !curve.kind.is_freeform())
             || own_axes.contains(&Some(oi))
-            || curve.spline_handle_of.as_ref() == Some(&target.id)
+            || curve.spline_guide_owner() == Some(target.id.as_str())
         {
             continue;
         }

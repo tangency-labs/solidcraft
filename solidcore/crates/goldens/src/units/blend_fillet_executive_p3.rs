@@ -30,8 +30,6 @@ mod attributed;
 mod contract;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
-#[cfg(test)]
-pub(crate) use end_to_end::result_body_of;
 #[path = "blend_fillet_executive_p3/preview.rs"]
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
@@ -1097,10 +1095,11 @@ mod tests {
         assert_eq!(on, off);
     }
 
-    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`).
+    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`), which runs
+    /// with every flag off: the record is not deferred and succeeds.
     #[test]
     fn bands_hook_answers_with_no_blend() {
-        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_overlapping_bands = true);
+        reaches_hook_as_with_flags_off(|_| {});
     }
 
     /// WR-546: the stitch with `SmFilletPatchStitchCallback`

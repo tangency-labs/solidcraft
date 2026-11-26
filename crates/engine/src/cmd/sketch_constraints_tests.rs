@@ -2095,3 +2095,197 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
     assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
 }
+
+/// An arc's centre and radius, as the sketch holds them.
+fn round_of(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, f64) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, .. } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    (sk.point(c).unwrap(), sk.radius(i).unwrap())
+}
+
+/// Where the point halfway along an arc lies, from the arc as the sketch holds it, and the middle
+/// of its chord.
+fn arc_middles(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, Vec2) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    let (centre, start, end) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    let mut sweep = (end - centre).angle() - (start - centre).angle();
+    while sweep <= 0.0 {
+        sweep += std::f64::consts::TAU;
+    }
+    let half = (start - centre).angle() + sweep / 2.0;
+    let radius = centre.dist(start);
+    (centre + Vec2::new(radius * half.cos(), radius * half.sin()), (start + end) * 0.5)
+}
+
+/// MidPoint on an arc: the point goes halfway along the arc, which is not the middle of its
+/// chord, from a point and an arc picked either way round or given as `point` and `line`; it
+/// stays there when the arc's radius is dimensioned afterwards (#16860).
+#[test]
+fn midpoint_holds_a_point_halfway_along_an_arc() {
+    for form in 0..3 {
+        let mut s = new_sketch();
+        let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+        run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+        let params = match form {
+            0 => json!({"point": "m", "line": arc}),
+            1 => json!({"a": "m", "b": arc}),
+            _ => json!({"a": arc, "b": "m"}),
+        };
+        let made = run(&mut s, "sketch.constraint.midpoint", params);
+        assert_eq!(made["sketch"]["solved"], true, "form {form}: {made}");
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (middle, chord) = arc_middles(&sk, &arc);
+        assert!(m.dist(middle) < 1e-5, "form {form}: {m:?} should be halfway along the arc, at {middle:?}");
+        // The arc stays and the point comes to it, whichever way it was named: halfway along the
+        // arc, not at the middle of its chord (5, 5).
+        let r = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+        assert!(m.dist(Vec2::new(r, r)) < 1e-5, "form {form}: {m:?}");
+        assert!(m.dist(chord) > 1.0, "form {form}: not the middle of the chord {chord:?}: {m:?}");
+        run(&mut s, "sketch.dimension", json!({"entities": [arc], "value": 20}));
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (centre, radius) = round_of(&sk, &arc);
+        assert!((radius - 20.0).abs() < 1e-6, "form {form}: radius {radius}");
+        assert!(m.dist(arc_middles(&sk, &arc).0) < 1e-5, "form {form}: still halfway along the arc: {m:?} (centre {centre:?})");
+    }
+}
+
+/// What MidPoint on an arc refuses: a circle, which has no middle, and one of the arc's own
+/// ends, which would shrink the arc to a point.
+#[test]
+fn midpoint_refuses_a_circle_and_an_end_of_the_arc() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 0], "radius": 5}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": "m", "b": circle})).unwrap_err().to_string();
+    assert!(e.contains("a point and a line or an arc"), "{e}");
+    let end = sketch(&s).curves.iter().find_map(|c| (c.id == arc).then(|| c.kind.ends())).flatten().unwrap().0;
+    let end = sketch(&s).points[end].id.clone();
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": end, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("an arc's own end"), "{e}");
+}
+
+/// A menu or toolbar offers MidPoint for a point picked with an arc, but not with a circle, which
+/// has no ends (#16860).
+#[test]
+fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let midpoint = crate::find_command("sketch.constraint.midpoint").unwrap();
+    let pick = |curve: &str| vec![crate::Sel::SketchPoint { id: "m".into() }, crate::Sel::SketchCurve { id: curve.into(), sketch: None }];
+    s.selection = pick(&arc);
+    assert!(midpoint.for_selection(&s).is_some(), "a point and an arc");
+    s.selection = pick(&circle);
+    assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
+}
+
+/// Horizontal and Vertical on their own go the way they say, not the nearer way that
+/// Horizontal/Vertical picks: a line drawn nearly vertical can be made horizontal, and two points
+/// nearly level can be put one above the other. Their length and first end stay where they were.
+#[test]
+fn horizontal_and_vertical_go_the_way_they_say() {
+    for (id, from, to) in [("sketch.constraint.horizontal", [10.0, 10.0], [13.0, 40.0]), ("sketch.constraint.vertical", [10.0, 10.0], [40.0, 13.0])] {
+        let horizontal = id.ends_with(".horizontal");
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [from, to], "infer": false, "connect": false}));
+        run(&mut s, id, json!({"line": "l1"}));
+        let sk = sketch(&s);
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. }) == horizontal
+                && matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })),
+            "{id}"
+        );
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let d = b - a;
+        if horizontal {
+            assert!(d.y.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        } else {
+            assert!(d.x.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        }
+        // A mode the combined command would read is not one these take: the command decides.
+        let mut s = new_sketch();
+        run(&mut s, "sketch.point", json!({"point": [0, 20], "id": "p", "connect": false}));
+        run(&mut s, "sketch.point", json!({"point": [30, 21], "id": "q", "connect": false}));
+        run(&mut s, id, json!({"points": ["p", "q"]}));
+        let sk = sketch(&s);
+        let (p, q) = (sk.point(sk.resolve_point("p").unwrap()).unwrap(), sk.point(sk.resolve_point("q").unwrap()).unwrap());
+        let kind = &sk.constraints.last().unwrap().kind;
+        if horizontal {
+            assert!(matches!(kind, ConstraintKind::HorizontalPoints { .. }) && (p.y - q.y).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        } else {
+            assert!(matches!(kind, ConstraintKind::VerticalPoints { .. }) && (p.x - q.x).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        }
+    }
+}
+
+/// Horizontal on a line running the other way, exactly vertical or nearly, and Vertical on one
+/// lying flat, turn the line keeping its length (it would otherwise shrink to its short extent,
+/// or to nothing): about its middle when both ends are free, about a fixed end when one is.
+#[test]
+fn horizontal_and_vertical_turn_a_line_running_the_other_way_keeping_its_length() {
+    for (id, to) in [
+        ("sketch.constraint.horizontal", [10.0, 40.0]),
+        ("sketch.constraint.horizontal", [13.0, 40.0]),
+        ("sketch.constraint.vertical", [40.0, 10.0]),
+        ("sketch.constraint.vertical", [40.0, 13.0]),
+    ] {
+        for fixed_start in [false, true] {
+            let horizontal = id.ends_with(".horizontal");
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points": [[10.0, 10.0], to], "infer": false, "connect": false}));
+            if fixed_start {
+                run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.start"}));
+            }
+            let length = (Vec2::new(to[0], to[1]) - Vec2::new(10.0, 10.0)).len();
+            run(&mut s, id, json!({"line": "l1"}));
+            let sk = sketch(&s);
+            let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+            let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+            let d = b - a;
+            let case = format!("{id} to {to:?}, fixed start {fixed_start}: {a:?} {b:?}");
+            assert!((d.len() - length).abs() < 1e-6, "{case}: length {} not {length}", d.len());
+            assert!(if horizontal { d.y.abs() < 1e-6 && d.x > 0.0 } else { d.x.abs() < 1e-6 && d.y > 0.0 }, "{case}");
+            if fixed_start {
+                assert!((a - Vec2::new(10.0, 10.0)).len() < 1e-9, "{case}: the fixed end stays");
+            } else {
+                let middle = (Vec2::new(to[0], to[1]) + Vec2::new(10.0, 10.0)) * 0.5;
+                assert!(((a + b) * 0.5 - middle).len() < 1e-6, "{case}: turned about its middle");
+            }
+        }
+    }
+}
+
+/// A selection the combined tool takes, Horizontal and Vertical take too, without a `mode`: one
+/// line, two points, or a point and a line (aligned with the line's middle).
+#[test]
+fn horizontal_and_vertical_take_the_selection_without_a_mode() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 10]], "infer": false, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [5, 30], "id": "p", "connect": false}));
+    let line = crate::Sel::SketchCurve { id: "l1".into(), sketch: None };
+    let point = crate::Sel::SketchPoint { id: "p".into() };
+    for id in ["sketch.constraint.horizontal", "sketch.constraint.vertical"] {
+        let spec = crate::find_command(id).unwrap();
+        s.selection = vec![line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"line": "l1"})), "{id}");
+        s.selection = vec![point.clone(), line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", {"midpoint": "l1"}]})), "{id}");
+        s.selection = vec![point.clone(), crate::Sel::SketchPoint { id: "l1.start".into() }];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", "l1.start"]})), "{id}");
+    }
+    // The vertical one runs on the point and line: the point goes above the line's middle.
+    s.selection = vec![point, line];
+    let p = crate::find_command("sketch.constraint.vertical").unwrap().for_selection(&s).unwrap();
+    run(&mut s, "sketch.constraint.vertical", p);
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point("p").unwrap()).unwrap();
+    let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+    let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+    assert!((at.x - (a.x + b.x) / 2.0).abs() < 1e-6, "{at:?} {a:?} {b:?}");
+}

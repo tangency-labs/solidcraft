@@ -1360,6 +1360,21 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
     Ok(())
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]): the control points, the
+/// degree and the knots, the storage beyond the indices in use too.
+impl crate::geom::content::Content for Curve {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self { pw, n, p, u, m } = self;
+        d.tag(0xC0);
+        pw.as_slice().content(d)?;
+        d.usize(*n);
+        d.usize(*p);
+        d.f64s(u);
+        d.usize(*m);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

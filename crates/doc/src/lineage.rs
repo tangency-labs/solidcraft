@@ -15,6 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 
@@ -36,6 +37,9 @@ pub(crate) enum Operand {
     /// pattern or mirror of that feature: its faces named by their roles in that feature
     /// (`F<feature>:<role>@F<pattern>.<instance>`).
     CopiedTool { roles: Vec<Vec<String>>, feature: u64, instance: usize },
+    /// A body another feature (`feature`) builds, built again by this one in its place (a frame
+    /// member with its ends trimmed): its faces keep that feature's names (`F<feature>:<role>`).
+    Rebuilt { roles: Vec<Vec<String>>, feature: u64 },
     /// A body the feature made on the way to its result (a cut body before it falls into lumps),
     /// named as a whole first so pieces of one face in different results are told apart.
     Stage(Box<Stage>),
@@ -79,12 +83,17 @@ pub(crate) struct Stage {
 pub(crate) struct Lineage {
     pub(crate) history: History,
     pub(crate) operands: Vec<Arc<Operand>>,
+    /// The pieces the feature split faces into, by face of the body this is the lineage of: each
+    /// piece's role in the feature (`in`, `out`, `+`, …, see [`Traced::with_pieces`]), `None` for
+    /// a face it did not split. Only the feature's own step has them: a later step's lineage reads
+    /// the names they gave.
+    pub(crate) pieces: Option<Arc<Vec<Option<String>>>>,
 }
 
 impl Lineage {
     /// `body` as it is: every face and edge its own, named as `operand` names them.
     pub(crate) fn of(body: &Body, operand: Operand) -> Lineage {
-        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)] }
+        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], pieces: None }
     }
 
     /// The lineage of `result`, made by one kernel operation from operands whose lineages are
@@ -104,7 +113,7 @@ impl Lineage {
             }
         }
         let operands: Vec<Arc<Operand>> = inputs.iter().flat_map(|l| l.operands.iter().cloned()).collect();
-        (history.operands == operands.len()).then_some(Lineage { history, operands })
+        (history.operands == operands.len()).then_some(Lineage { history, operands, pieces: None })
     }
 
     /// This lineage for a moved copy of what feature `feature` built (instance `instance` of a
@@ -117,10 +126,11 @@ impl Lineage {
                 Operand::Made(roles) => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature, instance }),
                 // A sheet's faces are named by what made them in the sheet: no copy has them.
                 Operand::Grown { faces, .. } => Arc::new(Operand::Made(vec![Vec::new(); faces.len()])),
+                Operand::Rebuilt { roles, feature: built } => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature: *built, instance }),
                 _ => op.clone(),
             })
             .collect();
-        Lineage { history: self.history.clone(), operands }
+        Lineage { history: self.history.clone(), operands, pieces: None }
     }
 
     /// Whether each face of the body this is the lineage of came, in whole or in part, from a
@@ -163,7 +173,7 @@ impl Lineage {
             .iter()
             .map(|piece| {
                 let history = piece.history()?.clone();
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()] })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], pieces: None })
             })
             .collect()
     }
@@ -179,7 +189,7 @@ impl Lineage {
                 let history = piece.history()?.clone();
                 let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
                 let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage] })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], pieces: None })
             })
             .collect()
     }
@@ -212,6 +222,20 @@ impl Traced {
         }
     }
 
+    /// Label this instance of a tool. A cached or moved tool can have the same geometry but
+    /// belong to a different sketch point.
+    pub fn with_part_prefix(mut self, prefix: Option<&str>) -> Traced {
+        if let (Some(prefix), Some(lineage)) = (prefix, self.lineage.as_mut()) {
+            for operand in &mut lineage.operands {
+                if let Operand::Made(roles) = operand.as_ref() {
+                    let roles = roles.iter().map(|names| names.iter().map(|role| format!("{prefix}:{role}")).collect()).collect();
+                    *operand = Arc::new(Operand::Made(roles));
+                }
+            }
+        }
+        self
+    }
+
     /// `copy`, this tool moved: instance `instance` of a pattern or mirror of feature `feature`,
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
@@ -231,6 +255,34 @@ impl Traced {
         Traced { body: result, lineage, recipe: None }
     }
 
+    /// This body with the pieces its feature split faces into named by their roles there (one per
+    /// face, `None` for a face it did not split): `F<feature>:<role>` tells each piece apart.
+    pub fn with_pieces(mut self, pieces: Vec<Option<String>>) -> Traced {
+        if let Some(lineage) = &mut self.lineage
+            && pieces.len() == self.body.face_count()
+            && pieces.iter().any(Option::is_some)
+        {
+            lineage.pieces = Some(Arc::new(pieces));
+        }
+        self
+    }
+
+    /// This tool replaces faces built by `feature`, preserving that feature's roles even
+    /// when a later trim supplies the replacement cap.
+    pub fn rebuilt(mut self, feature: u64) -> Traced {
+        if let Some(lineage) = &mut self.lineage {
+            lineage.operands = lineage
+                .operands
+                .iter()
+                .map(|op| match op.as_ref() {
+                    Operand::Made(roles) => Arc::new(Operand::Rebuilt { roles: roles.clone(), feature }),
+                    _ => op.clone(),
+                })
+                .collect();
+        }
+        self
+    }
+
     /// `result`, made by one kernel operation from this body alone. Where that operation's
     /// history can't be composed with this body's (it blends an edge the same feature made: a
     /// boss's root fillet), this body is a stage of the feature, its faces and edges named as a
@@ -247,7 +299,7 @@ impl Traced {
             }
             let body = crate::ModelBody::new(String::new(), self.body.clone(), 0);
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
-            Some(Lineage { history, operands: vec![stage] })
+            Some(Lineage { history, operands: vec![stage], pieces: None })
         });
         Traced { body: result, lineage, recipe: None }
     }
@@ -545,17 +597,52 @@ pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
 /// by the part it makes: `<part>:top` (its end cap), `<part>:base` (its start cap) and
 /// `<part>:side:<k>` (swept from segment `k` of its profile), as its construction records them.
 pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
-    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
-        h.faces
-            .iter()
-            .map(|f| match f.origins.as_slice() {
-                [FaceOrigin::Cap { end }] => vec![format!("{part}:{}", if *end { "top" } else { "base" })],
-                [FaceOrigin::Profile { segment }] => vec![format!("{part}:side:{segment}")],
-                _ => Vec::new(),
-            })
-            .collect()
-    });
+    let roles =
+        body.history().filter(|h| h.operands == 0).map(|h| h.faces.iter().map(|f| part_role(&f.origins, part).into_iter().collect()).collect());
     Traced::made(body, roles)
+}
+
+/// The role of one face of a tool built from a profile (see [`part_tool`]).
+pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
+    match origins {
+        [FaceOrigin::Cap { end }] => Some(format!("{part}:{}", if *end { "top" } else { "base" })),
+        [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
+        _ => None,
+    }
+}
+
+/// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
+/// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v6 encoding is little-endian: reconstruction
+/// kind (0 analytic, 1 faceted), the producer's u32 face-order version, tolerance bits, u64 vertex
+/// count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// The producer versions face ordering; bump this domain when the input encoding changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64, kind: ReconstructionKind) -> Traced {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"solidcraft-mesh-reconstruction-v6");
+    hash.update([match kind {
+        ReconstructionKind::Analytic => 0,
+        ReconstructionKind::Faceted => 1,
+    }]);
+    hash.update(FACE_ORDER_VERSION.to_le_bytes());
+    hash.update(tolerance.to_le_bytes());
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
+    let digest = format!("{:x}", hash.finalize());
+    let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
+    Traced::made(body, Some(roles))
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
@@ -614,6 +701,13 @@ pub(crate) fn link_role(fid: u64, name: &str, depth: usize) -> String {
         role.push_str(&format!("#{k}"));
     }
     role
+}
+
+/// [`numbered_tool`] for a body feature `feature` built, built again by another feature: its
+/// faces keep the names `feature` gave them.
+pub(crate) fn numbered_rebuilt(body: Body, feature: u64) -> Traced {
+    let roles = (0..body.face_count()).map(|k| vec![format!("face:{k}")]).collect();
+    Traced { lineage: Some(Lineage::of(&body, Operand::Rebuilt { roles, feature })), body, recipe: None }
 }
 
 /// The role of an extrude's cap at `height` along the sketch normal: on the sketch plane, above
@@ -717,6 +811,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                     Lineage {
                         history: History { operands: 1, faces, edges: Vec::new() },
                         operands: vec![Arc::new(Operand::Body(b.name.to_string()))],
+                        pieces: None,
                     }
                 }
             };
@@ -752,7 +847,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                 Some((_, PanelMade::Converted { face, .. })) => vec![*face],
                 _ => Vec::new(),
             },
-            (SheetPart::Hole { .. }, _) => Vec::new(),
+            (SheetPart::Hole { .. } | SheetPart::Drill { .. }, _) => Vec::new(),
             _ => had.get(x).cloned().unwrap_or_default(),
         };
         if !source.is_empty() {
@@ -778,7 +873,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     let edges = History::identity(body).edges.into_iter().map(|e| EdgeProv { faces: e.faces, origins: Vec::new() }).collect();
     let mut history = History { operands: grown_at + 1, faces, edges };
     let Some(first) = first else {
-        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })] });
+        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], pieces: None });
     };
     // A face grown from faces of the body as the feature found it is named after their names;
     // where the feature made that body so far, after the faces of the model before them.
@@ -803,7 +898,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     history.substitute(0, &first.history).ok()?;
     let mut operands = first.operands.clone();
     operands.push(Arc::new(Operand::Grown { body: body_name, faces: grown }));
-    (history.operands == operands.len()).then_some(Lineage { history, operands })
+    (history.operands == operands.len()).then_some(Lineage { history, operands, pieces: None })
 }
 
 /// The role of a face a sheet's build made for `part` (see `SheetPart`), the `place`th of the faces
@@ -828,8 +923,9 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
 /// and its side is the face of the body its panel away from the corner was, the one the corner's
 /// two bends do not share. Each corner's walls are so named apart from every other corner's, and
 /// numbered among themselves (see `FaceNamer::part`). Where a side is not known, the walls are
-/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it. None for a panel
-/// nothing says what made.
+/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it, and a bead's face
+/// `<face>:<curve>` of the bead feature, after its centreline (`crown.top:<curve>`, see
+/// `sheet_surface_bead::face_role`). None for a panel nothing says what made.
 fn sheet_role(
     part: &crate::sheet_surface_convert::SheetPart,
     place: Option<usize>,
@@ -958,6 +1054,12 @@ fn sheet_role(
         SheetPart::Hole { feature, curve } => {
             Some(GrownFace { role: format!("side:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
         }
+        SheetPart::Drill { feature, role } => {
+            Some(GrownFace { role: role.clone(), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
+        SheetPart::Bead { feature, curve, face } => {
+            Some(GrownFace { role: format!("{face}:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
     }
 }
 
@@ -979,12 +1081,18 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
-    /// This body as the feature changed it: under its name, from the feature that made it and with
-    /// its `component`, so a later step of the same feature still counts it among that
-    /// component's bodies (the copies of a pattern's second cut, #14305).
+    /// This body as the feature changed it: under its name, from the feature that made it, with
+    /// its `component` and the frame a transfer gave it, so a later step of the same feature still
+    /// counts it among that component's bodies (the copies of a pattern's second cut, #14305) and
+    /// meets it where it is placed (a mirror's round after its join, #19451).
     pub(crate) fn remade(&self, made: Traced) -> Self {
         let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
         remade.component = self.component;
+        remade.transferred = self.transferred;
+        remade.source_name = self.source_name.clone();
+        remade.source_transform = self.source_transform;
+        // A surface stays a surface through a change to its shape (#21969).
+        remade.sheet = self.sheet;
         remade
     }
 
@@ -1172,9 +1280,21 @@ fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: 
 }
 
 /// Name the pieces a body fell into after their faces: of the bodies in `bodies` that are lumps
-/// of one body (made in the same step, from one stage), the one whose least face name sorts first
-/// takes the first of their body names, and so on. The kernel's shell order, which named them
-/// before, can swap when an upstream edit moves the cut; their faces' names follow history.
+/// of one body (made in the same step, from one stage), the one whose faces sort first takes the
+/// first of their body names, and so on. The kernel's shell order, which named them before, can
+/// swap when an upstream edit moves the cut; their faces' names follow history.
+///
+/// A piece's faces are told apart in two kinds: those of the body it was split from, as it was
+/// before the feature, and those the feature made (the walls it cut the pieces apart with, or a
+/// tool's). The pieces that hold faces of the body come first; of them, a lump the feature left
+/// as it was, then the others by the least name of the faces the feature made on them; each tie,
+/// and the pieces that hold none of the body's faces, by their least face name. An upstream edit
+/// can take away the face holding a piece's least name (a notch that eats the end of a bar),
+/// which handed the first name to another piece and a renamed piece's name to a sliver
+/// (#21552); the faces the feature made are named after the feature itself, so they stay where
+/// they are. A feature saved before then (`Feature::least_face_piece_order`), or one that split
+/// a body it made itself, orders its pieces by their least face name alone, as builds before
+/// then did.
 /// `origin` is the feature that made them, for naming their faces.
 pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::naming::NamingOrigin>) {
     let mut families: Vec<(*const Operand, Vec<usize>)> = Vec::new();
@@ -1200,20 +1320,21 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if !same && foreign > 1 {
             continue;
         }
-        let least = |b: &crate::ModelBody| {
-            let mut named = b.clone();
-            named.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
-            crate::naming::face_names(&named).iter().min().cloned()
-        };
-        let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
+        // The faces the body had before the feature, by stem (`None`: order by the least face
+        // name alone).
+        let had = if origin.feature.least_face_piece_order { None } else { faces_before(bodies, &members, &origin.before) };
+        let key = |b: &crate::ModelBody| piece_key(b, origin, had.as_ref());
+        let keys: Option<Vec<(PieceKey, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(key).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438). So does the body a name
-        // past the first was split off, which gives that piece its material and look.
-        let names: Vec<(String, u64, Option<String>)> =
-            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
+        // past the first was split off, which gives that piece its material and look, and whether
+        // the name's owner is the body's component rather than its feature's (a root cut's piece
+        // of a placed part's body, #21156).
+        let names: Vec<(String, u64, Option<String>, bool)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone(), b.transferred))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -1222,13 +1343,57 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from, transferred)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
             b.split_from = split_from;
+            b.transferred = transferred;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }
         }
     }
+}
+
+/// What [`order_lumps`] sorts a piece by: whether it holds none of the faces of the body it was
+/// split from (a mirrored copy, a tool's material a join split off: it comes after those that
+/// do), the least name of the faces the feature made on it (`None`, which sorts first, for a
+/// lump the feature left as it was), then its least face name. Where the body's faces are not
+/// known, only the least face name tells pieces apart.
+type PieceKey = (bool, Option<String>, String);
+
+/// The [`PieceKey`] of piece `b`, its faces named as `origin` names them; `had` holds the stems
+/// of the face names of the body it was split from, as it was before the feature
+/// ([`faces_before`]). `None` for a piece without faces.
+fn piece_key(b: &crate::ModelBody, origin: &Arc<crate::naming::NamingOrigin>, had: Option<&std::collections::BTreeSet<String>>) -> Option<PieceKey> {
+    let mut named = b.clone();
+    named.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
+    let names = crate::naming::face_names(&named);
+    let Some(had) = had else { return names.iter().min().cloned().map(|least| (false, None, least)) };
+    // A piece of a face the body had keeps that face's name as its stem (`F1:+y#[…]`).
+    let mut least: Option<&String> = None;
+    let mut made: Option<&String> = None;
+    let mut has_kept = false;
+    for n in names.iter() {
+        if least.is_none_or(|l| n < l) {
+            least = Some(n);
+        }
+        if had.contains(crate::naming::strip_piece(n)) {
+            has_kept = true;
+        } else if made.is_none_or(|m| n < m) {
+            made = Some(n);
+        }
+    }
+    Some((!has_kept, made.filter(|_| has_kept).cloned(), least?.clone()))
+}
+
+/// The stems of the face names (`naming::strip_piece`) of the body that the pieces `members` of
+/// `bodies` were split from, as it was in `before`: the body a piece past the first says it was
+/// split off, else the one whose name a piece kept. `None` where it was no body then: the feature
+/// made it itself, and its faces are all the feature's.
+fn faces_before(bodies: &[crate::ModelBody], members: &[usize], before: &crate::ModelState) -> Option<std::collections::BTreeSet<String>> {
+    let family = || members.iter().filter_map(|i| bodies.get(*i));
+    let source =
+        family().find_map(|b| b.split_from.as_deref().and_then(|n| before.body(n))).or_else(|| family().find_map(|b| before.body(&b.name)))?;
+    Some(crate::naming::face_names(source).iter().map(|n| crate::naming::strip_piece(n).to_string()).collect())
 }

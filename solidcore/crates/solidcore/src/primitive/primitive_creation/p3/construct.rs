@@ -46,6 +46,7 @@ use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -113,9 +114,9 @@ fn linear_section_centroid(
         .iter()
         .all(|v| v.is_finite())
     {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             OP,
-            "a section centroid is non-finite",
+            PrimitiveFailure::SectionNotFinite,
         ));
     }
     Ok(Some(centroid))
@@ -203,9 +204,9 @@ fn align_section_loop(
         let domain = joined.natural_interval();
         let range = domain.max() - domain.min();
         if !range.is_finite() || range <= 0.0 {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "a section loop has no finite parameter interval",
+                PrimitiveFailure::SectionLoopNoInterval,
             ));
         }
         let (knots, _) = joined.knots(None)?;
@@ -221,9 +222,9 @@ fn align_section_loop(
             }
         }
         if !score.is_finite() {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "section correspondence has a non-finite distance",
+                PrimitiveFailure::SectionNotFinite,
             ));
         }
         if score < best_score {
@@ -253,12 +254,25 @@ pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<Regi
         brep,
         primitive
             .region()
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the target region"))?,
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoRegion))?,
     ))
 }
-fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
+/// The surface of a section face of the caller's skin
+/// ([`PrimitiveFailure::FaceWithoutSurface`] without one).
+fn section_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
     crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?
-        .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
+        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::FaceWithoutSurface))
+}
+
+/// The surface of a side face the sweep made: each is made on its swept surface, so one
+/// without a surface is the kernel's fault.
+fn side_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
+    crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?.ok_or_else(|| {
+        SolidError::primitive_broken_link(
+            OP,
+            "a side face the sweep made has no surface, though each is made on its swept surface",
+        )
+    })
 }
 
 /// Not upstream: section faces that are planes, three or more, all parallel to the first
@@ -290,7 +304,7 @@ impl SectionPlanes {
         }
         let mut planes = Vec::new();
         for &face in faces {
-            match face_surface(a, face)?.kind() {
+            match section_surface(a, face)?.kind() {
                 SurfaceKind::Plane(p) => {
                     let (point, normal, _) = p.is_planar();
                     planes.push((point, normal));
@@ -546,14 +560,14 @@ impl PrimitiveCreation {
         let mut section_planes: Vec<Option<(Point3, Vec3)>> = Vec::new();
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
-            let normal = face_surface(a, face)?.evaluate_normal(
+            let normal = section_surface(a, face)?.evaluate_normal(
                 a.kernel(brep)?,
                 domain.evaluate(0.5, 0.5),
                 Side::Left,
                 Side::Left,
             )?;
             let planar = matches!(
-                face_surface(a, face)?.kind(),
+                section_surface(a, face)?.kind(),
                 crate::surface::surface::SurfaceKind::Plane(_)
             );
             let composites = a.face_composites_with_edges(face)?;
@@ -594,9 +608,12 @@ impl PrimitiveCreation {
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
-                return Err(SolidError::primitive_failed(
+                return Err(SolidError::primitive(
                     OP,
-                    "the faces have different numbers of layers",
+                    PrimitiveFailure::SectionLayersDiffer {
+                        first: layer_count,
+                        this: composites.len(),
+                    },
                 ));
             }
             let mut current_loops = Vec::new();
@@ -903,7 +920,7 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         side_faces.clear();
         if profiles.is_empty() {
-            return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoProfiles));
         }
         // SolidCraft fork (5d3939e): a scaled sweep's sections are no rigid images of the
         // profile.
@@ -1114,7 +1131,7 @@ fn sweep_end_curves(
         let mut spans = Vec::new();
         for &face in side_faces.get(group.clone()).unwrap_or_default() {
             let domain =
-                face_surface(a, (brep, face))?.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
+                side_surface(a, (brep, face))?.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
             let span = if translational {
                 (domain.min().y, domain.max().y)
             } else {
@@ -1129,7 +1146,7 @@ fn sweep_end_curves(
             .fold(f64::NEG_INFINITY, f64::max);
         let tol = EFF_ZERO_SQRT * (1.0 + first.abs().max(last.abs()));
         for &(face, (low, high)) in &spans {
-            let surface = face_surface(a, (brep, face))?;
+            let surface = side_surface(a, (brep, face))?;
             for (at, keep, out) in [
                 (low, low - first <= tol, &mut starts),
                 (high, last - high <= tol, &mut ends),

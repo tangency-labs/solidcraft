@@ -13,13 +13,15 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]).
+//!   the feature's `targets` ([`scope_targets`]). Pipe and Thicken don't choose, but this holds
+//!   for them too.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, OPS};
+use crate::dialogs_surface::Surf;
 
 /// Operation indices (see [`OPS`]).
 pub const NEW: usize = 0;
@@ -58,6 +60,12 @@ fn rule(kind: &Kind) -> Option<Rule> {
         Kind::Primitive { cmd, .. } => Some(Rule { extrude: false, cut: *cmd != "solid.coil" }),
         _ => None,
     }
+}
+
+/// Whether the window's Join, Cut or Intersect takes only the shown bodies: every window that
+/// chooses, and Pipe and Thicken, which don't.
+fn scoped(kind: &Kind) -> bool {
+    rule(kind).is_some() || matches!(kind, Kind::Pipe { .. } | Kind::Surface(Surf::Thicken { .. }))
 }
 
 fn operation(kind: &mut Kind) -> Option<&mut usize> {
@@ -308,7 +316,7 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 /// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
 /// nothing to change.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if rule(&d.kind).is_none() || d.editing.is_some() {
+    if !scoped(&d.kind) || d.editing.is_some() {
         return Ok(());
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
