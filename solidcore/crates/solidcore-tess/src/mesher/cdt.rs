@@ -318,8 +318,106 @@ fn collect(
     Some((extra, tris))
 }
 
+fn poly_bbox(polygon: &[[f64; 2]]) -> [f64; 4] {
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for p in polygon {
+        b = [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])];
+    }
+    b
+}
+
+fn bbox_contains(b: [f64; 4], p: [f64; 2]) -> bool {
+    p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]
+}
+
+/// 2D axis-aligned boxes bucketed on a square grid, with an overflow list for large boxes that
+/// span many cells so no box is ever dropped.
+struct BoxGrid {
+    cells: HashMap<(i64, i64), Vec<usize>>,
+    overflow: Vec<usize>,
+    step: f64,
+}
+
+impl BoxGrid {
+    fn new(items: &[(usize, [f64; 4])]) -> Self {
+        const MAX_BOX_CELLS: i64 = 64;
+        if items.len() <= 8 {
+            return Self { cells: HashMap::new(), overflow: items.iter().map(|&(id, _)| id).collect(), step: 0.0 };
+        }
+        let mut gx0 = f64::INFINITY;
+        let mut gy0 = f64::INFINITY;
+        let mut gx1 = f64::NEG_INFINITY;
+        let mut gy1 = f64::NEG_INFINITY;
+        let mut finite_count = 0usize;
+        for &(_, b) in items {
+            if b.iter().all(|v| v.is_finite()) && b[0] <= b[2] && b[1] <= b[3] {
+                gx0 = gx0.min(b[0]);
+                gy0 = gy0.min(b[1]);
+                gx1 = gx1.max(b[2]);
+                gy1 = gy1.max(b[3]);
+                finite_count += 1;
+            }
+        }
+        let span = (gx1 - gx0).max(gy1 - gy0);
+        let step = if finite_count > 0 && span.is_finite() && span > 0.0 {
+            span / (finite_count as f64).sqrt()
+        } else {
+            0.0
+        };
+        if !(step.is_finite() && step > 0.0) {
+            return Self { cells: HashMap::new(), overflow: items.iter().map(|&(id, _)| id).collect(), step: 0.0 };
+        }
+        let mut cells: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+        let mut overflow = Vec::new();
+        let cell = |x: f64| -> Option<i64> {
+            let c = (x / step).floor();
+            (c.is_finite() && c.abs() < 1e15).then_some(c as i64)
+        };
+        for &(id, b) in items {
+            let (Some(x0), Some(y0), Some(x1), Some(y1)) = (cell(b[0]), cell(b[1]), cell(b[2]), cell(b[3])) else {
+                overflow.push(id);
+                continue;
+            };
+            if x1 < x0 || y1 < y0 {
+                overflow.push(id);
+                continue;
+            }
+            let nx = (x1 - x0).saturating_add(1);
+            let ny = (y1 - y0).saturating_add(1);
+            if nx.saturating_mul(ny) > MAX_BOX_CELLS {
+                overflow.push(id);
+                continue;
+            }
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    cells.entry((x, y)).or_default().push(id);
+                }
+            }
+        }
+        Self { cells, overflow, step }
+    }
+
+    fn any_at(&self, p: [f64; 2], mut pred: impl FnMut(usize) -> bool) -> bool {
+        if self.overflow.iter().copied().any(&mut pred) {
+            return true;
+        }
+        if self.step == 0.0 || self.cells.is_empty() {
+            return false;
+        }
+        let cell = |x: f64| -> Option<i64> {
+            let c = (x / self.step).floor();
+            (c.is_finite() && c.abs() < 1e15).then_some(c as i64)
+        };
+        let (Some(cx), Some(cy)) = (cell(p[0]), cell(p[1])) else {
+            return false;
+        };
+        self.cells.get(&(cx, cy)).is_some_and(|list| list.iter().copied().any(pred))
+    }
+}
+
 fn clipped_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>]) -> Vec<bool> {
     let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let bboxes: Vec<[f64; 4]> = polygons.iter().copied().map(poly_bbox).collect();
     let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
         let mut inside = false;
         for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
@@ -338,10 +436,21 @@ fn clipped_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usi
         polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs()
     };
     let outer = polygons.iter().enumerate().max_by(|(_, a), (_, b)| area(a).total_cmp(&area(b))).map(|(index, _)| index);
+    let hole_boxes: Vec<(usize, [f64; 4])> = bboxes
+        .iter()
+        .enumerate()
+        .filter(|&(index, _)| Some(index) != outer)
+        .map(|(index, &b)| (index, b))
+        .collect();
+    let hole_grid = BoxGrid::new(&hole_boxes);
     let inside = |point: [f64; 2]| match outer {
         Some(outer) => {
-            polygons.get(outer).is_some_and(|polygon| contains(polygon, point))
-                && !polygons.iter().enumerate().any(|(index, hole)| index != outer && contains(hole, point))
+            bboxes.get(outer).is_some_and(|&b| bbox_contains(b, point))
+                && polygons.get(outer).is_some_and(|polygon| contains(polygon, point))
+                && !hole_grid.any_at(point, |index| {
+                    bboxes.get(index).is_some_and(|&b| bbox_contains(b, point))
+                        && polygons.get(index).is_some_and(|hole| contains(hole, point))
+                })
         }
         None => false,
     };
@@ -447,7 +556,14 @@ pub(crate) fn triangulate_union(boundary: &[[f64; 2]], loops: &[std::ops::Range<
 /// boundary is a constraint, so a face and its neighbour across a free edge are the same side of
 /// every item: one test per piece, then a flood fill.
 fn union_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], region_of: &[usize]) -> Vec<bool> {
+    struct RegionInfo {
+        outline: usize,
+        bbox: [f64; 4],
+        holes: Vec<usize>,
+        hole_grid: Option<BoxGrid>,
+    }
     let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let bboxes: Vec<[f64; 4]> = polygons.iter().copied().map(poly_bbox).collect();
     let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
         let mut inside = false;
         for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
@@ -472,29 +588,47 @@ fn union_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize
             list.push(index);
         }
     }
-    let outlines: Vec<Option<(usize, [f64; 4])>> = members
+    let regions: Vec<Option<RegionInfo>> = members
         .iter()
         .map(|list| {
             let polygon = |index: &usize| polygons.get(*index).copied().unwrap_or(&[] as &[[f64; 2]]);
-            let best = list.iter().copied().max_by(|a, b| area(polygon(a)).total_cmp(&area(polygon(b))))?;
-            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-            for p in polygon(&best) {
-                b = [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])];
-            }
-            Some((best, b))
+            let outline = list.iter().copied().max_by(|a, b| area(polygon(a)).total_cmp(&area(polygon(b))))?;
+            let bbox = bboxes.get(outline).copied().unwrap_or([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY]);
+            let holes: Vec<usize> = list.iter().copied().filter(|&hole| hole != outline).collect();
+            let hole_grid = (holes.len() > 8).then(|| {
+                let items: Vec<(usize, [f64; 4])> = holes
+                    .iter()
+                    .filter_map(|&hole| bboxes.get(hole).copied().map(|b| (hole, b)))
+                    .collect();
+                BoxGrid::new(&items)
+            });
+            Some(RegionInfo { outline, bbox, holes, hole_grid })
         })
         .collect();
+    let region_boxes: Vec<(usize, [f64; 4])> = regions
+        .iter()
+        .enumerate()
+        .filter_map(|(region, info)| info.as_ref().map(|info| (region, info.bbox)))
+        .collect();
+    let region_grid = BoxGrid::new(&region_boxes);
     let inside = |point: [f64; 2]| -> bool {
-        members.iter().enumerate().any(|(region, list)| {
-            let Some((outline, b)) = outlines.get(region).copied().flatten() else { return false };
-            if point[0] < b[0] || point[0] > b[2] || point[1] < b[1] || point[1] > b[3] {
+        region_grid.any_at(point, |region| {
+            let Some(info) = regions.get(region).and_then(Option::as_ref) else { return false };
+            if !bbox_contains(info.bbox, point) {
                 return false;
             }
-            let Some(outer) = polygons.get(outline) else { return false };
+            let Some(outer) = polygons.get(info.outline) else { return false };
             if !contains(outer, point) {
                 return false;
             }
-            !list.iter().copied().any(|hole| hole != outline && polygons.get(hole).is_some_and(|polygon| contains(polygon, point)))
+            let in_hole = |hole: usize| {
+                bboxes.get(hole).is_some_and(|&b| bbox_contains(b, point))
+                    && polygons.get(hole).is_some_and(|polygon| contains(polygon, point))
+            };
+            match &info.hole_grid {
+                Some(grid) => !grid.any_at(point, in_hole),
+                None => !info.holes.iter().copied().any(in_hole),
+            }
         })
     };
     let mut classified = vec![None; cdt.num_all_faces()];
@@ -611,7 +745,8 @@ fn refine_sag(
         _ => 0.0,
     };
     for _ in 0..SAG_ROUNDS {
-        let mut todo: Vec<Point2<f64>> = Vec::new();
+        // `(point, located)`: `located` is true when `point` was already checked off the boundary.
+        let mut todo: Vec<(Point2<f64>, bool)> = Vec::new();
         let mut at = |h: FixedVertexHandle, p: Point2<f64>| {
             *cache.entry(h).or_insert_with(|| {
                 let q = from(p);
@@ -619,6 +754,7 @@ fn refine_sag(
             })
         };
         let region = region(cdt, slits);
+        let mut edge_checked = vec![false; cdt.num_all_faces()];
         for face in cdt.inner_faces() {
             if !region.get(face.index()).copied().unwrap_or(false) {
                 continue;
@@ -642,44 +778,53 @@ fn refine_sag(
                 // centroid lies on the boundary chord, and inserting it there would split the
                 // boundary, which the neighbouring face shares. Such a sliver is split at the middles
                 // of its inner edges instead.
-                let on_boundary = matches!(cdt.locate(c), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected()));
+                let cm = spade::mitigate_underflow(c);
+                let on_boundary = matches!(cdt.locate(cm), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected()));
                 if !on_boundary {
-                    todo.push(c);
+                    todo.push((cm, true));
                     continue;
                 }
                 for e in face.adjacent_edges() {
                     if !e.is_constraint_edge() {
                         let [p, q] = e.positions();
-                        todo.push(Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y)));
+                        todo.push((spade::mitigate_underflow(Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y))), false));
                     }
                 }
                 continue;
+            }
+            if let Some(slot) = edge_checked.get_mut(face.index()) {
+                *slot = true;
             }
             for (e, (pa, pb)) in face.adjacent_edges().into_iter().zip([(a, b), (b, d), (d, a)]) {
                 if e.is_constraint_edge() {
                     continue;
                 }
+                // Evaluate each undirected interior edge once across its two adjacent faces.
+                if e.rev().face().as_inner().is_some_and(|other| edge_checked.get(other.index()).copied().unwrap_or(false)) {
+                    continue;
+                }
                 let [p, q] = e.positions();
                 let m = Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
                 if pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5) {
-                    todo.push(m);
+                    todo.push((spade::mitigate_underflow(m), false));
                 }
             }
         }
         if todo.is_empty() {
             return (added, true);
         }
-        todo.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
-        todo.dedup();
-        for p in todo {
+        todo.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)).then(b.1.cmp(&a.1)));
+        todo.dedup_by(|a, b| a.0 == b.0);
+        for (p, located) in todo {
             if added >= budget {
                 return (added, false);
             }
             // The boundary's nodes are its edges', shared with the neighbouring face: a point that
             // lands on the boundary (a sliver's middle on a nearly straight stretch, on the chord to
             // rounding) is no inner point, and inserting it would split the boundary.
-            let p = spade::mitigate_underflow(p);
-            if matches!(cdt.locate(p), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected())) {
+            if !located
+                && matches!(cdt.locate(p), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected()))
+            {
                 continue;
             }
             if cdt.insert(p).is_ok() {
@@ -987,5 +1132,86 @@ mod tests {
         let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None }) else { panic!("meshes") };
         assert!(extra.is_empty());
         assert_eq!(tris.len(), 2);
+    }
+
+    #[test]
+    fn refine_sag_evaluates_each_interior_edge_once() {
+        let b = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let loops = [0..4];
+        let mut seeds = Vec::new();
+        for i in 1..=3u32 {
+            for j in 1..=3u32 {
+                seeds.push([f64::from(i) * 0.25, f64::from(j) * 0.25]);
+            }
+        }
+        let evals = std::cell::Cell::new(0usize);
+        let flat = |u: f64, v: f64| {
+            evals.set(evals.get() + 1);
+            Some((Vec3::new(u, v, 0.0), Some(Vec3::Z)))
+        };
+        let sag = Sag { eval: &flat, tol: 1e-3, h: 10.0, turn: None, scale: [1.0, 1.0] };
+        let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &seeds, refine: Some((sag, 200)), shape: false, lenient: false, flat: None }) else {
+            panic!("meshes")
+        };
+        let mut uv = b.to_vec();
+        uv.extend(extra);
+        assert!((area(&uv, &tris) - 1.0).abs() < 1e-12);
+        let num_verts = uv.len();
+        let num_faces = tris.len();
+        // Every interior edge borders 2 faces; the 4 boundary edges border 1 face.
+        let interior_edges = (3 * num_faces - 4) / 2;
+        assert!(interior_edges > 10);
+        // Each vertex cached once + each face centroid once + each interior edge once.
+        assert_eq!(evals.get(), num_verts + num_faces + interior_edges);
+    }
+
+    #[test]
+    fn union_and_clipped_regions_with_many_boxes_keep_exact_area() {
+        let mut boundary = Vec::new();
+        let mut loops = Vec::new();
+        let mut region_of = Vec::new();
+        let push_rect = |boundary: &mut Vec<[f64; 2]>, loops: &mut Vec<std::ops::Range<usize>>, x0: f64, y0: f64, x1: f64, y1: f64| {
+            let start = boundary.len();
+            boundary.extend([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+            loops.push(start..boundary.len());
+        };
+        // Region 0: a large frame [0, 50]^2 with 16 small 1x1 holes (exercises overflow + hole BoxGrid).
+        push_rect(&mut boundary, &mut loops, 0.0, 0.0, 50.0, 50.0);
+        region_of.push(0);
+        for gx in 0..4u32 {
+            for gy in 0..4u32 {
+                let x = 5.0 + f64::from(gx) * 10.0;
+                let y = 5.0 + f64::from(gy) * 10.0;
+                push_rect(&mut boundary, &mut loops, x, y, x + 1.0, y + 1.0);
+                region_of.push(0);
+            }
+        }
+        // Regions 1..=20: disjoint 2x2 islands outside the frame (exercises region BoxGrid).
+        for idx in 0..20u32 {
+            let x = 60.0 + f64::from(idx % 5) * 4.0;
+            let y = f64::from(idx / 5) * 4.0;
+            push_rect(&mut boundary, &mut loops, x, y, x + 2.0, y + 2.0);
+            region_of.push(idx as usize + 1);
+        }
+        let Some((extra, tris)) = triangulate_union(&boundary, &loops, &region_of) else {
+            panic!("union meshes")
+        };
+        let mut uv = boundary.clone();
+        uv.extend(extra);
+        let expected_union_area = 2500.0 - 16.0 + 20.0 * 4.0;
+        assert!((area(&uv, &tris) - expected_union_area).abs() < 1e-9, "union area {}", area(&uv, &tris));
+
+        // Clipped region: outer [0, 50]^2 with 16 disjoint 1x1 holes (exercises hole BoxGrid in clipped_region).
+        let clipped_loops = &loops[..17];
+        let Some((c_extra, c_tris)) = triangulate_clipped(
+            &boundary[..17 * 4],
+            clipped_loops,
+            Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None },
+        ) else {
+            panic!("clipped meshes")
+        };
+        let mut c_uv = boundary[..17 * 4].to_vec();
+        c_uv.extend(c_extra);
+        assert!((area(&c_uv, &c_tris) - (2500.0 - 16.0)).abs() < 1e-9);
     }
 }
