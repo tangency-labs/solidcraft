@@ -304,7 +304,7 @@ impl Ctx<'_> {
         }
     }
 
-    /// The shop, and its process when the rule names one: `PCBWay's laser cutting`.
+    /// The shop, and its process when the rule names one: `Acme's laser cutting`.
     fn who(&self) -> String {
         match &self.rule.process {
             Some(p) => format!("{}'s {p}", self.shop),

@@ -1,7 +1,8 @@
 //! Fabrication shop rule profiles (#20113): what a shop asks of a sheet metal part, as data. A
 //! profile is a list of rules; each numeric rule keeps every value the shop's pages give, with the
 //! page it came from, so a number that changes is a one-line edit and a rule whose pages disagree
-//! says so. The built-in profiles are `assets/sheet-metal/shop-rules.json`; the format is
+//! says so. The one built-in profile (a strict, generic one) is `assets/sheet-metal/shop-rules.json`;
+//! a shop's own rules are a person's preset (`shop_presets`) or a plugin's. The format is
 //! `docs/formats/shop-rules.md`.
 //!
 //! A profile may come from a file or an object a person gave, so everything in it is checked
@@ -469,7 +470,7 @@ fn clip(s: &str) -> String {
     s.chars().take(40).collect()
 }
 
-fn text(what: &str, s: &str, max: usize) -> Result<(), ShopRulesError> {
+pub(crate) fn text(what: &str, s: &str, max: usize) -> Result<(), ShopRulesError> {
     if s.trim().is_empty() || s.chars().count() > max || s.chars().any(char::is_control) {
         return refuse(format!("`{what}` must be 1 to {max} characters of plain text"));
     }
@@ -683,9 +684,19 @@ pub fn read_file(bytes: &[u8]) -> Result<Vec<Profile>, ShopRulesError> {
     Ok(file.profiles)
 }
 
+const BUILTIN: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sheet-metal/shop-rules.json"));
+
 fn builtin() -> &'static Result<Vec<Profile>, ShopRulesError> {
     static PROFILES: OnceLock<Result<Vec<Profile>, ShopRulesError>> = OnceLock::new();
-    PROFILES.get_or_init(|| read_file(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sheet-metal/shop-rules.json")).as_bytes()))
+    PROFILES.get_or_init(|| read_file(BUILTIN.as_bytes()))
+}
+
+/// The built-in profile `id` (ignoring case) as the object a preset starts from: the profile as the
+/// file writes it, to be edited and saved under a name of the person's own.
+pub fn profile_value(id: &str) -> Option<Value> {
+    let file: Value = serde_json::from_str(BUILTIN).ok()?;
+    let id = id.trim();
+    file.get("profiles")?.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str).is_some_and(|i| i.eq_ignore_ascii_case(id))).cloned()
 }
 
 /// The ids of the built-in profiles, in the file's order.
@@ -702,10 +713,15 @@ pub fn profile(id: &str) -> Result<&'static Profile, ShopRulesError> {
     let id = id.trim();
     list.iter().find(|p| p.id.eq_ignore_ascii_case(id)).ok_or_else(|| {
         let known: Vec<&str> = list.iter().map(|p| p.id.as_str()).collect();
-        ShopRulesError(format!("`{}` is not a shop profile: the built-in ones are {}", clip(id), known.join(", ")))
+        ShopRulesError(format!(
+            "`{}` is not a shop profile: the built-in {} {}",
+            clip(id),
+            if known.len() == 1 { "one is" } else { "ones are" },
+            known.join(", ")
+        ))
     })
 }
 
 #[cfg(test)]
 #[path = "shop_rules_tests.rs"]
-mod tests;
+pub(crate) mod tests;

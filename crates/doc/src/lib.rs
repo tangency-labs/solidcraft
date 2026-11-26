@@ -134,6 +134,7 @@ mod sheet_surface_perforation;
 mod sheet_surface_shadow;
 mod sheet_surface_tab;
 pub mod shop_check;
+pub mod shop_presets;
 pub mod shop_rules;
 pub mod sketch_equation;
 pub use sheet_surface_bead::MAX_BEADS;
