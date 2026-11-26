@@ -315,8 +315,9 @@ pub fn same_surface(
     min: [f64; 3],
     max: [f64; 3],
 ) -> Result<bool> {
-    let v = |p: [f64; 3]| solidcore::Vec3::new(p[0], p[1], p[2]);
-    let region = solidcore::geom::extent3d::Extent3d::from_points(v(min), v(max));
+    let region = solidcore::geom::extent3d::Extent3d::from_bounds(
+        min[0], min[1], min[2], max[0], max[1], max[2],
+    );
     solidcore::query::same_surface::same_surface(&a.kernel(), &b.kernel(), tol, &region)
         .map_err(crate::error::status)
 }
