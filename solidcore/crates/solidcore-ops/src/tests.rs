@@ -1415,6 +1415,193 @@ fn periodic_seam_completion_replaces_a_seam_that_overshoots_the_cut() {
     );
 }
 
+/// A boundary crossing the cut whose pcurve is fitted to its edge rather than on the edge's own
+/// parameter (as a STEP file's intersection edge is, #22462): the 45-degree sheet of
+/// [`periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell`], its top arc's
+/// pcurve a quadratic in u through the arc's ends whose middle control point is `lead` past the
+/// cut, so that at the arc's parameter 4, where the arc meets the cut, the pcurve is `lead / 2`
+/// past it. The seam splits the arc there, and the arc's trim at the same parameter: its piece on
+/// [3.5, 4] ends that sliver across the cut, which no whole-period translation fits. That piece
+/// is cut where its pcurve meets the cut: the sheet completes as the exact one does, two faces of
+/// seven edges, each within the base period, the piece ending on the cut.
+#[test]
+fn periodic_seam_completion_ends_a_fitted_pcurve_on_the_cut_it_crosses() {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2);
+    // The top arc's pcurve leads the arc's parameter by up to `lead / 2` in u, which is at most
+    // 1.8e-6 mm on the radius-5 circle (whose speed is at most 2 r / w = 14.2 per unit of u);
+    // the arc's tolerance, 1e-5, holds it.
+    let (lead, top_tolerance) = (1e-6, 1e-5);
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    let average = |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|d| 0.5 * (a[d] + b[d]));
+    let (left, right) = (average(ring[7], ring[8]), average(ring[0], ring[1]));
+    let (lo, hi) = (
+        average(average(ring[6], ring[7]), left),
+        average(right, average(ring[1], ring[2])),
+    );
+    let arc = |z: f64| Curve::RationalSpline {
+        knots: vec![3.5, 3.5, 3.5, 4.0, 4.0, 4.5, 4.5, 4.5],
+        homogeneous: [lo, left, ring[8], right, hi]
+            .map(|p| [p[0], p[1], z * p[2], p[2]])
+            .to_vec(),
+    };
+    let point = |p: [f64; 3], z| [p[0] / p[2], p[1] / p[2], z];
+    let vertices = [point(lo, 0.0), point(hi, 0.0), point(hi, h), point(lo, h)]
+        .map(|point| Vertex {
+            point,
+            tolerance: 1e-6,
+        })
+        .to_vec();
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    let ruling = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    let curves = [arc(0.0), ruling(1, 2), arc(h), ruling(0, 3)];
+    let intervals = [[3.5, 4.5], [0.0, h], [3.5, 4.5], [0.0, h]];
+    let ends = [[0, 1], [1, 2], [3, 2], [0, 3]];
+    let directions = [true, true, false, false];
+    let tolerances = [1e-6, 1e-6, top_tolerance, 1e-6];
+    let line = |a: [f64; 2], b: [f64; 2], [t0, t1]: [f64; 2]| Curve2::Spline {
+        knots: vec![t0, t0, t1, t1],
+        points: vec![a, b],
+    };
+    let pcurves = [
+        line([3.5, 0.0], [4.5, 0.0], intervals[0]),
+        line([4.5, 0.0], [4.5, h], intervals[1]),
+        Curve2::Spline {
+            knots: vec![3.5, 3.5, 3.5, 4.5, 4.5, 4.5],
+            points: vec![[3.5, h], [4.0 + lead, h], [4.5, h]],
+        },
+        line([3.5, 0.0], [3.5, h], intervals[3]),
+    ];
+    let edges = curves
+        .into_iter()
+        .enumerate()
+        .map(|(i, curve)| Edge {
+            curve,
+            nurbs: None,
+            interval: intervals[i],
+            vertices: ends[i],
+            tolerance: tolerances[i],
+            uses: vec![EdgeUseRef {
+                face: 0,
+                r#loop: 0,
+                position: i as u32,
+                upper: !directions[i],
+            }],
+        })
+        .collect();
+    let boundary = pcurves
+        .into_iter()
+        .enumerate()
+        .map(|(i, pcurve)| OrientedEdge {
+            edge: i as u32,
+            forward: directions[i],
+            pcurve,
+        })
+        .collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: boundary }],
+        }],
+        edges,
+        vertices,
+    };
+    crate::record_check::validate(&source).unwrap();
+    crate::record_check::agreement(&source).unwrap();
+    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
+        .unwrap()
+        .unwrap();
+    assert_eq!(origins, [0, 0]);
+    assert_eq!(
+        (
+            completed.faces.len(),
+            completed.edges.len(),
+            completed.vertices.len()
+        ),
+        (2, 7, 6)
+    );
+    crate::record_check::validate(&completed).unwrap();
+    crate::record_check::agreement(&completed).unwrap();
+    // Each face is its 45 degrees, [3.5, 4] or [0, 0.5], within the base period: the top arc's
+    // pieces start at most `lead / 2` into a face's side, and no further.
+    let round = 1e-9 * 4.0;
+    for face in &completed.faces {
+        assert!(
+            face.domain[0][0] >= -round && face.domain[0][1] <= 4.0 + round,
+            "{:?}",
+            face.domain
+        );
+        assert!(
+            (face.domain[0][1] - face.domain[0][0] - 0.5).abs() <= round,
+            "{:?}",
+            face.domain
+        );
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points: Vec<[f64; 2]> = match &u.pcurve {
+                    Curve2::Spline { points, .. } => points.clone(),
+                    Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                        .iter()
+                        .map(|p| [p[0] / p[2], p[1] / p[2]])
+                        .collect(),
+                };
+                for p in &points {
+                    assert!(
+                        p[0] >= face.domain[0][0] - round && p[0] <= face.domain[0][1] + round,
+                        "edge {}: {points:?} outside {:?}",
+                        u.edge,
+                        face.domain
+                    );
+                }
+            }
+        }
+    }
+    let (body, _) = Body::from_record(&completed, true).unwrap();
+    let check = body.check(CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+}
+
 /// A wall of a closed periodic surface, bounded by two rims each made of four quarter arcs. A
 /// rim's trims are lifted continuously from u = 0.5 to u = 4.5, so its last arc crosses the cut
 /// (u = 4) at the middle of its parameter, and the seam has to split it there. Completing the
