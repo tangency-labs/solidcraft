@@ -1121,6 +1121,20 @@ impl JsonSchema for ProfilesParam {
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
                         {
+                            "type": "object",
+                            "properties": {
+                                "type": {"enum": ["sided_curves"]},
+                                "loops": {"type": "array", "minItems": 1, "maxItems": 128, "items": {
+                                    "type": "array", "minItems": 1, "maxItems": 512, "items": {
+                                        "type": "object",
+                                        "properties": {"curve": {"type": "string"}, "side": {"enum": ["inside", "outside", "left", "right"]}},
+                                        "required": ["curve", "side"], "additionalProperties": false
+                                    }
+                                }}
+                            },
+                            "required": ["type", "loops"]
+                        },
+                        {
                             "type": "object", "properties": {"offset_boundaries": associations}, "required": ["offset_boundaries"],
                             "not": {"properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]}
                         },

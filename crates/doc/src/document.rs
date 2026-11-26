@@ -204,6 +204,31 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Profiles that the curves around them can't tell apart (twins, such as the halves of a lens
+    /// a line cuts), each saved as the curves of its outer loop with the side of each it lies on
+    /// (#22548). Found again on every evaluation; after a change of the regions, the profile that
+    /// shares the most of those curves on the same sides and lies against none of them. A tie is
+    /// an error, never a guess.
+    SidedCurves { loops: Vec<Vec<SidedCurve>> },
+}
+
+/// The side of a sketch curve a region lies on: inside or outside a circle or arc (toward its
+/// centre or away from it), left or right of a line seen from its start to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveSide {
+    Inside,
+    Outside,
+    Left,
+    Right,
+}
+
+/// A curve of a profile's outer loop and the side of it the profile lies on.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SidedCurve {
+    pub curve: String,
+    pub side: CurveSide,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

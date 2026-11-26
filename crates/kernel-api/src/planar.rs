@@ -1,7 +1,7 @@
-//! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the turn between
-//! two path directions, a frame section's corners, paper strokes, where a board's drilled hole
-//! reaches, and a sketch plane's normal and points as a sketch solver holds them. Plain numbers
-//! and the record's values in, plain numbers out.
+//! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the side of a sketch
+//! curve a region lies on, the turn between two path directions, a frame section's corners, paper
+//! strokes, where a board's drilled hole reaches, and a sketch plane's normal and points as a sketch
+//! solver holds them. Plain numbers and the record's values in, plain numbers out.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 
@@ -37,6 +37,17 @@ pub trait Planar: Backend {
     /// (radians; the sweep wins when both are given): on the arc of that size whose middle is
     /// nearest the cursor. `None`: no such arc.
     fn arc_third_point(&self, s: [f64; 2], e: [f64; 2], h: [f64; 2], radius: Option<f64>, sweep: Option<f64>) -> Option<[f64; 2]>;
+    /// The distance between two points (an arc's radius, from its centre and an end).
+    fn distance(&self, a: [f64; 2], b: [f64; 2]) -> f64;
+    /// Whether the region on the left of the piece from `a` to `b` of a counter-clockwise loop
+    /// lies left of the line from `p` to `q` (`Some(true)`) or right of it (`Some(false)`);
+    /// `None` when the piece is not on that line, within `tol` times its size.
+    fn left_side_along_line(&self, a: [f64; 2], b: [f64; 2], p: [f64; 2], q: [f64; 2], tol: f64) -> Option<bool>;
+    /// Whether the region on the left of an arc piece of a counter-clockwise loop (about `centre`
+    /// with `radius`, sweeping `sweep` radians) lies inside the circle about `c` of radius `r`
+    /// (`Some(true)`) or outside it (`Some(false)`); `None` when the piece is not on that circle,
+    /// within `tol` times its size.
+    fn left_side_inside_circle(&self, centre: [f64; 2], radius: f64, sweep: f64, c: [f64; 2], r: f64, tol: f64) -> Option<bool>;
     /// The angle in radians, in `[0, PI]`, between the planar directions `before` (the first
     /// curve's end tangent) and `after` (the next curve's start tangent): 0 where the path runs
     /// straight on, `PI` where it doubles back. The directions need not be unit.

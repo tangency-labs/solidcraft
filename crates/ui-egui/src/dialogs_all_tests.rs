@@ -18,6 +18,45 @@ fn repeated_profile_fixture() -> (Harness, u64, u64) {
     (h, sketch, path)
 }
 
+/// Twins picked by their numbers are saved by the sides of their curves (#22548). After a change
+/// of the sketch's regions the dialog refills with the regions the feature builds, not none: two
+/// circles of radius `r` and a fixed line through both centres, the halves of the lens and of
+/// the lower crescent picked on r = 3.04 mm; on 3.45 the line no longer cuts the lens.
+#[test]
+fn profile_refill_of_sided_twins_follows_a_change_of_the_regions() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "r", "expression": "3.04 mm"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "s"})).unwrap()["sketch"].as_u64().unwrap();
+    for (id, y) in [("c1", 19.4), ("c2", 20.0)] {
+        h.app.run("sketch.circle.center", json!({"center": [0, y], "radius": 3.04})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities": [id], "type": "diameter", "value": "2*r"})).unwrap();
+        h.app.run("sketch.constraint.fix", json!({"entity": format!("{id}.center"), "fixed": true})).unwrap();
+    }
+    h.app.run("sketch.line", json!({"points": [[0, 1.75], [0, 22.5]]})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "l1", "fixed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let picks = [(-1.26, 19.7), (1.26, 19.7), (-0.5, 16.5), (0.5, 16.5)].map(|(x, y)| solidcore_record::Vec2::new(x, y));
+    let at = |h: &Harness, points: &[solidcore_record::Vec2]| {
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(sketch).unwrap();
+        let mut found: Vec<usize> = points.iter().map(|q| solidcraft_engine::doc::sketch::profile_at_point(&ss.profiles, *q).unwrap()).collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    };
+    let indices = at(&h, &picks);
+    assert_eq!(indices.len(), 4);
+    let feature = h.app.run("solid.extrude", json!({"sketch": sketch, "profiles": indices, "distance": 2})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("parameters.change", json!({"name": "r", "expression": "3.45 mm"})).unwrap();
+    let Some(FeatureKind::Extrude { profiles, .. }) = h.app.session.doc.feature(feature).map(|f| f.kind.clone()) else { panic!("an extrude") };
+    assert!(matches!(profiles, ProfileSel::SidedCurves { .. }), "{profiles:?}");
+    let state = h.app.session.world_state().unwrap();
+    let mut refilled = profile_indices(state.sketch(sketch).unwrap(), &profiles);
+    refilled.sort_unstable();
+    assert_eq!(refilled, at(&h, &picks[1..]), "the lens and the crescent's two halves");
+}
+
 #[test]
 fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
     for command in ["solid.extrude", "solid.sweep"] {

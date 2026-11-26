@@ -9002,6 +9002,11 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
+        // The regions the feature builds, also those a change of the regions left to the closest
+        // match (#22548): re-saving the dialog must not drop them.
+        ProfileSel::SidedCurves { .. } => {
+            solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
+        }
         ProfileSel::Curves { loops } => loops
             .iter()
             .filter_map(|l| {

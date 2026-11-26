@@ -1,7 +1,7 @@
 //! The router's planar helpers ([`solidcraft_kernel_api::Planar`]), as `solidcraft_kernel::planar`:
-//! the arcs a sketch tool draws from its picks, the turn between two path directions, a frame
-//! section's corners, paper strokes, where a board's drilled hole reaches, and a sketch plane's
-//! normal and points as a sketch solver holds them.
+//! the arcs a sketch tool draws from its picks, the side of a sketch curve a region lies on, the turn
+//! between two path directions, a frame section's corners, paper strokes, where a board's drilled
+//! hole reaches, and a sketch plane's normal and points as a sketch solver holds them.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 use solidcraft_kernel_api::{OpKind, Planar};
@@ -79,6 +79,35 @@ pub fn three_point_circle(s: [f64; 2], e: [f64; 2], t: [f64; 2]) -> Option<([f64
 pub fn arc_third_point(s: [f64; 2], e: [f64; 2], h: [f64; 2], radius: Option<f64>, sweep: Option<f64>) -> Option<[f64; 2]> {
     match which(OpKind::Planar) {
         Which::Solidcore => Solidcore.arc_third_point(s, e, h, radius, sweep),
+    }
+}
+
+/// The distance between two points (an arc's radius, from its centre and an end).
+#[must_use]
+pub fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.distance(a, b),
+    }
+}
+
+/// Whether the region on the left of the piece from `a` to `b` of a counter-clockwise loop lies
+/// left of the line from `p` to `q` (`Some(true)`) or right of it (`Some(false)`); `None` when the
+/// piece is not on that line, within `tol` times its size.
+#[must_use]
+pub fn left_side_along_line(a: [f64; 2], b: [f64; 2], p: [f64; 2], q: [f64; 2], tol: f64) -> Option<bool> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.left_side_along_line(a, b, p, q, tol),
+    }
+}
+
+/// Whether the region on the left of an arc piece of a counter-clockwise loop (about `centre` with
+/// `radius`, sweeping `sweep` radians) lies inside the circle about `c` of radius `r` (`Some(true)`)
+/// or outside it (`Some(false)`); `None` when the piece is not on that circle, within `tol` times its
+/// size.
+#[must_use]
+pub fn left_side_inside_circle(centre: [f64; 2], radius: f64, sweep: f64, c: [f64; 2], r: f64, tol: f64) -> Option<bool> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.left_side_inside_circle(centre, radius, sweep, c, r, tol),
     }
 }
 
@@ -223,6 +252,12 @@ mod tests {
         assert_eq!(tangent_arc_centre(a, b, [0.0, 1.0]), sketch_arc::tangent_arc_centre(a, b, [0.0, 1.0]));
         assert_eq!(joint_turn([1.0, 0.0], [0.0, 1.0]).ok(), turn::joint_turn([1.0, 0.0], [0.0, 1.0]).ok());
         assert_eq!(straight_length(a, b), paper_gaps::straight_length(a, b));
+        assert_eq!(distance(a, b), sketch_arc::distance(a, b));
+        assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), sketch_arc::left_side_along_line(a, [2.0, 0.0], a, b, 1e-9));
+        assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), Some(true));
+        let quarter = std::f64::consts::FRAC_PI_2;
+        assert_eq!(left_side_inside_circle(a, 2.0, quarter, a, 2.0, 1e-9), sketch_arc::left_side_inside_circle(a, 2.0, quarter, a, 2.0, 1e-9));
+        assert_eq!(left_side_inside_circle(a, 2.0, quarter, a, 2.0, 1e-9), Some(true));
         assert_eq!(direction_angle([0.0, 0.0], [1.0, 1.0]), board_drill::direction_angle([0.0, 0.0], [1.0, 1.0]));
         let square = vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]];
         for c in [[5.0, 5.0], [9.5, 5.0], [0.0, 5.0]] {
