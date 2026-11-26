@@ -3015,6 +3015,32 @@ mod tests {
         assert!(app.session.log.iter().any(|l| l.contains("Problem report: opened in the browser")), "each step is in the log");
     }
 
+    /// The same report sent again within half an hour makes no second draft: the first one's page
+    /// is offered instead (#21201). Another title, or the same report after the half hour, is sent.
+    #[test]
+    fn ticket_report_sent_again_offers_the_earlier_draft() {
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        let ctx = crate::fonts::test_context();
+        let drafts = |requests: &Requests| requests.lock().unwrap().iter().filter(|r| r.url.ends_with("/api/drafts")).count();
+        let report = || payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report());
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (1, Some(tickets::Outcome::Opened(draft_page()))));
+        tickets::send(&mut app, report());
+        assert!(app.tickets.sending.is_none(), "nothing is sent");
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (1, Some(tickets::Outcome::AlreadySent(draft_page()))));
+        let other = payload::Form { title: "Shell fails".into(), ..form() };
+        tickets::send(&mut app, payload::build(&other, payload::Ticks::default(), &evidence_with_design(), "t"));
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!(drafts(&requests), 2, "another report is sent");
+        for sent in &mut app.tickets.sent {
+            sent.at_ms -= tickets::REPEAT_WINDOW_MS;
+        }
+        tickets::send(&mut app, report());
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (3, Some(tickets::Outcome::Opened(draft_page()))));
+    }
+
     #[test]
     fn ticket_report_made_offline_is_kept_and_sent_on_retry() {
         let dir = temp_dir("queue");

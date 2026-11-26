@@ -77,6 +77,7 @@ fn format_name(f: Format) -> &'static str {
     match f {
         Format::StlBinary | Format::StlAscii => "stl",
         Format::ThreeMfTagged => "3mf-tagged",
+        Format::Step => "step",
         _ => "3mf",
     }
 }

@@ -3471,6 +3471,32 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A preview that fails says why at the top of its dialog, in the error colour (#22297). The
+    /// dialogs are out of the list while they are drawn, so the line used never to show.
+    #[test]
+    fn a_failed_preview_shows_its_error_at_the_top_of_the_dialog() {
+        let root = view_package("preview-error");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        previewed(&mut h);
+        let error = h.app.preview.error.clone().expect("the failed run's error");
+        assert!(!h.app.preview.active, "nothing is drawn for a run that failed");
+        h.frames(2);
+        let line = solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", &error)]);
+        let shown = solidcraft_ui_registry::rect_of(&format!("dialog:status:{line}")).expect("the dialog shows the preview's error");
+        // Above the Preview box, which comes after the fields.
+        let preview_box = h.widget("Preview").expect("the Preview box");
+        assert!(f64::from(shown.center().y) < preview_box[1], "the error is above the fields and the Preview box: {shown:?} vs {preview_box:?}");
+        // Preview off: no error is shown.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(preview_error(&h.app, &h.app.plugin_menu.dialogs[0]).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// A package with `home` (a box, then view.home), `edit` (a box and no view command),
     /// `fail`, `place` (a new component moved 100 mm along X), `move` (only the move), and
     /// `both` (move the existing component, then make another box), and `fit` (a box from the

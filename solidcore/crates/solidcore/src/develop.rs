@@ -68,6 +68,7 @@ mod contour;
 mod flat;
 mod fold;
 pub mod hermite;
+mod holes;
 mod layout;
 pub(crate) mod plane;
 mod refusal;
@@ -82,9 +83,10 @@ pub use bead::{
     BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
     MIN_BEND_RISE,
 };
-pub use contour::{offset_contour, ContourRefusal};
+pub use contour::{offset_closed_contour, offset_contour, ContourRefusal};
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
+pub use holes::{note_beside, same_circle, Circle};
 pub use layout::{crossings, curve_through, develop};
 pub use refusal::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 pub use rigid::{Rigid2, Rigid3};

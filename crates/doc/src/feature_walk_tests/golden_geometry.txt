@@ -73,6 +73,9 @@ hole_countersink
 hole_references
   moves: direction[0], direction[2], position[0], position[1], position[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
   face points: [0, 0, 0]
+hole_hardware
+  moves: direction[0], direction[2], position[0], position[1], position[2]
+  face points: [0, 0, 0]
 thread
   moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
