@@ -397,7 +397,9 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
     // VORONOI-TODO: plan voronoi cells here instead of refusing them.
     if spec.shape == CellShape::Voronoi {
         spec.validate()?;
-        return Err(CellGridError::Parameter("the voronoi shape is not built yet".into()));
+        return Err(CellGridError::Parameter(
+            "the voronoi shape is not built yet".into(),
+        ));
     }
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
