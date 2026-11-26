@@ -5999,9 +5999,9 @@ fn the_arrow_and_the_build_agree_where_an_extrude_from_a_slanted_face_starts() {
                         p["distance2"] = json!(3);
                     }
                     let built = s.execute("solid.extrude", &p);
-                    // A taper with two sides is refused, and so is the other wall with a level
-                    // start, which lies in the empty slot; every other row builds.
-                    let refused = (taper && two_sided) || (*to_name == "other wall" && (two_sided || taper || through_all));
+                    // The other wall with a level start lies in the empty slot and is refused;
+                    // every other row builds, a taper with two sides too (#22419).
+                    let refused = *to_name == "other wall" && (two_sided || taper || through_all);
                     assert_eq!(built.is_ok(), !refused, "to {to_name} all {through_all} taper {taper} two {two_sided}: {built:?}");
                     let warn = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
                     let level_build = warn.contains("From Object starts on a plane parallel");
