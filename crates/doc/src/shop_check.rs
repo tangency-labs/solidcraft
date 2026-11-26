@@ -377,7 +377,7 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
     };
     for &id in RuleId::ALL {
         let Some(rule) = profile.rule(id) else {
-            not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
+            not_checked(&mut r, id, format!("{}'s rules give no value for it", profile.name));
             continue;
         };
         let dxf_rule = matches!(id, RuleId::DxfSingleLayer | RuleId::DxfClosedContours | RuleId::DxfBendLines | RuleId::TextOutlined);

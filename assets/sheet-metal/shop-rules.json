@@ -1,12 +1,12 @@
 {
   "format": "solidcraft-shop-rules",
   "version": 1,
-  "note": "The built-in shop rules profile, each value carrying the guideline it stands for in our own words. A profile note names any value still to spot check.",
+  "note": "The built-in Generic profile: general sheet-metal design practice in SolidCraft's own words, with each value stated as a multiple of the sheet thickness (t) or the inside bend radius (R). It is not any shop's rules: your shop's numbers belong in a preset.",
   "profiles": [
     {
       "id": "generic",
       "name": "Generic",
-      "note": "A strict preliminary check: the strictest of the values laser-cutting and press-brake shops commonly publish, read on 2026-11-25. A shop adds rules of its own (materials, sizes, per-material limits), so save your shop's numbers as a preset and check against that before ordering. It has no stock list or sheet size, which differ from shop to shop. A spot check is still wanted for hole to bend, which some pages measure to the bend line and others to the bend region; the default here (to where the bend starts) is the stricter reading.",
+      "note": "General sheet-metal design practice, not any shop's rules. Distances are multiples of the sheet thickness t and the inside bend radius R, the rules of thumb taught for laser, punch and press-brake parts. Hole to bend is measured to where the bend starts, the stricter reading. It has no stock list or sheet size. Your shop's numbers belong in a preset: save one from this profile and edit it.",
       "dxf_export": {
         "layers": "single",
         "bend_lines": false,
@@ -14,14 +14,7 @@
         "hardware_notes": false,
         "sources": [
           {
-            "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
-            "read": "2026-11-25",
-            "says": "every cut path on one designated cut layer, with construction geometry and notes on other layers or deleted: a single-layer file has no other layer, so it leaves bend lines and notes out"
-          },
-          {
-            "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-            "read": "2026-11-25",
-            "says": "all cut-path geometry on the same layer; guides, construction lines and notes moved off it or deleted"
+            "says": "general practice: a cutter takes every line on its layer as a cut, so a file for cutting has one layer of cut paths, with bend lines and notes left out"
           }
         ]
       },
@@ -30,14 +23,7 @@
           "id": "file.one_body",
           "sources": [
             {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
-              "read": "2026-11-25",
-              "says": "each STEP file holds exactly one solid sheet-metal body; multi-body solids and assemblies are not processed in one part file"
-            },
-            {
-              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-              "read": "2026-11-25",
-              "says": "the STEP file holds a single solid sheet-metal body; files with several bodies or assemblies do not upload"
+              "says": "general practice: a flat pattern is made from one solid sheet-metal body, so a part file holds one body and an assembly is split into its parts"
             }
           ]
         },
@@ -45,50 +31,20 @@
           "id": "file.uniform_thickness",
           "sources": [
             {
-              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
-              "read": "2026-11-25",
-              "says": "for a part bent in one piece, every feature is modelled at the same sheet thickness; thicknesses are the listed stock"
-            },
-            {
-              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-              "read": "2026-11-25",
-              "says": "thickness is uniform, with a face at every edge, and modelled at the stock thickness that will be ordered"
+              "says": "general practice: a sheet part is cut from one thickness of stock, so every feature is modelled at the same thickness"
             }
           ]
         },
         {
           "id": "hole.min_diameter",
           "unit": "mm",
-          "process": "laser cutting",
           "limits": [
             {
-              "value": 0.5,
+              "value": 1.0,
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
-                  "read": "2026-11-25",
-                  "says": "laser holes at least 0.5 times the thickness (capability table), at least 50% of the thickness in the guide"
-                },
-                {
-                  "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-                  "read": "2026-11-25",
-                  "says": "laser holes and cut-outs at least 50% of the material thickness; the exact figure per material is on each material page"
-                },
-                {
-                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
-                  "read": "2026-11-25",
-                  "says": "cutting holes at least half the sheet thickness"
-                }
-              ]
-            },
-            {
-              "value": 1.0,
-              "sources": [
-                {
-                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
-                  "read": "2026-11-25",
-                  "says": "cutting holes also at least 1 mm across, whatever the thickness"
+                  "says": "general practice: a hole is at least as wide as the sheet is thick, a common rule of thumb for punched and cut holes"
                 }
               ]
             }
@@ -97,27 +53,13 @@
         {
           "id": "hole.to_edge",
           "unit": "mm",
-          "disagreement": true,
           "limits": [
-            {
-              "value": 1.5,
-              "relative_to": "thickness",
-              "sources": [
-                {
-                  "url": "https://jlccnc.com/blog/sheet-metal-design",
-                  "read": "2026-11-25",
-                  "says": "hole edge to sheet edge at least 1.5 times the thickness; more for heavily formed or loaded parts (blog)"
-                }
-              ]
-            },
             {
               "value": 2.0,
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://sendcutsend.com/materials/5052-aluminum/",
-                  "read": "2026-11-25",
-                  "says": "a hole at least 2 times the thickness from an edge (this one material page; the guideline page gives no figure)"
+                  "says": "general practice: the rim of a hole is at least two thicknesses from the sheet's edge, so the web left does not tear or bulge"
                 }
               ]
             }
@@ -126,33 +68,14 @@
         {
           "id": "hole.to_bend",
           "unit": "mm",
-          "disagreement": true,
           "limits": [
             {
-              "value": 2.0,
-              "relative_to": "thickness",
-              "sources": [
-                {
-                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
-                  "read": "2026-11-25",
-                  "says": "holes at least 2 times the thickness from the bend line as a starting point; the page adds that the hole edge to the bend region is what counts, and that tight radii or large holes call for more"
-                },
-                {
-                  "url": "https://jlccnc.com/blog/sheet-metal-design",
-                  "read": "2026-11-25",
-                  "says": "hole edge to the bend tangent line at least 2 times the thickness (rules table; its mistakes table says 1.5 to 2 times)"
-                }
-              ]
-            },
-            {
-              "value": 2.0,
+              "value": 2.5,
               "relative_to": "thickness",
               "plus_radius": 1.0,
               "sources": [
                 {
-                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
-                  "read": "2026-11-25",
-                  "says": "hole to bend line at least 2 times the thickness plus the bend radius (formula in the bending section)"
+                  "says": "general practice: the rim of a hole is at least 2.5 thicknesses plus the inside bend radius from a bend, so bending does not stretch the hole out of round"
                 }
               ]
             }
@@ -161,27 +84,13 @@
         {
           "id": "flange.min",
           "unit": "mm",
-          "disagreement": true,
           "limits": [
-            {
-              "value": 3.0,
-              "relative_to": "thickness",
-              "sources": [
-                {
-                  "url": "https://jlccnc.com/blog/sheet-metal-design",
-                  "read": "2026-11-25",
-                  "says": "flange at least 3 times the thickness; varies with press brake tooling and die width"
-                }
-              ]
-            },
             {
               "value": 4.0,
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
-                  "read": "2026-11-25",
-                  "says": "minimum flange length is 4 times the thickness, so the flange sits stably on the lower die"
+                  "says": "general practice: a flange is at least four thicknesses long, so it rests on the die of a press brake when it is bent"
                 }
               ]
             }
@@ -191,14 +100,7 @@
           "id": "thread.modelling",
           "sources": [
             {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
-              "read": "2026-11-25",
-              "says": "the tap-size pilot hole is what goes in the 2D or 3D model (a drill chart is given); the page does not say to model the thread itself"
-            },
-            {
-              "url": "https://sendcutsend.com/services/tapping/",
-              "read": "2026-11-25",
-              "says": "model a plain hole at the size listed for the tap; the laser-cut hole is resized to the drill size automatically"
+              "says": "general practice: a tapped hole is drawn as a plain hole of the tap-drill size and the thread is named on the order"
             }
           ],
           "wanted": "plain"
@@ -207,14 +109,7 @@
           "id": "file.dxf_single_layer",
           "sources": [
             {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
-              "read": "2026-11-25",
-              "says": "all final cut paths go on one designated cut layer; construction geometry and notes go on other layers or are deleted"
-            },
-            {
-              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-              "read": "2026-11-25",
-              "says": "all cut-path geometry on the same layer; guides and construction lines moved off it or deleted"
+              "says": "general practice: every cut path of the flat DXF is on one layer, with construction lines and notes on other layers or left out"
             }
           ]
         },
@@ -222,14 +117,7 @@
           "id": "file.dxf_closed_contours",
           "sources": [
             {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
-              "read": "2026-11-25",
-              "says": "every cut path forms a fully closed shape; duplicate, overlapping and intersecting entities are deleted"
-            },
-            {
-              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-              "read": "2026-11-25",
-              "says": "every cut path is a closed shape; no shared or overlapping lines inside a part"
+              "says": "general practice: every cut path of the flat DXF is a closed shape, and no line is drawn twice or overlaps another"
             }
           ]
         },
@@ -237,14 +125,7 @@
           "id": "file.text_outlined",
           "sources": [
             {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
-              "read": "2026-11-25",
-              "says": "all text converted to vector outlines; editable text cannot be recognised as cutting geometry"
-            },
-            {
-              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
-              "read": "2026-11-25",
-              "says": "text converted to outlines; text that can still be edited does not cut"
+              "says": "general practice: text in the flat DXF is converted to outlines, as editable text is not cut geometry"
             }
           ]
         }

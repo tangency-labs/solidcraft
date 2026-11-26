@@ -1,7 +1,7 @@
 //! Fabrication shop rule profiles (#20113): what a shop asks of a sheet metal part, as data. A
 //! profile is a list of rules; each numeric rule keeps every value the shop's pages give, with the
-//! page it came from, so a number that changes is a one-line edit and a rule whose pages disagree
-//! says so. The one built-in profile (a strict, generic one) is `assets/sheet-metal/shop-rules.json`;
+//! page (or, for Generic, the general practice) it came from, so a number that changes is a
+//! one-line edit and a rule whose pages disagree says so. The one built-in profile (Generic: general design practice, no shop's rules) is `assets/sheet-metal/shop-rules.json`;
 //! a shop's own rules are a person's preset (`shop_presets`) or a plugin's. The format is
 //! `docs/formats/shop-rules.md`.
 //!
@@ -144,14 +144,18 @@ impl RuleId {
     }
 }
 
-/// A page a value comes from.
+/// What a value comes from: a page (with its `url` and the day it was `read`), or, with neither,
+/// a basis stated as text (`general practice: ...`), as the built-in Generic profile does.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
-    pub url: String,
+    /// The page, an https address; none for a basis that is only text.
+    #[serde(default)]
+    pub url: Option<String>,
     /// The day the page was read (`2026-11-25`).
-    pub read: String,
-    /// What the page says, in our own words.
+    #[serde(default)]
+    pub read: Option<String>,
+    /// What the page says, or the basis of the value, in our own words.
     pub says: String,
 }
 
@@ -381,8 +385,10 @@ impl Rule {
         let all = self.sources.iter().chain(self.limits.iter().flat_map(|l| &l.sources)).chain(self.stock.iter().flat_map(|s| &s.sources));
         let mut out: Vec<String> = Vec::new();
         for s in all {
-            if !out.contains(&s.url) {
-                out.push(s.url.clone());
+            if let Some(url) = &s.url
+                && !out.contains(url)
+            {
+                out.push(url.clone());
             }
         }
         out
@@ -506,13 +512,17 @@ fn https_address(url: &str) -> bool {
 
 fn sources(rule: &str, list: &[Source]) -> Result<(), ShopRulesError> {
     if list.is_empty() || list.len() > MAX_SOURCES {
-        return refuse(format!("{rule}: give 1 to {MAX_SOURCES} sources (the page each value comes from)"));
+        return refuse(format!("{rule}: give 1 to {MAX_SOURCES} sources (the page or the general practice each value comes from)"));
     }
     for s in list {
-        if !https_address(&s.url) {
-            return refuse(format!("{rule}: a source url must be an https:// address, not `{}`", clip(&s.url)));
+        if let Some(url) = &s.url
+            && !https_address(url)
+        {
+            return refuse(format!("{rule}: a source url must be an https:// address, not `{}`", clip(url)));
         }
-        text(&format!("{rule}: read"), &s.read, 32)?;
+        if let Some(read) = &s.read {
+            text(&format!("{rule}: read"), read, 32)?;
+        }
         text(&format!("{rule}: says"), &s.says, MAX_TEXT)?;
     }
     Ok(())

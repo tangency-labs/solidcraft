@@ -2785,8 +2785,8 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     // The 0.6 mm hole only: the window checks a single-layer DXF by default.
     assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
-    // Generic's values cite one page.
-    assert!(texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "the finding links its source: {texts:?}");
+    // Generic's basis is general practice, stated as text: there is no page to link.
+    assert!(!texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "Generic links no page: {texts:?}");
     let Some(Kind::Sheet(Sm::ShopCheck { shop, data, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
     let generic = data.clone();
     *shop = 1;

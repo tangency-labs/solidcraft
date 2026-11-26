@@ -166,14 +166,20 @@ pub(crate) fn shop(id: &str) -> Profile {
 }
 
 #[test]
-fn the_embedded_profiles_parse_and_every_value_has_a_source() {
-    assert_eq!(profile_ids(), ["generic"], "core ships the one strict profile; a shop's own rules are a preset or a plugin's");
+fn the_embedded_profiles_parse_and_every_value_has_a_basis() {
+    assert_eq!(profile_ids(), ["generic"], "core ships the one general profile; a shop's own rules are a preset or a plugin's");
     for id in profile_ids() {
         let p = profile(id).unwrap();
-        assert!(p.note.as_deref().is_some_and(|n| n.contains("spot check")), "{id}: says its values need a spot check");
+        assert!(p.note.as_deref().is_some_and(|n| n.contains("not any shop's rules")), "{id}: says it is no shop's rules");
+        // Generic cites general practice as text: every basis is stated, and none is a page.
         for rule in &p.rules {
-            let urls = rule.urls();
-            assert!(!urls.is_empty() && urls.iter().all(|u| u.starts_with("https://")), "{id} {}", rule.id.as_str());
+            let all = rule.sources.iter().chain(rule.limits.iter().flat_map(|l| &l.sources));
+            let mut n = 0;
+            for s in all {
+                n += 1;
+                assert!(s.says.starts_with("general practice:") && s.url.is_none() && s.read.is_none(), "{id} {}", rule.id.as_str());
+            }
+            assert!(n > 0 && rule.urls().is_empty(), "{id} {}", rule.id.as_str());
         }
     }
     assert!(profile("GENERIC").is_ok(), "ids ignore case");
@@ -248,6 +254,12 @@ fn a_malformed_profile_is_refused_with_the_reason_and_never_panics() {
         Profile::from_value(&v).is_ok()
     };
     assert!(ok("https://example.com") && ok("https://www.example.com/a/b.html?x=1#y") && ok("https://example.com:8443/a"));
+    // A basis stated as text needs no page; it still has to say something.
+    let mut v = minimal();
+    v["rules"][0]["limits"][0]["sources"] = json!([{"says": "general practice: half the thickness"}]);
+    assert!(Profile::from_value(&v).is_ok());
+    assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([{"url": "https://example.com"}])).contains("sources"));
+    assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([{"says": " "}])).contains("says"));
     // A bend radius is only there for the bend rules: a formula with it elsewhere would be dropped.
     assert!(broken(&|v| v["rules"][0]["limits"][0]["plus_radius"] = json!(1.0)).contains("plus_radius"));
     assert!(broken(&|v| v["id"] = json!("Bad Id")).contains("lower case"));
@@ -327,7 +339,9 @@ fn each_profile_recommends_the_export_it_wants() {
     let rec = |shop: &str| any(shop).dxf_export.unwrap_or_else(|| panic!("{shop} names an export"));
     for id in ["generic", "shop_a", "shop_b", "shop_c"] {
         let r = rec(id);
-        assert!(!r.sources.is_empty() && r.sources.iter().all(|s| s.url.starts_with("https://")), "{id}");
+        // The synthetic shops cite pages; Generic states a basis as text.
+        let pages = id != "generic";
+        assert!(!r.sources.is_empty() && r.sources.iter().all(|s| s.url.as_deref().is_some_and(|u| u.starts_with("https://")) == pages), "{id}");
         assert!(!r.bend_notes && !r.hardware_notes, "{id}: notes are text entities, which a file rule may refuse");
     }
     // A cutter-safe file: one layer and no bend lines for a shop that cuts every line.

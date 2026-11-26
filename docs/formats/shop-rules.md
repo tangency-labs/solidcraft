@@ -2,14 +2,16 @@
 
 A shop rules profile says what a fabrication shop asks of a sheet metal part: the sizes it
 stocks, its smallest hole, how near a hole may be to an edge or a bend, whether threads and
-hardware are modelled. `sheet.check_shop` holds a part against one. Each value keeps the page it
-came from, so a number that changes is a one-line edit, and a rule whose pages disagree says so.
+hardware are modelled. `sheet.check_shop` holds a part against one. Each value keeps what it comes
+from (a page, or a basis stated as text), so a number that changes is a one-line edit, and a rule
+whose pages disagree says so.
 
-SolidCraft ships one profile, `generic`, in `assets/sheet-metal/shop-rules.json`: a strict preliminary
-check, the strictest of the values laser-cutting and press-brake shops commonly publish. It has no
-stock list or sheet size, which differ from shop to shop, and its note names the few values that still
-need a spot check. A named shop's own numbers are not built in: they come from a plugin, or from
-you, as a preset.
+SolidCraft ships one profile, `generic`, in `assets/sheet-metal/shop-rules.json`: general sheet-metal
+design practice in our own words, not any shop's rules. Its distances are the rules of thumb, in
+terms of the sheet thickness T and the inside bend radius R: a hole at least T wide, 2 T from an
+edge and 2.5 T + R from a bend, and a flange at least 4 T long. It has no stock list or sheet size,
+which differ from shop to shop. A shop's own numbers are not built in: they come from a plugin, or
+from you, as a preset.
 
 `sheet.check_shop` takes `shop` as `generic`, as the id of a preset, as the path of a profile file
 (a path ends in `.json`), or as a profile object. Profiles are read only from files you name;
@@ -110,8 +112,10 @@ what the numbers are for (`laser cutting`) in the messages. The ids are a closed
 | `thread.modelling` | `wanted`: `plain` (a plain hole, the thread on the order) or `modelled` | `wanted`, `sources` |
 | `hardware.modelling` | `wanted`: `plain` (named on the order) or `modelled` | `wanted`, `sources` |
 
-A **source** is `{"url", "read", "says"}`: an https page, the day it was read, and what it says in
-our own words. A source holds no copied text.
+A **source** is `{"url"?, "read"?, "says"}`: an https page, the day it was read, and what it says in
+our own words. A source holds no copied text. `url` and `read` may be left out for a basis that is
+only text: `{"says": "general practice: ..."}`, which is how Generic states each rule; such a
+source has no page for the Shop Check window to open.
 
 A **limit** is `{"value" or "steps", "relative_to"?, "plus_radius"?, "short_value"?, "from"?,
 "materials"?, "sources"}`:

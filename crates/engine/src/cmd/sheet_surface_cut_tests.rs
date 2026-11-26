@@ -1709,7 +1709,7 @@ fn shop_findings(reply: &Value, id: &str) -> Vec<Value> {
     reply["findings"].as_array().cloned().unwrap_or_default().into_iter().filter(|f| f["rule"] == id).collect()
 }
 
-/// A clean 2 mm plate with a 6 mm hole passes the generic profile: needs of max(0.5 T, 1) = 1 mm
+/// A clean 2 mm plate with a 6 mm hole passes the generic profile: needs of T = 2 mm
 /// for the hole and 2 T = 4 mm to an edge are met (the hole is 30 mm from the nearest edge); the
 /// reply names the shop and the sheet, lists what was and was not looked at, and changes nothing.
 #[test]
@@ -1733,7 +1733,9 @@ fn a_clean_plate_passes_the_generic_shop_check() {
     assert!(not_checked.contains(&"stock.thickness"), "{not_checked:?}");
 }
 
-/// A 0.6 mm hole in 2 mm sheet is under the generic laser minimum of max(0.5 * 2, 1) = 1 mm.
+/// A 0.6 mm hole in 2 mm sheet is under Generic's minimum of one thickness, T = 2 mm (it was
+/// max(0.5 T, 1) = 1 mm).
+
 #[test]
 fn a_hole_under_the_shops_minimum_is_a_finding_with_the_limit() {
     let mut s = plate();
@@ -1741,10 +1743,11 @@ fn a_hole_under_the_shops_minimum_is_a_finding_with_the_limit() {
     let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
     let f = shop_findings(&reply, "hole.min_diameter");
     assert_eq!(f.len(), 1, "{reply}");
-    assert!((f[0]["value"].as_f64().unwrap_or(f64::NAN) - 0.6).abs() < 1e-6 && f[0]["limit"].as_f64() == Some(1.0), "{}", f[0]);
+    assert!((f[0]["value"].as_f64().unwrap_or(f64::NAN) - 0.6).abs() < 1e-6 && f[0]["limit"].as_f64() == Some(2.0), "{}", f[0]);
     assert_eq!(f[0]["severity"], "error");
     assert!(f[0]["message"].as_str().unwrap_or("").contains("\u{d8}0.6 mm") && f[0]["at"].is_array(), "{}", f[0]);
-    assert!(f[0]["sources"].as_array().is_some_and(|u| !u.is_empty()));
+    // Generic's basis is general practice, not a page: no address is given.
+    assert!(f[0]["sources"].as_array().is_some_and(Vec::is_empty));
 }
 
 /// A shop that stocks 0.5 to 6 mm (`shop_b`): a 7 mm sheet is not stock.
@@ -1765,15 +1768,15 @@ fn a_sheet_outside_the_shops_stock_is_a_finding() {
     assert_eq!(shop_findings(&reply, "stock.thickness").len(), 1, "shop_c: 7 mm is no listed size either");
 }
 
-/// A hole near a bend, measured as the flat has it: the generic limit is the strictest of
-/// 2 T = 4 and 2 T + R = 6 mm (R = 2), a warning as the shops' pages differ; the hole is in the
+/// A hole near a bend, measured as the flat has it: the generic limit is 2.5 T + R = 2.5 * 2 + 2 =
+/// 7 mm (R = 2; it was the strictest of 2 T and 2 T + R = 6 mm, a warning); the hole is in the
 /// bend's zone or the distance from its rim to the zone's edge is what the finding says (the
 /// shops measure from the hole's edge: the centre's distance less the 3 mm radius).
 #[test]
 fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
     let mut s = plate();
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
-    // Off the bend (a hole crossing it is refused), its centre within the 6 mm limit of the zone.
+    // Off the bend (a hole crossing it is refused), its centre within the 7 mm limit of the zone.
     run(&mut s, "solid.hole", json!({"position": [50, 9, T], "diameter": 6}));
     run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
     let zone = flat(&mut s)["bend_zones"][0].clone();
@@ -1789,9 +1792,9 @@ fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
         let found = f
             .iter()
             .find(|x| x["at"][0].as_f64().is_some_and(|x| (x - c[0]).abs() < 1e-6) && x["at"][1].as_f64().is_some_and(|y| (y - c[1]).abs() < 1e-6));
-        assert_eq!(found.is_some(), d + 1e-9 < 6.0, "hole at {c:?}, zone y {y0}..{y1}: {f:?}");
+        assert_eq!(found.is_some(), d + 1e-9 < 7.0, "hole at {c:?}, zone y {y0}..{y1}: {f:?}");
         if let Some(found) = found {
-            assert_eq!((found["limit"].as_f64(), found["severity"].as_str()), (Some(6.0), Some("warning")));
+            assert_eq!((found["limit"].as_f64(), found["severity"].as_str()), (Some(7.0), Some("error")));
             assert!((found["value"].as_f64().unwrap_or(f64::NAN) - d).abs() < 1e-6, "{found}");
         }
     }

@@ -30,16 +30,16 @@ fn rule<'a>(r: &'a Report, id: &str) -> Vec<&'a Finding> {
 
 #[test]
 fn a_clean_bracket_passes_generic() {
-    // Needs for T = 2, R = 2: a hole at least max(0.5 T, 1) = 1 mm wide, 2 T = 4 mm from an edge
-    // (the larger of 1.5 T and 2 T), and max(2 T, 2 T + R) = 6 mm from a bend. The hole is 6 mm
-    // wide, 30 mm from the edges and 20 mm from the bend.
+    // Generic's rules of thumb for T = 2, R = 2: a hole at least T = 2 mm wide, 2 T = 4 mm from an
+    // edge, and 2.5 T + R = 7 mm from a bend. The hole is 6 mm wide, 30 mm from the edges and 20 mm
+    // from the bend.
     let r = run("generic", &bracket());
     assert!(r.findings.is_empty(), "{:?}", r.findings);
     assert!(r.checked.contains(&"hole.to_bend".to_string()));
     // No bend, no flange: the rule is looked at and nothing is found.
     assert!(r.checked.contains(&"flange.min".to_string()) && !r.not_checked.iter().any(|n| n.rule == "flange.min"));
     let stock = r.not_checked.iter().find(|n| n.rule == "stock.thickness").map(|n| n.why.as_str()).unwrap_or("");
-    assert!(stock.contains("Generic's pages give no value"), "{stock}");
+    assert!(stock.contains("Generic's rules give no value"), "{stock}");
 }
 
 #[test]
@@ -48,10 +48,11 @@ fn a_small_hole_is_a_finding_with_the_shops_limit() {
     part.holes.push(hole([12.0, 8.0], 0.6, 8.0, 20.0));
     let f = rule(&run("generic", &part), "hole.min_diameter").into_iter().cloned().collect::<Vec<_>>();
     assert_eq!(f.len(), 1);
-    // max(0.5 * 2, 1) = 1 mm.
-    assert_eq!((f[0].value, f[0].limit, f[0].severity, f[0].at), (Some(0.6), Some(1.0), Severity::Error, Some([12.0, 8.0])));
-    assert_eq!(f[0].message, "the hole at (12, 8) is \u{d8}0.6 mm; Generic's laser cutting needs at least \u{d8}1 mm for 2 mm sheet");
-    assert!(f[0].sources.iter().all(|u| u.starts_with("https://")) && !f[0].sources.is_empty());
+    // Generic: a hole at least T wide, 1 * 2 = 2 mm for 2 mm sheet (was max(0.5 T, 1) = 1 mm).
+    assert_eq!((f[0].value, f[0].limit, f[0].severity, f[0].at), (Some(0.6), Some(2.0), Severity::Error, Some([12.0, 8.0])));
+    assert_eq!(f[0].message, "the hole at (12, 8) is \u{d8}0.6 mm; Generic needs at least \u{d8}2 mm for 2 mm sheet");
+    // Generic's basis is general practice, not a page: no address to open.
+    assert!(f[0].sources.is_empty());
     let strict = run("shop_a", &part);
     // Shop A: half the thickness, 1 mm.
     assert_eq!(rule(&strict, "hole.min_diameter")[0].limit, Some(1.0));
@@ -59,14 +60,14 @@ fn a_small_hole_is_a_finding_with_the_shops_limit() {
 }
 
 #[test]
-fn a_hole_near_a_bend_is_a_warning_where_the_pages_disagree() {
+fn a_hole_near_a_bend_is_an_error_by_the_generic_rule_of_thumb() {
     let mut part = bracket();
     part.holes = vec![hole([50.0, 5.0], 6.0, 5.0, 1.0)];
-    // Generic: 2 T = 4 and 2 T + R = 6 mm; the strictest, 6.
+    // Generic: 2.5 T + R = 2.5 * 2 + 2 = 7 mm (was the strictest of 2 T and 2 T + R = 6 mm, a warning).
     let f = rule(&run("generic", &part), "hole.to_bend").into_iter().cloned().collect::<Vec<_>>();
     assert_eq!(f.len(), 1);
-    assert_eq!((f[0].value, f[0].limit, f[0].severity), (Some(1.0), Some(6.0), Severity::Warning));
-    assert!(f[0].message.contains("1 mm from bend 1 (to where the bend starts)") && f[0].message.contains("which differ"), "{}", f[0].message);
+    assert_eq!((f[0].value, f[0].limit, f[0].severity), (Some(1.0), Some(7.0), Severity::Error));
+    assert!(f[0].message.contains("1 mm from bend 1 (to where the bend starts)") && !f[0].message.contains("which differ"), "{}", f[0].message);
     // A hole inside a bend is told so.
     part.holes[0].bends[0].inside = true;
     part.holes[0].bends[0].from_start = 0.0;
@@ -378,7 +379,7 @@ fn cut_contours_on_two_layers_are_a_finding_that_names_the_export_option() {
     );
     let listed = run("shop_b", &filed(drawn()));
     assert!(rule(&listed, "file.dxf_single_layer").is_empty());
-    assert!(listed.not_checked.iter().any(|n| n.rule == "file.dxf_single_layer" && n.why.contains("Shop B's pages give no value")));
+    assert!(listed.not_checked.iter().any(|n| n.rule == "file.dxf_single_layer" && n.why.contains("Shop B's rules give no value")));
 }
 
 /// A junction cut is a line out and back; a contour the writer cannot close is another finding.
