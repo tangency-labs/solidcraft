@@ -264,9 +264,17 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if app.agent_computing().is_some() {
         let steps = app.agent_steps();
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
-        // A batch counts its steps; one command, the features it evaluates.
+        // A batch counts its steps; one command, the features it evaluates; a plugin, what it reports.
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
-        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, next: app.agent_next(), ..Row::new("agent".into(), label) });
+        let percent = app.agent_plugin_percent();
+        rows.push(Row {
+            steps: steps.or(percent.map(|p| (p, 100))),
+            percent: steps.is_none() && percent.is_some(),
+            cancel: Some(Cancel::Agent),
+            agent: true,
+            next: app.agent_next(),
+            ..Row::new("agent".into(), label)
+        });
     }
     // Each design change waiting behind it is an operation of its own, named by its place in the
     // queue (1 runs next).

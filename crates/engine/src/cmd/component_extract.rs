@@ -469,7 +469,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 local_path(&mut face.path, &sc.own);
                 local_path(&mut face.author_path, &sc.own);
             }
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. } => {
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     anchor.component = to_root(anchor.component);
                     local_path(&mut anchor.path, &sc.own);
@@ -496,6 +496,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     part.body_offsets.retain(|b, _| moved.contains_key(b));
     keep_component_looks(&mut part, &sc.owners, &BTreeSet::from([comp]));
     part.materials.retain(|b, _| bodies.contains(b));
+    part.collision_shapes.retain(|b, _| bodies.contains(b));
     part.appearances.bodies.retain(|b, _| bodies.contains(b));
     part.appearances.faces.retain(|f| bodies.contains(&f.body));
     part.appearances.components.retain(|c, _| sc.children.contains(c));
@@ -520,6 +521,8 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         g.features.retain(|f| sc.inside.contains(f));
     }
     part.named_views.clear();
+    part.home_view = None;
+    part.saved_sections.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
     let features: BTreeMap<u64, u64> = sc.inside.iter().chain(&sc.carried).map(|f| (*f, *f)).collect();
@@ -611,7 +614,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
         s.active_component = 0;
         s.active_occurrence_path = None;
     }
-    s.selection.clear();
+    s.clear_selection();
 }
 
 /// The design as it was before a swap, to check the swap against.
@@ -724,7 +727,18 @@ impl Session {
     /// Whether component `id` can leave the design for a file of its own or a link: what
     /// `component.extract` and `component.replace_with_link` check before they build anything.
     pub fn can_extract(&self, id: u64) -> bool {
-        scope(self, id, CMD).is_ok()
+        self.extract_refusal(id).is_none()
+    }
+
+    /// Why component `id` can't be extracted, as a sentence for a disabled menu entry's hover
+    /// text (#18623), or `None` when it can: the same check as [`Session::can_extract`].
+    pub fn extract_refusal(&self, id: u64) -> Option<String> {
+        let why = match scope(self, id, CMD).err()? {
+            EngineError::BadParams { msg, .. } => msg,
+            other => other.to_string(),
+        };
+        let mut chars = why.chars();
+        Some(chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or(why))
     }
 }
 
@@ -786,7 +800,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
     // The link keeps what the new file holds, as Insert Design's does (#9739).
-    if let Some(read) = file_sha256(&file, s.path.as_deref())
+    if let Some(read) = file_sha256(&file, s.path.as_deref(), false)
         && let Some(link) = s.doc_mut().links.get_mut(&comp)
     {
         link.file_sha256 = Some(read);
@@ -886,6 +900,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         d.remove_configuration_components(&[t]);
         d.appearances.components.remove(&t);
         d.materials.retain(|b, _| !sc.bodies.contains(b));
+        d.collision_shapes.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.bodies.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.faces.retain(|f| !sc.bodies.contains(&f.body));
         d.browser_groups.retain(|g| g.component != t);

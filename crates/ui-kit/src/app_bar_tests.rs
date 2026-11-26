@@ -506,6 +506,13 @@ fn app_bar_edit_mode_changes_only_separator_widths() {
 
 #[test]
 fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
+    // The bar's helpers and these checks never lock the context inside its own lock: a worker's
+    // repaint between the two reads froze the window (#21091).
+    let ((), nested) = egui::Context::record_nested_locks(separator_mode_changes_glide_and_resize_still_snaps);
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
+fn separator_mode_changes_glide_and_resize_still_snaps() {
     let mut rig = BarRig::new(1920.0);
     let mut style = rig.ctx.global_style().as_ref().clone();
     style.animation_time = 0.15;
@@ -517,7 +524,8 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
             Rect::from_min_size(pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0), vec2(item.right - item.left, ITEM_HEIGHT));
         // Outside a frame cumulative_frame_nr already points to the next frame, so
         // inspect the completed paint state rather than calling the in-frame helper.
-        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap().items.get("save").unwrap().drawn);
+        let key = motion_key(&rig.ctx);
+        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().drawn);
         (final_rect, Rect::from_min_size(painted, final_rect.size()))
     };
     let separator_gap = |rig: &BarRig| {
@@ -529,8 +537,9 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
                 pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0),
                 vec2(item.right - item.left, ITEM_HEIGHT),
             );
+            let key = motion_key(&rig.ctx);
             rig.ctx.data(|data| {
-                let state = data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap();
+                let state = data.get_temp::<BarMotion>(key).unwrap();
                 let item = state.items.get(id).unwrap();
                 Rect::from_min_size(item.drawn, vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()))
             })
@@ -1066,6 +1075,7 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    file_drop: "t:file_drop",
 };
 
 const VIEW_MENU: [TabMenuRow<'static>; 4] = [
@@ -1314,6 +1324,20 @@ fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
         let (_, dragged) = rig.frame_output(vec![egui::Event::PointerMoved(at + vec2(20.0, 0.0))]);
         assert_eq!(dragged.platform_output.cursor_icon, drag_cursor(true));
         rig.frame(vec![event(false)]);
+    }
+}
+
+/// The × on a design tab is a button, not part of the tab's drag handle: over it the pointer is the
+/// plain arrow, on the shown design's tab and on the others alike.
+#[test]
+fn a_design_tabs_close_button_shows_the_arrow_not_the_drag_hand() {
+    for close in ["t:close:0", "t:close:1"] {
+        let rig = TabsRig::new();
+        let at = rig.at(close);
+        for _ in 0..3 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default, "{close}");
+        }
     }
 }
 
@@ -2986,38 +3010,4 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
-}
-
-#[test]
-fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
-    let ctx = crate::test_support::context();
-    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
-        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
-        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
-        });
-        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
-        if width == 240.0 {
-            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
-        }
-        if width >= 70.0 {
-            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
-        }
-        let chip = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(chip.height(), 18.0);
-        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
-    }
-    for t in [Tokens::light(), Tokens::dark()] {
-        assert!(
-            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
-            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
-        );
-    }
 }

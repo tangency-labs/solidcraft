@@ -22,6 +22,7 @@ pub mod blend;
 pub mod composite_curve;
 pub mod conic;
 pub mod conic_projection;
+pub(crate) mod contact;
 pub mod crv_in_volume;
 pub mod crv_on_surf;
 #[allow(clippy::module_inception)]

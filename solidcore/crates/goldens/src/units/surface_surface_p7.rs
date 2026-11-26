@@ -1966,8 +1966,7 @@ mod tests {
         ("gen2997", &[1001.0, 1.0, 0.9984474015655054], &[0.0, 1.0, 0.9984474015655054]),
     ];
 
-    /// The enclosed alignment at `uv` ([`crate::certify::alignment`], shared with the
-    /// goldens' WR-57 substitution replay).
+    /// The enclosed alignment at `uv` ([`crate::certify::alignment`]).
     fn wr57_alignment(k: &Kernel, s: &Surface, uv: Point2, dir: Vec3, singular_u: bool) -> Option<(f64, f64)> {
         crate::certify::alignment(k, s, uv, dir, singular_u)
     }

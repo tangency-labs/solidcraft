@@ -356,6 +356,25 @@ fn a_new_launch_checks_even_when_the_last_check_was_today() {
     assert!(h.app.updater.rx.is_none() && h.app.updater.status == Status::Idle);
 }
 
+/// The window froze for good when the check's thread asked for a repaint while a frame read egui's
+/// context inside its own read of it (the tab strip's `ctx.viewport_id()` inside `ctx.data`): the
+/// inner read waited on the repaint, which waited on the outer read (#21091). No frame nests them.
+#[test]
+fn the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let (release, nested) = egui::Context::record_nested_locks(|| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.updater.feed = Some(feed);
+        h.frame();
+        wait_for_check(&mut h);
+        h.frames(3);
+        h.app.updater.release.as_ref().map(|r| r.version().to_string())
+    });
+    assert_eq!(release, Some(version), "the check ran");
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
 #[test]
 fn turning_off_automatic_checks_stops_the_launch_check() {
     let dir = scratch();
@@ -429,7 +448,7 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         let reply = h.call("ui.prefs", json!({"open":"General"}));
         assert_eq!(
             reply["result"]["policy"],
-            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}, "off": []}),
             "{reply}"
         );
         assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
@@ -640,6 +659,49 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frames(2);
     assert!(!h.app.updater.open);
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
+}
+
+/// #18688: the first update offer and the community links have distinct hit
+/// regions in the measured application-bar layout, including at narrower widths.
+#[test]
+fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.preferences.show_donate_button = true;
+    h.app.preferences.show_discord_button = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.call("ui.resize", json!({"width":1920,"height":720}));
+    assert!(crate::scenario::rect_of("titlebar:update").is_none());
+
+    h.app.updater.release = Some(Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap());
+    assert!(offered(&h.app).is_some());
+    // Check the first actual update-offer frame; the registry is reset each frame.
+    h.frame();
+
+    for width in [1920.0, 1500.0, 1280.0, 1200.0, 1000.0, 850.0] {
+        if width != 1920.0 {
+            h.call("ui.resize", json!({"width":width,"height":720}));
+        }
+        let rect = crate::scenario::rect_of;
+        if width == 1920.0 {
+            assert!(rect("titlebar:update").is_some(), "wide title bar has a visible update offer");
+        }
+        let visible: Vec<_> = ["titlebar:kofi", "titlebar:discord", "titlebar:update", "titlebar:report", "titlebar:version", "titlebar:assistant"]
+            .into_iter()
+            .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
+            .collect();
+        for (i, (a, ra)) in visible.iter().enumerate() {
+            for (b, rb) in visible.iter().skip(i + 1) {
+                assert!(!ra.intersects(*rb), "{width}: {a} overlaps {b}: {ra:?}, {rb:?}");
+            }
+        }
+        if let Some(tab) = rect("tab:design:0") {
+            for (id, bounds) in &visible {
+                assert!(!tab.intersects(*bounds), "{width}: document tab overlaps {id}: {tab:?}, {bounds:?}");
+            }
+        }
+    }
 }
 
 fn windows_update_offer(notes: &str) -> crate::scenario::Harness {

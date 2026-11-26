@@ -129,6 +129,10 @@ fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error
     entity_ids(d, "curves", "`curves` must list curve ids")
 }
 
+fn construction_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
+    entity_ids(d, "points", "`points` must list point ids")
+}
+
 fn entities<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
     entity_ids(d, "entities", "`entities` must list sketch entity ids")
 }
@@ -206,7 +210,20 @@ macro_rules! option_flags {
     )+};
 }
 
-option_flags!(value, show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d);
+option_flags!(
+    value,
+    show_profile,
+    show_points,
+    show_dimensions,
+    show_constraints,
+    show_projected,
+    show_construction,
+    show_control_polygons,
+    grid,
+    snap,
+    slice,
+    sketch_3d
+);
 
 // ---------------------------------------------------------------------------------------------
 // sketch.create
@@ -505,26 +522,32 @@ pub struct CreateResult {
 // ---------------------------------------------------------------------------------------------
 // sketch.construction, sketch.delete
 
-fn curves_required(schema: &mut Schema) {
-    require(schema, "curves");
+/// `sketch.construction` takes curves, points or both: the handler refuses a call with neither.
+fn curves_or_points(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["curves"]}, {"required": ["points"]}]));
 }
 
 fn entities_required(schema: &mut Schema) {
     require(schema, "entities");
 }
 
-/// Switch curves between normal and construction. The selection switches together (a slot or
-/// polygon as a whole): to construction unless all of it already is. Projected curves may
-/// switch too. A centerline that becomes construction stops being a centerline, and a normal
-/// line is a finite one. One undo step.
+/// Switch curves and points between normal and construction. The selection switches together
+/// (a slot or polygon as a whole): to construction unless all of it already is. Projected
+/// curves may switch too. A centerline that becomes construction stops being a centerline, and
+/// a normal line is a finite one. A construction point is reference geometry that features
+/// reading a sketch's points (a Hole from the whole sketch) leave out. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = curves_required)]
+#[schemars(deny_unknown_fields, transform = curves_or_points)]
 pub struct ConstructionParams {
-    // Optional in the type and required in the schema (`curves_required`).
+    // Optional in the type; the schema asks for curves, points or both (`curves_or_points`).
     /// The curves, by id.
     #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "EntityIds")]
+    #[schemars(with = "Option<EntityIds>")]
     pub curves: Option<EntityIds>,
+    /// The points, by id (`p3`, `l1.end`).
+    #[serde(default, deserialize_with = "construction_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EntityIds>")]
+    pub points: Option<EntityIds>,
     /// True makes them construction, false makes them normal. Default: construction unless all of
     /// them already are.
     #[serde(default, deserialize_with = "value", skip_serializing_if = "Option::is_none")]
@@ -554,6 +577,9 @@ pub struct ConstructionResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
+    /// Keep identifiable surviving projection edges linked. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
     /// What to delete: curve, point, constraint, wire or link ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
@@ -571,9 +597,22 @@ pub struct DeleteResult {
     pub deleted: usize,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
+    /// Projections part of which was deleted and whose deleted members could not be recorded:
+    /// what remained of each is normal geometry now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_links: Vec<BrokenLink>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A projection `sketch.delete` broke off.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenLink {
+    /// The projection's id.
+    pub link: String,
+    /// Why its deleted members could not be recorded.
+    pub why: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -984,6 +1023,10 @@ pub struct OptionsParams {
     #[serde(default, deserialize_with = "show_construction", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub show_construction: Option<bool>,
+    /// Show the sides of spline control polygons.
+    #[serde(default, deserialize_with = "show_control_polygons", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub show_control_polygons: Option<bool>,
     /// Show the grid.
     #[serde(default, deserialize_with = "grid", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
@@ -1020,6 +1063,8 @@ pub struct SketchOptions {
     pub show_projected: bool,
     /// Construction geometry is shown.
     pub show_construction: bool,
+    /// Spline control polygons are shown.
+    pub show_control_polygons: bool,
     /// The grid is shown.
     pub grid: bool,
     /// Clicks snap to the grid.

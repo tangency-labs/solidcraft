@@ -131,3 +131,116 @@ fn pole_free_sphere_tolerance_is_explicit_and_validated() {
     let next_default = create_sphere_no_pole(&mut k, center, 3.0).unwrap();
     assert_eq!(next_default.tolerance(), default.tolerance());
 }
+
+/// tangency-labs/solidcraft#18634: a box is judged by its size, not by its distance from
+/// the origin. Each cube here is many times the B-rep tolerance (1e-5) on every side and
+/// its far corner is exact in f64 (`c + s` rounds to within 1e-6 of the true sum at every
+/// offset below), so it exists; before the fix `create_box` refused the rows at about
+/// 1e-9 times the offset and below ("surface degenerates to a curve/point", whose floors
+/// scaled with `1 + |coord|`), and built the rows between that and about
+/// `sqrt(1e-12 * offset)` with faces the level-2 check reported as crossing or missing a
+/// seam (`is_periodic`'s position test scaled the same way).
+#[test]
+fn boxes_far_from_the_origin_build_closed_and_valid() {
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box};
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Kernel;
+
+    // sides from 2e-4 (above the level-2 check's degenerate-point tolerance, 1e-4, as at
+    // the origin) to the 5e3 cube at 1e12 of the issue
+    let rows: [(f64, &[f64]); 7] = [
+        (1e3, &[2e-4, 1e-2, 1.0]),
+        (1e4, &[2e-4, 1e-3]),
+        (1e5, &[2e-4, 3e-4, 1e-2]),
+        (1e6, &[2e-4, 1e-3, 1.5e-3]),
+        (1e7, &[1e-3, 1e-2]),
+        (1e8, &[1e-3, 1e-2, 1e-1]),
+        (1e12, &[5e3]),
+    ];
+    let mut failures = Vec::new();
+    for (c, sides) in rows {
+        for &s in sides {
+            let at = Point3::new(c, c, c);
+            // the exact rounding error of the far corner `c + s` (Knuth's TwoSum)
+            let sum = c + s;
+            let back = sum - c;
+            assert!(
+                ((c - (sum - back)) + (s - back)).abs() < 1e-6,
+                "{s:e} at {c:e}"
+            );
+            let k = &mut Kernel::default();
+            match create_box(k, at, s, s, s) {
+                Err(e) => failures.push(format!("box {s:e} at {c:e}: {e}")),
+                Ok(mut b) => {
+                    let counts = (
+                        b.face_list().len(),
+                        b.edge_list().len(),
+                        b.vertex_list().len(),
+                    );
+                    let check = check_brep(k, &mut b, CheckLevel::Level2).unwrap();
+                    if counts != (6, 12, 8) || !check.is_valid() {
+                        failures.push(format!(
+                            "box {s:e} at {c:e}: {counts:?} {:?}",
+                            check.lines()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // quarter cylindrical boxes (length, inner and outer radius) at the same offsets: their
+    // cylinder faces' tangent test scaled with the corner's position too
+    for c in [1e3, 1e6, 1e8] {
+        for (length, inner, outer) in [(1.0, 1.0, 2.0), (1e-3, 1.0, 2.0), (1.0, 1e-3, 2e-3)] {
+            let at = Point3::new(c, c, c);
+            let k = &mut Kernel::default();
+            let row = format!("cylindrical box {length:e} x {inner:e}..{outer:e} at {c:e}");
+            match create_cylindrical_box(k, at, length, inner, outer, 0.0, 90.0) {
+                Err(e) => failures.push(format!("{row}: {e}")),
+                Ok(mut b) => {
+                    let faces = b.face_list().len();
+                    let check = check_brep(k, &mut b, CheckLevel::Level2).unwrap();
+                    if faces != 6 || !check.is_valid() {
+                        failures.push(format!("{row}: {faces} {:?}", check.lines()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// tangency-labs/solidcraft#18634, the issue's second table: cubes of 1e-4 and 5e-5 at
+/// (1e4, 1e4, 1e4), at or below the level-2 check's degenerate-point tolerance (1e-4).
+/// Their answer is the one the same cube gets at the origin (the same face, edge and
+/// vertex counts and level-2 verdict, or the same refusal), so where the cube is does not
+/// decide it.
+#[test]
+fn small_boxes_at_1e4_answer_as_at_the_origin() {
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Kernel;
+
+    let answer = |at: Point3, s: f64| -> Result<((usize, usize, usize), bool), String> {
+        let k = &mut Kernel::default();
+        let mut b = create_box(k, at, s, s, s).map_err(|e| e.to_string())?;
+        let counts = (
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+        );
+        Ok((
+            counts,
+            check_brep(k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .is_valid(),
+        ))
+    };
+    for s in [1e-4, 5e-5] {
+        let near = answer(Point3::new(0.0, 0.0, 0.0), s);
+        let far = answer(Point3::new(1e4, 1e4, 1e4), s);
+        assert_eq!(far, near, "{s:e}");
+    }
+}

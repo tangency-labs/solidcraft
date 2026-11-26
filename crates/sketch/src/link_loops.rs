@@ -128,8 +128,10 @@ fn clear(a: &Shape, b: &Shape, shared: &[Vec2], tol: f64) -> bool {
 fn contains(boundary: &Boundary, p: Vec2, tol: f64) -> Option<bool> {
     let mut crossings = 0;
     for shape in &boundary.shapes {
-        // Avoid ray/vertex coincidences rather than guessing a half-open arc rule.
-        if endpoints(shape).iter().any(|q| (q.y - p.y).abs() <= tol) {
+        // Avoid ray/vertex coincidences rather than guessing a half-open arc rule. A full
+        // circle's seam is no vertex: the ray meets it like any other point (#21213).
+        let seam_only = matches!(*shape, Shape::Round { sweep, .. } if sweep >= TAU - 1e-12);
+        if !seam_only && endpoints(shape).iter().any(|q| (q.y - p.y).abs() <= tol) {
             return None;
         }
         match *shape {
@@ -151,7 +153,7 @@ fn contains(boundary: &Boundary, p: Vec2, tol: f64) -> Option<bool> {
                     let angle = y.asin();
                     for theta in [angle, std::f64::consts::PI - angle] {
                         let off = (theta - start).rem_euclid(TAU);
-                        if off < sweep {
+                        if seam_only || off < sweep {
                             let x = c.x + r * theta.cos();
                             if (x - p.x).abs() <= tol {
                                 return None;
@@ -277,14 +279,39 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
             if i == j {
                 continue;
             }
-            let shape = out.get(i)?.shapes.first()?;
-            let (_, end) = shape.range();
-            let inside = [0.317, 0.613, 0.823].into_iter().find_map(|t| contains(out.get(j)?, shape.point(end * t), tol))?;
+            // The first point of loop `i` the ray test decides: a point level with a vertex of
+            // loop `j` is ambiguous, so the other curves of loop `i` are tried too (#21213).
+            let other = out.get(j)?;
+            let inside = out
+                .get(i)?
+                .shapes
+                .iter()
+                .flat_map(|shape| {
+                    let (_, end) = shape.range();
+                    [0.317, 0.613, 0.823].map(|t| shape.point(end * t))
+                })
+                .find_map(|p| contains(other, p, tol))?;
             depth += usize::from(inside);
         }
         out.get_mut(i)?.depth = depth;
     }
     Some(out)
+}
+
+/// Whether more than two curves end at one point of the layout: loops of the boundary touch
+/// there (two inner outlines of a face that meet at a corner, #20619).
+pub(super) fn meets_at_corner(curves: &[LCurve], points: usize) -> bool {
+    let mut ends = vec![0usize; points];
+    for curve in curves {
+        if let LCurve::Line(a, b) | LCurve::Arc(_, a, b) = *curve {
+            for p in [a, b] {
+                if let Some(n) = ends.get_mut(p) {
+                    *n += 1;
+                }
+            }
+        }
+    }
+    ends.iter().any(|n| *n > 2)
 }
 
 pub(super) fn valid(curves: &[LCurve], points: &[Vec2]) -> bool {

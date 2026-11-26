@@ -8,7 +8,7 @@
 //! large, names no valid plugin id or holds more than an installation can approve is ignored: the
 //! plugin then runs with nothing granted.
 
-use super::{COMMAND_GROUPS, Grants, MAX_MEMORY_MIB, valid_id};
+use super::{COMMAND_GROUPS, Grants, MAX_APPROVED_FUEL, MAX_MEMORY_MIB, valid_id};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -28,12 +28,14 @@ pub fn folder(plugins: &Path) -> PathBuf {
 }
 
 /// Whether `grants` is a record an installation could have made: known command groups, memory
-/// within the Wasm32 limit and at most 32 distinct, usable absolute folders.
+/// within the Wasm32 limit, fuel within the approval ceiling and at most 32 distinct, usable
+/// absolute folders.
 pub fn valid_record(grants: &Grants) -> bool {
     let mut names = BTreeSet::new();
     grants.package_hash.as_deref().is_none_or(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
         && grants.command_groups.len() <= COMMAND_GROUPS.len()
         && grants.command_groups.iter().all(|group| COMMAND_GROUPS.contains(&group.as_str()))
+        && grants.fuel.is_none_or(|fuel| (1..=MAX_APPROVED_FUEL).contains(&fuel))
         && grants.memory_mib.is_none_or(|memory| (1..=MAX_MEMORY_MIB).contains(&memory))
         && grants.folders.len() <= 32
         && grants.folders.iter().all(|grant| {

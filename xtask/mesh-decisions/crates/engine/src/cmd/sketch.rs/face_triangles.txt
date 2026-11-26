@@ -1,1 +1,0 @@
-groups mesh triangles by face for sketch picks

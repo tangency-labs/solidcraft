@@ -125,7 +125,8 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -254,9 +255,12 @@ pub(super) fn gen_with_out_of_bounds(c: &Curve, enabled: bool) -> Option<Curve> 
 /// The first entry of an evaluation.
 fn first(v: &[Vec3]) -> Result<Vec3> {
     v.first().copied().ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             "surface::surf_of_extrusion::p1::first",
-            "the evaluation returned no point",
+            SurfaceFailure::Defect {
+                why: "a generator's STEP evaluation returned no entry, though it always \
+                      returns the point first",
+            },
         )
     })
 }
@@ -519,10 +523,18 @@ impl SurfOfExtrusion {
             let domain = gen.natural_interval();
             self.gen_curve = Some(gen);
             ignore_status(self.make_nurb(k))?;
-            gen = self
-                .gen_curve
-                .take()
-                .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            gen = self.gen_curve.take().ok_or_else(|| {
+                Failure::new(
+                    OP_GEN,
+                    SurfaceFailure::Defect {
+                        why: "the generator is gone after make_nurb, though it was put on the \
+                              surface just before and make_nurb edits it in place and never \
+                              removes it",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             let (start, end) = ignored(gen.ends(k))?
                 .map_or((Vec3::UNDEF, Vec3::UNDEF), |ends| (ends.start, ends.end));
             Some(gen.is_linear_after_ends(k, tol, false, domain, start, end)?)
@@ -613,7 +625,10 @@ impl SurfOfExtrusion {
     /// dereferences the null copy).
     pub fn copy(&self) -> Result<Self> {
         if self.gen_curve.is_none() {
-            return Err(SolidError::surface_missing(OP_COPY, "the generator curve"));
+            return Err(SolidError::surface(
+                OP_COPY,
+                SurfaceFailure::SurfaceWithoutGenerator,
+            ));
         }
         Ok(self.clone())
     }
@@ -734,7 +749,7 @@ impl SurfOfExtrusion {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
         adjust_generator_interval(k, gen, ivl, owner_ivl)
     }
 
@@ -830,7 +845,7 @@ impl SurfOfExtrusion {
     fn gen(&self) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))
     }
 
     /// The generating curve (`GetGenCurve`).
@@ -1094,7 +1109,12 @@ impl SurfOfExtrusion {
 
         // set GenCurve analytic domain from U part of new surface Anal domain.
         let u_ivl = self.anal_uv_domain.u_interval();
-        self.adjust_gen_step_interval(k, &u_ivl)?;
+        let owner_ivl = self.owner_ivl();
+        let gen = self
+            .gen_curve
+            .as_mut()
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
+        adjust_generator_interval(k, gen, &u_ivl, owner_ivl)?;
 
         // make sure m_pGenCurve Nurb domain matches crNewNurbsDomain (status ignored)
         let gen_ivl = if self.swap_uv {
@@ -1102,10 +1122,6 @@ impl SurfOfExtrusion {
         } else {
             new_nurbs_domain.u_interval()
         };
-        let gen = self
-            .gen_curve
-            .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         ignore_status(gen_base_mut(gen)?.scale_knot_vector(gen_ivl.min(), gen_ivl.max()))?;
 
         // recompute a m_vOrigin point to ensure that the origin is still on the genCurve
@@ -1140,14 +1156,27 @@ impl SurfOfExtrusion {
         };
 
         // GetOrCreateGwNurbPointer: the virtual MakeNurb (status unchecked upstream)
+        let mut made = Ok(());
         if self.base.nurb.is_none() {
-            ignore_status(self.make_nurb(k))?;
+            made = self.make_nurb(k);
+            ignore_status(made.clone())?;
         }
-        let sur = self
-            .base
-            .nurb
-            .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_REPARAM, "the surface's NURB"))?;
+        let Some(sur) = self.base.nurb.as_mut() else {
+            return Err(match made {
+                Err(e) => {
+                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
+                }
+                Ok(()) => Failure::new(
+                    OP_REPARAM,
+                    SurfaceFailure::Defect {
+                        why: "the NURB is missing after make_nurb returned success, which on \
+                              success sets the NURB",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error(),
+            });
+        };
 
         // set NURB Surface domain parameterization - no change in shape
         let _ = sur.reparam_to_interval(rect, Direction::UV);
@@ -1161,7 +1190,7 @@ impl SurfOfExtrusion {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
         ignore_status(gen.edit_parameterization(k, &gen_ivl))?;
         Ok(())
     }
@@ -1172,7 +1201,9 @@ impl SurfOfExtrusion {
     /// upstream's `const` method would make it.
     fn nurb_uv_domain(&self, op: &'static str) -> Result<Extent2d> {
         if self.base.gw_nurb().is_none() {
-            return Err(SolidError::surface_failed(op, "the surface has no NURB"));
+            return Err(Failure::new(op, SurfaceFailure::NoNurb)
+                .with_status(crate::error::SM_ERR)
+                .into_error());
         }
         Ok(self.base.natural_uv_domain())
     }
@@ -1302,9 +1333,9 @@ impl SurfOfExtrusion {
     ) -> Result<()> {
         // check state:
         if hu > MAX_DERIV || hv > MAX_DERIV {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL_STEP,
-                "the derivative order is above the maximum",
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV },
             ));
         }
 
@@ -1467,9 +1498,9 @@ impl SurfOfExtrusion {
 
         // failure - projected point is not on GenCurve
         let Some(sol) = solutions.first() else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_STEP_INV,
-                "the projected point is not on the generator curve",
+                SurfaceFailure::PointNotOnGenerator,
             ));
         };
 
@@ -1528,9 +1559,9 @@ impl SurfOfExtrusion {
     ) -> Result<SolutionArray<O>> {
         // return SM_ERR when this function can't compute a solution.
         if self.orientation != CurveOrientType::Perpendicular {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the generator is not perpendicular to the extrusion",
+                SurfaceFailure::GeneratorNotPerpendicular,
             ));
         }
 
@@ -1540,9 +1571,12 @@ impl SurfOfExtrusion {
             let mut copy = self.clone_for_evaluation(0)?;
             copy.make_nurb(k)?;
             if copy.base.gw_nurb().is_none() {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_DROP,
-                    "the evaluation copy has no NURB",
+                    SurfaceFailure::Defect {
+                        why: "the evaluation copy has no NURB after its make_nurb returned \
+                              success, which on success sets the NURB",
+                    },
                 ));
             }
             return copy.drop_point_fast(
@@ -1562,7 +1596,7 @@ impl SurfOfExtrusion {
         let mut out: SolutionArray<O> = SolutionArray::new();
 
         // locals
-        let nat_domain = self.nurb_uv_domain(OP_DROP)?;
+        let nat_domain = self.base.natural_uv_domain();
         let line_vec = self.anal_uv_domain.y_length() * self.extrusion_vec;
         let line_origin = self.origin + self.anal_uv_domain.min().y * self.extrusion_vec;
         let ivl = if self.swap_uv {
@@ -1716,23 +1750,24 @@ impl SurfOfExtrusion {
                 let curve_domain = self.anal_uv_domain.u_interval();
                 let gen = self.gen()?;
 
-                // Get Curve/Line intersection (status ignored)
-                let (needs_more, mut params) = match ignored(gen.intersect_with_line(
-                    k,
-                    &curve_domain,
-                    &line,
-                    &line_domain,
-                    tol,
-                ))? {
-                    Some(r) => (
-                        r.needs_more_intersections,
-                        r.solutions
-                            .iter()
-                            .map(|s| s.start.parameters[1])
-                            .collect::<Vec<f64>>(),
-                    ),
-                    None => (true, Vec::new()),
-                };
+                // Get Curve/Line intersection (status ignored; a caught error is the
+                // cause when no solution is found)
+                let mut caught = None;
+                let (needs_more, mut params) =
+                    match gen.intersect_with_line(k, &curve_domain, &line, &line_domain, tol) {
+                        Ok(r) => (
+                            r.needs_more_intersections,
+                            r.solutions
+                                .iter()
+                                .map(|s| s.start.parameters[1])
+                                .collect::<Vec<f64>>(),
+                        ),
+                        Err(e) => {
+                            ignored::<()>(Err(e.clone()))?;
+                            caught = Some(e);
+                            (true, Vec::new())
+                        }
+                    };
 
                 if needs_more || params.is_empty() {
                     let line_curve = Curve::from(line);
@@ -1746,7 +1781,7 @@ impl SurfOfExtrusion {
                         id: 3,
                         ivl: line_ivl,
                     };
-                    params = match ignored(gen.global_curve_intersect::<CurveHandle>(
+                    params = match gen.global_curve_intersect::<CurveHandle>(
                         k,
                         &curve_domain,
                         &line_curve,
@@ -1757,26 +1792,29 @@ impl SurfOfExtrusion {
                             handles: [Some(gen_handle), Some(line_handle)],
                             analytic_handles: [Some(gen_analytic), Some(line_analytic)],
                         },
-                    ))? {
-                        Some(sols) => sols
+                    ) {
+                        Ok(sols) => sols
                             .as_slice()
                             .iter()
                             .map(|s| s.start.parameters[1])
                             .collect(),
-                        None => Vec::new(),
+                        Err(e) => {
+                            ignored::<()>(Err(e.clone()))?;
+                            caught = Some(e);
+                            Vec::new()
+                        }
                     };
                 }
 
                 // CurrentHeight equals negative Line Param solution
-                match params.first() {
-                    Some(&p) => current_height = -p,
-                    None => {
-                        return Err(SolidError::surface_failed(
-                            OP_DIRECTRIX,
-                            "the directrix solve gave no parameter",
-                        ))
+                let Some(&p) = params.first() else {
+                    let mut failure = Failure::new(OP_DIRECTRIX, SurfaceFailure::DirectrixNotFound);
+                    if let Some(e) = caught {
+                        failure = failure.caused_by(e);
                     }
-                }
+                    return Err(failure.into_error());
+                };
+                current_height = -p;
             }
             CurveOrientType::Undefined => {}
         }
@@ -1842,9 +1880,9 @@ impl SurfOfExtrusion {
                 // when scale factors are not all the same
                 d_scale = s.x;
                 if !are_same(s.y, d_scale) || !are_same(s.z, d_scale) {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP_XFORM,
-                        "the scale is not uniform",
+                        SurfaceFailure::ScaleNotUniform,
                     ));
                 }
             }
@@ -2008,8 +2046,9 @@ pub fn intersect_generators(
     // locals
     let extrusion_ivl = surf.step_uv_domain().v_interval();
     let (gen, extrusion_vec) = surf.canonical();
-    let ext_gen =
-        gen.ok_or_else(|| SolidError::surface_missing(OP_GENERATORS, "the extrusion's generator"))?;
+    let ext_gen = gen.ok_or_else(|| {
+        SolidError::surface(OP_GENERATORS, SurfaceFailure::SurfaceWithoutGenerator)
+    })?;
     let ext_gen_ivl = ext_gen.natural_interval();
     let extrusion_length = extrusion_vec.length();
     let other_length = other_vec.length();
@@ -2605,23 +2644,61 @@ mod tests {
             empty
                 .evaluate_step_point(&k, Point2::new(0.5, 0.5))
                 .unwrap_err(),
-            SolidError::surface_missing(OP_GEN, "the generator curve")
+            SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator)
         );
         assert_eq!(
             empty
                 .evaluate_step(&k, Point2::new(0.5, 0.5), 0, 0)
                 .unwrap_err(),
-            SolidError::surface_missing(OP_GEN, "the generator curve")
+            SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator)
         );
         assert_eq!(
             s.evaluate_step(&k, Point2::new(0.5, 0.5), 6, 0)
                 .unwrap_err(),
-            SolidError::surface_failed(OP_EVAL_STEP, "the derivative order is above the maximum")
+            SolidError::surface(
+                OP_EVAL_STEP,
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV }
+            )
         );
         assert_eq!(
             s.evaluate_step(&k, Point2::new(0.5, 0.5), 0, 6)
                 .unwrap_err(),
-            SolidError::surface_failed(OP_EVAL_STEP, "the derivative order is above the maximum")
+            SolidError::surface(
+                OP_EVAL_STEP,
+                SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIV }
+            )
+        );
+
+        // A copy of a surface without generator and a non-uniform scale are the caller's.
+        assert_eq!(
+            empty.copy().unwrap_err(),
+            SolidError::surface(OP_COPY, SurfaceFailure::SurfaceWithoutGenerator)
+        );
+        let mut scaled = s.clone();
+        assert_eq!(
+            scaled
+                .transform(
+                    &k,
+                    &Axis2Placement::IDENTITY,
+                    Some(Vec3::new(1.0, 2.0, 1.0))
+                )
+                .unwrap_err(),
+            SolidError::surface(OP_XFORM, SurfaceFailure::ScaleNotUniform)
+        );
+
+        // Reparameterising a surface without generator: the NURB is not made, and the
+        // make's missing generator is the cause.
+        let mut unmade = SurfOfExtrusion::empty();
+        let mut unit = Extent2d::new();
+        unit.add_point(Point2::new(0.0, 0.0));
+        unit.add_point(Point2::new(1.0, 1.0));
+        let e = unmade.reparameterize(&k, &unit).unwrap_err();
+        assert_eq!(e.operation(), OP_REPARAM);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.cause().and_then(SolidError::surface_failure),
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
         );
     }
 

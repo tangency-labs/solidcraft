@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png | pdf | dxf (millimetres, layers VISIBLE, THIN, HIDDEN, DASHED, TEXT and FILL, each entity at its line's weight; pictures are left out and counted in report.pictures_left_out); pdf only: sheets?: [id or name, ...], one page each in that order (a pdf given neither sheet nor sheets holds every sheet, in the drawing's order), each page the sheet's paper size, its lines and text vector, shaded views and images embedded; path?: a file with the format's extension, required for png and pdf (else the reply holds an svg's or dxf's text, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, pages? (a pdf's sheets), format, bytes, path | svg | dxf, report: {widths_snapped, pieces_merged, pixels?: [width, height], pictures_left_out?}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged."),
+    .params("sheet: id or name; format?: svg (default) | png | pdf | dxf (millimetres, layers VISIBLE, THIN, HIDDEN, DASHED, TEXT and FILL, each entity at its line's weight; pictures are left out and counted in report.pictures_left_out); pdf only: text?: text (default: real text in an embedded font, selectable and searchable, with the same look) | outlines (glyph outlines only, no text in the file), sheets?: [id or name, ...], one page each in that order (a pdf given neither sheet nor sheets holds every sheet, in the drawing's order), each page the sheet's paper size, its lines and text vector, shaded views and images embedded; path?: a file with the format's extension, required for png and pdf (else the reply holds an svg's or dxf's text, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, pages? (a pdf's sheets), format, bytes, path | svg | dxf, report: {widths_snapped, pieces_merged, pixels?: [width, height], pictures_left_out?}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then centre annotations, parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. Omitted centre annotations are listed in annotation_failures with their reasons. A view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(PRINT, "Print Drawing", crate::checked!("drawing.print", print))
         .at("DRAWING REVIEW", "OUTPUT")
         .icon("export")
@@ -211,6 +211,9 @@ fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>, actu
             None
         }
     };
+    if request.text.is_some() && request.format != ExportFormat::Pdf {
+        return Err(bad(CMD, "`text` is for pdf only"));
+    }
     if png.is_none() && (request.dpi.is_some() || request.colour.is_some()) {
         return Err(bad(CMD, "`dpi` and `colour` are for png only"));
     }
@@ -254,7 +257,13 @@ fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>, actu
         }
         (ExportFormat::Pdf, _) => {
             let sources: Vec<&dyn Pictures> = pictures.iter().map(|p| p as &dyn Pictures).collect();
-            let options = PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size };
+            let options = PdfOptions {
+                title: Some(d.name.clone()).filter(|name| !name.is_empty()),
+                output_time: None,
+                layers: true,
+                actual_size,
+                text: request.text.unwrap_or_default().into(),
+            };
             let (pdf, reports) =
                 solidcraft_io::paper::paper_pdf_pages_with(&scenes, &options, Some(PdfPictures { pages: &sources, dpi: DEFAULT_DPI }))
                     .map_err(|e| bad(CMD, e.to_string()))?;
@@ -310,6 +319,7 @@ fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>, actu
         views: Vec::new(),
         dimensions: Vec::new(),
         notes: Vec::new(),
+        annotation_failures: Vec::new(),
         balloons: Vec::new(),
         tables: Vec::new(),
         out_of_date: Vec::new(),
@@ -321,6 +331,7 @@ fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>, actu
         reply.views.extend(built.views.into_iter().map(Into::into));
         reply.dimensions.extend(super::drawing_scene::dimension_results(built.dimensions));
         reply.notes.extend(super::drawing_scene::note_results(built.notes));
+        reply.annotation_failures.extend(built.annotation_failures.into_iter().map(Into::into));
         reply.balloons.extend(super::drawing_scene::balloon_results(built.balloons));
         reply.tables.extend(super::drawing_scene::table_results(built.tables));
         reply.out_of_date.extend(built.out_of_date.iter().map(|(id, _)| ids::encode(*id)));

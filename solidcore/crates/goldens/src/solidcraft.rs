@@ -1755,7 +1755,6 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         _ => k
@@ -2479,9 +2478,9 @@ mod tests {
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
         enable_fix(&mut k, "offset_extension_as_itself").unwrap();
-        enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
+        enable_fix(&mut k, "fillet_trace_reaches_rails").unwrap();
         assert!(k.fixes.offset_extension_as_itself);
-        assert!(k.fixes.analytic_copy_keeps_parameterization);
+        assert!(k.fixes.fillet_trace_reaches_rails);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
@@ -2708,7 +2707,6 @@ mod tests {
         // blend's checks the refusal reports the largest radius that builds, 3.
         let case: Case = serde_json::from_value(json!({
             "name": "bar-round-too-large",
-            "fixes": ["fillet_refuse_overlapping_bands"],
             "steps": [
                 {"op": "box", "id": "bar", "origin": [14.0, 0.0, 0.0], "size": [14.0, 6.0, 10.0]},
                 {"op": "fillet", "id": "result", "body": "bar",

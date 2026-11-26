@@ -119,9 +119,32 @@ fn circle_of_arc(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) 
     }
 }
 
+/// The new arc (an index into `lay.curves`) old arc `c` is when its centre became a different
+/// point: the one arc between the points `c`'s ends became whose centre is where `c`'s was (or
+/// where the point `c`'s centre became is). Two concentric arcs saved on one centre point can be
+/// read again with centres apart by more than the layout merges but within [`TOL`] (#20280: a
+/// shelled wall's rim and its outer rim); the old centre becomes only one of the two, and the
+/// other arc is still the same arc.
+fn arc_about_same_centre(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<usize> {
+    let LCurve::Arc(centre, a, b) = *c else { return None };
+    let (ma, mb) = (map.get(a).copied().flatten()?, map.get(b).copied().flatten()?);
+    let was = *old.get(centre)?;
+    let became = map.get(centre).copied().flatten().and_then(|i| lay.pts.get(i)).copied();
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
+    let mut hits = lay.curves.iter().enumerate().filter(|(_, n)| {
+        matches!(**n, LCurve::Arc(x, y, z) if y == ma && z == mb
+            && lay.pts.get(x).is_some_and(|p| near(*p, was) || became.is_some_and(|q| near(*p, q))))
+    });
+    match (hits.next(), hits.next()) {
+        (Some((j, _)), None) => Some(j),
+        _ => None,
+    }
+}
+
 /// The new curve (an index into `lay.curves`) old curve `c` becomes, and whether it is only a
 /// piece of the line `c` was: the curve of the same kind on the points `c`'s points became, for
-/// an arc without one the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
+/// an arc without one the arc between the same ends about the same centre
+/// ([`arc_about_same_centre`]) or else the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
 /// line without one, the longest new line along it (where it was, or between the points its
 /// ends became).
 fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<(usize, bool)> {
@@ -156,6 +179,9 @@ fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) ->
             }
             _ => {}
         }
+    }
+    if let Some(j) = arc_about_same_centre(c, old, map, lay) {
+        return Some((j, false));
     }
     if let Some(j) = circle_of_arc(c, old, map, lay) {
         return Some((j, true));
@@ -201,6 +227,32 @@ fn needs_arc_ends(k: &ConstraintKind, c: usize) -> bool {
     }
 }
 
+/// Names have already fixed a one-to-one whole-edge correspondence. Only
+/// witness its extent and direction here; endpoints never choose another edge.
+/// Closed or changed extents without a unique witness keep the ordinary refusal.
+fn named_curve_identities(cur: &[LCurve], old: &[Vec2], lay: &Layout, names: &[(usize, usize)]) -> BTreeMap<usize, (usize, bool)> {
+    let ends = |c: &LCurve| match *c {
+        LCurve::Line(a, b) | LCurve::Arc(_, a, b) | LCurve::Conic(a, b, ..) | LCurve::Spline(a, b, ..) => Some([a, b]),
+        _ => None,
+    };
+    names
+        .iter()
+        .filter_map(|&(i, j)| {
+            let (a, b) = (cur.get(i)?, lay.curves.get(j)?);
+            let [a0, a1] = ends(a)?;
+            let [b0, b1] = ends(b)?;
+            let old = [*old.get(a0)?, *old.get(a1)?];
+            let fresh = [*lay.pts.get(b0)?, *lay.pts.get(b1)?];
+            let agrees = |points: &[Vec2]| solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, points, TOL, 16).unwrap_or(false);
+            match (agrees(&fresh), agrees(&[fresh[1], fresh[0]])) {
+                (true, false) => Some((i, (j, false))),
+                (false, true) => Some((i, (j, true))),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 impl Sketch {
     /// Rebuild link `id`, whose entities are `points` and `curves` (laid out as `cur`, when they
     /// still are a layout), for its new shape `lay`. A curve of the sketch's own on an old point
@@ -209,21 +261,38 @@ impl Sketch {
     /// them has no match. A new point or curve that matches an old one takes its id; one that
     /// nothing in the sketch holds is matched afterwards, to what the held ones left, and not
     /// at all past [`MAX_MATCH_WORK`]. All or nothing: on an error the sketch is as it was.
-    pub(super) fn rebuild_link(&mut self, id: &str, lay: &Layout, points: &[usize], curves: &[usize], cur: Option<&[LCurve]>) -> Result<()> {
+    pub(super) fn rebuild_link(
+        &mut self,
+        id: &str,
+        lay: &Layout,
+        points: &[usize],
+        curves: &[usize],
+        cur: Option<&[LCurve]>,
+        named_edges: &[(usize, usize)],
+    ) -> Result<()> {
         let saved = self.clone();
-        let rebuilt = self.rebuild_link_in_place(id, lay, points, curves, cur);
+        let rebuilt = self.rebuild_link_in_place(id, lay, points, curves, cur, named_edges);
         if rebuilt.is_err() {
             *self = saved;
         }
         rebuilt
     }
 
-    fn rebuild_link_in_place(&mut self, id: &str, lay: &Layout, points: &[usize], curves: &[usize], cur: Option<&[LCurve]>) -> Result<()> {
+    fn rebuild_link_in_place(
+        &mut self,
+        id: &str,
+        lay: &Layout,
+        points: &[usize],
+        curves: &[usize],
+        cur: Option<&[LCurve]>,
+        named_edges: &[(usize, usize)],
+    ) -> Result<()> {
         let keep = self.links.clone();
         let old_point: BTreeMap<usize, usize> = points.iter().enumerate().map(|(k, p)| (*p, k)).collect();
         let old_curve: BTreeMap<usize, usize> = curves.iter().enumerate().map(|(k, c)| (*c, k)).collect();
         let old_ids: BTreeSet<String> = points.iter().filter_map(|p| self.points.get(*p)).map(|p| p.id.clone()).collect();
         let old_pos: Vec<Vec2> = points.iter().map(|p| self.points.get(*p).map_or(Vec2::ZERO, |q| q.pos)).collect();
+        let identities = named_curve_identities(cur.unwrap_or_default(), &old_pos, lay, named_edges);
         // What refers to the old entities: the sketch's own curves and its constraints.
         let mut needed: BTreeSet<usize> = BTreeSet::new();
         let mut needed_curves: BTreeSet<usize> = BTreeSet::new();
@@ -337,8 +406,10 @@ impl Sketch {
             }
         }
         let to_point = |p: usize| if old_point.contains_key(&p) { new_point(p).or_else(|| free.get(&p).copied()) } else { Some(p) };
+        // A curve whose kind changed (a spline that is an arc again) has no geometric match in
+        // `curve_map`, but a named identity says which new curve it is: constraints on it follow.
         let to_curve = |c: usize| match old_curve.get(&c) {
-            Some(k) => curve_map.get(k).map(|(j, _)| first_curve + j),
+            Some(k) => curve_map.get(k).or_else(|| identities.get(k)).map(|(j, _)| first_curve + j),
             None => Some(c),
         };
         for c in self.curves.iter_mut().filter(|c| c.link.as_deref() != Some(id)) {
@@ -381,31 +452,71 @@ impl Sketch {
         // A new curve that is an old one keeps how the sketch used it: a projected outline set to
         // construction stays out of profiles (#17732).
         let mut curve_flags: BTreeMap<String, (bool, bool)> = BTreeMap::new();
+        let mut reversed = BTreeSet::new();
+        for (k, (j, reverse)) in &identities {
+            if let (Some(new), Some(old)) = (self.curves.get(first_curve + j), curves.get(*k).and_then(|c| self.curves.get(*c))) {
+                curve_ids.insert(new.id.clone(), old.id.clone());
+                curve_flags.insert(new.id.clone(), (old.construction, old.centerline));
+                if *reverse {
+                    reversed.insert(old.id.clone());
+                }
+            }
+        }
         // The halves of a circle that is one curve now: the first half's id names the circle.
         let matched = curve_map.iter().map(|(k, (j, _))| (k, j));
+        let mut stable_ids: BTreeSet<String> = curve_ids.values().cloned().collect();
         for (k, j) in arcs_on_circles.iter().chain(matched).chain(&id_curves) {
             if let (Some(new), Some(old)) = (self.curves.get(first_curve + j), curves.get(*k).and_then(|c| self.curves.get(*c))) {
-                if !curve_ids.contains_key(&new.id) {
-                    curve_flags.insert(new.id.clone(), (old.construction, old.centerline));
+                if curve_ids.contains_key(&new.id) || !stable_ids.insert(old.id.clone()) {
+                    continue;
                 }
-                curve_ids.entry(new.id.clone()).or_insert_with(|| old.id.clone());
+                curve_flags.insert(new.id.clone(), (old.construction, old.centerline));
+                curve_ids.insert(new.id.clone(), old.id.clone());
+            }
+        }
+        // Transfer ids before deletion. Pruning must see the retired generated ids,
+        // not stable ids still named by offsets, equations, patterns or features.
+        let retired: BTreeMap<String, String> = curve_ids.iter().map(|(new, old)| (old.clone(), new.clone())).collect();
+        let old_curves: BTreeSet<usize> = curves.iter().copied().collect();
+        for (i, curve) in self.curves.iter_mut().enumerate() {
+            if old_curves.contains(&i) {
+                if let Some(temporary) = retired.get(&curve.id) {
+                    curve.id.clone_from(temporary);
+                }
+            } else {
+                if let Some((construction, centerline)) = curve_flags.get(&curve.id) {
+                    (curve.construction, curve.centerline) = (*construction, *centerline);
+                }
+                if let Some(stable) = curve_ids.get(&curve.id) {
+                    curve.id.clone_from(stable);
+                }
+            }
+        }
+        for offset in &mut self.offsets {
+            for (source, forward) in &mut offset.sources {
+                *forward ^= reversed.contains(source);
+            }
+        }
+        for offset in &mut self.freeform_offsets {
+            offset.forward ^= reversed.contains(&offset.source);
+        }
+        for offset in &mut self.freeform_chain_offsets {
+            for (source, forward) in &mut offset.sources {
+                *forward ^= reversed.contains(source);
             }
         }
         // Nothing refers to the old entities any more: they go without taking anything along.
+        let chain_offsets = self.freeform_chain_offsets.clone();
         self.remove_curves(curves);
+        // A rebuild is not a user deletion. An unresolved source must still
+        // report "offset source vanished", rather than silently break its offset.
+        let remaining: BTreeSet<&str> = self.curves.iter().map(|c| c.id.as_str()).collect();
+        self.freeform_chain_offsets = chain_offsets.into_iter().filter(|o| o.outputs.iter().all(|id| remaining.contains(id.as_str()))).collect();
         let rest: Vec<usize> = self.points.iter().enumerate().filter(|(_, p)| old_ids.contains(&p.id)).map(|(i, _)| i).collect();
         self.remove_points(&rest);
         for p in &mut self.points {
             if let Some(old) = point_ids.get(&p.id) {
                 p.id.clone_from(old);
-            }
-        }
-        for c in &mut self.curves {
-            if let Some((construction, centerline)) = curve_flags.get(&c.id) {
-                (c.construction, c.centerline) = (*construction, *centerline);
-            }
-            if let Some(old) = curve_ids.get(&c.id) {
-                c.id.clone_from(old);
             }
         }
         // Removal prunes empty links; this one stays.

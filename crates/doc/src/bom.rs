@@ -23,7 +23,8 @@
 //! material typed in for a component ([`metadata::MATERIAL`](crate::metadata::MATERIAL)) is what
 //! its rows say instead, in every view and at every level ([`Row::statics`]), and what it stands
 //! for in the one material an assembly around it shares: the bill of materials says one thing
-//! about the part everywhere. It only names: mass still comes from the bodies.
+//! about the part everywhere. It only names: mass still comes from the bodies. A design that is
+//! one part (its own bodies, nothing placed) holds its static material, and its finish, itself.
 //!
 //! A row's [`Quantity`] adds up what each of its placements means ([`quantity`]): each definition's
 //! quantity is evaluated once for every list made from the [`Tree`].
@@ -227,6 +228,9 @@ pub struct Row {
     pub part_number: String,
     pub description: String,
     pub revision: String,
+    /// Its finish: the first of its definitions' finish properties, else the first free property
+    /// named `finish` (what a part had before it was a property of its own).
+    pub finish: String,
     /// The definitions' free properties; where several give one name, the first's.
     pub properties: BTreeMap<String, String>,
     /// The physical materials of what one of its parts stands for, each once, in body order: a
@@ -415,7 +419,11 @@ impl<'a> Tree<'a> {
     /// The structure of `doc` with the bodies of `state`, its evaluated model.
     pub fn new(doc: &'a Document, state: &'a ModelState) -> Tree<'a> {
         let mut children: HashMap<u64, Vec<Placed>> = HashMap::new();
+        let inactive = doc.inactive_pattern_occurrences();
         for (o, bom_type) in doc.occurrences.iter().zip(doc.occurrence_bom_types()) {
+            if inactive.contains(&o.id) {
+                continue;
+            }
             children.entry(o.parent).or_default().push(Placed { occurrence: o.id, member: Member { component: o.component, bom_type } });
         }
         let mut components: HashMap<u64, &Component> = HashMap::new();
@@ -462,6 +470,7 @@ impl<'a> Tree<'a> {
             part_number: metadata.part_number().unwrap_or_default().to_string(),
             description: metadata.description().unwrap_or_default().to_string(),
             revision: metadata.revision().unwrap_or_default().to_string(),
+            finish: metadata.finish().unwrap_or_default().to_string(),
             properties: BTreeMap::new(),
             // Filled in by `name_materials`.
             materials: Vec::new(),
@@ -503,9 +512,13 @@ impl<'a> Tree<'a> {
         self.contents(id).iter().filter(adds_here).map(|p| p.member).collect()
     }
 
-    /// The static material typed in for a component, if any.
+    /// The static material typed in for a component (0: the design), if any.
     fn static_material(&self, id: u64) -> Option<&'a str> {
-        self.components.get(&id).and_then(|c| c.metadata.material())
+        match id {
+            // The design: a single part holds its own.
+            0 => self.doc.metadata.material(),
+            _ => self.components.get(&id).and_then(|c| c.metadata.material()),
+        }
     }
 
     fn own_bodies(&self, id: u64) -> &[&'a ModelBody] {
@@ -603,6 +616,7 @@ impl<'a> Tree<'a> {
             part_number: String::new(),
             description: String::new(),
             revision: String::new(),
+            finish: String::new(),
             properties: BTreeMap::new(),
             count,
             // Rows with different kits are different rows, to any depth, so every part of the parent
@@ -631,6 +645,15 @@ impl<'a> Tree<'a> {
                 row.properties.entry(k.clone()).or_insert_with(|| v.clone());
             }
         }
+        // A finish property wins over a free property of that name, whichever definition has it.
+        row.finish = row
+            .components
+            .iter()
+            .filter_map(|id| self.components.get(id))
+            .find_map(|c| c.metadata.finish())
+            .map(str::to_string)
+            .or_else(|| row.properties.get(crate::metadata::FINISH).filter(|f| !f.is_empty()).cloned())
+            .unwrap_or_default();
         Some(row)
     }
 
