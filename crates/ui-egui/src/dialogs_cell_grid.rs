@@ -35,6 +35,14 @@ const ANCHOR_INPUT: usize = 2;
 /// The dialog's own note (not a command key) of the point the anchor field was filled with when
 /// the dialog opened on a stored grid: a field still holding it is not a new pick.
 const ANCHOR_SHOWN: &str = "anchor_shown";
+/// The user changed input `i` (a pick, a box, a removed row, a cleared chip): once the anchor is
+/// touched, even a pick at the point it showed is a new anchor, not the stored expressions.
+pub(crate) fn input_touched(kind: &Kind, extra: &mut Map<String, Value>, i: usize) {
+    if matches!(kind, Kind::CellGrid(_)) && i == ANCHOR_INPUT {
+        extra.remove(ANCHOR_SHOWN);
+    }
+}
+
 /// A corner, the origin or a snap point (an edge's middle or end, a hole's centre), each picked as
 /// a vertex with its point; a sketch point; a construction point.
 const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES
@@ -242,6 +250,7 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         // still holds the point it was filled with, even if a parameter has moved the anchor
         // since; a new pick replaces it, an empty field is the sketch origin.
         let kept = extra.get("anchor").filter(|kept| stored_point(app, kept).is_some());
+        // The note is dropped when the user changes the anchor input (`input_touched`).
         let shown = extra.get(ANCHOR_SHOWN).and_then(point_of);
         match crate::selection::items(inputs, ANCHOR_INPUT).first() {
             Some(Sel::Vertex { body, point }) if body.is_empty() && kept.is_some() && shown.is_some_and(|s| s.dist(*point) < 1e-9) => {

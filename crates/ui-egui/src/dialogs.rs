@@ -2217,6 +2217,7 @@ impl Dialog {
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
+        crate::dialogs_cell_grid::input_touched(&self.kind, &mut self.extra, self.active);
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -2303,6 +2304,7 @@ impl Dialog {
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
+        crate::dialogs_cell_grid::input_touched(&self.kind, &mut self.extra, self.active);
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -2458,6 +2460,7 @@ impl Dialog {
             }
             gone.extend(seeds);
         }
+        crate::dialogs_cell_grid::input_touched(&self.kind, &mut self.extra, i);
         let Some(inp) = self.inputs.get_mut(i) else { return };
         match (shell_chain, item, state.as_ref()) {
             (true, Sel::Face { body, index, .. }, Some(st)) => {
@@ -4058,25 +4061,31 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         d.pick_refused = None;
     }
     if let Some(i) = clear {
-        crate::dialogs_assembly::clear_alignment(&mut d.kind, i);
-        if let Some(key) = stored_input_reference_key(d, i) {
-            d.extra.remove(key);
-        }
-        if d.listed == Some(i) {
-            d.listed = None;
-            d.list_hover = None;
-        }
-        let Some(inp) = d.inputs.get_mut(i) else { return };
-        inp.items.clear();
-        if i == 0 {
-            d.profile_selection_changed = true;
-            d.picked_edges.clear();
-        }
-        d.active = i;
-        d.awaiting_pick = true;
-        d.pick_refused = None;
+        clear_input(d, i);
     }
     d.sync_thread(s);
+}
+
+/// The clear button of input `i`: its picks go and it becomes the active, waiting input.
+pub(crate) fn clear_input(d: &mut Dialog, i: usize) {
+    crate::dialogs_assembly::clear_alignment(&mut d.kind, i);
+    if let Some(key) = stored_input_reference_key(d, i) {
+        d.extra.remove(key);
+    }
+    crate::dialogs_cell_grid::input_touched(&d.kind, &mut d.extra, i);
+    if d.listed == Some(i) {
+        d.listed = None;
+        d.list_hover = None;
+    }
+    let Some(inp) = d.inputs.get_mut(i) else { return };
+    inp.items.clear();
+    if i == 0 {
+        d.profile_selection_changed = true;
+        d.picked_edges.clear();
+    }
+    d.active = i;
+    d.awaiting_pick = true;
+    d.pick_refused = None;
 }
 
 /// A rectangular pattern direction's distance type (`index` 0 or 1), from the dialog's extra

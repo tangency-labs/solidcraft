@@ -1224,6 +1224,40 @@ fn cell_grid_edit_keeps_an_anchor_expression_after_a_parameter_change() {
     assert_eq!(commands[0].1.get("anchor"), Some(&crate::selection::point_value(Vec3::new(9.0, 2.0, 0.0))), "{commands:?}");
 }
 
+/// The same grid, edited through the dialog: after a parameter change the user clears the anchor
+/// and picks the vertex at the point the field first showed. That is a new anchor, so numbers go.
+#[test]
+fn cell_grid_edit_sends_a_re_picked_anchor_even_at_the_point_it_showed() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
+    h.app.run("parameters.add", json!({"name": "Inset", "expression": "4 mm"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Field"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let feature = h
+        .app
+        .run(
+            "solid.cell_grid",
+            json!({"sketch": "Field", "shape": "hexagon", "size": 6, "web": 1.5, "anchor": ["Inset", "2 mm", "0 mm"], "through_all": true}),
+        )
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    let anchor = |d: &Dialog| crate::dialogs_cell_grid::commands(&h.app, &cell_grid(d), &d.inputs, &d.extra).unwrap()[0].1["anchor"].clone();
+    fn cell_grid(d: &Dialog) -> crate::dialogs_cell_grid::CellGrid {
+        let Kind::CellGrid(c) = &d.kind else { panic!() };
+        c.clone()
+    }
+    assert_eq!(anchor(&d)[0], json!("Inset"), "untouched: the expressions stay");
+    h.app.run("parameters.change", json!({"name": "Inset", "expression": "9 mm"})).unwrap();
+    assert_eq!(anchor(&d)[0], json!("Inset"), "a parameter change alone keeps them");
+    let shown = Vec3::new(4.0, 2.0, 0.0);
+    crate::dialogs::clear_input(&mut d, 2);
+    d.pick(&h.app.session, Sel::Vertex { body: String::new(), point: shown });
+    assert_eq!(anchor(&d), crate::selection::point_value(shown), "{:?}", d.extra);
+}
+
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
