@@ -327,7 +327,10 @@ pub enum NoCorner {
     OutOfRange,
 }
 
-/// Two directions closer than this to one line, in radians, make no corner.
+/// Two directions closer than this to one line, in radians, make no corner. Over a millimetre
+/// of segment such a turn moves a point 1e-6 mm, the distance the 3D sketch takes for none (as
+/// [`same_plane`] does for height). The arc's formulas stay finite below it: the value only
+/// says where a slight turn is reported as one straight line.
 const NO_CORNER: f64 = 1e-6;
 
 /// The arc of radius `radius` that rounds the corner at `corner` between the segments running to
@@ -343,13 +346,13 @@ pub fn corner_round(
 ) -> Result<([[f64; 3]; 3], f64), NoCorner> {
     let (a, b) = (far_a - corner, far_b - corner);
     let (la, lb) = (a.len(), b.len());
+    // A segment shorter than 1e-12 has no direction, the floor `unit` divides by.
     if !(la > 1e-12 && lb > 1e-12 && la.is_finite() && lb.is_finite()) {
         return Err(NoCorner::NoLength);
     }
     let (u, v) = (a.scale(1.0 / la), b.scale(1.0 / lb));
     let angle = u.cross(v).len().atan2(u.dot(v));
-    let sum = u + v;
-    if angle > std::f64::consts::PI - NO_CORNER || sum.len() <= 1e-12 {
+    if angle > std::f64::consts::PI - NO_CORNER {
         return Err(NoCorner::Straight);
     }
     if angle < NO_CORNER {
@@ -359,6 +362,8 @@ pub fn corner_round(
         return Err(NoCorner::OutOfRange);
     }
     let half = 0.5 * angle;
+    // The sum is 2 cos(θ/2) long: at least 1e-6 after the checks above, so it has a direction.
+    let sum = u + v;
     let bisector = sum.scale(1.0 / sum.len());
     let setback = radius / half.tan();
     let centre = corner + bisector.scale(radius / half.sin());
