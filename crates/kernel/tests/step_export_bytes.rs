@@ -165,6 +165,8 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
     ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
+    ("tests/step-regressions/tube_wavy_edge_across_spline_start.step", "cc2368a446247ba6"),
+    ("tests/step-regressions/tube_wavy_edge_control.step", "3aeeb64cb7ed4dd7"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 

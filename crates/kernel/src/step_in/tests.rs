@@ -4001,6 +4001,32 @@ fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     assert!(check.is_valid(), "{check}");
 }
 
+/// A tube of radius 5 and length 8 whose wall is one cubic spline closed round v, in three faces
+/// (#22462; `tests/step-regressions/tube_wavy_edge_across_spline_start.step`). Two of them lie
+/// across the start of the knots, one each side of a wavy edge fitted through points of the wall,
+/// its parameter not the wall's. The control file is the same tube turned so that no face lies
+/// across the start. The two faces were left out and the tube came in open.
+#[test]
+fn a_fitted_edge_across_a_closed_spline_start_keeps_all_faces() {
+    // The two faces across the start are each cut along the seam, as every face across it is.
+    for (name, step, faces) in [
+        ("across", include_str!("../../../../tests/step-regressions/tube_wavy_edge_across_spline_start.step"), 7),
+        ("control", include_str!("../../../../tests/step-regressions/tube_wavy_edge_control.step"), 5),
+    ] {
+        let imp = step_import(step).unwrap();
+        assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("as surfaces")), "{name}: {:?}", imp.warnings);
+        assert_eq!(imp.bodies.len(), 1, "{name}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{name}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert_eq!(m.faces, faces, "{name}");
+        // The section's area by its Bézier arcs is 78.539822 mm², times the length 8.
+        assert!(rel(m.volume, 628.318_573) < 1e-6, "{name}: volume {}", m.volume);
+        assert!(rel(m.area, 408.407_1) < 1e-6, "{name}: area {}", m.area);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{name}: {check}");
+    }
+}
+
 /// Containment of the positive-weight control hull proves containment of the entire stored
 /// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
 /// and lie on opposite sides of the surface's base period.
