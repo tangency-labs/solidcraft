@@ -130,6 +130,9 @@ pub struct Built {
     pub outlines: Vec<(String, Arc<Mesh>)>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
+    /// What the feature says about itself when it builds without failing (a warning of its
+    /// reply): the sheet metal hardware dialog shows it.
+    pub warning: Option<String>,
     /// Extent of what the preview shows (the view's depth range must cover it).
     pub bounds: Aabb3,
     /// The smallest and largest radius a fillet used when it reduced one too large for its edges
@@ -250,6 +253,8 @@ pub struct PreviewState {
     pub sketches: Vec<SketchPreview>,
     /// Why the current inputs don't make a feature (nothing is previewed then).
     pub error: Option<String>,
+    /// What the previewed feature warns of while it builds (see [`Built::warning`]).
+    pub warning: Option<String>,
     /// A preview is being computed.
     pub busy: bool,
     /// Extent of the preview scene.
@@ -409,6 +414,7 @@ impl PreviewState {
         self.shown_key = None;
         self.error = None;
         self.plugin_view = None;
+        self.warning = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -500,6 +506,7 @@ impl PreviewState {
                 self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
+                self.warning = b.warning;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
@@ -541,6 +548,7 @@ impl PreviewState {
                 self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
+                self.warning = None;
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
@@ -564,6 +572,7 @@ impl PreviewState {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            self.warning = None;
             // A constraint's reply says how free its part is with the inputs it was for: with other
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
@@ -687,7 +696,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             (command.clone(), params)
         };
         let fields: &[&str] = match command.as_str() {
-            "solid.extrude" => &["distance", "distance2", "to_offset"],
+            "solid.extrude" => &["distance", "distance2", "to_offset", "to_offset2"],
             "solid.offset_face" => &["distance"],
             // A radius dragged or typed: each result shows while the next computes, rather than
             // the preview holding still until the input stops changing.
@@ -990,6 +999,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             // fillet or an edited one: the feature the replies name).
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
+            // What the features warn of while they build: the sheet metal hardware dialog says so.
+            let warnings: Vec<&str> = p.replies.iter().filter_map(|r| r.get("warning").and_then(Value::as_str)).filter(|w| !w.is_empty()).collect();
+            b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
             b.centrelines = crate::dialogs_frame::centrelines(&p);
             Ok(b)
@@ -1175,6 +1187,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1231,6 +1244,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1552,6 +1566,7 @@ fn build_scene(
         replaced,
         outlines,
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -2030,6 +2045,7 @@ mod tests {
             replaced: vec!["Lid".into()],
             outlines: Vec::new(),
             error: None,
+            warning: None,
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),

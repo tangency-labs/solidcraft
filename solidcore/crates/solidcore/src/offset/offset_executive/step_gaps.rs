@@ -602,12 +602,67 @@ impl OffsetExecutive {
             }
         }
         for &(face, across) in closed_edges {
-            let explained = gone.contains(&face) || across.is_some_and(|a| gone_orig.contains(&a));
+            let explained = gone.contains(&face)
+                || across.is_some_and(|a| gone_orig.contains(&a))
+                || self.closed_on_both_sides(original, b, closed_edges, face, across)?;
             if !explained {
                 return Err(self.edge_vanishes(original, face, None));
             }
         }
         Ok((gone_list, gone))
+    }
+
+    /// (#1126) Whether the edge of `face` closed to a point (the original face `across`
+    /// beside it) is one edge closed on both its sides: `face`'s only closed edge, the
+    /// face across having closed exactly one edge, the one across from `face`, and both
+    /// faces keeping a loop of three edges or more. The point is then a vertex where the
+    /// faces either side meet the two faces whose edge closed (an offset that just
+    /// reaches where its neighbours converge). An edge of a face that closed more than
+    /// once, or that leaves a face fewer than three edges, is no such vertex.
+    ///
+    /// # Errors
+    ///
+    /// Those of the face and loop queries.
+    fn closed_on_both_sides(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        closed_edges: &[(FaceId, Option<FaceId>)],
+        face: FaceId,
+        across: Option<FaceId>,
+    ) -> Result<bool> {
+        let Some(across) = across else {
+            return Ok(false);
+        };
+        let original_of = |f: FaceId| -> Result<Option<FaceId>> {
+            match self.faceuse_to_faces.firsts(f).as_slice() {
+                [fu] => eu::faceuse_face(original, *fu),
+                _ => Ok(None),
+            }
+        };
+        let Some(this_orig) = original_of(face)? else {
+            return Ok(false);
+        };
+        // the closed edges of the offset face across, and that face
+        let mut across_closed = Vec::new();
+        for &(other, other_across) in closed_edges {
+            if other != face && original_of(other)? == Some(across) {
+                across_closed.push((other, other_across));
+            }
+        }
+        let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
+        let [(other, Some(back))] = across_closed[..] else {
+            return Ok(false);
+        };
+        if !once || back != this_orig {
+            return Ok(false);
+        }
+        for f in [face, other] {
+            if face4::edges(b, f, None, false, None)?.len() < 3 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
@@ -764,6 +819,29 @@ impl OffsetExecutive {
                 edge::set_interval(b, e, &new_ivl)?;
                 return Ok(None);
             }
+        }
+
+        // (#1126) The edge's two vertices met at the gap and its curve misses them: the
+        // edge closed to a point where the faces either side meet (a draft that just
+        // reaches where its neighbours converge). It is squeezed out like a closed edge
+        // above; `closed_faces` takes it only where its edge on the face across closed
+        // with it.
+        if self.operation() == OffsetOperation::LocalOperation
+            && self.squeeze_closed_edge(
+                kernel,
+                original,
+                b,
+                f,
+                u,
+                e,
+                at_start,
+                vertex_point,
+                tol,
+                notifications,
+                closed_edges,
+            )?
+        {
+            return Ok(None);
         }
 
         // (#21215) The gap's end on the other edge at the vertex: the two edges cross
@@ -1368,6 +1446,111 @@ fn corner_split(
         }
     }
     Ok(None)
+}
+
+/// (#1126) An edge of the original whose offset ends cross (see
+/// [`OffsetExecutive::split_corner_vertices`]): the edge between `wall` and the face
+/// across it, whose end vertices `ends` each join exactly one more face. Its offset
+/// vanishes: the wall's offset ends in `p` (where it meets the offsets of those two
+/// faces), the face across's in `q`, and the two faces meet along `p`-`q`.
+struct EdgeFlip {
+    ends: [VertexId; 2],
+    wall: FaceId,
+    p: Point3,
+    q: Point3,
+}
+
+/// The flip of the original's edge `e0` (see [`EdgeFlip`]), `None` where `e0` is not an
+/// edge between two plane faces whose two end vertices each join one more plane face,
+/// or its offset ends do not cross by more than `tol` (ends that meet are the closed
+/// edge `close_loop_gap` squeezes).
+fn edge_flip(
+    original: &Brep,
+    b: &Brep,
+    e0: EdgeId,
+    sheet_of: &BTreeMap<FaceId, FaceId>,
+    tol: f64,
+) -> Result<Option<EdgeFlip>> {
+    let [fw, fb] = edge::faces(original, e0, None)?[..] else {
+        return Ok(None);
+    };
+    if fw == fb {
+        return Ok(None);
+    }
+    let (Some(v1), Some(v2)) = (
+        edge::start_vertex(original, e0)?,
+        edge::end_vertex(original, e0)?,
+    ) else {
+        return Ok(None);
+    };
+    if v1 == v2 {
+        return Ok(None);
+    }
+    let plane_of = |f: FaceId| -> Result<Option<(Point3, Vec3)>> {
+        let Some(sheet) = sheet_of.get(&f) else {
+            return Ok(None);
+        };
+        let Some(surface) = b.face(*sheet)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let SurfaceKind::Plane(plane) = surface.kind() else {
+            return Ok(None);
+        };
+        let (point, normal, _) = plane.is_planar();
+        Ok(Some((point, normal)))
+    };
+    // the one more face at an end where exactly three edges meet
+    let third = |v: VertexId| -> Result<Option<FaceId>> {
+        let mut edges = crate::topology::vertex::edges(original, v, None)?;
+        edges.sort_unstable();
+        edges.dedup();
+        if edges.len() != 3 {
+            return Ok(None);
+        }
+        let mut others: Vec<FaceId> = Vec::new();
+        for e in edges {
+            for f in edge::faces(original, e, None)? {
+                if f != fw && f != fb && !others.contains(&f) {
+                    others.push(f);
+                }
+            }
+        }
+        Ok(match others[..] {
+            [s] => Some(s),
+            _ => None,
+        })
+    };
+    let (Some(s1), Some(s2)) = (third(v1)?, third(v2)?) else {
+        return Ok(None);
+    };
+    if s1 == s2 {
+        return Ok(None);
+    }
+    let (Some(w), Some(a), Some(n1), Some(n2)) =
+        (plane_of(fw)?, plane_of(fb)?, plane_of(s1)?, plane_of(s2)?)
+    else {
+        return Ok(None);
+    };
+    let (Some(p1), Some(p2), Some(p), Some(q)) = (
+        three_planes([w, a, n1]),
+        three_planes([w, a, n2]),
+        three_planes([w, n1, n2]),
+        three_planes([a, n1, n2]),
+    ) else {
+        return Ok(None);
+    };
+    let Ok(d) = (original.vertex(v2)?.point - original.vertex(v1)?.point).unitize() else {
+        return Ok(None);
+    };
+    if (p2 - p1).dot(d) >= -tol {
+        return Ok(None);
+    }
+    Ok(Some(EdgeFlip {
+        ends: [v1, v2],
+        wall: fw,
+        p,
+        q,
+    }))
 }
 
 /// The vertex the original's edges `e1` and `e2` share (one only).
@@ -2524,6 +2707,37 @@ impl OffsetExecutive {
                 corners.insert(v0, split);
             }
         }
+        // (#1126) in a local operation, the edges whose offset ends cross: each end splits
+        // as a corner whose new edge joins the faces at the edge's ends, and the edge
+        // closes to a point on each of its two faces (`close_loop_gap` squeezes it). An
+        // end shared by two such edges is left as it is (more changes there than one edge).
+        let mut flips: BTreeMap<EdgeId, EdgeFlip> = BTreeMap::new();
+        if self.operation() == OffsetOperation::LocalOperation {
+            for e0 in bp1::edges(original, None)? {
+                if let Some(flip) = edge_flip(original, b, e0, &sheet_of, tol)? {
+                    flips.insert(e0, flip);
+                }
+            }
+            let mut uses: BTreeMap<VertexId, usize> = BTreeMap::new();
+            for flip in flips.values() {
+                for v in flip.ends {
+                    *uses.entry(v).or_default() += 1;
+                }
+            }
+            flips.retain(|_, flip| flip.ends.iter().all(|v| uses.get(v) == Some(&1)));
+            for flip in flips.values() {
+                for v in flip.ends {
+                    corners.insert(
+                        v,
+                        CornerSplit {
+                            b: flip.wall,
+                            t_b: flip.p,
+                            t_d: flip.q,
+                        },
+                    );
+                }
+            }
+        }
         if corners.is_empty() {
             return Ok(());
         }
@@ -2561,6 +2775,14 @@ impl OffsetExecutive {
                         continue;
                     };
                     let end_of = |e: EdgeId| -> Result<Point3> {
+                        // a flipped edge ends where its own face's offset ends
+                        if let Some(flip) = flips.get(&e) {
+                            return Ok(if sheet_of.get(&flip.wall) == Some(&f) {
+                                flip.p
+                            } else {
+                                flip.q
+                            });
+                        }
                         Ok(if edge::faces(original, e, None)?.contains(&split.b) {
                             split.t_b
                         } else {
@@ -2569,7 +2791,12 @@ impl OffsetExecutive {
                     };
                     let (t_this, t_next) = (end_of(o_this)?, end_of(o_next)?);
                     let plan = plans.entry(v0).or_default();
-                    for (u, target) in [(this, t_this), (next, t_next)] {
+                    for (u, o, target) in [(this, o_this, t_this), (next, o_next, t_next)] {
+                        // a flipped edge keeps its curve; its vertices move, and
+                        // `close_loop_gap` squeezes it
+                        if flips.contains_key(&o) {
+                            continue;
+                        }
                         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
                         let Some(ends) = straight_edge_ends(kernel, b, e, tol)? else {
                             plan.unusable = true;

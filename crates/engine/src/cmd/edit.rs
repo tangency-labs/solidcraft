@@ -574,6 +574,9 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     s.model = solidcraft_doc::Model::new();
     // and nothing taken from the rows built before (`config.activate`)
     s.row_models.clear();
+    if let Ok(mut cache) = s.clearance_cache.lock() {
+        cache.clear();
+    }
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -648,6 +651,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    // Pin surviving features' evaluated body names before deleting, so disambiguated names
+    // (e.g. `VIS (3)`) do not slide down into freed suffixes.
+    s.pin_body_names();
     let mut removed_capture_joints = std::collections::BTreeSet::new();
     for &id in &ids {
         if let Some(f) = s.doc.feature(id)
@@ -1099,6 +1105,10 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a folder cannot be moved into itself or one of its descendants"));
     }
+    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    let active = active_param(p, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    s.pin_timeline_body_names();
     let nested = group_feature_ids(&s.doc, &groups);
     features.retain(|feature| !nested.contains(feature));
     let moving: Vec<u64> =
@@ -1114,9 +1124,6 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     sort_group_features(&mut next);
-    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let active = active_param(p, cmd)?;
-    let allow = allow_errors(p, cmd)?;
     let (next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
@@ -1286,6 +1293,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
                 && joints.iter().all(|id| s.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed)))
         }
     };
+    if want {
+        s.pin_body_names();
+    }
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
@@ -2638,15 +2648,28 @@ fn boundary_walks(record: &solidcore_record::brep::Brep, uses: &BTreeMap<usize, 
     walks
 }
 
-/// Features that worked in `before` and fail in `after`: (name, error).
-fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -> Vec<(String, String)> {
+/// Features that worked in `before` and fail in `after`: (name, error). When `include_left_out`
+/// is true, body patterns that newly leave out a source body they copied before are reported too
+/// (so a timeline reorder cannot silently drop pattern copies with a warning and zero errors).
+fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model, include_left_out: bool) -> Vec<(String, String)> {
     after
         .results
         .iter()
         .filter_map(|r| {
-            let e = r.error.clone()?;
-            let was_ok = before.result(r.id).is_some_and(|b| b.error.is_none() && !b.skipped);
-            was_ok.then(|| (r.name.clone(), e))
+            let prev = before.result(r.id).filter(|b| b.error.is_none() && !b.skipped)?;
+            if let Some(e) = r.error.clone() {
+                return Some((r.name.clone(), e));
+            }
+            if !include_left_out || r.skipped {
+                return None;
+            }
+            let prev_left = prev.state.pattern_left_out(r.id);
+            let after_left = r.state.pattern_left_out(r.id);
+            if after_left.iter().any(|s| !prev_left.contains(s)) {
+                let reason = r.warning.clone().unwrap_or_else(|| "a patterned body could not be copied".into());
+                return Some((r.name.clone(), reason));
+            }
+            None
         })
         .collect()
 }
@@ -2663,8 +2686,18 @@ pub(super) fn newly_broken_in_history(
     after_doc: &solidcraft_doc::Document,
     after: &solidcraft_doc::Model,
 ) -> Vec<(String, String)> {
+    newly_broken_in_history_with_left_out(before_doc, before, after_doc, after, false)
+}
+
+fn newly_broken_in_history_with_left_out(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+    include_left_out: bool,
+) -> Vec<(String, String)> {
     if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
-        return newly_broken(before, after);
+        return newly_broken(before, after, include_left_out);
     }
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
@@ -2680,10 +2713,10 @@ pub(super) fn newly_broken_in_history(
     // history before it needn't be built again (#9917: each build ran every boolean after the
     // marker, half a minute on a large design).
     let after = whole(after_doc, after);
-    if after.results.iter().all(|r| r.error.is_none()) {
+    if after.results.iter().all(|r| r.error.is_none() && (!include_left_out || r.state.pattern_left_out(r.id).is_empty())) {
         return Vec::new();
     }
-    newly_broken(&whole(before_doc, before), &after)
+    newly_broken(&whole(before_doc, before), &after, include_left_out)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
@@ -2745,16 +2778,19 @@ pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         let note = Some(format!("nothing moved: {why}"));
         return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
+    // Pin evaluated body names (including disambiguated suffixes) before reordering so moving a
+    // later same-named component or import earlier does not renumber existing bodies.
+    s.pin_timeline_body_names();
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
     let name = f.name.clone();
     next.features.insert(to, f);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    // Everything that evaluated before must still evaluate.
+    // Everything in the history that evaluated before must still evaluate.
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true);
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
@@ -2852,6 +2888,7 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
+    s.pin_timeline_body_names();
     let (next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
@@ -2907,7 +2944,7 @@ fn reorder_features(
     // evaluated again from an empty model (#6186).
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = if unchanged { Vec::new() } else { newly_broken_in_history(&s.doc, &s.model, &next, &after) };
+    let broken = if unchanged { Vec::new() } else { newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true) };
     if !broken.is_empty() && !allow_errors {
         let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
         return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
@@ -3147,6 +3184,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             "sheet.flange"
                 | "sheet.hem"
                 | "sheet.perforate"
+                | "sheet.hardware"
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
@@ -3243,6 +3281,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // Press-in hardware's hole is redefined by the command that made it: the Hole command would
+    // drop the hardware it names and leave a plain hole of its size (#17752).
+    if let FeatureKind::Hole { hardware: Some(h), .. } = &old.kind
+        && cid == "solid.hole"
+    {
+        return Err(bad(cmd, format!("this hole is the mounting hole of an {} {}: redefine it with `sheet.hardware`", h.thread, h.kind.label())));
     }
     // A hole saved before a sketch on a derived plane started its holes at that plane keeps
     // starting at the surface when it is edited (#11538).

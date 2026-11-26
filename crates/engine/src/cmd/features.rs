@@ -77,6 +77,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); ",
             "convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); ",
             "distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); ",
+            "through_all2?: bool (Two Sides: the second side runs through all, instead of distance2); ",
+            "to2?: [x,y,z] (Two Sides: the second side ends at that face, vertex or point, instead of distance2) with to_offset2?: expr (past it); ",
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
@@ -1829,7 +1831,24 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         Some("symmetric") => Direction::Symmetric,
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}`"))),
     };
-    let distance2 = expr(p, "distance2");
+    // The second side of Two Sides takes the extent types of the first (#18691). Its distance is
+    // then unused, and kept as 0 as the first side's is.
+    let through_all2 = bool_(p, "through_all2").unwrap_or(false);
+    let to2 = p.get("to2");
+    if to2.is_some() && to2.and_then(vec3).is_none() {
+        return Err(bad(cmd, "`to2` must be a point [x, y, z] on the face, vertex or point the second side extrudes to"));
+    }
+    if through_all2 && to2.is_some() {
+        return Err(bad(cmd, "give `through_all2` or `to2` for the second side, not both"));
+    }
+    if (through_all2 || to2.is_some()) && direction == Direction::Symmetric {
+        return Err(bad(cmd, "`through_all2` and `to2` are for Two Sides: give direction positive or negative, not symmetric"));
+    }
+    let to_offset2 = expr(p, "to_offset2");
+    if let Some(d) = &to_offset2 {
+        check_expr(s, d, Kind::Length, cmd, "to_offset2")?;
+    }
+    let distance2 = if through_all2 || to2.is_some() { Some(expr(p, "distance2").unwrap_or_else(|| "0".into())) } else { expr(p, "distance2") };
     if let Some(d) = &distance2 {
         check_expr(s, d, Kind::Length, cmd, "distance2")?;
     }
@@ -1866,6 +1885,9 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
         to_body_apart,
+        through_all2,
+        to2: to2.and_then(vec3).map(FacePick),
+        to_offset2,
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
@@ -4225,12 +4247,16 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    plane_param_named(s, v, cmd, "plane")
+}
+
+pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
-        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
-        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+        Some(f) => Err(bad(cmd, format!("`{key}`: `{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("`{key}`: no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
@@ -4240,7 +4266,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
                 return Err(bad(
                     cmd,
                     format!(
-                        "plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
+                        "`{key}`: plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
                         n.trim(),
                         origin_plane_alias(n).unwrap_or("XY"),
                         f.id
@@ -4263,7 +4289,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
-            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+            None => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
             // The origin's coordinates are numbers or length expressions; expressions are kept,
@@ -4274,13 +4300,13 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, format!("`{key}` needs x_dir and y_dir, or normal")))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }
             Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
         }
-        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+        _ => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
     }
 }
 
@@ -4742,7 +4768,12 @@ fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.hole";
+    hole_with(s, p, "solid.hole", None)
+}
+
+/// A hole: `solid.hole`'s, or the mounting hole of press-in hardware (`sheet.hardware`, #17752),
+/// which names its `hardware` and has no thread of its own.
+pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware: Option<solidcraft_doc::Hardware>) -> Result<Value> {
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
     let points = match (p.get("sketch"), p.get("points"), p.get("position")) {
         (Some(_), Some(_), _) | (Some(_), None, None) => {
@@ -5065,6 +5096,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             to: to.map(FacePick),
             references,
             old_surface_start,
+            hardware,
         },
     )
 }
@@ -5294,7 +5326,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let neutral = plane_param_named(s, p.get("neutral"), cmd, "neutral")?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());

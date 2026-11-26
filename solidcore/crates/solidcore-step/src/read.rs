@@ -370,13 +370,11 @@ impl<'a> Reader<'a> {
         if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
             return Err(format!("not supported yet: transformation {}", e.name()));
         }
-        // (name, description, axis1, axis2, local_origin, scale, axis3): the entity inherits a name
-        // from representation_item and a name and description from the functionally defined
-        // transformation.
-        let p = e.params();
+        // (axis1, axis2, local_origin, scale, axis3), after the name and the description when written.
+        let p = solidcore_record::step::product::operator_attributes(e);
         let axis = |i: usize| p.get(i).and_then(Param::as_ref_id).map(|d| self.direction(d)).transpose();
-        let z = axis(6)?.unwrap_or([0.0, 0.0, 1.0]);
-        let x = match axis(2)? {
+        let z = axis(4)?.unwrap_or([0.0, 0.0, 1.0]);
+        let x = match axis(0)? {
             Some(a) => sub(a, scale(z, dot(a, z))),
             None => {
                 let a = if z == [0.0, 0.0, 1.0] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
@@ -385,11 +383,11 @@ impl<'a> Reader<'a> {
         };
         let x = unit(x, &format!("#{id} axes"))?;
         let mut y = cross(z, x);
-        if axis(3)?.is_some_and(|a| dot(a, y) < 0.0) {
+        if axis(1)?.is_some_and(|a| dot(a, y) < 0.0) {
             y = scale(y, -1.0);
         }
-        let origin = self.point(reference(p.get(4), "transformation origin")?)?;
-        let k = match p.get(5) {
+        let origin = self.point(reference(p.get(2), "transformation origin")?)?;
+        let k = match p.get(3) {
             Some(v) if v.as_f64().is_some() => num(Some(v), "transformation scale")?,
             _ => 1.0,
         };
@@ -762,6 +760,11 @@ impl<'a> Reader<'a> {
                     basis,
                 })
             }
+            "SURFACE_REPLICA" => {
+                let parent = self.surface_in(reference(p.get(1), "surface replica parent")?, depth + 1)?;
+                let transform = self.transform(reference(p.get(2), "surface replica transformation")?)?;
+                replicate_surface(&parent, &transform)
+            }
             n => Err(format!("not supported yet: surface {n}")),
         }
     }
@@ -818,4 +821,52 @@ impl<'a> Reader<'a> {
             knot_spec,
         })))
     }
+}
+
+/// A SURFACE_REPLICA's surface: the parent moved by `t`, as the same kind of surface with the
+/// parent's parameters. A mirror would turn the surface over, and a scale would stretch the
+/// length parameters of a plane, a cylinder or a cone (the pcurves on it would no longer fit),
+/// so those are not supported; a sphere's or a torus's parameters are angles and a B-spline
+/// surface's are its own, so they take a scale.
+fn replicate_surface(parent: &Surface, t: &Transform) -> R<Surface> {
+    if !t.is_proper() {
+        return Err("not supported yet: a SURFACE_REPLICA that mirrors".into());
+    }
+    let place = |p: &Placement| Placement { origin: t.point(p.origin), axis: t.direction(p.axis), ref_direction: t.direction(p.ref_direction) };
+    let k = t.scale;
+    let rigid = |what: &str| {
+        if k == 1.0 { Ok(()) } else { Err(format!("not supported yet: a SURFACE_REPLICA that scales a {what}")) }
+    };
+    Ok(match parent {
+        Surface::Plane { position } => {
+            rigid("plane")?;
+            Surface::Plane { position: place(position) }
+        }
+        Surface::Cylinder { position, radius } => {
+            rigid("cylinder")?;
+            Surface::Cylinder { position: place(position), radius: *radius }
+        }
+        Surface::Cone { position, radius, semi_angle } => {
+            rigid("cone")?;
+            Surface::Cone { position: place(position), radius: *radius, semi_angle: *semi_angle }
+        }
+        Surface::Sphere { position, radius } => Surface::Sphere { position: place(position), radius: radius * k },
+        Surface::Torus { position, major_radius, minor_radius } => {
+            Surface::Torus { position: place(position), major_radius: major_radius * k, minor_radius: minor_radius * k }
+        }
+        Surface::DegenerateTorus { position, major_radius, minor_radius, select_outer } => Surface::DegenerateTorus {
+            position: place(position),
+            major_radius: major_radius * k,
+            minor_radius: minor_radius * k,
+            select_outer: *select_outer,
+        },
+        Surface::BSpline(b) => {
+            let mut moved = (**b).clone();
+            moved.points = b.points.iter().map(|row| row.iter().map(|p| t.point(*p)).collect()).collect();
+            Surface::BSpline(Box::new(moved))
+        }
+        Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Offset { .. } | Surface::RectangularTrimmed { .. } => {
+            return Err("not supported yet: a SURFACE_REPLICA of a swept, offset or trimmed surface".into());
+        }
+    })
 }
