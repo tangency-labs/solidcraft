@@ -242,6 +242,7 @@ pub use kicad_in::KicadBoard;
 pub use kicad_in::KicadCopper;
 pub use kicad_in::KicadDrill;
 pub use kicad_in::KicadFootprint;
+pub use kicad_in::KicadHoles;
 pub use kicad_in::KicadImport;
 pub use kicad_in::KicadLoader;
 pub use kicad_in::KicadModel;
