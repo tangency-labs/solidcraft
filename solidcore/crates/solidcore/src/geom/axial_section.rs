@@ -294,6 +294,27 @@ fn trimmed<E>(
     })
 }
 
+/// How far a line leaves the plane through `plane_point` square to `plane_normal` (any length):
+/// `(tilt, offset)`, the line's unit direction's component along the plane's unit normal, and the
+/// height of `line_point` above the plane. A plane holds the line when both are within the
+/// caller's tolerances. `None` for a number that is not finite or a direction or normal of no
+/// length.
+#[must_use]
+pub fn line_plane_deviation(
+    plane_point: Point3,
+    plane_normal: Vec3,
+    line_point: Point3,
+    line_dir: Vec3,
+) -> Option<(f64, f64)> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(plane_point) && finite(plane_normal) && finite(line_point) && finite(line_dir)) {
+        return None;
+    }
+    let n = plane_normal.unitize().ok()?;
+    let d = line_dir.unitize().ok()?;
+    Some((d.dot(n).abs(), (line_point - plane_point).dot(n).abs()))
+}
+
 /// Whether the plane through `plane_point` square to `plane_normal` (any length) holds the axis
 /// of `surface` within `tol` (the model's tolerance) wherever the axis passes the points
 /// `extent` (the corners of a box around the face), or for a sphere its centre: whether

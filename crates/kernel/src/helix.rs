@@ -14,16 +14,17 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 
 /// Whether a coil's profile plane contains its axis, as a sketched coil profile must: the same
 /// incidence test as a revolve axis in its sketch plane (1e-9 on the axis's component along the
-/// plane's normal, 1e-6 mm on the axis point's height above the plane). A plane across the axis
+/// plane's normal, 1e-6 mm on the axis point's height above the plane), measured by solidcore's
+/// `line_plane_deviation`. A plane across the axis
 /// would sweep a stacked slab and report success. A NaN is refused as across.
 ///
 /// # Errors
 /// [`KernelError::Invalid`] naming the cause and what fits.
 pub fn require_plane_through_axis(plane: &Plane, axis_origin: Vec3, axis: Vec3) -> Result<()> {
-    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    let normal = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("the coil's profile plane".into()))?;
-    let tilt = k.dot(normal).abs();
-    let offset = (axis_origin - plane.origin).dot(normal).abs();
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let normal = plane.x.cross(plane.y);
+    let (tilt, offset) = solidcore_ops::axial_section::line_plane_deviation(arr(plane.origin), arr(normal), arr(axis_origin), arr(axis))
+        .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
     if !(tilt <= 1e-9) {
         return Err(KernelError::Invalid(
             "the coil's profile must be on a plane through its axis; this plane is across it: sketch the profile on a plane that contains the axis"
