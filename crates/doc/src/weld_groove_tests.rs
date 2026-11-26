@@ -4,13 +4,15 @@
 //! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
 //! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
 //! parts only read, and a plate not straight along the joint (naming its wall), an outer face that
-//! is no plane, a right outer face off the arrow side, a round groove whose walls are no cylinders
-//! and faces past the direction search's budget refused; the weld filling a Y groove flat (its volume in closed form), a fill the groove cannot
-//! take refused with the size that builds; parts of different length and a gap that steps along
-//! the joint refused with the stretches that keep one section, each of which builds on its own;
-//! the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a warning, full
-//! penetration). Ported from the second groove PR's first slice (solidcore
-//! `weld::groove::joint`, never pushed) onto ops reads (#18500).
+//! is no plane, a right outer face off the arrow side or square to the left one (on and off the
+//! world axes), a round groove whose walls are no cylinders and faces past the direction search's
+//! budget refused; the weld filling a Y groove flat (its volume in closed form), a fill the groove
+//! cannot take refused with the size that builds; parts of different length, a gap that steps
+//! along the joint and a plate whose ends lean refused with the stretches that keep one section,
+//! each of which builds on its own; a pick off the chain refused naming it; the fill's notes and
+//! refusals in weld words (ISO 6520-1 no. 511 as a warning, full penetration). Ported from the
+//! second groove PR's first slice (solidcore `weld::groove::joint`, never pushed) onto ops reads
+//! (#18500).
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -269,6 +271,28 @@ fn a_right_outer_face_off_the_arrow_side_is_refused() {
     assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, down)[0] });
 }
 
+/// brett19's point 3 on #22033 review 5: a right outer face square to the left one (a corner joint,
+/// not covered here) is refused whatever the rounding, on the world axes and off them (the plane of
+/// [`a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance`]). The right
+/// plate stands below the joint: its top is its groove face, its side facing away from the left
+/// plate its outer face.
+#[test]
+fn a_right_outer_face_square_to_the_left_one_is_refused_on_and_off_the_world_axes() {
+    let r5 = 5.0_f64.sqrt();
+    let off = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0), y: Vec3::new(-1.0 / r5, 2.0 / r5, 0.0) };
+    for plane in [Plane::XY, off] {
+        let (ex, ey) = (plane.x, plane.y);
+        let world = |a: f64, b: f64| [a * ex.x + b * ey.x, a * ex.y + b * ey.y, a * ex.z + b * ey.z];
+        let left = swept(&plane, &[(-40.0, 0.0), (-40.0, -6.0), (-1.0, -6.0), (-1.0, 0.0)]);
+        let right = swept(&plane, &[(1.0, -40.0), (7.0, -40.0), (7.0, 0.0), (1.0, 0.0)]);
+        let (lf, rf) = (facing(&left, world(1.0, 0.0)), facing(&right, world(0.0, 1.0)));
+        assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+        let side = world(1.0, 0.0);
+        let got = frame_of([pick_up(&left, &lf, world(0.0, 1.0)), pick_up(&right, &rf, side)]).unwrap_err();
+        assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, side)[0] });
+    }
+}
+
 /// The pick of `faces` on `plate`, its outer face the one facing `up`.
 fn pick_up<'a>(plate: &'a (Body, Order), faces: &'a [usize], up: [f64; 3]) -> GroovePick<'a> {
     GroovePick { part: &plate.0, order: &plate.1, faces, outer: facing(plate, up)[0] }
@@ -313,28 +337,20 @@ fn arc(center: (f64, f64), radius: f64, start: f64, sweep: f64) -> Seg2 {
 /// the surface (x = -9 and 9) down to the root (x = -1 and 1). The only planes among the picked
 /// faces are the two outer faces, which are parallel, so the walls' axis gives the direction.
 fn round_groove() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+    round_groove_of(arc((-1.0, 0.0), 8.0, -FRAC_PI_2, -FRAC_PI_2), arc((1.0, 0.0), 8.0, 0.0, -FRAC_PI_2))
+}
+
+/// [`round_groove`] with its walls `left_wall` (from (-1, -8) to (-9, 0)) and `right_wall` (from
+/// (9, 0) to (1, -8)).
+fn round_groove_of(left_wall: Seg2, right_wall: Seg2) -> ([(Body, Order); 2], [Vec<usize>; 2]) {
     let left = swept_loop(
         &Plane::XY,
-        Loop2 {
-            segs: vec![
-                line((-40.0, 0.0), (-40.0, -8.0)),
-                line((-40.0, -8.0), (-1.0, -8.0)),
-                arc((-1.0, 0.0), 8.0, -FRAC_PI_2, -FRAC_PI_2),
-                line((-9.0, 0.0), (-40.0, 0.0)),
-            ],
-        },
+        Loop2 { segs: vec![line((-40.0, 0.0), (-40.0, -8.0)), line((-40.0, -8.0), (-1.0, -8.0)), left_wall, line((-9.0, 0.0), (-40.0, 0.0))] },
         120.0,
     );
     let right = swept_loop(
         &Plane::XY,
-        Loop2 {
-            segs: vec![
-                line((1.0, -8.0), (40.0, -8.0)),
-                line((40.0, -8.0), (40.0, 0.0)),
-                line((40.0, 0.0), (9.0, 0.0)),
-                arc((1.0, 0.0), 8.0, 0.0, -FRAC_PI_2),
-            ],
-        },
+        Loop2 { segs: vec![line((1.0, -8.0), (40.0, -8.0)), line((40.0, -8.0), (40.0, 0.0)), line((40.0, 0.0), (9.0, 0.0)), right_wall] },
         120.0,
     );
     let wall = |(b, o): &(Body, Order)| -> Vec<usize> { (0..o.faces.len()).filter(|&f| b.face_plane_normal(o, f).unwrap().is_none()).collect() };
@@ -353,14 +369,23 @@ fn a_round_groove_runs_along_its_walls_axis() {
     assert!(within(frame.origin, [-9.0, 0.0, 60.0], points()), "{:?}", frame.origin);
 }
 
-/// brett19 on #22033: the round groove of [`round_groove`] made without the app's fixes on this
-/// thread, so its arcs sweep to extrusions, not cylinders: the only planes are the parallel outer
-/// faces and no face gives an axis, so the joint has no direction.
+/// brett19 on #22033 (reviews 4 and 5): the round groove of [`round_groove`] with its quarter
+/// circles drawn as cubic Béziers (control points 0.5523 r along the tangents), so its walls are
+/// extrusions of a free-form curve, not cylinders, whatever the kernel's fixes: the only planes are
+/// the parallel outer faces and no face gives an axis, so the joint has no direction.
 #[test]
 fn a_round_groove_whose_walls_are_no_cylinders_has_no_direction() {
-    let without: Vec<&str> = solidcraft_kernel::smlib_trace::fixes().into_iter().filter(|&f| f != "linear_sweep_arc_is_cylinder").collect();
-    session::set_thread_fixes(without).unwrap();
-    let (parts, faces) = round_groove();
+    let k = 0.5523 * 8.0;
+    let cubic = |p: [(f64, f64); 4]| Seg2::Cubic {
+        p0: Vec2::new(p[0].0, p[0].1),
+        p1: Vec2::new(p[1].0, p[1].1),
+        p2: Vec2::new(p[2].0, p[2].1),
+        p3: Vec2::new(p[3].0, p[3].1),
+    };
+    let (parts, faces) = round_groove_of(
+        cubic([(-1.0, -8.0), (-1.0 - k, -8.0), (-9.0, -k), (-9.0, 0.0)]),
+        cubic([(9.0, 0.0), (9.0, -k), (1.0 + k, -8.0), (1.0, -8.0)]),
+    );
     assert_eq!(joint(&parts, [&faces[0], &faces[1]]).unwrap_err(), GrooveRefusal::DirectionUndetermined);
 }
 
@@ -525,6 +550,40 @@ fn a_gap_that_steps_along_the_joint_is_refused_with_its_two_stretches_each_of_wh
     // a part of one stretch builds; a span across the step does not
     assert!(weld_over(&parts, &faces, 10.0, 50.0).is_ok());
     stretches_of(&weld_over(&parts, &faces, 50.0, 70.0).unwrap_err(), &[(0.0, 60.0), (60.0, 120.0)]);
+}
+
+/// brett19's point 1 on #22033 review 5: plate ends not square to the joint. An I groove (gap 1 on
+/// 8 mm plates) whose right plate is swept along x from a parallelogram, so both its ends lean:
+/// its top runs z 0 to 120, its bottom z 8 tan 30° to 120 - 8 tan 30°. Its wall's ends read no line
+/// across the joint and its span is where its whole section is present, so the joint is refused
+/// with that stretch (not with none), and the stretch builds: the gap times 8 times its length.
+#[test]
+fn plate_ends_not_square_to_the_joint_give_the_stretch_where_the_groove_is_whole() {
+    let lean = 8.0 * 30.0_f64.to_radians().tan();
+    let left = plate(&[(-40.0, 0.0), (-40.0, -8.0), (-0.5, -8.0), (-0.5, 0.0)]);
+    let along_x = Plane { origin: Vec3::new(0.5, 0.0, 0.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let right = swept_by(&along_x, &[(-8.0, lean), (0.0, 0.0), (0.0, 120.0), (-8.0, 120.0 - lean)], 39.5);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (parts, faces) = ([left, right], [lf, rf]);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    stretches_of(&got, &[(lean, 120.0 - lean)]);
+    let built = weld_over(&parts, &faces, lean, 120.0 - lean).unwrap();
+    let volume = built.body.volume(1e-9).unwrap();
+    let want = 8.0 * (120.0 - 2.0 * lean);
+    assert!((volume - want).abs() <= 1e-6 * volume, "{volume} != {want}");
+}
+
+/// brett19's point 5 on #22033 review 5: a pick off the chain (the left plate's bottom with its
+/// bevel, which share no edge) leaves no piece of the joint with one section; the refusal names it,
+/// not a joint with no stretch.
+#[test]
+fn a_pick_off_the_chain_is_refused_naming_it() {
+    let (parts, faces) = y_groove();
+    let bottom = facing(&parts[0], [0.0, -1.0, 0.0])[0];
+    let picks = [vec![faces[0][0], bottom], faces[1].clone()];
+    let got = weld(&parts, &picks, &flat()).unwrap_err();
+    assert_eq!(got, GrooveRefusal::PicksNotOneChain { part: JointPart::Left, face: bottom });
 }
 
 #[test]
