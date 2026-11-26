@@ -78,6 +78,12 @@ pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
 /// A solidcore-ops call failed ([`super::call::ops_on`]): its `inputs`, the caller's own bodies
 /// (the call was handed copies where it consumes its operands), go to the folder as they are.
 /// They are serialised only now, so a call that answers costs nothing more than with no folder.
+/// Whether a failed call's inputs are written to a folder ([`failed_ops`]): an operation that
+/// consumes its operands keeps them while it is.
+pub(crate) fn dumping() -> bool {
+    DIR.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+}
+
 pub(super) fn failed_ops(call: &str, why: &str, inputs: Inputs<'_>) {
     if DIR.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
         return;

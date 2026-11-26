@@ -332,14 +332,26 @@ pub struct CanvasToSketchParams {
     /// A point on the canvas's plane, in mm, [x, y] (as `canvas.calibrate` takes them). Given, only
     /// the region of the picture around that point is traced: every pixel joined to it whose colour
     /// is within `tolerance` of the colour there, instead of the drawing told from the background.
-    /// Refused when the point is off the image or the region is none of it or all of it.
+    /// A list of points traces the regions of all of them together, as one sketch (touching regions
+    /// make one outline). Refused when a point is off the image or the region is none of it or all of it.
     #[serde(default)]
-    pub at: Option<Point2>,
+    pub at: Option<TracePoints>,
     /// With `at`: how far a pixel's colour may differ from the colour at `at` and still be part of
     /// the region, from 0 (the same colour only) to 100 (any colour). Default: 20.
     #[serde(default)]
     #[schemars(range(min = 0.0, max = 100.0))]
     pub tolerance: Option<f64>,
+}
+
+/// `at` of `canvas.to_sketch`: one point, or a list of points (1 to 64) whose regions are traced
+/// together.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TracePoints {
+    /// One point, [x, y].
+    One(Point2),
+    /// Several points.
+    Many(#[schemars(length(min = 1, max = 64))] Vec<Point2>),
 }
 
 /// A key that is left out, `null`, or parses as `T`: `null` is the same as leaving it out, as

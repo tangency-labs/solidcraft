@@ -1023,11 +1023,6 @@ crates/kernel/src/matchsurf.rs:match_surface dot,normalized
 crates/kernel/src/matchsurf.rs:seam_continuity dot,normalized
 crates/kernel/src/matchsurf.rs:shape dot
 crates/kernel/src/matchsurf.rs:support_faces dot
-crates/kernel/src/mesh_convert.rs:convert_prismatic_mesh cross,normalized,triangles
-crates/kernel/src/mesh_convert.rs:extrusion dot,triangles
-crates/kernel/src/mesh_convert.rs:face_loops cross,dot
-crates/kernel/src/mesh_convert.rs:faceted_solid cross,dot,normalized,triangles
-crates/kernel/src/mesh_convert.rs:weld cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::from_packed_flat_mesh_indexed triangles
 crates/kernel/src/meshbody.rs:Body::mesh_transformed cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::triangle_mesh triangles

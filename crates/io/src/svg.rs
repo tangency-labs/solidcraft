@@ -8,7 +8,7 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::curve::CubicStanding;
+use solidcraft_kernel::curves::CubicStanding;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -230,7 +230,9 @@ pub struct SvgDrawing {
 impl Out {
     fn push(&mut self, g: Geom2) -> Result<()> {
         if self.g.len() >= MAX_ENTITIES {
-            return Err(IoError::Invalid("too many SVG elements".into()));
+            return Err(IoError::Invalid(format!(
+                "the drawing has more than {MAX_ENTITIES} elements (lines, arcs, shapes and texts): simplify it in its own program, or split it across files"
+            )));
         }
         if !geom_is_finite(&g) {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
@@ -256,7 +258,7 @@ impl Out {
         // is that line; one the kernel's curve check refuses is split exactly into pieces it keeps
         // (lines where a piece lies within the zone tolerance of its chord). Only a cubic that no
         // such split serves stays as drawn, with a warning naming it (#16190).
-        let pieces = match solidcraft_kernel::services::curve::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
+        let pieces = match solidcraft_kernel::curves::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
             Ok(pieces) => pieces,
             Err(e) => {
                 let number = self.g.len() + 1;
