@@ -70,5 +70,8 @@
     "browser.trace_tolerance": "容差",
     "ui.trace": "追踪",
     "browser.trace_limit": "一次最多可追踪 {max} 个形状。"
+  },
+  "cs": {
+    "browser.trace_limit": "Najednou lze obkreslit nejvýše {max} tvarů."
   }
 }
