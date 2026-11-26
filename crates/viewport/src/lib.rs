@@ -31,6 +31,7 @@ pub use camera::Quat;
 pub use camera::StandardView;
 pub use camera::UpAxis;
 pub use camera::ViewAngles;
+pub use camera::dial_turn;
 pub use camera::ease_in_out;
 pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;

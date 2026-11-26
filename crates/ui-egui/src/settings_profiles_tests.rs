@@ -40,10 +40,12 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
-    // 108 -> 109 because Turn Around adds one portable Navigation preference.
+    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 112 because
+    // the Roll key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable Navigation
+    // preferences.
     assert_eq!(
         keys.len(),
-        110,
+        112,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -876,6 +878,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "ribbon_reveal",
         "ribbon_tabs_only",
         "right_drag_orbits",
+        "roll_key",
         "select_other_hidden",
         "selection_shift_add_only",
         "shortcut_again_ends_tool",
@@ -907,6 +910,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "timeline_origin_bodies",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_rolls",
         "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
@@ -928,9 +932,10 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
     // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
+    // Test change: two more portable keys, roll_key and trackpad_twist_rolls (rolling the view, #22691).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 110);
+    assert_eq!(expected.len(), 112);
     assert_eq!(actual, expected);
 }
 

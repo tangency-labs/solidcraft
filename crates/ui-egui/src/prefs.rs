@@ -1488,6 +1488,11 @@ impl FreeOrbitKey {
         Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
     }
 
+    /// The Roll key (`roll_key`, #22691), from the same keys (no key for an unknown one).
+    pub fn roll_of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.roll_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
     pub fn parse(id: &str) -> Option<FreeOrbitKey> {
         Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
     }
@@ -4620,6 +4625,13 @@ fn prepare_preferences(
     }
     if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
         return Err("`free_orbit_key` must be none, alt or ctrl".into());
+    }
+    match FreeOrbitKey::parse(&new.roll_key) {
+        None => return Err("`roll_key` must be none, alt or ctrl".into()),
+        Some(key) if key != FreeOrbitKey::Off && new.roll_key == new.free_orbit_key => {
+            return Err("`roll_key` must be another key than `free_orbit_key`".into());
+        }
+        Some(_) => {}
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
