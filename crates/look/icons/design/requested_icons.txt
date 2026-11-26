@@ -176,6 +176,7 @@ flange	false
 flat	false
 fold	false
 folder	false
+frame_cope	false
 frame_member	false
 frame_plate	false
 frame_trim	false

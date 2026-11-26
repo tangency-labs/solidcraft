@@ -1,6 +1,6 @@
-//! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, projection, line-family clipping, affine maps, sheet development and the
-//! display plan. They read records and data; none
+//! solidcore's services that the application still uses beside the kernel interface's families
+//! (`crate::route`), until each moves behind it: helpers and the display plan.
+//! They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -16,49 +16,24 @@ pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
-pub use solidcore_ops::SquareFaceLevel;
-pub use solidcore_ops::affine;
 pub use solidcore_ops::cancel;
-pub use solidcore_ops::centroid_and_mean_radius;
-pub use solidcore_ops::conic_projection;
 pub use solidcore_ops::constraint;
-pub use solidcore_ops::curve;
-pub use solidcore_ops::curve_fit;
-pub use solidcore_ops::develop;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
-pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
-pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
-pub use solidcore_ops::pcurve;
-pub use solidcore_ops::pick;
-pub use solidcore_ops::point_displacement;
-pub use solidcore_ops::point_distance;
-pub use solidcore_ops::point_identity;
-pub use solidcore_ops::prism;
 pub use solidcore_ops::profile;
-pub use solidcore_ops::query;
 pub use solidcore_ops::section_corners;
 pub use solidcore_ops::session;
 pub use solidcore_ops::sketch_arc;
-pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
+pub use solidcore_ops::tube_cope;
 pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
-
-/// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`
-/// (`solidcore_ops::flush_contact_points`). `None` where either body's record doesn't convert or
-/// the kernel fails.
-pub fn flush_contact_points(target: &Body, tool: &Body) -> Option<Vec<[f64; 3]>> {
-    let (target, _) = solidcore_ops::Body::from_record(target.record(), true).ok()?;
-    let (tool, _) = solidcore_ops::Body::from_record(tool.record(), true).ok()?;
-    solidcore_ops::flush_contact_points(&target, &tool).ok()
-}
 
 /// How far record edge `edge` of `body`, on its exact trimmed curve, passes from `point`. `None`
 /// where the record doesn't convert, the index is past the edges, or the kernel finds no point.
