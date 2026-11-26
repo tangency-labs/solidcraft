@@ -452,7 +452,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
             "body: name; ",
-            "plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)",
+            "plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line?: curve id, curves?: [curve ids] (sketch curves joined end to end into one chain, swept along the sketch's normal through the body, open ends continued along their tangents past it; one straight line splits as its plane)",
         )),
     CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull)).begins_edit()
         .contract(&PRESS_PULL_CONTRACT)
@@ -4459,19 +4459,40 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     // More surface bodies cut only with a face tool's whole surface body (#13303): a plane or a
     // sketch line would drop them.
     let face_tool = p.get("tool").is_some_and(|t| !t.is_null());
-    let lines = p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null());
+    let lines = ["sketch", "line", "curves"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
     if p.get("tool_bodies").is_some_and(|v| !v.is_null()) && (!face_tool || lines) {
         return Err(bad(cmd, "`tool_bodies` needs a face `tool` with `tool_sheet` \"body\""));
     }
-    // A straight sketch line as the tool: `sketch` and `line` (#1552).
+    // Sketch curves as the tool: `sketch`, and `line` and/or `curves` (#1552, #7492). One straight
+    // line splits as its plane; any other curve, or a chain, as the sheet it sweeps through the body.
     if lines {
         let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
-        let line = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must name a line of the sketch"))?.to_string();
-        let st = s.model.state();
-        if st.sketch(sketch).is_none() {
-            return Err(bad(cmd, format!("no sketch {sketch}")));
+        let line = match p.get("line").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => Some(v.as_str().ok_or_else(|| bad(cmd, "`line` must name a curve of the sketch"))?.to_string()),
+        };
+        let curves: Vec<String> = match p.get("curves").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => {
+                let list = v.as_array().ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch"))?;
+                if list.len() > MAX_SPLIT_CURVES {
+                    return Err(bad(cmd, format!("`curves` takes at most {MAX_SPLIT_CURVES} curves")));
+                }
+                list.iter()
+                    .map(|c| c.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch")))
+                    .collect::<Result<_>>()?
+            }
+        };
+        if line.is_none() && curves.is_empty() {
+            return Err(bad(cmd, "`line` must name a curve of the sketch"));
         }
-        solidcraft_doc::sketch_line_plane(&st, sketch, &line).map_err(|e| bad(cmd, e.to_string()))?;
+        let st = s.model.state();
+        let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?;
+        for id in line.iter().chain(&curves) {
+            if ss.sketch.curve_index(id).is_none() {
+                return Err(bad(cmd, format!("no curve `{id}` in sketch {sketch}")));
+            }
+        }
         return add_feature(
             s,
             p,
@@ -4484,7 +4505,8 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_faces: Vec::new(),
                 tool_bodies: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
-                line: Some(line),
+                line,
+                curves,
             },
         );
     }
@@ -4583,6 +4605,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_bodies,
                 sketch: None,
                 line: None,
+                curves: Vec::new(),
             },
         );
     }
@@ -4600,9 +4623,13 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
             tool_bodies: Vec::new(),
             sketch: None,
             line: None,
+            curves: Vec::new(),
         },
     )
 }
+
+/// The most sketch curves one Split Body chains (`curves`), as the surface features chain.
+const MAX_SPLIT_CURVES: usize = 1000;
 
 /// The most other faces one Split Body by faces takes (`tool_faces`).
 const MAX_SPLIT_TOOL_FACES: usize = 1024;

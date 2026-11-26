@@ -16,6 +16,7 @@ fn schemas_and_the_key_check_agree() {
             "body",
             "body_name",
             "body_names",
+            "curves",
             "line",
             "name",
             "participants",
@@ -60,7 +61,7 @@ fn design(level: ParamCheck) -> (Session, Value, Value, Value) {
 
 /// Calls that fail today give the same message in strict, each on a fresh [`design`]: what the
 /// contracts check (the body, the faces, each tool's form) and what they leave to the handler (a
-/// body, sketch, line, plane or face the design lacks, a sketch line that isn't straight, a tool
+/// body, sketch, line, plane or face the design lacks, a sketch curve that misses the body, a tool
 /// point off the tool, and no tool at all). Split Face without `faces` is left out: today it says
 /// "`faces` must be a list of points or face names", and strict "`faces` is required", as for
 /// every missing key.
