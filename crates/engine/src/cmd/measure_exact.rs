@@ -9,8 +9,6 @@
 //! less its holes'. The display mesh's polygon for a round hole runs inside the circle, so
 //! the mesh's holes are too small and the face reads too big.
 
-use std::f64::consts::PI;
-
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Loop};
 use solidcraft_geom::prelude::*;
