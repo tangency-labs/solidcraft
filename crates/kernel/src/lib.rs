@@ -488,6 +488,7 @@ pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::sections;
+pub use route::runtime;
 pub use route::shaft_spline;
 pub use route::shell;
 pub use route::sphere;
@@ -527,9 +528,7 @@ pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 
-/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
-/// stops with it (a sketch solve).
-pub use solidcraft_smlib::stop::token as stop_token;
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 /// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
 /// scopes and counted work of the calls this process made.
