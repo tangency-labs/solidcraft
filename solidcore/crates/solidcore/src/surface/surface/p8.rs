@@ -107,7 +107,8 @@ use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolveRequest, S
 use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
 use crate::geom::solution_array::{
-    Contact, OperandObject, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+    Contact, OperandObject, SideRecord, Solution, SolutionArray, SolutionObject, SolutionType,
+    SortKey,
 };
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -2403,7 +2404,20 @@ impl Surface {
 
             // Put the end points of the intersection into separate solutions
             if found.is_some() {
+                // (not upstream) the side record outlives the reset: a pass that ran stays
+                // a pass that ran. The points it added go with the guesses', as upstream
+                // replaces every point by the coincident ranges (each point here has the
+                // line square to the normal within EFF_ZERO_RAD, so a crossing the pass
+                // certified, of a regular Jacobian, reaches here only that near tangency),
+                // and what it typed was typed against those points: nothing it decided
+                // stands for the ranges, so the whole line is undecided (a crossing dropped
+                // is never read as absent). A pass that did not run stays not run.
+                let record = match sols.take_side_record() {
+                    SideRecord::NotRun => SideRecord::NotRun,
+                    _ => SideRecord::undecided(Vec::new()),
+                };
                 sols.reset();
+                sols.set_side_record(record);
 
                 // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`:
                 // the caller's, else the face's through a face-aware context)
@@ -3325,7 +3339,8 @@ fn coincident_range<O: SolutionObject>(
 /// id, [`crate::geom::solution_array::ContactId`]): otherwise they may be two contacts, and one
 /// solution standing for both would turn a full line's parity. Two such solutions are
 /// still merged, as upstream merges them, so that no result but the contact changes; not
-/// merging two crossings in unique boxes apart is the consumers' change.
+/// merging two crossings in unique boxes apart is the consumers' change. A solution kept
+/// that is not a crossing keeps no unique box (it carries no root any more).
 fn remove_repeated_solutions<O: SolutionObject>(
     sols: &mut SolutionArray<O>,
     param_tol: &[f64; 3],
@@ -3379,6 +3394,11 @@ fn remove_repeated_solutions<O: SolutionObject>(
                     (a, b) => a.merged(b),
                 };
                 kept.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a solution merged
+                // into anything else carries none)
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
+                }
                 sols.set_at(ii, &kept)?;
 
                 // remove the worst duplicate
@@ -4840,8 +4860,8 @@ mod tests {
             );
         }
         // two crossings are one contact where one lies in the other's unique box: merged as
-        // before, the one kept a crossing; with unique boxes apart, or one with none, the one
-        // kept is undecided
+        // before, the one kept a crossing with its box; with unique boxes apart, or one with
+        // none, the one kept is undecided and keeps no box (it carries no root)
         for (second, want) in [
             (Some([[0.21, 0.3], [0.2, 0.4]]), Contact::Undecided),
             (None, Contact::Undecided),
@@ -4857,6 +4877,12 @@ mod tests {
             remove_repeated_solutions(&mut sols, &[1e-4; 3]).unwrap();
             assert_eq!(sols.len(), 1, "{second:?}");
             assert_eq!(sols.as_slice()[0].contact, want, "{second:?}");
+            let boxed = if want == Contact::Crossing {
+                second
+            } else {
+                None
+            };
+            assert_eq!(sols.as_slice()[0].unique, boxed, "{second:?}");
         }
         // a point of a seam pair (a shared contact id) merged with a third point: the one
         // kept loses the id and is undecided, even where one lies in the other's unique box
@@ -5155,6 +5181,49 @@ mod tests {
             .find_knots_by_max_continuity(&k, ContinuityType::G1, false)
             .unwrap();
         assert!(u.is_empty() && v.is_empty());
+    }
+
+    /// A line lying in a flat B-spline is totally coincident with it: its solutions become
+    /// the coincident range, and the side record the certified pass made before that
+    /// survives the rebuild as a pass that ran (never `NotRun`, which says no pass ran),
+    /// undecided over the whole line, since what the pass typed was typed against the
+    /// points the range replaced.
+    #[test]
+    fn a_total_coincidence_keeps_a_pass_that_ran() {
+        let k = Kernel::default();
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(2.0, 3.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let sols = s
+            .base_global_line_intersect::<NoObject>(
+                &k,
+                NoObject,
+                &domain,
+                Vec3::new(0.5, 1.0, 0.0),
+                Vec3::new(1.0, 0.5, 0.0),
+                Some(&Extent1d::from_min_max(0.0, 1.0)),
+                false,
+                1e-6,
+            )
+            .unwrap();
+        assert!(
+            sols.as_slice()
+                .iter()
+                .any(|x| x.solution_type == SolutionType::RangeOfValues),
+            "{:?}",
+            sols.as_slice()
+        );
+        assert_eq!(
+            sols.side_record(),
+            &SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
     }
 
     #[test]

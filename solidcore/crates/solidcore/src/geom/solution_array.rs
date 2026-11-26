@@ -105,8 +105,9 @@
 //!   duplicate merged into a held solution leaves it [`Contact::merged`] from both.
 //!   It takes no part in the sort, the duplicate tests or the classification. A
 //!   solution typed by a certified root also carries the `(u, v)` box that root is
-//!   the only root in (`Solution::unique`), so that two solutions in boxes apart,
-//!   which are two contacts, are never merged by a tolerance; and the two solutions a line
+//!   the only root in (`Solution::unique`): two solutions in boxes apart are two contacts,
+//!   so where a tolerance still merges them (upstream's duplicate removal, kept) the one
+//!   kept is undecided and carries no box, never a crossing standing for both; and the two solutions a line
 //!   solve reports for one contact on a seam, once at each end of the range, share a
 //!   [`ContactId`] (`Solution::shared_contact`), so that a consumer counts them once.
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
