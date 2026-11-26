@@ -253,6 +253,8 @@ mod setback_on_an_arc_is_certified;
 mod solidcraft_1986_join_cylindrical_wall;
 #[path = "../variable_round_law_corner_refused.rs"]
 mod variable_round_law_corner_refused;
+#[path = "../wr21288_mirrored_sections_once.rs"]
+mod wr21288_mirrored_sections_once;
 #[path = "../wr212_refusal_keeps_owners.rs"]
 mod wr212_refusal_keeps_owners;
 #[path = "../wr300_variable_rounds_meet_at_law_radii.rs"]
