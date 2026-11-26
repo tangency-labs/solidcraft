@@ -7628,6 +7628,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 need(0, "a plane")?;
             }
             let axis = match sels(d, 1).first() {
+                // The edge itself, so the command finds the face along it and the plane follows
+                // the edge (`axis_param` gives a straight edge as a fixed line).
+                Some(Sel::Edge { point, .. }) if edge_only => json!({"edge": pt(*point)}),
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
