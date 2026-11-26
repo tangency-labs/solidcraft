@@ -577,6 +577,32 @@ mod tests {
     }
 
     #[test]
+    fn directions_of_any_finite_length_are_made_unit() {
+        let region = cube(v(0.0, 0.0, 0.0), 20.0);
+        for scale in [1e200, 1e-200] {
+            let x = v(scale, 0.0, 0.0);
+            // x = 0 and x = 10 stay two planes, x = 0 stays itself
+            let at = |d: f64, normal: Vec3| plane(v(d, 0.0, 0.0), normal);
+            assert!(!same(at(0.0, x), at(10.0, x), 1e-6, &region), "{scale}");
+            assert!(same(at(0.0, x), at(0.0, v(1.0, 0.0, 0.0)), 1e-9, &region));
+            // a cylinder's axis likewise
+            let along = |axis: Vec3, r: f64| cylinder(v(0.0, 0.0, 0.0), axis, r);
+            assert!(same(
+                along(x, 3.0),
+                along(v(-1.0, 0.0, 0.0), 3.0),
+                1e-9,
+                &region
+            ));
+            assert!(!same(
+                along(x, 3.0),
+                along(v(0.0, 1.0, 0.0), 3.0),
+                1e-6,
+                &region
+            ));
+        }
+    }
+
+    #[test]
     fn bad_numbers_are_refused() {
         let region = cube(v(0.0, 0.0, 0.0), 1.0);
         let p = plane(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0));
