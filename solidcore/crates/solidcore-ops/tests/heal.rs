@@ -1437,3 +1437,115 @@ fn an_edge_whose_gap_is_under_the_check_limit_heals_to_a_tolerance_under_it() {
     let (body, _) = Body::from_record(&box_with_a_bowed_top_edge(bow, TOLS), false).unwrap();
     assert!(failed(&body).contains(&59), "{:?}", failed(&body));
 }
+
+/// A block `size` wide on a square base whose top is a ridge `ridge` long along x at half its
+/// width, `size / 2` high: two trapezoids meet at the ridge, two triangles end it. The ridge is
+/// an edge between two large faces, and no face is small.
+fn ridge_block(size: f64, ridge: f64, tols: Tols) -> Record {
+    let (m, h) = (0.5 * size, 0.5 * size);
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [size, 0.0, 0.0],
+        [size, size, 0.0],
+        [0.0, size, 0.0],
+        [m - 0.5 * ridge, m, h],
+        [m + 0.5 * ridge, m, h],
+    ];
+    let cycles: [&[usize]; 5] = [
+        &[0, 3, 2, 1], // bottom
+        &[0, 1, 5, 4], // front
+        &[2, 3, 4, 5], // back
+        &[1, 2, 5],    // right
+        &[3, 0, 4],    // left
+    ];
+    polyhedron(&corners, &cycles, tols)
+}
+
+/// The healer's degenerate-edge test is certified against the edge's own tolerance (#17738): on
+/// a 0.1 block, whose size class takes a body tolerance of 1e-6, a ridge 3e-6 long lies 1.5e-6
+/// from its midpoint at best, farther than its 1e-6 tolerance, so it is a real edge and the
+/// healed body is the record's. The sampled test read the context's approximation tolerance
+/// (5e-6), called the ridge degenerate and squeezed it into one end, which left the four edges
+/// at the other 3e-6 off their vertex.
+#[test]
+fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
+    let tols = Tols {
+        body: 1e-6,
+        edge: 1e-6,
+        vertex: 1e-6,
+    };
+    let rec = ridge_block(0.1, 3e-6, tols);
+    let (trusted, _) = Body::from_record(&rec, true).unwrap();
+    assert_eq!(failed(&trusted), [0u32; 0]);
+    // an untrusted record is healed as it is built; its order is known only when the healer
+    // left its topology as it was
+    let (healed, _) = Body::from_record(&rec, false).unwrap();
+    assert_eq!(healed.counts().unwrap(), [5, 9, 6]);
+    assert_eq!(failed(&healed), [0u32; 0]);
+    let (after, _) = healed.to_record().unwrap();
+    assert!(after.edges.iter().all(|e| e.tolerance <= 1e-6), "{after:?}");
+    assert!(
+        after.vertices.iter().all(|v| v.tolerance <= 1e-6),
+        "{after:?}"
+    );
+}
+
+/// The healer's degenerate-edge step on the hair step (#17738): its riser's two end edges, 3e-4
+/// long, lie within their 1e-3 tolerance of their midpoints (the certified bound), so the cache
+/// lists them, though the sampled test read only the context's approximation tolerance (5e-6)
+/// and listed none. Each is squeezed into its midpoint and the four edges that met its vertices
+/// are re-ended there: every edge's curve ends at its vertices, not at the vertex removed, and
+/// no tolerance grows.
+#[test]
+fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours() {
+    use solidcore::heal::face_props::HealerOpType;
+    use solidcore::heal::heal_data::p2::HealData;
+    use solidcore::topology::{brep::p1, edge, vertex};
+    let rec = hair_step_box(3e-4, TOLS);
+    let mut k = solidcore::Kernel::default();
+    let (mut b, _) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+    let (vs, es, fs) = (
+        p1::vertices(&b, None).unwrap(),
+        p1::edges(&b, None).unwrap(),
+        p1::faces(&b, None).unwrap(),
+    );
+    assert_eq!((fs.len(), es.len(), vs.len()), (8, 18, 12));
+    let mut h = HealData::<solidcore::EntityRef>::with_targets(&vs, &es, &fs);
+    h.cache_edge_props(&k, &mut b, HealerOpType::CacheEdgeprops)
+        .unwrap();
+    assert_eq!(h.bad_edge_props_degen_edges.prob_array.len(), 2);
+    h.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges)
+        .unwrap();
+    let (vs, es) = (
+        p1::vertices(&b, None).unwrap(),
+        p1::edges(&b, None).unwrap(),
+    );
+    assert_eq!((es.len(), vs.len()), (16, 10));
+    // the survivors sit at the riser ends' midpoints
+    for x in [0.0, 10.0] {
+        let mid = solidcore::math::Point3::new(x, 5.0, 10.0 + 1.5e-4);
+        assert!(
+            vs.iter()
+                .any(|&v| vertex::point(&b, v).unwrap().distance(mid) <= 1e-12),
+            "no vertex at {mid:?}"
+        );
+    }
+    for e in es {
+        let (Some(s), Some(t)) = edge::start_end_vertices(&b, e).unwrap() else {
+            panic!("{e:?} without its vertices")
+        };
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        let iv = edge::interval(&b, e).unwrap();
+        for (at, v) in [(iv.min(), s), (iv.max(), t)] {
+            let gap = c
+                .evaluate_point(&k, at)
+                .unwrap()
+                .distance(vertex::point(&b, v).unwrap());
+            assert!(gap <= 1e-12, "{e:?} ends {gap} off its vertex");
+        }
+        assert!(edge::tolerance(&b, e).unwrap() <= TOLS.edge);
+    }
+    for v in vs {
+        assert!(vertex::tolerance(&b, v).unwrap() <= TOLS.vertex);
+    }
+}
