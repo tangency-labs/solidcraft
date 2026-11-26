@@ -2777,6 +2777,20 @@ impl Session {
         self.model.refingerprint_shared(&self.doc, keep);
     }
 
+    /// Pin evaluated body names across the timeline before a history reorder or move, including
+    /// rolled-back features when any active name needed pinning or duplicate stored names exist
+    /// past the marker. Already-pinned sessions hit the O(1) `names_pinned` fast path.
+    pub(crate) fn pin_timeline_body_names(&mut self) {
+        let unpinned = self.doc.reserved_body_names.is_empty() && self.doc.features.iter().all(|f| f.body_names.is_empty());
+        let before = self.doc.clone();
+        self.pin_body_names();
+        if self.doc.marker.is_some_and(|m| m < self.doc.features.len())
+            && (unpinned || !std::sync::Arc::ptr_eq(&before, &self.doc) || self.has_duplicate_rolled_back_body_names())
+        {
+            self.pin_rolled_back_body_names();
+        }
+    }
+
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
         let mut design = crate::as_saved(&self.doc, &self.visibility, &self.dimension_values);
