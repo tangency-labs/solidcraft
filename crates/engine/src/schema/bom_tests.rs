@@ -18,7 +18,20 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ComponentMetadataParams>(), &["component"]);
     assert_keys(
         input_schema_for::<ComponentMetadataSetParams>(),
-        &["bom_quantity", "bom_type", "component", "description", "finish", "material", "part_number", "properties", "revision", "values", "virtual"],
+        &[
+            "bom_quantity",
+            "bom_type",
+            "component",
+            "description",
+            "finish",
+            "material",
+            "name_split",
+            "part_number",
+            "properties",
+            "revision",
+            "values",
+            "virtual",
+        ],
     );
 }
 
@@ -170,6 +183,42 @@ fn strict_keeps_todays_errors_of_a_bill_of_materials() {
         assert!(a.is_err(), "{p} should fail today");
         assert_eq!(a.map_err(|e| e.to_string()), b.map_err(|e| e.to_string()), "{p}");
     }
+}
+
+#[test]
+fn an_optional_name_split_is_checked_and_reported_without_creating_authored_properties() {
+    let (mut s, _) = placed(ParamCheck::Strict);
+    let read = |s: &mut Session| run(s, "component.metadata", json!({"component": "Part"}));
+    assert!(read(&mut s).get("name_split").is_none());
+    let rule = json!({"separator": "::", "left_property": "Number", "right_property": "Name"});
+    let set = json!({"component": "Part", "name_split": rule});
+    let undo = s.undo.len();
+    let reply = run(&mut s, "component.metadata.set", set.clone());
+    matches(output_schema_for::<ComponentMetadataSetResult>(), "component.metadata.set", &reply, false);
+    assert_eq!(reply["changed"], json!(["name_split"]));
+    assert_eq!(reply["properties"], json!({}));
+    assert_eq!(s.undo.len(), undo + 1);
+    let reply = read(&mut s);
+    matches(output_schema_for::<ComponentMetadataResult>(), "component.metadata", &reply, false);
+    assert_eq!(reply["name_split"], rule);
+    assert_eq!(run(&mut s, "component.metadata.set", set)["changed"], json!([]));
+    assert_eq!(s.undo.len(), undo + 1, "setting the same rule does nothing");
+
+    for invalid in [
+        json!("::"),
+        json!({"separator": "::", "left_property": "Number"}),
+        json!({"separator": "::", "left_property": "Number", "right_property": "Name", "extra": true}),
+        json!({"separator": "", "left_property": "Number", "right_property": "Name"}),
+        json!({"separator": "::", "left_property": "Number", "right_property": "Number"}),
+    ] {
+        let params = json!({"component": "Part", "properties": {"Number": "manual"}, "name_split": invalid});
+        assert!(s.execute("component.metadata.set", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.undo.len(), undo + 1, "refusals change nothing");
+    assert_eq!(read(&mut s)["properties"], json!({}));
+    let cleared = run(&mut s, "component.metadata.set", json!({"component": "Part", "name_split": null}));
+    assert_eq!(cleared["changed"], json!(["name_split"]));
+    assert!(cleared.get("name_split").is_none());
 }
 
 /// #11075: a bill of materials replies as its output schema says, in Warn without warnings for
