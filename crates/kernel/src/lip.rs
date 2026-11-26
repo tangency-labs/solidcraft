@@ -3,7 +3,7 @@
 //! directly on the body's schema 4 record (the band's walls continue the walls below, which a
 //! boolean union can't join: their faces would coincide).
 
-use solidcore_ops::prism::{LoopPlacement, loop_placement};
+use solidcore_ops::prism::{LoopPlacement, loop_crosses_itself, loop_placement};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
 use solidcraft_geom::Ring;
@@ -242,6 +242,9 @@ pub enum LipRefusal {
     /// The band's far edge crosses the rim's other edge in some places only.
     #[error("the band's far edge crosses the rim's other edge in part, so the face left beside it has no single side")]
     BandCrossesRim,
+    /// The band's far edge crosses itself, where the face is narrower than twice the band.
+    #[error("the band's far edge crosses itself where the face is narrower than twice the band")]
+    BandCrossesItself,
     /// A rim edge of a curve the band cannot follow, such as the ellipse a tilted cut leaves.
     #[error("not supported yet: a rim edge that is {0}; a lip follows only lines and arcs")]
     RimCurve(&'static str),
@@ -369,6 +372,11 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         // the two loops' exact lines and arcs, loops within `tol` (from the body's size) meeting.
         let plane = Plane::from_normal(at, n).ok_or_else(|| fail("rim plane"))?;
         let (far, other_loop) = (profile(&moved, &plane)?, profile(&pieces(&asm, &other, n)?, &plane)?);
+        // The kernel's offset meets only neighbouring pieces: moved past a neck narrower than
+        // twice the band, the far edge crosses itself, and bounds no face.
+        if loop_crosses_itself(&far, tol) {
+            return Err(LipRefusal::BandCrossesItself.into());
+        }
         let placed = loop_placement(&far, &other_loop, tol).ok_or_else(|| fail("where the band's far edge lies"))?;
         // The band's edge follows the outer loop (the other is the hole) or the hole (the other is
         // the outer loop): it clears the other loop on the face's side, or reaches past it.
