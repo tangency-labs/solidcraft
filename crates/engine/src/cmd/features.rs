@@ -389,6 +389,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); ",
             "from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); ",
             "modeled?: bool (default false); ",
+            "to_bottom?: bool (modelled internal threads, default false: at a blind hole's bottom the groove runs down to the bottom, its last turn trimmed at the bottom's plane, rather than stopping clear of it, as a printed part wants; a square end only, not with `ease_out`; a bottom that rises back along the hole, or one the kernel can't check, keeps the stop clear of it and the reply's warning says so); ",
             "continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); ",
             "at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; ",
             "a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; ",
@@ -5799,6 +5800,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(Position(vec3(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] near the end the thread starts at"))?)),
     };
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    let to_bottom = match p.get("to_bottom") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`to_bottom` must be a boolean")),
+    };
+    if to_bottom && !modeled {
+        return Err(bad(cmd, "`to_bottom` is cut only on a modelled thread (`modeled: true`)"));
+    }
+    if to_bottom && ease_out.is_some() {
+        return Err(bad(cmd, "`to_bottom` runs the groove square down to the bottom: give it or `ease_out`, not both"));
+    }
     // The coarse metric range bounds only a metric thread with no designation given.
     if designation.is_none() && form == ThreadForm::Metric {
         let state = s.model.state();
@@ -5837,6 +5849,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         hand,
         starts,
         ease_out,
+        to_bottom,
         tip,
         chamfer_angle,
         chamfer_depth,
