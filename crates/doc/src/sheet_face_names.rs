@@ -17,12 +17,14 @@ use crate::SurfaceSheet;
 
 /// What the builder of a folded sheet made from surfaces sews a face for (see
 /// `sheet_surface_fold::solid`): one of a piece's two caps, on the sheet's surface or the other
-/// face, `at` the middle of the piece, or a wall along the run of its outline from `a` through
-/// `mid` to `b` (flat coordinates).
+/// face, `at` the middle of the piece, a wall along the run of its outline from `a` through
+/// `mid` to `b` (flat coordinates), or a face of the sheet's `bead`th bead (see
+/// [`crate::sheet_surface_bead::Form`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FaceRole {
     Cap { surface: bool, at: Vec2 },
     Wall { a: Vec2, b: Vec2, mid: Vec2 },
+    Bead { bead: usize, face: solidcraft_develop::BeadFace },
 }
 
 /// What each face of a folded sheet made from surfaces (#6748) was made for, as its builder makes
@@ -33,6 +35,8 @@ pub(crate) struct FaceNamer<'a> {
     dev: &'a Development,
     /// What made each panel, by its key (see [`PanelMade`]).
     recipes: &'a [(String, PanelMade)],
+    /// The sheet's beads, which name their own faces.
+    beads: &'a [crate::SurfaceBead],
     /// Each panel's rims in the flat, and what made each (see [`rim_edges`]).
     rims: Vec<Vec<(Vec2, Vec2, Option<RimEdge>)>>,
     /// Each corner relief cut from the flat (see [`Development::cuts`]), with the panels the two
@@ -48,6 +52,7 @@ impl<'a> FaceNamer<'a> {
         pieces: &[(Piece, Region2)],
         curves: &[(String, String, Vec2, Vec2)],
         recipes: &'a [(String, PanelMade)],
+        beads: &'a [crate::SurfaceBead],
     ) -> FaceNamer<'a> {
         let rims = (0..sheet.panels.len())
             .map(|i| {
@@ -83,7 +88,7 @@ impl<'a> FaceNamer<'a> {
                 _ => None,
             })
             .collect();
-        FaceNamer { sheet, dev, recipes, rims, reliefs }
+        FaceNamer { sheet, dev, recipes, beads, rims, reliefs }
     }
 
     /// What the face made for `role` of `piece` was made for, as the sheet reports it to the model
@@ -92,8 +97,9 @@ impl<'a> FaceNamer<'a> {
     /// a bend's curved face or end by the panel the bend makes; a tab's cap, along its bend; a
     /// corner relief's wall by its corner's two bends, along the relief's outline from where it
     /// meets the first bend's zone (see [`relief_start`]); a hole's wall (see [`HoleRecord`],
-    /// `holes`), along its sketch curve. None for a wall nothing says what made (the model names
-    /// it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
+    /// `holes`), along its sketch curve; a bead's face by its feature and centreline (see
+    /// [`crate::sheet_surface_bead::face_role`]). None for a wall nothing says what made (the model
+    /// names it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
     /// the faces the fold parted.
     pub(crate) fn part(&self, piece: Piece, role: FaceRole, holes: &[HoleRecord]) -> Option<(SheetPart, Option<f64>)> {
         let key = |i: usize| self.sheet.panels.get(i).map(|p| p.name.clone());
@@ -122,6 +128,10 @@ impl<'a> FaceNamer<'a> {
             Some((part, Some(along)))
         };
         match (piece, role) {
+            (_, FaceRole::Bead { bead, face }) => {
+                let b = self.beads.get(bead)?;
+                Some((SheetPart::Bead { feature: b.feature, curve: b.curve.clone(), face: crate::sheet_surface_bead::face_role(face) }, None))
+            }
             (Piece::Panel(i), FaceRole::Cap { surface, .. }) => Some((SheetPart::Cap { panel: parted(i)?, surface }, None)),
             (Piece::Panel(i), FaceRole::Wall { a, b, mid }) => {
                 let m = (a + b) * 0.5;
@@ -150,6 +160,7 @@ impl<'a> FaceNamer<'a> {
                             None => cut([a, mid, b]),
                         }
                     }
+                    FaceRole::Bead { .. } => None,
                 }
             }
             (Piece::Tab(z, _), FaceRole::Cap { surface, at }) => {

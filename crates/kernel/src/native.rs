@@ -94,6 +94,12 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
     Ok((Body::from_smlib_record(record)?, Some(order)))
 }
 
+/// With healing off, a complete trusted import (or its copy) keeps the record's
+/// face and edge order. A form that re-shares touching edges is numbered separately.
+fn complete_record_import(record: &solidcore_record::brep::Brep, brep: &solidcraft_smlib::Brep) -> bool {
+    brep.counts().ok() == Some([record.faces.len(), record.edges.len(), record.vertices.len()])
+}
+
 /// A copy of the body's trusted record import, with its face and edge numbering.
 /// The import writes faces and edges in record order. MakeTopologyFromData appends them in
 /// that order with the healer off, and SmApiBrepCopy walks and appends those same lists.
@@ -102,12 +108,28 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     let brep = smlib_body(body)?;
     let record = body.record();
-    if brep.counts().ok() == Some([record.faces.len(), record.edges.len(), record.vertices.len()]) {
+    if complete_record_import(record, &brep) {
         return Ok((brep, Some(solidcraft_smlib::history::Order::default())));
     }
     // Keep the operand separate from the export that checks an unexpected copy's numbering:
     // filling in its trims can raise local tolerances.
     Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(record, &brep)))
+}
+
+/// The shared trusted import for an ordinary boolean, with its record numbering.
+/// [`solidcraft_smlib::Brep::boolean_tagged`] reads the operand to make the tagged copy it
+/// consumes (solidcore#3359). An export or a failed-boolean check can edit its argument:
+/// run either on a disposable copy, including the numbering fallback for an incomplete import.
+pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
+    let brep = body.smlib()?;
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
+    let record = body.record();
+    if complete_record_import(record, &brep) {
+        return Ok((brep, Some(solidcraft_smlib::history::Order::default())));
+    }
+    let probe = brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?;
+    let order = numbering(record, &probe);
+    Ok((brep, order))
 }
 
 /// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
@@ -408,7 +430,12 @@ mod tests {
             std::fs::write(path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
         }
         let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
-        compare_wire(&expected, &actual);
+        // On a mismatch the records made are printed, so a change can be read (and blessed) from
+        // the test's log without a local build.
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compare_wire(&expected, &actual))) {
+            eprintln!("WIRE_RECORDS_BEGIN\n{actual}\nWIRE_RECORDS_END");
+            std::panic::resume_unwind(e);
+        }
     }
 
     fn compare_wire(expected: &Value, actual: &Value) {

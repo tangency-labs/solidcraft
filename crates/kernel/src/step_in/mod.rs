@@ -363,14 +363,14 @@ fn translation(t: [f64; 3]) -> M4 {
 /// (`Reader::modelling_checked`): every rigid motion is one class (`None`), any other placement
 /// (a transformation operator's scale, shear or mirror) its own, by the matrix's exact bits.
 ///
-/// A rigid placement is applied by [`solidcraft_geom::brep::placement::moved`], which moves
+/// A rigid placement is applied by [`crate::placement::moved`], which moves
 /// every point and direction of the part by the same rotation and translation and keeps every
 /// tolerance; SMLib's check compares distances, lengths and orientations with those tolerances,
 /// which the motion keeps but for the rounding of the coordinates it moves. Any other placement
 /// is mapped without its tolerances, so the check can differ: such a placement is checked as it
 /// is.
 fn check_class(m: &M4) -> Option<[u64; 16]> {
-    if solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some() {
+    if crate::placement::Rigid::of_matrix(m).is_some() {
         return None;
     }
     let mut bits = [0u64; 16];

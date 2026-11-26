@@ -140,8 +140,11 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
                 && section.tabs.iter().any(|instance| instance.0 == "history")
         })
     });
-    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+    if app.preferences.history_in_browser || !app.preferences.history_steps_component {
         return crate::timeline_fold::View::of(doc, None, true);
+    }
+    if side_history {
+        return crate::timeline_fold::View::of(doc, None, app.tree.history_show_hidden);
     }
     let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
     crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
@@ -271,7 +274,10 @@ impl TimelineKind {
     pub(crate) fn of(kind: &FeatureKind) -> Self {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
-            FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. }
+            | FeatureKind::Coil { sketch: Some(sketch), .. } => Self::Profile(*sketch),
             // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
             FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
@@ -284,6 +290,19 @@ impl TimelineKind {
             _ => None,
         }
     }
+}
+
+/// What an Edit Profile Sketch button or menu entry says on hover: the sketch it opens, by the
+/// name the Browser shows it under (#20405).
+pub(crate) fn profile_sketch_tip(app: &SolveApp, sketch: u64) -> Option<String> {
+    let name = crate::i18n::tr_name(&app.session.doc.feature(sketch)?.name);
+    Some(solidcraft_ui_text::format("browser.edit_profile_sketch_of", &[("sketch", &name)]))
+}
+
+/// An Edit Profile Sketch entry that names its sketch on hover. A reason the entry is off, set
+/// after this, takes the hover's place.
+pub(crate) fn naming_profile_sketch(app: &SolveApp, item: Item, sketch: Option<u64>) -> Item {
+    Item { tip: sketch.and_then(|sketch| profile_sketch_tip(app, sketch)), ..item }
 }
 
 /// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
@@ -306,6 +325,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceSweep { .. } => "surface_sweep",
         FeatureKind::SurfaceLoft { .. } => "surface_loft",
         FeatureKind::SurfaceOffset { .. } => "surface_offset",
+        FeatureKind::SurfaceMidsurface { .. } => "surface_offset",
         FeatureKind::SurfaceRuled { .. } => "surface_ruled",
         FeatureKind::SurfaceUntrim { .. } => "surface_untrim",
         FeatureKind::SurfaceBlend { .. } => "surface_blend",
@@ -346,9 +366,11 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
+        FeatureKind::CapturePosition { .. } => "capture",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
         FeatureKind::MeshReduce { .. } => "mesh_reduce",
         FeatureKind::BodyTransfer { .. } => "move",
@@ -372,6 +394,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
         FeatureKind::CellGrid { .. } => "perforate",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -643,7 +666,9 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.extend(redefine);
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
-        v.push(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
+        let item = Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }));
+        v.push(rule.one(naming_profile_sketch(app, item, Some(sketch.0))));
+        v.push(rule.one(Item::action("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).
@@ -751,7 +776,11 @@ pub(crate) fn feature_tooltip(
 ) -> StatusTip {
     // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
     // user sees "Fillet", not "FilletFeature".
-    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let kind_name = match ty.strip_suffix("Feature").unwrap_or(ty) {
+        "CapturePosition" => "Capture Position",
+        other => other,
+    };
+    let kind = solidcraft_ui_text::tr_label(kind_name);
     let mut lines = Vec::new();
     // Greyed out says only "not shown": say why (#8100).
     if rolled {
@@ -1605,6 +1634,15 @@ impl history_bar::Contents for BarSteps<'_> {
 /// (Preferences › Layout), the first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
 pub(crate) fn find_in_browser(app: &mut SolveApp, ids: &[u64]) {
+    // A construction plane, axis or point is found in its Construction folder (#15355).
+    if let [id] = ids
+        && app.session.doc.feature(*id).is_some_and(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        })
+    {
+        crate::browser::reveal_construction(app, *id);
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let mut bodies: Vec<String> = Vec::new();
     let mut items: Vec<serde_json::Value> = Vec::new();
@@ -2074,6 +2112,28 @@ mod tests {
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);
+    }
+
+    #[test]
+    fn capture_position_history_icon_and_tooltip_translate() {
+        crate::i18n::install();
+        use solidcraft_engine::doc::FeatureKind;
+        let feature = FeatureKind::CapturePosition { moves: Vec::new(), joints: Vec::new() };
+        let cmd = solidcraft_engine::find_command("component.capture_position").unwrap();
+        let icon = super::icon_of(&feature);
+        assert_eq!(icon, "capture");
+        assert_eq!(icon, cmd.icon);
+        assert!(!crate::icon_svg::resolve(icon).placeholder);
+
+        let _en = solidcraft_ui_text::scope("en");
+        let en_tip = super::feature_tooltip("CapturePosition1", "CapturePositionFeature", None, false, None);
+        assert!(en_tip.head.contains("Capture Position"), "en head: {:?}", en_tip.head);
+        assert!(!en_tip.head.contains("CapturePositionFeature"), "en head: {:?}", en_tip.head);
+
+        let _ja = solidcraft_ui_text::scope("ja");
+        let ja_tip = super::feature_tooltip("CapturePosition1", "CapturePositionFeature", None, false, None);
+        let ja_expected = solidcraft_ui_text::Locale::for_language("ja").text("cmd.component_capture_position");
+        assert!(ja_tip.head.contains(ja_expected), "ja head: {:?}, expected: {ja_expected}", ja_tip.head);
     }
 
     fn two_boxes(left: bool) -> Harness {
@@ -4796,5 +4856,73 @@ mod tests {
             assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
             assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
+    }
+
+    #[test]
+    fn left_docked_capture_position_double_click_and_context_menu_actions() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_timeline = true;
+        h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+        let occ = h.app.run("component.create", json!({"name": "PartA", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BoxA"})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": occ, "translate": [20, 0, 0], "capture": false})).unwrap();
+        h.app.run("component.capture_position", json!({})).unwrap();
+        h.frames(3);
+
+        // Double-click CapturePosition1 in the left-docked timeline -> opens CapturePosition dialog.
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "double": true})).unwrap();
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::CapturePosition(_))));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none());
+
+        // Right-click menu picks: Suppress Feature -> Unsuppress Feature -> Roll History Marker Here -> Go to End -> Delete.
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Suppress Feature"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.find_feature("CapturePosition1").unwrap().suppressed);
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Unsuppress Feature"})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.find_feature("CapturePosition1").unwrap().suppressed);
+
+        h.step(&json!({"click": {"handle": "timeline:Box1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Roll Back Here"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, Some(1));
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Roll Back Here"})).unwrap();
+        h.settle();
+        assert!(matches!(h.app.session.doc.marker, None | Some(2)), "{:?}", h.app.session.doc.marker);
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.find_feature("CapturePosition1").is_none());
+    }
+
+    #[test]
+    fn capture_position_in_active_subcomponent_appears_in_bottom_timeline() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_timeline = true;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        let frame_comp = h.app.run("component.create", json!({"name": "frame", "grounded": true})).unwrap()["component"].as_u64().unwrap();
+        let child_occ = h.app.run("component.create", json!({"name": "frame_z", "parent": frame_comp, "grounded": false})).unwrap()["occurrence"]
+            .as_u64()
+            .unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BoxZ"})).unwrap();
+        h.app.run("component.activate", json!({"component": frame_comp})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": child_occ, "translate": [20, 0, 0], "capture": false})).unwrap();
+        h.app.run("component.capture_position", json!({})).unwrap();
+        let cp = h.app.session.doc.find_feature("CapturePosition1").expect("CapturePosition1 created");
+        assert_eq!(cp.component, frame_comp, "CapturePosition belongs to active subcomponent");
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:CapturePosition1".to_string()), "CapturePosition1 visible in active subcomponent timeline: {names:?}");
     }
 }

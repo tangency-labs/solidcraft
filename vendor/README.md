@@ -109,6 +109,12 @@ SolidCraft changes to egui and eframe:
   each platform's code (`other_button_number`) and the web runner its `button` 5 and up, where
   upstream drops them. Tests: `buttons_are_numbered_in_order` (egui) and
   `further_mouse_buttons_reach_egui_by_number` (egui-winit).
+- `crates/egui/src/data/input/viewport_info.rs`, `crates/egui-winit/src/lib.rs`
+  (`update_viewport_info`): `ViewportInfo::native_window`, the handle of the native window a
+  viewport is shown in (the `HWND` on Windows, `None` elsewhere). Windows asks a window what is
+  under the pointer by that handle, and a window's title bar is laid out by its viewport: with
+  the handle each window, the main one and every pop-out, publishes its own bar for one window
+  procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
@@ -131,6 +137,11 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   guarantees 1x and 4x).
 - `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
   instead of exactly 8192.
+- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
+  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
+  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
+  defaults refused the device, so no window opened. An adapter at or above the defaults gets
+  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which
@@ -262,3 +273,36 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/drop_handler.rs`, `src/platform_impl/linux/x11/event_processor.rs`:
+  while files are dragged over a window, send `WindowEvent::CursorMoved` with where the drag is
+  (Windows: `IDropTarget`'s `DragEnter`, `DragOver` and `Drop`, screen to client coordinates;
+  X11: each `XdndPosition`, root to window coordinates). winit 0.30 gives `HoveredFile` and
+  `DroppedFile` no position, and neither platform sends the window pointer motion while a drag
+  runs, so the app could not tell where files were dropped (the design tabs open files dropped
+  on them at that place). macOS and Wayland are unchanged.
+- `src/platform_impl/windows/definitions.rs`: `IDropTarget`'s `pt` is a `POINTL` passed by value,
+  as COM declares it; winit 0.30 declared a pointer, harmless only while nothing read it.
+- `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
+  (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
+  the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
+  and has none at the top. This replaces winit's client area moved down by 1 px, which blurred
+  text (#3927) and with which Windows 11 offered no snap layouts on a restored window's maximize
+  button, although the hit test answered `HTMAXBUTTON` (#13996). A window that is all client
+  area gets no snap layouts either: Windows 11 shows them only over a window that keeps a frame
+  of its own, so the frame is kept here and the app's window procedure leaves this answer alone.
+  `adjust_rect` grows an inner size by the same frame, so requested and saved sizes and DPI
+  changes keep the client area's size. The two places must agree, which is why the calculation
+  is here and not in the app. A window that cannot be resized (the preview of a view dragged out
+  of the window) has no resize borders to keep and is winit's own, as is a maximized one. The
+  hit test itself is the app's (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this
+  copy.
+- `src/platform_impl/windows/event_loop.rs`, `util.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_touchpad_wheels`): a process-wide switch, off by default, which is winit's own behaviour.
+  Windows sends a precision touchpad's two-finger scroll as the wheel messages a mouse sends, so
+  winit reported it as lines, and in the SolidCraft presets it zoomed (vertical) or did nothing
+  (horizontal) (#15353). On, the event loop thread is registered with
+  `RegisterTouchpadCapableThread` (looked up by name; absent or failing means off), touchpad
+  `WM_POINTER` contacts go to `DefWindowProc` instead of becoming touches, and a touchpad's wheel
+  message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
+  factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
+  `LineDelta`. The registration is undone when the event loop drops.

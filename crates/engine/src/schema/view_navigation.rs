@@ -182,6 +182,27 @@ pub struct OriginAxesAcrossViewResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Show or hide the scale bar in the view's bottom left corner: a bar and the round length it
+/// stands for in the design's units, at the view's centre in perspective (#375). An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ScaleBarParams {
+    /// True shows the scale bar, false hides it.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted scale bar setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ScaleBarResult {
+    /// Whether the scale bar is shown now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
 /// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
@@ -633,6 +654,46 @@ pub struct AmbientOcclusionParams {
     pub enabled: Option<bool>,
 }
 
+/// How the view shows what an Isolate hid (#8120): not at all, see-through, or as its edges.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolateShow {
+    /// Hidden, as Isolate always has.
+    #[default]
+    Hidden,
+    /// Drawn faded and see-through; clicks go through it.
+    Transparent,
+    /// Drawn as its edges only, faded; clicks go through it.
+    Wireframe,
+}
+
+/// `view.isolate_others`: how the view shows what an Isolate hid. A display setting the app
+/// keeps; the design is not changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct IsolateOthersParams {
+    /// How the parts show: hidden, transparent or wireframe.
+    #[serde(default)]
+    pub show: Option<IsolateShow>,
+    /// Whether a click on a part shown transparent or wireframe selects it (true) or goes
+    /// through it (false).
+    #[serde(default)]
+    pub pick: Option<bool>,
+}
+
+/// What `view.isolate_others` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct IsolateOthersResult {
+    /// What was set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<IsolateShow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ambient_occlusion` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AmbientOcclusionResult {
@@ -677,6 +738,8 @@ pub enum NavigateAction {
     Down,
     Clockwise,
     Counterclockwise,
+    /// Turn half a turn about the screen's vertical axis, retaining screen up.
+    TurnAround,
     /// The isometric view, framed on the whole model.
     Home,
     /// Frame the whole model.
@@ -809,7 +872,7 @@ pub struct NavigateParams {
     pub direction: Option<Vec3>,
     /// A turn without `direction`: left, right, up or down turn the view `degrees`, clockwise and
     /// counterclockwise roll it a quarter turn, home shows the isometric view framed, fit frames
-    /// the model.
+    /// the model. Turn Around turns half a turn about screen up.
     #[serde(default, deserialize_with = "navigate_action", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "NavigateAction")]
     pub action: Option<NavigateAction>,

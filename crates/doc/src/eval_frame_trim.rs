@@ -6,7 +6,8 @@
 use super::*;
 use crate::frame::{MemberRecord, Side, TrimEnd, TrimMemberRef, TrimTarget};
 use kernel::Body;
-use solidcore_ops::frame_trim::{self, Target, TrimRefusal};
+use solidcore_record::frame::{self as data, MemberData};
+use solidcraft_kernel::{MemberRefusal, TrimRefusal, TrimTarget as Target};
 
 /// The members a `FrameMember` feature lays out, before they are built.
 pub(super) struct Layout {
@@ -21,7 +22,7 @@ pub(super) struct Laid {
     pub plane: Plane,
     pub region: Region2,
     /// The member as the kernel lays it out, for its middle line, ends and trims.
-    pub member: frame_trim::Member,
+    pub member: MemberData,
 }
 
 impl Layout {
@@ -33,40 +34,40 @@ impl Layout {
 impl Laid {
     /// The line through the middle of the section's bounding box, and where each end of `ends`
     /// crosses it (the kernel's).
-    fn axis(&self, ends: &[Option<Plane>; 2]) -> Result<frame_trim::Axis> {
-        frame_trim::axis(&self.member, ends).map_err(|why| refused(&self.id, why))
+    fn axis(&self, ends: &[Option<Plane>; 2]) -> Result<data::Axis> {
+        solidcraft_kernel::member_axis(&self.member, ends).map_err(|why| refused(&self.id, why))
     }
 }
 
 /// The kernel's refusal of the member on line `line`, worded.
-fn refused(line: &str, why: frame_trim::Refusal) -> DocError {
-    use frame_trim::Refusal as R;
+fn refused(line: &str, why: MemberRefusal) -> DocError {
+    use MemberRefusal as R;
     DocError::Invalid(match why {
         R::Degenerate => format!("line `{line}` has no length"),
         R::RunsAlong => format!("the end of the member on line `{line}` runs along it"),
         R::WrongWay => format!("the member on line `{line}`: an end plane faces the wrong way"),
-        R::TooFar => format!("the member on line `{line}` would reach more than {} mm", frame_trim::MAX_REACH),
+        R::TooFar => format!("the member on line `{line}` would reach more than {} mm", solidcraft_kernel::FRAME_MAX_REACH),
         R::EndsCross => format!("trimming leaves nothing of the member on line `{line}` (its ends cross)"),
         R::FacesAway => format!("a side faces away from the member on line `{line}`"),
     })
 }
 
 /// A trim's end choice as the kernel's.
-fn end_choice(end: TrimEnd) -> frame_trim::End {
+fn end_choice(end: TrimEnd) -> data::End {
     match end {
-        TrimEnd::Auto => frame_trim::End::Nearer,
-        TrimEnd::Start => frame_trim::End::Start,
-        TrimEnd::End => frame_trim::End::End,
+        TrimEnd::Auto => data::End::Nearer,
+        TrimEnd::Start => data::End::Start,
+        TrimEnd::End => data::End::End,
     }
 }
 
 /// A member's side as the kernel's.
-fn side_choice(side: Side) -> frame_trim::Side {
+fn side_choice(side: Side) -> data::Side {
     match side {
-        Side::Right => frame_trim::Side::Right,
-        Side::Left => frame_trim::Side::Left,
-        Side::Top => frame_trim::Side::Top,
-        Side::Bottom => frame_trim::Side::Bottom,
+        Side::Right => data::Side::Right,
+        Side::Left => data::Side::Left,
+        Side::Top => data::Side::Top,
+        Side::Bottom => data::Side::Bottom,
     }
 }
 
@@ -102,7 +103,7 @@ fn laid_member(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: 
         lo = Vec2::new(lo.x.min(bounds.min.x), lo.y.min(bounds.min.y));
         hi = Vec2::new(hi.x.max(bounds.max.x), hi.y.max(bounds.max.y));
     }
-    let member = frame_trim::Member::along(&plane, *a, *b, lo, hi).map_err(|why| refused(line, why))?;
+    let member = solidcraft_kernel::member_along(&plane, *a, *b, lo, hi).map_err(|why| refused(line, why))?;
     Ok(Laid { id: line.to_string(), plane, region, member })
 }
 
@@ -121,7 +122,7 @@ pub(super) fn section(
     };
     let laid = laid_member(doc, vals, f, st, line)?;
     let axis = laid.axis(&record.ends)?;
-    let plane = Plane::new(laid.plane.origin + laid.member.dir() * axis.t0, laid.plane.x, laid.plane.y)
+    let plane = Plane::new(laid.plane.origin + laid.member.dir * axis.t0, laid.plane.x, laid.plane.y)
         .ok_or_else(|| DocError::Invalid("the trimmed member's section is degenerate".into()))?;
     Ok((plane, axis.length, original.2, original.3))
 }
@@ -131,7 +132,7 @@ pub(super) fn section(
 fn build(m: &Laid, ends: &[Option<Plane>; 2], feature: u64) -> Result<Traced> {
     // The extrusion range, and which ends are then cut at a slant (the kernel's: the ends must
     // leave the whole section between them).
-    let frame_trim::Extent { from, to, cut: [s_cut, e_cut] } = frame_trim::extent(&m.member, ends).map_err(|why| refused(&m.id, why))?;
+    let data::Extent { from, to, cut: [s_cut, e_cut] } = solidcraft_kernel::member_extent(&m.member, ends).map_err(|why| refused(&m.id, why))?;
     let mut bodies = kernel::extrude(&m.plane, std::slice::from_ref(&m.region), from, to)?;
     let body = match (bodies.pop(), bodies.is_empty()) {
         (Some(body), true) => body,
@@ -243,10 +244,10 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 Tool::Plane(pl) => Target::Plane(pl),
             });
         }
-        let cuts = frame_trim::trim(&laid.member, &rec.ends, end_choice(*end), &targets, gap).map_err(|why| match why {
+        let cuts = solidcraft_kernel::trim_member(&laid.member, &rec.ends, end_choice(*end), &targets, gap).map_err(|why| match why {
             TrimRefusal::Member { target: None, why } => refused(&rec.line, why),
             TrimRefusal::Member { target: Some(k), why } => match (tools.get(k), why) {
-                (Some(Tool::Member { at, .. }), frame_trim::Refusal::FacesAway) => {
+                (Some(Tool::Member { at, .. }), MemberRefusal::FacesAway) => {
                     DocError::Invalid(format!("that side of `{}` faces away from the member trimmed to it", at.name))
                 }
                 (Some(Tool::Member { at, .. }), why) => refused(st.frame_members.get(at.record).map_or("", |r| r.line.as_str()), why),

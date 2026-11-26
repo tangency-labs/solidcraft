@@ -55,6 +55,17 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))
 }
 
+/// [`boolean`] of `a` and `b` tagged as operands 0 and 1 ([`super::history::tag`]): the tagged
+/// copies are the operation's to consume, so they are not copied again. A boolean of tagged
+/// copies made them and then copied them both, the larger operand's copy as dear as the
+/// boolean on a body of many faces (solidcore#3359). A failure's dump gets `a` and `b`.
+pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
+    usable("SmApiBoolean", &[a, b])?;
+    let ta = super::history::tag(a, 0)?;
+    let tb = super::history::tag(b, 1)?;
+    call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ta, tb, operation(op)))
+}
+
 /// The kernel's operation for [`merged`].
 fn kernel_operation(op: BooleanOp) -> BooleanOperation {
     match op {
@@ -145,6 +156,18 @@ fn boolean_pair(a: &Body, b: &Body) -> Result<Option<Body>> {
     let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
     let inputs = [("a", a), ("b", b)];
     call::ops_on("smlib_boolean_union_all", &inputs, || ops::boolean(ca, cb, operation(BooleanOp::Union)))
+}
+
+/// [`union_all`] of `bodies` tagged each as its own operand, in order
+/// ([`super::history::tag`]): the tagged copies are the union's to consume, so they are not
+/// copied again, as in [`boolean_tagged`]. A failure's dump gets `bodies`.
+pub(crate) fn union_all_tagged(bodies: &[&Body]) -> Result<Body> {
+    if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
+        return Err(Error::Argument);
+    }
+    usable("smlib_boolean_union_all", bodies)?;
+    let tagged = bodies.iter().enumerate().map(|(i, b)| super::history::tag(b, i)).collect::<Result<Vec<_>>>()?;
+    call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(tagged))
 }
 
 /// `a` op `b` for sheets of planar faces on one plane, on copies: `None` when either has no

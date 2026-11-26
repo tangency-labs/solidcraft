@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.3d_mouse_motion_model": "Motion model",
+    "ui.3d_mouse_motion_model_object": "Object",
+    "ui.3d_mouse_motion_model_target_camera": "Target camera",
+    "ui.3d_mouse_motion_model_tip": "Object: the 3D mouse moves the model the way you push, tilt or twist the cap. Target camera: it moves the camera that way around the point the view turns about, so the model moves the other way."
+  },
+  "ar": {
+    "ui.3d_mouse_motion_model": "نموذج الحركة",
+    "ui.3d_mouse_motion_model_object": "الكائن",
+    "ui.3d_mouse_motion_model_target_camera": "كاميرا الهدف",
+    "ui.3d_mouse_motion_model_tip": "الكائن: تحرّك الفأرة ثلاثية الأبعاد النموذج في الاتجاه الذي تدفع فيه الغطاء أو تُميله أو تلفّه. كاميرا الهدف: تحرّك الكاميرا في ذلك الاتجاه حول النقطة التي يدور حولها العرض، فيتحرك النموذج في الاتجاه المعاكس."
+  },
+  "de": {
+    "ui.3d_mouse_motion_model": "Bewegungsmodell",
+    "ui.3d_mouse_motion_model_object": "Objekt",
+    "ui.3d_mouse_motion_model_target_camera": "Zielkamera",
+    "ui.3d_mouse_motion_model_tip": "Objekt: Die 3D-Maus bewegt das Modell in die Richtung, in die Sie die Kappe drücken, neigen oder drehen. Zielkamera: Sie bewegt die Kamera in diese Richtung um den Punkt, um den sich die Ansicht dreht, sodass sich das Modell in die Gegenrichtung bewegt."
+  },
+  "he": {
+    "ui.3d_mouse_motion_model": "מודל תנועה",
+    "ui.3d_mouse_motion_model_object": "אובייקט",
+    "ui.3d_mouse_motion_model_target_camera": "מצלמת מטרה",
+    "ui.3d_mouse_motion_model_tip": "אובייקט: העכבר התלת־ממדי מזיז את המודל בכיוון שבו דוחפים, מטים או מסובבים את הכיפה. מצלמת מטרה: הוא מזיז את המצלמה בכיוון הזה סביב הנקודה שסביבה התצוגה מסתובבת, ולכן המודל נע בכיוון ההפוך."
+  },
+  "ja": {
+    "ui.3d_mouse_motion_model": "動作モデル",
+    "ui.3d_mouse_motion_model_object": "オブジェクト",
+    "ui.3d_mouse_motion_model_target_camera": "ターゲットカメラ",
+    "ui.3d_mouse_motion_model_tip": "オブジェクト: キャップを押す・傾ける・ひねる方向に、3D マウスでモデルを動かします。ターゲットカメラ: ビューの回転中心の周りで、その方向にカメラを動かすため、モデルは逆方向に動きます。"
+  },
+  "ko": {
+    "ui.3d_mouse_motion_model": "동작 모델",
+    "ui.3d_mouse_motion_model_object": "객체",
+    "ui.3d_mouse_motion_model_target_camera": "타깃 카메라",
+    "ui.3d_mouse_motion_model_tip": "객체: 3D 마우스가 캡을 누르거나 기울이거나 비트는 방향으로 모델을 움직입니다. 타깃 카메라: 뷰의 회전 중심 주위로 그 방향으로 카메라를 움직이므로 모델은 반대 방향으로 움직입니다."
+  },
+  "vi": {
+    "ui.3d_mouse_motion_model": "Mô hình chuyển động",
+    "ui.3d_mouse_motion_model_object": "Đối tượng",
+    "ui.3d_mouse_motion_model_target_camera": "Camera mục tiêu",
+    "ui.3d_mouse_motion_model_tip": "Đối tượng: chuột 3D di chuyển mô hình theo hướng bạn đẩy, nghiêng hoặc xoay núm. Camera mục tiêu: chuột di chuyển camera theo hướng đó quanh điểm mà khung nhìn xoay quanh, nên mô hình di chuyển theo hướng ngược lại."
+  },
+  "zh": {
+    "ui.3d_mouse_motion_model": "运动模型",
+    "ui.3d_mouse_motion_model_object": "对象",
+    "ui.3d_mouse_motion_model_target_camera": "目标相机",
+    "ui.3d_mouse_motion_model_tip": "对象：3D 鼠标按你推动、倾斜或扭转控制帽的方向移动模型。目标相机：它按该方向绕视图的旋转中心移动相机，因此模型向相反方向移动。"
+  }
+}

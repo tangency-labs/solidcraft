@@ -67,7 +67,7 @@ pub fn chat_turn_cancelled(turn: Option<&std::sync::atomic::AtomicBool>) -> bool
 
 /// The reply to a request whose agent chat turn has ended.
 pub fn cancelled_chat_response() -> Value {
-    json!({"ok": false, "error": "not run: the agent chat turn ended or its document tab was left"})
+    json!({"ok": false, "error": format!("{} the agent chat turn ended or its document tab was left", crate::NOT_RUN)})
 }
 
 /// The active design's id and revision for control connections that sent `control.subscribe`

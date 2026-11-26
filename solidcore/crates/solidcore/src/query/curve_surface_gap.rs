@@ -63,7 +63,7 @@ type Edge = (bool, bool, Vec<(usize, usize)>);
 const OP: &str = "query::curve_surface_gap";
 
 /// The most pieces the bisection may make before the gap is called not enclosed.
-const MAX_PIECES: usize = 1 << 15;
+pub(crate) const MAX_PIECES: usize = 1 << 15;
 /// The deepest bisection of one piece.
 const MAX_DEPTH: u32 = 30;
 /// A piece is closed once its second-order term is at most this fraction of its end values.
@@ -1842,11 +1842,27 @@ pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) 
 ///
 /// Every quantity is enclosed in outward-rounded interval arithmetic from the stored data, so
 /// the bound counts the rounding. `None` (the caller bisects) for any other structure.
+#[cfg(test)]
 pub(crate) fn structured_trim_gap_bound(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     net: &Nurbs,
+    range: [f64; 2],
+) -> Option<f64> {
+    structured_trim_gap_bound_as(cn, wn, net, range, false)
+}
+
+/// [`structured_trim_gap_bound`], or with `same_parameter` (#22034) a bound on the gap at
+/// equal parameters, `max |C(s) - S(W(s))|` over `range` (the gap
+/// [`trim_same_parameter_gap_bound_within`] bounds): the first case's `ψ` is the identity, so
+/// its bound is that gap's already; the second case adds how far its `ψ` moves the curve's
+/// parameter ([`iso_row_gap_bound`]).
+fn structured_trim_gap_bound_as(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
     [lo, hi]: [f64; 2],
+    same_parameter: bool,
 ) -> Option<f64> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return None;
@@ -1860,15 +1876,17 @@ pub(crate) fn structured_trim_gap_bound(
         return Some(bound);
     }
     // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
-    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped)
-    if net.q == 1 {
-        if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi]) {
+    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped; at equal
+    // parameters also one along the net's first or last row or column, whatever its degree
+    // across it, [`end_row`])
+    if net.q == 1 || same_parameter {
+        if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi], same_parameter) {
             return Some(bound);
         }
     }
-    if net.p == 1 {
+    if net.p == 1 || same_parameter {
         let (net, wn) = swapped_uv(net, wn)?;
-        return iso_row_gap_bound(cn, &wn, &net, [lo, hi]);
+        return iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter);
     }
     None
 }
@@ -2011,11 +2029,22 @@ fn swapped_uv(net: &Nurbs, wn: &NurbsCurve) -> Option<(Nurbs, NurbsCurve)> {
 
 /// The second case of [`structured_trim_gap_bound`]: a trim of degree 1 along the `u` side of
 /// the net `net`, of degree 1 in `v`.
+///
+/// With `same_parameter` (#22034), a bound at equal parameters instead:
+/// `|C(s) - S(W(s))| <= |C(s) - C(ψ(s))| + |C(ψ(s)) - S(W(s))|`, the second term the bound
+/// above. `τ(u(s))` (the trim's `u` mapped linearly onto the whole side, as the slip below
+/// takes it) is linear in `s`, from one end of the side at `lo` to the other at `hi`, and `ψ`
+/// maps each row segment's fraction linearly onto the curve segment's, so `s - ψ(s)` is linear
+/// over each segment and largest in size at one of their ends: at the curve's knot `t_j`,
+/// `ψ(s_j) = t_j` for the `s_j` at which `τ(u(s))` reaches the row's knot facing it
+/// ([`psi_shift`]). With `L` a bound on the curve's speed ([`row_lipschitz`] of the curve's
+/// own points), the first term is at most `L max_j |s_j - t_j|`.
 fn iso_row_gap_bound(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     net: &Nurbs,
     [lo, hi]: [f64; 2],
+    same_parameter: bool,
 ) -> Option<f64> {
     let point = |pw: &[f64], i: usize| -> Option<(V3<Ivl>, f64)> {
         let s = pw.get(4 * i..4 * i + 4)?;
@@ -2025,7 +2054,12 @@ fn iso_row_gap_bound(
     if cn.pw.len() != 4 * cn.n || wn.pw.len() != 4 * wn.n {
         return None;
     }
-    if !(wn.p == 1 && wn.n == 2 && net.q == 1 && net.nv == 2 && net.p == cn.p && net.nu == cn.n) {
+    // (at equal parameters, a trim along the net's first or last row is taken whatever the
+    // net's degree in `v` ([`end_row`]); the bound of [`structured_trim_gap_bound`] keeps
+    // the nets of degree 1 in `v` it always took, so the bounds it gives are unchanged)
+    let two_rows = net.q == 1 && net.nv == 2;
+    if !(wn.p == 1 && wn.n == 2 && net.p == cn.p && net.nu == cn.n && (two_rows || same_parameter))
+    {
         return None;
     }
     if net.pw.len() != 4 * net.nu * net.nv {
@@ -2033,9 +2067,21 @@ fn iso_row_gap_bound(
     }
     let ends =
         |k: &[f64], p: usize, n: usize| -> Option<[f64; 2]> { Some([*k.get(p)?, *k.get(n)?]) };
-    if ends(&wn.u, wn.p, wn.n)? != [lo, hi] || ends(&cn.u, cn.p, cn.n)? != [lo, hi] {
+    if ends(&wn.u, wn.p, wn.n)? != [lo, hi] {
         return None;
     }
+    // (the curve's points and knots over `[lo, hi]`: its own where its domain is `[lo, hi]`,
+    // and at equal parameters a line's piece over `[lo, hi]` of a longer domain, [`line_piece`])
+    let (curve, knots) = if ends(&cn.u, cn.p, cn.n)? == [lo, hi] {
+        let points = (0..cn.n)
+            .map(|i| point(&cn.pw, i))
+            .collect::<Option<Vec<_>>>()?;
+        (points, cn.u.clone())
+    } else if same_parameter {
+        line_piece(cn, [lo, hi])?
+    } else {
+        return None;
+    };
     let raw = |i: usize| -> Option<[f64; 4]> {
         let s = wn.pw.get(4 * i..4 * i + 4)?;
         Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
@@ -2054,34 +2100,41 @@ fn iso_row_gap_bound(
     if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && nu0 <= u_lo && u_lo < u_hi && u_hi <= nu1) {
         return None;
     }
-    let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
-    if !(clamped_v && nv0 <= v_a && v_a <= nv1) {
+    if !(bezier_chain(&knots, cn.p, cn.n) && bezier_chain(&net.u, net.p, net.nu)) {
         return None;
     }
-    if !(bezier_chain(&cn.u, cn.p, cn.n) && bezier_chain(&net.u, net.p, net.nu)) {
-        return None;
-    }
-    // (`nv0 <= v_a <= nv1` exactly, so the true `beta` is in `[0, 1]` as well as in the
-    // enclosure, whose outward rounding can pass an end by an ulp: the trim at the side's
-    // top, `v_a == nv1`, encloses `beta` as `[1 - ulp, 1 + ulp]`)
-    let beta = (Ivl::from(v_a) - Ivl::from(nv0)) / (Ivl::from(nv1) - Ivl::from(nv0));
-    let beta = Ivl::new(beta.lo.max(0.0), beta.hi.min(1.0));
-    if beta.lo.is_nan() || beta.hi.is_nan() || beta.lo > beta.hi {
-        return None;
-    }
-    let one_less = Ivl::from(1.0) - beta;
     let mut worst = 0.0_f64;
-    let mut row = Vec::new();
-    for j in 0..net.nu {
-        let (p0, w0) = point(&net.pw, 2 * j)?;
-        let (p1, w1) = point(&net.pw, 2 * j + 1)?;
-        if w0.to_bits() != w1.to_bits() {
+    let row = if two_rows {
+        let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
+        if !(clamped_v && nv0 <= v_a && v_a <= nv1) {
             return None;
         }
-        row.push((plus(scaled(p0, one_less), scaled(p1, beta)), w0));
-    }
-    for i in 0..cn.n {
-        let (c, wc) = point(&cn.pw, i)?;
+        // (`nv0 <= v_a <= nv1` exactly, so the true `beta` is in `[0, 1]` as well as in the
+        // enclosure, whose outward rounding can pass an end by an ulp: the trim at the side's
+        // top, `v_a == nv1`, encloses `beta` as `[1 - ulp, 1 + ulp]`)
+        let beta = (Ivl::from(v_a) - Ivl::from(nv0)) / (Ivl::from(nv1) - Ivl::from(nv0));
+        let beta = Ivl::new(beta.lo.max(0.0), beta.hi.min(1.0));
+        if beta.lo.is_nan() || beta.hi.is_nan() || beta.lo > beta.hi {
+            return None;
+        }
+        let one_less = Ivl::from(1.0) - beta;
+        let mut row = Vec::new();
+        for j in 0..net.nu {
+            let (p0, w0) = point(&net.pw, 2 * j)?;
+            let (p1, w1) = point(&net.pw, 2 * j + 1)?;
+            if w0.to_bits() != w1.to_bits() {
+                return None;
+            }
+            row.push((plus(scaled(p0, one_less), scaled(p1, beta)), w0));
+        }
+        row
+    } else {
+        end_row(net, v_a)?
+            .into_iter()
+            .map(|i| point(&net.pw, i))
+            .collect::<Option<Vec<_>>>()?
+    };
+    for (i, &(c, wc)) in curve.iter().enumerate() {
         let &(d, w) = row.get(if rev { cn.n.checked_sub(1 + i)? } else { i })?;
         if w.to_bits() != wc.to_bits() {
             return None;
@@ -2100,7 +2153,128 @@ fn iso_row_gap_bound(
         let lip = row_lipschitz(&row, &net.u, net.p)?;
         worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(slip)).hi;
     }
+    if same_parameter {
+        let shift = psi_shift(&knots, &net.u, [nu0, nu1], [lo, hi], rev)?;
+        if shift > 0.0 {
+            let lip = row_lipschitz(&curve, &knots, cn.p)?;
+            worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(shift)).hi;
+        }
+    }
     worst.is_finite().then_some(worst)
+}
+
+/// A curve's control points (enclosed) with their weights, and its knots.
+type WeightedPiece = (Vec<(V3<Ivl>, f64)>, Vec<f64>);
+
+/// Not upstream (#22034): the piece over `[lo, hi]` of the curve `cn` of degree 1 with two
+/// control points of one positive weight (a line's data, whose domain may be far longer than
+/// the edge's interval), as its two control points, enclosed, with that weight, and its knots
+/// `[lo, lo, hi, hi]`. With equal weights the curve is affine in its parameter,
+/// `C(t) = P_0 + (t - a) / (b - a) (P_1 - P_0)` over its domain `[a, b]`, so the piece is the
+/// curve of degree 1 from `C(lo)` to `C(hi)` over `[lo, hi]`, at the same parameters. `None`
+/// for any other curve, or `[lo, hi]` not within its domain.
+fn line_piece(cn: &NurbsCurve, [lo, hi]: [f64; 2]) -> Option<WeightedPiece> {
+    if !(cn.p == 1 && cn.n == 2 && cn.pw.len() == 8) {
+        return None;
+    }
+    let (Some(&a), Some(&b)) = (cn.u.get(1), cn.u.get(2)) else {
+        return None;
+    };
+    if !(a < b && a <= lo && lo < hi && hi <= b) {
+        return None;
+    }
+    let at = |i: usize| -> Option<(V3<Ivl>, f64)> {
+        let s = cn.pw.get(4 * i..4 * i + 4)?;
+        let w = *s.get(3)?;
+        Some((point_of([*s.first()?, *s.get(1)?, *s.get(2)?, w])?, w))
+    };
+    let ((p0, w0), (p1, w1)) = (at(0)?, at(1)?);
+    if w0.to_bits() != w1.to_bits() {
+        return None;
+    }
+    let span = Ivl::from(b) - Ivl::from(a);
+    let on = |t: f64| {
+        plus(
+            p0,
+            scaled(minus(p1, p0), (Ivl::from(t) - Ivl::from(a)) / span),
+        )
+    };
+    Some((vec![(on(lo), w0), (on(hi), w0)], vec![lo, lo, hi, hi]))
+}
+
+/// Not upstream (#22034): the indices in `net.pw` of the net's first row of control points
+/// (`v` index 0, for every `u` index) where `v` is the start of its `v` knots, or of its last
+/// where `v` is their end; `None` for any other `v`, or `v` knots not clamped (the first
+/// `q + 1` equal, the last `q + 1` equal, the two apart). Over clamped knots the basis
+/// functions in `v` at an end are 1 for the end row and 0 for every other, so the net's
+/// points at that `v` are exactly the rational curve of that row's points and weights, of the
+/// net's `u` knots and degree.
+fn end_row(net: &Nurbs, v: f64) -> Option<Vec<usize>> {
+    let q = net.q;
+    if net.nv == 0 || net.v.len() != net.nv + q + 1 {
+        return None;
+    }
+    let (Some(&v0), Some(&v1)) = (net.v.first(), net.v.last()) else {
+        return None;
+    };
+    let (start, end) = (net.v.get(..=q)?, net.v.get(net.nv..)?);
+    if !(v0 < v1 && start.iter().all(|&x| x == v0) && end.iter().all(|&x| x == v1)) {
+        return None;
+    }
+    let k = if v == v0 {
+        0
+    } else if v == v1 {
+        net.nv.checked_sub(1)?
+    } else {
+        return None;
+    };
+    Some((0..net.nu).map(|j| j * net.nv + k).collect())
+}
+
+/// Not upstream (#22034): an upper bound on `max |s - ψ(s)|` over `[lo, hi]`, for
+/// [`iso_row_gap_bound`] at equal parameters: the largest `|s_j - t_j|` over the distinct knots
+/// `t_j` of `curve_knots` (a chain of Bézier segments over `[lo, hi]`), where
+/// `s_j = lo + (r - u_0) (hi - lo) / (u_1 - u_0)` for the row's knot `r` facing `t_j`: the
+/// `j`-th distinct knot of `row_knots` (over the side `[u_0, u_1]`), or with `rev` (the trim
+/// running the row backwards) the `j`-th from the end, with `u_1 - r` for `r - u_0`. Enclosed
+/// in outward-rounded interval arithmetic. `None` where the two chains have not the same
+/// number of segments, or the bound is not finite.
+fn psi_shift(
+    curve_knots: &[f64],
+    row_knots: &[f64],
+    [u0, u1]: [f64; 2],
+    [lo, hi]: [f64; 2],
+    rev: bool,
+) -> Option<f64> {
+    let distinct = |k: &[f64]| {
+        let mut d = k.to_vec();
+        d.dedup();
+        d
+    };
+    let (t, r) = (distinct(curve_knots), distinct(row_knots));
+    if t.len() != r.len() || t.len() < 2 {
+        return None;
+    }
+    let side = Ivl::from(u1) - Ivl::from(u0);
+    if !side.is_positive() {
+        return None;
+    }
+    let length = Ivl::from(hi) - Ivl::from(lo);
+    let mut most = 0.0_f64;
+    for (j, &tj) in t.iter().enumerate() {
+        let x = if rev {
+            Ivl::from(u1) - Ivl::from(*r.iter().rev().nth(j)?)
+        } else {
+            Ivl::from(*r.get(j)?) - Ivl::from(u0)
+        };
+        let s = Ivl::from(lo) + x * length / side;
+        let d = (s - Ivl::from(tj)).mag();
+        if !d.is_finite() {
+            return None;
+        }
+        most = most.max(d);
+    }
+    Some(most)
 }
 
 /// An upper bound on the speed `|r'|` of the chain of rational Bézier segments with the
@@ -2990,6 +3164,76 @@ pub fn plane_uv_lipschitz(s: &Surface, ends: &[crate::nurbs::math::CPoint], d: f
     l.is_finite().then_some(l)
 }
 
+/// A bound on `|S(p) - S(q)|` for the surface `s` and UV points `p`, `q` within `d` of each
+/// other in each coordinate, both within `d` of the segment between the UV points `ends` (a UV
+/// line's NURB, so `d` its [`line_evaluation_slack`]): what a UV line's analytic evaluation
+/// adds to the bound [`trim_image_gap_bound`] gives for its NURB. On a plane it is
+/// [`plane_uv_lipschitz`] times `d`. On another surface with an exact net
+/// ([`NetSurface::of_exact`], probed at `ends`), the net's first partials are enclosed in
+/// interval arithmetic over the segment's box widened by `d` ([`NetSurface::partials`]),
+/// which holds `p`, `q` and the segment between them: the net is continuous and piecewise
+/// polynomial there, so `|S~(p) - S~(q)| <= (sup |S_u| + sup |S_v|) d` along that segment,
+/// `S~` the net with its end spans continued past the net. Where the box overshoots the net
+/// (a seam on the domain's boundary, its parameters a rounding out), the surface is taken at
+/// the clamped point as the gap bound takes it, within the partials' slack of `S~` at each of
+/// `p` and `q`: twice the slack is added. `None` for a surface without an exact net, `ends`
+/// that are not polynomial points, a box the partials refuse, or numbers not finite.
+///
+/// Not upstream (#18923): the WR-450 certificate of the UV lines a copied analytic face keeps.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn uv_line_slack_on_surface(
+    k: &Kernel,
+    s: &Surface,
+    ends: &[crate::nurbs::math::CPoint],
+    d: f64,
+) -> Result<Option<f64>> {
+    use crate::nurbs::math::NOW;
+    use crate::surface::surface::SurfaceKind;
+    if matches!(s.kind(), SurfaceKind::Plane(_)) {
+        return Ok(plane_uv_lipschitz(s, ends, d)
+            .map(|l| l * d * (1.0 + 4.0 * f64::EPSILON))
+            .filter(|x| x.is_finite()));
+    }
+    if !(d.is_finite() && d >= 0.0) || ends.is_empty() {
+        return Ok(None);
+    }
+    let mut u = Ivl::new(f64::INFINITY, f64::NEG_INFINITY);
+    let mut v = u;
+    let mut probes = Vec::new();
+    for c in ends {
+        if !(c.w == NOW || c.w == 1.0) || !(c.x.is_finite() && c.y.is_finite()) {
+            return Ok(None);
+        }
+        let du = Ivl::from(c.x) - Ivl::from(d);
+        let dv = Ivl::from(c.y) - Ivl::from(d);
+        let eu = Ivl::from(c.x) + Ivl::from(d);
+        let ev = Ivl::from(c.y) + Ivl::from(d);
+        u = Ivl::new(u.lo.min(du.lo), u.hi.max(eu.hi));
+        v = Ivl::new(v.lo.min(dv.lo), v.hi.max(ev.hi));
+        probes.push(Point2::new(c.x, c.y));
+    }
+    let Some(net) = NetSurface::of_exact(k, s, &probes)? else {
+        return Ok(None);
+    };
+    let w = V3 {
+        x: u,
+        y: v,
+        z: Ivl::from(0.0),
+    };
+    let Ok((p, slack)) = net.partials(&[w], 1, 0) else {
+        return Ok(None);
+    };
+    let (Some(su), Some(sv)) = (norm_upper(p.at(1, 0)), norm_upper(p.at(0, 1))) else {
+        return Ok(None);
+    };
+    let bound =
+        ((Ivl::from(su) + Ivl::from(sv)) * Ivl::from(d) + Ivl::from(2.0) * Ivl::from(slack)).hi;
+    Ok(bound.is_finite().then_some(bound))
+}
+
 /// Not upstream: [`line_nurb_slack`] of the line `l` and its NURB (made on a copy when it has
 /// none), a UV line when `is_2d`: how far its analytic point can be from its NURB's exact point
 /// at the same parameter. `None` where that NURB's data is not two control points of weight
@@ -3564,12 +3808,13 @@ fn structured_pair_bound(
     wn: &NurbsCurve,
     net: &NetSurface,
     range: [f64; 2],
+    same_parameter: bool,
 ) -> Option<f64> {
     // (an offset's net is its base's, not the surface: no structured bound)
     if net.offset.is_some() {
         return None;
     }
-    let g = structured_trim_gap_bound(cn, wn, &net.net, range)?;
+    let g = structured_trim_gap_bound_as(cn, wn, &net.net, range, same_parameter)?;
     // (the bound is on the net's image: the net's own distance to the surface added)
     let off = net_to_surface_bound(surface, &net.net)?;
     let mut bound = Ivl::from(g) + Ivl::from(c_slack);
@@ -3598,8 +3843,174 @@ pub(crate) fn structured_trim_image_gap_bound(
         return Ok(None);
     };
     Ok(structured_pair_bound(
-        surface, &p.cn, p.c_slack, &p.wn, &p.net, range,
+        surface, &p.cn, p.c_slack, &p.wn, &p.net, range, false,
     ))
+}
+
+/// Not upstream (#19910): how much farther the image of a UV trim on its surface can lie from
+/// its curve after a move than `‖A‖` times the distance [`trim_image_gap_bound_within`] proves
+/// before it, where `A x = L x + o` is the affine map of `m` ([`Axis2Placement::matrix`]
+/// layout, `L` its upper 3x3 block, `o` its last column) and `‖A‖` is
+/// [`affine_linear_norm_upper`] of `m`. `before` and `after` are `(surface, curve, trim)` of
+/// the pair before and after the move, both over `range`.
+///
+/// The bound is `δc + δs + slack + residual`, rounded up:
+/// - `δc` is the largest distance from a control point of the curve's data after the move to
+///   `A` of the matching one before (enclosed), and `δs` the same for the surface's net;
+/// - `slack` is the curve's own slack after the move and `residual` its net's distance to the
+///   surface ([`bisection_residual`]).
+///
+/// Why it holds: the data before and after have the same degrees, knots and weights (checked
+/// bit for bit), so at every parameter they share their rational basis, which is non-negative
+/// with sum `1` for positive weights. A point of the data after the move is then within the
+/// largest control point distance of `A` of the point before (`A` is affine). The trims are
+/// the same data and lie within the net's knot range (their control points do), so the net is
+/// evaluated by that basis and not continued past its ends. For any correspondence `t -> w(t)`,
+/// `|c1(t) - n1(w)| <= δc + ‖A‖ |c0(t) - n0(w)| + δs` and the curve and surface after the
+/// move are within `slack` and `residual` of their data. The proof before bounds
+/// `|c0(t) - n0(w)|` for its correspondence by its bound, whose other terms are not negative.
+///
+/// `None` where the pair has no exact data before or after ([`TrimPair::of`]), the data's
+/// structure differs, a weight is not positive, the trim changed, the net is an offset's or
+/// the trim is not within its knots, or a term is not finite.
+///
+/// [`Axis2Placement::matrix`]: crate::geom::axis2_placement::Axis2Placement::matrix
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn moved_pair_room(
+    k: &Kernel,
+    before: (&Surface, &Curve, &Curve),
+    after: (&Surface, &Curve, &Curve),
+    range: [f64; 2],
+    m: [[f64; 4]; 4],
+) -> Result<Option<f64>> {
+    let (s0, c0, w0) = before;
+    let (s1, c1, w1) = after;
+    let Some(p0) = TrimPair::of(k, s0, c0, w0, range)? else {
+        return Ok(None);
+    };
+    let Some(p1) = TrimPair::of(k, s1, c1, w1, range)? else {
+        return Ok(None);
+    };
+    if p0.wn != p1.wn || p0.net.offset.is_some() || p1.net.offset.is_some() {
+        return Ok(None);
+    }
+    let (a0, a1) = (&p0.cn, &p1.cn);
+    if a0.p != a1.p || a0.n != a1.n || a0.u != a1.u {
+        return Ok(None);
+    }
+    let (n0, n1) = (&p0.net.net, &p1.net.net);
+    if n0.p != n1.p || n0.q != n1.q || n0.nu != n1.nu || n0.nv != n1.nv || n0.u != n1.u {
+        return Ok(None);
+    }
+    if n0.v != n1.v || !trim_within_knots(&p1.wn, n1) {
+        return Ok(None);
+    }
+    let Some(count) = n0.nu.checked_mul(n0.nv) else {
+        return Ok(None);
+    };
+    let (Some(dc), Some(ds)) = (
+        moved_points_room(&a0.pw, &a1.pw, a0.n, m),
+        moved_points_room(&n0.pw, &n1.pw, count, m),
+    ) else {
+        return Ok(None);
+    };
+    let Some(residual) = bisection_residual(s1, &p1.net) else {
+        return Ok(None);
+    };
+    let room = Ivl::from(dc) + Ivl::from(ds) + Ivl::from(p1.c_slack) + Ivl::from(residual);
+    Ok(room.hi.is_finite().then_some(room.hi))
+}
+
+/// Not upstream (#19910): an upper bound on the spectral norm of the upper 3x3 block `L` of
+/// `m` ([`moved_pair_room`]): `‖L‖² = λmax(LᵀL) <= 1 + ‖LᵀL - I‖`, and the spectral norm of
+/// the symmetric `LᵀL - I` is at most its Frobenius norm, enclosed. `None` unless finite.
+pub(crate) fn affine_linear_norm_upper(m: [[f64; 4]; 4]) -> Option<f64> {
+    let [[a, b, c, _], [d, e, f, _], [g, h, i, _], _] = m;
+    let col = |x: f64, y: f64, z: f64| V3 {
+        x: Ivl::from(x),
+        y: Ivl::from(y),
+        z: Ivl::from(z),
+    };
+    let (x, y, z) = (col(a, d, g), col(b, e, h), col(c, f, i));
+    let one = Ivl::from(1.0);
+    let sq = |v: Ivl| {
+        let m = Ivl::from(v.mag());
+        m * m
+    };
+    let diagonal = sq(dot(x, x) - one) + sq(dot(y, y) - one) + sq(dot(z, z) - one);
+    let off = sq(dot(x, y)) + sq(dot(x, z)) + sq(dot(y, z));
+    let frobenius = (diagonal + Ivl::from(2.0) * off).sqrt();
+    let norm = (one + Ivl::from(frobenius.hi)).sqrt().hi;
+    norm.is_finite().then_some(norm)
+}
+
+/// The largest distance from a homogeneous control point of `after` to the affine map of `m`
+/// ([`moved_pair_room`]) of the matching one of `before`, enclosed; `None` unless both hold
+/// `count` points with equal positive weights and every distance is finite.
+fn moved_points_room(before: &[f64], after: &[f64], count: usize, m: [[f64; 4]; 4]) -> Option<f64> {
+    let [r0, r1, r2, _] = m;
+    let row = |r: [f64; 4], p: V3<Ivl>| {
+        let [a, b, c, o] = r;
+        Ivl::from(a) * p.x + Ivl::from(b) * p.y + Ivl::from(c) * p.z + Ivl::from(o)
+    };
+    if before.len() != count.checked_mul(4)? || after.len() != before.len() {
+        return None;
+    }
+    let mut worst = 0.0_f64;
+    for (q0, q1) in before.chunks_exact(4).zip(after.chunks_exact(4)) {
+        let (&[x0, y0, z0, w0], &[x1, y1, z1, w1]) = (q0, q1) else {
+            return None;
+        };
+        // (the same weights give the same rational basis before and after)
+        if w0.to_bits() != w1.to_bits() {
+            return None;
+        }
+        let p0 = point_of([x0, y0, z0, w0])?;
+        let p1 = point_of([x1, y1, z1, w1])?;
+        let moved = V3 {
+            x: row(r0, p0),
+            y: row(r1, p0),
+            z: row(r2, p0),
+        };
+        worst = worst.max(norm_upper(minus(p1, moved))?);
+    }
+    Some(worst)
+}
+
+/// Whether every control point of the trim data `wn` lies within the knot range of `net` in
+/// `u` and `v` (enclosed), so the trim's image is evaluated within the net's knots
+/// ([`moved_pair_room`]).
+fn trim_within_knots(wn: &NurbsCurve, net: &Nurbs) -> bool {
+    let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
+        net.u.get(net.p),
+        net.u.get(net.nu),
+        net.v.get(net.q),
+        net.v.get(net.nv),
+    ) else {
+        return false;
+    };
+    // (`lo <= x / w <= hi` for a positive weight `w` is `lo w <= x <= hi w`, decided exactly: a
+    // trim on the net's edge, as a sphere's seam trims are, lies on it, where an enclosed
+    // quotient may round past it)
+    let within = |x: f64, w: f64, lo: f64, hi: f64| {
+        use crate::geom::expansion::{product, sign, sub};
+        let (Some(l), Some(h)) = (product(lo, w), product(hi, w)) else {
+            return false;
+        };
+        sign(&sub(&[x], &l)) >= 0 && sign(&sub(&h, &[x])) >= 0
+    };
+    wn.pw.chunks_exact(4).all(|q| {
+        let &[x, y, _, w] = q else {
+            return false;
+        };
+        [x, y, w, u0, u1, v0, v1].iter().all(|c| c.is_finite())
+            && w > 0.0
+            && within(x, w, u0, u1)
+            && within(y, w, v0, v1)
+    })
 }
 
 /// [`trim_image_gap_bound_up_to`] for a caller that also takes any bound at most `enough` as
@@ -3628,28 +4039,157 @@ pub fn trim_image_gap_bound_within(
     [enough, over]: [f64; 2],
     budget: Option<usize>,
 ) -> Result<Option<f64>> {
+    trim_gap_bound_with(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::Fitted,
+    )
+}
+
+/// Not upstream (WR-450, #18923): a proved upper bound on the same-parameter gap
+/// `sup |C(t) - S(W(t))|` over `t` in `range`, for the curve `curve` (`C`), its UV trim `uv`
+/// (`W`) and `surface` (`S`): how far the trim's image at each parameter is from the curve's
+/// point at that same parameter. It is [`trim_image_gap_bound_within`]'s bisection with `ψ`
+/// the identity (degree 1 from `(lo, lo)` to `(hi, hi)`, its evaluation enclosed as any `ψ`'s),
+/// so it also counts how far the two parameters slip along the curve: the bound for a trim
+/// that is to stand where the edge's parameter pairs it with its other trims (both faces'
+/// trims evaluated at one edge parameter, as a volume enclosure's strips and a vertex's
+/// sectors take them), which a Hausdorff bound does not give (fillet1019's corner round
+/// extended for a defeature: a trim within 4.2e-4 of its edge as a curve, 5.9e-3 from it at
+/// equal parameters). The gap it bounds is at least the trim's distance from the curve as a
+/// set, which [`trim_image_gap_bound_within`] bounds (the two computed bounds need not be
+/// ordered). As there, a trim whose image has the curve's own structure is bounded by the
+/// control points at once where that bound is at most `enough` (#22034), here at equal
+/// parameters (`structured_trim_gap_bound_as`). `floor`,
+/// `enough`, `over` and `budget` mean what they mean there. `None` only where the pair has no
+/// exact data (a surface with no exact net at the trim, a curve without exact data, a UV
+/// line, whose rounding moves its parameters, a range outside either curve's domain) or the
+/// floor is not finite; a pair with exact data whose gap it does not enclose (a net whose
+/// own distance from the surface is not enclosed among them, a bisection that does not
+/// enclose a piece, or a slack that is not finite) gets `Some(f64::INFINITY)`, since nothing
+/// proves that gap.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn trim_same_parameter_gap_bound_within(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+) -> Result<Option<f64>> {
+    trim_gap_bound_with(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::SameParameter,
+    )
+}
+
+/// How [`trim_gap_bound_with`] pairs the curve's parameter with the trim's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Correspondence {
+    /// The fitted reparametrisation [`reparametrisation`] (a Hausdorff bound: the parameters
+    /// may slip along the curve), with the structured bound tried as well, and the identity
+    /// for a pair of degree 1.
+    Fitted,
+    /// The identity: the gap at equal parameters.
+    SameParameter,
+}
+
+/// The bound of [`trim_image_gap_bound_within`] (`Correspondence::Fitted`) or
+/// [`trim_same_parameter_gap_bound_within`] (`Correspondence::SameParameter`).
+fn trim_gap_bound_with(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+    correspondence: Correspondence,
+) -> Result<Option<f64>> {
+    let fitted = correspondence == Correspondence::Fitted;
     if !(floor.is_finite() && floor >= 0.0) {
         return Ok(None);
     }
-    let Some(TrimPair {
+    let Some(pair) = TrimPair::of(k, surface, curve, uv, range)? else {
+        return Ok(None);
+    };
+    let bound = bound_trim_pair(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        fitted,
+        pair,
+    )?;
+    // (a same-parameter bound is asked of a pair with exact data: one it does not enclose is
+    // not proved within any bound, which `Some(INFINITY)` tells from a pair with none)
+    Ok(if fitted {
+        bound
+    } else {
+        Some(bound.unwrap_or(f64::INFINITY))
+    })
+}
+
+/// [`trim_gap_bound_with`] once the pair's exact data are made: `fitted` for
+/// `Correspondence::Fitted`.
+fn bound_trim_pair(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+    fitted: bool,
+    pair: TrimPair,
+) -> Result<Option<f64>> {
+    let TrimPair {
         cn,
         c_slack,
         wn,
         net,
-    }) = TrimPair::of(k, surface, curve, uv, range)?
-    else {
-        return Ok(None);
-    };
+    } = pair;
     // (#20373: a trim whose image has the curve's own structure is bounded by their control
     // points at once, the curve's slack added ([`structured_pair_bound`]); where that is
     // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
-    // it)
+    // it. Its second case pairs the parameters by a map of its own, so at equal parameters it
+    // also counts how far that map moves them (#22034: a join of many patterned copies
+    // bisected each exact copy of a trim a boolean carries, for every union, down to just
+    // under its tolerance)
     if enough.is_finite() {
-        if let Some(bound) = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range) {
+        let structured = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range, !fitted);
+        if let Some(bound) = structured {
             if bound <= enough && bound <= over {
                 return Ok(Some(bound));
             }
         }
+    }
+    if !fitted {
+        k.work_counters.add_same_parameter_bisection();
     }
     // (#20373 review r4: the bisection bounds the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is added to the curve's slack, so a bound past the
@@ -3667,11 +4207,22 @@ pub fn trim_image_gap_bound_within(
     if !c_slack.is_finite() {
         return Ok(None);
     }
-    let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
-    let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
-        return Ok(None);
-    };
     let [r0, r1] = range;
+    let psi = if fitted {
+        let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
+        let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
+            return Ok(None);
+        };
+        psi
+    } else {
+        // (the identity: degree 1, its two control points the range's ends)
+        NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![r0, r0, r1, r1],
+            pw: vec![r0, 0.0, 0.0, 1.0, r1, 0.0, 0.0, 1.0],
+        }
+    };
     if !kinks(&psi, r0, r1).is_empty() {
         return Ok(None);
     }
@@ -3775,7 +4326,7 @@ pub fn trim_image_gap_bound_within(
     // the fitted `psi` only adds its own steps, each as long as the curve's speed makes it:
     // `primitive.api_primitives` gen1108, a line 5.5e8 long bounded at 1.4e-3 and 1e4 against
     // its trims, 1e-7 by samples. The identity is tried there too, the smaller bound kept.
-    if cn.p == 1 && wn.p == 1 && !bound.is_some_and(|g| g <= enough) {
+    if fitted && cn.p == 1 && wn.p == 1 && !bound.is_some_and(|g| g <= enough) {
         if let Some(identity) = hermite_psi(&[(r0, r0), (r1, r1)], range) {
             if let Some(g) = with_psi(&identity)? {
                 bound = Some(bound.map_or(g, |b| b.min(g)));
@@ -3788,6 +4339,314 @@ pub fn trim_image_gap_bound_within(
     // (the cutoff applies to the bound returned, the curve's slack included: a gap at most
     // `over` whose slack takes it past `over` is above it too)
     Ok(Some(if bound > over { f64::INFINITY } else { bound }))
+}
+
+/// Not upstream (WR-450, #18923): [`trim_image_gap_bound`] for an edge curve that is a curve
+/// on a surface, `C(r) = S_c(W_c(r))` (`CrvOnSurf`: its UV curve `W_c` on its own surface
+/// `S_c`, as it evaluates), against the trim `uv` (`W`) on `surface` (`S`). The same
+/// reparametrised bisection: for each piece `[a, b]` of the trim's parameter `s`, the gap
+/// `g = C(ψ(s)) - S(W(s))` is at most its end values plus `h^2 / 8 sup |g''|` (or `h sup |g'|`
+/// where either side may not be C^1 inside the piece), with the curve side's derivatives
+/// lifted by the chain rule from `W_c`'s NURBS data (enclosed over the range `ψ` sweeps) and
+/// `S_c`'s exact net's partials over the box `W_c` sweeps there ([`NetSurface::partials`]):
+/// `C' = S_u u' + S_v v'`, `C'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 + S_u u'' + S_v v''`.
+/// Each net's slack past its end is added to the piece (and to its end values), and each
+/// net's own distance to its surface ([`bisection_residual`]) to the bound. Every
+/// coefficient is in outward-rounded interval arithmetic.
+///
+/// `None` when it is not enclosed: `curve` not a curve on a surface, either UV curve without
+/// exact data (or one evaluated with rounding, a UV line's), a surface without an exact net,
+/// a range past either UV curve's domain or not finite, or a piece the bisection cannot
+/// bound. The work is [`bisect`]'s, bounded by [`MAX_PIECES`].
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn crv_on_surf_trim_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    use crate::error::ignored;
+
+    let CurveKind::CrvOnSurf(cos) = curve.kind() else {
+        return Ok(None);
+    };
+    let [lo, hi] = range;
+    if !(floor.is_finite() && floor >= 0.0 && lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Ok(None);
+    }
+    k.check_cancelled(OP)?;
+    let (Some((wc, wc_slack)), Some((wn, w_slack))) = (
+        exact_curve_data(cos.uv_curve(), true)?,
+        exact_curve_data(uv, true)?,
+    ) else {
+        return Ok(None);
+    };
+    // (the trim exact; the curve's UV curve exact, or a UV line enclosed as its NURB with
+    // its analytic evaluation's slack, `wc_slack` apart in UV, carried to `S_c`)
+    if w_slack != 0.0 {
+        return Ok(None);
+    }
+    let line_slack = if wc_slack == 0.0 {
+        0.0
+    } else {
+        let CurveKind::Line(l) = cos.uv_curve().kind() else {
+            return Ok(None);
+        };
+        let nurb = l.base_with_nurb()?;
+        let Ok(ends) = nurb.control_points() else {
+            return Ok(None);
+        };
+        match uv_line_slack_on_surface(k, cos.surface(), ends, wc_slack)? {
+            Some(x) => x,
+            None => return Ok(None),
+        }
+    };
+    let within = |n: &NurbsCurve| match (n.u.get(n.p), n.u.get(n.n)) {
+        (Some(&d0), Some(&d1)) => d0 <= lo && hi <= d1,
+        _ => false,
+    };
+    if !(within(&wc) && within(&wn)) {
+        return Ok(None);
+    }
+    let probes = |c: &Curve| -> Result<Option<Vec<Point2>>> {
+        let mut out = Vec::new();
+        for i in 0..TRIM_PROBES {
+            let t = if i + 1 == TRIM_PROBES {
+                hi
+            } else {
+                lo + (hi - lo) * (i as f64) / ((TRIM_PROBES - 1) as f64)
+            };
+            let Some(p) = ignored(c.evaluate_point(k, t))? else {
+                return Ok(None);
+            };
+            out.push(Point2::new(p.x, p.y));
+        }
+        Ok(Some(out))
+    };
+    let (Some(face_probes), Some(curve_probes)) = (probes(uv)?, probes(cos.uv_curve())?) else {
+        return Ok(None);
+    };
+    let (Some(face_net), Some(curve_net)) = (
+        NetSurface::of_exact(k, surface, &face_probes)?,
+        NetSurface::of_exact(k, cos.surface(), &curve_probes)?,
+    ) else {
+        return Ok(None);
+    };
+    let (Some(r_face), Some(r_curve)) = (
+        bisection_residual(surface, &face_net),
+        bisection_residual(cos.surface(), &curve_net),
+    ) else {
+        return Ok(None);
+    };
+    let residual = (Ivl::from(r_face) + Ivl::from(r_curve)).hi;
+    if !residual.is_finite() {
+        return Ok(None);
+    }
+    let knots: Vec<f64> = wc.u.iter().chain(wn.u.iter()).copied().collect();
+    let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
+        return Ok(None);
+    };
+    if !kinks(&psi, lo, hi).is_empty() {
+        return Ok(None);
+    }
+    let curve_kinks = kinks(&wc, lo, hi);
+    let trim_kinks = kinks(&wn, lo, hi);
+    let add = |a: f64, b: f64| (Ivl::from(a) + Ivl::from(b)).hi;
+    // (the gap at one trim parameter, both nets' slacks past their ends added)
+    let endpoint = |t: f64| -> Result<Option<f64>> {
+        let at = Ivl::from(t);
+        let Some(r) = psi_over(&psi, at, 0, range)? else {
+            return Ok(None);
+        };
+        let Some(&r0) = r.first() else {
+            return Ok(None);
+        };
+        let wcp = curve_derivs_over(&wc, r0, 0, None)?;
+        let w = curve_derivs_over(&wn, at, 0, None)?;
+        if wcp.is_empty() || w.is_empty() {
+            return Ok(None);
+        }
+        let (cp, c_slack) = curve_net.partials(&wcp, 0, 0)?;
+        let (sp, s_slack) = face_net.partials(&w, 0, 0)?;
+        let Some(g) = norm_upper(minus(cp.at(0, 0), sp.at(0, 0))) else {
+            return Ok(None);
+        };
+        let g = add(add(g, c_slack), s_slack);
+        Ok(g.is_finite().then_some(g))
+    };
+    let piece = |a: f64, b: f64| -> Result<Option<PieceBound>> {
+        let mut ends = 0.0_f64;
+        for t in [a, b] {
+            let Some(g) = endpoint(t)? else {
+                return Ok(None);
+            };
+            ends = ends.max(g);
+        }
+        let span = Ivl::new(a, b);
+        let Some(r) = psi_over(&psi, span, 2, range)? else {
+            return Ok(None);
+        };
+        let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
+            return Ok(None);
+        };
+        let wcd = curve_derivs_over(&wc, r0, 2, None)?;
+        let wd = curve_derivs_over(&wn, span, 2, None)?;
+        let (Some(c1w), Some(c2w), Some(w1)) = (wcd.get(1), wcd.get(2), wd.get(1)) else {
+            return Ok(None);
+        };
+        let (u1, v1) = (c1w.x, c1w.y);
+        let (u2, v2) = (c2w.x, c2w.y);
+        // (the curve side's first two derivatives in `r`, where `S_c` is C^1 across every
+        // knot line the box crosses; else its first alone, the one-sided partials hulled)
+        let lifted = match curve_net.partials(&wcd, 2, 1) {
+            Ok((p, slack)) => {
+                let c1 = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
+                let mut c2 = scaled(p.at(2, 0), u1 * u1);
+                c2 = plus(c2, scaled(p.at(1, 1), Ivl::from(2.0) * u1 * v1));
+                c2 = plus(c2, scaled(p.at(0, 2), v1 * v1));
+                c2 = plus(c2, scaled(p.at(1, 0), u2));
+                c2 = plus(c2, scaled(p.at(0, 1), v2));
+                (c1, Some(c2), slack)
+            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => {
+                let (p, slack) = curve_net.partials(&wcd, 1, 0)?;
+                let c1 = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
+                (c1, None, slack)
+            }
+        };
+        let (c1, c2, c_slack) = lifted;
+        let cp = scaled(c1, p1);
+        let h = Ivl::from(b) - Ivl::from(a);
+        let corner = trim_kinks.iter().any(|&x| a < x && x < b)
+            || curve_kinks.iter().any(|&x| r0.lo < x && x < r0.hi);
+        match c2 {
+            Some(c2) if !corner => {
+                let cpp = plus(scaled(c2, p1 * p1), scaled(c1, p2));
+                let Some((term, slack)) = second_term(&face_net, &wd, cp, cpp, h)? else {
+                    return Ok(None);
+                };
+                Ok(PieceBound::with(ends, term, add(slack, c_slack)))
+            }
+            _ => {
+                let (p, slack) = face_net.partials(&wd, 1, 0)?;
+                let sw = plus(scaled(p.at(1, 0), w1.x), scaled(p.at(0, 1), w1.y));
+                let Some(m) = norm_upper(minus(cp, sw)) else {
+                    return Ok(None);
+                };
+                Ok(PieceBound::with(
+                    ends,
+                    h * Ivl::from(m),
+                    add(slack, c_slack),
+                ))
+            }
+        }
+    };
+    let Some(gap) = bisect(
+        range,
+        FIRST_PIECES,
+        &trim_kinks,
+        CLOSE_RELATIVE,
+        floor,
+        [f64::NEG_INFINITY, f64::INFINITY],
+        None,
+        |a, b| {
+            k.check_cancelled(OP)?;
+            piece(a, b)
+        },
+    )?
+    else {
+        return Ok(None);
+    };
+    let bound = add(add(gap, residual), line_slack);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (#18923): [`trim_image_gap_bound`] for a B-spline trim whose domain
+/// `[d0, d1]` ends inside `range` while the curve's domain holds all of it. Such a trim is
+/// evaluated clamped (out-of-bounds evaluation off: `BSplineCurve::evaluate_point`), so on
+/// `[lo, d0]` it is `W(d0)` and on `[d1, hi]` it is `W(d1)`, both points of the image over
+/// `[d0', d1'] = [max(lo, d0), min(hi, d1)]`. That inner range is bounded by
+/// [`trim_image_gap_bound`] at `B`, its reparametrisation fixing its ends, so
+/// `|C(d0') - S(W(d0'))| <= B`; a curve point `C(t)` with `t` in a sliver is then within
+/// `|C(t) - C(d0')| + B` of the image, and `|C(t) - C(d0')| <= (d0' - lo) max |C'|` over the
+/// sliver ([`curve_derivs_over`], the curve's exact data), plus twice the curve's slack
+/// (its evaluation's distance from that data at either point). The bound is `B` plus the
+/// larger sliver's term, every step rounded up.
+///
+/// `None` where the trim is not such a B-spline (out-of-bounds evaluation on, or its domain
+/// holds `range`), the curve's exact data or domain does not hold `range`, the inner range
+/// is empty, or [`trim_image_gap_bound`] encloses nothing on it.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn clamped_trim_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    [lo, hi]: [f64; 2],
+    floor: f64,
+) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Ok(None);
+    }
+    let CurveKind::BSpline(bs) = uv.kind() else {
+        return Ok(None);
+    };
+    if bs.is_out_of_bounds_enabled() {
+        return Ok(None);
+    }
+    let (Some((cn, c_slack)), Some((wn, _))) =
+        (exact_curve_data(curve, false)?, exact_curve_data(uv, true)?)
+    else {
+        return Ok(None);
+    };
+    let (Some(&c0), Some(&c1), Some(&d0), Some(&d1)) = (
+        cn.u.get(cn.p),
+        cn.u.get(cn.n),
+        wn.u.get(wn.p),
+        wn.u.get(wn.n),
+    ) else {
+        return Ok(None);
+    };
+    if !(c0 <= lo && hi <= c1) || (d0 <= lo && hi <= d1) {
+        return Ok(None);
+    }
+    let (a, b) = (lo.max(d0), hi.min(d1));
+    if a.partial_cmp(&b) != Some(core::cmp::Ordering::Less) {
+        return Ok(None);
+    }
+    let Some(inner) = trim_image_gap_bound(k, surface, curve, uv, [a, b], floor)? else {
+        return Ok(None);
+    };
+    let mut worst = Ivl::from(0.0);
+    for (s0, s1) in [(lo, a), (b, hi)] {
+        if s0.partial_cmp(&s1) != Some(core::cmp::Ordering::Less) {
+            continue;
+        }
+        let d = curve_derivs_over(&cn, Ivl::new(s0, s1), 1, None)?;
+        let Some(m) = d.get(1).copied().and_then(norm_upper) else {
+            return Ok(None);
+        };
+        let term = (Ivl::from(s1) - Ivl::from(s0)) * Ivl::from(m)
+            + Ivl::from(c_slack)
+            + Ivl::from(c_slack);
+        if term.hi > worst.hi {
+            worst = term;
+        }
+    }
+    let bound = (Ivl::from(inner) + worst).hi;
+    Ok(bound.is_finite().then_some(bound))
 }
 
 /// Not upstream (#18166): the bound `first` of a curve against a surface (`None` where it is
@@ -4108,6 +4967,43 @@ mod tests {
         }
     }
 
+    /// [`clamped_trim_gap_bound`] of a line `lift` above the plane patch over `[0, 1]` and
+    /// its shadow as a trim over `[0.25, 1]` only (evaluated clamped before 0.25): the
+    /// unclamped bound encloses nothing past the trim's domain; the clamped one holds the true
+    /// distance of `C(0)` from the image, `sqrt((L / 4)^2 + lift^2)` (`L` the line's length),
+    /// and is at most `lift` plus the sliver's `L / 4`, within the bisection's closing fraction.
+    #[test]
+    fn a_trim_clamped_inside_the_range_is_bounded() {
+        let t = Top::new();
+        let lift = 1.0 / 4096.0;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let mid = [0.325, 0.375];
+        let (pa, pb) = (t.point(a, lift), t.point(b, lift));
+        let curve = Top::curve(&[pa, pb], 1, vec![0.0, 0.0, 1.0, 1.0], false);
+        let trim = Top::curve(&[t.uv(mid), t.uv(b)], 1, vec![0.25, 0.25, 1.0, 1.0], true);
+        let unclamped =
+            trim_image_gap_bound(&t.k, &t.surface, &curve, &trim, [0.0, 1.0], 1e-9).unwrap();
+        assert!(unclamped.is_none());
+        let g = clamped_trim_gap_bound(&t.k, &t.surface, &curve, &trim, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        let quarter = 0.25 * pa.distance(pb);
+        let truth = (quarter * quarter + lift * lift).sqrt();
+        assert!(g >= truth, "{g:e} against {truth:e}");
+        assert!(
+            g <= (lift + quarter) * (1.0 + 2.0 * CLOSE_RELATIVE),
+            "{g:e} against {:e}",
+            lift + quarter
+        );
+        // a trim whose domain holds the range is not this case
+        let whole = Top::curve(&[t.uv(a), t.uv(b)], 1, vec![0.0, 0.0, 1.0, 1.0], true);
+        assert!(
+            clamped_trim_gap_bound(&t.k, &t.surface, &curve, &whole, [0.0, 1.0], 1e-9)
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn trim_subdivision_reuses_certified_endpoints() {
         let t = Top::new();
@@ -4175,6 +5071,59 @@ mod tests {
         let slip = (t.point([0.45, 0.45], 0.0) - curve.evaluate_point(&t.k, 0.5).unwrap()).length();
         assert!(slip > 100.0 * lift, "{slip:e}");
         let g = t.bound(&curve, &trim).unwrap();
+        assert!(
+            g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE),
+            "{g:e} against {lift:e}"
+        );
+    }
+
+    /// WR-450 (#18923): the slipping trim of the test above, and the same trim with the curve's
+    /// middle point at the line's centre (no slip). The same-parameter bound counts the slip
+    /// (it is at least the gap at `t = 0.5`, an outward-rounded witness) where the Hausdorff
+    /// bound does not, and with `over` below it the bound is turned away as infinite; without
+    /// slip it is within the bisection's closing fraction of `lift`, as the Hausdorff bound.
+    #[test]
+    fn a_same_parameter_bound_counts_the_slip() {
+        let t = Top::new();
+        let lift = 3.0e-4;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let trim = Top::curve(&[t.uv(a), t.uv(b)], 1, vec![0.0, 0.0, 1.0, 1.0], true);
+        let quadratic = |mid: [f64; 2]| {
+            Top::curve(
+                &[t.point(a, lift), t.point(mid, lift), t.point(b, lift)],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                false,
+            )
+        };
+        let same = |curve: &Curve, over: f64| {
+            trim_same_parameter_gap_bound_within(
+                &t.k,
+                &t.surface,
+                curve,
+                &trim,
+                [0.0, 1.0],
+                1e-9,
+                [f64::NEG_INFINITY, over],
+                None,
+            )
+            .unwrap()
+        };
+        let slipping = quadratic([0.2 + 0.7 * 0.5, 0.3 + 0.7 * 0.3]);
+        let w = trim.evaluate_point(&t.k, 0.5).unwrap();
+        let at_half = (t
+            .surface
+            .evaluate_point(&t.k, Point2::new(w.x, w.y))
+            .unwrap()
+            - slipping.evaluate_point(&t.k, 0.5).unwrap())
+        .length();
+        assert!(at_half > 100.0 * lift, "{at_half:e}");
+        let g = same(&slipping, f64::INFINITY).unwrap();
+        assert!(g >= at_half, "{g:e} against {at_half:e}");
+        assert!(t.bound(&slipping, &trim).unwrap() < 2.0 * lift);
+        assert_eq!(same(&slipping, 10.0 * lift), Some(f64::INFINITY));
+        let even = quadratic([0.45, 0.45]);
+        let g = same(&even, f64::INFINITY).unwrap();
         assert!(
             g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE),
             "{g:e} against {lift:e}"
@@ -6084,6 +7033,118 @@ mod tests {
             structured_trim_gap_bound(&off_weight, &wn, &probed, [0.0, 1.0]),
             None
         );
+    }
+
+    /// The largest distance between `curve` and the image of `trim` on `s` at equal
+    /// parameters, sampled at 2001 points of `range`: a lower bound on the same-parameter gap.
+    fn sampled_same_parameter_gap(
+        k: &Kernel,
+        s: &Surface,
+        curve: &Curve,
+        trim: &Curve,
+        [lo, hi]: [f64; 2],
+    ) -> f64 {
+        (0..=2000)
+            .map(|i| {
+                let t = lo + (hi - lo) * f64::from(i) / 2000.0;
+                let c = curve.evaluate_point(k, t).unwrap();
+                let w = trim.evaluate_point(k, t).unwrap();
+                let p = s.evaluate_point(k, Point2::new(w.x, w.y)).unwrap();
+                ((c.x - p.x).powi(2) + (c.y - p.y).powi(2) + (c.z - p.z).powi(2)).sqrt()
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// #22034: every trim of a cylinder's edges (the circles on the caps, a trim on a plane
+    /// with the circle's knots and weights; the circles on the side, along its net's rows; the
+    /// seam line, a piece of a line's long domain along the side's first and last columns) is
+    /// proved within `1e-5` of its edge at equal parameters by its control points at once, as
+    /// a boolean's carried trims are gated: no bisection runs, and each bound is at least the
+    /// gap sampled at equal parameters.
+    #[test]
+    fn a_cylinders_trims_are_proved_at_equal_parameters_without_bisecting_them() {
+        let (k, trims) = cylinder_trims();
+        let mut lines = 0;
+        for (s, curve, trim, range) in &trims {
+            let before = k.work_counters.same_parameter_bisections();
+            let g = trim_same_parameter_gap_bound_within(
+                &k,
+                s,
+                curve,
+                trim,
+                *range,
+                1e-8,
+                [1e-5, 1e-5],
+                Some(MAX_PIECES),
+            )
+            .unwrap();
+            let Some(g) = g else {
+                // (a pair with no exact data to bound it from: a UV line's)
+                continue;
+            };
+            let line = matches!(curve.kind(), crate::curve::curve::CurveKind::Line(_));
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "the trim over {range:?} (a line: {line}) was bisected"
+            );
+            assert!(g <= 1e-9, "{g:e}");
+            let sampled = sampled_same_parameter_gap(&k, s, curve, trim, *range);
+            assert!(g >= sampled, "{g:e} under the sampled {sampled:e}");
+            lines += usize::from(line);
+        }
+        assert!(lines >= 2, "{lines} seam line trims bounded");
+    }
+
+    /// #22034: no pass-over at equal parameters. The side's circle with the row's control
+    /// points but its knots moved (each knot `t` to `t² (3 − 2t)`, so the arcs run at other
+    /// speeds) is the same set as the row: a reparametrisation `ψ` takes one onto the other,
+    /// and the structured bound of a trim's image (`ψ` free) is a rounding. At equal parameters
+    /// the two are far apart, and the bound there counts it: it is at least the gap sampled at
+    /// equal parameters, over `1e-5`, so a carried trim like it is turned away.
+    #[test]
+    fn a_same_parameter_bound_counts_how_far_the_structured_map_slips() {
+        let (k, s, net, _) = side_row();
+        let (u0, u1) = (net.u[0], net.u[net.u.len() - 1]);
+        let v1 = net.v[net.v.len() - 1];
+        // (the row at the top, as `side_row` takes it, over the moved knots)
+        let knots = net
+            .u
+            .iter()
+            .map(|x| x / u1)
+            .map(|t| t * t * (3.0 - 2.0 * t))
+            .collect();
+        let cps = (0..net.nu)
+            .map(|i| {
+                let q = &net.pw[4 * (2 * i + 1)..4 * (2 * i + 2)];
+                CPoint::new(q[0], q[1], q[2], q[3])
+            })
+            .collect();
+        let slipped = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(cps, net.p, knots).unwrap(),
+            3,
+            false,
+        ));
+        let trim = iso_trim(u0, u1, v1);
+        let (cn, wn, probed) = trim_data(&k, &s, &slipped, &trim, [0.0, 1.0]);
+        let free = structured_trim_gap_bound(&cn, &wn, &probed, [0.0, 1.0]).unwrap();
+        assert!(free <= 1e-9, "{free:e}");
+        let sampled = sampled_same_parameter_gap(&k, &s, &slipped, &trim, [0.0, 1.0]);
+        assert!(sampled > 1e-2, "{sampled:e}");
+        let same = structured_trim_gap_bound_as(&cn, &wn, &probed, [0.0, 1.0], true).unwrap();
+        assert!(same >= sampled, "{same:e} under the sampled {sampled:e}");
+        let gate = trim_same_parameter_gap_bound_within(
+            &k,
+            &s,
+            &slipped,
+            &trim,
+            [0.0, 1.0],
+            1e-8,
+            [1e-5, 1e-5],
+            Some(MAX_PIECES),
+        )
+        .unwrap();
+        assert!(gate.is_some_and(|g| g > 1e-5), "{gate:?}");
     }
 
     /// #20373: the same side with `u` and `v` swapped (as the stitch's orientation leaves an

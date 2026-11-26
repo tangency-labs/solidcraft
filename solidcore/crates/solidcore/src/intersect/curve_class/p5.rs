@@ -66,6 +66,7 @@ use super::p6::{
 use super::{
     make_consistent_classifications, src_zone_tol_3d_of, CurveClassification, CurveInterval,
 };
+use crate::curve::contact::NativeSupport;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::intersect::IntersectFailure;
@@ -80,8 +81,8 @@ use crate::geom::tol::{
     map_to_1d_on_curve, xsect_tol3d, xsect_tol_3d_from_zones, ANG_TOL_DEG, USE_DEFAULT,
 };
 use crate::intersect::point_class::{
-    object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
-    PointClassification,
+    object_zone_tol_3d, periodic_trim_witness, ClassGeometry, ClassObject, ClassObjectKind,
+    PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max3, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
@@ -978,6 +979,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 has_big_gaps,
                 tolerance,
             )?;
+            let ordinary_contact =
+                !has_big_gaps && !self.doing_fillets() && !pole && wrapped.is_none();
             // (not upstream, with `Kernel::memoize_curve_caches`) a vertex farther from the
             // curve's reach than the drop's tolerance has no solution: it is passed over
             // after everything above, which may fail, and before anything that may edit
@@ -1005,6 +1008,24 @@ impl<O: ClassObject> CurveClassification<O> {
                     let margin = tolerance
                         + 1e-9 * (1.0 + b.max_dimension().abs() + point.max_dimension().abs());
                     if !b.contains_point(point, margin) {
+                        continue;
+                    }
+                }
+            }
+            // A periodic marker is excluded only with its whole material rim.
+            // Other vertices keep the existing tolerant classification.
+            if ordinary_contact {
+                if let Some(marker) = periodic_trim_witness(k, geometry, vertex)? {
+                    let curve = self.curve_geometry(geometry)?;
+                    if NativeSupport::curve(curve, &self.interval()).is_some_and(|source| {
+                        marker.excluded_by(
+                            k,
+                            &source,
+                            source_zone,
+                            vertex_zone,
+                            self.native_foreign_support(),
+                        )
+                    }) {
                         continue;
                     }
                 }
@@ -2015,10 +2036,28 @@ fn edge_end_vertex_snap<O: ClassObject>(
 
         // check the EdgeEnd/Vertex distance (EvaluatePoint's status is ignored)
         let edge_end_pt = ignored(edge_curve.evaluate_point(k, param))?.unwrap_or(Point3::UNDEF);
-        let dist = edge_end_pt.distance(super::p3::vertex_point(geometry, vtx)?);
+        let vertex_point = super::p3::vertex_point(geometry, vtx)?;
+        let dist = edge_end_pt.distance(vertex_point);
 
         // if EdgeEnd/Vertex distance < XSectTol3d(Vtx,ClassCurve) - snap to vertex
         if dist < cc_vtx_xsect_tol {
+            if classification.native_material_contacts() {
+                if let Some(marker) = periodic_trim_witness(k, geometry, vtx)? {
+                    if NativeSupport::curve(source, &classification.interval()).is_some_and(
+                        |support| {
+                            marker.excluded_by(
+                                k,
+                                &support,
+                                source_zone,
+                                vtx_zone,
+                                classification.native_foreign_support(),
+                            )
+                        },
+                    ) {
+                        continue;
+                    }
+                }
+            }
             // Don't add this vertex as a PointClassification if it would make a
             // sub-tolerant CurveInterval, where both ends are this vertex [B678]
             let touches = classification.point_classifies_connected_to(geometry, &[vtx])?;
