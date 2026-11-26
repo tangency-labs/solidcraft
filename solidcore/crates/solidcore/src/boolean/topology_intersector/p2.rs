@@ -1417,6 +1417,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             self.vertices_on_edges.push((nv, v));
         }
         let coincident_edges = coincident_line_edges(k, brep, this, other)?;
+        self.coincident_line_edges.clone_from(&coincident_edges);
 
         // A proto vertex's ball never reaches two distinct vertices of one operand. Two
         // vertices a distance d apart are never both closer than d / 2 to one point, so the
@@ -1646,6 +1647,49 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .is_none()
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
+        // Not upstream: face pairs whose boundaries share a pre-mated coincident line edge
+        // pair (`coincident_line_edges`). Parallel planar faces in this set must check surface
+        // coincidence at the same intersection tolerance so `intersect_topology` agrees with
+        // the edge mates already declared at `xsect_tol_3d_from_zones`.
+        let coincident_face_pairs: std::collections::BTreeSet<(O, O)> =
+            if self.coincident_line_edges.is_empty() {
+                std::collections::BTreeSet::new()
+            } else {
+                let mut left_faces: std::collections::BTreeMap<O, Vec<O>> =
+                    std::collections::BTreeMap::new();
+                let mut right_faces: std::collections::BTreeMap<O, Vec<O>> =
+                    std::collections::BTreeMap::new();
+                for &(e1, e2) in &self.coincident_line_edges {
+                    left_faces.entry(e1).or_default();
+                    right_faces.entry(e2).or_default();
+                }
+                for &f1 in &faces1 {
+                    for e in brep.face_edges(f1)? {
+                        if let Some(list) = left_faces.get_mut(&e) {
+                            list.push(f1);
+                        }
+                    }
+                }
+                for &f2 in &faces2 {
+                    for e in brep.face_edges(f2)? {
+                        if let Some(list) = right_faces.get_mut(&e) {
+                            list.push(f2);
+                        }
+                    }
+                }
+                let mut pairs = std::collections::BTreeSet::new();
+                for &(e1, e2) in &self.coincident_line_edges {
+                    if let (Some(fs1), Some(fs2)) = (left_faces.get(&e1), right_faces.get(&e2)) {
+                        for &f1 in fs1 {
+                            for &f2 in fs2 {
+                                pairs.insert((f1, f2));
+                            }
+                        }
+                    }
+                }
+                pairs
+            };
+
         // Finally, the Face-Face intersections: first every pair's curves and points (no
         // proto topology of theirs yet), so that the contacts a rule declares from them are
         // known before the first of their proto vertices is made.
@@ -1766,8 +1810,32 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         }
                     }
                 }
+                // Not upstream: two planar faces that already share a pre-mated coincident line
+                // edge pair (`coincident_line_edges`, decided at `xsect_tol_3d_from_zones`) check
+                // plane coincidence at that same tolerance so parallel faces within `[tol, xsect]`
+                // imprint their remaining edges rather than disagreeing with their mated edges.
+                let coinc_tol = if coincident_face_pairs.contains(&(f1, f2)) {
+                    match (
+                        brep.surface(surf1).and_then(plane_of),
+                        brep.surface(surf2).and_then(plane_of),
+                        ProtoBrep::topology_tolerance(&*brep, f1),
+                        ProtoBrep::topology_tolerance(&*brep, f2),
+                    ) {
+                        (Some(_), Some(_), Some(t1), Some(t2)) => {
+                            let xsect = xsect_tol_3d_from_zones(k, t1, t2);
+                            if xsect.is_finite() {
+                                max2(tol, xsect)
+                            } else {
+                                tol
+                            }
+                        }
+                        _ => tol,
+                    }
+                } else {
+                    tol
+                };
                 let (are_coincident, _coincident_distance) =
-                    surface_coincidence_check(k, brep, surf1, surf2, tol, false)?;
+                    surface_coincidence_check(k, brep, surf1, surf2, coinc_tol, false)?;
 
                 // Not upstream (#15718; replaces WR-614's removal after the fact): two planes
                 // whose crossing lies inside a coincident pair of their faces make no curve,
