@@ -2138,6 +2138,15 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         return;
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
+    // Tangent Arc and Blend Curve take the sketch point itself, since the tangent comes from its
+    // curve. When the Undo button took that point away after the click, the place clicked is no
+    // answer, so the stored click goes and the tool says where to click to start over (#22766).
+    if matches!(tool.cmd, "sketch.arc.tangent" | "sketch.blend_curve") && tool.pts.iter().any(|q| crate::tools::standing(app, q).1 != q.1) {
+        tool.pts.clear();
+        crate::sketch_dims::reset(tool);
+        app.set_status(hint(tool.cmd).unwrap_or_default(), true);
+        return;
+    }
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(tr_engine_error(&error), true);
         return;
@@ -2169,7 +2178,10 @@ fn tangent_start(app: &SolveApp, p: &(Vec2, Option<String>)) -> bool {
 }
 
 fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
-    let p = &t.pts;
+    // A stored click whose snap the Undo button took away goes as the place clicked, as
+    // `run_shape` sends it, so the command does not refuse click after click (#22766).
+    let pts: Vec<_> = t.pts.iter().map(|p| crate::tools::standing(app, p)).collect();
+    let p = &pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
     let slot_width = |fallback: f64| crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| fallback.max(1e-3));
     let params = match (t.cmd, p.as_slice()) {

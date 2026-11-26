@@ -270,7 +270,7 @@ fn snap_stands(app: &SolveApp, id: &str, at: Vec2) -> Option<bool> {
 /// after the click (it leaves the tool on) goes as the place clicked, so the command does not
 /// refuse click after click (#21835), as the Line's chain re-checks its point (#10016). It is
 /// checked when the shape is sent, so a Redo that brings the curve back brings the snap back.
-fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
+pub(crate) fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
     match &p.1 {
         Some(id) if snap_stands(app, id, p.0) == Some(false) => (p.0, None),
         _ => p.clone(),
