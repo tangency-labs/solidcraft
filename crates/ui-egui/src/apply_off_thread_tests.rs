@@ -108,19 +108,14 @@ fn a_pattern_marker_cannot_change_the_copies_after_ok() {
     let mut h = Harness::new();
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"})).unwrap();
-    h.app.run("solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "name": "Copies"})).unwrap();
+    h.app
+        .run("solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "name": "Copies", "skip": [3]}))
+        .unwrap();
     h.call("ui.editFeature", json!({"feature": "Copies"}));
-    h.frames(2);
-    h.app.dialog.as_mut().unwrap().set_pattern_skipped(
-        vec![solidcraft_engine::doc::PatternAddress::Steps(vec![solidcraft_engine::doc::PatternStep(
-            solidcraft_engine::doc::FeatureId::DANGLING,
-            2,
-            0,
-        )])],
-        Vec::new(),
-    );
     h.settle();
-    assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [3]);
+    let dialog = h.app.dialog.as_ref().unwrap();
+    assert!(dialog.pattern_skip_active());
+    assert_eq!(crate::pattern_skip::skipped_handles(&h.app, dialog), [3]);
 
     let _finish = hold_result(&mut h, false);
     crate::pattern_skip::apply_picks(&mut h.app, [2].into_iter(), true);

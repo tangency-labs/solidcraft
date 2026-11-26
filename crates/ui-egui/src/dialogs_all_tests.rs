@@ -3372,6 +3372,8 @@ fn pattern_labels_show_one_placement_number_for_each_opening_in_a_copy() {
     h.call("ui.view", json!({"view":"top"}));
     h.frames(2);
     h.settle();
+    // Leave room for the Restore row below the additional distance controls.
+    h.step(&json!({"click":{"handle":"dialog:section:Direction 2"}})).unwrap();
     let labels: std::collections::BTreeSet<_> =
         (2..6).map(|handle| crate::pattern_skip::marker_label(&h.app, h.app.dialog.as_ref().unwrap(), handle)).collect();
     assert_eq!(labels, ["2 · Pair [0]", "2 · Pair [1]", "3 · Pair [0]", "3 · Pair [1]"].map(str::to_string).into_iter().collect());
