@@ -1384,6 +1384,84 @@ fn a_bead_round_a_rod_on_a_plate_is_sound() {
     }
 }
 
+/// A leg past the end of a curved face has no toe on it, and is refused with the leg that
+/// fits: round the rod on its plate (the rod 40 high, the plate reaching 35 beyond it) a leg
+/// of 45 along either face is refused as `NoToeAtLeg`, naming that face and its leg: the
+/// rod's height on the rod's cylinder, the plate's reach on the plate, each from below and
+/// within the leg search's stop (`1e-7 (1 + 45)`). At the leg named along the rod the bead
+/// builds, and the part's file is unchanged.
+#[test]
+fn a_leg_past_the_end_of_a_rod_is_refused_with_the_leg_that_fits() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::FitMeasure;
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
+    let before = smb(&k, &part);
+    let mut fits = Vec::new();
+    for face in edge::faces(&part, joint, None).unwrap() {
+        let size = ChamferSize::Distances([45.0, 4.0]);
+        let along = [Some(face)];
+        let err = weld_bead_body(
+            &mut k,
+            &mut part,
+            &[joint],
+            &[size],
+            0.0,
+            &along,
+            &[],
+            SQUARE,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+        assert!(
+            matches!(
+                err.blend_failure(),
+                Some(BlendFailure::NoRoom(NoRoomReason::NoToeAtLeg))
+            ),
+            "{err:?}"
+        );
+        let named = err
+            .site()
+            .and_then(|s| s.face)
+            .map(solidcore::error::TargetFace::id);
+        assert_eq!(named, Some(face), "{err:?}");
+        let fit = err.fit().unwrap();
+        assert_eq!(fit.measure, FitMeasure::Leg, "{err:?}");
+        println!("a leg of 45 along {face:?}: {} fits", fit.size);
+        fits.push((fit.size, face));
+    }
+    fits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(fits.len(), 2, "the joint has two faces: {fits:?}");
+    let (Some(&(on_plate, _)), Some(&(on_rod, rod_face))) = (fits.first(), fits.last()) else {
+        panic!("the joint has two faces: {fits:?}");
+    };
+    assert!(
+        on_plate > 35.0 - 1e-5 && on_plate <= 35.0 + 1e-6,
+        "{on_plate}"
+    );
+    assert!(on_rod > 40.0 - 1e-5 && on_rod <= 40.0 + 1e-6, "{on_rod}");
+    let size = ChamferSize::Distances([on_rod, 4.0]);
+    let along = [Some(rod_face)];
+    if let Err(refused) = weld_bead_body(
+        &mut k,
+        &mut part,
+        &[joint],
+        &[size],
+        0.0,
+        &along,
+        &[],
+        SQUARE,
+    ) {
+        panic!("refused at the leg named, {on_rod}: {refused:?}");
+    }
+    assert!(smb(&k, &part) == before, "the part changed");
+}
+
 /// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
 /// and the tubes' file is unchanged.
 #[test]
