@@ -3056,13 +3056,15 @@ fn a_curved_field_edge_touching_a_cell_drops_it_when_the_fields_mode_is_whole_wh
 fn a_notch_a_keep_out_takes_from_a_large_cell_drops_it_though_it_is_a_tiny_share_of_its_area() {
     // Cells of 1e5 x 1e5 mm (area 1e10 mm2) on a pitch with a web of 2 between them, from cell
     // (0, 0) at [0, 1e5]^2. A keep-out of 2 x 2 straddles the right side of cell (0, 0) at its
-    // middle, so it takes a notch of 1 x 2 = 2 mm2 from it: 2e-10 of its area, but far more than
-    // a strip of 1e-6 mm along its outline of 4e5 mm (0.4 mm2). Cells (0, 1), (1, 0) and (1, 1)
-    // are whole; cell (0, 0) is cut by a whole keep-out, so it goes.
+    // middle, so it takes a notch of 1 x 2 = 2 mm2 from it. A keep-out of 2 x 0.1 straddles the
+    // right side of cell (1, 1) (at x = 200002) and takes a notch 1 mm deep and 0.1 mm wide,
+    // 0.1 mm2: 1e-11 of the cell, though 1e6 times the EPS it is measured by. Each cell is cut by
+    // a whole keep-out, so both go; (0, 1) and (1, 0) are whole.
     let side = 1e5;
     let field = [
         rect(-10.0, -10.0, 2.0 * side + 12.0, 2.0 * side + 12.0),
         rect(side - 1.0, 4.9e4, side + 1.0, 4.9e4 + 2.0),
+        rect(2.0 * side + 1.0, 1.5e5, 2.0 * side + 3.0, 1.5e5 + 0.1),
     ];
     let cell = sk_cell(
         rect(0.0, 0.0, side, side),
@@ -3078,7 +3080,26 @@ fn a_notch_a_keep_out_takes_from_a_large_cell_drops_it_though_it_is_a_tiny_share
     let plan = sk_run(&field, &cell, &spec);
     let mut kept: Vec<(i64, i64)> = plan.cells.iter().map(|c| (c.i, c.j)).collect();
     kept.sort_unstable();
-    assert_eq!(kept, vec![(0, 1), (1, 0), (1, 1)]);
+    assert_eq!(kept, vec![(0, 1), (1, 0)]);
+}
+
+#[test]
+fn rows_a_pitch_apart_with_few_neighbours_in_reach_are_planned() {
+    // A strip cell 2098 x 0.5 on rows 1 mm apart, each row shifted 2100 along (pitch_x 1e6, stagger
+    // 0.0021). The reach is 1049 mm, so neighbours are looked for within 2100 mm: 2100 rows, but
+    // a row holds a neighbour only where its shift of 2100 per row, less whole pitches of 1e6,
+    // lands within that: a few of them. The layout is fine (neighbours 2 mm apart along the rows),
+    // so it is planned and cell (0, 0) is whole in the field [0, 3000] x [0, 10].
+    let cell = sk_cell(rect(0.0, 0.0, 2098.0, 0.5), None, 1e6, 1.0, 0.0021);
+    let spec = CellGridSpec {
+        anchor: v(1049.0, 0.25),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(0.0, 0.0, 3000.0, 10.0)], &cell, &spec);
+    assert!(plan
+        .cells
+        .iter()
+        .any(|c| (c.i, c.j) == (0, 0) && c.kind == CellKind::Whole));
 }
 
 #[test]

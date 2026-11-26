@@ -61,6 +61,9 @@ pub const MAX_CELL_SEGMENTS: usize = 256;
 pub const MAX_CELL_REACH: f64 = 1e6;
 /// Most lattice offsets a cell is tested against.
 const MAX_OFFSETS: usize = 2_000;
+/// Most rows of the lattice looked at for neighbours: a row is a few operations, so this bounds the
+/// time, while the neighbours themselves are bounded by [`MAX_OFFSETS`].
+const MAX_OFFSET_ROWS: usize = 100_000;
 /// Smallest area (mm²) of a cell.
 const MIN_CELL_AREA: f64 = MIN_SIZE * MIN_SIZE;
 /// How far inside the web two cells may come and still count as the web apart: a rounding.
@@ -306,18 +309,24 @@ struct Prepared {
     /// Farthest any point of the cell is from its origin.
     reach: f64,
     area: f64,
-    /// Length of the cell's outline.
-    perimeter: f64,
     web: f64,
 }
 
-impl Prepared {
-    /// The area a clipped cell may differ from the whole cell by and still count as unchanged: a
-    /// rounding of the area, but never more than a strip of [`EPS`] along the outline, so a keep-out
-    /// notch deeper than the tolerance of a large cell is not lost.
-    fn unchanged_area(&self) -> f64 {
-        (1e-9 * self.area).min(EPS * self.perimeter)
+/// Whether the clip left the cell as it was: one piece, an outer loop, made only of the cell's own
+/// edges, so that no edge of the field or a keep-out entered it. A piece's edge is the cell's own
+/// when its middle lies within [`EPS`] of the cell's outline, so a notch is seen by its depth, not
+/// by the share of the cell's area it takes. A loss of more than a rounding of the area (1e-9 of
+/// it) is a change at once.
+fn unchanged(pieces: &[(Vec<Prim>, f64)], cell: &[Prim], area: f64) -> bool {
+    let [(prims, piece_area)] = pieces else {
+        return false;
+    };
+    if !((piece_area - area).abs() <= 1e-9 * area) {
+        return false;
     }
+    prims
+        .iter()
+        .all(|p| cell.iter().any(|c| c.distance(p.mid()) <= EPS))
 }
 
 /// What two neighbouring outlines that meet or nest do.
@@ -372,8 +381,11 @@ fn offsets(a: Vec2, b: Vec2, l: f64) -> Result<Vec<(i64, i64)>, CellGridError> {
         ))
     };
     let jmax = (l / b.y).floor();
-    if !(jmax <= MAX_OFFSETS as f64) {
-        return Err(too_many());
+    if !(jmax <= MAX_OFFSET_ROWS as f64) {
+        return Err(CellGridError::Layout(format!(
+            "the row pitch is small for the cell: more than {MAX_OFFSET_ROWS} rows of cells lie \
+             within {l:.1} mm of a cell; use a larger pitch_y or a smaller cell"
+        )));
     }
     let jm = jmax as i64;
     let mut out: Vec<(i64, i64)> = Vec::new();
@@ -514,7 +526,6 @@ fn prepare(cell: &SketchCell, spec: &CellGridSpec) -> Result<Prepared, CellGridE
              has (pitch_x * pitch_y): the cells would overlap; increase the pitch"
         )));
     }
-    let perimeter = even.prims.iter().map(Prim::length).sum::<f64>();
     let prepared = Prepared {
         loops: [even, odd],
         flip: cell.flip,
@@ -522,7 +533,6 @@ fn prepare(cell: &SketchCell, spec: &CellGridSpec) -> Result<Prepared, CellGridE
         b,
         reach,
         area,
-        perimeter,
         web: spec.web,
     };
     check_neighbours(&prepared)?;
@@ -706,10 +716,7 @@ pub fn plan_sketch(
                 ));
                 continue;
             }
-            pieces.len() == 1
-                && pieces
-                    .first()
-                    .is_some_and(|p| (p.1 - prep.area).abs() <= prep.unchanged_area())
+            unchanged(&pieces, &cl.prims, prep.area)
         };
         if full {
             if let Some((field_exact, keepout_exact)) = &exact {
