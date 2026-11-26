@@ -72,6 +72,14 @@ impl NamedFace<'_> {
         solidcraft_kernel::cylinder_face(&self.body.body, &self.body.mesh(), self.face)
     }
 
+    /// The face as a cylindrical or conical round face, in the body's own coordinates.
+    fn own_round(&self) -> Option<RoundFace> {
+        if let Some(cyl) = self.own_cylinder() {
+            return Some(RoundFace { cyl, cone_half_angle: None });
+        }
+        cone_round_in(&self.body.body, self.face)
+    }
+
     /// The face as a cylinder, in the component's coordinates.
     pub fn cylinder(&self) -> Option<CylinderFace> {
         self.own_cylinder().map(|c| placed(&self.offset, c))
@@ -141,11 +149,66 @@ pub(super) fn placed(m: &Mat, c: CylinderFace) -> CylinderFace {
     CylinderFace { axis_point: apply_point(m, c.axis_point), axis: apply_vector(m, *c.axis).unit().unwrap_or(c.axis), ..c }
 }
 
-/// The face across the rim at the `at` end (along the axis) of cylinder `c`, face `face` of `b`
+/// A cylindrical or conical face of a body (in the body's own coordinates).
+/// For a cone, `cyl.axis_point` is the apex, `cyl.axis` points into the cone, and
+/// `cone_half_angle` is `Some(half_angle)`, so the radius at axial coordinate `s` is
+/// `s * half_angle.tan()`.
+#[derive(Clone, Copy)]
+struct RoundFace {
+    cyl: CylinderFace,
+    cone_half_angle: Option<f64>,
+}
+
+impl RoundFace {
+    fn is_cone(&self) -> bool {
+        self.cone_half_angle.is_some()
+    }
+
+    fn radius_at(&self, at: f64) -> f64 {
+        match self.cone_half_angle {
+            Some(h) => (at * h.tan()).abs(),
+            None => self.cyl.radius,
+        }
+    }
+
+    fn at_end(&self, chosen: (f64, f64), offset: &Mat) -> Round {
+        let mut c = self.cyl;
+        c.radius = self.radius_at(chosen.0);
+        Round::at(placed(offset, c), chosen)
+    }
+
+    /// Valid circular rim ends `(at, dir)` along `cyl.axis`. A pointed cone reaching its apex has
+    /// only its larger end; a cylinder or frustum has both.
+    fn valid_ends(&self, body_size: f64) -> Vec<(f64, f64)> {
+        let Some(h) = self.cone_half_angle else {
+            return ends(&self.cyl).to_vec();
+        };
+        let tol = (body_size * 1e-6).max(1e-6);
+        let tan_h = h.tan();
+        let mut out = Vec::new();
+        if self.cyl.start * tan_h > tol && (self.cyl.end - self.cyl.start).abs() > tol {
+            out.push((self.cyl.start, -1.0));
+        }
+        if self.cyl.end * tan_h > tol {
+            out.push((self.cyl.end, 1.0));
+        }
+        out
+    }
+}
+
+/// Face `face` of `body` as a conical round face (exact B-rep, no display mesh).
+fn cone_round_in(body: &solidcraft_kernel::Body, face: usize) -> Option<RoundFace> {
+    let (cyl, half_angle) = solidcraft_kernel::cone_face(body, face)?;
+    let rf = RoundFace { cyl, cone_half_angle: Some(half_angle) };
+    (!rf.valid_ends(body.size()).is_empty()).then_some(rf)
+}
+
+/// The face across the rim at the `at` end (along the axis) of round face `c`, face `face` of `b`
 /// (the body's own coordinates): of the body's other faces, the one nearest the rim's points.
 fn rim_neighbour(b: &ModelBody, face: usize, c: &CylinderFace, at: f64) -> Option<usize> {
     let mesh = b.mesh();
-    let slack = (c.end - c.start).abs() * 1e-3 + 1e-9;
+    let span = (c.end - c.start).abs();
+    let slack = if span > 1e-9 { span * 1e-3 + 1e-9 } else { c.radius * 1e-3 + 1e-9 };
     let mut rim: Vec<Vec3> = Vec::new();
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if *f as usize != face {
@@ -200,11 +263,19 @@ fn nearer_end(c: &CylinderFace, pick: Vec3) -> (f64, f64) {
 }
 
 /// The end a named round face takes without an `end` (a design saved before origins named
-/// it): the one nearer the pick (moved onto the face) along the axis, decided as those builds
-/// decided it, by the kernel's reading of the cylinder at the pick, so a pick midway along the
-/// wall takes the same end as it did then. `own` is the face's cylinder (the body's own
-/// coordinates).
-fn end_by_pick(nf: &NamedFace, own: &CylinderFace) -> (f64, f64) {
+/// it): the one nearer the pick along the axis, decided as those builds decided it for cylinders
+/// (by the kernel's reading of the cylinder at the pick, so a pick midway along the wall takes
+/// the same end as it did then). For a cone, uses `raw_pick` directly so a centre pick on a
+/// chamfer's wide rim isn't pulled axially toward its narrower rim.
+fn end_by_pick(nf: &NamedFace, own: &RoundFace, raw_pick: Vec3) -> (f64, f64) {
+    if own.is_cone() {
+        let candidates = own.valid_ends(nf.body.body.size());
+        return match candidates.as_slice() {
+            [only] => *only,
+            _ => nearer_end(&own.cyl, nf.local(raw_pick)),
+        };
+    }
+    let own = &own.cyl;
     let pick = nf.local(nf.point);
     let [start, end] = ends(own);
     match solidcraft_kernel::cylinder_face_at(&nf.body.body, pick).filter(|k| k.axis.dot(own.axis).abs() > 0.5) {
@@ -231,37 +302,259 @@ impl Round {
     }
 }
 
-/// A circle-centre snap's cylinder found through its named face (`None`: the snap names no
-/// face, or the face is not a cylinder any more; the caller looks by point, as older builds
-/// did). The end is the one whose rim meets the face called `end`, else the one nearer `pick`.
-pub(super) fn named_round(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face: &str, end: Option<&str>) -> Result<Option<Round>> {
-    let nf = named_face(doc, st, component, pick, face)?;
-    let Some(own) = nf.own_cylinder() else { return Ok(None) };
-    let chosen = end.and_then(|name| end_named(nf.body, nf.face, &own, name)).unwrap_or_else(|| end_by_pick(&nf, &own));
-    Ok(Some(Round::at(placed(&nf.offset, own), chosen)))
+/// How stored face name `name` matches face `f` of `b`.
+fn face_name_match(b: &ModelBody, names: &crate::history_names::Names, f: usize, name: &str) -> Option<Match> {
+    if crate::name_lookup::legacy_name(name).is_some() {
+        return crate::name_lookup::face_has_name(b, f, name).then_some(Match::Exact);
+    }
+    match crate::history_names::matches(names, f, name) {
+        Some(Match::Stem) if crate::name_lookup::unique_resuffixed_on_body(names, name) == Some(f) => Some(Match::Piece),
+        other => other,
+    }
 }
 
-/// The end of cylinder `own` (face `face` of `b`) whose rim meets the face called `name` better
+/// Faces of `b` sharing a B-rep edge with `face` (other than `face` itself), as `(other_face, edge)`.
+fn adjacent_faces(b: &ModelBody, face: usize) -> Vec<(usize, usize)> {
+    let record = b.body.record();
+    let mut out = Vec::new();
+    for edge in solidcraft_kernel::face_edge_indices(&b.body, face) {
+        let Some(e) = record.edges.get(edge) else { continue };
+        for u in &e.uses {
+            let other = u.face as usize;
+            if other != face {
+                out.push((other, edge));
+            }
+        }
+    }
+    out
+}
+
+/// Whether `face` on `b` is a coaxial cone (chamfer/countersink) or torus (fillet) on `own`'s axis.
+fn is_coaxial_bevel(b: &ModelBody, face: usize, own: &CylinderFace) -> bool {
+    let tol = (b.body.size() * 1e-5).max(1e-3);
+    let (pt, axis) = match solidcraft_kernel::face_surface(&b.body, face) {
+        Some(solidcraft_kernel::FaceSurface::Cone { apex, axis, .. }) => (apex, axis),
+        Some(solidcraft_kernel::FaceSurface::Torus { center, axis, .. }) => (center, axis),
+        _ => return false,
+    };
+    if (*axis - *own.axis).len() > 1e-3 && (*axis + *own.axis).len() > 1e-3 {
+        return false;
+    }
+    Plane::from_normal(own.axis_point, *own.axis).is_some_and(|pl| pl.to_local(pt).len() <= tol)
+}
+
+/// Coaxial bevel faces (chamfers, countersinks, fillets) meeting cylinder `face` at its `at` rim.
+fn rim_bevels(b: &ModelBody, face: usize, own: &CylinderFace, at: f64) -> Vec<usize> {
+    let tol = (b.body.size() * 1e-5).max(1e-3);
+    let at_point = own.axis_point + own.axis * at;
+    let mut out = Vec::new();
+    for (other, edge) in adjacent_faces(b, face) {
+        if !is_coaxial_bevel(b, other, own) {
+            continue;
+        }
+        if let Some(ec) = solidcraft_kernel::edge_circle(&b.body, edge)
+            && ec.center.dist(at_point) <= tol
+            && !out.contains(&other)
+        {
+            out.push(other);
+        }
+    }
+    if out.is_empty()
+        && let Some(other) = rim_neighbour(b, face, own, at)
+        && is_coaxial_bevel(b, other, own)
+    {
+        out.push(other);
+    }
+    out
+}
+
+/// The axial coordinate along `own` where `own`'s axis meets face `adj` across `bevel` (moving
+/// outward from `at` in direction `dir`), if `adj` lies on that side of `at`.
+fn axial_at_end_face(b: &ModelBody, own: &CylinderFace, (at, dir): (f64, f64), bevel: usize, adj: usize) -> Option<f64> {
+    let tol = (b.body.size() * 1e-5).max(1e-3);
+    let at_point = own.axis_point + own.axis * at;
+    let out = *own.axis * dir;
+    for (other, edge) in adjacent_faces(b, bevel) {
+        if other != adj {
+            continue;
+        }
+        if let Some(ec) = solidcraft_kernel::edge_circle(&b.body, edge)
+            && ((*ec.axis - *own.axis).len() <= 1e-3 || (*ec.axis + *own.axis).len() <= 1e-3)
+        {
+            let shift = ec.center.dist(at_point);
+            if (at_point + out * shift).dist(ec.center) <= tol {
+                return Some(at + dir * shift);
+            }
+        }
+    }
+    let plane @ solidcraft_kernel::FaceSurface::Plane { .. } = solidcraft_kernel::face_surface(&b.body, adj)? else {
+        return None;
+    };
+    let q0 = plane.nearest(at_point)?;
+    let s0 = at_point.dist(q0);
+    if s0 <= tol {
+        return Some(at);
+    }
+    let p1 = at_point + out;
+    let q1 = plane.nearest(p1)?;
+    let (v0, v1) = (q0 - at_point, q1 - p1);
+    let s1 = v1.len();
+    let same_side = (v1 - v0).len() < (v1 + v0).len();
+    let rate = if same_side { s0 - s1 } else { s0 + s1 };
+    if rate <= 1e-6 {
+        return None;
+    }
+    let shift = s0 / rate;
+    let hit = at_point + out * shift;
+    (shift >= -tol && shift <= b.body.size() && plane.nearest(hit).is_some_and(|q| q.dist(hit) <= tol)).then_some(at + dir * shift)
+}
+
+/// Faces reachable from cylinder `face` at end `(at, dir)` across one or two coaxial bevels
+/// (chamfers, countersinks, fillets), with the axial coordinate where `own`'s axis meets each
+/// face.
+fn bevel_end_faces(b: &ModelBody, face: usize, own: &CylinderFace, (at, dir): (f64, f64)) -> Vec<(usize, f64)> {
+    if b.body.is_mesh() {
+        return Vec::new();
+    }
+    let mut seen = vec![face];
+    let mut frontier = rim_bevels(b, face, own, at);
+    seen.extend(frontier.iter().copied());
+    let mut out: Vec<(usize, f64)> = Vec::new();
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for bevel in frontier {
+            for (adj, _) in adjacent_faces(b, bevel) {
+                if seen.contains(&adj) {
+                    continue;
+                }
+                if is_coaxial_bevel(b, adj, own) {
+                    seen.push(adj);
+                    next.push(adj);
+                } else if let Some(t) = axial_at_end_face(b, own, (at, dir), bevel, adj)
+                    && !out.iter().any(|&(f, _)| f == adj)
+                {
+                    out.push((adj, t));
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    out
+}
+
+/// When a chamfer or fillet is added to a cylinder's rim, the cylinder no longer directly meets
+/// the face `name` across that rim: a coaxial cone or torus now sits between them. Walk across up
+/// to two coaxial bevel faces from each cylinder end to find `name`, keeping the origin on `name`
+/// instead of shifting inward to the recessed cylinder end.
+fn end_across_bevel(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Option<(f64, f64)> {
+    if b.body.is_mesh() {
+        return None;
+    }
+    let names = crate::naming::names(b);
+    let find = |end: (f64, f64)| -> Option<(Match, f64)> {
+        let mut best: Option<(Match, f64)> = None;
+        for (adj, t) in bevel_end_faces(b, face, own, end) {
+            if let Some(m) = face_name_match(b, &names, adj, name)
+                && best.is_none_or(|(bm, _)| m > bm)
+            {
+                best = Some((m, t));
+            }
+        }
+        best
+    };
+    let [start, end] = ends(own);
+    match (find(start), find(end)) {
+        (Some((ms, ts)), Some((me, te))) => {
+            if ms > me {
+                Some((ts, start.1))
+            } else if me > ms {
+                Some((te, end.1))
+            } else {
+                None
+            }
+        }
+        (Some((_, ts)), None) => Some((ts, start.1)),
+        (None, Some((_, te))) => Some((te, end.1)),
+        (None, None) => None,
+    }
+}
+
+/// A circle-centre snap's cylinder or cone found through its named face (`None`: the snap names no
+/// face, or the face is not round any more; the caller looks by point, as older builds did). The
+/// end is the one whose rim meets the face called `end` (directly or across an added chamfer or
+/// fillet), else the one nearer `pick`.
+pub(super) fn named_round(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face: &str, end: Option<&str>) -> Result<Option<Round>> {
+    let nf = named_face(doc, st, component, pick, face)?;
+    let Some(own) = nf.own_round() else { return Ok(None) };
+    let chosen = end
+        .and_then(|name| {
+            end_named(nf.body, nf.face, &own, name).or_else(|| (!own.is_cone()).then(|| end_across_bevel(nf.body, nf.face, &own.cyl, name)).flatten())
+        })
+        .unwrap_or_else(|| end_by_pick(&nf, &own, pick));
+    Ok(Some(own.at_end(chosen, &nf.offset)))
+}
+
+/// A conical round face at `pick` (component coordinates) and its circular rim end nearer `pick`,
+/// for an unnamed circle-centre snap on a chamfer or countersink rim.
+pub(super) fn cone_round_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3) -> Option<Round> {
+    let mut best: Option<(f64, Round)> = None;
+    for b in component_bodies(doc, st, component) {
+        if b.body.is_mesh() {
+            continue;
+        }
+        let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
+        let p = apply_point(&mat_inverse(&offset)?, pick);
+        let size = b.body.size();
+        let tol = (size * 1e-3).max(1e-3);
+        for f in 0..b.body.face_count() {
+            let Some(surf @ solidcraft_kernel::FaceSurface::Cone { .. }) = solidcraft_kernel::face_surface(&b.body, f) else {
+                continue;
+            };
+            let Some((cyl, half_angle)) = solidcraft_kernel::cone_face(&b.body, f) else { continue };
+            let rf = RoundFace { cyl, cone_half_angle: Some(half_angle) };
+            let candidates = rf.valid_ends(size);
+            if candidates.is_empty() {
+                continue;
+            }
+            let Some(q) = surf.nearest(p) else { continue };
+            let sq = q.dist(cyl.axis_point) * half_angle.cos();
+            let off = if sq >= cyl.start && sq <= cyl.end {
+                q.dist(p)
+            } else {
+                let sc = sq.clamp(cyl.start, cyl.end);
+                let rim_pt = if sq > 1e-12 { cyl.axis_point + (q - cyl.axis_point) * (sc / sq) } else { cyl.axis_point + cyl.axis * sc };
+                rim_pt.dist(p)
+            };
+            if off <= tol && best.as_ref().is_none_or(|(bo, _)| off < *bo) {
+                let chosen = candidates.into_iter().min_by(|(a, _), (b, _)| (sq - *a).abs().total_cmp(&(sq - *b).abs()))?;
+                best = Some((off, rf.at_end(chosen, &offset)));
+            }
+        }
+    }
+    best.map(|(_, r)| r)
+}
+
+/// The end of round face `own` (face `face` of `b`) whose rim meets the face called `name` better
 /// than the other end's rim does: the very face, or one merged into it, else a piece of it whose
 /// neighbours have changed (the face round a hole in a sheet is told apart from its other pieces
 /// by the faces around it, and those change when the hole moves). `None` when neither rim, or
 /// both, meet it as well.
-fn end_named(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Option<(f64, f64)> {
+fn end_named(b: &ModelBody, face: usize, own: &RoundFace, name: &str) -> Option<(f64, f64)> {
     let names = crate::naming::names(b);
-    let how = |at: f64| {
-        let f = rim_neighbour(b, face, own, at)?;
-        if crate::name_lookup::legacy_name(name).is_some() {
-            return crate::name_lookup::face_has_name(b, f, name).then_some(Match::Exact);
+    let candidates = own.valid_ends(b.body.size());
+    match candidates.as_slice() {
+        [only] => rim_neighbour(b, face, &own.cyl, only.0).and_then(|f| face_name_match(b, &names, f, name)).map(|_| *only),
+        [start, end] => {
+            let how = |at: f64| rim_neighbour(b, face, &own.cyl, at).and_then(|f| face_name_match(b, &names, f, name));
+            match (how(start.0), how(end.0)) {
+                (s, e) if s > e => Some(*start),
+                (s, e) if e > s => Some(*end),
+                _ => None,
+            }
         }
-        match crate::history_names::matches(&names, f, name) {
-            Some(Match::Stem) if crate::name_lookup::unique_resuffixed_on_body(&names, name) == Some(f) => Some(Match::Piece),
-            other => other,
-        }
-    };
-    let [start, end] = ends(own);
-    match (how(start.0), how(end.0)) {
-        (s, e) if s > e => Some(start),
-        (s, e) if e > s => Some(end),
         _ => None,
     }
 }
@@ -481,14 +774,38 @@ pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3,
             continue;
         }
         for (f, d) in near.into_iter().filter(|(_, d)| *d <= nearest + tol) {
-            let (off, cylinder) = match solidcraft_kernel::face_surface(&b.body, f) {
-                Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) => (d.min((p - point).dot(normal).abs()), false),
+            let (off, round_bonus) = match solidcraft_kernel::face_surface(&b.body, f) {
+                Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) => (d.min((p - point).dot(normal).abs()), 0.0),
                 Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
-                    (solidcraft_kernel::cylinder_face(&b.body, &mesh, f).map_or(d, |c| d.min(c.off(p))), true)
+                    let off = solidcraft_kernel::cylinder_face(&b.body, &mesh, f).map_or(d, |c| d.min(c.off(p)));
+                    (off, if round { tol + 1e-6 * tol } else { 0.0 })
                 }
-                _ => (d, false),
+                Some(surf @ solidcraft_kernel::FaceSurface::Cone { .. }) => match solidcraft_kernel::cone_face(&b.body, f) {
+                    Some((c, half_angle)) => {
+                        let v = p - c.axis_point;
+                        let along = v.dot(c.axis);
+                        let radial = (v - c.axis * along).len();
+                        let exact = match surf.nearest(p) {
+                            Some(q) => {
+                                let sq = (q - c.axis_point).dot(c.axis);
+                                if sq >= c.start && sq <= c.end {
+                                    q.dist(p)
+                                } else {
+                                    let clamped = sq.clamp(c.start, c.end);
+                                    let dr = radial - clamped * half_angle.tan();
+                                    let ds = along - clamped;
+                                    (dr * dr + ds * ds).sqrt()
+                                }
+                            }
+                            None => d,
+                        };
+                        (d.min(exact), if round { tol } else { 0.0 })
+                    }
+                    None => (d, 0.0),
+                },
+                _ => (d, 0.0),
             };
-            let score = if round && cylinder { off - tol } else { off };
+            let score = off - round_bonus;
             if best.as_ref().is_none_or(|(s, ..)| score < *s) {
                 best = Some((score, b, f));
             }
@@ -499,17 +816,22 @@ pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3,
 }
 
 /// Whether the face called `name` nearest `pick` (the component's coordinates) on the bodies of
-/// `component` is round: a cylinder, as its exact surface says. `false` when no face has that name.
+/// `component` is round: a cylinder or cone, as its exact surface says. `false` when no face has
+/// that name.
 pub fn face_is_round(doc: &Document, st: &ModelState, component: u64, pick: Vec3, name: &str) -> bool {
-    named_face(doc, st, component, pick, name)
-        .is_ok_and(|f| matches!(solidcraft_kernel::face_surface(&f.body.body, f.face), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })))
+    named_face(doc, st, component, pick, name).is_ok_and(|f| {
+        matches!(
+            solidcraft_kernel::face_surface(&f.body.body, f.face),
+            Some(solidcraft_kernel::FaceSurface::Cylinder { .. } | solidcraft_kernel::FaceSurface::Cone { .. })
+        )
+    })
 }
 
-/// A circle-centre snap for the round end of a component's cylindrical face centred at
+/// A circle-centre snap for the round end of a component's cylindrical or conical face centred at
 /// `centre` (the component's coordinates; a circle given by its centre, where no face lies),
-/// with the face's name and its end's: `None` when no named cylinder ends there.
+/// with the face's name and its end's: `None` when no named cylinder or cone ends there.
 pub fn round_end_at(doc: &Document, st: &ModelState, component: u64, centre: Vec3) -> Option<Snap> {
-    let mut best: Option<(f64, &ModelBody, usize, CylinderFace, f64)> = None;
+    let mut best: Option<(f64, bool, &ModelBody, usize, CylinderFace, f64)> = None;
     for b in component_bodies(doc, st, component) {
         if b.body.is_mesh() {
             continue;
@@ -517,20 +839,28 @@ pub fn round_end_at(doc: &Document, st: &ModelState, component: u64, centre: Vec
         let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
         let p = apply_point(&mat_inverse(&offset)?, centre);
         let mesh = b.mesh();
-        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let size = b.body.size();
+        let tol = (size * 1e-3).max(1e-3);
         for f in 0..b.body.face_count() {
-            let Some(c) = solidcraft_kernel::cylinder_face(&b.body, &mesh, f) else { continue };
+            let Some(rf) = solidcraft_kernel::cylinder_face(&b.body, &mesh, f)
+                .map(|cyl| RoundFace { cyl, cone_half_angle: None })
+                .or_else(|| cone_round_in(&b.body, f))
+            else {
+                continue;
+            };
+            let c = rf.cyl;
             let v = p - c.axis_point;
             let along = v.dot(c.axis);
-            for (at, _) in ends(&c) {
+            for (at, _) in rf.valid_ends(size) {
                 let off = (v - c.axis * along).len() + (along - at).abs();
-                if off <= tol && best.as_ref().is_none_or(|(o, ..)| off < *o) {
-                    best = Some((off, b, f, c, at));
+                let better = best.as_ref().is_none_or(|(bo, b_cone, ..)| off < *bo - 1e-9 || ((off - *bo).abs() <= 1e-9 && !rf.is_cone() && *b_cone));
+                if off <= tol && better {
+                    best = Some((off, rf.is_cone(), b, f, c, at));
                 }
             }
         }
     }
-    let (_, b, f, c, at) = best?;
+    let (_, _, b, f, c, at) = best?;
     let names = crate::naming::face_names(b);
     let face = names.get(f).filter(|n| !n.is_empty()).cloned()?;
     let end = rim_neighbour(b, f, &c, at).and_then(|n| names.get(n)).filter(|n| !n.is_empty()).cloned();
@@ -543,23 +873,39 @@ pub fn round_end_at(doc: &Document, st: &ModelState, component: u64, centre: Vec
 pub fn pin_end(doc: &Document, st: &ModelState, component: u64, snap: &mut Snap) {
     let Snap::CircleCenter { pick, face: Some(face), end: end @ None, .. } = snap else { return };
     let Ok(nf) = named_face(doc, st, component, *pick, face) else { return };
-    let Some(own) = nf.own_cylinder() else { return };
-    let (at, _) = end_by_pick(&nf, &own);
-    *end = rim_neighbour(nf.body, nf.face, &own, at).and_then(|n| crate::naming::face_names(nf.body).get(n).cloned()).filter(|n| !n.is_empty());
+    let Some(own) = nf.own_round() else { return };
+    let (at, _) = end_by_pick(&nf, &own, *pick);
+    *end = rim_neighbour(nf.body, nf.face, &own.cyl, at).and_then(|n| crate::naming::face_names(nf.body).get(n).cloned()).filter(|n| !n.is_empty());
 }
 
-/// The names of the faces across the rims at the two ends of the cylinder a named circle-centre
-/// snap of `component` names (what its `end` can be); empty when the snap names no cylinder.
+/// The names of the faces across the rims at the ends of the cylindrical or conical face a named
+/// circle-centre snap of `component` names (what its `end` can be, including planar ends
+/// reachable across an added chamfer or fillet); empty when the snap names no round face.
 pub fn end_faces(doc: &Document, st: &ModelState, component: u64, snap: &Snap) -> Vec<String> {
     let Snap::CircleCenter { pick, face: Some(face), .. } = snap else { return Vec::new() };
     let Ok(nf) = named_face(doc, st, component, *pick, face) else { return Vec::new() };
-    let Some(own) = nf.own_cylinder() else { return Vec::new() };
+    let Some(own) = nf.own_round() else { return Vec::new() };
     let names = crate::naming::face_names(nf.body);
-    ends(&own)
-        .iter()
-        .filter_map(|(at, _)| rim_neighbour(nf.body, nf.face, &own, *at).and_then(|n| names.get(n).cloned()))
-        .filter(|n| !n.is_empty())
-        .collect()
+    let mut out = Vec::new();
+    let mut push = |f: usize| {
+        if let Some(n) = names.get(f)
+            && !n.is_empty()
+            && !out.contains(n)
+        {
+            out.push(n.clone());
+        }
+    };
+    for end in own.valid_ends(nf.body.body.size()) {
+        if let Some(direct) = rim_neighbour(nf.body, nf.face, &own.cyl, end.0) {
+            push(direct);
+        }
+        if !own.is_cone() {
+            for (across, _) in bevel_end_faces(nf.body, nf.face, &own.cyl, end) {
+                push(across);
+            }
+        }
+    }
+    out
 }
 
 /// The face `model.faces` calls `name` (on the body called `body`, or any body): the component

@@ -3453,7 +3453,7 @@ pub fn cancel(s: &mut Session) {
 /// A copy of `s` as the design places its parts: an occurrence move not captured yet is left out.
 pub(crate) fn designed(s: &Session) -> Session {
     let mut copy = s.scratch();
-    copy.pending_moves.clear();
+    copy.clear_pending_moves();
     copy
 }
 
