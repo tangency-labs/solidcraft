@@ -101,6 +101,8 @@
 
 use std::borrow::Cow;
 
+use crate::blend::fillet_section::interval::Ivl;
+use crate::curve::contact::NativeSupport;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
@@ -1501,7 +1503,9 @@ impl Plane {
     /// control points are projected and clamped to the domain: the UV B-spline of
     /// those points is exact when no clamp moves a point off its normal line by more
     /// than `approx_tol`, and is kept when `keep_all` or every control point drops
-    /// within `approx_tol`. Everything else is the general `SmSurface::DropCurve`, run
+    /// within `approx_tol`. An analytic ellipse proved strictly inside the UV rectangle
+    /// keeps its unclamped affine projection even when its control hull extends outside.
+    /// Everything else is the general `SmSurface::DropCurve`, run
     /// on the plane with its `owner` (the plane's `m_pOwner`, which a bare [`Plane`]
     /// does not carry: pass the owning [`Surface`]'s [`Surface::owner`]; without the
     /// face tolerance its B-rep records on that surface, which the crate's
@@ -1785,16 +1789,31 @@ impl Plane {
 
             // loop locals
             let mut max_drop_sq = 0.0;
+            let mut ellipse_inside = None;
 
             // for every control point
             for cp in &mut ctrl_pts {
                 let p_3d = *cp;
 
                 // project to infinite plane
-                let mut uv_pnt = self.project_point_to_uv_domain(p_3d);
+                let projected = self.project_point_to_uv_domain(p_3d);
 
-                // clamp control points
-                uv_pnt = uv_domain.clamp_point(uv_pnt);
+                // A tangent-hull control can lie outside a rectangle containing the
+                // complete ellipse. Certify containment only when a clamp would move it.
+                let uv_pnt = if ellipse_inside == Some(true) {
+                    projected
+                } else {
+                    let clamped = uv_domain.clamp_point(projected);
+                    if clamped != projected
+                        && *ellipse_inside.get_or_insert_with(|| {
+                            self.ellipse_projection_inside(curve, interval, uv_domain)
+                        })
+                    {
+                        projected
+                    } else {
+                        clamped
+                    }
+                };
 
                 // save largest control point drop
                 let on_srf_3d = self.evaluate_point_fast(uv_pnt);
@@ -1868,6 +1887,53 @@ impl Plane {
             context,
             face_test,
         )
+    }
+
+    /// The full analytic ellipse's affine UV image lies strictly in the supplied domain.
+    fn ellipse_projection_inside(
+        &self,
+        curve: &Curve,
+        interval: &Extent1d,
+        domain: &Extent2d,
+    ) -> bool {
+        if !matches!(curve.kind(), CurveKind::Ellipse(_))
+            || !interval.is_bounded()
+            || ![interval.min(), interval.max()]
+                .iter()
+                .all(|v| v.is_finite())
+            || interval.min() > interval.max()
+            || !interval.is_contained_by(&curve.natural_interval(), 0.0)
+        {
+            return false;
+        }
+        let Some(support) = NativeSupport::curve(curve, interval) else {
+            return false;
+        };
+        [
+            (
+                self.position.x_axis(),
+                self.uv_scale.x,
+                domain.u_min(),
+                domain.u_max(),
+            ),
+            (
+                self.position.y_axis(),
+                self.uv_scale.y,
+                domain.v_min(),
+                domain.v_max(),
+            ),
+        ]
+        .into_iter()
+        .all(|(axis, scale, lo, hi)| {
+            if ![scale, lo, hi].iter().all(|v| v.is_finite()) || scale == 0.0 {
+                return false;
+            }
+            let direction = [Ivl::from(axis.x), Ivl::from(axis.y), Ivl::from(axis.z)];
+            support
+                .project(self.position.origin(), direction)
+                .map(|projection| projection / Ivl::from(scale))
+                .is_some_and(|uv| uv.is_finite() && lo < uv.lo && uv.hi < hi)
+        })
     }
 
     // ---- coincidence ------------------------------------------------------------------
@@ -2502,6 +2568,23 @@ fn surface_drop_curve<O: SolutionObject>(
         max_approx_dev: r.max_approx_dev,
         uv_curves: r.uv_curves.into_iter().map(Curve::from).collect(),
     })
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Plane {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_uv_domain,
+            uv_scale,
+        } = self;
+        d.tag(0x91A);
+        base.content(d)?;
+        position.content(d)?;
+        anal_uv_domain.content(d)?;
+        uv_scale.content(d)
+    }
 }
 
 #[cfg(test)]

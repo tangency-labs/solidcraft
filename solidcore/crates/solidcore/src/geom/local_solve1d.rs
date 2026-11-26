@@ -82,7 +82,7 @@ const ZEPS: f64 = 1.0e-12;
 fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
     if matches!(
         e,
-        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+        SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
     ) {
         e
     } else {
@@ -916,7 +916,9 @@ impl LocalSolve1d {
         if let Err(e) = r {
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) {
                 return Err(e);
             }

@@ -455,8 +455,9 @@ impl FilletSolver {
             // branch on SolverType
             let solver_type = ops.solver_type()?;
             if solver_type == FilletSolverType::ConstDist {
-                // implicit radius function: F(radius) = distance between rail curve
-                // points at the intersection - desired distance
+                // Implicit radius at the boundary: the chord or setback of the
+                // crossing's two rails.
+                let stationwise = ops.solver().station_setback().is_some();
                 let target_distance = ops.constant_distance()?;
                 let mut efo = FindClippedRadiusEfo::new(
                     ops.solver_mut(),
@@ -467,8 +468,14 @@ impl FilletSolver {
                     uv,
                     target_distance,
                 )?;
-                let interval = Extent1d::from_min_max(0.0, efo.target_distance * 10.0);
-                let mut ls = LocalSolve1d::with_interval(interval, false);
+                let mut ls = if stationwise {
+                    // Equal setbacks have no geometric upper radius. The evaluator
+                    // checks finite, nonnegative trials before offsetting either face.
+                    LocalSolve1d::new()
+                } else {
+                    let interval = Extent1d::from_min_max(0.0, target_distance * 10.0);
+                    LocalSolve1d::with_interval(interval, false)
+                };
                 let mut radius_found = 0.0;
 
                 // NewtonRaphson iteration for the radius whose boundary crossing has

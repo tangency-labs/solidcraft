@@ -73,7 +73,13 @@ pub(super) fn workers() -> usize {
 }
 
 pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
-    let _span = solidcraft_profile::span("import", "step.body");
+    // On a worker thread: the span says which item of the file it reads (#22473); a part read
+    // before is placed again, and the import's own span names the file's feature.
+    let span = solidcraft_profile::span("import", "step.body");
+    let _span = match &job.source {
+        Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+        Source::Oriented(_) => span,
+    };
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
@@ -90,8 +96,20 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     };
     let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
         .map_err(|e| Failure { read: false, msg: e.to_string() })?;
-    // Counted on the part (a placement meshes the same faces).
-    let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
+    // Counted on the part (a placement meshes the same faces). A part not moved is the body
+    // itself: it keeps the display plan its check made, which its display then takes.
+    let (body, missing) = match job.check_mesh {
+        false => (body, 0),
+        true if job.placement == IDENTITY => {
+            let body = body.keeping_plans();
+            let missing = solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces());
+            (body, missing)
+        }
+        true => {
+            let missing = solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces());
+            (body, missing)
+        }
+    };
     Ok(Made { body, missing, part, read })
 }
 

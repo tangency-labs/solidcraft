@@ -404,7 +404,7 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     if let Some(d) = dialog {
         let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
     }
-    let _ = write!(&mut h, "{:?}", app.session.selection);
+    let _ = write!(&mut h, "{:?}{}", app.session.selection, app.session.all_bodies_selected());
     h.0.finish()
 }
 
@@ -530,6 +530,10 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
                 context.push_str(&block(&debug(&d.extra, 1000)));
             }
         }
+    }
+    if app.session.all_bodies_selected() {
+        let count = app.session.selected_count().unwrap_or(0);
+        let _ = writeln!(&mut context, "\nSelect All: every shown body ({count}) is selected.");
     }
     context.push_str("\nSelected items (including occurrence paths):\n");
     context.push_str(&block(&debug(&app.session.selection.iter().take(32).collect::<Vec<_>>(), 3000)));
@@ -665,7 +669,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
 
 /// Open a reviewed draft for a crash report (no screenshot: the view shows nothing of it).
 pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json::Value) {
-    if keep_open_draft(app, true) {
+    if refused(app) || keep_open_draft(app, true) {
         return;
     }
     if app.issue_report.draft.is_none() {
@@ -720,7 +724,7 @@ pub fn draft_url(title: &str, body: &str) -> (String, bool) {
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
-    if keep_open_draft(app, dialog.is_some() || error.is_some()) {
+    if refused(app) || keep_open_draft(app, dialog.is_some() || error.is_some()) {
         return;
     }
     if app.issue_report.draft.is_none() {
@@ -729,6 +733,22 @@ pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::D
     cancel_capture(app);
     app.issue_report.draft = Some(window_draft(app, ctx, dialog, error));
     capture(app, ctx, dialog);
+}
+
+/// The organization's policy turns problem reports off (`AllowProblemReports` = 0): no report
+/// opens, to the ticket server or GitHub, and the status bar says where the details are instead.
+pub(crate) fn refused(app: &mut SolveApp) -> bool {
+    if app.policy.allows("problem_reports") {
+        return false;
+    }
+    app.set_status(solidcraft_ui_text::tr("policy.reports_off").to_string(), true);
+    true
+}
+
+/// An error toast offers Report… only where a report can open: tickets work here, and the
+/// organization's policy hasn't turned problem reports off.
+pub fn toast_offers_report(app: &SolveApp) -> bool {
+    app.policy.allows("problem_reports") && ticket::enabled(app)
 }
 
 /// Reopening must not replace the reviewed context or the typing waiting for its screenshot.
@@ -1078,9 +1098,50 @@ mod tests {
     fn combine(app: &mut SolveApp) {
         app.start("solid.combine");
         let dialog = app.dialog.as_mut().unwrap();
-        dialog.kind = dialogs::Kind::Combine { operation: 2, keep_tools: true };
+        dialog.kind = dialogs::Kind::Combine {
+            operation: 2,
+            keep_tools: true,
+            offset: "0 mm".into(),
+            round_edges: false,
+            picked_faces: false,
+            radius: String::new(),
+        };
         dialog.inputs.get_mut(0).unwrap().items = vec![Sel::Body { name: "Stock".into() }];
         dialog.inputs.get_mut(1).unwrap().items = vec![Sel::Body { name: "Cutter".into() }];
+    }
+
+    /// An organization's policy that turns problem reports off (#10260): no report opens, from the
+    /// app bar, a failed operation, a crash or an agent, and the status bar says where to look.
+    #[test]
+    fn a_policy_that_turns_problem_reports_off_opens_no_report() {
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 0}"#);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, Some("Fillet failed"));
+        assert!(h.app.issue_report.draft.is_none(), "no report opens");
+        let (text, _, error) = h.app.status.clone().unwrap_or_default();
+        assert!(error && text.contains("Copy diagnostic information"), "{text}");
+        h.app.status = None;
+        begin_crash(&mut h.app, &ctx, &json!({"id": "crash-1", "message": "boom"}));
+        assert!(h.app.issue_report.draft.is_none(), "no crash report opens either");
+        assert!(h.app.status.is_some());
+        // AllowProblemReports = 1 leaves it as it was.
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
+        begin(&mut h.app, &ctx, None, Some("Fillet failed"));
+        assert!(h.app.issue_report.draft.is_some());
+    }
+
+    /// With problem reports turned off, a failed operation's toast offers no Report… (#10260).
+    #[test]
+    fn an_error_toast_offers_report_only_while_the_policy_allows_reports() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        assert!(toast_offers_report(&app));
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 0}"#);
+        assert!(!toast_offers_report(&app), "no Report… while the policy turns reports off");
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
+        assert!(toast_offers_report(&app));
     }
 
     fn click_commands(h: &mut crate::scenario::Harness, label: &str) -> Vec<egui::OutputCommand> {
@@ -1655,7 +1716,7 @@ mod tests {
         let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
         let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
         assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
-        assert!(app.session.selection.is_empty());
+        assert!(!app.session.has_selection());
         let at = crate::now_ms() - 125_000.0;
         for i in 0..12 {
             app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);
@@ -1857,7 +1918,7 @@ mod tests {
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
         assert!(h.widget("Reports are public. A GitHub account is required.").is_some());
         let commands = open_commands(&mut h);
-        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)), "commands: {commands:?}");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text.starts_with(&reviewed) && text.contains("drag the PNG file") && text.contains(".png"))), "commands: {commands:?}");
         assert!(
             commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL) && !url.url.contains("&body=")))
         );
@@ -1980,6 +2041,81 @@ mod tests {
                 let why = std::fs::write(&path, b"").unwrap_err();
                 assert_eq!(note, format!("Could not save screenshot: {why}"));
             }
+        }
+    }
+
+    #[test]
+    fn issue_report_short_screenshot_handoff_copies_the_image_and_explains_pasting() {
+        for (os, shortcut) in [(egui::os::OperatingSystem::Nix, "Ctrl+V"), (egui::os::OperatingSystem::Mac, "Cmd+V")] {
+            let mut h = crate::scenario::Harness::new();
+            h.ctx.set_os(os);
+            h.app.home.open = false;
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            let image = Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]));
+            draft.image = Some(image.clone());
+            let reviewed = draft.report_body();
+            h.app.issue_report.draft = Some(draft);
+            h.frames(16);
+            let commands = open_commands(&mut h);
+            assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(copied) if copied == image.as_ref())));
+            assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_))));
+            let url = commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::OpenUrl(url) => Some(&url.url),
+                    _ => None,
+                })
+                .unwrap();
+            let body = query(url).into_iter().find(|(key, _)| key == "body").unwrap().1;
+            assert!(body.contains("## Visual context\nThe screenshot is NOT attached yet. Click in this box and press"));
+            assert!(body.contains(shortcut));
+            assert!(!body.contains("Attach the reviewed screenshot"));
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.report_body(), reviewed, "reviewed diagnostics remain editable and unchanged");
+            assert!(draft.note.contains("NOT attached yet") && draft.note.contains(shortcut));
+            assert!(draft.opened_github);
+        }
+    }
+
+    #[test]
+    fn issue_report_long_screenshot_handoff_saves_png_and_preserves_text_on_save_failure() {
+        let h = crate::scenario::Harness::new();
+        for (path, saved) in [(h.dir.join("report.png"), true), (h.dir.join("missing/report.png"), false)] {
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            draft.steps = "Select a face and start Extrude.".into();
+            draft.body.push_str(&"Reviewed diagnostic context. ".repeat(300));
+            draft.image = Some(Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+            let reviewed = draft.report_body();
+            assert!(draft_url(&draft.report_title(), &reviewed).1);
+            let path = path.to_str().unwrap();
+            let output = h.ctx.run_ui(Default::default(), |_| form::open_github(&mut draft, &h.ctx, path));
+            assert!(!output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(_))));
+            let text = output
+                .platform_output
+                .commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::CopyText(text) => Some(text),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if !url.url.contains("&body="))));
+            if saved {
+                let png = image::load_from_memory_with_format(&std::fs::read(path).unwrap(), image::ImageFormat::Png).unwrap();
+                assert_eq!(png.into_rgba8().dimensions(), (4, 3));
+                assert!(text.contains("report.png") && text.contains("drag the PNG file"));
+                assert!(!text.contains(h.dir.to_str().unwrap()), "the public issue text never names the folder");
+                assert!(text.contains("NOT attached yet"));
+                assert!(draft.note.contains(path) && draft.note.contains("drag"));
+            } else {
+                assert_eq!(text, &reviewed);
+                assert!(text.contains("Attach the reviewed screenshot or a short example showing the problem."));
+                assert!(draft.note.starts_with("Could not save screenshot:"));
+            }
+            assert_eq!(draft.report_body(), reviewed);
+            assert!(draft.opened_github);
         }
     }
 

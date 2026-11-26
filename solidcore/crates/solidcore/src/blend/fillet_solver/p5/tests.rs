@@ -1170,16 +1170,14 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
+    // a defect with its reason (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
-        (
-            err.operation(),
-            err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
-            err.upstream_status()
-        ),
+        (err.operation(), err.blend_failure(), err.upstream_status()),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-            true,
+            Some(&BlendFailure::Defect {
+                why: crate::blend::fillet_geom::p5::SOLVER_NO_EU
+            }),
             Some(SM_ERR_NULL_POINTER)
         ),
         "{err:?}"

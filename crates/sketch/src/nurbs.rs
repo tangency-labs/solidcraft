@@ -79,14 +79,14 @@ impl Nurbs {
         if !(2..=crate::MAX_SPLINE_POINTS).contains(&points.len()) || points.iter().any(|p| !p.is_finite()) {
             return bad("fit points must be finite and within the spline point limit");
         }
-        solidcore_ops::fit_projection::fit_splines(points, periodic, crate::MAX_SPLINE_POINTS)
+        solidcraft_kernel::curves::fit_splines(points, periodic, crate::MAX_SPLINE_POINTS)
             .map(|curves| curves.into_iter().map(|s| (s.points, Nurbs { knots: s.knots, weights: s.weights })).collect())
             .map_err(|e| SketchError::Invalid(e.to_string()))
     }
 
     /// Whether these knots and weights fit a control spline of `degree` over `n` points.
     pub fn check(&self, n: usize, degree: u8) -> Result<()> {
-        solidcore_ops::fit_projection::check_control(n, usize::from(degree), &self.knots, &self.weights, crate::MAX_SPLINE_POINTS)
+        solidcraft_kernel::curves::check_control(n, usize::from(degree), &self.knots, &self.weights, crate::MAX_SPLINE_POINTS)
             .map_err(|e| SketchError::Invalid(e.to_string()))
     }
 
@@ -113,7 +113,7 @@ impl Nurbs {
 
     /// The control points with a common homogeneous weight normalization.
     fn homogeneous(&self, p: &[Vec2]) -> Vec<HPoint> {
-        solidcore_ops::fit_projection::homogeneous_controls(p, &self.weights)
+        solidcraft_kernel::curves::homogeneous_controls(p, &self.weights)
             .unwrap_or_default()
             .into_iter()
             .map(|[x, y, z, w]| HPoint { x, y, z, w })
@@ -129,7 +129,7 @@ impl Nurbs {
     /// (the points reverse with them). Reflection about zero preserves every knot exactly,
     /// including intervals too narrow to survive subtraction from a large domain endpoint.
     pub fn reversed(&self) -> Nurbs {
-        let (knots, weights) = solidcore_ops::fit_projection::reversed_metadata(&self.knots, &self.weights);
+        let (knots, weights) = solidcraft_kernel::curves::reversed_metadata(&self.knots, &self.weights);
         Nurbs { knots, weights }
     }
 
@@ -178,7 +178,7 @@ impl Nurbs {
     /// within affine-map roundoff. `None` retains a genuinely two-dimensional curve.
     pub fn linear_image(&self, p: &[Vec2], degree: u8, roundoff: f64) -> Result<Option<[Vec2; 2]>> {
         self.check(p.len(), degree)?;
-        solidcore_ops::fit_projection::linear_image(p, usize::from(degree), &self.knots, &self.weights, roundoff)
+        solidcraft_kernel::curves::linear_image(p, usize::from(degree), &self.knots, &self.weights, roundoff)
             .map_err(|e| SketchError::Invalid(e.to_string()))
     }
 

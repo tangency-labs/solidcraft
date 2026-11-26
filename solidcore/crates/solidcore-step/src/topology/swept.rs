@@ -726,18 +726,23 @@ fn step_profile(c: &BCurve) -> R<Option<Curve>> {
     }))
 }
 
-/// Samples a spline is checked at to be a circle.
+/// Samples a spline's angle round its circle is read at.
 const CIRCLE_SAMPLES: usize = 64;
 
 /// A rational B-spline that is exactly a circle or an arc of one, as that circle, its angle
 /// running the way the spline runs and starting at the spline's start, and the angle the spline
 /// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
 /// the one through the spline's points at the start and a third and two thirds of the way along
-/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of its size).
+/// its parameter. The whole spline lies on it, proved on its control points, not at samples
+/// ([`on_circle`]): to within 1e-9 of the spline's own size (its samples' spread, the same
+/// wherever the spline lies) plus the rounding of deciding it. The angle it sweeps is read at
+/// [`CIRCLE_SAMPLES`] + 1 samples a fraction of a turn apart. A non-finite sample, point or
+/// weight refuses.
 pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
-    b.weights.as_ref()?;
+    let weights = b.weights.as_ref()?;
     let (t0, t1) = b.domain()?;
     let at = |s: f64| b.point(t0 + (t1 - t0) * s).map(v3);
+    let samples: Vec<Vec3> = (0..=CIRCLE_SAMPLES).map(|k| at(k as f64 / CIRCLE_SAMPLES as f64)).collect::<Option<_>>()?;
     let (a, m, c) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
     let (ab, ac) = (m - a, c - a);
     let n = ab.cross(ac);
@@ -751,13 +756,26 @@ pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64
     let axis = n.normalized()?;
     let x = (a - centre).normalized()?;
     let y = axis.cross(x);
-    let reach = 1e-9 * (radius + centre.len());
-    let (mut swept, mut last) = (0.0, 0.0);
-    for k in 0..=CIRCLE_SAMPLES {
-        let d = at(k as f64 / CIRCLE_SAMPLES as f64)? - centre;
-        if !((d.len() - radius).abs() <= reach && d.dot(axis).abs() <= reach) {
+    // On the circle to 1e-9 of the spline's own size, its samples' spread, the same wherever it
+    // lies; not of the circle's radius and centre: three points of a spline that is nearly
+    // straight lie on a circle kilometres wide, 1e-9 of which is microns, and a sweep's straight
+    // seam microns off any circle was taken for one, about 4 µm off its face (#21379). The
+    // samples only measure the size; whether the spline is on the circle is proved on all of it.
+    let inf = f64::INFINITY;
+    let (mut lo, mut hi) = (Vec3 { x: inf, y: inf, z: inf }, Vec3 { x: -inf, y: -inf, z: -inf });
+    for p in &samples {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
             return None;
         }
+        lo = Vec3 { x: lo.x.min(p.x), y: lo.y.min(p.y), z: lo.z.min(p.z) };
+        hi = Vec3 { x: hi.x.max(p.x), y: hi.y.max(p.y), z: hi.z.max(p.z) };
+    }
+    if !on_circle(b, weights, centre, axis, radius, 1e-9 * (hi - lo).len()) {
+        return None;
+    }
+    let (mut swept, mut last) = (0.0, 0.0);
+    for p in samples {
+        let d = p - centre;
         let angle = d.dot(y).atan2(d.dot(x));
         let step = (angle - last + PI).rem_euclid(TAU) - PI;
         // Samples a fraction of a turn apart: a step back is not this spline's way round.
@@ -767,7 +785,60 @@ pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64
         swept += step;
         last = angle;
     }
+    // The arc must bow out of its chord by more than 1e-6 of the spline's size. A spline that
+    // straight lies within the proof's reach of a circle of almost any radius through three of
+    // its points, so that circle is not the spline's: a straight 3 mm edge was read as an arc
+    // of radius 8.8e8 mm, and its NURBS form's middle point, 1e9 mm out, made SMLib refuse the
+    // face (#20805). Refused, the spline stays the file's spline, which it is exactly.
+    let sagitta = 2.0 * radius * (0.25 * swept.min(PI)).sin().powi(2);
+    if !(sagitta > 1e-6 * (hi - lo).len()) {
+        return None;
+    }
     Some((Curve::Circle { position: Placement { origin: p3(centre), axis: p3(axis), ref_direction: p3(x) }, radius }, swept))
+}
+
+/// Whether every point of the rational spline `b` (weights `weights`) lies within `reach` of the
+/// circle of `centre`, unit `axis` and `radius`, plus the rounding of deciding it, proved on the
+/// control points over the whole parameter range (`definitions-and-certificates.md` §7, "a check
+/// at sample points proves nothing"):
+/// - in the circle's plane: with positive weights each point of the spline is a convex
+///   combination of its control points, so none is further from the plane than the furthest of
+///   them; plus the rounding of that distance, γ_8 of the numbers it works on;
+/// - on the circle's sphere: by [`solidcore::eval::sphere::curve_on_sphere`], which proves
+///   `|H − C W|² − R² W²` on the Bézier pieces' Bernstein coefficients. A coefficient bound `F`
+///   holds the spline within `F / (W² R)` of the sphere, and `W` is at least the least weight
+///   `w_lo`, so its tolerance `rel_tol (R w_max)²` is set to hold it within `reach` (plus the
+///   rounding of the homogeneous points, γ_3 of the largest control point, and of the
+///   coefficients, which `curve_on_sphere` adds).
+///
+/// A weight that is not positive or a point that is not finite refuses.
+fn on_circle(b: &crate::geom::BSplineCurve, weights: &[f64], centre: Vec3, axis: Vec3, radius: f64, reach: f64) -> bool {
+    use solidcore::nurbs::math::gamma;
+    if weights.len() != b.points.len() || !weights.iter().all(|w| w.is_finite() && *w > 0.0) {
+        return false;
+    }
+    let (mut w_lo, mut w_hi, mut far) = (f64::INFINITY, 0.0f64, 0.0f64);
+    for (p, w) in b.points.iter().zip(weights) {
+        let p = v3(*p);
+        let off = (p - centre).dot(axis).abs();
+        if !(off <= reach + gamma(8) * (p.len() + centre.len())) {
+            return false;
+        }
+        (w_lo, w_hi, far) = (w_lo.min(*w), w_hi.max(*w), far.max(p.len()));
+    }
+    let mut knots = Vec::new();
+    for (k, m) in b.knots.iter().zip(&b.multiplicities) {
+        knots.extend(std::iter::repeat_n(*k, *m));
+    }
+    let homogeneous = b.points.iter().zip(weights).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect();
+    // The certificate takes clamped knots: an unclamped spline (a circle written periodically,
+    // its end knots single) is the same spline over its domain clamped there, exactly
+    // (tangency-labs/solidcore#3401).
+    let Ok((knots, homogeneous)) = crate::assembly::clamped(b.degree, knots, homogeneous) else { return false };
+    let curve = solidcore::eval::Curve::RationalSpline { knots, homogeneous };
+    let within = reach + gamma(3) * far * (w_hi / w_lo);
+    let rel_tol = within / radius * (w_lo / w_hi) * (w_lo / w_hi);
+    rel_tol.is_finite() && solidcore::eval::sphere::curve_on_sphere(&curve, p3(centre), radius, rel_tol).is_ok()
 }
 
 /// An extruded circle along its axis is a cylinder; a circle in a plane through the axis,

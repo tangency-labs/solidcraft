@@ -246,9 +246,21 @@ impl Drawing {
 /// fields of their own at its top level (also in the drawing reader's record fields), which a release that can't read image parts (0.45.0) sets
 /// aside, keeps as they came and writes back, opening the rest of the drawing. Its logo cells show
 /// their text there; nothing is lost when it saves.
-const FILES: &str = "image_files";
-const PLACED: &str = "placed_images";
-const LOGOS: &str = "logo_cells";
+pub(super) const FILES: &str = "image_files";
+pub(super) const PLACED: &str = "placed_images";
+pub(super) const LOGOS: &str = "logo_cells";
+
+/// A logo's on-disk placement, separate from the text cell it accompanies.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LogoCell {
+    #[serde(with = "crate::ids")]
+    pub sheet: u64,
+    #[serde(rename = "cell")]
+    _cell: String,
+    #[serde(with = "crate::ids")]
+    pub image: u64,
+}
 
 /// Moves a drawing record's image files, placements and logos to the fields of their own above.
 pub(super) fn set_aside(v: &mut serde_json::Value) {

@@ -145,9 +145,12 @@ fn check_expression(value: Option<&Value>) -> Result<()> {
     }
     Ok(())
 }
+/// A rule's parameter is name-shaped and short. Whether the name is reserved is not checked here:
+/// an older design's parameter can be named after what is now a unit, and is renamed only after
+/// these checks, as the design opens. A rule naming no parameter fails when it is evaluated.
 fn check_parameter(value: Option<&Value>) -> Result<()> {
     let name = value.and_then(Value::as_str).ok_or_else(|| invalid("parameter name required"))?;
-    if name.is_empty() || name.len() > 64 || Document::param_name_problem(name).is_some() {
+    if name.len() > 64 || !expr::is_name_shaped(name) {
         return Err(invalid("invalid parameter name"));
     }
     Ok(())
@@ -175,7 +178,7 @@ fn operands(
         &|name| values.get(name).copied().ok_or_else(|| invalid(&format!("unknown parameter `{name}`"))),
         defaults,
     )?;
-    let kind = lhs.kind().ok_or_else(|| invalid("comparison requires length, angle or unitless values"))?;
+    let kind = lhs.kind().ok_or_else(|| invalid("comparison requires a length, angle, mass, volume, area or unit-less value"))?;
     let right = rhs.to_kind_in(kind, defaults)?;
     if !lhs.v.is_finite() || !right.is_finite() {
         return Err(invalid("comparison requires finite values"));
@@ -424,10 +427,12 @@ impl ConfigRule {
         });
         references
     }
-    pub fn rename_parameter(&mut self, old: &str, new: &str) {
+    /// Rename parameter `old` to `new`, renaming it in expressions with `rename`
+    /// (`expr::rename_reference`, or `expr::rename_word` as an older build read them).
+    pub fn rename_parameter(&mut self, old: &str, new: &str, rename: fn(&str, &str, &str) -> String) {
         self.visit_parameters(&mut |text, expression| {
             if expression {
-                *text = expr::rename_reference(text, old, new);
+                *text = rename(text, old, new);
             } else if text == old {
                 *text = new.to_string();
             }
@@ -618,6 +623,27 @@ mod tests {
         assert_eq!(doc, before);
     }
 
+    /// A mass parameter compares with a mass in any unit (#4811), reads a bare number in its own
+    /// unit, and refuses a length.
+    #[test]
+    fn mass_comparisons_keep_their_dimensions() {
+        let mut doc = design();
+        doc.set_param("load", "2 kg", None, None).unwrap();
+        doc.configs.rules.push(rule(
+            "heavy",
+            RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Gt, expression: "1500 g".into() },
+            RuleEffect::DriveParameter { parameter: "width".into(), expression: "20 mm".into() },
+        ));
+        assert!(doc.apply_configuration_with_trace("Default").unwrap()[0].matched);
+        assert_eq!(doc.param_values().0["width"].v, 20.0);
+        doc.configs.rules[0].condition = RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Lt, expression: "3".into() };
+        assert!(doc.apply_configuration_with_trace("Default").unwrap()[0].matched, "3 is 3 kg");
+        doc.configs.rules[0].condition = RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Eq, expression: "2 mm".into() };
+        let before = doc.clone();
+        assert!(doc.apply_configuration("Default").is_err());
+        assert_eq!(doc, before);
+    }
+
     #[test]
     fn saved_rule_budgets_are_checked_before_deserialization() {
         let valid = serde_json::to_value(rule(
@@ -651,9 +677,16 @@ mod tests {
         let mut long = valid.clone();
         long["effect"]["expression"] = serde_json::json!("a".repeat(4097));
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":[long]}})).is_err());
-        let mut malformed = valid;
+        let mut malformed = valid.clone();
         malformed["condition"] = serde_json::json!({"type":"any","conditions":{}});
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":[malformed]}})).is_err());
+        // An older design's parameter can be named after what is now a unit (#4811): the saved
+        // rule's name passes, so the design opens and renames it. A misshapen name doesn't.
+        for (name, ok) in [("g", true), ("mm", true), ("2w", false), ("", false), ("a b", false)] {
+            let mut named = valid.clone();
+            named["effect"]["parameter"] = serde_json::json!(name);
+            assert_eq!(validate_rules_json(&serde_json::json!({"configs":{"rules":[named]}})).is_ok(), ok, "{name:?}");
+        }
     }
 
     #[test]
