@@ -166,6 +166,43 @@ fn script_relative_restores_the_callers_folder_for_profiling_even_after_an_error
     }
 }
 
+/// #22473: a profile says which feature and which part of a STEP file each span was for. The
+/// inserted part's feature span names the feature; the spans run on worker threads for it name
+/// the item of the file they read.
+#[cfg(feature = "profile")]
+#[test]
+fn a_profile_names_the_feature_and_step_part_of_each_span() {
+    let dir = Scratch::new();
+    let part = dir.0.join("part.step");
+    let make = dir.0.join("make.json");
+    std::fs::write(
+        &make,
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}},
+            {"command": "file.export_step", "params": {"path": part.to_string_lossy()}},
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let output = cli().current_dir(&dir.0).arg("run").arg(&make).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let insert = dir.0.join("insert.json");
+    std::fs::write(&insert, json!({"commands": [{"command": "file.insert_step", "params": {"path": part.to_string_lossy()}}]}).to_string()).unwrap();
+    let output = cli().current_dir(&dir.0).arg("run").arg(&insert).args(["--profile-out", "trace.json"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let trace: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.0.join("trace.json")).unwrap()).unwrap();
+    let spans: Vec<&serde_json::Value> = trace["traceEvents"].as_array().unwrap().iter().filter(|e| e["ph"] == "X").collect();
+    let features: Vec<_> = spans.iter().filter(|e| e["cat"] == "feature").collect();
+    assert!(!features.is_empty(), "{trace}");
+    assert!(features.iter().all(|e| e["args"]["feature"].is_string() && e["args"]["name"].is_string()), "{features:?}");
+    let bodies: Vec<_> = spans.iter().filter(|e| e["name"] == "step.body").collect();
+    assert!(!bodies.is_empty(), "{trace}");
+    assert!(bodies.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{bodies:?}");
+    for check in spans.iter().filter(|e| e["name"] == "step.check") {
+        assert!(check["args"]["part"].is_string(), "{check}");
+    }
+}
+
 #[test]
 fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
     let dir = Scratch::new();
