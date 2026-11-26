@@ -13,7 +13,7 @@ use super::filter::{Row, RowFilter, contents_groups, omit};
 use super::{active_joint_values, component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
     EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
-    Referent, SweptFrom, WorldFrame,
+    Referent, SketchPointReference, SweptFrom, WorldFrame,
 };
 use crate::{Result, Session};
 
@@ -170,10 +170,25 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 face(ReferenceRole::X, &Some(n.clone()));
             }
         }
+        Snap::SketchPoint { sketch, point, x } => {
+            let (sketch_name, error) = match doc.feature(*sketch) {
+                Some(f) => (f.name.clone(), None),
+                None => (String::new(), Some(format!("sketch {sketch} is gone"))),
+            };
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
+            }
+            out.push(Reference {
+                role: ReferenceRole::SketchPoint,
+                to: Referent::SketchPoint(SketchPointReference { sketch: *sketch, sketch_name, point: point.clone(), error }),
+            });
+        }
         Snap::Frame { .. } | Snap::Point { .. } => {}
     }
     let x = match snap {
-        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
+            x.as_ref()
+        }
         _ => None,
     };
     use joints::AlignmentRef;

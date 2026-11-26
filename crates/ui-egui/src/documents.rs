@@ -1612,6 +1612,18 @@ pub fn view_counts(app: &SolveApp) -> Vec<usize> {
     (0..app.docs.count()).map(|design| views_of(app, design).map_or(1, ViewSet::len)).collect()
 }
 
+/// Whether the sub-tabs of the design in tab `design` are folded into its tab. False for a tab
+/// that does not exist.
+pub fn views_collapsed(app: &SolveApp, design: usize) -> bool {
+    views_of(app, design).is_some_and(ViewSet::collapsed)
+}
+
+/// Fold the shown design's sub-tabs into its tab (`collapsed`: its name and how many views it
+/// has, with a chevron that shows them again), or show them. The views are unchanged.
+pub fn view_collapse(app: &mut SolveApp, collapsed: bool) {
+    app.docs.views.set_collapsed(collapsed);
+}
+
 fn views_of(app: &SolveApp, design: usize) -> Option<&ViewSet> {
     if design == app.docs.active { Some(&app.docs.views) } else { app.docs.slots.get(design)?.as_ref().map(|slot| &slot.views) }
 }
@@ -1807,6 +1819,11 @@ fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result
             crate::view_windows::detach(app, asked, &v)?;
             Some(asked)
         }
+        "tab.view.collapse" => {
+            let collapsed = v.get("collapsed").and_then(Value::as_bool).unwrap_or(!app.docs.views.collapsed());
+            view_collapse(app, collapsed);
+            None
+        }
         "tab.view.move" => {
             let len = app.docs.views.len();
             let (from, to) = (place("from").filter(|n| *n < len), place("to").filter(|n| *n < len));
@@ -1820,6 +1837,9 @@ fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result
     if let Some(reply) = v.as_object_mut() {
         if let Some(id) = id {
             reply.insert("id".into(), json!(id));
+        }
+        if matches!(command, "tab.view.collapse" | "tab.view.list") {
+            reply.insert("collapsed".into(), json!(app.docs.views.collapsed()));
         }
         if command == "tab.view.list" {
             let list = views_info(app, app.docs.active)
@@ -2965,6 +2985,7 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
     view_new: "tab:view_new",
     view_more: "tab:view_more",
     switcher: "tab:switcher",
+    view_collapse: "tab:view_collapse",
     file_drop: "tab:file_drop",
 };
 
@@ -3224,7 +3245,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                     place,
                     security: *security,
                     views,
+                    collapsed: false,
                 })
+                .enumerate()
+                .map(|(design, tab)| crate::app_bar::DocTab { collapsed: views_collapsed(app, design), ..tab })
                 .collect(),
             selected,
             shown_selected: (!app.home.open).then_some(selected),
@@ -3252,6 +3276,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 new_view: solidcraft_ui_text::tr_label("Open another view"),
                 more: more_text,
                 switch_view: solidcraft_ui_text::tr("tab_strip.switch_view"),
+                collapse_views: solidcraft_ui_text::tr("tab_strip.collapse_views"),
+                expand_views: solidcraft_ui_text::tr("tab_strip.expand_views"),
             },
             view_menu: &view_menu,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
@@ -6619,6 +6645,7 @@ mod tests {
         crate::view_memory::wait_for_pending().unwrap();
         assert!(!dir.exists(), "off: nothing is kept");
         h.app.preferences.design_reopen_views = true;
+        view_collapse(&mut h.app, true);
         remember_views_in(&h.app, 0, &dir);
         crate::view_memory::wait_for_pending().unwrap();
         h.app.docs.views = ViewSet::new();
@@ -6630,6 +6657,7 @@ mod tests {
         let kinds: Vec<ViewKind> = h.app.docs.views.views().iter().map(|view| view.kind).collect();
         assert_eq!(kinds, [ViewKind::Model, ViewKind::Model], "the sheet has no workspace yet");
         assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(h.app.docs.views.collapsed(), "folded sub-tabs come back folded");
         // Legacy remembered Sketch tabs are removed without changing design features.
         let stale = json!({"views": [{"id": 7, "kind": "sketch", "name": "Sketch 1", "subject": "987654"}], "active": 7});
         crate::view_memory::remember(&dir, &path, stale).unwrap();
@@ -6638,6 +6666,47 @@ mod tests {
         assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
         assert!(h.app.session.doc.features.iter().any(|feature| feature.name == "Sketch1"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The chevron right after a design's + folds its sub-tabs into its tab and shows them again;
+    /// `tab.view.collapse` does the same (toggling without `collapsed`), `tab.view.list` says
+    /// which, a new view shows them again, and each design keeps its own.
+    #[test]
+    fn the_chevron_and_the_command_fold_a_designs_sub_tabs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.app.preferences.design_views_as_tabs = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        let call =
+            |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
+        assert_eq!(call(&mut h, "tab.view.open", json!({"kind": "animation"}))["ok"], true);
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:view:1").is_some(), "the sub-tabs are shown");
+        h.step(&json!({"click": {"handle": "tab:view_collapse"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.docs.views.collapsed());
+        assert!(crate::scenario::rect_of("tab:view:1").is_none(), "folded: no sub-tabs");
+        assert!(crate::scenario::rect_of("tab:view_collapse").is_some(), "the chevron stays to show them again");
+        assert_eq!(call(&mut h, "tab.view.list", json!({}))["result"]["collapsed"], true);
+        h.step(&json!({"click": {"handle": "tab:view_collapse"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.docs.views.collapsed() && crate::scenario::rect_of("tab:view:1").is_some(), "shown again");
+        // The command: toggling, then as asked.
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({}))["result"]["collapsed"], true);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": true}))["result"]["collapsed"], true);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": false}))["result"]["collapsed"], false);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": "yes"}))["ok"], false);
+        // A view added shows them again.
+        call(&mut h, "tab.view.collapse", json!({"collapsed": true}));
+        call(&mut h, "tab.view.open", json!({"kind": "render"}));
+        assert!(!h.app.docs.views.collapsed(), "a new view shows the sub-tabs");
+        // Each design keeps its own: folding the first leaves the second as it was.
+        call(&mut h, "tab.view.collapse", json!({"collapsed": true}));
+        open_tab(&mut h.app, Session::default()).unwrap();
+        assert!(!views_collapsed(&h.app, 1));
+        switch(&mut h.app, 0);
+        assert!(views_collapsed(&h.app, 0) && !views_collapsed(&h.app, 1));
     }
 
     #[test]
@@ -7253,17 +7322,17 @@ mod tests {
         assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a design adopted over a blank one");
     }
 
-    /// Hide Origin by Default hides the Origin of designs that don't keep its eye; a design that
+    /// The Origin visibility preference on Hidden hides the Origin of designs that don't keep its eye; a design that
     /// does keeps it, along with the rest of the browser's view, in its tab and in its file.
     #[test]
     fn the_browsers_view_follows_each_design_and_the_origin_preference() {
         let mut a = app();
         assert!(a.origin_shown());
-        a.preferences.hide_origin = true;
+        a.preferences.hide_origin = crate::prefs::OriginDisplay::Hidden;
         assert!(!a.origin_shown() && !a.session.is_dirty(), "the preference is not a change to the design");
         let mut b = app();
         b.load_prefs(&a.prefs());
-        assert!(b.preferences.hide_origin && !b.origin_shown(), "the preference is kept between runs");
+        assert!(b.preferences.hide_origin == crate::prefs::OriginDisplay::Hidden && !b.origin_shown(), "the preference is kept between runs");
         // This design shows its Origin and locks its body and hides its Sketches folder.
         a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         a.set_origin_shown(true);
@@ -7276,9 +7345,60 @@ mod tests {
         // Opened again, the design's own Origin setting wins over the preference.
         let text = a.session.design().to_json();
         let mut c = app();
-        c.preferences.hide_origin = true;
+        c.preferences.hide_origin = crate::prefs::OriginDisplay::Hidden;
         c.session = Session::new(solidcraft_engine::doc::Document::from_json(&text).unwrap());
         assert!(c.origin_shown() && c.session.visibility == a.session.visibility);
+    }
+
+    /// The Origin visibility preference on Automatic: the Origin shows until the design has a body, and
+    /// again when the body is undone or rolled back. It saves nothing in the design, the Browser's
+    /// eye wins over it, and each design decides by its own bodies.
+    #[test]
+    fn an_automatic_origin_hides_once_the_design_has_a_body() {
+        let mut a = app();
+        a.preferences.hide_origin = crate::prefs::OriginDisplay::Automatic;
+        assert!(a.origin_shown(), "an empty design shows it");
+        a.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        a.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+        a.run("sketch.finish", json!({})).unwrap();
+        assert!(a.origin_shown(), "a sketch is not a body");
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(!a.origin_shown(), "the first body hides it");
+        assert!(crate::viewport::origin_planes(&a).is_empty() && crate::viewport::origin_axes(&a).is_empty());
+        assert!(a.session.visibility.is_empty(), "nothing is saved in the design");
+        a.start("sketch.create");
+        assert_eq!(crate::viewport::origin_planes(&a).len(), 3, "Create Sketch still offers the planes");
+        a.dialog = None;
+        a.session.visibility.hidden_bodies.push("Body1".into());
+        assert!(!a.origin_shown(), "hiding the body does not bring it back");
+        a.session.visibility.hidden_bodies.clear();
+        let body = a.session.doc.features.last().unwrap().id;
+        a.edit_feature(body);
+        assert!(a.dialog.is_some() && a.session.model.state().bodies.is_empty(), "the edit rolls back before the body");
+        assert!(!a.origin_shown(), "editing the first body leaves it hidden");
+        crate::dialogs::cancel(&mut a);
+        assert!(!a.origin_shown());
+        a.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        assert!(a.origin_shown(), "rolled back before the body");
+        a.run("timeline.roll_to", json!({})).unwrap();
+        assert!(!a.origin_shown());
+        let mut undone = 0;
+        while !a.session.model.state().bodies.is_empty() && undone < 5 {
+            a.run("edit.undo", json!({})).unwrap();
+            undone += 1;
+        }
+        assert!(a.origin_shown(), "undoing the body shows it again");
+        a.run("edit.redo", json!({})).unwrap();
+        assert!(!a.origin_shown(), "redoing it hides it");
+        new_design(&mut a);
+        assert!(a.origin_shown(), "another design has no body yet");
+        switch(&mut a, 0);
+        assert!(!a.origin_shown());
+        a.set_origin_shown(true);
+        assert!(a.origin_shown(), "the Browser's eye wins");
+        let text = a.session.design().to_json();
+        a.session = Session::new(solidcraft_engine::doc::Document::from_json(&text).unwrap());
+        assert!(a.origin_shown(), "and the design keeps it");
     }
 
     /// #1205: Units of new designs apply to the empty design a launch shows, to New while that

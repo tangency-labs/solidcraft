@@ -140,12 +140,31 @@ pub(crate) fn tag(body: &Body, operand: usize) -> Result<Body> {
     }
     const CALL: &str = "smlib_history_tag";
     let r = ops_on(CALL, &[("brep", body)], || body.copy())?;
+    tagged(r, operand, &[("brep", body)])
+}
+
+/// [`tag`] of a body the caller hands over and never reads again: it is tagged itself, with no
+/// copy. The copy [`tag`] makes keeps the body's face and edge order, so the faces and edges
+/// tagged, and what they are tagged with, are the same.
+pub(crate) fn tag_owned(body: Body, operand: usize) -> Result<Body> {
+    if operand >= TAG_MAX {
+        return Err(Error::Argument);
+    }
+    // a failure's dump gets nothing: bodies are handed over only while no dump folder is set
+    // ([`super::boolean::boolean_tagged_owned`])
+    tagged(body, operand, &[])
+}
+
+/// The tags of [`tag`] attached to `r`, a body in its operand's face and edge order; `inputs`
+/// are what a failure's dump gets.
+fn tagged(r: Body, operand: usize, inputs: super::dump::Inputs<'_>) -> Result<Body> {
+    const CALL: &str = "smlib_history_tag";
     let order = r.own_order();
     if order.faces.len() >= TAG_MAX || order.edges.len() >= TAG_MAX {
         return Err(Error::Argument);
     }
-    let adjacency = ops_on(CALL, &[("brep", body)], || r.adjacency(&order))?;
-    let samples = ops_on(CALL, &[("brep", body)], || r.edge_samples(&order, &SAMPLES))?;
+    let adjacency = ops_on(CALL, inputs, || r.adjacency(&order))?;
+    let samples = ops_on(CALL, inputs, || r.edge_samples(&order, &SAMPLES))?;
     let mut data = Vec::with_capacity(order.faces.len() + order.edges.len());
     for (i, edges) in adjacency.face_edges.iter().enumerate() {
         let own: BTreeSet<i64> = edges.iter().filter_map(|j| i64::try_from(*j).ok()).collect();
@@ -154,7 +173,7 @@ pub(crate) fn tag(body: &Body, operand: usize) -> Result<Body> {
     for (i, at) in samples.into_iter().enumerate() {
         data.push((Carrier::Edge(i), Tag { origins: BTreeSet::from([(operand, i)]), edges: BTreeSet::new(), at }));
     }
-    ops_on(CALL, &[("brep", body)], || r.attach(&order, data))?;
+    ops_on(CALL, inputs, || r.attach(&order, data))?;
     Ok(r)
 }
 
