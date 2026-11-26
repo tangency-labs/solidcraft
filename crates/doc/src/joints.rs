@@ -4083,6 +4083,8 @@ mod tests {
                         dir2: None,
                         count2: None,
                         spacing2: None,
+                        skip: Vec::new(),
+                        skip_members: Vec::new(),
                         alignment: Default::default(),
                         alignment2: Default::default(),
                         reversed: false,

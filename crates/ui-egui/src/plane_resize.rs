@@ -86,7 +86,7 @@ fn handles(app: &SolveApp, proj: &Proj) -> Option<(u64, String, Plane, [f64; 4],
 
 fn hit(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Side> {
     let (_, _, _, _, at) = handles(app, proj)?;
-    crate::sketch_tools::nearest_glyph(at, pos, GRAB_PX).map(|(s, _)| s)
+    crate::selection::nearest_glyph(at, pos, GRAB_PX).map(|(s, _)| s)
 }
 
 /// Is a handle under the pointer? (A click there does not change the selection.)

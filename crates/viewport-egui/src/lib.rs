@@ -13,6 +13,12 @@ use std::sync::Arc;
 
 use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
 
+/// The overlay glyph under the pointer, preferring the nearest centre when they overlap.
+/// Coordinates and reach are in egui's screen points.
+pub fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, egui::Pos2)>, pos: egui::Pos2, reach: f32) -> Option<(K, egui::Pos2)> {
+    glyphs.into_iter().filter(|(_, centre)| centre.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+}
+
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
 /// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own

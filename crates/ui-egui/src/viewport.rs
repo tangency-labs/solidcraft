@@ -163,6 +163,8 @@ impl ViewScenes {
 pub struct ViewportState {
     /// Touchscreen gesture ownership and contacts for the shared camera handler.
     pub(crate) touch: crate::navigation::TouchNavigation,
+    pub(crate) pattern_skip_cache: Option<crate::pattern_skip::Cache>,
+    pub(crate) pattern_marker_jobs: crate::pattern_skip::Jobs,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
     /// message, a "needs repair" row under the pointer): ringed in the error colour. What this
     /// frame asks for ([`crate::refused_part::ring`]) is drawn from the next one on, so the ring
@@ -636,6 +638,10 @@ pub enum Hit {
     /// Member the open dialog previews: clicked to pick it for Remove Tube.
     Centreline {
         line: String,
+    },
+    /// A numbered opening in the active pattern dialog's viewport overlay.
+    PatternOpening {
+        handle: usize,
     },
 }
 
@@ -4870,6 +4876,13 @@ pub(crate) fn pick_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, ctx: &egui:
 }
 
 fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option<&egui::Context>) -> Vec<Hit> {
+    if crate::pattern_skip::active(app) {
+        let markers = crate::pattern_skip::project(app, proj);
+        return crate::selection::nearest_glyph(markers, pos, crate::pattern_skip::MARKER_RADIUS + 3.0)
+            .map(|(handle, _)| Hit::PatternOpening { handle })
+            .into_iter()
+            .collect();
+    }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     crate::render_workspace::active(app).hash(&mut h);
     pos.x.to_bits().hash(&mut h);
@@ -6170,7 +6183,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::ConstructionPoint { name } => Sel::ConstructionPoint { name: name.clone() },
         Hit::PointCloudPoint { cloud, index, point, .. } => Sel::PointCloudPoint { cloud: *cloud, index: *index, point: *point },
         // Only the Frame Member dialog's path takes one (`dialogs_frame::end_pick`).
-        Hit::MemberEnd { .. } | Hit::Centreline { .. } => return None,
+        Hit::MemberEnd { .. } | Hit::Centreline { .. } | Hit::PatternOpening { .. } => return None,
     })
 }
 
@@ -8574,6 +8587,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.preview.rolled_back = preview_should_roll_back(app, preview_held, platform, busy_dragging);
     }
     let proj = projection(app, rect);
+    let skip_picking = crate::pattern_skip::active(app);
+    let skip_markers = crate::pattern_skip::project(app, &proj);
     if let Ok(mut cache) = app.viewport.display.lock() {
         cache.prepare(crate::open_meshing::shown_world(app), &proj, app.viewport.pixels_per_point());
     }
@@ -8639,7 +8654,12 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         Some((hit, Some(sel)))
     } else {
         // A centreline of the Frame Member being made lights up for Remove Tube (#15705).
-        crate::dialogs_frame::tube_hover(app, &hits).map(|h| (h, None)).or_else(|| candidate(app, &hits).map(|(h, s)| (h, Some(s))))
+        hits.first()
+            .filter(|h| matches!(h, Hit::PatternOpening { .. }))
+            .cloned()
+            .or_else(|| crate::dialogs_frame::tube_hover(app, &hits))
+            .map(|h| (h, None))
+            .or_else(|| candidate(app, &hits).map(|(h, s)| (h, Some(s))))
     };
     let cand = stable_alignment_hover(app, &proj, hover.filter(|_| inside && !navigating), cand);
     // The view moved under a still pointer: the highlight under it stays on the face it
@@ -8660,7 +8680,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
     let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
-    let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
+    let held =
+        crate::select_other::track_hold(app, ui.ctx(), &proj, inside && !skip_picking, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
     let still = inside
@@ -8917,6 +8938,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Selection chords via resolve (add-only Shift is a preference; default both toggle).
     let held_mods = crate::tool_modifiers::Held::from_modifiers(mods);
     let (add, allow_toggle) = crate::tool_modifiers::selection_click(held_mods, app.preferences.selection_shift_add_only);
+    // A plain pick edits the skip list in place. Selection chords share the ordinary toggle policy.
     crate::sketch_text::set_one_letter(mods.shift);
     // Resting on the Line tool's last point switches lines and tangent arcs (#9489): only a free
     // pointer, nothing held or under way. Not `inside`: on that point the pointer is between the
@@ -9041,6 +9063,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let drawn = (copy_free_3d_move && app.applying.is_none()).then(|| crate::sketch3d::drawn_at(app, &proj, p)).flatten();
                 if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
                     // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
+                } else if let Some((Hit::PatternOpening { handle }, None)) = &cand {
+                    crate::pattern_skip::apply_picks(app, std::iter::once(*handle), !add || allow_toggle);
                 } else if let Some((hit, None)) = &cand
                     && crate::dialogs_frame::click_tube(app, hit)
                 {
@@ -9551,9 +9575,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !axes.contains(a)
         {
             // The lasso (#4376) follows the pointer from the press; the rectangle spans it.
+            let lasso_mode = app.ui.lasso_select;
             match &mut app.viewport.boxsel {
-                Some(lasso) if app.ui.lasso_select && lasso.is_lasso() => lasso.extend(b),
-                _ if app.ui.lasso_select => app.viewport.boxsel = Some(BoxSel::lasso(&[a, b])),
+                Some(lasso) if lasso_mode && lasso.is_lasso() => lasso.extend(b),
+                _ if lasso_mode => app.viewport.boxsel = Some(BoxSel::lasso(&[a, b])),
                 _ => app.viewport.boxsel = Some(BoxSel::from_drag(a, b)),
             }
         }
@@ -9565,7 +9590,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         if resp.drag_stopped()
             && let Some(bx) = app.viewport.boxsel.take()
         {
-            box_select(app, &proj, bx, add);
+            box_select(app, &proj, bx, add, allow_toggle);
         }
     } else {
         app.viewport.boxsel = None;
@@ -9623,7 +9648,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(tl) = app.tool.as_ref() {
         crate::tools::preview(app, tl, &painter, &proj);
     }
-    crate::canvas::show(app, ui, &painter, &proj);
+    if skip_picking {
+        crate::pattern_skip::paint(app, &painter, &skip_markers);
+    } else {
+        crate::canvas::show(app, ui, &painter, &proj);
+    }
     crate::sketch_tools::show(app, ui, &painter, &proj);
     crate::drag_snap::show(app, &painter, &proj);
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
@@ -10332,10 +10361,17 @@ pub(crate) fn measurement_selection(s: &solidcraft_engine::Session, sel: &Sel) -
 /// those too. An input that asks for edges or faces never takes a region: the
 /// regions are neither. A click takes a region of a shown sketch as well (see
 /// hit_sel), but the marquee of a design that has a body takes the bodies alone.
-fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
+fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool, allow_toggle: bool) {
     use crate::selection::{BODIES, EDGES, FACES, PROFILES};
     // While OK computes, the dialog's inputs hold.
     if app.applying.is_some() {
+        return;
+    }
+    if crate::pattern_skip::active(app) {
+        let size = egui::Vec2::splat(2.0 * crate::pattern_skip::MARKER_RADIUS);
+        let picks = crate::pattern_skip::project(app, proj);
+        let handles = picks.into_iter().filter_map(|(handle, at)| bx.takes_rect(Rect::from_center_size(at, size)).then_some(handle));
+        crate::pattern_skip::apply_picks(app, handles, !add || allow_toggle);
         return;
     }
     let st = crate::open_meshing::shown_world(app);
@@ -17953,7 +17989,7 @@ mod tests {
             let r = Rect::from_points(&screen).expand(2.0);
             let bx = if crossing { BoxSel::from_drag(r.right_bottom(), r.left_top()) } else { BoxSel::from_drag(r.left_top(), r.right_bottom()) };
             app.dialog = Some(crate::dialogs::Dialog::for_command(app, "inspect.measure").unwrap());
-            box_select(app, &proj, bx, false);
+            box_select(app, &proj, bx, false, false);
             edge_indices(&app.dialog.take().unwrap().items()).into_iter().filter(|i| rim.contains(i)).collect()
         };
         let mid = polyline_mid(&m.edges[rim[0]]);
@@ -18266,7 +18302,7 @@ mod tests {
                 *chain = false;
             }
             app.dialog = Some(d);
-            box_select(app, &proj, bx, false);
+            box_select(app, &proj, bx, false, false);
             let taken = edge_indices(&app.dialog.take().unwrap().items());
             taken.into_iter().filter(|i| plus.contains(i)).collect()
         };
@@ -18332,7 +18368,7 @@ mod tests {
             let bx = if crossing { BoxSel::from_drag(r.right_bottom(), r.left_top()) } else { BoxSel::from_drag(r.left_top(), r.right_bottom()) };
             assert_eq!(bx.crossing, crossing);
             app.dialog = Some(crate::dialogs::Dialog::for_command(app, "inspect.measure").unwrap());
-            box_select(app, &proj, bx, false);
+            box_select(app, &proj, bx, false, false);
             edge_indices(&app.dialog.take().unwrap().items()).into_iter().filter(|i| plus.contains(i)).collect()
         };
         for &half in &plus {
@@ -18364,7 +18400,7 @@ mod tests {
             let mut d = crate::dialogs::Dialog::for_command(&app, "solid.extrude").unwrap();
             d.inputs[0].accept = crate::selection::PROFILES | crate::selection::CURVES;
             app.dialog = Some(d);
-            box_select(&mut app, &proj, BoxSel::from_drag(from, to), false);
+            box_select(&mut app, &proj, BoxSel::from_drag(from, to), false, false);
             let items = app.dialog.take().unwrap().items();
             let lines = items.iter().filter(|i| matches!(i, Sel::SketchCurve { sketch: Some(_), .. })).count();
             assert_eq!(lines, 2, "both lines are taken: {items:?}");

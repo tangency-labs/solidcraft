@@ -22,8 +22,8 @@ pub struct SavedModel {
 
 /// Records refer to these at most.
 const MAX_ITEMS: usize = 1_000_000;
-/// Bodies, sketches, sheets, sketch keys and named face points all the states hold together, at
-/// most (a state is a list of clones).
+/// Bodies, sketches, surface sheets, sketch keys, named face points and pattern slots all states
+/// hold together, at most (a state is a list of clones).
 const MAX_HELD: usize = 50_000_000;
 /// Longest text a record holds (bytes). A feature's warning can quote every generated name of
 /// the edges it picked: 122,701 characters in one design, whose saved model was refused, so it
@@ -409,7 +409,7 @@ impl Writer {
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
-        let r = json!({
+        let mut r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
@@ -421,6 +421,9 @@ impl Writer {
             "tapered": serde_json::to_value(&st.tapered).ok()?,
             "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
         });
+        if !st.pattern_body_layouts.is_empty() {
+            r["pattern_body_layouts"] = serde_json::to_value(&st.pattern_body_layouts).ok()?;
+        }
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
         Some(self.states.len() - 1)
@@ -764,6 +767,13 @@ impl SavedModel {
                 held = held.saturating_add(surface_weight.get(index(Some(i), surface_weight.len())?).copied().unwrap_or(usize::MAX));
             }
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
+            if let Some(layouts) = s.get("pattern_body_layouts") {
+                let invalid = || bad("saved model: pattern layouts");
+                for layout in layouts.as_object().ok_or_else(invalid)?.values() {
+                    let slots = layout.get("made_slots").and_then(Json::as_array).ok_or_else(invalid)?;
+                    held = held.saturating_add(1).saturating_add(slots.len());
+                }
+            }
             if held > MAX_HELD {
                 return Err(bad("saved model: states"));
             }
@@ -833,6 +843,10 @@ impl SavedModel {
                 // Older saved models have none: their patterns left no body out.
                 pattern_left_out: match s.get("pattern_left_out") {
                     Some(v) => serde_json::from_value(v.clone()).map_err(invalid)?,
+                    None => BTreeMap::new(),
+                },
+                pattern_body_layouts: match s.get("pattern_body_layouts") {
+                    Some(v) => serde::Deserialize::deserialize(v).map_err(invalid)?,
                     None => BTreeMap::new(),
                 },
                 named_faces,

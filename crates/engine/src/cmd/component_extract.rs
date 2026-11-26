@@ -460,9 +460,26 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 *from = to_root(*from);
                 *to = to_root(*to);
             }
-            FeatureKind::Mirror { placements, .. } | FeatureKind::Pattern { placements, .. } => {
+            FeatureKind::Mirror { placements, .. } => {
                 for path in placements {
                     local_path(path, &sc.own);
+                }
+            }
+            FeatureKind::Pattern { pattern, placements, .. } => {
+                for path in placements {
+                    local_path(path, &sc.own);
+                }
+                let members = match pattern {
+                    solidcraft_doc::PatternKind::Rectangular { skip_members, .. }
+                    | solidcraft_doc::PatternKind::Circular { skip_members, .. }
+                    | solidcraft_doc::PatternKind::Path { skip_members, .. } => skip_members,
+                };
+                // A saved body identity uses the same occurrence path as its source pick.
+                // Rebase dormant identities too, so they can match when the copy returns.
+                for member in members {
+                    if let solidcraft_doc::PatternMemberKey::Stable(solidcraft_doc::PatternMemberIdentity::Body { path, .. }) = &mut member.2 {
+                        local_path(path, &sc.own);
+                    }
                 }
             }
             FeatureKind::Emboss { face: Some(face), .. } => {
@@ -1001,6 +1018,48 @@ mod tests {
         run(&mut s, "component.activate", json!({"component": 0}));
         run(&mut s, "occurrence.move", json!({"occurrence": plate_occ, "translate": [100, 0, 0]}));
         (s, plate, other)
+    }
+
+    #[test]
+    fn extracting_a_body_pattern_rebases_active_and_dormant_skip_identities_with_their_sources() {
+        let mut s = Session::default();
+        let holder = run(&mut s, "component.create", json!({"name":"Holder"}));
+        let (holder, own) = (holder["component"].as_u64().unwrap(), holder["occurrence"].as_u64().unwrap());
+        let pin = run(&mut s, "component.create", json!({"name":"Pin","parent":holder}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"body_name":"Seed"}));
+        run(&mut s, "component.activate", json!({"component":holder}));
+        let pattern = run(
+            &mut s,
+            "solid.pattern.rectangular",
+            json!({"bodies":["Seed"],"dir1":[1,0,0],"count1":4,"spacing1":20,"skip_members":[[2,0,0],[4,0,0]]}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        run(&mut s, "timeline.edit", json!({"feature":pattern,"set":{"pattern":{"count1":"3"}}}));
+        let before = serde_json::to_value(&s.doc.feature(pattern).unwrap().kind).unwrap();
+        assert_eq!(before["placements"], json!([[own, pin]]));
+        assert_eq!(before["pattern"]["skip_members"].as_array().unwrap().len(), 2);
+        for member in before["pattern"]["skip_members"].as_array().unwrap() {
+            assert_eq!(member[2]["path"], json!([own, pin]));
+        }
+        let expected = vec![[64, 200, 200, 200], [64, 4200, 200, 200]];
+        assert_eq!(shapes(&s), expected, "the original and instance 3 remain");
+        let scope = scope(&s, holder, CMD).unwrap();
+        let (part, _) = part_design(&s, &scope, "holder", CMD).unwrap();
+        assert_eq!(shapes(&part), expected, "extraction must not restore the skipped instance");
+        let after = serde_json::to_value(&part.doc.feature(pattern).unwrap().kind).unwrap();
+        assert_eq!(after["placements"], json!([[pin]]));
+        for member in after["pattern"]["skip_members"].as_array().unwrap() {
+            assert_eq!(member[2]["path"], json!([pin]), "active and dormant selections follow the source path");
+        }
+        let result = part.model.result(pattern).unwrap();
+        assert!(result.error.is_none(), "{result:?}");
+        assert!(result.warning.as_deref().is_some_and(|warning| warning.contains("1 saved exclusion")), "only instance 4 is dormant: {result:?}");
+        let mut reopened = Session::new(Document::from_json(&part.doc.to_json()).unwrap());
+        assert_eq!(shapes(&reopened), expected);
+        run(&mut reopened, "timeline.edit", json!({"feature":pattern,"set":{"pattern":{"count1":"4"}}}));
+        assert_eq!(shapes(&reopened), expected, "instance 4 remains skipped when its saved placement returns");
+        assert!(reopened.model.result(pattern).unwrap().warning.is_none());
     }
 
     #[test]

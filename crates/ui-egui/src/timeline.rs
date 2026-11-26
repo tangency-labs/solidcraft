@@ -2113,6 +2113,8 @@ mod tests {
                 start: None,
                 start_fraction: None,
                 follow_frame: true,
+                skip: Vec::new(),
+                skip_members: Vec::new(),
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);

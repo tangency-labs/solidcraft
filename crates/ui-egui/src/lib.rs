@@ -271,6 +271,7 @@ pub mod panel_runtime;
 pub mod params_dialog;
 pub mod parts_library;
 pub(crate) mod pattern_components;
+mod pattern_skip;
 pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
@@ -4599,6 +4600,7 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
+        pattern_skip::update(self, ctx);
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.

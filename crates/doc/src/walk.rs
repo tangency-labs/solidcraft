@@ -41,6 +41,54 @@ impl Walk for u64 {}
 impl Walk for i8 {}
 impl Walk for f64 {}
 impl Walk for usize {}
+impl Walk for crate::PatternAddress {
+    fn walk_refs<'a>(&'a self, visit: &mut dyn FnMut(RefItem<'a>)) {
+        if let Self::Steps(steps) = self {
+            for step in steps.iter().skip(1) {
+                step.0.walk_refs(visit);
+            }
+        }
+    }
+    fn walk_refs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(RefItemMut<'a>)) {
+        if let Self::Steps(steps) = self {
+            for step in steps.iter_mut().skip(1) {
+                step.0.walk_refs_mut(visit);
+            }
+        }
+    }
+}
+impl Walk for crate::PatternMember {
+    fn walk_refs<'a>(&'a self, visit: &mut dyn FnMut(RefItem<'a>)) {
+        self.0.walk_refs(visit);
+        if self.1 != FeatureId::DANGLING {
+            self.1.walk_refs(visit);
+        }
+        if let crate::PatternMemberKey::Stable(identity) = &self.2 {
+            match identity {
+                crate::PatternMemberIdentity::SketchPoint { sketch, .. } | crate::PatternMemberIdentity::Profile { sketch, .. } => {
+                    sketch.walk_refs(visit)
+                }
+                crate::PatternMemberIdentity::Body { body, .. } => body.walk_refs(visit),
+                crate::PatternMemberIdentity::Single => {}
+            }
+        }
+    }
+    fn walk_refs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.0.walk_refs_mut(visit);
+        if self.1 != FeatureId::DANGLING {
+            self.1.walk_refs_mut(visit);
+        }
+        if let crate::PatternMemberKey::Stable(identity) = &mut self.2 {
+            match identity {
+                crate::PatternMemberIdentity::SketchPoint { sketch, .. } | crate::PatternMemberIdentity::Profile { sketch, .. } => {
+                    sketch.walk_refs_mut(visit)
+                }
+                crate::PatternMemberIdentity::Body { body, .. } => body.walk_refs_mut(visit),
+                crate::PatternMemberIdentity::Single => {}
+            }
+        }
+    }
+}
 impl Walk for u32 {}
 impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}

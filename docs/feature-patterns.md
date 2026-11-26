@@ -1,9 +1,8 @@
 # Feature mirrors and patterns
 
-Choose **Mirror**, **Rectangular Pattern** or **Circular Pattern** from the Solid
+Choose **Mirror**, **Rectangular Pattern**, **Circular Pattern** or **Pattern on Path** from the Solid
 Create panel and set **Object Type** to **Features**. Select the source features
-in the timeline or pick their faces in the viewport. Selecting features before
-starting the command fills the Features input automatically.
+in the timeline or pick their faces in the viewport.
 
 Feature copies replay the source operations: a patterned hole cuts the target
 solid, and an additive feature adds material. The mirror's New Body / Join
@@ -26,6 +25,41 @@ original, with as many copies on each side; Copy at the end then adds a copy at
 either end. Directions can meet at any angle. A missing second direction
 produces a single row. Direction vectors are saved with the
 feature; editing a picked guide later does not change these saved vectors.
+
+In a rectangular, circular or path pattern, turn on **Instances to skip** to
+pick individual copies in the viewport. Each opening in a copied multi-hole
+feature has its own marker. Instance 1 is the original and always stays;
+instance 2 is the first copy. Openings at the same placement share its instance
+number and can be skipped separately.
+
+Green markers stay and red markers are skipped. Click a marker or drag around
+several to toggle them. The toolbar's **Select** panel controls the drag shape:
+turn on **Lasso** for a freehand loop, or leave it off to use a box.
+**Ctrl/Cmd-click** toggles. **Shift-click** toggles by default and only adds copies
+to the skip list when the add-only Shift preference is enabled. Use **Restore**
+beside a skipped item to bring it back, or **Clear skipped instances** for all
+copies. Editing a saved pattern shows its skipped copies again.
+
+Selections follow the original sketch point, profile or body rather than its
+position in a reordered source list. Deleting an opening keeps its exclusion
+dormant; drawing a new opening at the same position does not transfer the
+exclusion to it. Reducing Quantity can also leave a saved placement outside the
+pattern. The pattern warns and keeps that exclusion, which becomes active again
+when its source and placement return.
+
+The three pattern commands accept the same exclusion options for Features and
+Bodies. `skip: [2, 4]` leaves out whole placements, including any openings added
+to their source later. `skip_members: [[2, "Hole pair", 0]]` leaves out only the
+first opening of the feature named **Hole pair** at instance 2. The member index
+starts at zero and is resolved when the selection is made; saved selections
+follow their original source after reorder, save/reopen, undo and redo. A source
+feature ID can be used instead of its name. For a body pattern, use source 0 and
+the body's current index in the selected bodies list.
+
+New selections must refer to existing copies and source members. Invalid
+instance numbers, sources and members are refused without changing the design.
+When editing an existing pattern, its unchanged saved exclusions may remain
+dormant. Saved selectors can be sent back unchanged through the command API.
 
 Circular feature patterns have Quantity, Total angle, Flip and Center controls.
 Six instances over 90 degrees use 18-degree steps, including both ends of the
@@ -53,5 +87,4 @@ The command forms share sketch patterns' alignment names:
 ```
 
 Omitted alignments default to `right`, and omitted reversals to `false`, preserving
-older designs. `left` is also accepted by the command API. New placement values
-are stored through the pending document-format migration.
+older designs. `left` is also accepted by the command API.

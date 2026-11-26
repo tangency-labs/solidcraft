@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.pattern_skip": "Instances to skip",
+    "ui.pattern_skip_clear": "Clear skipped instances",
+    "ui.pattern_skip_list": "Skipped",
+    "ui.pattern_skip_restore": "Restore {number}"
+  },
+  "ar": {
+    "ui.pattern_skip": "النسخ المراد تخطيها",
+    "ui.pattern_skip_clear": "مسح قائمة النسخ المتخطاة",
+    "ui.pattern_skip_list": "النسخ المتخطاة",
+    "ui.pattern_skip_restore": "استعادة {number}"
+  },
+  "de": {
+    "ui.pattern_skip": "Zu überspringende Instanzen",
+    "ui.pattern_skip_clear": "Alle übersprungenen Instanzen wiederherstellen",
+    "ui.pattern_skip_list": "Übersprungen",
+    "ui.pattern_skip_restore": "{number} wiederherstellen"
+  },
+  "he": {
+    "ui.pattern_skip": "עותקים לדילוג",
+    "ui.pattern_skip_clear": "שחזור כל העותקים שדולגו",
+    "ui.pattern_skip_list": "עותקים שדולגו",
+    "ui.pattern_skip_restore": "שחזור {number}"
+  },
+  "ja": {
+    "ui.pattern_skip": "スキップするインスタンス",
+    "ui.pattern_skip_clear": "スキップしたインスタンスをすべて復元",
+    "ui.pattern_skip_list": "スキップ済み",
+    "ui.pattern_skip_restore": "{number} を復元"
+  },
+  "ko": {
+    "ui.pattern_skip": "건너뛸 인스턴스",
+    "ui.pattern_skip_clear": "건너뛴 인스턴스 모두 복원",
+    "ui.pattern_skip_list": "건너뛴 인스턴스",
+    "ui.pattern_skip_restore": "{number} 복원"
+  },
+  "vi": {
+    "ui.pattern_skip": "Các bản sao cần bỏ qua",
+    "ui.pattern_skip_clear": "Khôi phục tất cả bản sao đã bỏ qua",
+    "ui.pattern_skip_list": "Đã bỏ qua",
+    "ui.pattern_skip_restore": "Khôi phục {number}"
+  },
+  "zh": {
+    "ui.pattern_skip": "要跳过的实例",
+    "ui.pattern_skip_clear": "恢复所有已跳过的实例",
+    "ui.pattern_skip_list": "已跳过",
+    "ui.pattern_skip_restore": "恢复 {number}"
+  }
+}

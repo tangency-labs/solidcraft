@@ -1432,7 +1432,7 @@ impl Lit {
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             Some(Hit::PointCloudPoint { .. }) => None,
-            Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
+            Some(Hit::MemberEnd { .. } | Hit::Centreline { .. } | Hit::PatternOpening { .. }) => None,
             None => {
                 app.viewport
                     .hover_feature

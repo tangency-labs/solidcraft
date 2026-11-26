@@ -1800,6 +1800,25 @@ fn saved_named_face_points_refuse_missing_malformed_and_excessive_records() {
     });
 }
 
+#[test]
+fn saved_pattern_slots_count_toward_the_state_budget() {
+    use serde_json::json;
+    let mut doc = Document::new("Pattern layout");
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, None).unwrap();
+    let feature = doc.features[0].id;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let mut saved = model.saved(&doc).unwrap();
+    let state = &mut saved.records["states"][0];
+    state["pattern_body_layouts"] = json!({(feature.to_string()): {"copies_per_source": 2, "made_slots": [0, 1]}});
+    assert_eq!(saved.final_state().unwrap().pattern_body_layout(feature).unwrap().sources().collect::<Vec<_>>(), [0, 0]);
+
+    // A compressed body run leaves room for two entries. The pattern map adds one entry
+    // and two slots, so preflight must refuse the state before expanding the body run.
+    saved.records["states"][0]["bodies"] = json!([[0, 49_999_998]]);
+    assert!(matches!(saved.final_state(), Err(DocError::Invalid(message)) if message == "saved model: states"));
+}
+
 /// The dirty check and autosave compare the whole document after every edit; a scanned
 /// part's shared triangles must not be read for that. A coordinate that equals nothing (not a
 /// number) shows whether the shared arrays were read: only reading them makes a mesh differ
@@ -2515,6 +2534,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     dir2: None,
                     count2: None,
                     spacing2: None,
+                    skip: Vec::new(),
+                    skip_members: Vec::new(),
                     alignment: solidcraft_sketch::PatternAlignment::Right,
                     alignment2: Default::default(),
                     reversed: false,
@@ -2572,6 +2593,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     dir2: None,
                     count2: None,
                     spacing2: None,
+                    skip: Vec::new(),
+                    skip_members: Vec::new(),
                     alignment: solidcraft_sketch::PatternAlignment::Right,
                     alignment2: Default::default(),
                     reversed: false,
@@ -3396,6 +3419,46 @@ fn the_copies_that_remove_no_material_are_tested_in_one_boolean() {
     assert!(again.error.is_none(), "{again:?}");
     assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
     assert_eq!(work.miss_intersects, 1, "{work:?}");
+}
+
+#[test]
+fn skipped_pattern_copies_do_not_count_as_cuts_that_remove_no_material() {
+    for omitted in [vec![2, 4], vec![1, 2, 3, 4, 5], Vec::new()] {
+        let mut doc = Document::new("skipped repeated holes");
+        disc_with_hole_pattern(&mut doc, 20.0, 6);
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let before = disc_volume(&model);
+        let hole = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
+        let again = hole_pattern(&mut doc, hole, 6);
+        let FeatureKind::Pattern { pattern: PatternKind::Circular { skip_members, .. }, .. } = &mut doc.feature_mut(again).unwrap().kind else {
+            panic!("a circular pattern");
+        };
+        *skip_members = omitted
+            .iter()
+            .map(|&copy| {
+                PatternMember(
+                    PatternAddress::Steps(vec![PatternStep(FeatureId::DANGLING, copy, 0)]),
+                    FeatureId(hole),
+                    PatternMemberKey::Stable(PatternMemberIdentity::Single),
+                )
+            })
+            .collect();
+
+        let work = counted(|| model.evaluate(&doc));
+        let result = model.result(again).unwrap();
+        assert!(result.error.is_none(), "{omitted:?}: {result:?}");
+        let retained = 5 - omitted.len();
+        if retained == 0 {
+            assert!(result.warning.is_none(), "{result:?}");
+        } else {
+            let want = format!("{retained} of {retained} cut copies remove no material");
+            assert!(result.warning.as_deref().is_some_and(|w| w.starts_with(&want)), "{omitted:?}: {result:?}");
+        }
+        // The spaced copies' cut history certifies the misses without a separate intersection.
+        assert_eq!(work.miss_intersects, 0, "{omitted:?}: {work:?}");
+        assert!((disc_volume(&model) - before).abs() < 1e-6, "repeated cuts leave the plate unchanged");
+    }
 }
 
 #[test]

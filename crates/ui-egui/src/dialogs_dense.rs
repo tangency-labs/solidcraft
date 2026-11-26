@@ -400,6 +400,59 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
     .unwrap_or(false)
 }
 
+fn pattern_skip_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    if d.pattern_skip_command().is_none() {
+        return;
+    }
+    let selecting = d.pattern_skip_selecting;
+    ui_kit::checkbox_grid(ui, &mut [("ui.pattern_skip", &mut d.pattern_skip_selecting)], 1);
+    if d.pattern_skip_selecting && !selecting {
+        d.awaiting_pick = false;
+        d.pick_refused = None;
+        surrender_keyboard_focus(ui);
+    }
+    if d.pattern_skip_selecting || d.has_pattern_skips() {
+        crate::pattern_skip::show_status(app, d, ui);
+        let skipped = crate::pattern_skip::skipped_choices(app, d);
+        let list = format!("[{}]", skipped.iter().map(|(_, label, _)| *label).collect::<Vec<_>>().join(", "));
+        form_row(ui, "ui.pattern_skip_list", |ui| {
+            ui_kit::text(ui, &list, ui_kit::Text::MonoCell);
+        });
+        if !skipped.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for (number, shown, can_restore) in skipped {
+                    let label = solidcraft_ui_text::format("ui.pattern_skip_restore", &[("number", shown)]);
+                    let button = ui.add_enabled_ui(can_restore, |ui| ui_kit::button(ui, label, ui_kit::Button::Small)).inner;
+                    if ui.is_rect_visible(button.rect) {
+                        crate::scenario::publish_handle(&format!("pattern:restore:{shown}"), button.rect.center());
+                    }
+                    if button.clicked() {
+                        crate::pattern_skip::restore(app, d, number);
+                    }
+                }
+            });
+        }
+        let groups = crate::pattern_skip::whole_choices(app, d);
+        if !groups.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for (address, number) in groups {
+                    let label = solidcraft_ui_text::format("ui.pattern_skip_restore_instance", &[("number", &number.to_string())]);
+                    let button = ui_kit::button(ui, label, ui_kit::Button::Small);
+                    if ui.is_rect_visible(button.rect) {
+                        crate::scenario::publish_handle(&format!("pattern:restore-instance:{number}"), button.rect.center());
+                    }
+                    if button.clicked() {
+                        crate::pattern_skip::restore_whole(app, d, &address);
+                    }
+                }
+            });
+        }
+        if d.has_pattern_skips() && ui_kit::button(ui, tr("ui.pattern_skip_clear"), ui_kit::Button::Normal).clicked() {
+            d.set_pattern_skipped(Vec::new(), Vec::new());
+        }
+    }
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -885,12 +938,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             enter |= pattern_direction_group(app, d, ui, 0);
             enter |= pattern_direction_group(app, d, ui, 1);
             pattern_join_option(ui, d);
+            pattern_skip_group(app, d, ui);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, "Total angle", angle);
             solid_pattern_alignment_row(ui, &mut d.extra, 0);
             pattern_join_option(ui, d);
+            pattern_skip_group(app, d, ui);
         }
         Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
@@ -1455,6 +1510,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 );
             });
             extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
+            pattern_skip_group(app, d, ui);
         }
         Kind::Pipe { diameter, wall, hollow, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);

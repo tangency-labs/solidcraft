@@ -1136,6 +1136,9 @@ pub struct PatternCircularParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
+    /// Exact component placement paths from the root to place again.
+    #[serde(default)]
+    pub occurrences: Option<Vec<Vec<u64>>>,
     /// The axis to turn about. The coordinates of `{origin, dir}`'s origin may also be length
     /// expressions, which the pattern follows.
     pub axis: PatternAxis,
@@ -1157,6 +1160,16 @@ pub struct PatternCircularParams {
     /// their own (#21625). Default: false, every copy a body of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join: Option<bool>,
+    /// Entire placements to omit, using public instance numbers (2 is the first copy) or saved placement steps.
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_instances_schema")]
+    pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
+    /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
+    /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
+    /// Saved placement steps and stable member identities can be sent back unchanged.
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_members_schema")]
+    pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1168,7 +1181,7 @@ pub struct PatternCircularParams {
 pub enum PatternResult {
     /// With `features` or `bodies`.
     Feature(Box<FeatureResult>),
-    /// With `components`.
+    /// With `components` or `occurrences`.
     Components {
         /// The new occurrences' ids.
         occurrences: Vec<u64>,
@@ -1282,7 +1295,7 @@ impl JsonSchema for PatternDir {
         // The bounds are `params::finite`'s.
         let c = json!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9});
         json_schema!({
-            "description": "A direction: [x, y, z] or {\"x\", \"y\", \"z\"}. Only its direction counts; the spacing sets the step.",
+            "description": "A direction: [x, y, z] or {\"x\", \"y\", \"z\"}. The vector's length does not change the step.",
             "anyOf": [
                 {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
                 {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
@@ -1294,6 +1307,56 @@ impl JsonSchema for PatternDir {
 // `count1` and `spacing1` are not required: one of them is worked out with an extent.
 fn rectangular_required(schema: &mut Schema) {
     require(schema, "dir1");
+}
+
+fn skipped_pattern_instances<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<solidcraft_doc::PatternAddress>>, D::Error> {
+    crate::params::pattern_skip(&Value::deserialize(d)?).map(Some).map_err(|error| D::Error::custom(whole(error)))
+}
+
+fn pattern_placement_schema() -> Value {
+    let coordinate = json!({"type":"integer", "minimum":0, "maximum":crate::params::MAX_PATTERN_SKIP - 1});
+    let step = |source| {
+        json!({
+            "type":"array", "minItems":3, "maxItems":3,
+            "prefixItems":[source, coordinate, coordinate],
+            "not":{"prefixItems":[{}, {"enum":[0]}, {"enum":[0]}]}
+        })
+    };
+    json!({"anyOf":[
+        {"type":"integer", "minimum":2, "maximum":crate::params::MAX_PATTERN_SKIP},
+        {"type":"array", "minItems":1, "maxItems":crate::params::MAX_PATTERN_STEPS,
+         "prefixItems":[step(json!({"enum":[0]}))], "items":step(json!({"type":"integer","minimum":1}))}
+    ]})
+}
+
+fn skipped_pattern_instances_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type":"array", "maxItems":crate::params::MAX_PATTERN_SKIP, "items":pattern_placement_schema()})
+}
+
+fn skipped_pattern_members<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let value = Value::deserialize(d)?;
+    crate::params::pattern_skip_members(&value).map_err(|error| D::Error::custom(whole(error)))?;
+    Ok(Some(value))
+}
+
+fn skipped_pattern_members_schema(_: &mut SchemaGenerator) -> Schema {
+    let id = json!({"type":"integer", "minimum":0});
+    let name = json!({"type":"string", "minLength":1, "maxLength":4096});
+    let stable = |kind, mut properties: serde_json::Map<String, Value>, mut required: Vec<&str>| {
+        properties.insert("type".into(), json!({"enum":[kind]}));
+        required.push("type");
+        json!({"type":"object", "properties":properties, "required":required, "additionalProperties":false})
+    };
+    let member = json!({"anyOf":[
+        {"type":"integer", "minimum":0, "maximum":crate::params::MAX_PATTERN_MEMBERS - 1},
+        stable("single", serde_json::Map::new(), vec![]),
+        stable("sketch_point", serde_json::Map::from_iter([("sketch".into(),id.clone()),("point".into(),name.clone())]), vec!["sketch","point"]),
+        stable("profile", serde_json::Map::from_iter([("sketch".into(),id.clone()),("curves".into(),json!({"type":"array", "items":name,"minItems":1,"maxItems":crate::params::MAX_STRING_LIST}))]), vec!["sketch","curves"]),
+        stable("body", serde_json::Map::from_iter([("body".into(),name.clone()),("path".into(),json!({"type":"array", "items":id,"maxItems":64}))]), vec!["body","path"])
+    ]});
+    json_schema!({"type":"array", "maxItems":crate::params::MAX_PATTERN_MEMBERS,
+        "items":{"type":"array","minItems":3,"maxItems":3,"prefixItems":[pattern_placement_schema(),
+            {"anyOf":[{"type":"integer","minimum":0}, name]}, member]}})
 }
 
 /// Copy features, bodies or components in a row, or a grid with a second direction. Give one of
@@ -1310,6 +1373,9 @@ pub struct PatternRectangularParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
+    /// Exact component placement paths from the root to place again.
+    #[serde(default)]
+    pub occurrences: Option<Vec<Vec<u64>>>,
     // `dir1` is optional in the type and required in the schema: left out, the handler refuses
     // the call with its own message ("`dir1` must be [x, y, z]"), which the check would otherwise
     // replace with "`dir1` is required". `count1` and `spacing1` are read as `dir1`; the
@@ -1338,8 +1404,8 @@ pub struct PatternRectangularParams {
     /// The step between neighbours along the second direction.
     #[serde(default)]
     pub spacing2: Option<LengthExpr>,
-    /// Where the original sits along the first direction. Default: right, the original at the
-    /// start.
+    /// Where the original sits along the first direction. Default: right,
+    /// the original at the start.
     #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment: Option<solidcraft_sketch::PatternAlignment>,
@@ -1383,6 +1449,17 @@ pub struct PatternRectangularParams {
     /// their own (#21625). Default: false, every copy a body of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join: Option<bool>,
+    /// One-based copy numbers to leave out. The original (1) always remains.
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_instances_schema")]
+    pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
+
+    /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
+    /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
+    /// Saved placement steps and stable member identities can be sent back unchanged.
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_members_schema")]
+    pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1507,6 +1584,9 @@ pub struct PatternPathParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
+    /// Exact component placement paths from the root to place again.
+    #[serde(default)]
+    pub occurrences: Option<Vec<Vec<u64>>>,
     /// The sketch holding the path, by id or name. Required, unless given as `sketch`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SketchRef")]
@@ -1546,6 +1626,16 @@ pub struct PatternPathParams {
     /// Run along the path from its other end. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
+    /// Entire placements to omit, using public instance numbers (2 is the first copy) or saved placement steps.
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_instances_schema")]
+    pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
+    /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
+    /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
+    /// Saved placement steps and stable member identities can be sent back unchanged.
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "skipped_pattern_members_schema")]
+    pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

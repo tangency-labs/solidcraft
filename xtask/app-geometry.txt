@@ -1438,7 +1438,6 @@ crates/ui-egui/src/sketch_text_handles.rs:screen normalized
 crates/ui-egui/src/sketch_tools.rs:corner_point distance
 crates/ui-egui/src/sketch_tools.rs:glyph_anchors normalized
 crates/ui-egui/src/sketch_tools.rs:glyphs distance,normalized
-crates/ui-egui/src/sketch_tools.rs:nearest_glyph distance
 crates/ui-egui/src/sketch_tools.rs:nearest_on_polyline dot
 crates/ui-egui/src/sketch_tools.rs:on_click dot
 crates/ui-egui/src/sketch_tools.rs:periodic_start_snap distance

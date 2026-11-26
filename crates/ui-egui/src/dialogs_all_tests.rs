@@ -1939,6 +1939,97 @@ fn rectangular_pattern_distance_type_sends_what_it_uses_and_reopens() {
 }
 
 #[test]
+fn editing_a_rectangular_pattern_previews_skipped_copies_and_keeps_them_omitted_on_ok() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"})).unwrap();
+    let result =
+        h.app.run("solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "skip": [3]})).unwrap();
+    let pattern = result["feature"].as_u64().unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+
+    h.app.edit_feature(pattern);
+    let dialog = h.app.dialog.as_ref().unwrap();
+    assert!(dialog.pattern_skip_active(), "the saved exclusion is immediately available to restore");
+    let commands = preview_commands(&h.app, dialog).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    let preview = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
+    assert!((preview.bounds.max.x - 50.0).abs() < 1.0e-8, "the preview reaches the skipped last copy");
+
+    let apply = apply_commands(&h.app, dialog).unwrap();
+    // The third instance of a one-direction pattern is grid position (2, 0).
+    assert_eq!(apply[0].1["params"]["skip"], json!([[[0, 2, 0]]]));
+    assert_eq!(h.app.session.preview(&apply).unwrap().after.bodies.len(), 2);
+}
+
+#[test]
+fn pattern_skip_uses_the_viewports_selection_shape_modifiers_and_navigation() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"})).unwrap();
+    h.app
+        .run("solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "skip": [4], "name": "Copies"}))
+        .unwrap();
+    h.call("ui.editFeature", json!({"feature": "Copies"}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [36, 5, 0], "distance": 150}));
+    h.frames(4);
+    // The new distance rows also take space in the open Direction 2 section.
+    h.step(&json!({"click": {"handle": "dialog:section:Direction 2"}})).unwrap();
+    let skipped = |h: &Harness| crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap());
+    assert_eq!(skipped(&h), [4]);
+
+    let two = json!({"handle": "pattern:instance:2"});
+    let three = json!({"handle": "pattern:instance:3"});
+    let [x, y] = h.at(&two).unwrap();
+    let rect = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, rect);
+    assert!(matches!(
+        crate::viewport::pick_cached(&mut h.app, &proj, egui::pos2(x as f32, y as f32)).as_slice(),
+        [crate::viewport::Hit::PatternOpening { handle: 2 }]
+    ));
+    h.app.preferences.selection_shift_add_only = true;
+    h.step(&json!({"click": two})).unwrap();
+    h.step(&json!({"click": two, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [2, 4], "add-only Shift keeps the skipped marker");
+    h.step(&json!({"click": three, "shift": true})).unwrap();
+    h.step(&json!({"click": two, "ctrl": true})).unwrap();
+    assert_eq!(skipped(&h), [3, 4], "Primary toggles the marker off the list");
+    h.app.preferences.selection_shift_add_only = false;
+    h.step(&json!({"click": three, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [4], "default Shift also toggles");
+
+    let [x, y] = h.at(&two).unwrap();
+    let [left, right, top, bottom] = [x - 14.0, x + 14.0, y - 14.0, y + 14.0];
+    let diagonal = json!([[left, top], [right, bottom]]);
+    h.call("ui.set", json!({"lassoSelect": true}));
+    h.step(&json!({"drag": diagonal})).unwrap();
+    assert_eq!(skipped(&h), [4], "a straight lasso encloses nothing");
+    h.step(&json!({"drag": [[left, top], [right, top], [right, bottom], [left, bottom], [left, top]]})).unwrap();
+    assert_eq!(skipped(&h), [2, 4], "the shared lasso takes the enclosed marker");
+    h.call("ui.set", json!({"lassoSelect": false}));
+    h.step(&json!({"drag": diagonal})).unwrap();
+    assert_eq!(skipped(&h), [4], "the same diagonal now draws a box");
+    h.step(&json!({"drag": [[right, y - 4.0], [x - 1.0, y + 4.0]]})).unwrap();
+    assert_eq!(skipped(&h), [2, 4], "the shared crossing box takes the marker it touches");
+    h.app.preferences.selection_shift_add_only = true;
+    h.step(&json!({"drag": diagonal, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [2, 4], "the add-only modifier also works for a box");
+    h.app.preferences.selection_shift_add_only = false;
+    h.step(&json!({"drag": diagonal, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [4], "the toggle modifier can restore a boxed marker");
+    h.step(&json!({"click": two})).unwrap();
+
+    h.app.preferences.nav = "alias".into();
+    let camera = h.app.cam;
+    h.step(&json!({"drag": diagonal, "shift": true, "alt": true})).unwrap();
+    assert_ne!(h.app.cam, camera, "Alias's navigation chord still moves the view");
+    assert_eq!(skipped(&h), [2, 4], "navigation does not edit the skip list");
+    h.step(&json!({"click": {"handle": "pattern:restore:2"}})).unwrap();
+    assert_eq!(skipped(&h), [4]);
+}
+
+#[test]
 fn coil_axis_field_passes_named_and_custom_directions_with_a_profile() {
     let mut h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
@@ -3119,7 +3210,37 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
 /// (`occurrences`) instead of copying every body. A selection missing one body of a placement
 /// gets no offer.
 #[test]
+fn editing_circular_and_path_patterns_keeps_whole_instance_exclusions() {
+    for command in ["solid.pattern.circular", "solid.pattern.path"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Seed"})).unwrap();
+        let mut params = json!({"bodies":["Seed"],"count":3,"skip":[2],"name":"Copies"});
+        if command == "solid.pattern.circular" {
+            params["axis"] = json!({"origin":[50,0,0],"dir":[0,0,1]});
+        } else {
+            h.app.run("sketch.create", json!({"plane":"XY","name":"Path"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[0,0],[100,0]],"ids":["route"]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            params["path_sketch"] = json!("Path");
+            params["path"] = json!(["route"]);
+            params["spacing"] = json!(20);
+        }
+        let feature = h.app.run(command, params).unwrap()["feature"].as_u64().unwrap();
+        let dialog = for_feature(&h.app, feature, None).unwrap();
+        assert!(dialog.has_pattern_skips(), "{command}");
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].0, "timeline.redefine");
+        assert_eq!(commands[0].1["command"], command);
+        // The second instance is always the first translated or rotated placement.
+        assert_eq!(commands[0].1["params"]["skip"], json!([[[0, 1, 0]]]), "{command}");
+    }
+}
+
+#[test]
 fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
+    use solidcraft_engine::doc::{FeatureId, PatternAddress};
+
     let mut h = Harness::new();
     let comp = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["component"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 4, "body_name": "Base"})).unwrap();
@@ -3192,21 +3313,76 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&placements);
     mirror_object_type(&mut h, "Features");
     assert_eq!(items(&h), feature);
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.set_pattern_skipped(
+            vec![PatternAddress::Steps(vec![solidcraft_engine::doc::PatternStep(FeatureId::DANGLING, 1, 0)])],
+            vec![PatternMember(
+                PatternAddress::Steps(vec![solidcraft_engine::doc::PatternStep(FeatureId::DANGLING, 1, 0)]),
+                FeatureId(1),
+                solidcraft_engine::doc::PatternMemberKey::Stable(solidcraft_engine::doc::PatternMemberIdentity::Single),
+            )],
+        );
+        d.pattern_skip_selecting = true;
+        d.awaiting_pick = false;
+        assert!(d.pattern_skip_active());
+    }
     mirror_object_type(&mut h, "Components");
     {
         let d = h.app.dialog.as_mut().unwrap();
         assert_eq!(d.inputs[0].label, "Components");
         assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }]);
+        assert!(!d.pattern_skip_active());
         d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     }
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].0, "solid.pattern.rectangular");
     assert_eq!(commands[0].1["occurrences"], json!([[first], [second]]));
+    assert!(commands[0].1.get("spacing1").is_some());
+    for key in ["skip", "skip_members"] {
+        assert!(commands[0].1.get(key).is_none(), "{key}");
+    }
+    mirror_object_type(&mut h, "Features");
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.pattern_skipped().0, [PatternAddress::Steps(vec![solidcraft_engine::doc::PatternStep(FeatureId::DANGLING, 1, 0)])]);
     let occurrences = h.app.session.doc.occurrences.len();
+    h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
     for (command, params) in commands {
         h.app.run(&command, params).unwrap();
     }
     // Two more placements of each (a quantity of 3), and no new bodies.
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
+}
+
+#[test]
+fn pattern_labels_show_one_placement_number_for_each_opening_in_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":100,"width":50,"height":8,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profiles"})).unwrap();
+    for y in [10, 30] {
+        h.app.run("sketch.circle.center", json!({"center":[10,y],"radius":4})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"operation":"cut","distance":8,"name":"Pair"})).unwrap();
+    let made = h.app.run("solid.pattern.rectangular", json!({"features":["Pair"],"dir1":[1,0,0],"count1":3,"spacing1":30})).unwrap();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.app.dialog.as_mut().unwrap().pattern_skip_selecting = true;
+    h.call("ui.view", json!({"view":"top"}));
+    h.frames(2);
+    h.settle();
+    // Leave room for the Restore row below the additional distance controls.
+    h.step(&json!({"click":{"handle":"dialog:section:Direction 2"}})).unwrap();
+    let labels: std::collections::BTreeSet<_> =
+        (2..6).map(|handle| crate::pattern_skip::marker_label(&h.app, h.app.dialog.as_ref().unwrap(), handle)).collect();
+    assert_eq!(labels, ["2 · Pair [0]", "2 · Pair [1]", "3 · Pair [0]", "3 · Pair [1]"].map(str::to_string).into_iter().collect());
+    let first = "2 · Pair [0]";
+    h.step(&json!({"click":{"handle":format!("pattern:instance:{first}")}})).unwrap();
+    let dialog = h.app.dialog.as_ref().unwrap();
+    let skipped = crate::pattern_skip::skipped_handles(&h.app, dialog);
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(crate::pattern_skip::marker_label(&h.app, dialog, skipped[0]), first);
+    h.step(&json!({"click":{"handle":format!("pattern:restore:{first}")}})).unwrap();
+    assert!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()).is_empty());
 }

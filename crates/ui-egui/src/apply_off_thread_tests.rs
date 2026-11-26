@@ -104,6 +104,29 @@ fn cancel_while_computing_applies_nothing() {
 }
 
 #[test]
+fn a_pattern_marker_cannot_change_the_copies_after_ok() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"})).unwrap();
+    h.app
+        .run("solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "name": "Copies", "skip": [3]}))
+        .unwrap();
+    h.call("ui.editFeature", json!({"feature": "Copies"}));
+    h.settle();
+    let dialog = h.app.dialog.as_ref().unwrap();
+    assert!(dialog.pattern_skip_active());
+    assert_eq!(crate::pattern_skip::skipped_handles(&h.app, dialog), [3]);
+
+    let _finish = hold_result(&mut h, false);
+    crate::pattern_skip::apply_picks(&mut h.app, [2].into_iter(), true);
+    assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [3]);
+
+    h.app.applying = None;
+    crate::pattern_skip::apply_picks(&mut h.app, [2].into_iter(), true);
+    assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [2, 3]);
+}
+
+#[test]
 fn removing_the_edited_feature_discards_its_pending_result() {
     let mut h = Harness::new();
     h.app.home.open = false;

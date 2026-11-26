@@ -1286,8 +1286,11 @@ fn circular_pattern_schema_and_the_key_check_agree() {
             "features",
             "join",
             "name",
+            "occurrences",
             "participants",
             "reversed",
+            "skip",
+            "skip_members",
         ],
     );
 }
@@ -1314,6 +1317,7 @@ fn circular_pattern_contract_keeps_the_handlers_errors() {
         ring_with("alignment", json!(null)),
         ring_with("reversed", json!("yes")),
         ring_with("reversed", json!(null)),
+        ring_with("skip_members", json!([[0, 1, 0]])),
     ];
     for p in &cases {
         let error = |level| ring_rig(level).execute("solid.pattern.circular", p).err().map(|e| e.to_string());
@@ -1339,6 +1343,7 @@ fn circular_pattern_replies_match_the_output_schema() {
         ring_with("angle", json!("180 deg")),
         ring_with("alignment", json!("center")),
         ring_with("reversed", json!(true)),
+        ring_with("skip_members", json!([[2, "Post", 0]])),
         json!({"components": ["Part"], "axis": "Z", "count": 3}),
     ];
     for p in &calls {
@@ -1427,9 +1432,12 @@ fn pattern_schemas_and_the_key_check_agree() {
             "features",
             "join",
             "name",
+            "occurrences",
             "participants",
             "reversed",
             "reversed2",
+            "skip",
+            "skip_members",
             "spacing1",
             "spacing2",
         ],
@@ -1446,11 +1454,14 @@ fn pattern_schemas_and_the_key_check_agree() {
             "features",
             "flip",
             "name",
+            "occurrences",
             "orientation",
             "participants",
             "path",
             "path_sketch",
             "sketch",
+            "skip",
+            "skip_members",
             "spacing",
             "start",
             "start_fraction",
@@ -1503,6 +1514,7 @@ fn rectangular_pattern_contract_keeps_the_handlers_errors() {
             with(without(row(), "spacing1"), json!({"distance1": "spacing_extent", "extent1": 80})),
             with(row(), json!({"distance1": "spacing_extent", "spacing1": 90, "extent1": 80})),
             with(row(), json!({"distance1": "spacing_extent", "spacing1": -15, "extent1": 80})),
+            with(row(), json!({"skip": [1]})),
         ],
     );
     for p in [

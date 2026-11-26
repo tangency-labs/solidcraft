@@ -22,7 +22,10 @@ use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
-use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result, ScaleAbout};
+use crate::{
+    AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PatternAddress, PatternKind, PatternMarker, PatternMember,
+    PatternMemberIdentity, PatternMemberKey, PatternStep, PlaneRef, ProfileSel, Result, ScaleAbout,
+};
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
@@ -1089,6 +1092,10 @@ impl ModelState {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
     }
 
+    pub fn pattern_body_layout(&self, feature: u64) -> Option<&PatternBodyLayout> {
+        self.pattern_body_layouts.get(&feature)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -1205,6 +1212,8 @@ pub struct ModelState {
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
     pattern_left_out: BTreeMap<u64, Vec<usize>>,
+    /// The original slots of the bodies a pattern made when individual copies were omitted.
+    pattern_body_layouts: BTreeMap<u64, PatternBodyLayout>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -1213,6 +1222,18 @@ pub struct ModelState {
     /// its sketch plane and the interval along the plane's normal it ran over. A pocket it leaves
     /// is as deep as the extrude ran from the panel's face (see `sheet_surface_cuts`).
     cut_extents: BTreeMap<u64, (Plane, (f64, f64))>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PatternBodyLayout {
+    pub(crate) copies_per_source: usize,
+    pub(crate) made_slots: Vec<usize>,
+}
+
+impl PatternBodyLayout {
+    pub fn sources(&self) -> impl Iterator<Item = usize> + '_ {
+        self.made_slots.iter().filter_map(|&slot| slot.checked_div(self.copies_per_source))
+    }
 }
 
 /// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
@@ -1273,6 +1294,7 @@ impl ModelState {
             tapered,
             kept_separate,
             pattern_left_out,
+            pattern_body_layouts,
             legacy_picks,
             cut_extents,
         } = self;
@@ -1295,6 +1317,7 @@ impl ModelState {
             tapered: tapered.clone(),
             kept_separate: kept_separate.clone(),
             pattern_left_out: pattern_left_out.clone(),
+            pattern_body_layouts: pattern_body_layouts.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
         }
@@ -3489,6 +3512,7 @@ struct ModelChange {
     kept_separate: Option<KeptSeparate>,
     /// A body Pattern's sources it left out.
     pattern_left_out: Option<Vec<usize>>,
+    pattern_body_layout: Option<PatternBodyLayout>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
     /// The same change whatever the bodies the feature did not read, when it can be told so.
@@ -3784,6 +3808,7 @@ impl ModelState {
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
             && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
+            && others_same(&self.pattern_body_layouts, &before.pattern_body_layouts, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
@@ -3817,6 +3842,7 @@ impl ModelState {
                 tapered: self.tapered.get(&feature).cloned(),
                 kept_separate: self.kept_separate.get(&feature).copied(),
                 pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
+                pattern_body_layout: self.pattern_body_layouts.get(&feature).cloned(),
                 named_faces: self.named_faces.get(&feature).cloned(),
                 relative: Relative::of(before, self, f, read).map(Arc::new),
             }))
@@ -3921,6 +3947,10 @@ impl ModelState {
         if let Some(l) = &change.pattern_left_out {
             next.pattern_left_out.insert(feature, l.clone());
         }
+        next.pattern_body_layouts.remove(&feature);
+        if let Some(layout) = &change.pattern_body_layout {
+            next.pattern_body_layouts.insert(feature, layout.clone());
+        }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
             next.named_faces.insert(feature, p.clone());
@@ -3974,18 +4004,22 @@ fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &
         return false;
     }
     let vals = evaluation_values(doc).0;
-    let Ok(plan) = own_copies(doc, &vals, st, f).and_then(|mats| copy_plan(doc, &vals, st, own, features, &mats)) else {
+    let pattern = match &f.kind {
+        FeatureKind::Pattern { pattern, .. } => Some(pattern),
+        _ => None,
+    };
+    let Ok(plan) = own_copies(doc, &vals, st, f).and_then(|mats| copy_plan(doc, &vals, st, own, features, &mats, pattern, false, None)) else {
         reads.all = true;
         return true;
     };
     /// Each of `mats` as it acts in the frame at `at`, where it acts otherwise there.
-    fn moved(id: u64, mats: &[Mat], at: &Mat, h: &mut impl Hasher) -> Result<()> {
+    fn moved<'a>(id: u64, mats: impl Iterator<Item = &'a Mat>, at: &Mat, h: &mut impl Hasher) -> Result<()> {
         let placed = |m: &Mat| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             hash_placement(m, &mut h);
             h.finish()
         };
-        for (k, m) in mats.iter().enumerate() {
+        for (k, m) in mats.enumerate() {
             let there = moved_in(m, at)?;
             if placed(&there) != placed(m) {
                 (id, k).hash(h);
@@ -3996,15 +4030,15 @@ fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &
     }
     for (src, mats, _) in &plan {
         if let Some(at) = kept_in(doc, st, own, src) {
-            reads.all |= moved(src.id, mats, &at, h).is_err();
+            reads.all |= moved(src.id, mats.iter().map(|p| &p.transform), &at, h).is_err();
         }
     }
     // A pattern's or mirror's own copies are composed in this one's frame (see `copy_plan`).
     for g in &sources {
-        if let (Some(back), Ok(Some((_, inner)))) =
+        if let (Some(back), Ok(Some((_, inner, _)))) =
             (component_in(doc, own, g.component).and_then(|at| crate::mat_inverse(&at)), copied_features(doc, &vals, st, g))
         {
-            reads.all |= moved(g.id, &inner, &back, h).is_err();
+            reads.all |= moved(g.id, inner.iter().filter_map(|p| p.transform.as_ref()), &back, h).is_err();
         }
     }
     if plan.iter().any(|(src, _, _)| tools_component(doc, src).is_none() && kept_in(doc, st, own, src).is_some()) {
@@ -7498,11 +7532,13 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
 fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
-    apply_traced_with(doc, state, f, tools, op, targets, &[])
+    apply_traced_with(doc, state, f, tools, op, targets, &[], &[])
 }
 
 /// [`apply_traced`] with bodies that take part in the boolean besides the feature's targets:
-/// the body a Join extrude runs to (#6424), which joins with the tool.
+/// the body a Join extrude runs to (#6424), which joins with the tool. A pattern can also
+/// provide the name slots of the copies that make new bodies, including gaps for skips.
+#[allow(clippy::too_many_arguments)]
 fn apply_traced_with(
     doc: &Document,
     state: &mut ModelState,
@@ -7511,6 +7547,7 @@ fn apply_traced_with(
     op: Operation,
     targets: &[String],
     extra: &[String],
+    name_slots: &[usize],
 ) -> Result<()> {
     // Participants: the feature's own targets, else its explicit participants, else the bodies
     // of its component (and what it made itself): other components are left alone.
@@ -7564,7 +7601,7 @@ fn apply_traced_with(
             return Err(empty_boolean_targets(doc, state, f, &tools, targets.is_empty()));
         }
         for (k, t) in tools.into_iter().enumerate() {
-            let name = new_name(state, f, k);
+            let name = new_name(state, f, name_slots.get(k).copied().unwrap_or(k));
             state.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
         return Ok(());
@@ -10641,6 +10678,7 @@ fn feature_tools_with_constructor(
     constructor: &mut Option<ExtrudeConstructor>,
     to_body: &mut Vec<String>,
     warning: &mut Option<String>,
+    pack_disjoint: bool,
 ) -> Result<Vec<Traced>> {
     to_body.clear();
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
@@ -10909,7 +10947,7 @@ fn feature_tools_with_constructor(
                     Operation::Join => one_target,
                     _ => false,
                 };
-                if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
+                if pack_disjoint && at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
                     tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
@@ -11045,7 +11083,7 @@ fn feature_tools_with_constructor(
                 Operation::Join => one_target,
                 _ => false,
             };
-            if at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
+            if pack_disjoint && at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
                 tools = join_apart_tools(tools)?;
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
@@ -12435,7 +12473,8 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 
 /// The most copies one pattern makes (the original included), and so one mirror or pattern step
 /// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
-const MAX_INSTANCES: usize = 10_000;
+pub const MAX_PATTERN_INSTANCES: usize = 10_000;
+const MAX_INSTANCES: usize = MAX_PATTERN_INSTANCES;
 
 /// The copies of body `n` (source `s` of `count`) a body pattern makes, one per matrix of
 /// `mats` past the first. Picked where a placement (`path`) shows it, the body is copied where
@@ -12443,7 +12482,17 @@ const MAX_INSTANCES: usize = 10_000;
 /// mirror's do. A body of another component, picked by its own name, is copied as the pattern
 /// moves it in the world and kept beside its source, in its component (#4763).
 #[allow(clippy::too_many_arguments)]
-fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], count: usize, s: usize, n: &str, path: Option<&[u64]>) -> Result<()> {
+fn pattern_body(
+    doc: &Document,
+    f: &Feature,
+    st: &mut ModelState,
+    mats: &[PatternSlot],
+    excluded: &PatternScope,
+    count: usize,
+    s: usize,
+    n: &str,
+    path: Option<&[u64]>,
+) -> Result<Vec<usize>> {
     let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
     let here = doc.component_transform(f.component);
     let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
@@ -12465,15 +12514,24 @@ fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], 
     // took time cubic in the copies.
     let mut names = BodyNames::new(st);
     let mut made = Vec::with_capacity(mats.len());
-    for (k, m) in mats.iter().enumerate() {
+    let mut made_slots = Vec::new();
+    let member_key = pattern_members::body_key(n, path.unwrap_or_default());
+    for (k, placement) in mats.iter().enumerate() {
+        let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
+        let name = pattern_copy_name(&mut names, f, slot, &mb.name);
+        let Some(m) = placement.transform.as_ref() else { continue };
+        let mut skipped = Vec::new();
+        excluded.collect_exclusions(placement, 0, FeatureId::DANGLING, &mut skipped);
+        if skipped.contains(&member_key) {
+            continue;
+        }
         let local = match &frames {
             Some((into, from)) => crate::mat_mul(into, &crate::mat_mul(m, from)),
             None => *m,
         };
         let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-        let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
-        let name = pattern_copy_name(&mut names, f, slot, &mb.name);
         made.push((name, copy, local));
+        made_slots.push(s * mats.len() + k);
     }
     // Only once every copy of this body is made: a body that fails leaves none behind.
     for (name, copy, local) in made {
@@ -12489,7 +12547,7 @@ fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], 
         }
         st.bodies.push(body);
     }
-    Ok(())
+    Ok(made_slots)
 }
 
 /// The warning of a body pattern that left out the bodies `skipped`, the first for `why`.
@@ -12717,6 +12775,154 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
+impl PatternKind {
+    /// The number of grid positions along Direction 2, using one for a row.
+    pub fn rectangular_columns(&self, vals: &BTreeMap<String, Value>) -> Result<usize> {
+        let Self::Rectangular { dir2: Some(_), count2, spacing2, extent2, distance2, copy_at_end2, alignment2, .. } = self else { return Ok(1) };
+        if (distance2.uses_count() && count2.is_none())
+            || (distance2.uses_spacing() && spacing2.is_none())
+            || (distance2.uses_extent() && extent2.is_none())
+        {
+            return Ok(1);
+        }
+        let row = pattern_row(vals, *distance2, count2.as_deref(), spacing2.as_deref(), extent2.as_deref(), *copy_at_end2, *alignment2)?;
+        Ok(row.count)
+    }
+
+    pub fn skips(&self) -> &[PatternAddress] {
+        match self {
+            Self::Rectangular { skip, .. } | Self::Circular { skip, .. } | Self::Path { skip, .. } => skip,
+        }
+    }
+
+    pub fn skips_mut(&mut self) -> &mut Vec<PatternAddress> {
+        match self {
+            Self::Rectangular { skip, .. } | Self::Circular { skip, .. } | Self::Path { skip, .. } => skip,
+        }
+    }
+}
+
+/// Marker positions in the authoring component's frame, including skipped copies.
+pub fn pattern_instance_markers(
+    doc: &Document,
+    st: &ModelState,
+    component: u64,
+    pattern: &PatternKind,
+    features: &[FeatureId],
+    bodies: &[crate::BodyName],
+    placements: &[Vec<u64>],
+) -> Result<Vec<PatternMarker>> {
+    Ok(pattern_marker_info(doc, st, component, pattern, features, bodies, placements)?.markers)
+}
+
+/// Geometry and selection availability computed together, for the background preview worker.
+pub fn pattern_marker_info(
+    doc: &Document,
+    st: &ModelState,
+    component: u64,
+    pattern: &PatternKind,
+    features: &[FeatureId],
+    bodies: &[crate::BodyName],
+    placements: &[Vec<u64>],
+) -> Result<crate::PatternMarkerInfo> {
+    let vals = doc.evaluation_values();
+    let transforms = pattern_transforms(doc, &vals, st, component, pattern)?;
+    let slots = pattern_slots(&vals, &transforms, Some(pattern), FeatureId::DANGLING, true)?;
+    let groups = slots.iter().map(|slot| crate::PatternGroupChoice { number: slot.number, address: slot.address(0) }).collect();
+    let mut markers = Vec::new();
+    let mut unavailable_members = 0usize;
+    let budget = |count: Option<usize>| -> Result<()> {
+        if count.is_none_or(|count| count > 100_000) {
+            Err(DocError::Invalid("too many selectable pattern members (at most 100000)".into()))
+        } else {
+            Ok(())
+        }
+    };
+    if !bodies.is_empty() {
+        budget(transforms.len().checked_mul(bodies.len()))?;
+        let bounds = pattern_source_bounds(doc, st, component, bodies, placements)?;
+        for slot in slots {
+            let Some(transform) = slot.transform else { continue };
+            for (index, bounds) in bounds.iter().enumerate() {
+                let Some(bounds) = bounds else { continue };
+                let centre = bounds.center();
+                let key = pattern_members::body_key(&bodies[index], placements.get(index).map_or(&[], Vec::as_slice));
+                markers.push(slot.marker(FeatureId::DANGLING, index, key, [crate::apply_point(&transform, centre); 2]));
+            }
+        }
+        return Ok(crate::PatternMarkerInfo { groups, markers, unavailable_members });
+    }
+    for (src, copies, _) in copy_plan(doc, &vals, st, component, features, &transforms, Some(pattern), true, Some(100_000))? {
+        if copies.is_empty() {
+            continue;
+        }
+        if matches!(src.kind, FeatureKind::Hole { .. }) {
+            let keys = pattern_members::hole_keys(st, src);
+            budget(copies.len().checked_mul(keys.len()).and_then(|count| count.checked_add(markers.len() + unavailable_members)))?;
+            let (spots, dir) = hole_spots_raw(&vals, st, src)?;
+            let side = pattern_hole_side(st, src);
+            for copy in &copies {
+                let d = pattern_hole_direction(st, src, &copy.transform, &spots, dir, side)?;
+                for (index, spot) in spots.iter().enumerate() {
+                    let Some(key) = keys.get(index).and_then(Option::as_ref) else {
+                        unavailable_members += 1;
+                        continue;
+                    };
+                    if !copy.keeps(Some(key)) {
+                        continue;
+                    }
+                    let moved = crate::apply_point(&copy.transform, spot.at);
+                    let positions = pattern_markers::hole_positions(st, src, moved, d);
+                    markers.push(copy.slot.marker(FeatureId(src.id), index, key.clone(), positions));
+                }
+            }
+        } else {
+            let seed = pattern_tool_positions(doc, &vals, st, src)?;
+            budget(copies.len().checked_mul(seed.len()).and_then(|count| count.checked_add(markers.len() + unavailable_members)))?;
+            for copy in &copies {
+                for (index, (key, anchors)) in seed.iter().enumerate() {
+                    let Some(key) = key else {
+                        unavailable_members += 1;
+                        continue;
+                    };
+                    if !copy.keeps(Some(key)) {
+                        continue;
+                    }
+                    let positions = anchors.map(|point| crate::apply_point(&copy.transform, point));
+                    let positions = pattern_markers::clip_cut_positions(st, src, positions);
+                    markers.push(copy.slot.marker(FeatureId(src.id), index, key.clone(), positions));
+                }
+            }
+        }
+    }
+    markers.sort_by_key(|marker| marker.slot);
+    let mut seen = std::collections::BTreeSet::new();
+    markers.retain(|marker| seen.insert(marker.member.clone()));
+    Ok(crate::PatternMarkerInfo { groups, markers, unavailable_members })
+}
+
+fn pattern_source_bounds(
+    doc: &Document,
+    st: &ModelState,
+    component: u64,
+    bodies: &[crate::BodyName],
+    placements: &[Vec<u64>],
+) -> Result<Vec<Option<solidcraft_geom::Aabb3>>> {
+    let frame = state_in_frame(doc, st, component)?;
+    Ok(bodies
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let mb = st.body(name)?;
+            match mirrored_placement(doc, component, mb, placements.get(i).map(Vec::as_slice)) {
+                Ok(Some((_, _, source))) => kernel::transform_matrix(&mb.body, source).ok()?.exact_bounds().ok(),
+                Ok(None) => frame.body(name)?.body.exact_bounds().ok(),
+                Err(_) => None,
+            }
+        })
+        .collect())
+}
+
 /// A pattern count: a whole number of 1 to [`MAX_INSTANCES`].
 fn pattern_count(vals: &BTreeMap<String, Value>, e: &str) -> Result<usize> {
     let n = expr::eval_count(e, vals)?;
@@ -12932,6 +13138,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             extent2,
             copy_at_end1,
             copy_at_end2,
+            ..
         } => {
             let row1 = pattern_row(vals, *distance1, Some(count1), Some(spacing1), extent1.as_deref(), *copy_at_end1, *alignment)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
@@ -12960,7 +13167,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction, follow_frame } => {
+        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction, follow_frame, .. } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
             let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
@@ -13027,7 +13234,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 });
             }
         }
-        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
+        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature, .. } => {
             // On an edge or round face: about it as it is now; on a construction axis: where it is;
             // else through its origin, whose expressions follow the parameters (#10852).
             let (origin, axis) = match (axis_ref, axis_feature) {
@@ -13407,7 +13614,7 @@ enum CopyCut {
 }
 
 /// What each of a pattern's cut copies did (by its place among its instances, `instances.len()`
-/// of them: instance `first + k + 1` of source feature `src`, its tools `copies[instances[k]]`)
+/// of them: placement `k` of source feature `src`, its tools `copies[instances[k]]`)
 /// to the bodies it cut (`before`, as they were before the cut; `count` bodies in the model
 /// then), as the cut's own history shows it (#18396: asking the kernel about every copy was half
 /// of a design's rebuild).
@@ -13427,12 +13634,13 @@ fn copies_cut_by_history(
     before: &[ModelBody],
     count: usize,
     src: u64,
-    first: usize,
+    placements: &[PatternPlacement],
     copies: &[Traced],
     instances: &[std::ops::Range<usize>],
 ) -> Vec<CopyCut> {
     use solidcraft_kernel::history::FaceOrigin;
     let n = instances.len();
+    let indexes: BTreeMap<_, _> = placements.iter().enumerate().map(|(k, p)| (p.instance, k)).collect();
     let mut took = vec![false; n];
     let mut left = vec![false; n];
     // Every body the copies cut is still there, alone, with what it came from.
@@ -13459,9 +13667,7 @@ fn copies_cut_by_history(
             .operands
             .iter()
             .map(|op| match op.as_ref() {
-                crate::lineage::Operand::CopiedTool { feature, instance, .. } if *feature == src => {
-                    instance.checked_sub(first + 1).filter(|k| *k < n)
-                }
+                crate::lineage::Operand::CopiedTool { feature, instance, .. } if *feature == src => indexes.get(instance).copied().filter(|k| *k < n),
                 _ => None,
             })
             .collect();
@@ -13514,7 +13720,7 @@ fn copies_cut_by_history(
                     t.lineage.as_ref().is_some_and(|l| {
                         l.operands.iter().all(|op| {
                             matches!(op.as_ref(), crate::lineage::Operand::CopiedTool { feature, instance, .. }
-                                if *feature == src && *instance == first + k + 1)
+                                if *feature == src && placements.get(k).is_some_and(|p| p.instance == *instance))
                         })
                     })
                 })
@@ -13561,7 +13767,7 @@ fn count_copy_misses(
     let (mut missed, mut total) = (0, 0);
     // The copies the point test cannot place: they are asked about together.
     let mut unsure: Vec<&[Traced]> = Vec::new();
-    for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
+    for (k, tools) in instances.iter().enumerate().filter(|(_, i)| !i.is_empty()).filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
         total += 1;
         let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
         let takes = tools.iter().any(|t| {
@@ -13739,15 +13945,103 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
     doc.feature(id.0).map(|f| f.name.clone()).unwrap_or_else(|| id.to_string())
 }
 
+fn skipped_instances(pattern: &crate::PatternKind) -> &[PatternAddress] {
+    pattern.skips()
+}
+
+fn skipped_members(pattern: &crate::PatternKind) -> &[crate::PatternMember] {
+    match pattern {
+        PatternKind::Rectangular { skip_members, .. } | PatternKind::Circular { skip_members, .. } | PatternKind::Path { skip_members, .. } => {
+            skip_members
+        }
+    }
+}
+
+fn pattern_step(owner: FeatureId, ordinal: usize, columns: usize) -> PatternStep {
+    PatternStep(owner, ordinal / columns, ordinal % columns)
+}
+
+/// Placement identity is separate from the current transform's ordinal in the grid.
+#[derive(Clone)]
+struct PatternSlot {
+    transform: Option<Mat>,
+    number: usize,
+    steps: Vec<PatternStep>,
+}
+
+fn warn_inactive_pattern_skips(doc: &Document, st: &ModelState, f: &Feature, warning: &mut Option<String>) -> Result<()> {
+    let FeatureKind::Pattern { features, pattern, bodies, placements, .. } = &f.kind else { return Ok(()) };
+    if pattern.skips().is_empty() && skipped_members(pattern).is_empty() {
+        return Ok(());
+    }
+    let catalogue = pattern_member_catalogue(doc, st, f.component, pattern, features, bodies, placements)?;
+    let groups: std::collections::BTreeSet<_> = catalogue.groups.iter().map(|group| &group.address).collect();
+    let members: std::collections::BTreeSet<_> = catalogue.members.iter().map(|choice| &choice.member).collect();
+    let inactive = pattern.skips().iter().filter(|address| !groups.contains(address)).count()
+        + skipped_members(pattern).iter().filter(|member| !members.contains(member)).count();
+    if inactive > 0 {
+        let noun = if inactive == 1 { "exclusion is" } else { "exclusions are" };
+        append_warning(warning, format!("{inactive} saved {noun} outside the current pattern."));
+    }
+    Ok(())
+}
+
+impl PatternSlot {
+    fn address(&self, depth: usize) -> PatternAddress {
+        let mut steps = self.steps[depth..].to_vec();
+        if let Some(root) = steps.first_mut() {
+            root.0 = FeatureId::DANGLING;
+        }
+        PatternAddress::Steps(steps)
+    }
+
+    fn marker(&self, feature: FeatureId, index: usize, key: PatternMemberKey, positions: [Vec3; 2]) -> PatternMarker {
+        PatternMarker { member: PatternMember(self.address(0), feature, key), index, slot: self.number, positions }
+    }
+}
+
+/// Keep skipped transforms in their slots so the remaining copies retain their lineage.
+fn pattern_slots(
+    vals: &BTreeMap<String, Value>,
+    mats: &[Mat],
+    pattern: Option<&PatternKind>,
+    owner: FeatureId,
+    include_skipped: bool,
+) -> Result<Vec<PatternSlot>> {
+    let columns = pattern.map_or(Ok(1), |p| p.rectangular_columns(vals))?;
+    let excluded: std::collections::BTreeSet<_> = pattern.filter(|_| !include_skipped).into_iter().flat_map(skipped_instances).cloned().collect();
+    Ok(mats
+        .iter()
+        .enumerate()
+        .map(|(k, &transform)| {
+            let step = pattern_step(owner, k + 1, columns);
+            let address = PatternAddress::Steps(vec![PatternStep(FeatureId::DANGLING, step.1, step.2)]);
+            let enabled = !excluded.contains(&address);
+            PatternSlot { transform: enabled.then_some(transform), number: k + 2, steps: vec![step] }
+        })
+        .collect())
+}
+
 /// What a pattern or mirror of features copies, when it is the source of another one (#395): its
 /// own sources, and the transforms of its copies. `None` for any other feature, and for a pattern
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
-fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
+fn copied_features<'a>(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    src: &'a Feature,
+) -> Result<Option<(&'a [FeatureId], Vec<PatternSlot>, &'a [PatternMember])>> {
     match &src.kind {
-        FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
-            Ok(Some((features.clone(), own_copies(doc, vals, st, src)?)))
+        FeatureKind::Pattern { features, pattern, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
+            let mats = pattern_transforms(doc, vals, st, src.component, pattern)?;
+            let slots = pattern_slots(vals, &mats, Some(pattern), FeatureId(src.id), false)?;
+            Ok(Some((features, slots, skipped_members(pattern))))
         }
-        FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => Ok(Some((features.clone(), own_copies(doc, vals, st, src)?))),
+        FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+            let mats = own_copies(doc, vals, st, src)?;
+            let slots = pattern_slots(vals, &mats, None, FeatureId(src.id), false)?;
+            Ok(Some((features, slots, &[])))
+        }
         _ => Ok(None),
     }
 }
@@ -13893,8 +14187,58 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
     Ok(Some((g, notes)))
 }
 
+struct PatternPlacement {
+    instance: usize,
+    transform: Mat,
+    slot: PatternSlot,
+    skipped: Vec<PatternMemberKey>,
+    index: usize,
+}
+
+impl PatternPlacement {
+    fn keeps(&self, key: Option<&PatternMemberKey>) -> bool {
+        key.is_none_or(|key| !self.skipped.contains(key))
+    }
+}
+
+/// Each enclosing pattern has its own lineage numbering. Within a block the local
+/// transforms repeat once for each placement of the outer patterns.
+struct PatternScope {
+    first: usize,
+    width: usize,
+    next: usize,
+    excluded: BTreeMap<(PatternAddress, FeatureId), Vec<PatternMemberKey>>,
+}
+
+impl PatternScope {
+    fn new(width: usize, excluded: &[PatternMember]) -> Self {
+        let mut by_copy = BTreeMap::<_, Vec<_>>::new();
+        for PatternMember(address, feature, member) in excluded {
+            by_copy.entry((address.clone(), *feature)).or_default().push(member.clone());
+        }
+        Self { first: 0, width, next: width, excluded: by_copy }
+    }
+
+    fn instance(&self, placement: usize) -> usize {
+        self.first + placement % self.width + 1
+    }
+
+    fn collect_exclusions(&self, slot: &PatternSlot, depth: usize, source: FeatureId, skipped: &mut Vec<PatternMemberKey>) {
+        if self.excluded.is_empty() {
+            return;
+        }
+        if let Some(members) = self.excluded.get(&(slot.address(depth), source)) {
+            skipped.extend(members.iter().cloned());
+        }
+    }
+}
+
+/// The active placements of a source, and the total including whole skipped placements.
+type FeatureCopies<'a> = (&'a Feature, Vec<PatternPlacement>, usize);
+
 /// The sources a pattern or mirror in component `own` copies, each with its copies' transforms
 /// in `own`'s frame and its first instance.
+#[allow(clippy::too_many_arguments)]
 fn copy_plan<'a>(
     doc: &'a Document,
     vals: &BTreeMap<String, Value>,
@@ -13902,7 +14246,10 @@ fn copy_plan<'a>(
     own: u64,
     features: &[FeatureId],
     mats: &[Mat],
-) -> Result<Vec<(&'a Feature, Vec<Mat>, usize)>> {
+    pattern: Option<&PatternKind>,
+    include_skipped: bool,
+    max_choices: Option<usize>,
+) -> Result<Vec<FeatureCopies<'a>>> {
     #[allow(clippy::too_many_arguments)]
     fn walk<'a>(
         doc: &'a Document,
@@ -13910,11 +14257,11 @@ fn copy_plan<'a>(
         st: &ModelState,
         own: u64,
         features: &[FeatureId],
-        mats: &[Mat],
-        first: usize,
-        next: &mut usize,
+        mats: &[PatternSlot],
+        scopes: &mut Vec<PatternScope>,
         depth: usize,
-        out: &mut Vec<(&'a Feature, Vec<Mat>, usize)>,
+        out: &mut Vec<FeatureCopies<'a>>,
+        remaining: &mut Option<usize>,
     ) -> Result<()> {
         // The copies are made in timeline order, whatever order the features were picked in, a
         // pattern's or mirror's own too: a chamfer picked before the hole it blends would
@@ -13927,33 +14274,76 @@ fn copy_plan<'a>(
                 continue;
             }
             let src = source_feature(doc, *id)?;
-            let Some((inner, inner_mats)) = copied_features(doc, vals, st, src)? else {
-                out.push((src, mats.to_vec(), first));
+            let Some((inner, inner_mats, excluded)) = copied_features(doc, vals, st, src)? else {
+                if let Some(left) = remaining {
+                    *left = left
+                        .checked_sub(mats.len())
+                        .ok_or_else(|| DocError::Invalid("too many selectable pattern members (at most 100000)".into()))?;
+                }
+                let copies = mats.iter().enumerate().filter_map(|(k, slot)| {
+                    let transform = slot.transform?;
+                    let instance = scopes.first()?.instance(k);
+                    let mut skipped = Vec::new();
+                    for (depth, scope) in scopes.iter().enumerate() {
+                        scope.collect_exclusions(slot, depth, *id, &mut skipped);
+                    }
+                    Some(PatternPlacement { instance, transform, slot: slot.clone(), skipped, index: k })
+                });
+                out.push((src, copies.collect(), mats.len()));
                 continue;
             };
             // Made in the inner pattern's component's frame, composed in `own`'s (#19451).
-            let inner_mats = match component_in(doc, own, src.component).and_then(|at| crate::mat_inverse(&at)) {
-                Some(back) => inner_mats.iter().map(|m| moved_in(m, &back)).collect::<Result<Vec<_>>>()?,
-                None => inner_mats,
-            };
+            let mut inner_mats = inner_mats;
+            if let Some(back) = component_in(doc, own, src.component).and_then(|at| crate::mat_inverse(&at)) {
+                for m in inner_mats.iter_mut().filter_map(|slot| slot.transform.as_mut()) {
+                    *m = moved_in(m, &back)?;
+                }
+            }
             if depth >= MAX_NESTING {
                 return Err(DocError::Invalid(format!("patterns and mirrors of patterns and mirrors nest at most {MAX_NESTING} deep")));
             }
             // Counted before they are made: a pattern of a pattern multiplies the two counts.
             let count = mats.len().saturating_mul(inner_mats.len());
-            if count > MAX_INSTANCES || next.saturating_add(count) > MAX_INSTANCES * MAX_NESTING {
+            if count > MAX_INSTANCES || scopes.first().is_some_and(|s| s.next.saturating_add(count) > MAX_INSTANCES * MAX_NESTING) {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
-            let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
-            let block = *next;
-            *next += moved.len();
-            walk(doc, vals, st, own, &inner, &moved, block, next, depth + 1, out)?;
+            let moved: Vec<_> = mats
+                .iter()
+                .flat_map(|m| {
+                    inner_mats.iter().map(move |inner| {
+                        let mut steps = m.steps.clone();
+                        steps.extend_from_slice(&inner.steps);
+                        let transform = m.transform.as_ref().zip(inner.transform.as_ref()).map(|(a, b)| crate::mat_mul(a, b));
+                        PatternSlot { transform, number: m.number, steps }
+                    })
+                })
+                .collect();
+            let previous: Vec<_> = scopes
+                .iter_mut()
+                .map(|scope| {
+                    let previous = (scope.first, scope.width);
+                    scope.first = scope.next;
+                    scope.width *= inner_mats.len();
+                    scope.next += scope.width;
+                    previous
+                })
+                .collect();
+            scopes.push(PatternScope::new(inner_mats.len(), excluded));
+            walk(doc, vals, st, own, inner, &moved, scopes, depth + 1, out, remaining)?;
+            scopes.pop();
+            for (scope, (first, width)) in scopes.iter_mut().zip(previous) {
+                scope.first = first;
+                scope.width = width;
+            }
         }
         Ok(())
     }
-    let mut next = mats.len();
+    let excluded = pattern.filter(|_| !include_skipped).map_or(&[][..], skipped_members);
+    let mut scopes = vec![PatternScope::new(mats.len(), excluded)];
     let mut out = Vec::new();
-    walk(doc, vals, st, own, features, mats, 0, &mut next, 0, &mut out)?;
+    let slots = pattern_slots(vals, mats, pattern, FeatureId::DANGLING, include_skipped)?;
+    let mut remaining = max_choices;
+    walk(doc, vals, st, own, features, &slots, &mut scopes, 0, &mut out, &mut remaining)?;
     Ok(out)
 }
 
@@ -13982,16 +14372,16 @@ fn copy_instances(
     features: &[FeatureId],
     mats: &[Mat],
 ) -> Result<Vec<Mat>> {
-    let plan = copy_plan(doc, vals, st, f.component, features, mats)?;
-    let len = plan.iter().map(|(_, ms, first)| first + ms.len()).max().unwrap_or(0).max(mats.len());
+    let plan = copy_plan(doc, vals, st, f.component, features, mats, None, true, None)?;
+    let len = plan.iter().flat_map(|(_, copies, _)| copies.iter().map(|p| p.instance)).max().unwrap_or(0).max(mats.len());
     let mut all = vec![crate::IDENTITY; len];
     for (slot, m) in all.iter_mut().zip(mats) {
         *slot = *m;
     }
-    for (_, ms, first) in &plan {
-        for (k, m) in ms.iter().enumerate() {
-            if let Some(slot) = all.get_mut(first + k) {
-                *slot = *m;
+    for (_, copies, _) in &plan {
+        for p in copies {
+            if let Some(slot) = p.instance.checked_sub(1).and_then(|i| all.get_mut(i)) {
+                *slot = p.transform;
             }
         }
     }
@@ -14011,6 +14401,86 @@ fn moved_blend(src: &Feature, m: &Mat) -> Feature {
         }
     }
     copy
+}
+
+#[path = "eval_pattern_markers.rs"]
+mod pattern_markers;
+#[path = "eval_pattern_members.rs"]
+mod pattern_members;
+pub use pattern_members::pattern_member_catalogue;
+
+fn pattern_source_at_faces(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    named_from: &ModelState,
+    src: &Feature,
+) -> Result<Option<Feature>> {
+    match st.named_faces.get(&src.id) {
+        Some(points) => {
+            let mut g = src.clone();
+            for (p, q) in g.kind.face_points_mut().into_iter().zip(points) {
+                *p = *q;
+            }
+            Ok(Some(g))
+        }
+        None => Ok(with_named_face_points(doc, vals, named_from, src)?.map(|(g, _)| g)),
+    }
+}
+
+type PatternToolAnchor = (Option<PatternMemberKey>, [Vec3; 2]);
+
+fn pattern_tool_positions(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Vec<PatternToolAnchor>> {
+    let single = Some(PatternMemberKey::Stable(PatternMemberIdentity::Single));
+    let centre = |points: &[Vec3]| {
+        let bounds: solidcraft_geom::Aabb3 = points.iter().copied().collect();
+        (!bounds.is_empty()).then(|| (single.clone(), [bounds.center(); 2])).into_iter().collect()
+    };
+    match &src.kind {
+        FeatureKind::Fillet { edges, .. } | FeatureKind::Chamfer { edges, .. } => {
+            Ok(centre(st.blend_edges.get(&src.id).map_or_else(|| crate::plain(edges), Clone::clone).as_slice()))
+        }
+        FeatureKind::OffsetFace { faces, .. } => Ok(centre(&crate::plain(faces))),
+        FeatureKind::Thread { face, .. } => Ok(vec![(single, [face.0; 2])]),
+        FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. } => st
+            .bodies
+            .iter()
+            .filter(|body| body.feature == src.id)
+            .map(|body| Ok((Some(pattern_members::body_key(&body.name, &[])), pattern_markers::tool_positions(doc, st, src, &body.body)?)))
+            .collect(),
+        FeatureKind::Rib { .. } => {
+            let tools = more::rib_tools(vals, st, src, None)?;
+            tools.iter().map(|body| Ok((None, pattern_markers::tool_positions(doc, st, src, body)?))).collect()
+        }
+        _ => {
+            let moved = pattern_source_at_faces(doc, vals, st, st, src)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None, false)?;
+            let keys = pattern_members::tool_keys(st, src, &tools);
+            tools.iter().zip(keys).map(|(tool, key)| Ok((key, pattern_markers::tool_positions(doc, st, src, &tool.body)?))).collect()
+        }
+    }
+}
+
+fn pattern_hole_side(st: &ModelState, src: &Feature) -> Option<(Vec3, bool)> {
+    match &src.kind {
+        FeatureKind::Hole { points: Some(sp), .. } if !sp.single => st.sketch(sp.sketch.0).map(|ss| (ss.plane.normal(), sp.flip)),
+        _ => None,
+    }
+}
+
+fn pattern_hole_direction(
+    st: &ModelState,
+    src: &Feature,
+    transform: &Mat,
+    spots: &[HoleSpot<'_>],
+    dir: Vec3,
+    sketch_side: Option<(Vec3, bool)>,
+) -> Result<Vec3> {
+    let moved_dir = |n| crate::unit_direction(crate::apply_vector(transform, n)).ok_or_else(|| DocError::Invalid("hole direction".into()));
+    let Some((normal, flip)) = sketch_side else { return moved_dir(dir) };
+    let moved = spots.iter().map(|p| crate::apply_point(transform, p.at));
+    let side = sketch_hole_dir(st, moved, moved_dir(normal)?, hole_scope(src));
+    Ok(if flip { -side } else { side })
 }
 
 /// Exact box of a cut tool, grown by twice its tolerance plus `extra_tol`: tools whose boxes are
@@ -14068,6 +14538,8 @@ fn batchable_cut_source(src: &Feature, f: &Feature, op: Operation) -> bool {
 /// The transformed tools and per-instance metadata built for one source feature of [`replay`].
 struct ReplayBuilt {
     copies: Vec<Traced>,
+    output_slots: Vec<usize>,
+    tools_per_placement: usize,
     instances: Vec<std::ops::Range<usize>>,
     axes: Vec<Vec<(Vec3, Vec3)>>,
     reaches: Vec<Vec<f64>>,
@@ -14081,8 +14553,7 @@ struct ReplayBuilt {
 /// One source feature's slice of a [`ReplayCutBatch`].
 struct ReplayCutEntry<'a> {
     src: &'a Feature,
-    mats: &'a [Mat],
-    first: usize,
+    mats: &'a [PatternPlacement],
     instances: Vec<std::ops::Range<usize>>,
     axes: Vec<Vec<(Vec3, Vec3)>>,
     reaches: Vec<Vec<f64>>,
@@ -14108,6 +14579,7 @@ fn replay(
     st: &mut ModelState,
     features: &[FeatureId],
     mats: &[Mat],
+    pattern: Option<&PatternKind>,
     warning: &mut Option<String>,
 ) -> Result<()> {
     /// Build the transformed tool copies for one boolean source feature in [`replay`].
@@ -14120,8 +14592,7 @@ fn replay(
         own: u64,
         f: &Feature,
         src: &Feature,
-        mats: &[Mat],
-        first: usize,
+        placements: &[PatternPlacement],
         targets: &[String],
         extra_tol: f64,
         record_probes: bool,
@@ -14129,16 +14600,15 @@ fn replay(
         // Copies are made in their source's tools' frame and meet each target where it is shown,
         // as the source's own tools do (#3383).
         let _frames = ToolFrames::install(doc, src, st);
-        let in_tools: Vec<Mat>;
-        let mats: &[Mat] = match tools_component(doc, src).and_then(|c| component_in(doc, own, c)) {
-            Some(at) => {
-                in_tools = mats.iter().map(|m| moved_in(m, &at)).collect::<Result<_>>()?;
-                &in_tools
-            }
-            None => mats,
+        let frame = tools_component(doc, src).and_then(|c| component_in(doc, own, c));
+        let transform = |p: &PatternPlacement| match &frame {
+            Some(at) => moved_in(&p.transform, at),
+            None => Ok(p.transform),
         };
         let mut copies = Vec::new();
-        let mut instances = Vec::with_capacity(mats.len());
+        let mut output_slots = Vec::new();
+        let mut tools_per_placement = 0;
+        let mut instances = Vec::with_capacity(placements.len());
         // Each hole copy's axes (spot and direction), where the check for copies that miss looks
         // for material first.
         let mut axes: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
@@ -14178,10 +14648,12 @@ fn replay(
             let picks = PickFrames::new(doc, st, own, src);
             let scope = hole_drill_scope(src);
             let named = |b: &ModelBody, q: Vec3| (scope.is_empty() || scope.contains(&b.name)).then(|| box_dist(b, q));
-            for (k, m) in mats.iter().enumerate() {
+            let keys = if placements.iter().any(|p| !p.skipped.is_empty()) { pattern_members::hole_keys(st, src) } else { Vec::new() };
+            for placement in placements {
+                let base = transform(placement)?;
                 let (m, _) = match spots.first() {
-                    Some(spot) => picks.copy(st, m, spot.at, named)?,
-                    None => (*m, None),
+                    Some(spot) => picks.copy(st, &base, spot.at, named)?,
+                    None => (base, None),
                 };
                 let m = &m;
                 let d = match sketch_side {
@@ -14199,7 +14671,10 @@ fn replay(
                 let start = copies.len();
                 let mut on = Vec::with_capacity(spots.len());
                 let mut reach_of = Vec::with_capacity(spots.len());
-                for (spot, prefix) in spots.iter().zip(&prefixes) {
+                for (index, (spot, prefix)) in spots.iter().zip(&prefixes).enumerate() {
+                    if !placement.keeps(keys.get(index).and_then(Option::as_ref)) {
+                        continue;
+                    }
                     let moved_spot = crate::apply_point(m, spot.at);
                     let at = hole_on_surface_in(st, moved_spot, d, hole_scope(src), from_inside);
                     if record_probes && moved_spot != at {
@@ -14233,7 +14708,7 @@ fn replay(
                     // Apply the point name after reusing the shape, which may be another point's.
                     copies.extend(tools.into_iter().map(|tool| {
                         let tool = tool.with_part_prefix(prefix.as_deref());
-                        Traced { lineage: tool.lineage.map(|l| l.copied(src.id, first + k + 1)), body: tool.body, recipe: None }
+                        Traced { lineage: tool.lineage.map(|l| l.copied(src.id, placement.instance)), body: tool.body, recipe: None }
                     }));
                 }
                 instances.push(start..copies.len());
@@ -14245,11 +14720,12 @@ fn replay(
             // its walls run until they meet the body, which may not lie the same way there. It
             // meets every body where its sketch's frame shows it (#17655).
             let shown = targets_as_shown(st, src, &["*".to_string()])?;
-            for (k, m) in mats.iter().enumerate() {
-                for body in more::rib_tools(vals, &shown, src, Some(m))? {
+            for placement in placements {
+                let m = transform(placement)?;
+                for body in more::rib_tools(vals, &shown, src, Some(&m))? {
                     // Each copy's faces are named as the rib's, with the instance.
                     let t = Traced::unnamed(body);
-                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
+                    copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, placement.instance)), body: t.body, recipe: None });
                 }
             }
         } else {
@@ -14258,30 +14734,32 @@ fn replay(
             // extrude's copies reach the face where it is now, not where it was picked. They follow
             // them to where the feature found them, before it ran: a cut up to a face it splits has
             // left no one face of that name to find (#15054).
-            let moved = match st.named_faces.get(&src.id) {
-                Some(points) => {
-                    let mut g = (*src).clone();
-                    for (p, q) in g.kind.face_points_mut().into_iter().zip(points) {
-                        *p = *q;
-                    }
-                    Some(g)
-                }
-                None => with_named_face_points(doc, vals, named_from.unwrap_or(st), src)?.map(|(g, _)| g),
-            };
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None)?;
+            let moved = pattern_source_at_faces(doc, vals, st, named_from.unwrap_or(st), src)?;
+            let separate = placements.iter().any(|p| !p.skipped.is_empty());
+            let tools =
+                feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None, !separate)?;
+            let keys = if separate { pattern_members::tool_keys(st, src, &tools) } else { Vec::new() };
+            tools_per_placement = tools.len();
             if record_probes {
                 probe_boxes.extend(tools.iter().map(|t| tool_cut_box(&t.body, extra_tol)));
             }
-            for (k, m) in mats.iter().enumerate() {
+            for placement in placements {
+                let m = transform(placement)?;
                 let start = copies.len();
-                for t in &tools {
-                    let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
-                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
+                for (index, t) in tools.iter().enumerate() {
+                    if !placement.keeps(keys.get(index).and_then(Option::as_ref)) {
+                        continue;
+                    }
+                    let recipe = t.recipe.map(|r| moved_recipe(r, &m, src.id, placement.instance));
+                    copies.push(t.copied(kernel::transform_matrix(&t.body, m)?, src.id, placement.instance).with_recipe(recipe));
+                    if matches!(feature_op(src).0, Operation::NewBody) {
+                        output_slots.push(placement.index.saturating_mul(tools_per_placement).saturating_add(index));
+                    }
                 }
                 instances.push(start..copies.len());
             }
         }
-        Ok(ReplayBuilt { copies, instances, axes, reaches, probe_boxes, probe_rays })
+        Ok(ReplayBuilt { copies, output_slots, tools_per_placement, instances, axes, reaches, probe_boxes, probe_rays })
     }
 
     /// Resolve the operation, present targets and scope for `src` against `st`.
@@ -14305,8 +14783,7 @@ fn replay(
         named_from: Option<&ModelState>,
         own: u64,
         src: &Feature,
-        mats: &[Mat],
-        first: usize,
+        mats: &[PatternPlacement],
         prebuilt: Option<(Operation, Vec<String>, Feature, ReplayBuilt)>,
         missed: &mut usize,
         total: &mut usize,
@@ -14316,7 +14793,7 @@ fn replay(
             Some(ready) => ready,
             None => {
                 let (op, targets, scoped) = resolve_replay_targets(st, f, src);
-                let built = build_replay_copies(doc, vals, st, named_from, own, &scoped, src, mats, first, &targets, 0.0, false)?;
+                let built = build_replay_copies(doc, vals, st, named_from, own, &scoped, src, mats, &targets, 0.0, false)?;
                 (op, targets, scoped.into_owned(), built)
             }
         };
@@ -14346,7 +14823,7 @@ fn replay(
             // A copy whose tool left a wall in a target took material: the cut says so itself
             // (#18396: asking the kernel about every copy was half of a design's rebuild). The
             // copies it does not show are asked about as before.
-            let cut = copies_cut_by_history(st, &before, count, src.id, first, &copies, &instances);
+            let cut = copies_cut_by_history(st, &before, count, src.id, mats, &copies, &instances);
             let unsure: Vec<usize> = (0..instances.len()).filter(|k| cut.get(*k).is_none_or(|c| *c == CopyCut::Unknown)).collect();
             let some_instances: Vec<std::ops::Range<usize>> = unsure.iter().filter_map(|k| instances.get(*k).cloned()).collect();
             let some_axes: Vec<Vec<(Vec3, Vec3)>> =
@@ -14403,14 +14880,14 @@ fn replay(
             if topology_changed {
                 *st = saved;
                 for entry in batch.entries {
-                    apply_single_entry(doc, vals, f_outer, st, named_from, own, entry.src, entry.mats, entry.first, None, missed, total, warning)?;
+                    apply_single_entry(doc, vals, f_outer, st, named_from, own, entry.src, entry.mats, None, missed, total, warning)?;
                 }
                 return Ok(());
             }
         }
         applied?;
         for entry in &batch.entries {
-            let cut = copies_cut_by_history(st, &before, count, entry.src.id, entry.first, &all_copies, &entry.instances);
+            let cut = copies_cut_by_history(st, &before, count, entry.src.id, entry.mats, &all_copies, &entry.instances);
             let unsure: Vec<usize> = (0..entry.instances.len()).filter(|k| cut.get(*k).is_none_or(|c| *c == CopyCut::Unknown)).collect();
             let some_instances: Vec<std::ops::Range<usize>> = unsure.iter().filter_map(|k| entry.instances.get(*k).cloned()).collect();
             let some_axes: Vec<Vec<(Vec3, Vec3)>> =
@@ -14446,9 +14923,16 @@ fn replay(
             format!("{list} suppressed and not copied")
         });
     }
+    // The copies are made in timeline order, whatever order the features were picked in: a
+    // chamfer picked before the hole it blends would otherwise find no edge to copy.
     let (mut missed, mut total) = (0usize, 0usize);
     let own = f.component;
-    let plan = copy_plan(doc, vals, st, own, features, mats)?;
+    let plan = copy_plan(doc, vals, st, own, features, mats, pattern, false, None)?;
+    let keep_output_slots = pattern.is_some()
+        && plan.iter().all(|(src, _, _)| feature_op(src).0 == Operation::NewBody)
+        && plan.iter().any(|(_, active, all)| active.len() < *all || active.iter().any(|copy| !copy.skipped.is_empty()));
+    let mut next_output = 0usize;
+    let mut made_slots = Vec::new();
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
@@ -14457,7 +14941,10 @@ fn replay(
     let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().chain(&src.edge_names).any(|n| !n.is_empty())).then(|| st.clone());
     let batch_limit = joined_tools_limit().max(1);
     let mut pending: Option<ReplayCutBatch<'_>> = None;
-    for (src, mats, first) in &plan {
+    for (src, mats, placement_count) in &plan {
+        if mats.is_empty() && !keep_output_slots {
+            continue;
+        }
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             if let Some(batch) = pending.take() {
@@ -14475,7 +14962,8 @@ fn replay(
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
             let picks = PickFrames::new(doc, st, own, src);
-            for m in mats {
+            for placement in mats.iter().filter(|p| p.keeps(Some(&PatternMemberKey::Stable(PatternMemberIdentity::Single)))) {
+                let m = &placement.transform;
                 // Each edge's copy, in the frame of the body it lands on.
                 let each: Vec<(Mat, Option<usize>)> = found.iter().map(|p| picks.copy(st, m, *p, edge_through)).collect::<Result<_>>()?;
                 let moved_all: Vec<Vec3> = found.iter().zip(&each).map(|(p, (m, _))| crate::apply_point(m, *p)).collect();
@@ -14542,7 +15030,8 @@ fn replay(
             let picked: Vec<Vec3> = crate::plain(faces);
             let picks = PickFrames::new(doc, st, own, src);
             let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
-            for m in mats {
+            for placement in mats.iter().filter(|p| p.keeps(Some(&PatternMemberKey::Stable(PatternMemberIdentity::Single)))) {
+                let m = &placement.transform;
                 let (m, on) = match picked.first() {
                     Some(p) => picks.copy(st, m, *p, named)?,
                     None => (*m, None),
@@ -14578,15 +15067,25 @@ fn replay(
             }
             // Each copy is a body of the pattern's, in its frame: the source taken there first.
             let made_in: Vec<Option<Mat>> = made.iter().map(|b| body_in(doc, own, b)).collect();
-            let mut output = 0;
-            for (k, m) in mats.iter().enumerate() {
-                for (mb, at) in made.iter().zip(&made_in) {
-                    let m = at.map_or(*m, |at| crate::mat_mul(m, &at));
-                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, m)?, first + k + 1);
-                    let name = copy_body_name(st, f, output, &mb.name);
+            let keys: Vec<_> = made.iter().map(|body| pattern_members::body_key(&body.name, &[])).collect();
+            for p in mats {
+                for (member, (mb, at)) in made.iter().zip(&made_in).enumerate() {
+                    let output = p.index.saturating_mul(made.len()).saturating_add(member);
+                    if !p.keeps(keys.get(member)) {
+                        continue;
+                    }
+                    let m = at.map_or(p.transform, |at| crate::mat_mul(&p.transform, &at));
+                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, m)?, p.instance);
+                    let slot = if keep_output_slots { next_output.saturating_add(output) } else { output };
+                    let name = copy_body_name(st, f, slot, &mb.name);
                     st.bodies.push(ModelBody::traced_new(name, moved, f.id));
-                    output += 1;
+                    if keep_output_slots {
+                        made_slots.push(slot);
+                    }
                 }
+            }
+            if keep_output_slots {
+                next_output = next_output.saturating_add(placement_count.saturating_mul(made.len()));
             }
             continue;
         }
@@ -14600,7 +15099,8 @@ fn replay(
             // Each further face is kept in its own target body's frame, where the thread finds it.
             let further: Vec<PickFrames> = target_bodies.iter().skip(1).map(|n| PickFrames::on_body(doc, st, own, n)).collect();
             let named = |n: Option<&crate::BodyName>, b: &ModelBody, q: Vec3| n.is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
-            for each in mats {
+            for placement in mats.iter().filter(|p| p.keeps(Some(&PatternMemberKey::Stable(PatternMemberIdentity::Single)))) {
+                let each = &placement.transform;
                 let (m, _) = picks.copy(st, each, face.0, |b, q| named(target_bodies.first(), b, q))?;
                 let m = &m;
                 let mut copy = (*src).clone();
@@ -14648,20 +15148,8 @@ fn replay(
             2.0 * miss_scope(st, scoped, targets).map(|b| b.body.record().tolerance).fold(0.0, f64::max)
         };
         let mut extra_tol = if can_batch { target_tol(st, &scoped, &targets) } else { 0.0 };
-        let mut built = build_replay_copies(
-            doc,
-            vals,
-            st,
-            named_from.as_ref(),
-            own,
-            &scoped,
-            src,
-            mats,
-            *first,
-            &targets,
-            extra_tol,
-            can_batch && pending.is_some(),
-        )?;
+        let mut built =
+            build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, &targets, extra_tol, can_batch && pending.is_some())?;
         if can_batch && !built.copies.is_empty() {
             let fits_pending = pending.as_ref().is_some_and(|batch| batch.copies.len() + built.copies.len() <= batch_limit);
             let mut new_boxes: Option<Vec<solidcraft_geom::Aabb3>> = if fits_pending || (pending.is_none() && built.copies.len() < batch_limit) {
@@ -14684,7 +15172,7 @@ fn replay(
                 if let Some(bs) = new_boxes {
                     batch.tool_boxes.extend(bs);
                 }
-                batch.entries.push(ReplayCutEntry { src, mats, first: *first, instances: shifted, axes: built.axes, reaches: built.reaches });
+                batch.entries.push(ReplayCutEntry { src, mats, instances: shifted, axes: built.axes, reaches: built.reaches });
                 continue;
             }
             if let Some(batch) = pending.take() {
@@ -14694,7 +15182,7 @@ fn replay(
                 (op, targets, scoped) = resolve_replay_targets(st, f, src);
                 can_batch = plan.len() > 1 && batch_limit > 1 && batchable_cut_source(src, &scoped, op);
                 extra_tol = if can_batch { target_tol(st, &scoped, &targets) } else { 0.0 };
-                built = build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, *first, &targets, extra_tol, false)?;
+                built = build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, &targets, extra_tol, false)?;
                 new_boxes = if can_batch && !built.copies.is_empty() && built.copies.len() < batch_limit {
                     built.copies.iter().map(|t| tool_cut_box(&t.body, extra_tol)).collect()
                 } else {
@@ -14713,10 +15201,23 @@ fn replay(
                     targets,
                     copies: built.copies,
                     tool_boxes: bs,
-                    entries: vec![ReplayCutEntry { src, mats, first: *first, instances: built.instances, axes: built.axes, reaches: built.reaches }],
+                    entries: vec![ReplayCutEntry { src, mats, instances: built.instances, axes: built.axes, reaches: built.reaches }],
                 });
                 continue;
             }
+        }
+        if keep_output_slots {
+            let slots: Vec<_> = built.output_slots.iter().map(|slot| next_output.saturating_add(*slot)).collect();
+            next_output = next_output.saturating_add(placement_count.saturating_mul(built.tools_per_placement));
+            made_slots.extend_from_slice(&slots);
+            if !built.copies.is_empty() {
+                let _frames = ToolFrames::install(doc, src, st);
+                apply_traced_with(doc, st, &scoped, built.copies, op, &targets, &[], &slots)?;
+            }
+            continue;
+        }
+        if built.copies.is_empty() {
+            continue;
         }
         apply_single_entry(
             doc,
@@ -14727,7 +15228,6 @@ fn replay(
             own,
             src,
             mats,
-            *first,
             Some((op, targets, scoped.into_owned(), built)),
             &mut missed,
             &mut total,
@@ -14736,6 +15236,9 @@ fn replay(
     }
     if let Some(batch) = pending.take() {
         flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+    }
+    if keep_output_slots {
+        st.pattern_body_layouts.insert(f.id, PatternBodyLayout { copies_per_source: next_output, made_slots });
     }
     if missed > 0 {
         append_warning(warning, format!("{missed} of {total} cut copies remove no material"));
@@ -16138,7 +16641,7 @@ fn eval_feature_kind(
             refuse_ambiguous_targets(doc, st, f, &crate::plain(targets))?;
             let mut constructor = None;
             let mut to_body = Vec::new();
-            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
+            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning, true)?;
             // #9969: a cut whose tool lies clear of the body (a profile drawn beside it, a
             // distance that stops short, the wrong direction) reported success and changed
             // nothing. Say so, as a hole does (#10701): the bodies are compared before and after,
@@ -16227,7 +16730,7 @@ fn eval_feature_kind(
             // A Join extrude to an object joins that object too (#6424): the tool and the body
             // it runs to are one body, not only the body the profile was sketched on.
             let extra: Vec<String> = if *operation == Operation::Join { to_body } else { Vec::new() };
-            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
+            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra, &[])?;
             unchanged(st, warning);
             Ok(())
         }
@@ -16829,24 +17332,32 @@ fn eval_feature_kind(
                 return Ok(());
             }
             let mats = own_copies(doc, vals, st, f)?;
+            warn_inactive_pattern_skips(doc, st, f, warning)?;
             let before = st.bodies.len();
             if bodies.is_empty() {
-                replay(doc, vals, f, st, features, &mats, warning)?;
+                replay(doc, vals, f, st, features, &mats, Some(pattern), warning)?;
                 return if *join { join_pattern_copies(st, f, features, bodies, before) } else { Ok(()) };
             }
-            // Bodies: each copy is a new body named after its source. A body that cannot be
-            // copied (gone, its placement gone, or its geometry refused by the move) is left out
-            // with a warning: the others are still copied, and only a pattern that copies none
-            // fails.
+            let slots = pattern_slots(vals, &mats, Some(pattern), FeatureId::DANGLING, false)?;
+            let excluded = PatternScope::new(slots.len(), skipped_members(pattern));
+            // A body whose placement or geometry cannot be copied is left out. Keep other bodies.
             let mut skipped = Vec::new();
             let mut left_out = Vec::new();
             let mut first_error = None;
+            let mut made_slots = Vec::new();
             for (s, n) in bodies.iter().enumerate() {
-                if let Err(e) = pattern_body(doc, f, st, &mats, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
-                    skipped.push(n.to_string());
-                    left_out.push(s);
-                    first_error.get_or_insert(e);
+                match pattern_body(doc, f, st, &slots, &excluded, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
+                    Ok(made) => made_slots.extend(made),
+                    Err(e) => {
+                        skipped.push(n.to_string());
+                        left_out.push(s);
+                        first_error.get_or_insert(e);
+                    }
                 }
+            }
+            st.pattern_body_layouts.remove(&f.id);
+            if !skipped_instances(pattern).is_empty() || !skipped_members(pattern).is_empty() {
+                st.pattern_body_layouts.insert(f.id, PatternBodyLayout { copies_per_source: slots.len(), made_slots });
             }
             // Kept so the names stored for the left-out copies stay theirs when the session pins
             // the names the copies have now (`Feature::pattern_pins`).
@@ -16864,7 +17375,7 @@ fn eval_feature_kind(
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let m = mirror_copy(doc, vals, st, f, plane)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[m], warning);
+                return replay(doc, vals, f, st, features, &[m], None, warning);
             }
             let mut output = 0;
             // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:

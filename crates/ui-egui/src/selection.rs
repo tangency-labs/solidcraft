@@ -11,6 +11,7 @@ use crate::viewport::Hit;
 
 pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
 pub(crate) use solidcraft_engine::selection_context::same_item;
+pub(crate) use solidcraft_viewport_egui::nearest_glyph;
 
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
@@ -384,6 +385,11 @@ impl BoxSel {
             return pts.iter().all(|p| self.rect.contains(*p));
         }
         pts.iter().any(|p| self.rect.contains(*p)) || pts.windows(2).any(|w| segment_hits_rect(w[0], w[1], self.rect))
+    }
+
+    /// Does the marquee take the rectangular footprint of an on-screen selection target?
+    pub(crate) fn takes_rect(&self, rect: Rect) -> bool {
+        self.takes(&[rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()])
     }
 
     /// Every point inside the closed lasso, and no segment crossing its outline (a concave lasso
