@@ -22,7 +22,10 @@ const MIN_AREA: f64 = 1e-9;
 /// The cell to clip.
 pub(crate) enum Cell<'a> {
     Polygon(&'a Convex),
-    Circle { c: Vec2, r: f64 },
+    Circle {
+        c: Vec2,
+        r: f64,
+    },
     /// A convex polygon with rounded corners: the points within `r` of the convex `core`, its
     /// outline `prims` (counter-clockwise lines and arcs).
     Rounded {

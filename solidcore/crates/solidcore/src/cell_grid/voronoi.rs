@@ -176,10 +176,7 @@ fn rounded(poly: &[Vec2], r: f64) -> Option<(Convex, f64, Vec<Prim>, f64)> {
 }
 
 /// The cells of a voronoi grid over a field given as closed loops (see the module docs).
-pub(crate) fn plan(
-    field: &[Loop2],
-    spec: &CellGridSpec,
-) -> Result<CellGridPlan, CellGridError> {
+pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
