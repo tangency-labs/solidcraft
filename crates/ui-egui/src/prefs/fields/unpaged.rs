@@ -76,6 +76,9 @@ macro_rules! unpaged_preferences {
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
+            /// Your own shop rules profiles, offered by Check Against Shop Rules beside the built-in Generic
+            /// one (#20113). No page reset discards this user-authored library.
+            shop_presets: solidcraft_engine::doc::shop_presets::Presets = solidcraft_engine::doc::shop_presets::Presets::default();
             /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends, or to the arc
             /// whose centre is on a sketch point, and the click adds the Tangent or Coincident constraint (#20719). A mode of the 3-Point Arc tool, set
             /// in the Sketch Palette while it runs and kept for the next time; no Preferences page shows or

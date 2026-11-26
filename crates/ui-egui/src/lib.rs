@@ -345,6 +345,7 @@ pub(crate) mod sheet_views;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
+pub(crate) mod shop_presets_ui;
 pub mod shortcut_box;
 pub mod sketch3d;
 #[cfg(test)]
@@ -834,6 +835,8 @@ pub struct SolveApp {
     pub toolbar_custom: toolbar_custom::ToolbarCustom,
     /// Named settings profiles (#6237).
     pub settings_profiles: settings_profiles::Profiles,
+    /// Counts the changes of the shop presets (#20113), so a window that shows them knows to look again.
+    pub shop_presets_revision: u64,
     /// Preferences kept between runs, and their window.
     pub preferences: prefs::Prefs,
     pub prefs_window: prefs::PrefsWindow,
@@ -1234,6 +1237,7 @@ impl SolveApp {
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
+            shop_presets_revision: 0,
             preferences: prefs::Prefs::default(),
             prefs_window: prefs::PrefsWindow::default(),
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
@@ -1830,6 +1834,7 @@ impl SolveApp {
         self.session.set_validation(self.preferences.validation);
         workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
+        shop_presets_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1860,6 +1865,7 @@ impl SolveApp {
             })
         };
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        shop_presets_ui::keep(self);
         if matches!(id, "file.save" | "file.save_as") && r.is_ok() {
             let document_id = self.session.document_id.clone();
             control::post_design_saved(self, &document_id, saved_from);

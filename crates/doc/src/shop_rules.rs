@@ -692,19 +692,20 @@ fn builtin() -> &'static Result<Vec<Profile>, ShopRulesError> {
 }
 
 /// The built-in profile `id` (ignoring case) as the object a preset starts from: the profile as the
-/// file writes it, to be edited and saved under a name of the person's own.
+/// file writes it, without its `id` (a preset takes an id of its own), to be edited and saved.
 pub fn profile_value(id: &str) -> Option<Value> {
     let file: Value = serde_json::from_str(BUILTIN).ok()?;
     let id = id.trim();
-    file.get("profiles")?.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str).is_some_and(|i| i.eq_ignore_ascii_case(id))).cloned()
-}
-
-/// The ids of the built-in profiles, in the file's order.
-pub fn profile_ids() -> Vec<&'static str> {
-    match builtin() {
-        Ok(list) => list.iter().map(|p| p.id.as_str()).collect(),
-        Err(_) => Vec::new(),
+    let mut found = file
+        .get("profiles")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("id").and_then(Value::as_str).is_some_and(|i| i.eq_ignore_ascii_case(id)))
+        .cloned()?;
+    if let Some(object) = found.as_object_mut() {
+        object.remove("id");
     }
+    Some(found)
 }
 
 /// The built-in profile `id` (ignoring case).

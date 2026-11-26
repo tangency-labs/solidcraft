@@ -223,7 +223,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// the file has the sheet and its mounting holes only.
                 hardware_notes: bool,
             },
-            /// Check Against Shop Rules (#20113): the shop (index into the built-in profiles), and
+            /// Check Against Shop Rules (#20113): the shop (index into Generic and the person's presets), and
             /// what `sheet.check_shop` said for the design, body and shop it was last run for.
             /// Read-only: OK only closes it.
             ShopCheck {
@@ -235,7 +235,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// The shop `layers` was last set from.
                 layers_for: Option<usize>,
                 data: Option<Result<Value, String>>,
-                key: Option<(u64, Option<String>, usize, usize)>,
+                /// The design's revision, the body, the shop, the layers row and the presets' revision
+                /// the check was last run for.
+                key: Option<(u64, Option<String>, usize, usize, u64)>,
                 /// What Export DXF… last did: the saved path, or why it did not.
                 status: Option<String>,
             },
@@ -933,20 +935,26 @@ fn shop_check_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
     (shop, layers, layers_for): (&mut usize, &mut usize, &mut Option<usize>),
-    (data, key, status): (&mut Option<Result<Value, String>>, &mut Option<(u64, Option<String>, usize, usize)>, &mut Option<String>),
+    (data, key, status): (&mut Option<Result<Value, String>>, &mut Option<(u64, Option<String>, usize, usize, u64)>, &mut Option<String>),
     inputs: &[SelInput],
 ) {
-    use solidcraft_engine::doc::shop_rules;
-    let shops: Vec<(&str, &str)> =
-        shop_rules::profile_ids().into_iter().filter_map(|id| shop_rules::profile(id).ok().map(|p| (id, p.name.as_str()))).collect();
-    let Some(last) = shops.len().checked_sub(1) else { return };
+    use crate::shop_presets_ui;
+    crate::shop_presets_ui::sync(&mut app.session, &app.preferences);
+    let listed = shop_presets_ui::shops(app);
+    let Some(last) = listed.len().checked_sub(1) else { return };
     *shop = (*shop).min(last);
-    let names: Vec<&str> = shops.iter().map(|(_, name)| *name).collect();
+    let names: Vec<&str> = listed.iter().map(|s| s.name.as_str()).collect();
     choice_row(ui, "ui.shop_check_shop", "sm_shop_check_shop", shop, &names);
-    let (id, name) = shops.get(*shop).copied().unwrap_or(("generic", "Generic"));
+    // The presets section may add, remove or pick a shop: read the list again.
+    shop_presets_ui::rows(app, ui, shop);
+    let listed = shop_presets_ui::shops(app);
+    let Some(last) = listed.len().checked_sub(1) else { return };
+    *shop = (*shop).min(last);
+    let (id, name) = listed.get(*shop).map_or(("generic".to_string(), "Generic".to_string()), |s| (s.id.clone(), s.name.clone()));
+    let (id, name) = (id.as_str(), name.as_str());
     // The export the shop wants (its profile's `dxf_export`, else the export's defaults): the
     // row starts from it, and again from it when the shop changes.
-    let recommended = shop_rules::profile(id).ok().and_then(|p| p.dxf_export.clone());
+    let recommended = shop_presets_ui::profile(app, id).and_then(|p| p.dxf_export);
     let wanted = recommended.clone().unwrap_or_default();
     let wanted_layers = DXF_LAYERS.iter().position(|(l, ..)| *l == wanted.layers).unwrap_or(1);
     if *layers_for != Some(*shop) {
@@ -974,7 +982,7 @@ fn shop_check_rows(
         crate::ui_kit::status_line(ui, &line, crate::ui_kit::StatusTone::Dim);
     }
     let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
-    let want = (app.session.revision, body.clone(), *shop, *layers);
+    let want = (app.session.revision, body.clone(), *shop, *layers, app.shop_presets_revision);
     if key.as_ref() != Some(&want) {
         let mut p = json!({"shop": id});
         // `dxf` only when the row was changed from what the shop recommends; the rest of the

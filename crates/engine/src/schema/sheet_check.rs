@@ -180,7 +180,8 @@ pub struct CheckShopResult {
 #[schemars(deny_unknown_fields)]
 pub struct ShopPresetsParams {
     /// Also give this profile (`generic`, or a preset's id) as the object a preset is made from:
-    /// edit it and pass it to `sheet.save_shop_preset`.
+    /// edit it and pass it to `sheet.save_shop_preset`. Generic's has no `id`, so the preset gets one
+    /// made from its name.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub profile: Option<String>,

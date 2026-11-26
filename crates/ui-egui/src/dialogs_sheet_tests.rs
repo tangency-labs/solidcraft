@@ -2650,6 +2650,45 @@ fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
 
 // ---- Check Against Shop Rules (#20113) ----
 
+fn shop_page(says: &str) -> Value {
+    json!({"url": "https://example.com/rules", "read": "2026-11-25", "says": says})
+}
+
+fn shop_file_rule(id: &str) -> Value {
+    json!({"id": id, "sources": [shop_page("the file rule")]})
+}
+
+/// The synthetic shops the window is tried with (none is a real shop), as presets: `shop_a` asks for
+/// one layer and no bend lines, `shop_b` for a layer per role and the bend lines and has no file
+/// rule, `shop_c` for one cut layer and the bend lines apart. Each has the file rules a bent part
+/// meets when it is exported as asked.
+fn shop_preset_profile(id: &str) -> Value {
+    let (name, layers, bend_lines, rules) = match id {
+        "shop_a" => ("Shop A", "single", false, vec![shop_file_rule("file.dxf_single_layer"), shop_file_rule("file.text_outlined")]),
+        "shop_b" => ("Shop B", "roles", true, Vec::new()),
+        _ => (
+            "Shop C",
+            "cut",
+            true,
+            vec![
+                shop_file_rule("file.dxf_single_layer"),
+                json!({"id": "file.dxf_bend_lines", "bend_lines": "present", "sources": [shop_page("a line at each bend")]}),
+            ],
+        ),
+    };
+    let mut rules = rules;
+    rules.push(json!({"id": "hole.min_diameter", "limits": [{"value": 1.0, "sources": [shop_page("a plain length")]}]}));
+    let export = json!({"layers": layers, "bend_lines": bend_lines, "sources": [shop_page("the export it asks for")]});
+    json!({"id": id, "name": name, "dxf_export": export, "rules": rules})
+}
+
+/// Save `shop_a`, `shop_b` and `shop_c` as presets, in that order: the window lists them after Generic.
+fn save_shop_presets(h: &mut crate::scenario::Harness) {
+    for id in ["shop_a", "shop_b", "shop_c"] {
+        h.app.run("sheet.save_shop_preset", json!({"profile": shop_preset_profile(id)})).unwrap();
+    }
+}
+
 /// A plate with one hole of `diameter` mm (none for 0), and the Shop Check dialog open on it, drawn.
 fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
     shop_check_on_part(diameter, false)
@@ -2694,19 +2733,20 @@ fn shop_check_button_is_on_the_sheet_metal_tab() {
 #[test]
 fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     let mut h = shop_check_on(0.6);
+    save_shop_presets(&mut h);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sheet(Sm::ShopCheck { .. }))));
     assert!(!h.app.dialog.as_ref().is_some_and(|d| d.previews()), "a computed panel, nothing to preview");
     let texts = shop_check_texts(&mut h);
     // The 0.6 mm hole only: the window checks a single-layer DXF by default.
     assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
-    // The generic rule cites each shop's page, so its links are numbered.
+    // Generic's values cite one page.
     assert!(texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "the finding links its source: {texts:?}");
     let Some(Kind::Sheet(Sm::ShopCheck { shop, data, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
     let generic = data.clone();
     *shop = 1;
     let texts = shop_check_texts(&mut h);
-    assert!(texts.iter().any(|t| t.ends_with("against PCBWay")), "{texts:?}");
+    assert!(texts.iter().any(|t| t.ends_with("against Shop A")), "{texts:?}");
     let Some(Kind::Sheet(Sm::ShopCheck { data, key, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
     assert_eq!(key.as_ref().map(|k| k.2), Some(1));
     assert_ne!(data.as_ref().and_then(|d| d.as_ref().ok()).map(|v| v["shop"].clone()), generic.and_then(|d| d.ok()).map(|v| v["shop"].clone()));
@@ -2747,6 +2787,7 @@ fn shop_check_reply(h: &crate::scenario::Harness) -> Value {
 #[test]
 fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
     let mut h = shop_check_on_part(6.0, true);
+    save_shop_presets(&mut h);
     let texts = shop_check_texts(&mut h);
     assert!(!shop_check_rules(&h).iter().any(|r| r.starts_with("file.dxf")), "no finding about the export on a bent part: {texts:?}");
     assert!(!texts.iter().any(|t| t.contains("bend line(s)")), "{texts:?}");
@@ -2768,7 +2809,7 @@ fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
         assert_eq!((reply["dxf"]["layers"].as_str(), reply["dxf"]["from"].as_str()), (Some(layers), Some("recommended")), "{reply}");
         assert!(!shop_check_rules(&h).iter().any(|r| r.starts_with("file.dxf")), "shop {shop}: {reply}");
     }
-    // Changing the row sends it: one layer on SendCutSend, whose bend lines then sit on the cut layer.
+    // Changing the row sends it: one layer on shop_c, whose bend lines then sit on the cut layer.
     let Some(Kind::Sheet(Sm::ShopCheck { layers, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
     *layers = 0;
     let texts = shop_check_texts(&mut h);
@@ -2786,12 +2827,13 @@ fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
 }
 
 /// Export DXF… in the Shop Check window saves the flat DXF with the options the last check used:
-/// SendCutSend's recommendation (one cut layer, bend lines apart) puts the cuts on layer 0 and the
+/// shop_c's recommendation (one cut layer, bend lines apart) puts the cuts on layer 0 and the
 /// bend lines on BEND_UP/BEND_DOWN; Generic's (one layer, no bend lines) has no bend line.
 #[test]
 fn shop_check_dialog_exports_the_dxf_as_the_shop_wants_it() {
-    for (shop, name, bend_lines) in [(3, "sendcutsend", true), (0, "generic", false)] {
+    for (shop, name, bend_lines) in [(3, "shop_c", true), (0, "generic", false)] {
         let mut h = shop_check_on_part(6.0, true);
+        save_shop_presets(&mut h);
         let Some(Kind::Sheet(Sm::ShopCheck { shop: s, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
         *s = shop;
         shop_check_texts(&mut h);
@@ -2831,4 +2873,128 @@ fn shop_check_dialog_says_a_clean_part_passes_and_changes_nothing() {
     let Some(Kind::Sheet(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
     assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().is_empty(), "OK runs nothing: {k:?}");
     assert_eq!((h.app.session.undo.len(), h.app.session.doc.to_json()), (undo, design), "the dialog never changes the design");
+}
+
+fn shop_check_shop(h: &crate::scenario::Harness) -> usize {
+    let Some(Kind::Sheet(Sm::ShopCheck { shop, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+    *shop
+}
+
+fn shop_check_set_shop(h: &mut crate::scenario::Harness, index: usize) {
+    let Some(Kind::Sheet(Sm::ShopCheck { shop, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+    *shop = index;
+}
+
+/// The Shop row lists Generic and then the person's saved presets, in the order they were saved, and
+/// the presets section is there with its three actions; a preset saved while the window is open
+/// shows up and is checked against; Generic alone is listed before any is saved.
+#[test]
+fn shop_check_window_lists_generic_and_the_saved_presets() {
+    let mut h = shop_check_on(0.6);
+    let names = |h: &crate::scenario::Harness| crate::shop_presets_ui::shops(&h.app).into_iter().map(|s| s.name).collect::<Vec<_>>();
+    assert_eq!(names(&h), ["Generic"]);
+    let texts = shop_check_texts(&mut h);
+    for label in ["Shop presets", "Save as preset…", "Import profile file…", "Delete preset"] {
+        assert!(texts.iter().any(|t| t.eq_ignore_ascii_case(label)), "{label}: {texts:?}");
+    }
+    save_shop_presets(&mut h);
+    assert_eq!(names(&h), ["Generic", "Shop A", "Shop B", "Shop C"]);
+    shop_check_set_shop(&mut h, 2);
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t.ends_with("against Shop B")), "{texts:?}");
+    let reply = shop_check_reply(&h);
+    assert_eq!((reply["shop"]["id"].as_str(), reply["shop"]["name"].as_str()), (Some("shop_b"), Some("Shop B")), "{reply}");
+    // The presets are in the preferences (the person's profile), and a stored list reads back.
+    let stored = serde_json::to_value(&h.app.preferences.shop_presets).unwrap();
+    assert_eq!(stored.as_array().map(Vec::len), Some(3));
+    let back: solidcraft_engine::doc::shop_presets::Presets = serde_json::from_value(stored).unwrap();
+    assert_eq!(back, h.app.preferences.shop_presets);
+}
+
+/// A preset made from the shop shown starts from its values and is a new preset of its own: Generic's
+/// values give a preset that checks exactly as Generic does; a name that is in use, or Generic's,
+/// is refused and nothing changes; the new preset is the one shown.
+#[test]
+fn a_preset_saved_from_generic_checks_as_generic_does() {
+    let mut h = shop_check_on(0.6);
+    let generic = {
+        shop_check_texts(&mut h);
+        shop_check_reply(&h)
+    };
+    assert_eq!(crate::shop_presets_ui::save_as(&mut h.app, "generic", "My shop"), Ok("my-shop".to_string()));
+    assert_eq!(h.app.preferences.shop_presets.list().len(), 1);
+    assert_eq!(h.app.session.shop_presets, h.app.preferences.shop_presets, "the session has what the preferences keep");
+    // The window shows the new preset at once, and the same findings as Generic.
+    shop_check_set_shop(&mut h, 1);
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "1 error against My shop"), "{texts:?}");
+    let mine = shop_check_reply(&h);
+    // The same findings: the same rules, values and limits (the messages name the shop).
+    let found = |r: &Value| -> Vec<(Value, Value, Value)> {
+        r["findings"].as_array().cloned().unwrap_or_default().iter().map(|f| (f["rule"].clone(), f["value"].clone(), f["limit"].clone())).collect()
+    };
+    assert_eq!(found(&mine), found(&generic));
+    assert_eq!((&mine["checked"], &mine["dxf"]), (&generic["checked"], &generic["dxf"]));
+    assert_eq!(mine["shop"]["id"], "my-shop");
+    // Again from the preset: another name makes another preset, the same name is refused.
+    assert_eq!(crate::shop_presets_ui::save_as(&mut h.app, "my-shop", "Copy of mine"), Ok("copy-of-mine".to_string()));
+    let kept = h.app.preferences.shop_presets.clone();
+    for name in ["My shop", "my SHOP", "Generic", "generic"] {
+        assert!(crate::shop_presets_ui::save_as(&mut h.app, "generic", name).is_err(), "{name}");
+    }
+    assert!(crate::shop_presets_ui::save_as(&mut h.app, "generic", "???").is_err());
+    assert!(crate::shop_presets_ui::save_as(&mut h.app, "nobody", "Fresh").is_err());
+    assert_eq!(h.app.preferences.shop_presets, kept, "refusals keep nothing");
+}
+
+/// Delete asks twice; the second click removes the preset and the window goes back to Generic. Cancel
+/// keeps it, and Generic has nothing to delete.
+#[test]
+fn shop_check_window_deletes_a_preset_after_a_second_click() {
+    let mut h = shop_check_on(0.6);
+    save_shop_presets(&mut h);
+    shop_check_set_shop(&mut h, 1);
+    shop_check_texts(&mut h);
+    h.step(&json!({"click": {"handle": "dialog:shop_presets:delete"}})).unwrap();
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "Delete the preset Shop A? Designs are not affected."), "{texts:?}");
+    assert_eq!(h.app.preferences.shop_presets.list().len(), 3, "one click deletes nothing");
+    h.step(&json!({"click": {"handle": "dialog:shop_presets:delete_confirm"}})).unwrap();
+    h.frames(3);
+    let ids: Vec<&str> = h.app.preferences.shop_presets.list().iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["shop_b", "shop_c"]);
+    assert_eq!(h.app.session.shop_presets, h.app.preferences.shop_presets);
+    assert_eq!(shop_check_shop(&h), 0, "back to Generic");
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t.ends_with("against Generic")), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with("Delete the preset")), "{texts:?}");
+}
+
+/// Import profile file… reads a file the person picks into a preset and shows it; a file that is no
+/// profile is refused in the status line and keeps nothing.
+#[test]
+fn shop_check_window_imports_a_profile_file() {
+    let mut h = shop_check_on(0.6);
+    let mut profile = shop_preset_profile("shop_c");
+    profile["id"] = json!("acme");
+    profile["name"] = json!("Acme Fab");
+    let good = h.dir.join("acme.json");
+    std::fs::write(&good, profile.to_string()).unwrap();
+    let bad = h.dir.join("broken.json");
+    std::fs::write(&bad, "{not json").unwrap();
+    for (path, imported) in [(bad, false), (good, true)] {
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(chosen.clone())))));
+        shop_check_texts(&mut h);
+        h.step(&json!({"click": {"handle": "dialog:shop_presets:import"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.shop_presets.list().len(), usize::from(imported));
+        if imported {
+            assert_eq!(shop_check_shop(&h), 1, "the imported preset is the one shown");
+            let texts = shop_check_texts(&mut h);
+            assert!(texts.iter().any(|t| t.ends_with("against Acme Fab")), "{texts:?}");
+        } else {
+            assert_eq!(shop_check_shop(&h), 0);
+        }
+    }
 }

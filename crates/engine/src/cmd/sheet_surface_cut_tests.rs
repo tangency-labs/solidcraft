@@ -2077,7 +2077,8 @@ fn shop_presets_are_saved_listed_used_and_deleted() {
     assert!(shop_findings(&run(&mut s, "sheet.check_shop", json!({"shop": "my-shop"})), "hole.min_diameter").is_empty(), "a 6 mm hole meets 4 mm");
     // A preset that starts from Generic's values checks exactly as Generic does.
     let generic = run(&mut s, "sheet.shop_presets", json!({"profile": "generic"}));
-    assert_eq!(generic["profile"]["id"], "generic");
+    assert_eq!(generic["profile"]["name"], "Generic");
+    assert!(generic["profile"].get("id").is_none(), "Generic's object has no id: a preset takes one of its own");
     let mine = run(&mut s, "sheet.save_shop_preset", json!({"name": "Mine", "profile": generic["profile"].clone()}));
     assert_eq!(mine["id"], "mine");
     let (a, b) = (run(&mut s, "sheet.check_shop", json!({"shop": "generic"})), run(&mut s, "sheet.check_shop", json!({"shop": "mine"})));
