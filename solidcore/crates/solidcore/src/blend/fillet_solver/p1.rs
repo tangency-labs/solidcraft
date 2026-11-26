@@ -747,6 +747,44 @@ impl FilletSolver {
         )
     }
 
+    /// Not upstream (#13710): how far the solver's section stands off the face of rail
+    /// `rail` (0 or 1), where the corner code sizes a guess, a step-off or a foot by it: a
+    /// chamfer of setbacks' setback along that face (its offset surfaces stand at 0), else
+    /// `|offset|`, `offset` the signed offset distance of the rail's offset surface as the
+    /// caller reads it (a round's radius, an offset chamfer's offset); `None` where the
+    /// caller has no offset surface.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a rail past 1.
+    pub(crate) fn stand_off_from(&self, rail: usize, offset: Option<f64>) -> Result<Option<f64>> {
+        let setbacks = self
+            .chamfer
+            .filter(crate::surface::procedural_blend::chamfer::ChamferDefinition::is_setbacks)
+            .map(|c| c.setbacks());
+        match setbacks {
+            Some(setbacks) => setbacks
+                .get(rail)
+                .copied()
+                .map(Some)
+                .ok_or_else(|| invalid("rail index past 1")),
+            None => Ok(offset.map(f64::abs)),
+        }
+    }
+
+    /// Not upstream (#13710): [`Self::stand_off_from`] with the solver's own offset surface
+    /// of rail `rail` ([`Self::surface`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::surface`]; [`SolidError::InvalidInput`] for a rail past 1.
+    pub(crate) fn stand_off(&self, rail: usize) -> Result<Option<f64>> {
+        let offset = self
+            .surface(rail)?
+            .map(|slot| slot.surface.offset_distance());
+        self.stand_off_from(rail, offset)
+    }
+
     /// Reject a Newton trial outside the equal-setback radius domain.
     pub(crate) fn check_station_radius(&self, radius: f64, op: &'static str) -> Result<()> {
         if self.station_setback().is_some() && !(radius.is_finite() && radius >= 0.0) {

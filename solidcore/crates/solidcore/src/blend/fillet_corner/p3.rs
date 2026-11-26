@@ -632,7 +632,8 @@ fn no_mate(op: &'static str, eu: EdgeuseId) -> SolidError {
 /// this distance, so where the side faces meet at an angle `a` the shared section of a Join
 /// stands at most `2 size tan(a / 2)` off the blends
 /// (`blend_corner::join_within_xsect_tolerance_deg` derives it). `0` where it has no offset
-/// surface yet.
+/// surface yet. A chamfer of setbacks (#13710), whose offsets stand at 0, its larger
+/// setback ([`FilletSolver::stand_off`]).
 ///
 /// # Errors
 ///
@@ -640,8 +641,8 @@ fn no_mate(op: &'static str, eu: EdgeuseId) -> SolidError {
 fn round_size(solver: &FilletSolver) -> Result<f64> {
     let mut size = 0.0_f64;
     for rail in 0..2 {
-        if let Some(slot) = solver.surface(rail)? {
-            size = size.max(slot.surface.offset_distance().abs());
+        if let Some(stand_off) = solver.stand_off(rail)? {
+            size = size.max(stand_off);
         }
     }
     Ok(size)

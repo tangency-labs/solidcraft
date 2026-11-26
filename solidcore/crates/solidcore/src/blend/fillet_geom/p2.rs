@@ -608,6 +608,14 @@ fn solver_surface<'s>(
     }
 }
 
+/// Not upstream (#13710): `fs`'s stand-off from rail `i`'s face
+/// ([`FilletSolver::stand_off_from`]), `offset` the signed distance of the rail's offset
+/// surface ([`solver_surface`]): `|offset|`, or a chamfer of setbacks' setback.
+fn stand_off(fs: &FilletSolver, i: usize, offset: f64, op: &'static str) -> Result<f64> {
+    fs.stand_off_from(i, Some(offset))?
+        .ok_or_else(|| missing_set_up(op, FilletSetUp::SolverOffsetSurface))
+}
+
 /// A step of the routine `op` that cannot fail unless the kernel broke its own contract: a
 /// reviewed [`BlendFailure::Defect`] whose `why` says why (the reasons are the `const`s at
 /// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line
@@ -2832,7 +2840,9 @@ impl FilletBrep {
         let mut past_end = false;
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
         for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
-            let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
+            // (#13710) a chamfer of setbacks' feet stand its setback along this face
+            let offset = solver_surface(fs, index, OP)?.offset_distance();
+            let offset_distance = stand_off(fs, index, offset, OP)?;
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
             let ivl = edge::interval(target, e)?;
@@ -3125,7 +3135,14 @@ impl FilletBrep {
             .approximate_length(k, &ivl, 5, false)?
             .0;
         if let Some(off_srf) = solvers.offset_surface(self, first, 0)? {
-            let rad = off_srf.offset_distance().abs();
+            // (#13710) a chamfer of setbacks' rail 0 stands its first setback off the edge
+            let offset = off_srf.offset_distance();
+            let rad = stand_off(
+                solvers.solver(RailSolvers::geom_solver(self, first)?)?,
+                0,
+                offset,
+                OP,
+            )?;
             if side_edge_length > rad / 2.0 {
                 let mut frac = rad / side_edge_length;
                 if !from_start {
@@ -3782,7 +3799,9 @@ impl FilletBrep {
         }
 
         // Determine if we need to step off the edge to avoid convergence problems
-        let stepoff_dist = solver_surface(fs1, 0, OP)?.offset_distance().abs();
+        // (#13710) a chamfer of setbacks steps off by its first setback
+        let offset = solver_surface(fs1, 0, OP)?.offset_distance();
+        let stepoff_dist = stand_off(fs1, 0, offset, OP)?;
         let mut curve_stepoff_dist = stepoff_dist;
         let curve_len = curve.approximate_length(k, &ivl, 10, false)?.0;
         let max_stepoff_dist = curve_len * 0.15;
@@ -4052,7 +4071,8 @@ impl FilletBrep {
                 let fs = solvers.solver(sid)?;
                 let side_eu = solver_edgeuse(fs, ii, OP)?;
                 let offset = solver_surface(fs, ii, OP)?;
-                let distance = offset.offset_distance().abs();
+                // (#13710) a chamfer of setbacks' foot stands its setback along this face
+                let distance = stand_off(fs, ii, offset.offset_distance(), OP)?;
                 let base = offset.base_surface().clone();
                 let b = evaluate_binormal(
                     k,

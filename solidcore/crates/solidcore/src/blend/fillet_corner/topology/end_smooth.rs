@@ -301,10 +301,14 @@ impl FilletCorner {
             })?
             .unitize()?;
         // the round's radius, and the angle at which a face's end is a crease, not a tangent
-        // edge the rail rolls over: the corner's 3D tolerance over the radius
+        // edge the rail rolls over: the corner's 3D tolerance over the radius (a chamfer of
+        // setbacks', #13710: its larger setback)
         let mut radius: f64 = 0.0;
-        for slot in solver.surfaces.iter().flatten() {
-            radius = radius.max(slot.surface.offset_distance().abs());
+        for (rail, slot) in solver.surfaces.iter().enumerate() {
+            let offset = slot.as_ref().map(|slot| slot.surface.offset_distance());
+            if let Some(stand_off) = solver.stand_off_from(rail, offset)? {
+                radius = radius.max(stand_off);
+            }
         }
         let crease_rad = if radius > 0.0 {
             self.approx_tol_3d / radius
