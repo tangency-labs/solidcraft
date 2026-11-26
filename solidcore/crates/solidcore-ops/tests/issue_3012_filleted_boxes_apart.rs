@@ -124,27 +124,32 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
                 (expected - v).abs() < 1e-8,
                 "dx {dx} reversed {reversed}: {v} vs {expected} ({exact} ends exact)"
             );
-            // Each cap is a planar face whose edges bound the section above. Taken over its own
-            // trims, which run within the edges' tolerance of them, a cap's area was dx^2 / 2
-            // short (-0.5000, -0.5000 and -0.5015 dx^2 at 1e-4, 1e-3 and 1e-2, #16854); closed
-            // onto its edges, as the volume is (#16735), it is the section.
+            // Each cap is a planar face whose edges bound 30 dx less the dx^3 / 12 piece at each
+            // end (#16854), also at an end the walls close exactly: there the volume counts the
+            // piece (above) and the cap's edges do not (MEASURED at dx 1e-2 reversed, the one
+            // run with an exact end). Taken over its own trims, which run within the edges'
+            // tolerance of them, a cap's area was dx^2 / 2 short (-0.5000, -0.5000 and -0.5015
+            // dx^2 at 1e-4, 1e-3 and 1e-2, #16854); closed onto its edges, as the volume is
+            // (#16735), it is the region they bound. The bound, dx^2 / 1e4, is 1 / 5000 of that
+            // shortfall and under an eighth of the end piece at 1e-2.
+            let cap_area = dx * 30.0 - 2.0 * dx * dx * dx / 12.0;
             let caps: Vec<f64> = (0..rec.faces.len())
                 .map(|i| r.face_area(&order, i, 1e-10).unwrap())
-                .filter(|a| (a - section).abs() < 1e-3 * section)
+                .filter(|a| (a - cap_area).abs() < 1e-3 * cap_area)
                 .collect();
             assert_eq!(caps.len(), 2, "dx {dx} reversed {reversed}: caps {caps:?}");
             for cap in caps {
                 assert!(
-                    (cap - section).abs() < 1e-3 * dx * dx,
-                    "dx {dx} reversed {reversed}: cap {cap} vs section {section}"
+                    (cap - cap_area).abs() < 1e-4 * dx * dx,
+                    "dx {dx} reversed {reversed}: cap {cap} vs {cap_area}"
                 );
             }
             // Every face of the sliver: the two flat sides (26 x 10 each), the four fillets (a
-            // quarter turn of R2 by 10 each), the two caps, each the section above, and a strip
+            // quarter turn of R2 by 10 each), the two caps (`cap_area`), and a strip
             // dx by 10 at each exact end. A fillet face the sector skipped and a neighbouring
             // edge put in the wrong region would add or drop 31.4. A fillet cut dx of arc short
             // of its tangent end is 10 dx short.
-            let faces = 2.0 * 26.0 * 10.0 + 4.0 * FRAC_PI_2 * 2.0 * 10.0 + 2.0 * section;
+            let faces = 2.0 * 26.0 * 10.0 + 4.0 * FRAC_PI_2 * 2.0 * 10.0 + 2.0 * cap_area;
             let ends = exact as f64 * strip - cut * 10.0 * dx;
             let area = r.area(1e-8).unwrap();
             assert!(
