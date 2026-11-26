@@ -12,7 +12,7 @@ use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_kernel::services::sketch_arc as arcs;
+use solidcraft_kernel::planar as arcs;
 
 use crate::SolveApp;
 use crate::tools::Tool;
