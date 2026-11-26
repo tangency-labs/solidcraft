@@ -1500,7 +1500,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let plane = placed(t, at);
             let exits = corners.as_chunks::<4>().0.iter().flat_map(|r| {
                 let rect = r.map(|q| plane.to_world(q));
-                starts.iter().filter_map(move |s| solidcraft_kernel::services::section_corners::exit_through_box(*s, toward, rect))
+                starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_box(*s, toward, rect))
             });
             exits.reduce(f64::max)
         })

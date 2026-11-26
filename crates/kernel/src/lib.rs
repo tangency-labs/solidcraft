@@ -462,6 +462,8 @@ pub use route::gusset_prepare;
 pub use route::gusset_support;
 pub use route::gusset_support_pick;
 pub use route::gusset_support_plane;
+pub use route::hatch;
+pub use route::hole_stacks;
 pub use route::member_along;
 pub use route::member_axes;
 pub use route::member_axis;
@@ -469,6 +471,7 @@ pub use route::member_extent;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::planar;
 pub use route::points;
 pub use route::projection;
 pub use route::query;
@@ -510,10 +513,20 @@ pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathR
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+
 /// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
 /// stops with it (a sketch solve).
 pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
+/// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
+/// scopes and counted work of the calls this process made.
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::write_kernel_profiles;
+
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
@@ -555,11 +568,13 @@ pub use step_in::records::RecordMesh;
 pub use step_in::records::import_trims;
 pub use step_in::records::records_import;
 pub use step_in::records::records_import_shared;
+pub use step_in::records::records_import_shared_with_workers;
 pub use step_in::records::records_noted;
 pub use step_in::records::records_text;
 pub use step_in::step_cache_alive;
 pub use step_in::step_import;
 pub use step_in::step_import_shared;
+pub use step_in::step_import_shared_with_workers;
 pub use step_in::step_orientation_errors;
 pub use step_in::step_validate;
 pub use step_out::ExportBody;
@@ -580,6 +595,7 @@ pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
+pub use surface_kind::same_surface;
 pub use surface_offset::offset_surface;
 pub use surface_ruled::Ruled;
 pub use surface_ruled::RuledCorners;
@@ -600,7 +616,9 @@ pub use surfaces::copy_faces;
 pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::extrude_sheet_tapered;
+pub use surfaces::loft_section_closed;
 pub use surfaces::loft_sheet;
+pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;
@@ -647,6 +665,7 @@ pub use validation::Validation;
 pub use validation::check_kept;
 pub use validation::detach_kept;
 pub use validation::failing_check;
+pub use validation::is_result_only_check_refusal;
 pub use validation::validating;
 pub use validity::SmlibCheck;
 pub use validity::Validity;

@@ -343,7 +343,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies?: [names] (default: the selected bodies); ",
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
-            "format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written); ",
+            "format?: 3mf|stl|3mf-tagged|step (default 3mf, in millimetres; a 3MF that can't be written goes as STL; step: the bodies as exact B-rep with their colours, which the slicer meshes itself, for slicers that read STEP); ",
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
@@ -4367,7 +4367,8 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
             None | Some("3mf") => Format::ThreeMf,
             Some("stl") => Format::StlBinary,
             Some("3mf-tagged") => Format::ThreeMfTagged,
-            Some(other) => return Err(bad(cmd, format!("unknown mesh format `{other}` (stl, 3mf, 3mf-tagged)"))),
+            Some("step" | "stp") => Format::Step,
+            Some(other) => return Err(bad(cmd, format!("unknown format `{other}` (stl, 3mf, 3mf-tagged, step)"))),
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;

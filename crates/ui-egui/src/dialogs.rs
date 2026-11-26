@@ -5167,7 +5167,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
         Kind::UrdfExport(_) => ("Export URDF…", "Cancel"),
-        Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
+        Kind::ViewDxf { .. } | Kind::Sheet(crate::dialogs_sheet::Sm::ExportDxf { .. }) => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
 }
@@ -6711,6 +6711,10 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    if let Kind::Sheet(crate::dialogs_sheet::Sm::ExportDxf { body, options }) = &d.kind {
+        crate::dialogs_sheet::export_flat(app, body, Some(*options));
+        return Ok(());
+    }
     if let Kind::UrdfExport(f) = &d.kind {
         return crate::dialogs_urdf::run(app, f);
     }
