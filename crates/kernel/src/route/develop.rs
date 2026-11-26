@@ -4,7 +4,6 @@
 //! [`LapOps`]), beads and contours, and the cubic pieces a curve is carried into the flat by
 //! ([`hermite`]). A fold, a bend in space and a smooth piece hold the kernel's own form.
 
-use solidcore_record::brep::Curve;
 use solidcore_record::develop::{Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::OpKind;
@@ -455,7 +454,6 @@ pub mod hermite {
 mod tests {
     use super::*;
     use solidcore_ops::develop as ops;
-    use solidcore_ops::develop::Rigid2Ops as _;
 
     #[test]
     fn routed_development_is_solidcores() {

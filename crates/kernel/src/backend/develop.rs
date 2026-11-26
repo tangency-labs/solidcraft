@@ -16,15 +16,15 @@ use super::Solidcore;
 fn refusal(r: ops::Refusal) -> Refusal {
     match r {
         ops::Refusal::NoPanel(n) => Refusal::NoPanel(n),
-        ops::Refusal::Panel { panel, why } => Refusal::Panel { panel, why: panel(why) },
-        ops::Refusal::Joint { joint, why } => Refusal::Joint { joint, why: joint(why) },
+        ops::Refusal::Panel { panel, why } => Refusal::Panel { panel, why: panel_refusal(why) },
+        ops::Refusal::Joint { joint, why } => Refusal::Joint { joint, why: joint_refusal(why) },
         ops::Refusal::TooLarge => Refusal::TooLarge,
-        ops::Refusal::Rule(r) => Refusal::Rule(rule(r)),
+        ops::Refusal::Rule(r) => Refusal::Rule(rule_refusal(r)),
         ops::Refusal::Roots(n) => Refusal::Roots(n),
     }
 }
 
-fn panel(r: ops::PanelRefusal) -> PanelRefusal {
+fn panel_refusal(r: ops::PanelRefusal) -> PanelRefusal {
     match r {
         ops::PanelRefusal::RollRadius => PanelRefusal::RollRadius,
         ops::PanelRefusal::ConeHalfAngle => PanelRefusal::ConeHalfAngle,
@@ -34,7 +34,7 @@ fn panel(r: ops::PanelRefusal) -> PanelRefusal {
     }
 }
 
-fn joint(r: ops::JointRefusal) -> JointRefusal {
+fn joint_refusal(r: ops::JointRefusal) -> JointRefusal {
     match r {
         ops::JointRefusal::NoDirection => JointRefusal::NoDirection,
         ops::JointRefusal::NotUnit => JointRefusal::NotUnit,
@@ -56,7 +56,7 @@ fn joint(r: ops::JointRefusal) -> JointRefusal {
     }
 }
 
-fn rule(r: ops::RuleRefusal) -> RuleRefusal {
+fn rule_refusal(r: ops::RuleRefusal) -> RuleRefusal {
     match r {
         ops::RuleRefusal::Thickness => RuleRefusal::Thickness,
         ops::RuleRefusal::KFactor => RuleRefusal::KFactor,
