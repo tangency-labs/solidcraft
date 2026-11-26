@@ -975,8 +975,11 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_app_choose"), crate::ui_kit::Button::Small).clicked() && !busy {
             app.pick_program(|app, path| app.slicer_menu.picked = path);
         }
-        ui.add(egui::Label::new(form.program.as_str()).truncate());
     });
+    // The path on a line of its own: the row beside the button is too narrow for it.
+    if !form.program.is_empty() {
+        crate::ui_kit::text(ui, &form.program, crate::ui_kit::Text::MonoNote("send_app_program"));
+    }
     crate::ui_kit::text_row(ui, solidcraft_ui_text::tr("ui.send_app_name"), &mut form.name, "");
     crate::ui_kit::sized_row(ui, solidcraft_ui_text::tr("ui.send_app_args"), 64.0, |ui| {
         ui.add(egui::TextEdit::multiline(&mut form.args).desired_rows(3).desired_width(f32::INFINITY));

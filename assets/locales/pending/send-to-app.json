@@ -29,7 +29,7 @@
   "de": {
     "ui.send_app_label": "App",
     "ui.send_app_none": "Noch keine App hinzugefügt. Wähle App hinzufügen…, um ein Programm auszuwählen.",
-    "ui.send_app_add": "App hinzufügen…",
+    "ui.send_app_add": "Neue App…",
     "ui.send_app_remove": "Entfernen",
     "ui.send_app_remove_tip": "{app} aus dieser Liste nehmen. Das Programm selbst bleibt unberührt.",
     "ui.send_app_missing": "Nicht gefunden oder nicht startbar: {program}",
