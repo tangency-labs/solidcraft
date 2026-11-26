@@ -620,9 +620,21 @@ fn sub_topology(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
         k.check_cancelled(OP)?;
         rtn &= loops::loop_(k, b, cx, l)?;
     }
-    for e in edges {
+    let mut prechecked_edges =
+        edge::precheck_edges(k, b, &edges, cx.rep.level, cx.rep.array.is_some())?;
+    for (idx, e) in edges.into_iter().enumerate() {
         k.check_cancelled(OP)?;
-        rtn &= edge::edge(k, b, cx, e)?;
+        let precheck = match prechecked_edges.as_mut().and_then(|v| v.get_mut(idx)) {
+            Some(slot) => Some(std::mem::replace(
+                slot,
+                Err(crate::SolidError::invalid_input(
+                    OP,
+                    "edge precheck already consumed",
+                )),
+            )?),
+            None => None,
+        };
+        rtn &= edge::edge_with_precheck(k, b, cx, e, precheck)?;
     }
     for v in vertices {
         k.check_cancelled(OP)?;

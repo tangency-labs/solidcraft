@@ -16,7 +16,8 @@
 //!
 //! Deviations: not upstream. No recursion.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use crate::geom::solution_array::SolutionEnd;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
@@ -31,6 +32,9 @@ const MEMO_MAX_POINTS: usize = 4096;
 /// solutions' start ends.
 pub(crate) type AnalysisResult = (bool, Vec<SolutionEnd>);
 
+/// Shared read-only map snapshot for parallel validation workers.
+pub(crate) type AnalysisSnapshot = Arc<HashMap<Arc<[u64]>, Arc<AnalysisResult>>>;
+
 /// The results of `AssertValid`'s global property analyses, by the exact content of
 /// what they depend on ([`analysis_key`]): an unchanged curve checked again gets the
 /// result it got before. The key is the content bit for bit, never an address, so a
@@ -38,18 +42,46 @@ pub(crate) type AnalysisResult = (bool, Vec<SolutionEnd>);
 /// results are kept, the oldest dropped first.
 #[derive(Debug, Default)]
 pub struct AnalysisMemo {
-    results: BTreeMap<Vec<u64>, AnalysisResult>,
-    order: VecDeque<Vec<u64>>,
+    results: HashMap<Arc<[u64]>, Arc<AnalysisResult>>,
+    order: VecDeque<Arc<[u64]>>,
+    /// Optional read-only parent snapshot shared across scoped worker threads during
+    /// parallel B-rep validation so workers hit already-cached curves without locking.
+    parent: Option<AnalysisSnapshot>,
 }
 
 impl AnalysisMemo {
+    /// Whether this memo holds no local entries.
+    #[must_use]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.results.is_empty()
+    }
+
+    /// Cheap ref-counted snapshot of local entries for read-only worker lookup.
+    #[must_use]
+    pub(crate) fn snapshot(&self) -> AnalysisSnapshot {
+        Arc::new(self.results.clone())
+    }
+
+    /// Attaches a read-only parent snapshot (used by scoped parallel workers).
+    pub(crate) fn set_parent(&mut self, parent: Option<AnalysisSnapshot>) {
+        self.parent = parent;
+    }
+
     /// The result kept for `key`.
-    pub(crate) fn get(&self, key: &[u64]) -> Option<AnalysisResult> {
-        self.results.get(key).cloned()
+    pub(crate) fn get(&self, key: &[u64]) -> Option<Arc<AnalysisResult>> {
+        self.results
+            .get(key)
+            .or_else(|| self.parent.as_ref().and_then(|p| p.get(key)))
+            .cloned()
     }
 
     /// Keeps `result` for `key`, dropping the oldest result past [`MEMO_CAPACITY`].
     pub(crate) fn insert(&mut self, key: Vec<u64>, result: AnalysisResult) {
+        let key: Arc<[u64]> = Arc::from(key);
+        self.insert_arc(key, Arc::new(result));
+    }
+
+    fn insert_arc(&mut self, key: Arc<[u64]>, result: Arc<AnalysisResult>) {
         if self.results.contains_key(&key) {
             return;
         }
@@ -61,8 +93,17 @@ impl AnalysisMemo {
                 None => break,
             }
         }
-        self.order.push_back(key.clone());
+        self.order.push_back(Arc::clone(&key));
         self.results.insert(key, result);
+    }
+
+    /// Merges entries recorded by a worker memo into `self` in deterministic FIFO order.
+    pub(crate) fn merge_from(&mut self, other: &Self) {
+        for key in &other.order {
+            if let Some(result) = other.results.get(key) {
+                self.insert_arc(Arc::clone(key), Arc::clone(result));
+            }
+        }
     }
 }
 
@@ -79,28 +120,31 @@ pub(crate) fn analysis_key(
     settings: &[u64],
 ) -> Option<Vec<u64>> {
     let cur = curve.nurb.as_ref()?;
-    if cur.cpts().len() > MEMO_MAX_POINTS {
+    let cpts = cur.cpts();
+    if cpts.len() > MEMO_MAX_POINTS {
         return None;
     }
-    let mut key = vec![
+    let knots = cur.knots();
+    let degree = u64::try_from(cur.degree()).ok()?;
+    let n_cpts = u64::try_from(cpts.len()).ok()?;
+    let n_knots = u64::try_from(knots.len()).ok()?;
+    let mut key = Vec::with_capacity(10 + cpts.len() * 4 + knots.len() + settings.len());
+    key.extend_from_slice(&[
         property,
         lo.to_bits(),
         hi.to_bits(),
         min_sep.to_bits(),
         curve.dim,
         u64::from(curve.out_of_bounds_enabled),
-        u64::try_from(cur.degree()).ok()?,
-        u64::try_from(cur.cpts().len()).ok()?,
-        u64::try_from(cur.knots().len()).ok()?,
-    ];
-    for c in cur.cpts() {
-        key.extend([c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()]);
+        degree,
+        n_cpts,
+        n_knots,
+        ((curve.form as u64) << 8) | (curve.knot_type as u64),
+    ]);
+    for c in cpts {
+        key.extend_from_slice(&[c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()]);
     }
-    key.extend(cur.knots().iter().map(|v| v.to_bits()));
-    // (form and knot type by their debug names, as bytes)
-    for b in format!("{:?}/{:?}", curve.form, curve.knot_type).bytes() {
-        key.push(u64::from(b));
-    }
+    key.extend(knots.iter().map(|v| v.to_bits()));
     key.extend_from_slice(settings);
     Some(key)
 }
@@ -118,5 +162,22 @@ mod tests {
         assert!(memo.get(&[0]).is_none() && memo.get(&[1]).is_none());
         assert!(memo.get(&[2]).is_some());
         assert_eq!(memo.results.len(), MEMO_CAPACITY);
+    }
+
+    #[test]
+    fn parent_snapshot_and_merge_from_preserve_cached_entries() {
+        let mut parent = AnalysisMemo::default();
+        parent.insert(vec![10, 20], (true, Vec::new()));
+        let snap = parent.snapshot();
+
+        let mut worker = AnalysisMemo::default();
+        worker.set_parent(Some(snap));
+        assert!(worker.get(&[10, 20]).is_some());
+        assert!(worker.get(&[30, 40]).is_none());
+        worker.insert(vec![30, 40], (false, Vec::new()));
+
+        parent.merge_from(&worker);
+        assert!(parent.get(&[10, 20]).is_some());
+        assert_eq!(parent.get(&[30, 40]).map(|r| r.0), Some(false));
     }
 }
