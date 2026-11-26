@@ -1337,7 +1337,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
-- `timeline_2d` (default false: the History at the bottom is the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false keeps the 1D timeline)
+- `timeline_2d` (default false: the History at the bottom is raised to the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false lowers it to the 1D strip. It follows the row's height, so dragging the row or the header chevron changes it too)
 - `timeline_2d_cell_dots` (default true: empty cells in the 2D Timeline show a small alignment dot)
 - `timeline_2d_component_activation` (default true: a click on a component's row label or radio dot in the 2D Timeline makes that component active)
 - `timeline_2d_unsuppress_mode` (`restore_state` (default), `unsuppress_all`: unsuppressing a feature in the 2D Timeline keeps the dependents suppressed separately there in this session suppressed, or unsuppresses all dependents)

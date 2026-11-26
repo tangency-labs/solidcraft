@@ -18,6 +18,7 @@ pub(crate) use production::PanelVisibilitySnapshot;
 pub(crate) use production::apply_placement_command;
 pub(crate) use production::place_assistant;
 pub(crate) use production::refresh_production;
+pub(crate) use production::timeline_tall;
 pub(crate) use production::register_content_focus;
 pub(crate) use production::report_content_composer_height;
 pub(crate) use production::report_content_extent;

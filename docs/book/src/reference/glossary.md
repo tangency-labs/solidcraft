@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
