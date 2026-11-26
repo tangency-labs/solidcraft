@@ -8155,6 +8155,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     && let Some(height) = d.extra.get("coil_height").and_then(Value::as_str)
                 {
                     p.insert("height".into(), json!(height));
+                    // The height end to end (#20736); a sketch's section has only its centre line.
+                    if d.extra.get("height_measure").and_then(Value::as_str) == Some("overall") && !p.contains_key("sketch") {
+                        p.insert("height_measure".into(), json!("overall"));
+                    }
                 }
             }
             if let Some((point, normal)) = *at {
@@ -8314,7 +8318,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // The coil's size choice and height are put in the parameters by the command's own rows.
-            if k == "size_by" || k == "coil_height" {
+            if k == "size_by" || k == "coil_height" || k == "height_measure" {
                 continue;
             }
             // Saved selection mode is editor state, not a command parameter.

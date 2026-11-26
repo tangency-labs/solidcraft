@@ -1105,12 +1105,28 @@ fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, 
     false
 }
 
-/// The coil's Height row, its text kept with the dialog's other options.
-fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+/// The coil's Height row, its text kept with the dialog's other options, and with a section of
+/// its own, what it measures: the helix's centre line (the default, kept out of the parameters)
+/// or the coil end to end (#20736).
+fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from_sketch: bool) -> bool {
+    let overall = !from_sketch && extra.get("height_measure").and_then(Value::as_str) == Some("overall");
+    if !from_sketch {
+        let mut selected = usize::from(overall);
+        choice_row(ui, "ui.coil_height_measure", "coil_height_measure", &mut selected, &["ui.coil_center_line", "ui.coil_overall"]);
+        if selected != usize::from(overall) {
+            if selected == 1 {
+                extra.insert("height_measure".into(), json!("overall"));
+            } else {
+                extra.remove("height_measure");
+            }
+        }
+    }
     let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = height.clone();
-    // The helix's own height, centre line to centre line; the coil's section reaches past it.
-    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
+    // The helix's own height, centre line to centre line, which the coil's section reaches past;
+    // or the coil's, end to end.
+    let label = if overall { "ui.coil_overall_height" } else { "ui.coil_path_height" };
+    let enter = expr_row(ui, label, &mut height);
     if height != before {
         extra.insert("coil_height".into(), json!(height));
     }
@@ -1558,7 +1574,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
                 // Sized by height: the Height row takes the slot of the field it replaces.
                 if (coil_by == 1 && *k == "revolutions") || (coil_by == 2 && *k == "pitch") {
-                    enter |= coil_height_row(ui, &mut d.extra);
+                    enter |= coil_height_row(ui, &mut d.extra, from_sketch);
                     continue;
                 }
                 // Revolutions steps by whole turns like the other counts (#7481).
