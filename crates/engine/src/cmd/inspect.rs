@@ -259,7 +259,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
@@ -345,9 +345,17 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "unknown body name"));
     }
     if let Some((region, inside)) = region {
+        let bounds_list: Vec<solidcraft_kernel::Result<solidcraft_geom::Aabb3>> = if selected.len() > 1 {
+            solidcraft_kernel::map_on_threads(&selected, 16, |b| b.body.exact_bounds())
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(solidcraft_kernel::KernelError::Internal("bounding this body failed".into()))))
+                .collect()
+        } else {
+            selected.iter().map(|b| b.body.exact_bounds()).collect()
+        };
         let mut matches = Vec::new();
-        for body in selected {
-            let bounds = body.body.exact_bounds().map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+        for (body, bounds) in selected.into_iter().zip(bounds_list) {
+            let bounds = bounds.map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
             let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
             if !bounds.is_empty() && matches_region {
                 matches.push(body);
@@ -763,32 +771,39 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     });
-    let definitions = s.model.state();
-    // Only bodies given in full are measured.
-    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
     let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
-    // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
-    let mut measured =
-        if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
-            .into_iter();
-    let bodies: Vec<DocumentBody> = st
-        .bodies
-        .iter()
-        .map(|b| {
-            let detail = match measured.next() {
-                Some(m) => {
-                    DocumentBodyDetail::Measured(Box::new(m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into()))))
-                }
-                None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
-            };
-            // Editing a sketch rolls the timeline back; a body deleted further on is `removed_later`.
-            DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
-        })
-        .collect();
-    let bodies = match bodies_detail {
-        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
-        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
-        BodiesDetail::Left => None,
+    let bodies = if bodies_detail == BodiesDetail::Left {
+        None
+    } else {
+        // Body names and measurements describe every placement in the world, as inspect.measure
+        // does. Sketches and timeline entries below still describe their definitions once.
+        let world = s.world_state()?;
+        // Sheet perforations belong to the definition and are placed by measure_sheet.
+        let definitions = s.model.state();
+        // Only bodies given in full are measured; names alone never need their geometry measured.
+        let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
+        let mut measured =
+            if with_measure { solidcraft_kernel::map_on_threads(&world.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
+                .into_iter();
+        let bodies: Vec<DocumentBody> = world
+            .bodies
+            .iter()
+            .map(|b| {
+                let detail = match measured.next() {
+                    Some(m) => DocumentBodyDetail::Measured(Box::new(
+                        m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into())),
+                    )),
+                    None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
+                };
+                // A rolled-back removal and visibility both use the placed body's world name.
+                DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
+            })
+            .collect();
+        match bodies_detail {
+            BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+            BodiesDetail::Names => Some(DocumentBodies::Names(world.bodies.iter().map(|b| b.name.clone()).collect())),
+            BodiesDetail::Left => None,
+        }
     };
     let sketches: Vec<DocumentSketch> = st
         .sketches

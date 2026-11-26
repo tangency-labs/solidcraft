@@ -189,6 +189,9 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// SMLib mass properties `(volume, area, centroid)` measured on first use and shared by clones
+    /// because they share the record; reset on rigid moves because the centroid moves.
+    pub(crate) mass: std::sync::Arc<std::sync::Mutex<Option<(f64, f64, Vec3)>>>,
     /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
     /// because they share the record.
     pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
@@ -652,6 +655,15 @@ fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
     }
 }
 
+/// Whether a face lies in a plane, for a sketch on it ([`Body::sketch_plane_of_face`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SketchPlane {
+    Flat(solidcore_record::Plane),
+    NotFlat,
+    /// The kernel was stopped or re-entered before it decided: not an answer to keep.
+    Undecided,
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -750,6 +762,7 @@ impl Body {
             outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            mass: std::sync::Arc::new(std::sync::Mutex::new(None)),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
@@ -833,6 +846,22 @@ impl Body {
                     .refuse(why.clone())
                     .map_or_else(|| KernelError::Internal(format!("SMLib: {} (the body's form was made before)", why.why)), refused))
             }
+        }
+    }
+
+    /// [`Body::smlib`] for an operation that consumes the form: the form the body keeps, when it
+    /// keeps one, else one made from the record now and not kept, so that the operation may take
+    /// it over rather than copy it. Made as [`Body::smlib`] makes it, so it is the same form; a
+    /// record SMLib refuses is refused, and kept refused, as there.
+    pub(crate) fn smlib_to_consume(&self) -> Result<std::sync::Arc<solidcraft_smlib::Brep>> {
+        self.require_brep("an SMLib operation")?;
+        if self.smlib.refusal().is_some() || self.smlib.get().is_some() {
+            return self.smlib();
+        }
+        match solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true)) {
+            Ok(b) => Ok(std::sync::Arc::new(b)),
+            // the refusal as [`Body::smlib`] gives it, and keeps it
+            Err(_) => self.smlib(),
         }
     }
 
@@ -1076,6 +1105,37 @@ impl Body {
         solidcore_record::Plane::from_normal(point, v3(normal.value))
     }
 
+    /// The plane a sketch on face `index` lies in, for New Sketch's picker. A blend or a
+    /// revolution is flat when the kernel finds it so, which [`Body::planar_face`] does not ask,
+    /// so the other callers keep their answers. The other kinds answer as [`Body::planar_face`].
+    pub fn sketch_plane_of_face(&self, index: usize) -> SketchPlane {
+        let Some(face) = self.record.faces.get(index) else { return SketchPlane::NotFlat };
+        if !matches!(face.surface, Surface::Blend { .. } | Surface::PlacedRevolution { .. }) {
+            return self.planar_face(index).map_or(SketchPlane::NotFlat, SketchPlane::Flat);
+        }
+        let Some(form) = self.ops_body() else {
+            // A refusal of the moment says nothing about the face, so the caller must not keep it.
+            return if self.is_mesh() || self.ops.refusal().is_some() { SketchPlane::NotFlat } else { SketchPlane::Undecided };
+        };
+        let (body, order) = &*form;
+        let normal = match body.face_plane_normal(order, index) {
+            Ok(Some(normal)) => normal,
+            Ok(None) => return SketchPlane::NotFlat,
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. }) => {
+                return SketchPlane::Undecided;
+            }
+            Err(_) => return SketchPlane::NotFlat,
+        };
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        });
+        let Some(point) = vertex.and_then(|v| self.record.vertices.get(v as usize)).map(|v| v3(v.point)) else {
+            return SketchPlane::NotFlat;
+        };
+        solidcore_record::Plane::from_normal(point, v3(normal.value)).map_or(SketchPlane::NotFlat, SketchPlane::Flat)
+    }
+
     /// The record as solidcore-ops' body and the order of its entities, made on first use and
     /// kept for every later face ([`Body::release_kernel_form`] lets it go, and the next use
     /// makes it again). A refusal of the record is kept too, as `smlib`'s is: the same
@@ -1103,6 +1163,26 @@ impl Body {
             }
             Ok(made) => Some(self.ops.keep(made, releases)),
         }
+    }
+
+    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
+    pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
+        let hit = ops.face_hit_by_ray(order, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]).ok()??;
+        Some((hit.distance, hit.face))
+    }
+
+    /// Whether `p` lies inside or on the boundary of `self` (for a B-rep body).
+    pub fn contains(&self, p: Vec3) -> bool {
+        let Some(form) = self.ops_body() else {
+            return false;
+        };
+        let (ops, _) = &*form;
+        let Ok(mut res) = ops.classify_points(&[[p.x, p.y, p.z]]) else {
+            return false;
+        };
+        matches!(res.pop().and_then(std::result::Result::ok), Some(solidcore_ops::PointClass::Inside | solidcore_ops::PointClass::OnBoundary))
     }
 
     /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
@@ -1498,9 +1578,10 @@ impl Body {
             smlib: std::sync::Arc::default(),
             ops: std::sync::Arc::default(),
             outline: std::sync::Arc::default(),
-            // A rigid motion keeps the size and the volume.
+            // A rigid motion keeps the size and the volume; the centroid and exact bounds move.
             size: self.size,
             volume: self.volume.clone(),
+            mass: std::sync::Arc::new(std::sync::Mutex::new(None)),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh: None,
             color: self.color,
@@ -1615,6 +1696,11 @@ impl Body {
             }
         }
         record_outline(&self.record)
+    }
+
+    /// Whether [`Body::exact_bounds`] is already cached for this body.
+    pub(crate) fn has_cached_bounds(&self) -> bool {
+        self.is_mesh() || self.bounds.lock().ok().is_some_and(|g| g.is_some())
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
@@ -2221,6 +2307,31 @@ impl Body {
         }
     }
 
+    /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
+    /// modelling tolerance): exact, from the face's own surface and trim
+    /// ([`solidcore_ops::Body::face_normal_at_point`]), no mesh. It points out of the material,
+    /// or for a face of a surface body to the side its surface faces. `None` for a point off
+    /// the face, a mesh body, an index out of range or a point that is not finite.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Invalid`] where the face has no normal (a pole, an apex) or no side that
+    /// faces out (material on both sides); [`KernelError::Failed`] for the kernel's failure.
+    pub fn face_normal_at(&self, face_index: usize, point: Vec3) -> Result<Option<Vec3>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_normal_at_point(order, face_index, [point.x, point.y, point.z]) {
+            Ok(found) => Ok(found.map(|n| Vec3::from(n.value))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(solidcore_ops::Error::Degenerate) => Err(KernelError::Invalid("the face has no normal at that point".into())),
+            Err(solidcore_ops::Error::Unsupported(why)) => Err(KernelError::Invalid(format!("the face has no side that faces out: {why}"))),
+            Err(e) => Err(KernelError::Failed(format!("face normal: {e}"))),
+        }
+    }
+
     /// Exact material classes, boundary face indices and outward normals for all points.
     /// The entire request, including optional face selection, uses one ops rollback scope
     /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
@@ -2290,14 +2401,14 @@ impl Body {
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
     /// direction or origin that is not usable; `Err` for the kernel's failure.
-    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
+    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcraft_kernel_api::SquareFaceLevel>> {
         let Some(form) = self.ops_body() else { return Ok(None) };
         let (body, order) = &*form;
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
         match body.face_square_level(order, face_index, [direction.x, direction.y, direction.z], [origin.x, origin.y, origin.z]) {
-            Ok(found) => Ok(found),
+            Ok(found) => Ok(found.map(|f| solidcraft_kernel_api::SquareFaceLevel { level: f.level, tolerance: f.tolerance })),
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("face square level: {e}"))),
         }

@@ -3,6 +3,7 @@
 
 use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
+use std::borrow::Cow;
 
 pub use solidcore::topology::brep::SolidTest;
 
@@ -26,6 +27,8 @@ pub enum Error {
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
+    /// A mesh reconstruction refused this input or could not certify the fitted solid.
+    Mesh(Cow<'static, str>),
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
     /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
@@ -91,6 +94,10 @@ pub enum Error {
         /// The vertex's point.
         at: Option<[f64; 3]>,
     },
+    /// A dome the kernel refuses, and why (a non-planar face, holes, a non-star outline, a
+    /// height not positive and finite, a spherical dome on a face that is not a circle, a
+    /// reversed dome not supported yet).
+    Dome(solidcore::topology::brep::dome::DomeRefusal),
     /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
@@ -532,6 +539,7 @@ impl Error {
             Error::Status(..) => "Status",
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
+            Error::Mesh(..) => "Mesh",
             Error::Empty => "Empty",
             Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
@@ -590,6 +598,7 @@ impl Error {
             Error::ChamferAngleTooLarge { .. } => "ChamferAngleTooLarge",
             Error::OffsetRefused { .. } => "OffsetRefused",
             Error::BlendFailed { .. } => "BlendFailed",
+            Error::Dome(..) => "Dome",
         }
     }
 }
@@ -1010,6 +1019,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Dome(refusal) => write!(f, "{refusal}"),
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
@@ -1177,6 +1187,7 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::Mesh(why) => write!(f, "mesh conversion: {why}"),
             Error::NotOneFoot { found } => write!(
                 f,
                 "a classification found {found} nearest points on the face's surface, where one is needed"

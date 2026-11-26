@@ -174,6 +174,363 @@ fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
     assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
 }
 
+/// A plate 42 x 42 x 5 at `x0` along x with a pocket 2 deep cut into its top: a 41 x 41 square
+/// with corners rounded to 4, 0.5 in from each side (tangency-labs/solidcraft#22034). Its
+/// volume is 42² · 5 − 2 (41² − (4 − π) 4²) = 5586 − 32π.
+fn pocketed_plate(x0: f64) -> Body {
+    let v = |x: f64, y: f64| Vec2::new(x0 + x, y);
+    let (r, a, b) = (4.0, 0.5, 41.5);
+    let arc = |c: Vec2, start: f64| Seg2::Arc {
+        center: c,
+        radius: r,
+        start,
+        sweep: PI / 2.0,
+    };
+    let line = |p: Vec2, q: Vec2| Seg2::Line { a: p, b: q };
+    let pocket = Loop2 {
+        segs: vec![
+            line(v(a + r, a), v(b - r, a)),
+            arc(v(b - r, a + r), -PI / 2.0),
+            line(v(b, a + r), v(b, b - r)),
+            arc(v(b - r, b - r), 0.0),
+            line(v(b - r, b), v(a + r, b)),
+            arc(v(a + r, b - r), PI / 2.0),
+            line(v(a, b - r), v(a, a + r)),
+            arc(v(a + r, a + r), PI),
+        ],
+    };
+    let region = Region2 {
+        outer: pocket,
+        holes: vec![],
+    };
+    let tool = extrude_planar_regions(&Plane::XY, &[region], 3.0, 5.0).unwrap();
+    let plate = make_box([x0, 0.0, 0.0], [42.0, 42.0, 5.0]).unwrap();
+    boolean(plate, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// tangency-labs/solidcraft#22034: a join of copies of a pocketed plate side by side. Each union
+/// carries the trims of the faces it copies from the other operand, and proves each carried
+/// trim within its edge's tolerance at equal parameters first (`copy_uv_trim_curves_of_other_face`).
+/// Every such trim is an exact copy with its edge's own structure: an arc of the pocket's
+/// floor (a trim on a plane with the arc's knots and weights), an arc of a rounded corner along
+/// its cylinder's first or last row, a line of a corner along its first or last column. So
+/// each is proved from its control points at once, and none is bisected
+/// (`same_parameter_bisections`): bisected, each was cut down to pieces whose bound came just
+/// under its tolerance, and a join of 16 copies gated 768 such trims. The join is the four
+/// plates' volumes, `4 (5586 − 32π)`, as one solid.
+///
+/// Its counts. One plate is a box less a pocket open at the top. The box has its 6 faces, 12
+/// edges and 8 vertices, its top face holding the pocket's opening as an inner loop. The
+/// pocket adds 9 faces (its floor, 4 straight walls, 4 quarter-cylinder corners, none closed
+/// round so none with a seam), 24 edges (8 round its opening, 8 round its floor, 8 vertical
+/// where a wall meets a corner) and 16 vertices (8 at the opening, 8 at the floor): 15 faces,
+/// 36 edges, 24 vertices (`V − E + F − (L − F) = 24 − 36 + 15 − 1 = 2`). Side by side, each pair
+/// of neighbours touches over a whole 42 x 5 face: both go, and the boolean merges faces
+/// on one surface across an edge both sides of which it keeps, so each plane of the row's
+/// outside (top, bottom, front, back) is one face, each of its edges along the row one
+/// edge and the vertices where the plates met are gone (as the issue's 16 plates give
+/// `6 + 16 · 9 = 150` faces). The row is one box of 6 faces, 12 edges and 8 vertices, its top
+/// holding the 4 openings, with 4 pockets: `6 + 4 · 9 = 42` faces, `12 + 4 · 24 = 108` edges,
+/// `8 + 4 · 16 = 72` vertices (`72 − 108 + 42 − 4 = 2`).
+///
+/// Its trims against their surfaces. Every trim the join holds (each face's trim of an edge,
+/// where the unions carried or made one) is within its edge's tolerance of the edge curve at
+/// equal parameters: `sup |C(t) − S(W(t))| <= tol` over the edge's interval, by the proved
+/// bound that gates a carried trim (`trim_same_parameter_gap_bound_within`), here on the join
+/// itself. A UV line on a plane under a line edge has no exact data for that bound (a UV
+/// line's rounding moves its parameters); there `C(t) − S(W(t))` is affine in `t`, so its
+/// length is largest at an end of the interval, and the gap is the larger end gap plus each
+/// line's evaluation slack (`line_evaluation_slack`).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's check of its trims, not ops computing geometry
+fn a_join_of_pocketed_plates_proves_its_carried_trims_without_bisecting_them() {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::query::curve_surface_gap::{
+        line_evaluation_slack, trim_same_parameter_gap_bound_within,
+    };
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::edgeuse;
+    use solidcore::Point2;
+
+    all_fixes();
+    let plates: Vec<Body> = (0..4)
+        .map(|i| pocketed_plate(42.0 * f64::from(i)))
+        .collect();
+    let one = 5586.0 - 32.0 * PI;
+    assert!(near(volume(&plates[0]), one), "{}", volume(&plates[0]));
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held: Vec<_> = plates
+        .iter()
+        .map(|p| {
+            let record = p.to_record().unwrap().0;
+            solidcore_convert::brep::to_kernel(&mut k, &record, true)
+                .unwrap()
+                .0
+        })
+        .collect();
+    k.work_counters.reset();
+    // (the union of each pair of neighbours, then of the two pairs, as `union_all` pairs them)
+    while held.len() > 1 {
+        let mut next = Vec::new();
+        let mut it = held.into_iter();
+        while let (Some(a), Some(b)) = (it.next(), it.next()) {
+            next.push(solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap());
+        }
+        held = next;
+    }
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    // the join's counts, as derived above
+    let joined = &held[0];
+    assert_eq!(
+        [
+            joined.face_list().len(),
+            joined.edge_list().len(),
+            joined.vertex_list().len()
+        ],
+        [42, 108, 72]
+    );
+    // every trim of the join within its edge's tolerance of the edge curve at equal parameters
+    // (each trim once: an edge use without its own reads its mate's)
+    let mut held_by = Vec::new();
+    let mut ends_only = 0;
+    for &e in joined.edge_list() {
+        let rec = joined.edge(e).unwrap();
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let curve = rec.curve.as_ref().unwrap();
+        for &eu in &rec.edgeuses {
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(joined, eu).unwrap() else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            held_by.push(holder);
+            let f = edgeuse::p1::face(joined, holder).unwrap().unwrap();
+            let surface = joined.face(f).unwrap().surface.as_ref().unwrap();
+            let gap = trim_same_parameter_gap_bound_within(
+                &k,
+                surface,
+                curve,
+                trim,
+                range,
+                1e-3 * tol,
+                [tol, tol],
+                None,
+            )
+            .unwrap();
+            // A UV line on a plane, under a line edge: the bound has no exact data for a UV
+            // line at equal parameters (its rounding moves its parameters). The plane is
+            // affine in (u, v) and both lines are affine in t, so C(t) − S(W(t)) is affine in
+            // t and its length is largest at an end of the interval: the gap is the larger
+            // end gap, plus each line's evaluation slack.
+            let gap = if let Some(g) = gap {
+                g
+            } else {
+                assert!(
+                    matches!(surface.kind(), SurfaceKind::Plane(_)),
+                    "edge {e:?}: an unbounded trim off a plane"
+                );
+                let (CurveKind::Line(c), CurveKind::Line(w)) = (curve.kind(), trim.kind()) else {
+                    panic!("edge {e:?}: an unbounded trim that is not a line under a line");
+                };
+                ends_only += 1;
+                let end_gap = |t: f64| {
+                    let uv = trim.evaluate_point(&k, t).unwrap();
+                    let on = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                    (curve.evaluate_point(&k, t).unwrap() - on).length()
+                };
+                end_gap(range[0]).max(end_gap(range[1]))
+                    + line_evaluation_slack(c, false).unwrap()
+                    + line_evaluation_slack(w, true).unwrap()
+            };
+            assert!(
+                gap <= tol,
+                "edge {e:?}: a trim {gap} from its curve at tolerance {tol}"
+            );
+        }
+    }
+    // (the join holds a trim where an operation made or carried one; the others are built
+    // when read)
+    assert!(
+        ends_only < held_by.len(),
+        "{} trims, {ends_only} lines bounded by their ends",
+        held_by.len()
+    );
+
+    let u = union_all(plates).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [42, 108, 72]);
+    assert!(near(volume(&u), 4.0 * one), "{}", volume(&u));
+}
+
+/// tangency-labs/solidcraft#22273: a slat, a box 9 x 200 x 3 joined with a cylinder of radius 2
+/// and length 200 lying along the middle of its top face, its axis in that face, as the issue's
+/// `slat.json` makes it (the cylinder an extruded circle whose seam is 0.6131 rad round from
+/// `-x`, above the top). The union carries the cylinder's trims of its end circles, which it
+/// split where they cross the top: on the cylinder's side each piece's trim runs along a piece
+/// of its net's end row, with the piece's structure, not the whole row's. Each is now proved
+/// from the control points of the row's restriction to the piece at once; before, each of the
+/// four was bisected down to just under its tolerance, and the four took about 80% of the join
+/// (`same_parameter_bisections`).
+///
+/// Its counts and volume. The cylinder's lower half lies inside the box (`|x| <= 2 < 4.5`,
+/// `1 <= z <= 3`), so the union is the box and the upper half cylinder:
+/// `V = 9 · 200 · 3 + π 2² · 200 / 2 = 5400 + 400π`. The cylinder's seam line (at 0.6131 rad
+/// from `-x`, `z = 3 + 2 sin 0.6131 > 3`) is on the upper half, and the boolean keeps it as an
+/// edge, so the half cylinder is two faces either side of it. Faces: the box's bottom and two
+/// long sides, its top in two strips either side of the cylinder, its two ends each one face
+/// with the half disc of the cylinder's cap on it (one plane), and the two faces of the half
+/// cylinder: 9. Vertices: the box's 8 corners, the 4 where the cylinder meets the top at its
+/// ends and the seam's 2 ends: 14. Edges: the box's 4 bottom and 4 vertical edges, its 2 long
+/// top edges, 4 short top edges (from a corner to the cylinder at each end), the 2 lines where
+/// the cylinder meets the top, the 2 half circles each in 2 arcs either side of the seam, and
+/// the seam: 21 (`14 − 21 + 9 = 2`).
+///
+/// The four split arcs' trims. After the join, each of the four arcs (in the end planes
+/// `y = ±100`, from where the circle meets the top, `z = 3`, to the seam's end above it) has
+/// a trim on the cylinder's side, and each is asked the gate's question again on its own
+/// (`trim_same_parameter_gap_bound_within` over the edge's interval, at the edge's tolerance,
+/// the floor a thousandth of it): each is proved within the tolerance with no bisection, so
+/// the union's zero bisections are not those trims going ungated.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's check of its trims, not ops computing geometry
+fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_without_bisecting() {
+    use solidcore::query::curve_surface_gap::trim_same_parameter_gap_bound_within;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::edgeuse;
+
+    all_fixes();
+    let slat = || make_box([-4.5, -100.0, 0.0], [9.0, 200.0, 3.0]).unwrap();
+    let knuckle = || {
+        let circle = [Curve::Arc {
+            center: [0.0, -100.0, 3.0],
+            axis: [0.0, 1.0, 0.0],
+            reference: [-1.0, 0.0, 0.0],
+            radius: 2.0,
+            start: 0.6131,
+            end: 0.6131 + TAU,
+        }];
+        extrude(
+            &circle,
+            [0.0, 1.0, 0.0],
+            200.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held = |b: Body| {
+        let record = b.to_record().unwrap().0;
+        solidcore_convert::brep::to_kernel(&mut k, &record, true)
+            .unwrap()
+            .0
+    };
+    let (a, b) = (held(slat()), held(knuckle()));
+    k.work_counters.reset();
+    let joined = solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    // (the four split arcs' trims on the cylinder's side, each bounded on its own)
+    let (mut arcs, mut held_by) = (0, Vec::new());
+    for &e in joined.edge_list() {
+        let rec = joined.edge(e).unwrap();
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let ends = range.map(|t| curve.evaluate_point(&k, t).unwrap());
+        let in_an_end_plane = ends.iter().all(|p| (p.y.abs() - 100.0).abs() <= 1e-9);
+        let (low, high) = (ends[0].z.min(ends[1].z), ends[0].z.max(ends[1].z));
+        if !(in_an_end_plane && (low - 3.0).abs() <= 1e-9 && high > 3.1) {
+            continue;
+        }
+        for &eu in &rec.edgeuses {
+            let Some(f) = edgeuse::p1::face(&joined, eu).unwrap() else {
+                continue;
+            };
+            let surface = joined.face(f).unwrap().surface.as_ref().unwrap();
+            if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                continue;
+            }
+            // (each trim once: an edge use without its own reads its mate's)
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(&joined, eu).unwrap()
+            else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            held_by.push(holder);
+            let before = k.work_counters.same_parameter_bisections();
+            let gap = trim_same_parameter_gap_bound_within(
+                &k,
+                surface,
+                curve,
+                trim,
+                range,
+                1e-3 * tol,
+                [tol, tol],
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "edge {e:?}: the split arc's trim was bisected"
+            );
+            assert!(
+                gap.is_some_and(|g| g <= tol),
+                "edge {e:?}: {gap:?} at tolerance {tol}"
+            );
+            arcs += 1;
+        }
+    }
+    assert_eq!(arcs, 4, "the split arcs' trims on the cylinder's side");
+
+    let u = boolean(slat(), knuckle(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [9, 21, 14]);
+    let want = 5400.0 + 400.0 * PI;
+    assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
+}
+
 /// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
 /// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
 /// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's
@@ -239,7 +596,8 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
                     );
                 }
             }
-            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f).unwrap()
+            let Some(bx) =
+                solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
             else {
                 continue;
             };
@@ -674,6 +1032,315 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     }
 }
 
+// ---- #15049: a cut whose profile has a cusp, swept onto a face its line sweeps onto -------
+
+/// The arc of radius `radius` about the x-parallel axis through `center`, from angle `start`
+/// to `end` measured from +y towards +z.
+fn cusp_arc_x(center: [f64; 3], radius: f64, start: f64, end: f64) -> Curve {
+    Curve::Arc {
+        center,
+        axis: [1.0, 0.0, 0.0],
+        reference: [0.0, 1.0, 0.0],
+        radius,
+        start,
+        end,
+    }
+}
+
+/// The block of #15049's shape, cut twice, and the frame of its third cut's sketch.
+///
+/// A block 30 wide along x whose section is a front quarter circle (radius 30), a long top
+/// arc (radius 86 about a centre 56 below the floor) and a small back arc (radius 18),
+/// standing on the floor z = 0. Cut 1 rounds its front to a ball. Cut 2 sweeps two curved
+/// triangles along the top arc; each has an arc of the front ball's radius running
+/// tangentially into its top line at x = 0, where the two triangles touch: a cusp. Cut 2
+/// ends at the top of the back arc in a plane face holding the two triangles, and cut 3
+/// starts there (`sketch_point` maps the sketch's (u, v) onto that plane).
+struct CuspBlock {
+    body: Body,
+    /// The sketch plane's origin, its u and v directions and its normal.
+    origin: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+    normal: [f64; 3],
+    /// The back arc's centre (y), radius and start angle: cut 3's path.
+    back: (f64, f64, f64),
+}
+
+impl CuspBlock {
+    fn sketch_point(&self, (a, b): (f64, f64)) -> [f64; 3] {
+        let (o, u, v) = (self.origin, self.u, self.v);
+        [
+            o[0] + u[0] * a + v[0] * b,
+            o[1] + u[1] * a + v[1] * b,
+            o[2] + u[2] * a + v[2] * b,
+        ]
+    }
+}
+
+const CUSP_W: f64 = 15.0;
+const CUSP_R0: f64 = 30.0;
+const CUSP_C: f64 = 56.0;
+const CUSP_R2: f64 = 18.0;
+
+#[allow(clippy::disallowed_methods)] // the test's operands, not ops computing geometry
+fn cusp_block() -> CuspBlock {
+    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
+    let (w, r0, c, r2) = (CUSP_W, CUSP_R0, CUSP_C, CUSP_R2);
+    let rb = r0 + c;
+    let q = ((rb - r2).powi(2) - c * c).sqrt();
+    let phi_t = c.atan2(-q);
+    let x = [1.0, 0.0, 0.0];
+    let profile = [
+        cusp_arc_x([-w, 0.0, 0.0], r0, 0.0, PI / 2.0),
+        cusp_arc_x([-w, 0.0, -c], rb, PI / 2.0, phi_t),
+        cusp_arc_x([-w, -q, 0.0], r2, phi_t, PI),
+        Curve::Line {
+            start: [-w, -q - r2, 0.0],
+            end: [-w, r0, 0.0],
+        },
+    ];
+    let mut body = extrude(&profile, x, 2.0 * w, 0.0, DraftCorner::Curvature, true).unwrap();
+    // cut 1: the front rounded to a ball
+    let h = r0 + 15.0;
+    let ya = |x: f64| (r0 * r0 - x * x).sqrt();
+    let tool1 = [
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: x,
+            radius: r0,
+            start: ya(w).atan2(w),
+            end: ya(w).atan2(-w),
+        },
+        Curve::Line {
+            start: [-w, ya(w), 0.0],
+            end: [-w, h, 0.0],
+        },
+        Curve::Line {
+            start: [-w, h, 0.0],
+            end: [w + 0.2, h, 0.0],
+        },
+        Curve::Line {
+            start: [w + 0.2, h, 0.0],
+            end: [w, ya(w), 0.0],
+        },
+    ];
+    let (s1, _, _) = sweep_placed(
+        &tool1,
+        &[cusp_arc_x([0.0; 3], r0, 0.0, PI / 2.0)],
+        SweepFrame::Follow,
+        true,
+    )
+    .unwrap();
+    body = boolean(body, s1, BooleanOp::Subtract).unwrap().unwrap();
+    // cut 2: two curved triangles touching at their cusps, swept along the top arc
+    let path2 = [cusp_arc_x([0.0, 0.0, -c], rb, PI / 2.0, phi_t)];
+    for s in [1.0_f64, -1.0] {
+        let za = ya(s * w);
+        let (a, b, cc) = ([s * w, 0.0, za], [0.0, 0.0, r0], [s * w, 0.0, r0]);
+        let ta = za.atan2(s * w);
+        let arc = |start: f64, end: f64| Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, -1.0, 0.0],
+            reference: x,
+            radius: r0,
+            start,
+            end,
+        };
+        let tri = if s > 0.0 {
+            [
+                arc(ta, PI / 2.0),
+                Curve::Line { start: b, end: cc },
+                Curve::Line { start: cc, end: a },
+            ]
+        } else {
+            [
+                arc(PI / 2.0, ta),
+                Curve::Line { start: a, end: cc },
+                Curve::Line { start: cc, end: b },
+            ]
+        };
+        let (s2, _, _) = sweep_placed(&tri, &path2, SweepFrame::Follow, true).unwrap();
+        body = boolean(body, s2, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    assert_eq!(body.counts().unwrap(), [9, 19, 12], "the block after cut 2");
+    // cut 3's sketch plane: cut 2's end face
+    let alpha = phi_t - PI / 2.0;
+    let v = [0.0, -alpha.sin(), alpha.cos()];
+    let u = [-1.0, 0.0, 0.0];
+    let normal = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    CuspBlock {
+        body,
+        origin: [0.0, 0.0, -c],
+        u,
+        v,
+        normal,
+        back: (-q, r2, phi_t),
+    }
+}
+
+/// Cut 3's two tools: the end face's triangles as a sketch on that face reads them back,
+/// each point moved by a few billionths of a millimetre (`noise`, seeded by `seed`) and each
+/// arc's radius taken from its start point, swept along the back arc to the floor.
+#[allow(clippy::disallowed_methods)] // the test's operands, not ops computing geometry
+fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
+    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
+    let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
+    let rnd = |j: u32| {
+        let t = (f64::from(seed) * 12.9898 + f64::from(j) * 78.233).sin() * 43758.5453;
+        (t - t.floor()) * 2.0 - 1.0
+    };
+    let pt = |j: u32, a: f64, b: f64| (a + noise * rnd(2 * j), b + noise * rnd(2 * j + 1));
+    let (side, top) = (c + (r0 * r0 - w * w).sqrt(), c + r0);
+    let p1 = pt(1, w, side);
+    let p2 = pt(2, w, top);
+    let p3 = pt(3, 0.0, c);
+    let p4 = pt(4, 0.0, top);
+    let p5 = pt(5, -w, side);
+    let p6 = pt(6, -w, top);
+    // an arc about `cen` from `a` to `b`, counter-clockwise, its radius to `a`
+    let arc = |cen: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let start = (a.1 - cen.1).atan2(a.0 - cen.0);
+        let mut sweep = (b.1 - cen.1).atan2(b.0 - cen.0) - start;
+        while sweep <= 1e-12 {
+            sweep += 2.0 * PI;
+        }
+        Curve::Arc {
+            center: block.sketch_point(cen),
+            axis: block.normal,
+            reference: block.u,
+            radius: ((a.0 - cen.0).powi(2) + (a.1 - cen.1).powi(2)).sqrt(),
+            start,
+            end: start + sweep,
+        }
+    };
+    let line = |a, b| Curve::Line {
+        start: block.sketch_point(a),
+        end: block.sketch_point(b),
+    };
+    let (yc, r2, phi_t) = block.back;
+    let path = [cusp_arc_x([0.0, yc, 0.0], r2, phi_t, PI)];
+    [
+        vec![line(p1, p2), arc(p3, p1, p4), line(p2, p4)],
+        vec![arc(p3, p4, p5), line(p4, p6), line(p5, p6)],
+    ]
+    .iter()
+    .map(|region| {
+        sweep_placed(region, &path, SweepFrame::Follow, true)
+            .unwrap()
+            .0
+    })
+    .collect()
+}
+
+/// #15049: a sweep cut whose profile has a cusp, an arc running tangentially into a line,
+/// swept round the axis of a cylinder that line sweeps onto. Within a few hundredths of a
+/// millimetre of the cusp both of the tool's edges there, and its faces swept from them,
+/// lie within the tolerance of each other and of the block, so where the rounding of the
+/// sketch's points puts a crossing there decided the topology: the coaxial surfaces crossed
+/// 3e-5 to 2.5e-4 from the cusp, and the touch of the tool's line with the block's arc
+/// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
+/// or the merge did. With each contact read as one touch at the cusp, the cut builds
+/// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
+#[test]
+#[allow(clippy::disallowed_methods)] // the oracle points' closed form, not ops computing geometry
+fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
+    all_fixes();
+    let block = cusp_block();
+    for (seed, noise) in [
+        (0, 0.0),
+        (7, 5e-10),
+        (12, 5e-10),
+        (22, 5e-10),
+        (8, 1e-9),
+        (28, 1e-9),
+        (33, 1e-9),
+    ] {
+        let tools = cusp_tools(&block, seed, noise);
+        // the tools lie inside the block, touching its back face and each other: the cut
+        // removes their volumes, no more and no less
+        let removed: f64 = tools.iter().map(volume).sum();
+        let expected = volume(&block.body) - removed;
+        // points of the tools' faces halfway along the back arc, each turned there from the
+        // sketch: the middle of each triangle's arc, which bounds the result (its side line
+        // sweeps onto the block's side, which the cut opens); and a point inside each
+        // triangle, which the cut removes
+        let (yc, _, phi_t) = block.back;
+        let beta = (PI - phi_t) / 2.0;
+        let swept = |(a, b): (f64, f64)| {
+            let p = block.sketch_point((a, b));
+            let (y, z) = (p[1] - yc, p[2]);
+            [
+                p[0],
+                yc + y * beta.cos() - z * beta.sin(),
+                y * beta.sin() + z * beta.cos(),
+            ]
+        };
+        let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
+        let top = c + r0;
+        let mid_arc = (r0 * r0 - w * w).sqrt().atan2(w) / 2.0 + PI / 4.0;
+        let on_faces: Vec<[f64; 3]> = [1.0, -1.0]
+            .iter()
+            .map(|&sgn: &f64| swept((sgn * r0 * mid_arc.cos(), c + r0 * mid_arc.sin())))
+            .collect();
+        let removed_points: Vec<[f64; 3]> = [1.0, -1.0]
+            .iter()
+            .map(|&sgn: &f64| swept((sgn * 12.0, top - 0.3)))
+            .collect();
+        for order in [[1usize, 0], [0, 1]] {
+            let mut body = block.body.copy().unwrap();
+            for k in order {
+                body = boolean(body, tools[k].copy().unwrap(), BooleanOp::Subtract)
+                    .unwrap_or_else(|e| panic!("seed {seed}, tools {order:?}: {e:?}"))
+                    .unwrap_or_else(|| panic!("seed {seed}, tools {order:?}: empty"));
+            }
+            assert_eq!(
+                body.counts().unwrap(),
+                [8, 17, 11],
+                "seed {seed}, tools {order:?}"
+            );
+            let report = body.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "seed {seed}, tools {order:?}: {}",
+                report.text
+            );
+            let (_, faces_order) = body.to_record().unwrap();
+            let faces: Vec<usize> = (0..8).collect();
+            for &at in &on_faces {
+                let closest = body
+                    .closest_to_point(&faces_order, &faces, &[], at)
+                    .unwrap()
+                    .unwrap();
+                // written to accept: a NaN distance fails
+                assert!(
+                    closest.distance <= 1e-6,
+                    "seed {seed}, tools {order:?}: {at:?} is {} off the result",
+                    closest.distance
+                );
+            }
+            for &at in &removed_points {
+                assert_eq!(
+                    body.classify_point(at).unwrap(),
+                    PointClass::Outside,
+                    "seed {seed}, tools {order:?}: {at:?} is not cut away"
+                );
+            }
+            // written to accept: a NaN volume fails
+            let v = volume(&body);
+            assert!(
+                (v - expected).abs() <= 1e-6 * expected,
+                "seed {seed}, tools {order:?}: volume {v} against {expected} ({removed} removed)"
+            );
+        }
+    }
+}
+
 #[test]
 fn an_imprint_cuts_the_faces_the_tool_crosses() {
     all_fixes();
@@ -863,46 +1530,55 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
 /// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
 /// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
-/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
-/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
-/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
-/// the kernel's call). Any further poll would be work done after the cancel.
+/// check, `whole`; a token cancelled from a quarter of them then stops the check of the same
+/// cut moved up by 1 there. It returns `Cancelled`, and the token is polled exactly once after
+/// the poll that cancelled it: by the session as the call returns, asking whether it was
+/// cancelled (`run_with`, after the kernel's call). Any further poll would be work done after
+/// the cancel. (The second check is of the moved cut, not of the same one: a check skips the
+/// geometric tests of neighbourhoods an earlier check on the kernel found clean,
+/// `solidcore::geom::check_memo`, so the same cut checked again polls far fewer times. The
+/// moved cut has no neighbourhood in common with it, so its check is as whole as the first.)
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    let corners = [
-        [19.0, 0.0, 12.0],
-        [32.0, 0.0, 12.0],
-        [32.0, 0.0, 25.0],
-        [19.0, 0.0, 25.0],
-    ];
-    let square: Vec<Curve> = (0..4)
-        .map(|i| Curve::Line {
-            start: corners[i],
-            end: corners[(i + 1) % 4],
-        })
-        .collect();
-    let coil = screw_sweep(
-        &square,
-        [0.0; 3],
-        [0.0, 0.0, 1.0],
-        15.24,
-        20.0,
-        None,
-        15.24e-4,
-    )
-    .unwrap();
-    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
-    let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
+    // (the cut, moved up by `dz`)
+    let cut_at = |dz: f64| {
+        let corners = [
+            [19.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 25.0 + dz],
+            [19.0, 0.0, 25.0 + dz],
+        ];
+        let square: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        let coil = screw_sweep(
+            &square,
+            [0.0, 0.0, dz],
+            [0.0, 0.0, 1.0],
+            15.24,
+            20.0,
+            None,
+            15.24e-4,
+        )
+        .unwrap();
+        let stock = solidcore_ops::make_cylinder([0.0, 0.0, dz], 20.0, 304.5).unwrap();
+        boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let cut = cut_at(0.0);
     let probe = CancelToken::after_polls(u64::MAX);
     within(&probe, || cut.check(CheckLevel::All)).unwrap();
     let whole = probe.polls().unwrap();
     let n = whole / 4;
     // cancelled well inside the check, not at its last poll
     assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let moved = cut_at(1.0);
     let token = CancelToken::after_polls(n);
-    let r = within(&token, || cut.check(CheckLevel::All));
+    let r = within(&token, || moved.check(CheckLevel::All));
     eprintln!(
         "the check polls {whole} times; cancelled at {n}, polled {:?}",
         token.polls()
@@ -4262,4 +4938,117 @@ fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
         cut.classify_point([-15.0, 16.0, 0.0]).unwrap(),
         PointClass::Inside
     );
+}
+
+/// #21801's insert: a prism over the quadrilateral (2.85, 7), (26.868841, 7), (9.247749, 28),
+/// (2.85, 28) in x-z from y = 2.85 to 249.15, less a loft through three sections at x = -5,
+/// 95, 195 whose quadratic runs from (y, z) = (2.85, 28) to (249.15, 7) with its middle
+/// control point at y = ym, ym - 50, ym and z = 7. The loft meets z = 7 tangentially at
+/// y = 249.15, so the insert ends in a knife along the bin's floor there.
+fn fitted_loft_insert(ym: f64) -> Body {
+    let (f, top) = (7.0, 28.0);
+    let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], 2.85, a[1]],
+                end: [b[0], 2.85, b[1]],
+            }
+        })
+        .collect();
+    let prism = extrude(
+        &section,
+        [0.0, 1.0, 0.0],
+        246.3,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let above = |x: f64, ym: f64| {
+        vec![
+            Curve::Nurbs {
+                degree: 2,
+                points: vec![[x, 2.85, top, 1.0], [x, ym, f, 1.0], [x, 249.15, f, 1.0]],
+                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            },
+            Curve::Line {
+                start: [x, 249.15, f],
+                end: [x, 249.15, top],
+            },
+            Curve::Line {
+                start: [x, 249.15, top],
+                end: [x, 2.85, top],
+            },
+        ]
+    };
+    let cut = solidcore_ops::sweep::loft(
+        &[above(-5.0, ym), above(95.0, ym - 50.0), above(195.0, ym)],
+        2,
+        true,
+    )
+    .unwrap();
+    boolean(prism, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #21801: with `simple_coincidence_crossing_is_point` off, the union of #18064's bin with
+/// the fitted-loft insert failed with `NotSolid`: imprinting the vertex where the loft's
+/// section curve leaves the bin's floor arc at (4, 248) split the arc, and the vertex
+/// definition that split added to the same proto vertex was never imprinted, so the insert's
+/// bottom face was not split along the arc. With that imprinted, it failed with
+/// `RelateConflict`: the insert's bottom-face arc edge and its top-face section edge along the
+/// same arc had no certified coincidence bound (an ellipse against a B-spline).
+///
+/// The union now gets through the imprint and the relations. It still refuses in
+/// `manifold_boolean`'s leak check (#21822: the bin's wall is classified against only one of
+/// the insert's two coincident edges); once #21822 is fixed this test requires the joined
+/// solid. The volume of that solid lies in a certified enclosure: the bin and the insert
+/// share no volume except in the two pocket corners the insert covers, outside the rounds
+/// about (4, 4) and (4, 248), each of area 1.15^2 (1 - pi / 4), between z = 7 and the
+/// insert's top, at most z = 28; their sum is at most `share`.
+#[test]
+fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relate() {
+    let no_crossing = solidcore::kernel::UpstreamFixes::NAMES
+        .iter()
+        .copied()
+        .filter(|n| *n != "simple_coincidence_crossing_is_point");
+    session::set_thread_fixes(no_crossing).unwrap();
+    let bin = pocketed_bin();
+    let insert = fitted_loft_insert(200.0);
+    let (vb, vi) = (volume(&bin), volume(&insert));
+    let share = 2.0 * 1.15 * 1.15 * (1.0 - PI / 4.0) * 21.0;
+    let _ = (session::take_failure_code(), session::take_failure_detail());
+    let joined = boolean(bin, insert, BooleanOp::Union);
+    let (code, detail) = (session::take_failure_code(), session::take_failure_detail());
+    match joined {
+        Ok(Some(r)) => {
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+            assert!(r.is_manifold_solid().unwrap());
+            let got = volume(&r);
+            // each of the three volumes is computed to `1e-8` relative accuracy (`volume`)
+            let slack = 1e-8 * (vb + vi + got);
+            assert!(
+                got >= vb + vi - share - slack && got <= vb + vi + slack,
+                "volume {got} outside [{}, {}]",
+                vb + vi - share,
+                vb + vi
+            );
+        }
+        Ok(None) => panic!("the union of two solids is empty"),
+        Err(e) => {
+            let code = code.unwrap_or_else(|| panic!("{e:?} without a failure code"));
+            assert_eq!(
+                code.operation, "boolean::merge::p4::manifold_boolean",
+                "{e:?} ({code}): refused before the leak check (#21822)"
+            );
+            // the leak check's own cause (`BooleanFailure::SolidLeaks`), not another refusal there
+            let detail = detail.unwrap_or_default();
+            assert!(
+                detail.contains("the solid it bounded merged into the outside"),
+                "{e:?}: {detail}"
+            );
+        }
+    }
 }

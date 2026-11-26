@@ -1061,6 +1061,7 @@ fn inspect_lists_each_sheets_views_in_order() {
         place: ViewPlace::Aligned(50.0),
         settings: Default::default(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
@@ -1201,6 +1202,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     for _ in 1..MAX_VIEW_DEPTH {
@@ -1214,6 +1216,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         })]);
         made.push(id);
@@ -1233,6 +1236,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     };
     let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
@@ -2050,6 +2054,7 @@ fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspect
         end: "1".into(),
         variable_unit: solidcraft_sketch::VariableUnit::Number,
         tolerance: 0.01,
+        radians_trig: false,
     });
     let before = s.doc.clone();
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
