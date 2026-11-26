@@ -3694,11 +3694,22 @@ impl super::p1::LinearCrossSectionFsg {
     /// extended is kept as it is. The rails, uv curves and centre line become the stations'
     /// feet and the leader's points, over s. `None` where a face is not an offset surface.
     ///
+    /// The build runs over increasing s; what a surface generator hands back runs along the
+    /// trace, from its first point to its last (`FlushCurve` builds every other generator's
+    /// curves over the trace's curve parameter): the geometry's start is the trace's, which
+    /// the corner code takes as the solver's start vertex (`examine_n_fix_fillet_geoms`
+    /// compares the surface's first row with the corner the geometry starts at), and a
+    /// reversed trace's geometry is reversed back whole (`c5_undo_reversal`). So where the
+    /// trace ran down the edge (its first point's s above its last's: an edge use against its
+    /// edge's curve, or a trace started from its end), the rails, the uv curves, the centre
+    /// line and the surface's u are reversed (each over its own interval; the definition's
+    /// map follows the surface's reversal) to run along it.
+    ///
     /// # Errors
     ///
     /// `InvalidInput` for a chamfer that is not one of setbacks; those of the leader's cut,
-    /// the extensions (`Unported`, a cancel) and the build (a chamfer that does not fit, a
-    /// net not certified, feet not proved).
+    /// the extensions (`Unported`, a cancel), the build (a chamfer that does not fit, a
+    /// net not certified, feet not proved) and the reversals.
     #[allow(clippy::too_many_arguments)]
     pub fn setback_surface(
         &self,
@@ -3713,6 +3724,7 @@ impl super::p1::LinearCrossSectionFsg {
         chamfer: crate::surface::procedural_blend::chamfer::ChamferDefinition,
     ) -> Result<Option<Surface>> {
         use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg, GnSetbackTrace};
+        use crate::nurbs::b_spline_surface::SurfParamType;
         use crate::surface::extend::Continuity;
         use crate::surface::side::BoxSide;
         use crate::surface::surface::SurfaceKind;
@@ -3791,19 +3803,36 @@ impl super::p1::LinearCrossSectionFsg {
         }
         cut_leader.set_out_of_bounds_enabled(true);
         let mut gn = GnSectionFsg::chord();
-        gn.build_traced_setback_chord(
+        let [rail1, rail2] = rails;
+        let [uv1, uv2] = uv;
+        let built = gn.build_traced_setback_chord(
             k,
             GnSetbackTrace {
                 leader: &cut_leader,
                 points,
             },
             center_line,
-            rails,
+            [&mut *rail1, &mut *rail2],
             approx_tol_3d,
             [sup1, sup2],
-            uv,
+            [&mut *uv1, &mut *uv2],
             chamfer,
-        )
+        )?;
+        let Some(mut surface) = built else {
+            return Ok(None);
+        };
+        // (handed back along the trace)
+        let s_of = |p: Option<&TsectPnt>| p.and_then(|p| p.user_doubles.first().copied());
+        if let (Some(first), Some(last)) = (s_of(points.first()), s_of(points.last())) {
+            if first > last {
+                for c in [rail1, rail2, uv1, uv2, center_line] {
+                    let ivl = c.natural_interval();
+                    c.reverse_parameterization(&ivl)?;
+                }
+                surface.reverse(k, SurfParamType::U)?;
+            }
+        }
+        Ok(Some(surface))
     }
 }
 

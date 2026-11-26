@@ -2638,6 +2638,68 @@ mod tests {
             first.curve_pv[1]
         );
         assert_flushed(&h, d);
+        // the geometry runs along the trace, as every generator hands it back (the corner
+        // code takes its first row as the trace's start): rail 0 and the surface's first row
+        // start at the trace's first station's foot 0 (on r = 9, z = 20 at the given s = 1's
+        // end, 135 degrees, as assert_stations checks), not at the end s starts from
+        let start = first.surface_pv[0][0][0];
+        assert!(angle_of(start) > 1.5, "{start:?}");
+        let geom = h.pseudo.geom(h.geom).unwrap();
+        let surface = geom.fillet_surface(None).unwrap().unwrap().clone();
+        let SurfaceKind::ProceduralBlend(pb) = surface.kind() else {
+            panic!("a chamfer of setbacks by its definition");
+        };
+        // (the reversed definition proves its bound again)
+        let proved = pb.recertify(&h.k).unwrap();
+        assert!(proved <= TRACE_TOL, "re-certified bound {proved}");
+        let slack = pb.def.bound + 1e-9;
+        let rail0 = h
+            .pseudo
+            .brep()
+            .edge(h.rails[0])
+            .unwrap()
+            .curve
+            .clone()
+            .unwrap();
+        let p = rail0
+            .evaluate_point(&h.k, rail0.natural_interval().min())
+            .unwrap();
+        assert!(
+            p.distance(start) <= slack,
+            "rail 0 starts at {p:?}, not {start:?}"
+        );
+        let dom = surface.natural_uv_domain_with_nurb(&h.k).unwrap();
+        let p = surface
+            .evaluate_point(&h.k, dom.evaluate(0.0, 0.0))
+            .unwrap();
+        assert!(
+            p.distance(start) <= slack,
+            "the surface starts at {p:?}, not {start:?}"
+        );
+        // and rail 1 and the surface's other side at foot 1, on the wall at r = 10, z = 19.5
+        let start1 = first.surface_pv[1][0][0];
+        let rail1 = h
+            .pseudo
+            .brep()
+            .edge(h.rails[1])
+            .unwrap()
+            .curve
+            .clone()
+            .unwrap();
+        let p = rail1
+            .evaluate_point(&h.k, rail1.natural_interval().min())
+            .unwrap();
+        assert!(
+            p.distance(start1) <= slack,
+            "rail 1 starts at {p:?}, not {start1:?}"
+        );
+        let p = surface
+            .evaluate_point(&h.k, dom.evaluate(0.0, 1.0))
+            .unwrap();
+        assert!(
+            p.distance(start1) <= slack,
+            "the surface's other side starts at {p:?}, not {start1:?}"
+        );
     }
 
     /// The seam both the solver's trace and its re-trace go through,
