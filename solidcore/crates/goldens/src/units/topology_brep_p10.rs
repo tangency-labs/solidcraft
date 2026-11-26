@@ -460,6 +460,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     out.push(Item::Int(i64::from(data.is_geom_borrowed)));
     let g = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
     export(&k, &b, &g, &records, &mut out).map_err(|e| harness(e.to_string()))?;
+    crate::dump::body(&k, "uv_trims", &b);
 
     match i.op {
         OpIn::Make => {}
