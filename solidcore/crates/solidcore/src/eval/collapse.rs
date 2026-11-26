@@ -740,7 +740,9 @@ pub fn iso_within(
             };
             // The iso-line's control points: each column's point at t0, de Boor along o.
             let plan = DeBoorPlan::new(po, ko, no, t0).map_err(|e| off_message(e, uv))?;
-            let mut line = Vec::with_capacity(nd);
+            let mut line = Vec::new();
+            line.try_reserve(nd)
+                .map_err(|_| refused("an iso-line allocation overflow"))?;
             let (mut ex, mut ew) = (0.0f64, 0.0f64);
             for j in 0..nd {
                 let h = plan.eval(|i| net(j, i)).map_err(|e| off_message(e, uv))?;
