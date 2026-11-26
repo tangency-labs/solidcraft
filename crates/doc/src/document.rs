@@ -1698,6 +1698,12 @@ pub enum FeatureKind {
         #[walk(length = "Gap")]
         gap: Option<Expr>,
     },
+    /// Cope a round tube against the outside envelopes of straight mating round members.
+    FrameCope {
+        member: BodyName,
+        tools: Vec<BodyName>,
+        end: crate::frame_cope::End,
+    },
     /// A separate mounting or end plate, centred on a persistently identified planar face.
     FramePlate {
         plane: PlaneRef,
@@ -3940,6 +3946,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
+            FeatureKind::FrameCope { .. } => "FrameCopeFeature",
             FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -4035,6 +4042,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "frame_gusset",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::FrameTrim { .. } => "frame_trim",
+            FeatureKind::FrameCope { .. } => "frame_cope",
             FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -4134,6 +4142,7 @@ impl FeatureKind {
             "FrameMemberFeature" => "frame_member",
             "FrameTrimFeature" => "frame_trim",
             "GussetFeature" => "frame_gusset",
+            "FrameCopeFeature" => "frame_cope",
             "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -4231,6 +4240,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::FrameTrim { .. } => "MemberTrim",
+            FeatureKind::FrameCope { .. } => "Cope",
             FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
