@@ -422,8 +422,7 @@ fn resolve_uncached(
                 LinkKind::Intersect => {
                     let curves = sketch_curves(ss, ci);
                     let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
-                    let hits =
-                        solidcraft_kernel::services::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    let hits = solidcraft_kernel::curves::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
                     hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
@@ -535,15 +534,30 @@ fn resolve_uncached(
                 "X" => (Vec3::ZERO, Vec3::X),
                 "Y" => (Vec3::ZERO, Vec3::Y),
                 "Z" => (Vec3::ZERO, Vec3::Z),
-                _ => match crate::construct::DatumRef::parse_key(name) {
-                    // The origin axis of a component (#15086), where that component now stands.
-                    Some(datum) => match crate::construct::resolve_datum_in(doc, &datum, 0)? {
-                        crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
-                        _ => return Err(lost(&format!("axis {name}"))),
-                    },
-                    // A construction axis, by name (#9324), where the timeline so far puts it.
-                    None => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
-                },
+                _ => {
+                    let (author, frame_mat) = frame.copied().unwrap_or((0, crate::IDENTITY));
+                    match crate::construct::DatumRef::parse_key(name) {
+                        // The origin axis of a component (#15086), where that component now stands,
+                        // in the sketch's frame.
+                        Some(datum) => {
+                            let resolved = crate::construct::resolve_datum(doc, &datum)?;
+                            let geom = if frame.is_some() {
+                                let inverse = crate::mat_inverse(&frame_mat)
+                                    .ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+                                resolved.placed(&inverse)
+                            } else {
+                                resolved
+                            };
+                            match geom {
+                                crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
+                                _ => return Err(lost(&format!("axis {name}"))),
+                            }
+                        }
+                        // A construction axis, by name (#9324), where the timeline so far puts it,
+                        // in the sketch's frame.
+                        None => crate::eval::construction_axis_in_frame(doc, st, name, author, &frame_mat)?,
+                    }
+                }
             };
             let o = plane.to_local(o);
             let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));
@@ -605,7 +619,7 @@ fn edge_geom(
 ) -> Result<Vec<LinkGeom>> {
     Ok(match kind {
         LinkKind::Intersect => match section()? {
-            EdgeSection::Crossings(points) => points,
+            EdgeSection::Meets(geom) => geom,
             EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
             EdgeSection::Mesh => section_of_polyline(plane, &pts),
         },
@@ -633,32 +647,46 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
 
 /// Where a body edge meets a sketch plane.
 enum EdgeSection {
-    /// The points where its exact curve crosses or touches the plane, in the plane's coordinates.
-    Crossings(Vec<LinkGeom>),
+    /// The points where its exact curve crosses or touches the plane, and the parts of it lying
+    /// in the plane, in the plane's coordinates.
+    Meets(Vec<LinkGeom>),
     /// It lies in the plane: it meets the plane along its whole length.
     InPlane,
     /// A mesh body's edge: its display polyline is the edge.
     Mesh,
 }
 
-/// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
-/// edge on (an intersection curve's NURBS form). The kernel counts a contact at either end of
-/// the edge and gives no crossings for a curve lying in the plane, so an edge with none whose
-/// two vertices are in the plane (each within its own tolerance) lies in it.
+/// Where edge `e` of `body` meets `plane`: the kernel's section of the curve it evaluates the
+/// edge on (an intersection curve's NURBS form), which tells an edge lying in the plane from
+/// one crossing it and counts a contact at either end of the edge. A part of the edge lying in
+/// the plane is projected exactly, as a whole edge lying in it is.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
+    use solidcraft_kernel::curves::PlaneSection;
     if body.body.is_mesh() {
         return Ok(EdgeSection::Mesh);
     }
-    let record = body.body.record();
-    let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
-    let hits =
-        solidcraft_kernel::services::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
-    if !hits.is_empty() {
-        return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));
+    let edge = body.body.record().edges.get(e).ok_or_else(|| lost("the edge"))?;
+    let curve = edge.parameters();
+    let (points, parts) = match solidcraft_kernel::curves::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
+        PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
+        PlaneSection::Meets { points, in_plane } => (points, in_plane),
+    };
+    let mut geom: Vec<LinkGeom> = points.into_iter().map(LinkGeom::Point).collect();
+    for part in parts {
+        let projected = solidcraft_kernel::projection::projected_part(
+            curve,
+            part.interval,
+            part.ends,
+            plane,
+            body.body.planar_edges_tolerance(),
+            solidcraft_sketch::MAX_SPLINE_POINTS,
+            solidcraft_sketch::MAX_COORD,
+        )
+        .map_err(|e| DocError::Invalid(e.to_string()))?
+        .ok_or_else(|| DocError::Invalid(format!("exact projection is not supported for the part of native edge {e} in the sketch plane")))?;
+        geom.extend(projection_links(projected)?);
     }
-    let on_plane =
-        |v: &u32| record.vertices.get(*v as usize).is_some_and(|v| plane.height(Vec3::new(v.point[0], v.point[1], v.point[2])).abs() <= v.tolerance);
-    Ok(if edge.vertices.iter().all(on_plane) { EdgeSection::InPlane } else { EdgeSection::Crossings(Vec::new()) })
+    Ok(EdgeSection::Meets(geom))
 }
 
 /// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
@@ -797,15 +825,10 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
         .iter()
         .map(|e| {
             let projected = if let Some(pieces) = body.body.cylinder_edge_projection(plane, *e) {
-                solidcraft_kernel::services::conic_projection::classify_pieces(
-                    plane,
-                    &pieces,
-                    solidcraft_sketch::MAX_SPLINE_POINTS,
-                    solidcraft_sketch::MAX_COORD,
-                )
-                .map(Some)
+                solidcraft_kernel::projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .map(Some)
             } else {
-                solidcraft_kernel::services::spline_projection::projected_edge(
+                solidcraft_kernel::projection::projected_edge(
                     body.body.record(),
                     plane,
                     *e,
@@ -824,8 +847,8 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
 }
 
 /// Store the modelling operation's geometric images as document link state.
-fn projection_links(geometry: Vec<solidcraft_kernel::services::conic_projection::Projection>) -> Result<Vec<LinkGeom>> {
-    use solidcraft_kernel::services::conic_projection::Projection;
+fn projection_links(geometry: Vec<solidcraft_kernel::projection::Projection>) -> Result<Vec<LinkGeom>> {
+    use solidcraft_kernel::projection::Projection;
     geometry
         .into_iter()
         .map(|g| {
@@ -876,16 +899,16 @@ fn names_kept(names: Vec<String>, before: usize, geom: &[LinkGeom]) -> Vec<Strin
 /// round's edges end a few 1e-5 mm short of their neighbours (#8284); the sketch only shares a
 /// point between ends 1e-7 apart, and without it the outline has no closed profile.
 fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
-    let met = solidcraft_kernel::services::outline::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
+    let met = solidcraft_kernel::projection::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
     for (g, m) in geom.iter_mut().zip(met) {
         *g = link_of_piece(m);
     }
 }
 
-/// Link geometry as an outline piece of the kernel's ([`solidcraft_kernel::services::outline::Piece`]), field
+/// Link geometry as an outline piece of the kernel's ([`solidcraft_kernel::projection::OutlinePiece`]), field
 /// by field.
-fn outline_piece(g: LinkGeom) -> solidcraft_kernel::services::outline::Piece {
-    use solidcraft_kernel::services::outline::Piece;
+fn outline_piece(g: LinkGeom) -> solidcraft_kernel::projection::OutlinePiece {
+    use solidcraft_kernel::projection::OutlinePiece as Piece;
     match g {
         LinkGeom::Point(p) => Piece::Point(p),
         LinkGeom::Line(a, b) => Piece::Line(a, b),
@@ -900,8 +923,8 @@ fn outline_piece(g: LinkGeom) -> solidcraft_kernel::services::outline::Piece {
 }
 
 /// An outline piece of the kernel's as link geometry, field by field.
-fn link_of_piece(g: solidcraft_kernel::services::outline::Piece) -> LinkGeom {
-    use solidcraft_kernel::services::outline::Piece;
+fn link_of_piece(g: solidcraft_kernel::projection::OutlinePiece) -> LinkGeom {
+    use solidcraft_kernel::projection::OutlinePiece as Piece;
     match g {
         Piece::Point(p) => LinkGeom::Point(p),
         Piece::Line(a, b) => LinkGeom::Line(a, b),
@@ -1523,7 +1546,7 @@ fn placement_frame(doc: &Document, component: u64, path: &[u64], what: &str) -> 
 
 /// Is `m` a rotation (or a reflection) and a translation, as a placement is?
 fn is_rigid(m: &Mat) -> bool {
-    solidcraft_kernel::services::affine::is_rigid(m, 1e-6, 1e-12)
+    solidcraft_kernel::affine::is_rigid(m, 1e-6, 1e-12)
 }
 
 /// The transform from the source's own frame (its body's frame, or its sketch's component
@@ -1670,8 +1693,7 @@ impl Motion2 {
 /// moved, or when it tilts against the plane (its projection then changes shape).
 fn in_plane_motion(seen: &Mat, now: &Mat, plane: &Plane) -> Option<Motion2> {
     let coordinates = |v: Vec3| [v.x, v.y, v.z];
-    let (a, [x, y]) =
-        solidcraft_kernel::services::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
+    let (a, [x, y]) = solidcraft_kernel::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
     Some(Motion2 { a, b: Vec2::new(x, y) })
 }
 
@@ -2131,7 +2153,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        let query = solidcraft_kernel::services::query::Query::new(b.body.record());
+        let query = solidcraft_kernel::query::Query::new(b.body.record());
         for (_, i) in query.faces_at(at, tol) {
             if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
@@ -2506,8 +2528,7 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
         let samples = pcurve_levels(&used.pcurve, t0, t1);
         for pair in samples.windows(2) {
             let (Some(a), Some(b)) = (pair.first().copied(), pair.last().copied()) else { return false };
-            let Some((qa, qb)) =
-                solidcraft_kernel::services::pcurve::eval(&used.pcurve, a).zip(solidcraft_kernel::services::pcurve::eval(&used.pcurve, b))
+            let Some((qa, qb)) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, a).zip(solidcraft_kernel::curves::pcurve_eval(&used.pcurve, b))
             else {
                 return false;
             };
@@ -2518,14 +2539,14 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
             let (mut lo, mut hi) = (a, b);
             for _ in 0..80 {
                 let mid = lo.midpoint(hi);
-                let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, mid) else { return false };
+                let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, mid) else { return false };
                 if (q[1] > v) == above_a {
                     lo = mid;
                 } else {
                     hi = mid;
                 }
             }
-            let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
+            let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
             cuts.push(q[0]);
         }
     }
@@ -2600,7 +2621,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
         fit_world(to, &pts)
     };
-    let relation = solidcraft_kernel::services::conic_projection::plane_relation(from, to);
+    let relation = solidcraft_kernel::projection::plane_relation(from, to);
     let parallel = relation.parallel;
     let edge_on = relation.edge_on;
     let flip = relation.flip;
@@ -2634,7 +2655,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 .collect::<Result<_>>()?;
             let pieces = solidcraft_sketch::fit_beziers_with_handles(&source, &tangents, *periodic).map_err(|e| DocError::Invalid(e.to_string()))?;
             projection_links(
-                solidcraft_kernel::services::conic_projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
+                solidcraft_kernel::projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
                     .map_err(|e| DocError::Invalid(e.to_string()))?,
             )?
         }
@@ -2644,7 +2665,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
             if *control {
                 let metadata = nurbs.as_ref().map(|n| (n.knots.as_slice(), n.weights.as_slice()));
                 projection_links(
-                    solidcraft_kernel::services::conic_projection::project_control(
+                    solidcraft_kernel::projection::project_control(
                         from,
                         to,
                         &source,
@@ -2657,7 +2678,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 )?
             } else if parallel {
                 vec![LinkGeom::Spline {
-                    pts: solidcraft_kernel::services::conic_projection::project_points(from, to, &source),
+                    pts: solidcraft_kernel::projection::project_points(from, to, &source),
                     control: false,
                     degree: *degree,
                     periodic: *periodic,
@@ -2665,7 +2686,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 }]
             } else {
                 projection_links(
-                    solidcraft_kernel::services::conic_projection::project_fit(
+                    solidcraft_kernel::projection::project_fit(
                         from,
                         to,
                         &source,
@@ -2681,7 +2702,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         // A circle or arc seen edge on is the line it covers, out to its own extremes: samples of
         // it fall short of them, by up to its chord tolerance (#17482).
         Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) if edge_on => {
-            match solidcraft_kernel::services::conic_projection::project_arcs(from, to, &sk.segs(ci), solidcraft_sketch::MAX_COORD)
+            match solidcraft_kernel::projection::project_arcs(from, to, &sk.segs(ci), solidcraft_sketch::MAX_COORD)
                 .map_err(|e| DocError::Invalid(e.to_string()))?
             {
                 Some(geometry) => projection_links(geometry)?,
@@ -3022,7 +3043,7 @@ fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
-/// [`Query::outline_stretches`](solidcraft_kernel::services::query::Query::outline_stretches)), each projected exactly as an edge link
+/// [`Query::outline_stretches`](solidcraft_kernel::query::Query::outline_stretches)), each projected exactly as an edge link
 /// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
 /// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
 /// the sketch where its normal out of the material leans toward it; edge-on is away, as in
@@ -3044,7 +3065,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     let rec = body.body.record();
     let n = plane.normal();
     let size = body.body.size().max(1e-9);
-    let q = solidcraft_kernel::services::query::Query::new(rec);
+    let q = solidcraft_kernel::query::Query::new(rec);
     let mut edges = Vec::new();
     // The stretches of the edges on the outline, each projected as an edge link projects it.
     for stretch in q.outline_stretches(n, size).ok()? {
@@ -3055,7 +3076,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
             at_vertices(body, plane, e, &mut g);
             g
         } else {
-            let pieces = solidcraft_kernel::services::spline_projection::project_curve(
+            let pieces = solidcraft_kernel::projection::project_curve(
                 edge.parameters(),
                 stretch.range,
                 true,
@@ -3064,17 +3085,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
                 body.body.planar_edges_tolerance(),
                 &mut 262_144,
             )?;
-            let classified = solidcraft_kernel::services::conic_projection::classify_pieces(
-                plane,
-                &pieces,
-                solidcraft_sketch::MAX_SPLINE_POINTS,
-                solidcraft_sketch::MAX_COORD,
-            )
-            .ok()?;
+            let classified =
+                solidcraft_kernel::projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .ok()?;
             projection_links(classified).ok()?
         };
         // Tidied by the kernel: an edge seen end on is a point of the outline, not a curve of it.
-        edges.extend(solidcraft_kernel::services::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
+        edges.extend(solidcraft_kernel::projection::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
     }
     // The silhouettes of the curved faces, traced where they lie inside them.
     // Prepared once per body: every sketch that projects it, on any plane, shares it.
@@ -3096,13 +3113,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
         match s.accuracy {
             solidcraft_geom::section::CurveAccuracy::Analytic => {
                 let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
-                sils.extend(solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
+                sils.extend(solidcraft_kernel::projection::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
             }
             _ => {
                 let pts: Vec<Vec2> = s.points.iter().map(|p| Vec2::new(p[0], p[1])).collect();
                 // A traced silhouette along an edge already in the outline (a round's end, where
                 // the view grazes the round) is that edge.
-                if pts.iter().all(|p| edges.iter().any(|g| solidcraft_kernel::services::outline::near(g, *p, size * 1e-6))) {
+                if pts.iter().all(|p| edges.iter().any(|g| solidcraft_kernel::projection::near(g, *p, size * 1e-6))) {
                     continue;
                 }
                 let tol = size * 1e-5;
@@ -3119,8 +3136,8 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     // edge's own end there. Edges come first, so their exact ends are the ones kept.
     let mut out = edges;
     out.extend(sils);
-    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
-    Some(solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
+    let out = solidcraft_kernel::projection::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
+    Some(solidcraft_kernel::projection::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
 }
 
 /// The ends of `g` (none for a closed curve or a point).
@@ -3160,7 +3177,7 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
             continue;
         }
         let Some(pieces) = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<Vec<_>>>() else { continue };
-        let pieces = solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
+        let pieces = solidcraft_kernel::projection::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
         let pieces: Vec<LinkGeom> = pieces.into_iter().map(link_of_piece).collect();
         let (Some(first), Some(last)) = (pieces.first().and_then(piece_ends), pieces.last().and_then(piece_ends)) else { continue };
         if closes(first[0]) && closes(last[1]) {
@@ -3172,8 +3189,8 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
     }
     let mut out: Vec<_> = geom.into_iter().map(outline_piece).collect();
     out.extend(sides.into_iter().map(outline_piece));
-    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, tol);
-    solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
+    let out = solidcraft_kernel::projection::meet_at_shared_ends(out, tol);
+    solidcraft_kernel::projection::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the

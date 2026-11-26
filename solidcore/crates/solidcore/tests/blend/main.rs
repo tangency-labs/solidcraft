@@ -123,6 +123,8 @@ mod issue_1580_middle_off_face_run_past_edge_end;
 mod issue_16686_fillet_surface_not_skinned;
 #[path = "../issue_16735_volume_moves_are_the_old_leak.rs"]
 mod issue_16735_volume_moves_are_the_old_leak;
+#[path = "../issue_16922_smb_round_trip_keeps_cover_raises.rs"]
+mod issue_16922_smb_round_trip_keeps_cover_raises;
 #[path = "../issue_17633_crease_along_edge_geometry.rs"]
 mod issue_17633_crease_along_edge_geometry;
 #[path = "../issue_1945_fork_1207_step4.rs"]

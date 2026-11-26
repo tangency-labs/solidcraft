@@ -40,5 +40,12 @@
     "Automatic": "自动",
     "Full mesh": "完整网格",
     "No collision": "无碰撞"
+  },
+  "fr": {
+    "cmd.body_collision": "Forme de collision",
+    "Collision Shape": "Forme de collision",
+    "Automatic": "Automatique",
+    "Full mesh": "Maillage complet",
+    "No collision": "Aucune collision"
   }
 }

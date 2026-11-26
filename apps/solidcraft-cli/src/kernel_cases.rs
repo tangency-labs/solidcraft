@@ -986,22 +986,42 @@ fn report(args: &[String], results: &[Value]) {
         return;
     }
     for r in results {
-        let detail: Vec<String> = r["checks"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|c| !c["ok"].as_bool().unwrap_or(false))
-            .map(|c| format!("{} got {} want {}", c["check"].as_str().unwrap_or(""), c["got"], c["want"]))
-            .collect();
-        let err = r["error"].as_str().map(|e| format!(" ({e})")).unwrap_or_default();
-        println!(
-            "{} {}/{} [{}]{err}{}",
-            r["status"].as_str().unwrap_or("?").to_uppercase(),
-            r["area"].as_str().unwrap_or(""),
-            r["case"].as_str().unwrap_or(""),
-            r["kernel"].as_str().unwrap_or(""),
-            if detail.is_empty() { String::new() } else { format!(": {}", detail.join("; ")) }
-        );
+        println!("{}", report_line(r));
+    }
+}
+
+/// One case's line of the plain-text report: its status, area, case and kernel, its error, an
+/// export that was asked for and not written (#21933), and the checks that failed.
+fn report_line(r: &Value) -> String {
+    let detail: Vec<String> = r["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| !c["ok"].as_bool().unwrap_or(false))
+        .map(|c| format!("{} got {} want {}", c["check"].as_str().unwrap_or(""), c["got"], c["want"]))
+        .collect();
+    let err = r["error"].as_str().map(|e| format!(" ({e})")).unwrap_or_default();
+    let export = r["export_error"].as_str().map(|e| format!(" (not exported: {e})")).unwrap_or_default();
+    format!(
+        "{} {}/{} [{}]{err}{export}{}",
+        r["status"].as_str().unwrap_or("?").to_uppercase(),
+        r["area"].as_str().unwrap_or(""),
+        r["case"].as_str().unwrap_or(""),
+        r["kernel"].as_str().unwrap_or(""),
+        if detail.is_empty() { String::new() } else { format!(": {}", detail.join("; ")) }
+    )
+}
+
+/// What makes `run` fail: the cases that failed or crashed, and the cases whose asked-for export
+/// was not written (#21933), so a script that exports cases notices the missing file.
+fn failures(results: &[Value]) -> Option<String> {
+    let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();
+    let unexported = results.iter().filter(|r| r.get("export_error").is_some()).count();
+    match (bad, unexported) {
+        (0, 0) => None,
+        (bad, 0) => Some(format!("{bad} kernel case(s) failed")),
+        (0, n) => Some(format!("{n} kernel case(s) not exported")),
+        (bad, n) => Some(format!("{bad} kernel case(s) failed; {n} not exported")),
     }
 }
 
@@ -1033,8 +1053,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         solidcraft_engine::kernel::smlib_dump_dir(None);
     }
     report(args, &results);
-    let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();
-    if bad > 0 { Err(format!("{bad} kernel case(s) failed")) } else { Ok(()) }
+    failures(&results).map_or(Ok(()), Err)
 }
 
 /// `g` lies in the inclusive range `[min, max]`; a range without both ends holds nothing.
@@ -1102,6 +1121,23 @@ mod tests {
         assert!(splines_match(&faces, &json!([{"spans": [1, 1]}])).is_err());
         assert_eq!(spline_shape(&Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] }), None);
         assert_eq!(surface_word(&face(1, 1, 1, 1)), "bspline");
+    }
+
+    /// #21933: a case whose asked-for export was not written says so on its plain-text line and
+    /// fails the run, though the case itself passed; a passing case that was exported does not.
+    #[test]
+    fn an_export_not_written_is_reported_and_fails_the_run() {
+        let passed = json!({"status": "pass", "area": "", "case": "cases/5024", "kernel": "solidcore", "checks": []});
+        let mut unexported = passed.clone();
+        unexported["export_error"] = json!("cases/5024: not under tests/kernel-cases");
+        assert_eq!(report_line(&passed), "PASS /cases/5024 [solidcore]");
+        assert_eq!(report_line(&unexported), "PASS /cases/5024 [solidcore] (not exported: cases/5024: not under tests/kernel-cases)");
+        assert_eq!(failures(std::slice::from_ref(&passed)), None);
+        assert_eq!(failures(&[passed.clone(), unexported.clone()]).as_deref(), Some("1 kernel case(s) not exported"));
+        let mut failed = passed;
+        failed["status"] = json!("fail");
+        assert_eq!(failures(&[failed.clone()]).as_deref(), Some("1 kernel case(s) failed"));
+        assert_eq!(failures(&[failed, unexported]).as_deref(), Some("1 kernel case(s) failed; 1 not exported"));
     }
 
     #[test]

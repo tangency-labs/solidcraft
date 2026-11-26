@@ -28,6 +28,8 @@ solidcraft-control-egui = { workspace = true }
 # The UI kit and its components (ribbon, app bar, history bar, navigation bar, view compass,
 # preferences window, start page, window chrome, theme files), drawn from SolidCraft's data.
 solidcraft-ui-kit = { workspace = true }
+# App-neutral panel placement core.
+solidcraft-panel-layout = { workspace = true }
 # SolidCraft's look, installed into the kit: its icon set, glyphs, interface faces and built-in themes.
 solidcraft-look = { workspace = true }
 # The widget registry (handles, rects, counts) the UI kit publishes into.
