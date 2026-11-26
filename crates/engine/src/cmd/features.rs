@@ -3949,28 +3949,43 @@ fn body_placements(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
     Ok(paths)
 }
 
+/// Occurrence id -> occurrence name lookup built once per resolution.
+fn occurrence_names(doc: &solidcraft_doc::Document) -> std::collections::HashMap<u64, &str> {
+    let mut map = std::collections::HashMap::with_capacity(doc.occurrences.len());
+    for o in &doc.occurrences {
+        map.entry(o.id).or_insert(o.name.as_str());
+    }
+    map
+}
+
 /// Occurrence path label (`Part:1` or `Sub:1/Part:2`) for a non-empty occurrence path.
-fn occurrence_path_label(doc: &solidcraft_doc::Document, path: &[u64]) -> Option<String> {
+fn occurrence_path_label(occ_names: &std::collections::HashMap<u64, &str>, path: &[u64]) -> Option<String> {
     if path.is_empty() {
         return None;
     }
-    let names: Option<Vec<&str>> = path.iter().map(|id| doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect();
+    let names: Option<Vec<&str>> = path.iter().map(|id| occ_names.get(id).copied()).collect();
     Some(names?.join("/"))
 }
 
 /// Explicitly occurrence-qualified body label (`NAME (Occ:1)` or `NAME (Sub:1/Occ:1)`).
-fn qualified_body_name(doc: &solidcraft_doc::Document, own: &str, path: &[u64]) -> Option<String> {
-    Some(format!("{own} ({})", occurrence_path_label(doc, path)?))
+fn qualified_body_name(occ_names: &std::collections::HashMap<u64, &str>, own: &str, path: &[u64]) -> Option<String> {
+    Some(format!("{own} ({})", occurrence_path_label(occ_names, path)?))
 }
 
 /// Actionable name for a placement of `own`: uses `world` when already qualified, else
 /// `NAME (Occ:1)` when that label uniquely identifies this placement among `frames`, else `world`.
-fn placement_display_name(doc: &solidcraft_doc::Document, frames: &[BodyFrameEntry], world: &str, own: &str, path: &[u64]) -> String {
+fn placement_display_name(
+    occ_names: &std::collections::HashMap<u64, &str>,
+    frames: &[BodyFrameEntry],
+    world: &str,
+    own: &str,
+    path: &[u64],
+) -> String {
     if world != own {
         return world.to_string();
     }
-    if let Some(label) = qualified_body_name(doc, own, path) {
-        let unique = frames.iter().filter(|(_, o, _, p, _)| qualified_body_name(doc, o, p).as_deref() == Some(label.as_str())).count() == 1
+    if let Some(label) = qualified_body_name(occ_names, own, path) {
+        let unique = frames.iter().filter(|(_, o, _, p, _)| qualified_body_name(occ_names, o, p).as_deref() == Some(label.as_str())).count() == 1
             && !frames.iter().any(|(w, ..)| w == &label);
         if unique {
             return label;
@@ -3980,12 +3995,12 @@ fn placement_display_name(doc: &solidcraft_doc::Document, frames: &[BodyFrameEnt
 }
 
 /// Actionable list of placement names for `own`, capped so large assemblies stay readable.
-fn format_placement_choices(doc: &solidcraft_doc::Document, frames: &[BodyFrameEntry], own: &str) -> String {
+fn format_placement_choices(occ_names: &std::collections::HashMap<u64, &str>, frames: &[BodyFrameEntry], own: &str) -> String {
     const LIMIT: usize = 8;
     let matches: Vec<String> = frames
         .iter()
         .filter(|(_, frame_own, ..)| frame_own == own)
-        .map(|(world, frame_own, _, path, _)| format!("`{}`", placement_display_name(doc, frames, world, frame_own, path)))
+        .map(|(world, frame_own, _, path, _)| format!("`{}`", placement_display_name(occ_names, frames, world, frame_own, path)))
         .collect();
     if matches.len() <= LIMIT {
         matches.join(", ")
@@ -3998,7 +4013,7 @@ fn format_placement_choices(doc: &solidcraft_doc::Document, frames: &[BodyFrameE
 /// Match a body name against placed frames: exact world name first (`Body1`, `Body1 (Occ:2)`,
 /// fallback `@occ[...]`), then an unambiguous explicit occurrence-qualified name (`Body1 (Occ:1)`).
 fn find_placed_frame<'a>(
-    doc: &solidcraft_doc::Document,
+    occ_names: &std::collections::HashMap<u64, &str>,
     frames: &'a [BodyFrameEntry],
     name: &str,
     cmd: &str,
@@ -4007,10 +4022,10 @@ fn find_placed_frame<'a>(
         let bare = entry.0 == entry.1;
         return Ok(Some((entry, bare)));
     }
-    let mut qualified = frames.iter().filter(|(_, own, _, path, _)| qualified_body_name(doc, own, path).as_deref() == Some(name));
+    let mut qualified = frames.iter().filter(|(_, own, _, path, _)| qualified_body_name(occ_names, own, path).as_deref() == Some(name));
     let Some(first) = qualified.next() else { return Ok(None) };
     if qualified.next().is_some() {
-        let choices = format_placement_choices(doc, frames, &first.1);
+        let choices = format_placement_choices(occ_names, frames, &first.1);
         let hint = if cmd == "solid.mirror" { " or pass `placements`" } else { "" };
         return Err(bad(cmd, format!("`{name}` matches more than one placement: name one of {choices}{hint}")));
     }
@@ -4026,6 +4041,7 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
     }
     let st = s.model.state();
     let frames = s.doc.body_frames_with_source(&st);
+    let occ_names = occurrence_names(&s.doc);
     let mut resolved_bodies = Vec::with_capacity(names.len());
     let mut resolved_paths = Vec::with_capacity(placements.len());
     let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
@@ -4036,7 +4052,7 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
                 return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
             }
             mb.name.clone()
-        } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&s.doc, &frames, &name, cmd)? {
+        } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&occ_names, &frames, &name, cmd)? {
             if matched_path != &path {
                 return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));
             }
@@ -4062,16 +4078,26 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
 /// name, with the occurrence path of the placement it was picked at (where the copy goes). Names
 /// stay as they are, and no placement is kept, while every body is in the active component and
 /// every component in place, or when one of them is not a body. Duplicate picks of the same
-/// multi-placement body at the same placement are refused, and bare names that resolve to the
-/// first of several placements emit a warning naming all placements.
+/// body at the same placement are refused, and bare names that resolve to the first of several
+/// placements emit a warning naming all placements.
 fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<ResolvedBodies> {
-    if names.is_empty() || s.doc.occurrences.is_empty() {
+    if names.is_empty() {
+        return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
+    }
+    if s.doc.occurrences.is_empty() {
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for name in &names {
+            if !seen.insert(name.as_str()) {
+                return Err(bad(cmd, format!("body `{name}` was listed more than once")));
+            }
+        }
         return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
     }
     let frames = s.doc.body_frames_with_source(&s.model.state());
+    let occ_names = occurrence_names(&s.doc);
     let mut picked: Vec<(String, u64, Vec<u64>, bool)> = Vec::with_capacity(names.len());
     for name in &names {
-        let Some(((_, own, component, path, _), bare)) = find_placed_frame(&s.doc, &frames, name, cmd)? else {
+        let Some(((_, own, component, path, _), bare)) = find_placed_frame(&occ_names, &frames, name, cmd)? else {
             return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
         };
         picked.push((own.clone(), *component, path.clone(), bare));
@@ -4085,25 +4111,22 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<ResolvedB
     let mut seen: std::collections::BTreeSet<(&str, &[u64])> = std::collections::BTreeSet::new();
     for (own, _, path, _) in &picked {
         let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
-        if count > 1 && !seen.insert((own.as_str(), path.as_slice())) {
-            let at = occurrence_path_label(&s.doc, path).unwrap_or_else(|| format!("{path:?}"));
-            let choices = format_placement_choices(&s.doc, &frames, own);
-            return Err(bad(cmd, format!("body `{own}` was listed more than once at the same placement (`{at}`); {hint} ({choices})")));
-        }
-    }
-    let mut qualified_owns: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    for (own, _, _, bare) in &picked {
-        if !bare {
-            qualified_owns.insert(own.as_str());
+        if !seen.insert((own.as_str(), path.as_slice())) {
+            if count > 1 {
+                let at = occurrence_path_label(&occ_names, path).unwrap_or_else(|| format!("{path:?}"));
+                let choices = format_placement_choices(&occ_names, &frames, own);
+                return Err(bad(cmd, format!("body `{own}` was listed more than once at the same placement (`{at}`); {hint} ({choices})")));
+            }
+            return Err(bad(cmd, format!("body `{own}` was listed more than once")));
         }
     }
     let mut warnings = Vec::new();
     let mut warned_owns: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     for (own, _, path, bare) in &picked {
         let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
-        if *bare && count > 1 && !qualified_owns.contains(own.as_str()) && warned_owns.insert(own.as_str()) {
-            let at = occurrence_path_label(&s.doc, path).unwrap_or_else(|| format!("{path:?}"));
-            let choices = format_placement_choices(&s.doc, &frames, own);
+        if *bare && count > 1 && warned_owns.insert(own.as_str()) {
+            let at = occurrence_path_label(&occ_names, path).unwrap_or_else(|| format!("{path:?}"));
+            let choices = format_placement_choices(&occ_names, &frames, own);
             warnings.push(format!("body `{own}` appears in {count} placements ({choices}); used the first (`{at}`) — {hint} to choose another"));
         }
     }

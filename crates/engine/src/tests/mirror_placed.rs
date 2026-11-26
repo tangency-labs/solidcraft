@@ -710,3 +710,38 @@ fn mirror_accepts_explicit_placements_and_refuses_invalid_ones() {
     let e = s.execute("solid.mirror", &json!({"bodies": ["Bolt (2)"], "placements": [[occ2]], "plane": "YZ"})).unwrap_err().to_string();
     assert!(e.contains("Capture Position"), "{e}");
 }
+
+#[test]
+fn mirror_refuses_duplicate_single_placement_and_root_bodies() {
+    // Root body with no occurrences in the design.
+    let mut root = Session::default();
+    run(&mut root, "solid.box", json!({"corner": [10, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Base"}));
+    let e = root.execute("solid.mirror", &json!({"bodies": ["Base", "Base"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e.contains("listed more than once"), "{e}");
+    let ep = root
+        .execute("solid.pattern.rectangular", &json!({"bodies": ["Base", "Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}))
+        .unwrap_err()
+        .to_string();
+    assert!(ep.contains("listed more than once"), "{ep}");
+
+    // Single-occurrence component body (`Other:1` owning `Bolt`).
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let e1 = s.execute("solid.mirror", &json!({"bodies": ["Bolt", "Bolt"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e1.contains("listed more than once"), "{e1}");
+    let e2 = s.execute("solid.mirror", &json!({"bodies": ["Bolt", "Bolt (Other:1)"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e2.contains("listed more than once"), "{e2}");
+}
+
+#[test]
+fn mirror_warns_for_bare_pick_even_when_another_placement_is_qualified() {
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2)", "Bolt (2) (Part:2)"], "plane": "YZ"}));
+    let warning = r["warning"].as_str().unwrap_or("");
+    assert!(warning.contains("Bolt (2) (Part:1)") && warning.contains("Bolt (2) (Part:2)") && warning.contains("Part:1"), "{r}");
+    let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
+    assert_eq!(copies.len(), 2, "{r}");
+    assert_box(world_box(&s, &copies[0]), mirrored_yz(&s, "Bolt (2)"));
+    assert_box(world_box(&s, &copies[1]), mirrored_yz(&s, "Bolt (2) (Part:2)"));
+}
