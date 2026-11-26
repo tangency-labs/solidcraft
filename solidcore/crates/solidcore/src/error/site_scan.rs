@@ -58,6 +58,8 @@ pub(in crate::error) enum Builder {
     /// A wrapper shared with the files under a path (path relative to `crates/`, without
     /// `.rs`: the module's file and its children's), named, with its phrase at the index: a
     /// helper there. A wrapper `fn` visible outside its file is listed so, or fails the scan.
+    /// (No scan lists one at present.)
+    #[allow(dead_code)]
     Shared(&'static str, &'static str, Option<usize>),
 }
 

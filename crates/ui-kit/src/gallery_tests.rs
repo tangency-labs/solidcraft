@@ -224,6 +224,7 @@ pub const ELEMENTS: &[Element] = &[
             setting: "Z · 1°".into(),
             has_key: true,
             editable: false,
+            clear_key: None,
         };
         viewport_status_item(ui, &item, &mut StatusPresentation::default());
     }),
@@ -384,6 +385,10 @@ pub const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
         checkbox_at(ui, rect, "Enabled", &mut sample.checked);
     }),
+    element!("switch_at", |ui, sample| {
+        let (rect, _) = ui.allocate_exact_size(switch_size(), egui::Sense::hover());
+        switch_at(ui, rect, "Enabled", &mut sample.checked);
+    }),
     element!("settings_plugin_card", |ui, sample| {
         settings_plugin_card(
             ui,
@@ -392,7 +397,7 @@ pub const ELEMENTS: &[Element] = &[
             "1.2.0",
             "Adds a parametric gear feature.",
             &mut sample.checked,
-            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled" },
+            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled", update: None },
         );
     }),
     element!("text_button", |ui, _| {

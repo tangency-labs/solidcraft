@@ -152,6 +152,9 @@ impl Sketch {
         let CurveKind::Spline { pts, periodic, control, nurbs, .. } = &curve.kind else {
             return Err(SketchError::WrongKind(curve.id.clone(), "only a spline has points to remove".into()));
         };
+        if *control && self.curves.iter().any(|guide| guide.spline_control_polygon_of.as_deref() == Some(curve.id.as_str())) {
+            return Err(SketchError::Invalid("remove the control polygon before removing a spline point".into()));
+        }
         if *control && *periodic {
             return Err(SketchError::Invalid("not supported yet: removing a control point from a closed control spline".into()));
         }

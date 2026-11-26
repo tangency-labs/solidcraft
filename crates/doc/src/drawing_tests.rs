@@ -56,7 +56,7 @@ pub(crate) fn plate() -> Drawing {
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
     let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, centre_marks: None, label: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -1416,8 +1416,9 @@ fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
     assert!(why.contains("owner"), "{why}");
 }
 
-/// A drawing saved before view sketches (its `format_pending` lacks `view-sketches`) opens with each
-/// sheet sketch's `sheet` as its owner, keeps its id and geometry, and saves the same bytes again.
+/// A drawing saved before view sketches (format 5, which they came with, its `format_pending`
+/// lacking `view-sketches`) opens with each sheet sketch's `sheet` as its owner, keeps its id and
+/// geometry, and saves the same bytes again.
 #[test]
 fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
     let current = file(&read(&view_sketch_file()).unwrap());
@@ -2010,7 +2011,7 @@ fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfile
         .unwrap()
         .boundary;
     let region = drawing.sheet_fill_region(&doc, 41, &boundary).unwrap();
-    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: solidcore_record::hatch::Pattern::lines_45() }));
+    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: crate::drawing::hatch::Pattern::lines_45() }));
     drawing.fills.push(Arc::new(SketchFill { id: 70, sketch: 41, boundary: boundary.clone(), paint: FillPaint::Solid, last_region: region }));
     drawing.validate().unwrap();
     doc.put_drawing(Arc::new(drawing));
@@ -2304,6 +2305,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
                 end: "1".into(),
                 tolerance: 0.01,
                 variable_unit: solidcraft_sketch::VariableUnit::Number,
+                radians_trig: false,
             });
             "equations"
         };

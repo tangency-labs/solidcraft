@@ -49,7 +49,11 @@ function parseClosing(body, repoFullName) {
 // -> { status: 'missing' | 'malformed' | 'no' | 'yes', preference?, detail? }
 // `ownerApproved`: the PR carries the owner-approved label, which stands for "approved by the owner" on any `yes`.
 function parseDefaults(body, { ownerApproved = false } = {}) {
-  const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
+  const text = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '');
+  // The line form `Changes a default: no`, or a heading `## Changes a default` with the value on the
+  // first non-blank line under it.
+  const m = text.match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im)
+    || text.match(/^[ \t]*#{1,6}[ \t]*Changes a default[ \t]*:?[ \t]*#*[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*(?:[-*][ \t]+)?(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
   const value = m[1].replace(/\*\*/g, '').trim().replace(/^`([^`]*)`$/, '$1').trim();
   // `no` may end in a full stop or be followed by a note after any punctuation: `no.`, `no, only a fix`,

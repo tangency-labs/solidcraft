@@ -11,13 +11,13 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_doc::drawing::thread_lines::ThreadStroke;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, Source, Visibility};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
+use solidcraft_kernel::hlr::{self, Source, Visibility};
 
 use super::ShownSet;
 use super::exact::{self, Fallback, PreparedBodies};
@@ -274,7 +274,7 @@ fn meshed(
     let join = 2.0 * drawing.eps;
     let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
     let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
-    let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
+    let sampled = hlr::accuracy_on_paper(frame, CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
     let near = |radius: f64| near(model_chord_mm, radius);
     let mut out = Vec::with_capacity(runs.len());
     for (owner, runs) in runs {

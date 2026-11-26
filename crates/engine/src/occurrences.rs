@@ -386,7 +386,10 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() {
+        // The bodies Unisolate will hide again follow renames too (#8120).
+        let before_isolate = self.visibility.before_isolate.as_ref().map_or(&[][..], |before| before.hidden_bodies.as_slice());
+        let shown_before = self.visibility.before_isolate.as_ref().map(|before| &before.shown_bodies);
+        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && shown_before.is_none_or(|s| s.is_empty()) && selected.is_empty() {
             return;
         }
         if rename.is_none() {
@@ -404,7 +407,8 @@ impl Session {
                 body.name = new.to_string();
             }
         }
-        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        let hidden: std::collections::BTreeSet<_> =
+            self.visibility.hidden_bodies.iter().chain(before_isolate).chain(shown_before.into_iter().flatten()).map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
@@ -421,7 +425,7 @@ impl Session {
                 }
             }
         }
-        self.visibility.hidden_bodies.retain_mut(|hidden| {
+        let remap = |hidden: &mut String| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
                 true
@@ -430,7 +434,14 @@ impl Session {
                 // body's hide follows into that name; a stale entry must not hide it.
                 !destinations.contains(hidden)
             }
-        });
+        };
+        self.visibility.hidden_bodies.retain_mut(remap);
+        if let Some(before) = self.visibility.before_isolate.as_mut() {
+            before.hidden_bodies.retain_mut(remap);
+            let mut shown: Vec<String> = std::mem::take(&mut before.shown_bodies).into_iter().collect();
+            shown.retain_mut(remap);
+            before.shown_bodies = shown.into_iter().collect();
+        }
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,
@@ -961,7 +972,7 @@ impl Session {
 
     /// The placement a sketch or construction feature is drawn at: the active one while its
     /// component is being edited, else the component's first (empty for the design's own).
-    fn feature_path(&self, component: u64) -> Vec<u64> {
+    pub fn feature_path(&self, component: u64) -> Vec<u64> {
         match &self.active_occurrence_path {
             _ if component == 0 => Vec::new(),
             Some(p) if self.active_component == component => p.clone(),
@@ -985,7 +996,17 @@ impl Session {
             return false;
         }
         let component = self.doc.feature(id).map_or(0, |f| f.component);
-        self.item_folder_hidden(&Self::folder_scope(&self.feature_path(component)), component, folder, &id.to_string())
+        self.feature_folder_hidden_at(id, &self.feature_path(component), folder)
+    }
+
+    /// [`Self::feature_folder_hidden`] at the placement `path` of the feature's component: a
+    /// part placed more than once has a folder of its own under each copy.
+    pub fn feature_folder_hidden_at(&self, id: u64, path: &[u64], folder: &str) -> bool {
+        if self.visibility.hidden_folders.is_empty() {
+            return false;
+        }
+        let component = self.doc.feature(id).map_or(0, |f| f.component);
+        self.item_folder_hidden(&Self::folder_scope(path), component, folder, &id.to_string())
     }
 
     /// Is construction geometry or an origin item (by name) shown: not hidden itself, nor by
@@ -1151,8 +1172,66 @@ impl Session {
             .collect()
     }
 
+    pub(crate) fn clear_pending_move(&mut self, id: u64) {
+        self.pending_moves.remove(&id);
+        self.pending_move_records.retain(|r| r.occurrence != id);
+    }
+
+    pub(crate) fn clear_pending_moves(&mut self) {
+        self.pending_moves.clear();
+        self.pending_move_records.clear();
+    }
+
+    pub(crate) fn record_pending_move(
+        &mut self,
+        id: u64,
+        doc_transform: Mat,
+        prior_uncaptured: Option<Mat>,
+        base_transform: Option<Mat>,
+        next: Mat,
+        step: solidcraft_doc::CapturedOccurrenceMove,
+    ) {
+        let close = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < 1e-9);
+        if let Some(base) = base_transform {
+            if let Some(k) = self.pending_move_records.iter().rposition(|r| r.occurrence == id && close(&r.after, &base)) {
+                let mut idx = 0usize;
+                self.pending_move_records.retain(|r| {
+                    let keep = idx <= k || r.occurrence != id;
+                    idx += 1;
+                    keep
+                });
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+            } else if close(&base, &doc_transform) {
+                self.pending_move_records.retain(|r| r.occurrence != id);
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+            } else {
+                self.pending_move_records.retain(|r| r.occurrence != id);
+                if let Some(delta_step) = captured_delta_move(id, &doc_transform, &next) {
+                    self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: next });
+                }
+            }
+        } else {
+            if let Some(prev) = prior_uncaptured
+                && !self.pending_move_records.iter().any(|r| r.occurrence == id)
+                && !close(&prev, &doc_transform)
+                && let Some(delta_step) = captured_delta_move(id, &doc_transform, &prev)
+            {
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: prev });
+            }
+            self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+        }
+        if self.pending_move_records.len() > crate::MAX_PENDING_MOVE_RECORDS {
+            self.pending_move_records.retain(|r| r.occurrence != id);
+            if let Some(delta_step) = captured_delta_move(id, &doc_transform, &next) {
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: next });
+            }
+        }
+    }
+
     pub(crate) fn prune_occurrence_state(&mut self) {
         self.pending_moves.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
+        self.pending_move_records.retain(|r| self.doc.occurrences.iter().any(|o| o.id == r.occurrence));
+        self.pending_joint_bases.retain(|id, _| self.doc.assembly.joints.iter().any(|j| j.id == *id));
         self.exploded.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
         if self.active_component != 0 && !self.doc.components.iter().any(|c| c.id == self.active_component) {
             self.active_component = 0;
@@ -1192,5 +1271,39 @@ impl Session {
         let shown = shown.into_iter().filter(kept).collect();
         self.visibility.hidden_occurrences = hidden;
         self.visibility.shown_component_origins = shown;
+    }
+}
+
+pub(crate) fn format_mm_expr(v: f64) -> solidcraft_doc::Expr {
+    if v == 0.0 { solidcraft_doc::Expr::new("0") } else { solidcraft_doc::Expr::new(format!("{v} mm")) }
+}
+
+pub(crate) fn captured_delta_move(occurrence: u64, from: &Mat, to: &Mat) -> Option<solidcraft_doc::CapturedOccurrenceMove> {
+    let inv = solidcraft_doc::mat_inverse(from)?;
+    let delta = mat_mul(to, &inv);
+    if !solidcraft_doc::is_placement(&delta) {
+        return None;
+    }
+    Some(captured_move_from_delta(occurrence, solidcraft_doc::MoveSpace::Local, &delta, None))
+}
+
+pub(crate) fn captured_move_from_delta(
+    occurrence: u64,
+    space: solidcraft_doc::MoveSpace,
+    delta: &Mat,
+    path: Option<Vec<u64>>,
+) -> solidcraft_doc::CapturedOccurrenceMove {
+    let mut rot = *delta;
+    rot[3] = [0.0, 0.0, 0.0, 1.0];
+    let rotation = (!solidcraft_doc::is_identity(&rot)).then_some(rot);
+    solidcraft_doc::CapturedOccurrenceMove {
+        occurrence,
+        space,
+        translate: [format_mm_expr(delta[3][0]), format_mm_expr(delta[3][1]), format_mm_expr(delta[3][2])],
+        origin: None,
+        rotate_axis: None,
+        angle: None,
+        rotation,
+        path,
     }
 }

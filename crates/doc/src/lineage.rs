@@ -15,6 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 
@@ -82,12 +83,17 @@ pub(crate) struct Stage {
 pub(crate) struct Lineage {
     pub(crate) history: History,
     pub(crate) operands: Vec<Arc<Operand>>,
+    /// The pieces the feature split faces into, by face of the body this is the lineage of: each
+    /// piece's role in the feature (`in`, `out`, `+`, …, see [`Traced::with_pieces`]), `None` for
+    /// a face it did not split. Only the feature's own step has them: a later step's lineage reads
+    /// the names they gave.
+    pub(crate) pieces: Option<Arc<Vec<Option<String>>>>,
 }
 
 impl Lineage {
     /// `body` as it is: every face and edge its own, named as `operand` names them.
     pub(crate) fn of(body: &Body, operand: Operand) -> Lineage {
-        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)] }
+        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], pieces: None }
     }
 
     /// The lineage of `result`, made by one kernel operation from operands whose lineages are
@@ -107,7 +113,7 @@ impl Lineage {
             }
         }
         let operands: Vec<Arc<Operand>> = inputs.iter().flat_map(|l| l.operands.iter().cloned()).collect();
-        (history.operands == operands.len()).then_some(Lineage { history, operands })
+        (history.operands == operands.len()).then_some(Lineage { history, operands, pieces: None })
     }
 
     /// This lineage for a moved copy of what feature `feature` built (instance `instance` of a
@@ -124,7 +130,7 @@ impl Lineage {
                 _ => op.clone(),
             })
             .collect();
-        Lineage { history: self.history.clone(), operands }
+        Lineage { history: self.history.clone(), operands, pieces: None }
     }
 
     /// Whether each face of the body this is the lineage of came, in whole or in part, from a
@@ -167,7 +173,7 @@ impl Lineage {
             .iter()
             .map(|piece| {
                 let history = piece.history()?.clone();
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()] })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], pieces: None })
             })
             .collect()
     }
@@ -183,7 +189,7 @@ impl Lineage {
                 let history = piece.history()?.clone();
                 let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
                 let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage] })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], pieces: None })
             })
             .collect()
     }
@@ -249,6 +255,18 @@ impl Traced {
         Traced { body: result, lineage, recipe: None }
     }
 
+    /// This body with the pieces its feature split faces into named by their roles there (one per
+    /// face, `None` for a face it did not split): `F<feature>:<role>` tells each piece apart.
+    pub fn with_pieces(mut self, pieces: Vec<Option<String>>) -> Traced {
+        if let Some(lineage) = &mut self.lineage
+            && pieces.len() == self.body.face_count()
+            && pieces.iter().any(Option::is_some)
+        {
+            lineage.pieces = Some(Arc::new(pieces));
+        }
+        self
+    }
+
     /// This tool replaces faces built by `feature`, preserving that feature's roles even
     /// when a later trim supplies the replacement cap.
     pub fn rebuilt(mut self, feature: u64) -> Traced {
@@ -281,7 +299,7 @@ impl Traced {
             }
             let body = crate::ModelBody::new(String::new(), self.body.clone(), 0);
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
-            Some(Lineage { history, operands: vec![stage] })
+            Some(Lineage { history, operands: vec![stage], pieces: None })
         });
         Traced { body: result, lineage, recipe: None }
     }
@@ -593,6 +611,40 @@ pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
     }
 }
 
+/// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
+/// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v6 encoding is little-endian: reconstruction
+/// kind (0 analytic, 1 faceted), the producer's u32 face-order version, tolerance bits, u64 vertex
+/// count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// The producer versions face ordering; bump this domain when the input encoding changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64, kind: ReconstructionKind) -> Traced {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"solidcraft-mesh-reconstruction-v6");
+    hash.update([match kind {
+        ReconstructionKind::Analytic => 0,
+        ReconstructionKind::Faceted => 1,
+    }]);
+    hash.update(FACE_ORDER_VERSION.to_le_bytes());
+    hash.update(tolerance.to_le_bytes());
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
+    let digest = format!("{:x}", hash.finalize());
+    let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
+    Traced::made(body, Some(roles))
+}
+
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
 /// file's order): `face:<k>`.
 pub(crate) fn numbered_tool(body: Body) -> Traced {
@@ -759,6 +811,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                     Lineage {
                         history: History { operands: 1, faces, edges: Vec::new() },
                         operands: vec![Arc::new(Operand::Body(b.name.to_string()))],
+                        pieces: None,
                     }
                 }
             };
@@ -820,7 +873,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     let edges = History::identity(body).edges.into_iter().map(|e| EdgeProv { faces: e.faces, origins: Vec::new() }).collect();
     let mut history = History { operands: grown_at + 1, faces, edges };
     let Some(first) = first else {
-        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })] });
+        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], pieces: None });
     };
     // A face grown from faces of the body as the feature found it is named after their names;
     // where the feature made that body so far, after the faces of the model before them.
@@ -845,7 +898,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     history.substitute(0, &first.history).ok()?;
     let mut operands = first.operands.clone();
     operands.push(Arc::new(Operand::Grown { body: body_name, faces: grown }));
-    (history.operands == operands.len()).then_some(Lineage { history, operands })
+    (history.operands == operands.len()).then_some(Lineage { history, operands, pieces: None })
 }
 
 /// The role of a face a sheet's build made for `part` (see `SheetPart`), the `place`th of the faces
@@ -1038,6 +1091,8 @@ impl crate::ModelBody {
         remade.transferred = self.transferred;
         remade.source_name = self.source_name.clone();
         remade.source_transform = self.source_transform;
+        // A surface stays a surface through a change to its shape (#21969).
+        remade.sheet = self.sheet;
         remade
     }
 
@@ -1264,9 +1319,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438). So does the body a name
-        // past the first was split off, which gives that piece its material and look.
-        let names: Vec<(String, u64, Option<String>)> =
-            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
+        // past the first was split off, which gives that piece its material and look, and whether
+        // the name's owner is the body's component rather than its feature's (a root cut's piece
+        // of a placed part's body, #21156).
+        let names: Vec<(String, u64, Option<String>, bool)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone(), b.transferred))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -1275,10 +1332,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from, transferred)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
             b.split_from = split_from;
+            b.transferred = transferred;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }

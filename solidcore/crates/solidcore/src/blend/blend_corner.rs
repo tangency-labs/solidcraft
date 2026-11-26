@@ -272,6 +272,22 @@ pub enum BlendTurn {
     Swept,
 }
 
+/// How a fillet session's blend corners make their Turns ([`BlendTurn`] is one corner's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnChoice {
+    /// Every Turn is Mitred (the default).
+    #[default]
+    Mitre,
+    /// Every Turn is Swept (the fork's `SetSweptTurns`); a Turn the Swept construction does
+    /// not build ([`swept::classify_swept`]) is refused with its reason.
+    Swept,
+    /// Each Turn is Swept where [`swept::classify_swept`] builds it (the rolling ball kept on
+    /// the side edge: an exact torus) and Mitred where it does not. Decided once per corner,
+    /// by that classification, before anything is built: a Turn it builds is never refused
+    /// where a Mitre would have been made.
+    Auto,
+}
+
 /// The two ways the blend corner closes chamfers meeting at a vertex
 /// ([`chamfer`]), as [`BlendTurn`] is a Turn's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
