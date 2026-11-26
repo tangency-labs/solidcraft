@@ -7,7 +7,6 @@
 use solidcore::eval::hole_stacks as k;
 use solidcore_convert::record_vec3;
 use solidcore_record::brep::Brep;
-use solidcore_record::Vec3;
 
 use super::query::kernel_record;
 use crate::error::Error;
