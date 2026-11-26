@@ -1244,6 +1244,29 @@ fn run_param_sets_a_parameter_the_script_adds_itself() {
     assert_eq!(std::fs::read_to_string(&template).unwrap(), text);
 }
 
+/// #22309: `--param` replaces the value a script starts a parameter with, at the first step that
+/// sets it; a `parameters.change` later in the script still changes it, as without the override.
+#[test]
+fn run_param_leaves_a_later_change_in_the_script_alone() {
+    let scratch = Scratch::new();
+    let template = scratch.0.join("template.json");
+    let text = json!({"commands": [
+        {"command": "parameters.add", "params": {"name": "width", "expression": "20 mm"}},
+        {"command": "solid.box", "params": {"length": "width", "width": 10, "height": 5}},
+        {"command": "parameters.change", "params": {"name": "width", "expression": "30 mm"}}
+    ]})
+    .to_string();
+    std::fs::write(&template, &text).unwrap();
+    let values = |extra: &[&str]| {
+        let results = json_output(cli().arg("run").arg(&template).arg("--results").args(extra).output().unwrap());
+        (results[0]["value"].as_f64().unwrap(), results[2]["value"].as_f64().unwrap())
+    };
+    let (first, last) = values(&[]);
+    assert!((first - 20.0).abs() < 1e-9 && (last - 30.0).abs() < 1e-9, "{first} {last}");
+    let (first, last) = values(&["--param", "width=100mm"]);
+    assert!((first - 100.0).abs() < 1e-9 && (last - 30.0).abs() < 1e-9, "{first} {last}");
+}
+
 /// #22309: with `--in DESIGN`, an override the design has is set on it before the script runs,
 /// and one only the script adds is given to the script; a name neither has fails, naming it.
 #[test]
