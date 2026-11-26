@@ -3664,19 +3664,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // other blended edges (a disc's side, both rims blended by its height or more)
             // fits only where those bands still meet: their contact size, where less, and
             // located there as `refuse_overlapping_bands` locates it. A polygon taken whole
-            // keeps its own event's size.
+            // keeps its own event's size against the plane bands' contacts, but a curved face's
+            // contact counts wherever it is, so a polygon elsewhere in the selection never
+            // names a size larger than the curved face allows.
             let mut site = None;
             // the event only where every meeting of bands is on a curved face (a plane's
-            // bands keep their refusal)
+            // bands keep their refusal), and no polygon is taken whole
             let (mut met, mut all_curved) = (false, true);
-            if no_polygon {
-                for fit in access.creation_bands_meet(k, &solvers)? {
-                    met = true;
-                    all_curved &= fit.curved;
-                    if self.fit_radius < 0.0 || fit.size < self.fit_radius {
-                        self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
-                        site = Some(fit);
-                    }
+            for fit in access.creation_bands_meet(k, &solvers)? {
+                met |= no_polygon;
+                all_curved &= fit.curved;
+                if (no_polygon || fit.curved)
+                    && (self.fit_radius < 0.0 || fit.size < self.fit_radius)
+                {
+                    self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                    site = Some(fit);
                 }
             }
             // where no band contact is found (each band covers the face past the other edge),

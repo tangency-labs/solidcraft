@@ -454,3 +454,34 @@ fn rims_taking_a_disc_s_whole_side_build_at_the_named_size() {
         assert_one_sound_solid(&mut k, &mut b, 25.0 * PI - 2.0 * cut, 1e-7);
     }
 }
+
+/// #2784 (a review point on #22516): the disc with a 4 x 4 x 10 boss on its top, both rims and the
+/// boss's four top edges rounded 1.5 together. The boss's top is sized as a polygon taken whole
+/// (its bound, half its width, 2), but it is not what fails: the disc's side is. The refusal
+/// names where the disc's bands meet (half its height), not the polygon's larger bound, which
+/// would not build either.
+#[test]
+fn a_polygon_elsewhere_does_not_hide_where_a_disc_s_bands_meet() {
+    let mut k = kernel();
+    let disc = create_cylinder(&mut k, Point3::ZERO, 5.0, 1.0).unwrap();
+    let boss = create_box(&mut k, Point3::new(-2.0, -2.0, 1.0), 4.0, 4.0, 10.0).unwrap();
+    let mut b = boolean_union(&mut k, disc, boss).unwrap();
+    let got = blend(
+        &mut k,
+        &mut b,
+        &[
+            Point3::new(-5.0, 0.0, 0.0),
+            Point3::new(-5.0, 0.0, 1.0),
+            Point3::new(0.0, -2.0, 11.0),
+            Point3::new(0.0, 2.0, 11.0),
+            Point3::new(-2.0, 0.0, 11.0),
+            Point3::new(2.0, 0.0, 11.0),
+        ],
+        1.5,
+        1,
+    );
+    let (reason, fit, kind) = refusal(got);
+    assert_eq!(reason, Some(NoRoomReason::FaceConsumed));
+    assert_eq!(kind, FitKind::Radius);
+    assert!(fit <= 0.5 + 1e-9, "fit {fit}");
+}
