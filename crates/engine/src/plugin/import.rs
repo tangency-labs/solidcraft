@@ -88,6 +88,31 @@ pub fn importers(session: &Session) -> Vec<Importer> {
     format_slots(session, EntryKind::Importer)
 }
 
+/// Whether the importer plugin a link names can read now, and which version of it is installed.
+pub struct ImporterStatus {
+    /// The installed plugin's version, when its manifest can be read.
+    pub installed_version: Option<String>,
+    /// Why it can't read: `not installed`, `turned off`, `unreadable` or `not offering that importer`.
+    pub problem: Option<&'static str>,
+}
+
+/// The state of the importer `format` of plugin `plugin`, from manifests alone: no plugin code runs.
+pub fn importer_status(session: &Session, plugin: &str, format: &str) -> ImporterStatus {
+    let folders = package_folders(session);
+    let Some(folder) = folders.get(plugin) else { return ImporterStatus { installed_version: None, problem: Some("not installed") } };
+    let installed_version = with_installed(session, folder, || read_manifest(folder)).ok().map(|m| m.version);
+    let problem = if session.disabled_plugins.contains(plugin) {
+        Some("turned off")
+    } else if installed_version.is_none() {
+        Some("unreadable")
+    } else if !importers(session).iter().any(|i| i.id == format && i.plugin_id == plugin) {
+        Some("not offering that importer")
+    } else {
+        None
+    };
+    ImporterStatus { installed_version, problem }
+}
+
 /// The slot of `kind` that `format` names, or else the one that claims `path`'s extension. Two
 /// plugins claiming the same extension need `format` to choose.
 pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: Option<&str>) -> Result<Option<FormatSlot>> {
@@ -186,13 +211,26 @@ fn with_schema_defaults(schema: &Value, options: &Value) -> Value {
     defaults
 }
 
-fn convert(
+// What an importer wrote: the design's bytes and, in the desktop app, what it could not carry over.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+use craft_plugin_wasm::Imported;
+#[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[allow(dead_code)]
+struct Imported {
+    design: Vec<u8>,
+}
+
+/// Run `importer` on `path` as the caller's file scope allows, without touching the open design: what
+/// the importer wrote, the version of the plugin that ran, and what `check` made of the output. The
+/// plugin's staged user settings are published only after `check` accepts the output.
+fn run_importer<R>(
     session: &mut Session,
     importer: &Importer,
     path: &str,
     options: &Value,
     consent: Option<&folders::DialogFolders>,
-) -> Result<ImportedDesign> {
+    check: impl FnOnce(&Session, &Imported) -> Result<R>,
+) -> Result<(Imported, String, R)> {
     let package = checked_package(session, importer)?;
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     if !options.is_object() {
@@ -243,6 +281,7 @@ fn convert(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
@@ -265,25 +304,15 @@ fn convert(
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })
         });
-        // Keep settings staged while the app validates and evaluates the output. Any early
-        // return drops the private host and its pending settings without publishing them.
+        // Keep settings staged while the caller validates the output. Any early return drops the
+        // private host and its pending settings without publishing them.
         let (mut host, imported) = result?;
         let imported = imported?;
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
-        let mut doc = solidcraft_io::read_design(&imported.design)
-            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
-        if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
-            && doc.name.trim().is_empty()
-        {
-            doc.name = stem;
-        }
-        let mut fresh = Session::opened_at_validating(doc, None, None, session.validation());
-        fresh.undo.clear();
-        fresh.redo.clear();
-        fresh.mark_unsaved();
-        // Cancel pressed while the new design was evaluated leaves the open one alone.
+        let checked = check(session, &imported)?;
+        // Cancel pressed while the caller evaluated the output leaves everything alone.
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
@@ -292,6 +321,74 @@ fn convert(
             host.publish_committed()?;
             session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings;
         }
+        Ok((imported, package.manifest.version.clone(), checked))
+    }
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    {
+        let _ = (package, input_folder, options, input_folders, check);
+        Err(error("opening a file with an importer plugin needs the desktop app"))
+    }
+}
+
+/// What an importer wrote for a linked import: the design as file bytes, the version of the plugin
+/// that wrote it, and what it could not carry over, one line each.
+pub struct ImportedBytes {
+    pub design: Vec<u8>,
+    pub version: String,
+    pub notes: Vec<String>,
+}
+
+/// Run `importer` on `path` and give back the design it wrote. The open design is not touched: a
+/// linked import takes its bodies from the result. A failure names the plugin and file.
+pub fn import_design_bytes(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedBytes> {
+    let consent = session.plugin_state.user.dialog_folders.take();
+    let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    let (imported, version, ()) = run_importer(session, importer, path, options, consent.as_ref(), |_, _| Ok(()))
+        .map_err(super::messages::named(&importer.name, Some(&file)))?;
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    let notes = {
+        let report = &imported.report;
+        let items =
+            report.items.iter().take(20).map(|i| if i.subject.is_empty() { i.message.clone() } else { format!("{}: {}", i.subject, i.message) });
+        let lines: Vec<String> = std::iter::once(report.summary.clone()).filter(|s| !s.is_empty()).chain(items).collect();
+        lines.into_iter().map(|l| format!("{}: {l}", importer.name)).collect()
+    };
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    let notes = Vec::new();
+    Ok(ImportedBytes { design: imported.design, version, notes })
+}
+
+fn convert(
+    session: &mut Session,
+    importer: &Importer,
+    path: &str,
+    options: &Value,
+    consent: Option<&folders::DialogFolders>,
+) -> Result<ImportedDesign> {
+    let (imported, _, fresh) = run_importer(session, importer, path, options, consent, |session, imported| -> Result<Session> {
+        #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            let mut doc = solidcraft_io::read_design(&imported.design)
+                .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
+            if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
+                && doc.name.trim().is_empty()
+            {
+                doc.name = stem;
+            }
+            let mut fresh = Session::opened_at_validating(doc, None, None, session.validation());
+            fresh.undo.clear();
+            fresh.redo.clear();
+            fresh.mark_unsaved();
+            Ok(fresh)
+        }
+        #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+        {
+            let _ = (session, imported);
+            Err(error("opening a file with an importer plugin needs the desktop app"))
+        }
+    })?;
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
         session.replace_design(fresh);
         Ok(ImportedDesign {
             path: path.into(),
@@ -307,7 +404,7 @@ fn convert(
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder, options, input_folders);
+        let _ = (imported, fresh);
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }
@@ -397,6 +494,7 @@ pub fn import_dialog(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder: false };

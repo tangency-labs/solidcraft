@@ -1362,6 +1362,8 @@ pub struct TabHandles<'a> {
     pub view_new: &'a str,
     pub view_more: &'a str,
     pub switcher: &'a str,
+    /// The mark between the tabs where files dragged over the bar would open.
+    pub file_drop: &'a str,
 }
 
 /// One document tab.
@@ -3377,6 +3379,40 @@ pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
+/// Where files dragged from outside the window onto the bar would open: the bar's row and the
+/// places between the shown tabs (from the left end of the first to the right end of the last),
+/// each with the place among all the tabs a file dropped there opens at; and the pass it was
+/// drawn in.
+#[derive(Clone, Debug)]
+struct FileDropZone {
+    rect: Rect,
+    gaps: Vec<(f32, usize)>,
+    pass: u64,
+}
+
+impl FileDropZone {
+    /// The place between tabs (or at either end) nearest `p`, when `p` is over the bar.
+    fn place(&self, p: Pos2) -> Option<usize> {
+        if !self.rect.contains(p) {
+            return None;
+        }
+        self.gaps.iter().min_by(|a, b| (a.0 - p.x).abs().total_cmp(&(b.0 - p.x).abs())).map(|(_, at)| *at)
+    }
+}
+
+/// The place among the tabs of the strip that keeps its state at `id` ([`TabStrip::id`]) where
+/// files dropped with the pointer at `pointer` open, as a new tab each (0 before the first tab,
+/// the number of tabs after the last); `None` when the pointer is not over the bar. Read from the
+/// strip as last drawn (this pass or the one before), so an app can take a drop before it draws
+/// the strip, and a strip no longer drawn takes none.
+pub fn file_drop_place(ctx: &egui::Context, id: egui::Id, pointer: Option<Pos2>) -> Option<usize> {
+    let zone = ctx.data(|d| d.get_temp::<FileDropZone>(id.with("file_drop")))?;
+    if zone.pass.saturating_add(1) < ctx.cumulative_pass_nr() {
+        return None;
+    }
+    zone.place(pointer?)
+}
+
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
     tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
 }
@@ -3642,6 +3678,31 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         }
         None => d.remove::<ViewDrag>(vdrag_id),
     });
+    // Files dragged over the bar from outside the window open there, each as a tab of its own: a
+    // mark shows the place among the tabs they would open at.
+    let mut gaps = Vec::with_capacity(shown + 1);
+    let mut gap = x0;
+    gaps.push((gap, first));
+    for (k, w) in widths.iter().enumerate() {
+        gap += w;
+        gaps.push((gap, first + k + 1));
+    }
+    let zone = FileDropZone { rect: Rect::from_x_y_ranges(x0..=x1.max(x0), r.y_range()), gaps, pass: ui.ctx().cumulative_pass_nr() };
+    let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+    if let Some(gx) =
+        pointer.filter(|_| hovering).and_then(|p| zone.place(p)).and_then(|at| zone.gaps.iter().find(|(_, i)| *i == at)).map(|(x, _)| *x)
+    {
+        // In the 2-point gap a tab leaves at its right.
+        let x = (gx - 1.0).clamp(x0 + 1.0, x1.max(x0 + 1.0));
+        let mark = Rect::from_center_size(pos2(x, r.center().y), vec2(3.0, (r.height() - 6.0).max(3.0)));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, strip.id.with("file_drop_mark")));
+        painter.rect_filled(mark, 1.5, t.accent);
+        for y in [mark.top(), mark.bottom()] {
+            painter.circle_filled(pos2(x, y), 3.5, t.accent);
+        }
+        solidcraft_ui_registry::publish_handle(h.file_drop, mark.center());
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(strip.id.with("file_drop"), zone));
     // In the order they happened: a later choice this frame (the list's, the menu's) wins.
     actions.extend(shut.map(TabAction::Close));
     actions.extend(pick.map(TabAction::Select));
