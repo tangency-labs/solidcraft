@@ -257,7 +257,10 @@ fn one_body_one_thickness_and_what_was_not_measured() {
     part.cutouts = 1;
     part.perforations = vec![(5, 0.4)];
     let r = run("jlccnc", &part);
-    assert_eq!(rule(&r, "file.one_body").len(), 1);
+    // JLCCNC allows a sheet-metal assembly in one STEP file: no one-body rule, said, not found.
+    assert!(rule(&r, "file.one_body").is_empty());
+    assert!(r.not_checked.iter().any(|n| n.rule == "file.one_body"));
+    assert_eq!(rule(&run("pcbway", &part), "file.one_body").len(), 1);
     assert_eq!(rule(&r, "file.uniform_thickness").len(), 1);
     // The perforation's holes are held to the hole minimum like any hole: JLCCNC's strictest is 2 mm.
     assert!(rule(&r, "hole.min_diameter").iter().any(|f| f.feature == Some(5)));
@@ -455,9 +458,12 @@ fn the_file_rules_are_not_checked_without_the_dxf() {
     }
 }
 
-/// What the export writes for the options a profile recommends, for a part with two bends and a
-/// cut-out: the layout `sheet.export_dxf` has for each `layers` value (everything on layer 0 with
-/// `single`; only the cut contours there with `cut`, the bend lines on their own layers).
+/// The facts the evaluator is given for the options a profile recommends, for a part with two
+/// bends and a cut-out, written by hand to match the layout `sheet.export_dxf` has for each
+/// `layers` value (everything on layer 0 with `single`; only the cut contours there with `cut`,
+/// the bend lines on their own layers). It does not call the exporter: the engine test
+/// `the_dxf_is_checked_as_the_shop_recommends_unless_the_call_says_otherwise` reads the real
+/// export's layers for the recommended options.
 fn exported_as(r: &crate::shop_rules::DxfExport) -> DxfFacts {
     use crate::shop_rules::DxfLayers;
     let bend_lines = if r.bend_lines { 2 } else { 0 };
@@ -474,9 +480,10 @@ fn exported_as(r: &crate::shop_rules::DxfExport) -> DxfFacts {
     }
 }
 
-/// A bent part exported as each built-in shop recommends has no file finding: the recommendation
-/// is one the export produces and the shop's own rules accept. The export's defaults (layers by
-/// role) are still a finding for the shops that want one cut layer.
+/// The evaluator gives a bent part no file finding for the facts of each built-in shop's recommended
+/// export: the recommendation is one the shop's own rules accept. (That the export writes that
+/// layout is the engine test's.) The export's defaults (layers by role) are still a finding for the
+/// shops that want one cut layer.
 #[test]
 fn the_recommended_export_of_a_bent_part_meets_each_shops_file_rules() {
     let file_rules = ["file.dxf_single_layer", "file.dxf_closed_contours", "file.dxf_bend_lines", "file.text_outlined"];

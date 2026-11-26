@@ -80,6 +80,19 @@ fn a_malformed_profile_is_refused_with_the_reason_and_never_panics() {
     }
     assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([])).contains("give 1 to"));
     assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"][0]["url"] = json!("http://x")).contains("https://"));
+    for url in
+        ["https://", "https:///page", "https://.example.com", "https://-x.com/", "https://x.com:/a", "https://x.com:99999999/a", "https://a b.com"]
+    {
+        assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"][0]["url"] = json!(url)).contains("https://"), "{url}");
+    }
+    let ok = |url: &str| {
+        let mut v = minimal();
+        v["rules"][0]["limits"][0]["sources"][0]["url"] = json!(url);
+        Profile::from_value(&v).is_ok()
+    };
+    assert!(ok("https://example.com") && ok("https://www.example.com/a/b.html?x=1#y") && ok("https://example.com:8443/a"));
+    // A bend radius is only there for the bend rules: a formula with it elsewhere would be dropped.
+    assert!(broken(&|v| v["rules"][0]["limits"][0]["plus_radius"] = json!(1.0)).contains("plus_radius"));
     assert!(broken(&|v| v["id"] = json!("Bad Id")).contains("lower case"));
     assert!(broken(&|v| v["rules"][0]["colour"] = json!(1)).contains("unknown field"));
     assert!(broken(&|v| v["rules"][0]["id"] = json!("hole.max_diameter")).contains("hole.max_diameter"));

@@ -14,6 +14,20 @@ name; SolidCraft never fetches one.
 
 ## File (version 1)
 
+A profile given to `sheet.check_shop` as an object, or in a `.json` file whose path it is given,
+is the profile alone:
+
+```json
+{ "id": "acme", "name": "Acme Fab", "note": "For a person reading the file.", "dxf_export": { ... }, "rules": [ ... ] }
+```
+
+(`id`, `note` and `dxf_export` are optional.) Its `id` is `custom` when it has none. `id` is lower
+case letters, digits, `_` and `-`. A rule is given once; one a profile leaves out is listed as not
+checked.
+
+The versioned envelope is the separate format of the built-in catalogue,
+`assets/sheet-metal/shop-rules.json`; `sheet.check_shop` does not read it from a path:
+
 ```json
 {
   "format": "solidcraft-shop-rules",
@@ -22,11 +36,6 @@ name; SolidCraft never fetches one.
   "profiles": [ { "id": "acme", "name": "Acme Fab", "rules": [ ... ] } ]
 }
 ```
-
-A profile given to `sheet.check_shop` as an object, or in a file, is the profile alone
-(`{"id", "name", "note"?, "dxf_export"?, "rules"}`); its `id` is `custom` when it has none. `id` is lower case
-letters, digits, `_` and `-`. A rule is given once; one a profile leaves out is listed as not
-checked.
 
 ## DXF export
 

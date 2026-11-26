@@ -2771,7 +2771,10 @@ fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
     // Changing the row sends it: one layer on SendCutSend, whose bend lines then sit on the cut layer.
     let Some(Kind::Sheet(Sm::ShopCheck { layers, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
     *layers = 0;
-    shop_check_texts(&mut h);
+    let texts = shop_check_texts(&mut h);
+    // The summary follows the row: one layer now, the shop's bend lines kept.
+    assert!(texts.iter().any(|t| t == "Export with: single layer, bend lines"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Export with: one cut layer, bend lines"), "{texts:?}");
     let reply = shop_check_reply(&h);
     assert_eq!((reply["dxf"]["layers"].as_str(), reply["dxf"]["from"].as_str()), (Some("single"), Some("asked")), "{reply}");
     assert!(shop_check_rules(&h).contains(&"file.dxf_single_layer".to_string()), "the override is an error again");

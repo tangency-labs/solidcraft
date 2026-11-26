@@ -113,6 +113,8 @@ pub struct Part {
     pub bodies: Vec<String>,
     /// Recesses cut part-way through the sheet.
     pub recesses: usize,
+    /// Conical countersinks, which thin the sheet round their holes.
+    pub countersinks: usize,
     pub holes: Vec<Hole>,
     /// Cut-outs that are not round.
     pub cutouts: usize,
@@ -146,6 +148,7 @@ pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_s
         flat_size,
         bodies,
         recesses: sk.pockets.len(),
+        countersinks: sk.countersinks.len(),
         perforations: sk.perforations.iter().map(|p| (p.feature, p.diameter)).collect(),
         ..Part::default()
     };
@@ -425,6 +428,11 @@ fn uniform(ctx: &Ctx<'_>, r: &mut Report) {
         let message =
             format!("{n} recess(es) cut part-way into the sheet make it thinner there; {} wants one thickness all over{}", ctx.who(), ctx.note());
         r.findings.push(ctx.finding(message));
+    }
+    let n = ctx.part.countersinks;
+    if n > 0 {
+        let why = format!("{n} countersink(s) thin the sheet round their holes: the rule is checked for recesses cut part-way into the sheet only");
+        not_checked(r, ctx.rule.id, why);
     }
 }
 

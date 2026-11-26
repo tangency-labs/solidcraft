@@ -6,7 +6,7 @@
     {
       "id": "generic",
       "name": "Generic",
-      "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly: a part that passes should be accepted by any of them. It has no stock list or sheet size, which differ. Values were checked against the pages on 2026-11-25. A spot check is still wanted for PCBWay's hole to bend, which one page measures to the bend line and the other to the bend region; the default here (to where the bend starts) is the stricter reading.",
+      "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly. A preliminary check, not a promise: a shop adds rules of its own (materials, sizes, per-material limits), so run the shop's own profile before ordering. It has no stock list or sheet size, which differ. Values were checked against the pages on 2026-11-25. A spot check is still wanted for PCBWay's hole to bend, which one page measures to the bend line and the other to the bend region; the default here (to where the bend starts) is the stricter reading.",
       "dxf_export": {
         "layers": "single",
         "bend_lines": false,
@@ -253,7 +253,7 @@
     {
       "id": "pcbway",
       "name": "PCBWay",
-      "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper sheets are smaller than the 3000 by 1500 mm given.",
+      "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper sheets are smaller than the 3000 by 1500 mm given: their cuttable areas (the raw sheet less a 5 mm margin) are entered by material, and a material that is none of them is said not to have been checked for them.",
       "dxf_export": {
         "layers": "single",
         "bend_lines": false,
@@ -502,7 +502,7 @@
     {
       "id": "jlccnc",
       "name": "JLCCNC",
-      "note": "From JLCCNC's help pages and design blog, checked against them on 2026-11-25. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used. A spot check is still wanted for hole to edge, which only the blog gives; the help pages leave hole to bend to platform limits.",
+      "note": "From JLCCNC's help pages and design blog, checked against them on 2026-11-25. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used. A spot check is still wanted for hole to edge, which only the blog gives; the help pages leave hole to bend to platform limits. Its file page allows a sheet-metal assembly in one STEP file, so it has no one-body rule: more than one body is not a finding.",
       "dxf_export": {
         "layers": "roles",
         "bend_lines": true,
@@ -517,16 +517,6 @@
         ]
       },
       "rules": [
-        {
-          "id": "file.one_body",
-          "sources": [
-            {
-              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
-              "read": "2026-11-25",
-              "says": "the file holds no extra reference parts or hidden invalid solids; a sheet-metal assembly is one STEP file"
-            }
-          ]
-        },
         {
           "id": "file.uniform_thickness",
           "sources": [

@@ -1731,6 +1731,27 @@ fn a_hole_is_measured_from_its_rim_to_the_edge() {
     assert!(f[0]["message"].as_str().unwrap_or("").contains("has its rim 3 mm from the nearest edge"), "{}", f[0]);
 }
 
+/// A countersink thins the sheet round its hole: the one-thickness rule does not measure it, so it
+/// is listed as not checked rather than passed.
+#[test]
+fn a_countersink_is_said_not_to_be_checked_for_one_thickness() {
+    let mut s = plate();
+    let cone = json!({"type": "countersink", "cs_diameter": "7.85", "cs_angle": "120 deg"});
+    let said = |s: &mut Session| {
+        let reply = run(s, "sheet.check_shop", json!({"shop": "sendcutsend"}));
+        reply["not_checked"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .any(|n| n["rule"] == "file.uniform_thickness" && n["why"].as_str().unwrap_or("").contains("countersink"))
+    };
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
+    assert!(!said(&mut s), "a plain hole thins nothing");
+    run(&mut s, "solid.hole", json!({"position": [20, 30, T], "diameter": 3.35, "hole": cone}));
+    assert!(said(&mut s));
+}
+
 /// A perforation field's holes are not measured for spacing: the two spacing rules say so, and the
 /// diameter rule is still looked at.
 #[test]

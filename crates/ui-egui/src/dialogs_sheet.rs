@@ -956,14 +956,18 @@ fn shop_check_rows(
     let layer_names = DXF_LAYERS.map(|(_, key, _)| solidcraft_ui_text::tr(key));
     *layers = (*layers).min(DXF_LAYERS.len() - 1);
     choice_row(ui, "ui.shop_check_layers", "sm_shop_check_layers", layers, &layer_names);
-    if recommended.is_some() {
+    // The summary is of the export the check runs with: the row as it stands, over the rest of
+    // the shop's recommendation (hardware notes have no layer of their own on one layer).
+    let overridden = *layers != wanted_layers;
+    if recommended.is_some() || overridden {
         let tr = solidcraft_ui_text::tr;
-        let mut settings = vec![tr(DXF_LAYERS[wanted_layers].2)];
+        let (shown, _, shown_text) = DXF_LAYERS[*layers];
+        let mut settings = vec![tr(shown_text)];
         settings.push(tr(if wanted.bend_lines { "ui.shop_check_export_bend_lines" } else { "ui.shop_check_export_no_bend_lines" }));
         if wanted.bend_notes {
             settings.push(tr("ui.shop_check_export_bend_notes"));
         }
-        if wanted.hardware_notes {
+        if wanted.hardware_notes && shown != DxfLayers::Single {
             settings.push(tr("ui.shop_check_export_hardware_notes"));
         }
         let line = solidcraft_ui_text::format("ui.shop_check_export_with", &[("settings", &settings.join(", "))]);

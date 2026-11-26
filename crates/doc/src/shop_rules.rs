@@ -488,12 +488,27 @@ fn factor(rule: &str, what: &str, v: f64) -> Result<(), ShopRulesError> {
     if v.is_finite() && (0.0..=MAX_FACTOR).contains(&v) { Ok(()) } else { refuse(format!("{rule}: {what} must be 0 to {MAX_FACTOR}, not {v}")) }
 }
 
+/// An https address with a host: `https://` and then a name of letters, digits, dots and hyphens
+/// (and a port), not empty and not starting with a dot or a hyphen.
+fn https_address(url: &str) -> bool {
+    if url.len() > 300 || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let (name, port) = host.split_once(':').map_or((host, None), |(n, p)| (n, Some(p)));
+    let name_ok = name.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        && !name.ends_with('.');
+    name_ok && port.is_none_or(|p| !p.is_empty() && p.len() <= 5 && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn sources(rule: &str, list: &[Source]) -> Result<(), ShopRulesError> {
     if list.is_empty() || list.len() > MAX_SOURCES {
         return refuse(format!("{rule}: give 1 to {MAX_SOURCES} sources (the page each value comes from)"));
     }
     for s in list {
-        if !s.url.starts_with("https://") || s.url.len() > 300 || s.url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        if !https_address(&s.url) {
             return refuse(format!("{rule}: a source url must be an https:// address, not `{}`", clip(&s.url)));
         }
         text(&format!("{rule}: read"), &s.read, 32)?;
@@ -595,6 +610,9 @@ impl Limit {
             length(name, "short_value", v)?;
         }
         if let Some(v) = self.plus_radius {
+            if !matches!(id, RuleId::HoleToBend | RuleId::FlangeMin) {
+                return refuse(format!("{name}: `plus_radius` belongs to hole.to_bend and flange.min, the rules that have a bend radius"));
+            }
             factor(name, "plus_radius", v)?;
         }
         if self.from.is_some() && !matches!(id, RuleId::HoleToBend | RuleId::FlangeMin) {
