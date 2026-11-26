@@ -32,7 +32,8 @@
 //!
 //! [`brep`] converts the record's B-rep to the kernel's body and back; [`cell_grid`] the cell
 //! grid's spec and plan; [`develop`] a sheet metal part's surfaces and its flat pattern; [`frame`]
-//! frame-stock pieces, members and gusset supports.
+//! frame-stock pieces, members and gusset supports; [`shaft_spline`] a shaft spline's numbers,
+//! plan and outlines.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
@@ -42,6 +43,8 @@ pub mod brep;
 pub mod cell_grid;
 pub mod develop;
 pub mod frame;
+pub mod round_face;
+pub mod shaft_spline;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;
