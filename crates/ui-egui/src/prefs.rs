@@ -4119,6 +4119,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
+    if !accepted::forms_cad_tolerance(&p) {
+        p.forms_cad_tolerance = Prefs::default().forms_cad_tolerance;
+    }
     if !accepted::origin_plane_scale(&p) {
         p.origin_plane_scale = Prefs::default().origin_plane_scale;
     }
@@ -4412,6 +4415,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
+    }
+    if !accepted::forms_cad_tolerance(&new) {
+        return Err("`forms_cad_tolerance` must be 0.000001…1 mm".into());
     }
     if !accepted::origin_plane_scale(&new) {
         return Err("`origin_plane_scale` must be 0.5…4".into());
@@ -4941,6 +4947,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn compact_form_editor_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_compact_editor);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_compact_editor":true})).unwrap();
+        assert!(prefs.forms_compact_editor);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_compact_editor"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_compact_editor);
+    }
+    #[test]
+    fn form_drag_feedback_defaults_on_preserves_legacy_and_resets_with_design() {
+        assert!(super::Prefs::default().forms_drag_feedback);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_drag_feedback":false})).unwrap();
+        assert!(!prefs.forms_drag_feedback);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_drag_feedback"], false);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(prefs.forms_drag_feedback);
+    }
+    #[test]
+    fn form_filter_selection_preference_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_preserve_selection);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_preserve_selection":true})).unwrap();
+        assert!(prefs.forms_preserve_selection);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_preserve_selection"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_preserve_selection);
+    }
+    #[test]
+    fn form_region_selection_defaults_on_preserves_legacy_and_resets_on_design_page() {
+        assert!(super::Prefs::default().forms_region_selection);
+        let mut p = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_region_selection":false})).unwrap();
+        assert!(!p.forms_region_selection);
+        assert_eq!(serde_json::to_value(&p).unwrap()["forms_region_selection"], false);
+        super::reset_preferences(&mut p, super::PAGE_DESIGN);
+        assert!(p.forms_region_selection);
+    }
     /// Profile operations switches the profiler when it changes, and only then: an agent's
     /// diagnostics.profile in between is not undone next frame.
     #[test]
@@ -8271,6 +8313,23 @@ mod tests {
         }
         let read = lenient(&json!({"dimension_text_scale":9.0,"dimension_colour":[256,0,0]}));
         assert_eq!((read.dimension_text_scale, read.dimension_colour), (1.0, None), "bad values cost only their settings");
+    }
+
+    #[test]
+    fn saved_form_tolerance_migrates_before_unrelated_preference_updates() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let default = Prefs::default().forms_cad_tolerance;
+        for invalid in [0.0, 1.01] {
+            h.app.preferences = lenient(&json!({"forms_cad_tolerance":invalid,"dimension_text_scale":1.5}));
+            assert_eq!(h.app.preferences.forms_cad_tolerance, default);
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.5);
+            let out = h.call("ui.prefs", json!({"dimension_text_scale":1.2}));
+            assert!(out["error"].is_null(), "{out}");
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.2);
+        }
+        let valid = lenient(&json!({"forms_cad_tolerance":0.01}));
+        assert_eq!(valid.forms_cad_tolerance, 0.01);
     }
 
     /// #21191: Origin plane size scales the origin planes' squares in the view, from the size they

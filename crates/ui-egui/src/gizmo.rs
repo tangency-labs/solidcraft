@@ -317,6 +317,19 @@ fn snap(v: f64, step: f64, free: bool) -> f64 {
     if free || step <= 0.0 { v } else { (v / step).round() * step }
 }
 
+/// Screen-aligned axes in the plane normal to the gizmo's view ray.
+pub(crate) fn view_plane_basis(proj: &Proj, at: Pos2) -> Option<[Vec3; 2]> {
+    let (right, _, _) = proj.cam.basis();
+    solidcraft_kernel::services::form_transform::view_plane_basis(proj.ray(at).1, right)
+}
+
+fn snap_plane(delta: Vec3, basis: [Vec3; 2], step: f64, free: bool) -> Vec3 {
+    if free || step <= 0.0 {
+        return delta;
+    }
+    solidcraft_kernel::services::form_transform::SnapFrame::plane(basis).and_then(|frame| frame.quantise(delta, step)).unwrap_or(delta)
+}
+
 /// Discard a suspended pointer gesture without reporting a final model change.
 pub(crate) fn cancel(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|d| d.remove::<State>(id));
@@ -371,6 +384,9 @@ pub fn take_click(ui: &egui::Ui, id: egui::Id) -> Option<Handle> {
 
 /// Draw the triad and run a drag on it. `step` is the distance snap step.
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
+    show_mode(ui, painter, proj, id, t, step, false)
+}
+pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64, scale: bool) -> Option<Drag> {
     let tk = Tokens::get();
     ui.data_mut(|d| d.remove::<Handle>(id.with("click")));
     let l = mm_per_px(proj, t.center)? * LEN_PX;
@@ -399,9 +415,15 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         }
     }
     let state: Option<State> = ui.data(|d| d.get_temp(id));
-    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let (pointer, press) = ui.input(|i| {
+        let press = i.pointer.primary_down().then(|| i.pointer.press_origin()).flatten();
+        (i.pointer.hover_pos(), press)
+    });
+    // egui starts a drag after the pointer has moved. Pick the handle under the
+    // original press so that a fast first move cannot switch the constraint.
     let yielding = YIELD.with(|y| y.replace(false));
-    let hovered = if state.is_none() && !yielding { pointer.filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
+    let hovered =
+        if state.is_none() && !yielding { press.or(pointer).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
     let active = state.map(|s| s.handle).or(hovered);
     let hot = |h: Handle| active == Some(h);
     let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { tk.axes()[i.min(2)] };
@@ -413,10 +435,20 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         painter.extend(projected_polygon(q, c.gamma_multiply(if hot(Handle::Plane(*i)) { 0.7 } else { 0.35 }), Stroke::new(1.0, c)));
     }
     for (i, a, b, _) in &sh.arrows {
-        arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
+        if scale {
+            let color = col(Handle::Axis(*i), *i);
+            painter.line_segment([*a, *b], Stroke::new(2.0, color));
+            painter.rect_filled(Rect::from_center_size(*b, vec2(10.0, 10.0)), 1.0, color);
+        } else {
+            arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
+        }
     }
     let bc = if hot(Handle::Ball) { tk.accent } else { Color32::from_gray(235) };
-    painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
+    if scale {
+        painter.rect_filled(Rect::from_center_size(sh.ball, vec2(12.0, 12.0)), 1.0, bc);
+    } else {
+        painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
+    }
     // The handle under the press itself, owned as `hovered` is (this layer, inside the view): a
     // press and release in one frame can end with the pointer somewhere else, even off the triad.
     let pressed = || {
@@ -472,7 +504,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
                 Handle::Ring(i) => {
                     let q = on_plane(proj, from, c, t.frame[i])? - c;
                     let (e1, e2) = t.basis(i);
-                    s.last = q.dot(e2).atan2(q.dot(e1));
+                    s.last = solidcraft_kernel::services::forms_view_queries::ring_angle(q, e1, e2);
                 }
                 _ => s.grab = on_plane(proj, from, c, plane_normal(h))?,
             }
@@ -500,7 +532,9 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     let change = match st.handle {
         Handle::Axis(i) => {
             let v = match st.head_on {
-                Some((from, dir, scale)) => f64::from((p - from).dot(dir)) * scale,
+                Some((from, dir, scale)) => {
+                    f64::from(solidcraft_kernel::services::forms_view_queries::pixel_component((p - from).into(), dir.into())) * scale
+                }
                 None => along(proj, p, st.center, t.frame[i]).map(|v| v - st.t0).unwrap_or(0.0),
             };
             Change::Translate(t.frame[i] * snap(v, step, free))
@@ -508,7 +542,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         Handle::Ring(i) => {
             if let Some(q) = on_plane(proj, p, st.center, t.frame[i]).map(|q| q - st.center) {
                 let (e1, e2) = t.basis(i);
-                let th = q.dot(e2).atan2(q.dot(e1));
+                let th = solidcraft_kernel::services::forms_view_queries::ring_angle(q, e1, e2);
                 let mut d = th - st.last;
                 while d > std::f64::consts::PI {
                     d -= std::f64::consts::TAU;
@@ -523,8 +557,15 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         }
         h => {
             let d = on_plane(proj, p, st.center, plane_normal(h)).map(|q| q - st.grab).unwrap_or(Vec3::ZERO);
-            let [fx, fy, fz] = t.frame;
-            Change::Translate(fx * snap(d.dot(fx), step, free) + fy * snap(d.dot(fy), step, free) + fz * snap(d.dot(fz), step, free))
+            let basis = match h {
+                Handle::Plane(i) => Some([t.frame[(i + 1) % 3], t.frame[(i + 2) % 3]]),
+                Handle::Ball if t.axes.iter().filter(|on| **on).count() == 2 => {
+                    t.axes.iter().position(|on| !on).map(|i| [t.frame[(i + 1) % 3], t.frame[(i + 2) % 3]])
+                }
+                Handle::Ball => view_plane_basis(proj, sh.ball),
+                _ => None,
+            };
+            Change::Translate(basis.map_or(d, |basis| snap_plane(d, basis, step, free)))
         }
     };
     if done {
@@ -639,6 +680,17 @@ pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapped_drag_stays_in_an_oriented_plane() {
+        let normal = Vec3::new(0.6, 0.8, 0.0);
+        let along = Vec3::new(0.8, -0.6, 0.0);
+        let delta = along * 1.4 + Vec3::Z * 0.6;
+        let snapped = snap_plane(delta, [along, Vec3::Z], 1.0, false);
+        assert!(snapped.dot(normal).abs() < 1e-12);
+        assert!(snapped.dist(along + Vec3::Z) < 1e-12);
+        assert_eq!(snap_plane(delta, [along, Vec3::Z], 1.0, true), delta);
+    }
 
     #[test]
     fn plane_squares_stay_within_the_triad() {

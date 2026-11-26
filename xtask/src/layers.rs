@@ -42,6 +42,7 @@ impl Class {
 /// prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
+    ("kernel-services", Class::Layer(0)),
     // the kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md); solidcore-record only
     ("kernel-api", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
@@ -123,8 +124,15 @@ pub const TABLE: &[(&str, Class)] = &[
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
 /// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
 /// Sketch and sheet development reach solidcore's services through the kernel, its adapter.
-pub const INTRA_LAYER_ORDER: &[&[&str]] =
-    &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"], &["kernel", "sketch"], &["kernel", "develop"]];
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[
+    &["kernel-services", "geom"],
+    &["gpu", "ui-egui"],
+    &["gpu", "mcp"],
+    &["smlib", "kernel"],
+    &["step", "kernel"],
+    &["kernel", "sketch"],
+    &["kernel", "develop"],
+];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
@@ -551,6 +559,13 @@ pub fn adapter_check(crates: &[Crate], allow: &str) -> Vec<String> {
             continue;
         }
         for d in &c.deps {
+            // The record-only adapter is below geom. Its only backend is the public ops API.
+            if c.path == "crates/kernel/services" && d.name == "solidcore-ops" && d.kind == DepKind::Normal {
+                continue;
+            }
+            if d.name == "solidcraft-kernel-services" && c.path != "crates/geom" {
+                errors.push(format!("{} must use solidcraft_kernel::services", c.path));
+            }
             if !(is_solidcore_name(&d.name) || d.from_solidcore) || d.name == RECORD {
                 continue;
             }
@@ -939,6 +954,8 @@ mod tests {
     #[test]
     fn adapter_record_and_the_adapter_itself_pass() {
         assert!(adapter_check(&[app_crate("crates/doc", "solidcore-record", Normal)], "").is_empty());
+        assert!(adapter_check(&[app_crate("crates/kernel/services", "solidcore-ops", Normal)], "").is_empty());
+        assert_eq!(adapter_check(&[app_crate("crates/kernel/services", "solidcore", Normal)], "").len(), 1);
         for path in ADAPTER_CRATES {
             assert!(adapter_check(&[app_crate(path, "solidcore-ops", Normal)], "").is_empty(), "{path}");
         }

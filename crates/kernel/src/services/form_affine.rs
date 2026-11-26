@@ -1,0 +1,16 @@
+//! Record-vector access to checked SolidCore affine maps.
+
+use solidcore_ops::affine as ops;
+use solidcore_record::Vec3;
+
+use crate::{KernelError, Result};
+
+pub use ops::{Fit, Matrix, fit_between, frame_point, frame_vector, from_frame, mapped_axes, proper_axes, vector};
+
+/// Rotate about the line through `origin`, then translate.
+pub fn rigid(translation: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Matrix> {
+    if !(translation.is_finite() && origin.is_finite() && angle.is_finite()) {
+        return Err(KernelError::Invalid("non-finite transform".into()));
+    }
+    ops::rigid_motion(translation, origin, axis, angle).map_err(|_| KernelError::Invalid("invalid rigid transform".into()))
+}

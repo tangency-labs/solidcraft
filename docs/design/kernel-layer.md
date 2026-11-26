@@ -198,6 +198,11 @@ development.
    - It also keeps names comparable, because names are worked out from picks and measures.
    - Individual services can join the trait later (a faster classifier, say), each as its own
      `OpKind`, measured like any other.
+   The record and spline services used by `solidcraft-geom` live in
+   `crates/kernel/services`, a leaf of the adapter that depends only on the public
+   SolidCore operations crate. The router depends on geom, so geom calls this leaf
+   directly. Higher layers use the same services through `solidcraft_kernel::services`.
+
 3. **Runtime services**: guard, threads and stop tokens. The router wraps every backend call in
    `guard`, so a panic in any kernel becomes `KernelError::Internal`.
 

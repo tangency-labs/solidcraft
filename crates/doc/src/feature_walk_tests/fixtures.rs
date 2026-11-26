@@ -36,6 +36,13 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "form",
+            json!({"type":"form","definition":{
+                "placement":{"origin":[2,3,4],"axes":[[1,0,0],[0,1,0],[0,0,1]]},
+                "cage":{"points":[[0,0,0],[10,0,0],[10,10,0],[0,10,0]],"faces":[[0,1,2,3]]},
+                "parameters":{"kind":"face","dimensions":[10,10,10],"segments":[1,1,1]}},"tolerance":"form.tolerance","targets":["B"]}),
+        ),
+        (
             "frame_gusset",
             json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
         ),

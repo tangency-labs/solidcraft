@@ -623,6 +623,7 @@ impl FileAction {
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::Revert => app.session.path.is_some(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
+            Self::Command("document.metadata") => app.session.forms_prototype.is_none(),
             _ => true,
         };
         !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
@@ -923,6 +924,10 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::save_job::host_pending(app, app.session.uid) {
         if !crate::documents::saving_to_close(app) {
             app.set_status(app.tr("ui.browser_save_in_progress"), true);
@@ -960,6 +965,10 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 }
 
 pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::save_job::host_pending(app, app.session.uid) {
         app.set_status(app.tr("ui.browser_save_in_progress"), true);
         return;
@@ -995,6 +1004,10 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
 
 /// File > Download design (browser build): the open design as a `.sc` file download.
 pub(crate) fn download_design(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::DOWNLOAD.into());
         return;
@@ -3212,6 +3225,12 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     let mut ran = Vec::new();
     for (index, (k, repeat, mods)) in keys.into_iter().enumerate() {
         use egui::Key;
+        if crate::forms_prototype::shortcut(app, ctx, k, mods) {
+            continue;
+        }
+        if mods.is_none() && crate::forms_prototype::owns_key(app, k) {
+            continue;
+        }
         if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
             app.start("ui.palette");
             continue;
@@ -3802,6 +3821,19 @@ mod header_report_tests {
         let name = offered.borrow().last().map(|(n, _)| n.clone()).unwrap();
         assert!(name.ends_with(".sc"), "Save As offers .sc: {name}");
         assert!(h.dir.join(&name).is_file() && old.is_file(), "Save As leaves the .solidcraft file as it was");
+    }
+
+    #[test]
+    fn active_form_refuses_save_as_before_requesting_a_path() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_save = Some(Box::new(|_, _| panic!("unfinished Forms must be refused before a path is requested")));
+        h.app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        save_as_named(&mut h.app, "Draft", solidcraft_engine::io::DESIGN_EXT);
+        let (message, _, error) = h.app.status.as_ref().unwrap();
+        assert!(*error);
+        assert_eq!(message, h.app.tr("forms.prototype.finish_before_save"));
+        assert!(h.app.file_picker.is_none());
+        assert!(h.app.tree.capture_prompt.is_none());
     }
 
     /// #8329: Save As (and Save a Copy) offer the name of the file the design came from, not the
@@ -7516,7 +7548,9 @@ mod persistent_ribbon_tests {
         h.app.ui.tab = "SURFACE".into();
         h.frames(3);
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
-        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "FORMS", "CREATE", "EDIT", "MESH"]);
+        let (_, forms, _) = lists.iter().find(|(p, _, _)| *p == "FORMS").unwrap();
+        assert!(forms.iter().any(|command| command.id == "form.prototype.create"));
         let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
         assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
         assert_eq!(
@@ -7532,7 +7566,7 @@ mod persistent_ribbon_tests {
         h.app.preferences.legacy_surface_toolbar = true;
         h.frames(3);
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
-        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "CONVERT"]);
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "FORMS", "CREATE", "EDIT", "CONVERT"]);
         let (_, create, count) = lists.iter().find(|(p, _, _)| *p == "CREATE").unwrap();
         assert!(!create.iter().any(|c| c.id == "surface.thicken"));
         assert_eq!(*count, 4);

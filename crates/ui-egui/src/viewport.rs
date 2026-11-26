@@ -397,6 +397,8 @@ pub struct ViewportState {
     /// The preset's navigation for the left-button drag under way (Alias: Shift+Alt), taken
     /// when the button went down, so the drag neither selects nor moves sketch geometry.
     pub primary_nav: Option<NavMode>,
+    /// A Shift press on Form geometry belongs to the Form through release.
+    pub(crate) form_shift_press: bool,
     /// A primary press that started with the Zoom shortcut owns the pointer until release.
     pub(crate) zoom_shortcut_drag: bool,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
@@ -6925,6 +6927,7 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
+    refined_weld_dialog(app).hash(&mut h);
     for (name, m) in &app.preview.outlines {
         (name, std::sync::Arc::as_ptr(m)).hash(&mut h);
     }
@@ -7294,6 +7297,10 @@ fn hovered_in_model(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, lit: 
         && !app.preview.effective_replaced().contains(&b.name)
         && app.session.doc.face_colors(b).is_empty()
         && app.viewport.instanced_at.lock().is_ok_and(|m| m.contains_key(&b.name))
+}
+
+fn refined_weld_dialog(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::RefinedWeld)))
 }
 
 /// Light the whole of `b` from what the model already has on the GPU, copying no triangle: its

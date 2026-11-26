@@ -1,0 +1,38 @@
+{
+  "ar": {
+    "forms.prototype.insert_curve_miss": "انقر على نقطة مرئية على حافة الشكل الحر.",
+    "forms.prototype.insert_point_limit": "تقبل سلسلة «إدراج نقطة» 32 نقطة كحد أقصى."
+  },
+  "de": {
+    "forms.prototype.insert_curve_miss": "Klicken Sie auf einen sichtbaren Punkt auf einer Formkante.",
+    "forms.prototype.insert_point_limit": "Eine Kette für „Punkt einfügen“ kann höchstens 32 Punkte enthalten."
+  },
+  "en": {
+    "forms.prototype.insert_curve_miss": "Click a visible point on a Form edge.",
+    "forms.prototype.insert_point_limit": "An Insert Point chain accepts at most 32 points."
+  },
+  "fr": {
+    "forms.prototype.insert_curve_miss": "Cliquez sur un point d’une arête visible de la forme.",
+    "forms.prototype.insert_point_limit": "Une chaîne d’insertion accepte au maximum 32 points."
+  },
+  "he": {
+    "forms.prototype.insert_curve_miss": "יש ללחוץ על נקודה גלויה בקצה של הצורה החופשית.",
+    "forms.prototype.insert_point_limit": "שרשרת «הוספת נקודה» יכולה להכיל עד 32 נקודות."
+  },
+  "ja": {
+    "forms.prototype.insert_curve_miss": "表示されているフォームのエッジ上をクリックしてください。",
+    "forms.prototype.insert_point_limit": "「点を挿入」のチェーンには最大32個の点を指定できます。"
+  },
+  "ko": {
+    "forms.prototype.insert_curve_miss": "폼의 보이는 모서리 위를 클릭하세요.",
+    "forms.prototype.insert_point_limit": "점 삽입 체인은 최대 32개의 점을 포함할 수 있습니다."
+  },
+  "vi": {
+    "forms.prototype.insert_curve_miss": "Nhấp vào một điểm nhìn thấy trên cạnh của hình tự do.",
+    "forms.prototype.insert_point_limit": "Chuỗi chèn điểm chứa tối đa 32 điểm."
+  },
+  "zh": {
+    "forms.prototype.insert_curve_miss": "请在形状的可见边上单击。",
+    "forms.prototype.insert_point_limit": "每条插入点链最多可包含32个点。"
+  }
+}

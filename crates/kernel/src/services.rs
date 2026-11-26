@@ -12,6 +12,8 @@ use solidcore_record::Vec3;
 
 use crate::body::Body;
 
+pub mod form_affine;
+
 pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
 pub use solidcore_ops::FailureCode;
@@ -21,9 +23,12 @@ pub use solidcore_ops::constraint;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
+pub use solidcore_ops::form_guide_curves;
+pub use solidcore_ops::form_transform;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mesh;
+pub use solidcore_ops::mesh_edit;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::paper_gaps;
@@ -37,6 +42,22 @@ pub use solidcore_ops::sweep;
 pub use solidcore_ops::tube_cope;
 pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
+
+pub use solidcraft_kernel_services::form_cage;
+pub use solidcraft_kernel_services::form_curves;
+pub use solidcraft_kernel_services::form_fill;
+pub use solidcraft_kernel_services::form_match;
+pub use solidcraft_kernel_services::form_pipe;
+pub use solidcraft_kernel_services::form_subdivision;
+pub use solidcraft_kernel_services::forms_view_queries;
+pub use solidcraft_kernel_services::ordered_solve;
+pub use solidcraft_kernel_services::parameter_line;
+pub use solidcraft_kernel_services::rational_rim;
+pub use solidcraft_kernel_services::ray_spline;
+pub use solidcraft_kernel_services::ray_tensor;
+pub use solidcraft_kernel_services::spline_space;
+
+pub use crate::placement::Rigid;
 
 /// How far record edge `edge` of `body`, on its exact trimmed curve, passes from `point`. `None`
 /// where the record doesn't convert, the index is past the edges, or the kernel finds no point.

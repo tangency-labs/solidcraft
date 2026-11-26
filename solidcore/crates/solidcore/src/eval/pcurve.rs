@@ -1315,7 +1315,7 @@ const MAX_KNOTS: usize = 1 << 14;
 
 /// The knot span of `u` for degree `p` and `n` control points: the last non-empty span in
 /// `[p, n − 1]` that starts at or before `u` (`None` outside the domain, past rounding).
-fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
+pub(crate) fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     if n <= p || knots.len() != n + p + 1 || !u.is_finite() {
         return None;
     }
@@ -1377,6 +1377,35 @@ fn insert_knot(
     ctrl: &[[f64; 4]],
     u: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
+    insert_knot_with(p, knots, ctrl, u, |lo, u, hi| {
+        let alpha = (u - lo) / (hi - lo);
+        (alpha, 1.0 - alpha)
+    })
+}
+
+/// Boehm insertion with separate knot differences for both blend factors.
+/// This retains the small factor beside a large homogeneous weight.
+pub(crate) fn insert_guide_knot(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    u: f64,
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    insert_knot_with(p, knots, ctrl, u, guide_factors).map_err(|error| error.to_string())
+}
+
+fn guide_factors(lo: f64, u: f64, hi: f64) -> (f64, f64) {
+    let span = hi - lo;
+    ((u - lo) / span, (hi - u) / span)
+}
+
+fn insert_knot_with(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    u: f64,
+    factors: impl Fn(f64, f64, f64) -> (f64, f64),
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
         return Err(SegmentError::Input(
@@ -1401,11 +1430,15 @@ fn insert_knot(
         } else if i > k {
             pt(i - 1)
         } else {
-            let den = kn(i + p) - kn(i);
-            let alpha = if den > 0.0 { (u - kn(i)) / den } else { 1.0 };
+            let (lo, hi) = (kn(i), kn(i + p));
+            let (alpha, beta) = if hi > lo {
+                factors(lo, u, hi)
+            } else {
+                (1.0, 0.0)
+            };
             let mut r = [0.0; 4];
             for ((r, x), y) in r.iter_mut().zip(pt(i)).zip(pt(i - 1)) {
-                *r = x * alpha + y * (1.0 - alpha);
+                *r = x * alpha + y * beta;
             }
             r
         });
@@ -1440,6 +1473,37 @@ fn segment_data(
     a: f64,
     b: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
+    segment_data_with(p, knots, ctrl, a, b, insert_knot)
+}
+
+/// Exact authored tensor-row restriction using separate knot-difference factors.
+/// Shares the existing cut and insertion algorithms without changing native pcurves.
+pub(crate) fn segment_guide(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+) -> crate::Result<(Vec<f64>, Vec<[f64; 4]>)> {
+    segment_data_with(p, knots, ctrl, a, b, |p, knots, ctrl, t| {
+        insert_knot_with(p, knots, ctrl, t, guide_factors)
+    })
+    .map_err(|error| error.into_solid("eval::pcurve::segment_guide"))
+}
+
+fn segment_data_with(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+    insert: impl Fn(
+        usize,
+        &[f64],
+        &[[f64; 4]],
+        f64,
+    ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError>,
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
         return Err(SegmentError::Input(
@@ -1459,7 +1523,7 @@ fn segment_data(
             if k.iter().filter(|&&x| x == t).count() >= p {
                 break;
             }
-            (k, c) = insert_knot(p, &k, &c, t)?;
+            (k, c) = insert(p, &k, &c, t)?;
         }
     }
     let j0 = k

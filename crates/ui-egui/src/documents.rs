@@ -42,6 +42,7 @@ pub struct DocSlot {
     pub(crate) autosave: Option<solidcraft_engine::recovery::Autosaver>,
     pub(crate) big_operation: bool,
     cam: Camera,
+    forms: Option<Box<crate::forms_prototype::State>>,
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,
@@ -119,17 +120,14 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
 /// Give the incoming design back what [`take_work`] kept of it, after its session is in the app.
 /// Kept work comes back even when the preference was turned off since: the dialog may hold the
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
-/// `before`: the session's revision before the switch moved it on to refresh the views.
-fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
+fn put_work(app: &mut SolveApp, work: DocWork) {
     app.bom = work.bom;
     app.params = work.params;
     app.design_properties = work.design_properties;
     crate::bom_panel::set_focus_pending(app, true);
-    // That refresh is not a change to the design: the edit's Cancel must still see the design
-    // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
-    if let Some(state) = &mut work.editing_state {
-        state.source.revision = state.source.revision.saturating_add(app.session.revision.saturating_sub(before));
-    }
+    // Session::invalidate_view accounts for the tab's view-only revision jump.
+    // Keep the editor's original source counters paired: restore_editor accepts
+    // that view delta while still refusing any changed authoring context.
     app.dialog = work.dialog;
     app.inline_sketch = work.inline_sketch;
     app.editing_state = work.editing_state;
@@ -179,6 +177,7 @@ impl DocSlot {
             autosave: None,
             big_operation: false,
             cam: Camera::default(),
+            forms: None,
             pending_feature_edit: None,
             pre_sketch_cam: None,
             pre_sketch_component: None,
@@ -516,6 +515,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
+        crate::forms_prototype::leave_document(app);
         crate::select_other::close(app);
         crate::semantic_content::leave_document(app);
         if crate::render_workspace::active(app) {
@@ -571,6 +571,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         autosave: app.autosave.as_mut().and_then(|a| std::mem::replace(&mut a.active, slot.autosave)),
         big_operation: std::mem::replace(&mut app.big_operation, slot.big_operation),
         cam: std::mem::replace(&mut app.cam, slot.cam),
+        forms: Some(std::mem::take(&mut app.forms_prototype)),
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
@@ -611,16 +612,19 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     let before = app.session.revision;
     if !presenting {
         app.session.invalidate_view(out_rev);
-        if let Some(pending) = &mut app.pending_feature_edit {
-            pending.view_changed(before, app.session.revision);
-        }
         app.jobs_view_changed(before, app.session.revision);
     }
     if !presenting && shared_chat {
         crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
-    put_work(app, slot.work, before);
+    put_work(app, slot.work);
+    if let Some(forms) = slot.forms {
+        app.forms_prototype = forms;
+        crate::forms_prototype::resume_document(app);
+    } else {
+        crate::forms_prototype::opened(app);
+    }
     if presenting && app.docs.restore_views {
         // Protect the root spec before a passive child paint parks its camera.
         // Applying a workspace here would change the passive receiver.
@@ -2054,6 +2058,8 @@ pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
         crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
+        *app.forms_prototype = Default::default();
+        crate::forms_prototype::opened(app);
         app.fit_view();
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.
@@ -2376,6 +2382,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.bom = None;
         app.session.replace_design(Session::default());
+        *app.forms_prototype = Default::default();
         give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
@@ -7747,14 +7754,19 @@ mod tests {
         let editing = |h: &crate::scenario::Harness| h.app.dialog.as_ref().and_then(|d| d.editing).map(|(id, _)| id);
         assert_eq!(editing(&h), Some(first), "the first box's dialog is open");
         let marker = h.app.session.doc.marker;
+        let editor_source = h.app.editing_state.as_ref().unwrap().source.authoring_revision();
         new_design(&mut h.app);
         h.frames(2);
         assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
         assert!(h.app.session.doc.features.is_empty() && h.app.session.doc.marker.is_none(), "the new design is untouched");
+        // Returning from a design with a much newer display revision must not
+        // turn the saved editor source into a different authoring history.
+        h.app.session.invalidate_view(h.app.session.revision + 10_000);
         switch(&mut h.app, 0);
         h.frames(2);
         assert_eq!(editing(&h), Some(first), "the edit is open again");
         assert_eq!(h.app.session.doc.marker, marker, "with the history where the edit left it");
+        assert_eq!(h.app.editing_state.as_ref().unwrap().source.authoring_revision(), editor_source);
         crate::dialogs::cancel(&mut h.app);
         assert!(h.app.dialog.is_none());
         assert_eq!((h.app.session.doc.features.len(), h.app.session.doc.marker), (features, None), "Cancel puts the history back");

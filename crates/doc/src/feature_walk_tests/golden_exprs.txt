@@ -11,6 +11,10 @@ frame_member_turn
   inputs:
     Angle = turn.angle (Angle)
   expressions: turn.angle
+form
+  inputs:
+    Fit tolerance = form.tolerance (Length)
+  expressions: form.tolerance
 frame_gusset
   inputs:
     Angle = gusset1.angle (Angle)

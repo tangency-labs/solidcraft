@@ -6346,6 +6346,7 @@ dependencies = [
  "serde_json",
  "solidcore-record",
  "solidcore-tess",
+ "solidcraft-kernel-services",
  "thiserror 2.0.21",
 ]
 
@@ -6445,6 +6446,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-kernel-api",
+ "solidcraft-kernel-services",
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
@@ -6462,6 +6464,13 @@ dependencies = [
  "serde_json",
  "solidcore-record",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "solidcraft-kernel-services"
+version = "0.50.0"
+dependencies = [
+ "solidcore-ops",
 ]
 
 [[package]]

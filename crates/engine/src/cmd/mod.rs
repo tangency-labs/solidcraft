@@ -185,6 +185,7 @@ mod documents;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
+mod forms_prototype;
 pub mod frame;
 mod frame_end_cap;
 mod frame_gusset;
@@ -669,6 +670,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
+    v.extend(forms_prototype::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());

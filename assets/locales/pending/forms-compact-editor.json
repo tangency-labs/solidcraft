@@ -1,0 +1,50 @@
+{
+  "en": {
+    "forms.prototype.insert_edge_help": "Click a face to insert an edge. Press M to swap direction.",
+    "forms.prototype.insert_points_help": "Click the edges where you want the cut to pass.",
+    "prefs.forms_compact_editor": "Compact Form editor",
+    "prefs.forms_compact_editor_help": "Show sculpting controls first and focus the panel on the active tool. Turn off to restore the original layout."
+  },
+  "de": {
+    "forms.prototype.insert_edge_help": "Klicken Sie auf eine Fläche, um eine Kante einzufügen. Mit M wechseln Sie die Richtung.",
+    "forms.prototype.insert_points_help": "Klicken Sie auf die Kanten, durch die der Schnitt verlaufen soll.",
+    "prefs.forms_compact_editor": "Kompakter Form-Editor",
+    "prefs.forms_compact_editor_help": "Zeigt zuerst die Modellierwerkzeuge und hebt das aktive Werkzeug hervor. Deaktivieren Sie die Option für das ursprüngliche Layout."
+  },
+  "ja": {
+    "forms.prototype.insert_edge_help": "面をクリックしてエッジを挿入します。M キーで方向を切り替えます。",
+    "forms.prototype.insert_points_help": "切断線が通るエッジをクリックします。",
+    "prefs.forms_compact_editor": "コンパクトなフォームエディター",
+    "prefs.forms_compact_editor_help": "スカルプトの操作を先に表示し、使用中のツールに表示を絞ります。オフにすると元の配置に戻ります。"
+  },
+  "ko": {
+    "forms.prototype.insert_edge_help": "면을 클릭하여 모서리를 삽입합니다. M 키를 눌러 방향을 전환합니다.",
+    "forms.prototype.insert_points_help": "절단선이 통과할 모서리를 클릭합니다.",
+    "prefs.forms_compact_editor": "간결한 폼 편집기",
+    "prefs.forms_compact_editor_help": "조형 도구를 먼저 표시하고 현재 도구에 맞춰 패널을 구성합니다. 끄면 원래 배치로 돌아갑니다."
+  },
+  "zh": {
+    "forms.prototype.insert_edge_help": "单击一个面以插入边。按 M 切换方向。",
+    "forms.prototype.insert_points_help": "单击希望切线穿过的边。",
+    "prefs.forms_compact_editor": "紧凑的形体编辑器",
+    "prefs.forms_compact_editor_help": "优先显示塑形控件，并在面板中突出当前工具。关闭此选项可恢复原来的布局。"
+  },
+  "ar": {
+    "forms.prototype.insert_edge_help": "انقر على وجه لإدراج حافة. اضغط M لتبديل الاتجاه.",
+    "forms.prototype.insert_points_help": "انقر على الحواف التي تريد أن يمرّ القطع عبرها.",
+    "prefs.forms_compact_editor": "محرّر الأشكال المدمج",
+    "prefs.forms_compact_editor_help": "يعرض أدوات النحت أولًا ويركّز اللوحة على الأداة النشطة. أوقف هذا الخيار لاستعادة التخطيط الأصلي."
+  },
+  "he": {
+    "forms.prototype.insert_edge_help": "יש ללחוץ על פאה כדי להוסיף קצה. מקש M מחליף את הכיוון.",
+    "forms.prototype.insert_points_help": "יש ללחוץ על הקצוות שבהם החיתוך אמור לעבור.",
+    "prefs.forms_compact_editor": "עורך קומפקטי לצורות חופשיות",
+    "prefs.forms_compact_editor_help": "הצגת כלי העיצוב בראש הלוח ומיקודו בכלי הפעיל. כיבוי ההגדרה מחזיר את הפריסה המקורית."
+  },
+  "vi": {
+    "forms.prototype.insert_edge_help": "Bấm vào một mặt để chèn cạnh. Nhấn M để đổi hướng.",
+    "forms.prototype.insert_points_help": "Bấm vào các cạnh mà bạn muốn đường cắt đi qua.",
+    "prefs.forms_compact_editor": "Trình chỉnh sửa hình thu gọn",
+    "prefs.forms_compact_editor_help": "Hiển thị các điều khiển tạo dáng trước và ưu tiên công cụ đang dùng trong bảng. Tắt để khôi phục bố cục ban đầu."
+  }
+}

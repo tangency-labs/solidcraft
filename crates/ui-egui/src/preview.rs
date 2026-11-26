@@ -777,7 +777,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
-    let colors = colors(app);
+    let mut colors = colors(app);
+    // Both skins remain in a refined weld. Neither needs a cut or new-face tint.
+    if cmds.iter().any(|(command, _)| command == "form.refined_weld") {
+        colors.tint_new = false;
+        colors.cut_tint = false;
+    }
     // A hover is transient: evaluate it off the UI thread and use authored commands as
     // its fallback. Neither rejection nor leaving the candidate can author a reference.
     let candidate = app.dialog.as_ref().and_then(|d| crate::dialogs_assembly::alignment_hover_commands(app, d));

@@ -11,5 +11,6 @@ use solidcore_record::brep::{Curve, Frame, Surface};
 pub mod eval;
 pub mod form;
 pub mod normal_section;
+pub mod ray;
 mod split;
 pub use split::split_edges;

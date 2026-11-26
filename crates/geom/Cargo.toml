@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-kernel-services = { workspace = true }
 serde = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-tess = { workspace = true }

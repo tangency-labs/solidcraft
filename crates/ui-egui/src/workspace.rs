@@ -597,6 +597,12 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section {
         tab: "SURFACE",
+        panel: "FORMS",
+        promoted: 3,
+        ids: &["form.prototype.create", "form.pipe", "form.surface", "form.refined_weld", "form.blend.import", "form.blend.export"],
+    },
+    Section {
+        tab: "SURFACE",
         panel: "CREATE",
         promoted: 4,
         ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],

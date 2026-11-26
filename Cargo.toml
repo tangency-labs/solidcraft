@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/*", "xtask"]
+members = ["crates/*", "crates/kernel/services", "apps/*", "xtask"]
 # Third-party code kept with local fixes (vendor/), and the vendored SolidCore kernel (solidcore/);
 # neither is linted as ours. See CONTRIBUTING.md, "How the code is laid out".
 exclude = ["solidcore", "vendor"]
@@ -23,6 +23,7 @@ solidcraft-profile = { path = "crates/profile" }
 solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+solidcraft-kernel-services = { path = "crates/kernel/services" }
 # The kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md)
 solidcraft-kernel-api = { path = "crates/kernel-api" }
 solidcraft-smlib = { path = "crates/smlib" }
@@ -120,6 +121,10 @@ sysinfo = { version = "0.40.1", default-features = false, features = ["system"] 
 
 # packages (3MF)
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# Blender documents use gzip or Zstandard framing. Both pure-Rust decoders are
+# already transitive dependencies; flate2 (listed with the sheet PDFs below) is
+# MIT/Apache-2.0, ruzstd MIT.
+ruzstd = "0.9"
 quick-xml = "0.41"
 # STEP text in a legacy encoding (GBK, Shift_JIS, …) instead of Part 21 escapes (#2344): detect
 # and decode it. Both MIT OR Apache-2.0 (encoding_rs adds BSD-3-Clause data); encoding_rs is

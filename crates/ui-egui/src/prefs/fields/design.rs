@@ -51,6 +51,24 @@ macro_rules! design_preferences {
             /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
             /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.
             exports_folder: String = String::new(), PAGE_DESIGN;
+            /// Fit tolerance for new interactive Forms; saved features retain their tolerance.
+            forms_cad_tolerance: f64 = 0.05, PAGE_DESIGN, accept(0.000001..=1.0);
+            /// Focus the Form editor on sculpting controls and the active insertion tool.
+            forms_compact_editor: bool = false, PAGE_DESIGN => check_tr("prefs.forms_compact_editor");
+            /// Show submitted Form transforms and their request status beside the viewport.
+            forms_drag_feedback: bool = true, PAGE_DESIGN => check_tr("prefs.forms_drag_feedback");
+            /// Use qualified native CAD faces for Form clicks on desktop.
+            forms_exact_face_picking: bool = false, PAGE_DESIGN => check_tr("prefs.forms_exact_face_picking");
+            /// Toggle Form elements without holding a selection modifier.
+            forms_greedy_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_greedy_selection");
+            forms_match_adjacent:bool = false, PAGE_DESIGN => check_tr("prefs.forms_match_adjacent");
+            /// Keep subdivision feedback during a drag; false requests fitted CAD while interacting.
+            forms_mesh_while_dragging: bool = true, PAGE_DESIGN => check_tr("prefs.forms_mesh_while_dragging");
+            /// Keep selected Form entities and the custom pivot when changing pick filters.
+            forms_preserve_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_preserve_selection");
+            /// Drag empty viewport space to select logical Form elements. False keeps click-only selection.
+            forms_region_selection: bool = true, PAGE_DESIGN => check_tr("prefs.forms_region_selection");
+            forms_surface_partition:bool = true, PAGE_DESIGN => check_tr("prefs.forms_surface_partition");
             /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
             /// viewer can move each part on its own (#5296). Off: every body under the root in world
             /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.

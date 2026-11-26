@@ -26,6 +26,8 @@ pub(crate) struct HostSaving {
     copy: Session,
     original_path: Option<String>,
     original_name: String,
+    /// Preparing Save As can rename the scratch design and advance its own revision.
+    original_revision: u64,
     value: Value,
     reply: Option<Sender<Value>>,
     check: Option<solidcraft_engine::schema::ParamCheck>,
@@ -43,10 +45,10 @@ pub fn host_path_pending(app: &SolveApp, path: &str) -> bool {
 /// The browser's saved-file time cannot supersede this revision's kept copy.
 pub fn protects_host_recovery(app: &SolveApp, session: &Session) -> bool {
     app.host_save_left_dirty.contains(&session.uid)
-        || app
-            .host_saves
-            .iter()
-            .any(|save| save.copy.uid == session.uid && (save.copy.revision != session.revision || save.copy.visibility != session.visibility))
+        || app.host_saves.iter().any(|save| {
+            save.copy.uid == session.uid
+                && (save.original_revision != session.revision || save.copy.visibility != session.visibility || session.forms_prototype.is_some())
+        })
 }
 
 impl Saving {
@@ -127,6 +129,7 @@ pub(crate) fn start_host(
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
     let original_path = app.session.path.clone();
     let original_name = app.session.doc.name.clone();
+    let original_revision = app.session.revision;
     let mut copy = app.session.scratch();
     copy.path.clone_from(&original_path);
     if let Some(level) = check {
@@ -138,7 +141,7 @@ pub(crate) fn start_host(
         return Err("a save to this file is already in progress".into());
     }
     let done = persist(path, bytes);
-    app.host_saves.push(HostSaving { command, done, copy, original_path, original_name, value, reply, check });
+    app.host_saves.push(HostSaving { command, done, copy, original_path, original_name, original_revision, value, reply, check });
     Ok(())
 }
 
@@ -338,6 +341,22 @@ mod tests {
         assert_eq!(owner.doc.features.len(), 2);
         assert!(owner.is_dirty() && super::protects_host_recovery(&h.app, owner));
         assert!(!h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn a_form_started_during_a_browser_save_keeps_its_recovery_copy() {
+        let mut h = crate::scenario::Harness::new();
+        let writes = browser_writes(&mut h.app);
+        let path = h.dir.join("Host.sc");
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path":path})));
+        assert!(!super::protects_host_recovery(&h.app, &h.app.session));
+        h.app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        assert!(super::protects_host_recovery(&h.app, &h.app.session));
+        let (_, _, done) = writes.borrow_mut().pop().unwrap();
+        done.send(Ok(())).unwrap();
+        super::tick(&mut h.app, false);
+        assert!(h.app.session.forms_prototype.is_some() && h.app.session.is_dirty());
+        assert!(super::protects_host_recovery(&h.app, &h.app.session));
     }
 
     #[test]

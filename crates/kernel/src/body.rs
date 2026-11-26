@@ -803,6 +803,11 @@ impl Body {
         &self.record
     }
 
+    /// Share this immutable record with a query that outlives the body handle.
+    pub fn shared_record(&self) -> std::sync::Arc<Brep> {
+        self.record.arc().clone()
+    }
+
     /// The body in SMLib, built from its record the first time it is asked for. The record is
     /// SMLib's own form (`SmBrepData`), imported as given: a record SMLib refuses is an error that
     /// names why, never repaired here.
@@ -1797,6 +1802,18 @@ impl Body {
             }
             _ => plan().map(std::sync::Arc::new),
         }
+    }
+
+    /// Display-only paths embedded as actual triangle sides on certified native
+    /// spline rectangles. Leaves the body's CAD record and topology unchanged.
+    pub fn mesh_with_guides(&self, t: &MeshTolerance, guides: &[crate::DisplayGuide]) -> Result<crate::GuidedMesh> {
+        if self.is_mesh() {
+            return Err(KernelError::Invalid("a mesh body has no native charts for display guides".into()));
+        }
+        let mut result =
+            guard("guided display mesh", || solidcore_tess::mesh_with_guides(&self.record, t, self.size(), guides).map_err(KernelError::from))?;
+        result.mesh = self.flagged(result.mesh)?;
+        Ok(result)
     }
 
     fn mesh_plan_untimed(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {

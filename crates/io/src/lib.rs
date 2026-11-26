@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+pub mod blend;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(dead_code)]
 #[path = "../build.rs"]
@@ -32,6 +33,7 @@ pub use design::DesignFile;
 pub use design::DesignPreview;
 pub use design::FileKind;
 pub use design::ImportCache;
+pub use design::MAX_FORM_DRAFT_BYTES;
 pub use design::OpenPgpSignature;
 pub use design::OpenPgpSigner;
 pub use design::ProvenanceChain;
@@ -47,6 +49,7 @@ pub use design::THUMBNAIL_SIZE;
 pub use design::design_text;
 pub use design::file_kind;
 pub use design::has_design_provenance;
+pub use design::has_form_recovery_draft;
 pub use design::is_design_container;
 pub use design::large_file_text;
 pub use design::read_container_bytes;
@@ -65,6 +68,7 @@ pub use design::read_design_thumbnail_file;
 pub use design::read_design_with_model;
 pub use design::read_drawing;
 pub use design::read_drawing_file;
+pub use design::read_recovery_container;
 pub use design::take_last_cache_refusal;
 pub use design::write_design_container;
 pub use design::write_design_container_reusing;
@@ -74,6 +78,7 @@ pub use design::write_design_container_with_preview;
 pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
+pub use design::write_recovery_container;
 pub use design::written_design_provenance_chain;
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
@@ -2116,6 +2121,78 @@ mod tests {
     use super::*;
     use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
+
+    #[test]
+    fn blend_editable_cages_preserve_units_faces_creases_and_multiple_objects() {
+        use solidcraft_geom::subdivision::{EdgeCrease, VertexCrease, primitives::Parameters};
+        let mut cage = Parameters { segments: [1; 3], dimensions: [4., 6., 8.], ..Default::default() }.build().unwrap();
+        let edge = [cage.faces[0][0], cage.faces[0][1]];
+        cage.edge_creases.push(EdgeCrease { edge, sharpness: 2.5 });
+        cage.vertex_creases.push(VertexCrease { vertex: 2, sharpness: 5.625 });
+        let objects = vec![
+            blend::Object { name: "Cage with creases".into(), cage: cage.clone(), levels: 3 },
+            blend::Object { name: "Second".into(), cage, levels: 1 },
+        ];
+        let bytes = blend::write(&objects).unwrap();
+        let check = |bytes: &[u8]| {
+            let result = blend::read(bytes).unwrap();
+            assert!(result.rejected.is_empty(), "{:?}", result.rejected);
+            assert_eq!(result.objects.len(), 2);
+            for (actual, expected) in result.objects.iter().zip(&objects) {
+                assert_eq!(actual.name, expected.name);
+                assert_eq!(actual.levels, expected.levels);
+                assert_eq!(actual.cage.faces, expected.cage.faces);
+                assert!(actual.cage.points.iter().zip(&expected.cage.points).all(|(a, b)| a.dist(*b) < 1e-5));
+                assert!((actual.cage.edge_creases[0].sharpness - 2.5).abs() < 1e-5);
+                assert!((actual.cage.vertex_creases[0].sharpness - 5.625).abs() < 1e-5);
+            }
+        };
+        check(&bytes);
+        let mut compressed = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut compressed, &bytes).unwrap();
+        check(&compressed.finish().unwrap());
+        // The same SDNA/payload is legal in the classic 64-bit little-endian
+        // container, whose block header has a different field order and width.
+        let mut classic = b"BLENDER-v502".to_vec();
+        let mut at = 17;
+        while at < bytes.len() {
+            let h = &bytes[at..at + 32];
+            let n = u64::from_le_bytes(h[16..24].try_into().unwrap()) as usize;
+            classic.extend(&h[..4]);
+            classic.extend((n as u32).to_le_bytes());
+            classic.extend(&h[8..16]);
+            classic.extend(&h[4..8]);
+            classic.extend(&h[24..28]);
+            classic.extend(&bytes[at + 32..at + 32 + n]);
+            at += 32 + n;
+        }
+        check(&classic);
+    }
+
+    #[test]
+    fn blend_hostile_headers_layouts_pointers_and_truncation_are_errors() {
+        let cage = solidcraft_geom::subdivision::primitives::Parameters { segments: [1; 3], ..Default::default() }.build().unwrap();
+        let bytes = blend::write(&[blend::Object { name: "Hostile reference".into(), cage, levels: 2 }]).unwrap();
+        for n in (0..bytes.len()).step_by(37) {
+            assert!(blend::read(&bytes[..n]).is_err(), "truncated at {n}");
+        }
+        for n in [0usize, 7, 9, 16, 21, 33, 41] {
+            let mut altered = bytes.clone();
+            altered[n] = 255;
+            let _ = blend::read(&altered);
+        }
+        assert!(blend::write(&[]).is_err());
+        // Pseudorandom bounded mutation exercises unchecked offsets and SDNA
+        // array counts in the normal test process, including overflow paths.
+        let mut state = 17u64;
+        for _ in 0..300 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let mut altered = bytes.clone();
+            let n = state as usize % altered.len();
+            altered[n] ^= (state >> 32) as u8;
+            let _ = blend::read(&altered);
+        }
+    }
 
     /// What a flattened import treats as a placeholder: what `generic_name` gives up on, an
     /// exporting translator's own names and a library model's bare number; a part's name is kept.

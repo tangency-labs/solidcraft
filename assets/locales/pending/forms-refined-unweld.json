@@ -1,0 +1,56 @@
+{
+  "de": {
+    "forms.unweld.bridge_unavailable": "Die Brücke ist für die beibehaltene Quelle einer Trennung nicht verfügbar.",
+    "forms.unweld.refined_desktop_required": "Das Trennen verfeinerter Formen benötigt die Desktop-App.",
+    "forms.unweld.refined_help": "Wähle eine geschlossene Trennnaht. Beide Teile behalten ihre Verfeinerung und werden als getrennte Formen gespeichert.",
+    "forms.unweld.refined_unavailable": "Wähle eine geschlossene unabhängige verfeinerte Form ohne Symmetrie, Kappen oder andere vorgemerkte Objekte."
+  },
+  "en": {
+    "forms.unweld.bridge_unavailable": "Bridge is unavailable on a retained Unweld source.",
+    "forms.unweld.refined_desktop_required": "Refined Unweld needs the desktop app.",
+    "forms.unweld.refined_help": "Select one complete separating seam on a closed Form. Both pieces retain their refinement and are saved as separate Forms.",
+    "forms.unweld.refined_unavailable": "Select a closed independent refined Form without symmetry, caps, or other staged objects."
+  },
+  "ja": {
+    "forms.unweld.bridge_unavailable": "分離元を保持しているフォームではブリッジを使用できません。",
+    "forms.unweld.refined_desktop_required": "細分化フォームの分離にはデスクトップアプリが必要です。",
+    "forms.unweld.refined_help": "閉じたフォームを二分するシームを選択します。細分化を保持したまま別々のフォームとして保存されます。",
+    "forms.unweld.refined_unavailable": "対称、キャップ、他の保留中オブジェクトのない閉じた独立フォームを選択してください。"
+  },
+  "ko": {
+    "forms.unweld.bridge_unavailable": "분리된 원본을 유지한 형상에서는 브리지를 사용할 수 없습니다.",
+    "forms.unweld.refined_desktop_required": "세분화된 형상을 분리하려면 데스크톱 앱이 필요합니다.",
+    "forms.unweld.refined_help": "닫힌 형상을 나누는 완전한 이음선을 선택합니다. 두 부분은 세분화를 유지한 채 별도의 형상으로 저장됩니다.",
+    "forms.unweld.refined_unavailable": "대칭, 캡 또는 다른 대기 중인 객체가 없는 닫힌 독립 형상을 선택하세요."
+  },
+  "zh": {
+    "forms.unweld.bridge_unavailable": "保留分离源的造型不能使用桥接。",
+    "forms.unweld.refined_desktop_required": "分离细分造型需要桌面应用。",
+    "forms.unweld.refined_help": "选择闭合造型上能将其分成两部分的完整接缝。两部分都会保留细分并保存为独立造型。",
+    "forms.unweld.refined_unavailable": "请选择无对称、无封盖且没有其他待处理对象的闭合独立细分造型。"
+  },
+  "ar": {
+    "forms.unweld.bridge_unavailable": "لا تتوفر أداة التجسير لمصدر محفوظ لعملية الفصل.",
+    "forms.unweld.refined_desktop_required": "يتطلب فصل شكل مُنقَّح تطبيق سطح المكتب.",
+    "forms.unweld.refined_help": "حدّد درزًا فاصلًا كاملًا في شكل مغلق. يحتفظ الجزءان بتنقيحهما ويُحفظان كشكلين مستقلين.",
+    "forms.unweld.refined_unavailable": "حدّد شكلًا مستقلًا مغلقًا ومُنقَّحًا بلا تناظر أو رقع إغلاق أو عناصر أخرى قيد الإعداد."
+  },
+  "fr": {
+    "forms.unweld.bridge_unavailable": "La création d’un pont est indisponible sur une source conservée après séparation.",
+    "forms.unweld.refined_desktop_required": "La séparation d’une forme raffinée nécessite l’application de bureau.",
+    "forms.unweld.refined_help": "Sélectionnez une ligne de séparation complète sur une forme fermée. Les deux parties conservent leur raffinement et sont enregistrées comme deux formes distinctes.",
+    "forms.unweld.refined_unavailable": "Sélectionnez une forme raffinée fermée et indépendante, sans symétrie, sans surfaces de fermeture et sans autres objets en attente."
+  },
+  "he": {
+    "forms.unweld.bridge_unavailable": "גישור אינו זמין במקור שנשמר לצורך הפרדה.",
+    "forms.unweld.refined_desktop_required": "הפרדת צורה חופשית שעברה עידון דורשת את יישום שולחן העבודה.",
+    "forms.unweld.refined_help": "יש לבחור תפר מפריד שלם על צורה חופשית סגורה. שני החלקים שומרים על העידון ונשמרים כצורות חופשיות נפרדות.",
+    "forms.unweld.refined_unavailable": "יש לבחור צורה חופשית סגורה ועצמאית שעברה עידון, ללא סימטריה, מכסים או אובייקטים נוספים הממתינים לסיום."
+  },
+  "vi": {
+    "forms.unweld.bridge_unavailable": "Không thể nối cầu trên hình nguồn được giữ lại sau khi tách.",
+    "forms.unweld.refined_desktop_required": "Tách hình đã chia nhỏ cần ứng dụng máy tính.",
+    "forms.unweld.refined_help": "Chọn một đường nối hoàn chỉnh có thể chia đôi hình kín. Cả hai phần giữ nguyên mức chia nhỏ và được lưu thành hai hình riêng.",
+    "forms.unweld.refined_unavailable": "Chọn một hình kín đã chia nhỏ, độc lập, không có đối xứng, mặt bịt hoặc đối tượng khác đang chờ hoàn tất."
+  }
+}

@@ -30,6 +30,7 @@ pub mod drawing_view;
 pub mod easyprint;
 mod edit_start;
 mod failure_codes;
+pub mod forms_prototype;
 pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
@@ -779,6 +780,29 @@ struct ComputedCommand {
 }
 
 impl ComputedCommands {
+    /// Read-only Forms feedback from this exact, still-unaccepted transaction.
+    /// Displaying it does not change the source design or its recovery journal.
+    pub fn form_preview(&self) -> Option<&forms_prototype::Form> {
+        self.computed.forms_prototype.as_deref()
+    }
+
+    /// Exact logical seam IDs from this still-unaccepted Form Insert Loop.
+    pub fn form_loop_seams(&self) -> Result<Vec<[usize; 2]>> {
+        let [step] = self.steps.as_slice() else { return Err(EngineError::Other("expected one Form Insert Loop transaction".into())) };
+        if step.id != "form.prototype.insert_loop" {
+            return Err(EngineError::Other("expected a Form Insert Loop transaction".into()));
+        }
+        if let Some(seams) = step.reply.get("loop_seams") {
+            return serde_json::from_value(seams.clone()).map_err(|error| EngineError::Other(error.to_string()));
+        }
+        let before = self.source.forms_prototype.as_ref().and_then(|form| form.hierarchy.as_ref());
+        let after = self.computed.forms_prototype.as_ref().and_then(|form| form.hierarchy.as_ref());
+        let (Some(before), Some(after)) = (before, after) else {
+            return Err(EngineError::Other("Insert Loop lost its original or edited hierarchy".into()));
+        };
+        after.inserted_loop_edges(before).map_err(|error| EngineError::Other(error.to_string()))
+    }
+
     /// Collapse all undo snapshots produced by this multi-command batch into one undo step
     /// restoring the source state before the first command (including pending moves/joints).
     pub fn coalesce_undo(&mut self, label: &str) {
@@ -868,6 +892,8 @@ pub type EasyPrintUpload = Arc<dyn Fn(&str, Vec<u8>) -> std::result::Result<(), 
 type MadeBodies = std::collections::HashMap<u64, (std::sync::Weak<ModelState>, Vec<String>)>;
 
 pub struct Session {
+    /// Active Forms draft. Idle sessions and their UI snapshots only reserve a pointer.
+    pub forms_prototype: Option<Box<forms_prototype::Form>>,
     pub doc: Arc<Document>,
     pub model: Model,
     pub undo: Vec<Snapshot>,
@@ -950,7 +976,8 @@ pub struct Session {
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
     pub revision: u64,
-    /// Revision increments caused only by what is shown ([`Session::refresh_display`]).
+    /// Revision increments caused only by what is shown ([`Session::refresh_display`]
+    /// and [`Session::invalidate_view`]), including jumps when switching document tabs.
     /// Comparing both counters proves that every intervening increment left an editor's
     /// document and model untouched.
     visibility_revision: u64,
@@ -1173,12 +1200,14 @@ pub struct LiveEdit {
     pub report: solidcraft_sketch::SolveReport,
 }
 
-/// The design, active sketch, open drawing, pending positions, undo history and section at an `edit.checkpoint`.
-#[derive(Clone, Debug)]
+/// The design, editing sessions, open drawing, pending positions, undo history and section at an `edit.checkpoint`.
+#[derive(Clone)]
 pub(crate) struct Checkpoint {
     pub id: u64,
     pub document_id: String,
     pub doc: Arc<Document>,
+    // Absent until a Form command needs to preserve this checkpoint's editor.
+    form: Option<Arc<Option<Box<forms_prototype::Form>>>>,
     pub active_sketch: Option<u64>,
     pub sketching_view: Option<u64>,
     /// Temporary editor position to finalize if its former view has since closed.
@@ -1196,6 +1225,27 @@ pub(crate) struct Checkpoint {
     pub redo: Vec<Snapshot>,
     redo_watch: Option<RedoWatch>,
     pub section: SectionState,
+}
+
+/// Written out because a Form editor is not `Debug`: its cage and history are large. The
+/// checkpoint says only whether it holds an editor.
+impl std::fmt::Debug for Checkpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Checkpoint")
+            .field("id", &self.id)
+            .field("doc", &self.doc)
+            .field("form", &self.form.as_ref().map(|form| form.is_some()))
+            .field("active_sketch", &self.active_sketch)
+            .field("active_sheet_sketch", &self.active_sheet_sketch)
+            .field("open_drawing", &self.open_drawing)
+            .field("pending_moves", &self.pending_moves)
+            .field("visibility", &self.visibility)
+            .field("undo", &self.undo)
+            .field("redo", &self.redo)
+            .field("redo_watch", &self.redo_watch)
+            .field("section", &self.section)
+            .finish()
+    }
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -1475,6 +1525,7 @@ impl Session {
             is_copy: false,
             background_checks: false,
             saved: doc.clone(),
+            forms_prototype: None,
             doc,
             model,
             undo: Vec::new(),
@@ -1607,6 +1658,9 @@ impl Session {
         if !self.is_copy {
             self.stop_computing();
         }
+        if self.forms_prototype.is_some() || fresh.forms_prototype.is_some() {
+            self.remember_form_at_checkpoints();
+        }
         let auto_project = self.auto_project;
         let project_construction = self.project_construction;
         let validation = self.validation();
@@ -1703,7 +1757,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());
@@ -1718,7 +1772,13 @@ impl Session {
     /// The design has changes not in its file: in the document, in what is hidden, or a
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+        self.forms_prototype.is_some() || self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// A replay also needs pending Form tool commands. Autosave describes
+    /// the accepted draft, while the current editor includes the tool preview.
+    fn form_replay_revision(&self) -> Option<((u64, u64), [u64; 3], bool)> {
+        self.forms_prototype.as_ref().map(|form| (form.source_revision(), forms_prototype::draft::revision(form), form.has_tool_preview()))
     }
 
     /// The design is a STEP, IGES or mesh file just opened (`doc.open`) and not changed since:
@@ -3336,6 +3396,12 @@ impl Session {
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         // Before anything changes: a refusal leaves the session exactly as it was.
+        let form_before = (spec.id.starts_with("form.")
+            && !matches!(spec.id, "form.prototype.inspect" | "form.prototype.validate" | "form.blend.export"))
+        .then(|| self.forms_prototype.clone());
+        if let Some(form) = &form_before {
+            self.remember_form_at_checkpoints_from(form);
+        }
         let open_drawing = self.open_drawing;
         let redo_watch_before = self.redo_watch.clone();
         let mut before = Snapshot {
@@ -3382,6 +3448,8 @@ impl Session {
         };
         let _copy_context = outermost.then(|| frames::copy_context(spec.id, mapped.as_mut()));
         let params = mapped.as_ref().unwrap_or(params);
+        let journal_form = outermost && self.crash_journal && crash::enabled();
+        let form_replay_before = journal_form.then(|| self.form_replay_revision()).flatten();
         if outermost {
             crash::command_begin(self, spec.id, given);
         }
@@ -3474,6 +3542,7 @@ impl Session {
                 || self.open_drawing != open_drawing
                 || self.active_component != active_before.0
                 || self.active_occurrence_path != active_before.1
+                || journal_form && self.form_replay_revision() != form_replay_before
                 || spec.id.starts_with("select.");
             Some((before.doc.clone(), changed, failed, ids.seed()))
         } else {
@@ -3568,6 +3637,11 @@ impl Session {
                 Ok(v)
             }
             Err(e) => {
+                if let Some(form) = form_before {
+                    self.forms_prototype = form;
+                    self.active_component = active_before.0;
+                    self.active_occurrence_path = active_before.1.clone();
+                }
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
                 self.plugin_state.link_changes = link_observations_before;
@@ -3702,7 +3776,29 @@ impl Session {
         v
     }
 
-    /// Remember the design, active sketch, open drawing, pending positions, undo history and
+    // Every checkpoint since the last Form edit can share the same snapshot.
+    // A document-only batch never copies a Form's cage, display or edit history.
+    fn remember_form_at_checkpoints(&mut self) {
+        if self.checkpoints.last().is_none_or(|checkpoint| checkpoint.form.is_some()) {
+            return;
+        }
+        self.store_form_at_checkpoints(self.forms_prototype.clone());
+    }
+
+    fn remember_form_at_checkpoints_from(&mut self, form: &Option<Box<forms_prototype::Form>>) {
+        if self.checkpoints.last().is_some_and(|checkpoint| checkpoint.form.is_none()) {
+            self.store_form_at_checkpoints(form.clone());
+        }
+    }
+
+    fn store_form_at_checkpoints(&mut self, form: Option<Box<forms_prototype::Form>>) {
+        let form = Arc::new(form);
+        for checkpoint in self.checkpoints.iter_mut().rev().take_while(|checkpoint| checkpoint.form.is_none()) {
+            checkpoint.form = Some(form.clone());
+        }
+    }
+
+    /// Remember the design, editing sessions, open drawing, pending positions, undo history and
     /// section; returns the checkpoint's id.
     pub fn checkpoint(&mut self) -> u64 {
         let id = self.next_checkpoint;
@@ -3711,6 +3807,7 @@ impl Session {
             id,
             document_id: self.document_id.clone(),
             doc: self.doc.clone(),
+            form: None,
             active_sketch: self.active_sketch,
             sketching_view: self.sketching_view,
             sketch_restore_marker: self.sketch_restore_marker(),
@@ -3735,6 +3832,11 @@ impl Session {
     /// Go back to checkpoint `id` as if nothing since had happened (the undo history too). It
     /// and later checkpoints are used up.
     pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
+        self.restore_checkpoint_with_form(id).map(|_| ())
+    }
+
+    /// Also tell the window whether to reattach the Form editor or discard its cached preview.
+    pub(crate) fn restore_checkpoint_with_form(&mut self, id: u64) -> Result<bool> {
         let missing = || {
             EngineError::Other(format!(
                 "no checkpoint {id} (used up by restoring it or an earlier one, or by forgetting it, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
@@ -3743,6 +3845,11 @@ impl Session {
         let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(missing)?;
         let Some(c) = self.checkpoints.drain(i..).next() else { return Err(missing()) };
         let before = Snapshot::of(self, "");
+        let restored_form = c.form.is_some_and(|form| {
+            let restored = form.is_some() || self.forms_prototype.is_some();
+            self.forms_prototype = Arc::unwrap_or_clone(form);
+            restored
+        });
         self.doc = c.doc;
         self.document_id = c.document_id;
         self.design_revision = solidcraft_doc::ids::new_design_revision();
@@ -3787,9 +3894,11 @@ impl Session {
             || self.pending_joint_bases != before.pending_joint_bases
         {
             self.refresh();
+        } else if restored_form {
+            self.invalidate_view(self.revision);
         }
         self.follow_design_token();
-        Ok(())
+        Ok(restored_form)
     }
 
     /// Forget checkpoint `id` without going back. Later checkpoints stay: a batch forgets the
@@ -3808,6 +3917,7 @@ impl Session {
         Session {
             stop: self.stop.clone(),
             is_copy: true,
+            forms_prototype: self.forms_prototype.clone(),
             background_checks: false,
             doc: self.doc.clone(),
             model: self.model.clone(),
@@ -4053,6 +4163,7 @@ impl Session {
             let active_sheet_sketch = computed.active_sheet_sketch.clone();
             let open_drawing = computed.open_drawing;
             let pending_moves = computed.pending_moves.clone();
+            let form_replay_before = computed.form_replay_revision();
             let pending_move_records = computed.pending_move_records.clone();
             let pending_joint_bases = computed.pending_joint_bases.clone();
             let reply = computed.execute(id, params)?;
@@ -4062,6 +4173,7 @@ impl Session {
                 || active_sheet_sketch != computed.active_sheet_sketch
                 || open_drawing != computed.open_drawing
                 || pending_moves != computed.pending_moves
+                || computed.form_replay_revision() != form_replay_before
                 || pending_move_records != computed.pending_move_records
                 || pending_joint_bases != computed.pending_joint_bases
                 || id.starts_with("select.");
@@ -4168,6 +4280,11 @@ impl Session {
             && self.active_component == source.active_component
             && self.active_occurrence_path == source.active_occurrence_path
             && self.pending_moves == source.pending_moves
+            && match (&self.forms_prototype, &source.forms_prototype) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_authoring_source(b),
+                _ => false,
+            }
             && self.pending_move_records == source.pending_move_records
             && self.pending_joint_bases == source.pending_joint_bases
     }
@@ -4219,7 +4336,15 @@ impl Session {
     /// already prepared world-space geometry. This does not change the document.
     pub fn invalidate_view(&mut self, previous_revision: u64) {
         let old = self.revision;
-        self.revision = old.max(previous_revision) + 1;
+        self.revision = old.max(previous_revision).saturating_add(1);
+        self.visibility_revision += self.revision - old;
+    }
+
+    /// The document/model revision with display-only refreshes and tab-switch jumps
+    /// removed. A worker must also compare document identity, draft and authoring
+    /// context, as [`ComputedCommands::is_current`] does; this is not a source key alone.
+    pub fn authoring_revision(&self) -> u64 {
+        self.revision.saturating_sub(self.visibility_revision)
     }
 
     /// Offer what a copy of this session evaluated ahead for the commands about to run
@@ -4287,6 +4412,15 @@ impl Session {
         } else {
             computed.commit_design_token();
         }
+        if self.checkpoints.last().is_some_and(|checkpoint| checkpoint.form.is_none())
+            && match (&self.forms_prototype, &computed.forms_prototype) {
+                (None, None) => false,
+                (Some(before), Some(after)) => !before.same_authoring_source(after),
+                _ => true,
+            }
+        {
+            self.remember_form_at_checkpoints();
+        }
         let previous_revision = self.revision;
         // Audited direct-mutation callers edit one current owner without commands.
         // Command provenance takes precedence if nested tools erased their history.
@@ -4343,6 +4477,7 @@ impl Session {
         self.model = computed.model;
         self.release_left();
         self.world_cache = computed.world_cache;
+        self.forms_prototype = computed.forms_prototype;
         let replaces = |part| {
             Some(part) == implicit_part
                 || computed.redo_watch.as_ref().and_then(|watch| watch.get(&part)).copied().unwrap_or(false)
@@ -4371,7 +4506,10 @@ impl Session {
             self.selection = computed.selection;
             self.selection_all_bodies = computed.selection_all_bodies;
         }
+        // These counters describe the same computed history. Adopt them as a pair
+        // before accounting for the view jump past the live tab's last revision.
         self.revision = computed.revision;
+        self.visibility_revision = computed.visibility_revision;
         self.invalidate_view(previous_revision);
         self.active_component = computed.active_component;
         self.active_occurrence_path = computed.active_occurrence_path;

@@ -97,6 +97,7 @@ pub mod features;
 pub mod features_more;
 pub mod file;
 pub mod file_library;
+pub mod forms_prototype;
 pub mod frame;
 pub mod frame_plate;
 pub mod gusset;
@@ -204,6 +205,8 @@ pub use check::output_schema_for;
 pub(crate) use check::read;
 pub use check::run_checked;
 pub use check::run_checked_as;
+pub(crate) use check::run_detached_checked;
+pub use check::run_read_query_checked;
 pub use types::*;
 
 /// A command's `run` that checks the call against the contract command `$id` publishes

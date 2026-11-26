@@ -27,7 +27,7 @@ use std::process::Command;
 /// interface change rebuild every design (25 s on grid100) for nothing;
 /// `a_model_is_computed_without_the_display_crates` keeps doc's model computation from naming them.
 pub(crate) const EVALUATION_CRATES: &[&str] =
-    &["color", "geom", "profile", "smlib", "sketch", "kernel", "kernel-api", "derive", "develop", "doc", "format"];
+    &["color", "geom", "profile", "smlib", "sketch", "kernel", "kernel/services", "kernel-api", "derive", "develop", "doc", "format"];
 /// The other files the saved model depends on, relative to the workspace root.
 pub(crate) const EVALUATION_FILES: &[&str] = &["crates/io/build.rs", "crates/io/src/design/native_cache.rs", ".cargo/config.toml"];
 /// The committed trees whose every file computes models, hashed as one tree id each: the vendored

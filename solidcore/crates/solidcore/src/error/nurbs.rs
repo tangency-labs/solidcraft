@@ -55,6 +55,51 @@ use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NUL
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::nurbs::b_spline_surface::SurfParamType;
 
+/// A bounded ordered linear solve refusal, preserving its numerical stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinearSolveFailure {
+    /// The bounded storage allocation failed.
+    Allocation,
+    /// The block reconstruction does not produce finite values.
+    BlocksNonFinite,
+    /// The banded fit does not produce finite values.
+    FitNonFinite,
+    /// The banded fit has no positive Cholesky pivot.
+    FitSingular,
+    /// Buffer or ownership dimensions disagree.
+    InvalidShape,
+    /// The dense patch does not produce finite values.
+    PatchNonFinite,
+    /// The dense patch has no positive finite Cholesky pivot.
+    PatchSingular,
+    /// More coordinates are shared than the bounded Schur solve permits.
+    SharedLimit {
+        /// Shared coordinate count.
+        given: usize,
+    },
+    /// A declared dimension exceeds the solver bound.
+    TooLarge,
+}
+
+impl core::fmt::Display for LinearSolveFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Allocation => f.write_str("the ordered solve storage cannot be allocated"),
+            Self::BlocksNonFinite => f.write_str("the patches' equations have no finite solution"),
+            Self::FitNonFinite => f.write_str("the fit is not finite"),
+            Self::FitSingular => f.write_str("the fit's equations are singular"),
+            Self::InvalidShape => f.write_str("the fit's equations are out of shape"),
+            Self::PatchNonFinite => f.write_str("the patch's equations have no finite solution"),
+            Self::PatchSingular => f.write_str("the patch's equations are singular"),
+            Self::SharedLimit { given } => write!(
+                f,
+                "{given} unknowns shared by the patches about the centre (at most 4000)"
+            ),
+            Self::TooLarge => f.write_str("the ordered solve dimension exceeds its limit"),
+        }
+    }
+}
+
 /// Why a NURBS routine fails.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -103,6 +148,8 @@ pub enum NurbsFailure {
         /// The index of the knot that is smaller than its predecessor.
         index: usize,
     },
+    /// An ordered spline fitting solve failed.
+    LinearSolve(LinearSolveFailure),
     /// The memory for the result cannot be allocated.
     Memory,
     /// The output has no row for even the point itself, so no derivative order can be
@@ -797,7 +844,7 @@ impl NurbsFailure {
     /// `None` for a B-spline method's failure, which stores none.
     pub(crate) const fn nlib_number(&self) -> Option<i32> {
         Some(match self {
-            Self::BSpline(_) => return None,
+            Self::BSpline(_) | Self::LinearSolve(_) => return None,
             Self::CallFailed => 13,
             Self::CurveDefinition => 1,
             Self::Degree | Self::DegreeTooHigh { .. } => 3,
@@ -860,6 +907,7 @@ impl core::fmt::Display for NurbsFailure {
             Self::KnotsDecrease { index } => {
                 write!(f, "the knot vector decreases at knot {index}")
             }
+            Self::LinearSolve(reason) => reason.fmt(f),
             Self::Memory => f.write_str("the memory for the result cannot be allocated"),
             Self::NoDerivativeRows => f.write_str("the output has no row for the point itself"),
             Self::NotConverged => f.write_str("the iteration did not converge"),

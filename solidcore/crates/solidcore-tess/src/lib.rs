@@ -54,7 +54,12 @@ pub use curve::curve_points;
 pub use iso::MAX_ISOPARMS;
 pub use iso::isoparms;
 pub use mesh::Mesh;
+pub use mesh::MeshBufferLimits;
 pub use mesher::MAX_ANGLE_BOUNDARY;
+pub use mesher::guided::DisplayGuide;
+pub use mesher::guided::DisplayGuidePoint;
+pub use mesher::guided::GuidedMesh;
+pub use mesher::guided::mesh_with_guides;
 pub use mesher::plan;
 pub use par::guarded;
 pub use plan::FacePlan;
@@ -83,6 +88,8 @@ pub use tolerance::MeshTolerance;
 /// client that builds or reads a plan names them through this crate, not the kernel's.
 pub use solidcore::eval::plan::EvalCurve;
 pub use solidcore::eval::plan::EvalSurface;
+pub use solidcore::eval::plan::SurfaceJet;
+pub use solidcore::eval::plan::nurbs_derivs;
 /// The vector conversions between the record and the evaluator that plan surfaces are built with.
 pub use solidcore_convert::record_vec3;
 pub use solidcore_convert::vec3;

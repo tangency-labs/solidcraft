@@ -18,6 +18,8 @@ mod easyprint;
 #[cfg(target_arch = "wasm32")]
 mod files;
 #[cfg(target_arch = "wasm32")]
+mod form_check_worker;
+#[cfg(target_arch = "wasm32")]
 mod install;
 #[cfg(any(target_arch = "wasm32", test))]
 mod keep;
@@ -413,9 +415,20 @@ mod web {
     /// One open design followed for its kept copy: its revision, when that last changed, and since
     /// when its copy has lacked a change (`None`: current, or being written).
     struct Track {
-        revision: u64,
+        revision: files::KeptRevision,
         last_change: f64,
         first_unwritten: Option<f64>,
+    }
+
+    type AutosaveRevision = (u64, files::KeptRevision, Option<String>);
+
+    fn autosave_revision(session: &Session) -> AutosaveRevision {
+        (session.uid, (session.revision, solidcraft_engine::recovery::form_revision(session)), session.path.clone())
+    }
+
+    struct PendingAutosave {
+        revision: Option<AutosaveRevision>,
+        done: std::sync::mpsc::Receiver<bool>,
     }
 
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
@@ -459,16 +472,30 @@ mod web {
     /// The fetches of drawing fonts that have finished, for the next frame to hand on.
     type DrawingFontsDone = Rc<std::cell::RefCell<Vec<(solidcraft_engine::sketch::fallback::WebFont, Result<Vec<u8>, String>)>>>;
 
+    enum FormRestoreAfter {
+        Kept { id: String, drop: bool },
+        Recovery,
+    }
+    struct FormRestoring {
+        opening: Box<files::FormOpening>,
+        after: FormRestoreAfter,
+    }
     struct Shell {
         app: SolveApp,
         launch: crate::Launch,
         linked: crate::linked::Download,
         full_url: Option<String>,
         api: Api,
+        form_check_worker: Rc<crate::form_check_worker::FormCheckWorker>,
         files: Rc<Files>,
-        /// When the last autosave was (seconds), and the revision it holds (none stored: `None`).
+        /// When the last autosave attempt was made (seconds).
         autosaved_at: f64,
-        autosaved: Option<(u64, u64)>,
+        autosaved: Option<AutosaveRevision>,
+        /// The write or deletion in flight, which must succeed before tracking changes.
+        autosave_pending: Option<PendingAutosave>,
+        /// An archive may exist after a partial write, or until an explicit discard completes.
+        autosave_exists: bool,
+        autosave_discard: bool,
         /// A stored design being renamed: (its name, the new name).
         renaming: Option<(String, String)>,
         /// The rename field takes the keyboard when it appears.
@@ -510,6 +537,7 @@ mod web {
         /// A kept copy or recovered work being opened, in stages with progress and Cancel
         /// (#10198): the answer to come and what follows it ([`Shell::restored`]).
         restoring: Option<(std::sync::mpsc::Receiver<serde_json::Value>, keep::AfterOpen)>,
+        form_restoring: Option<FormRestoring>,
     }
 
     impl Shell {
@@ -643,41 +671,61 @@ mod web {
                 self.recents_synced = true;
                 self.sync_recents();
             }
-            let now = ctx.input(|i| i.time);
-            // With "keep unsaved work in this browser" on, each design's own copy takes over from
-            // the single autosave (#10220).
-            if self.app.preferences.keep_unsaved_in_browser && self.autosaved.is_some() {
-                files::autosave(&self.files, None);
-                self.autosaved = None;
-            }
-            // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
-            if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
-                // A clean tab must not remove the previous tab's recovery copy while its
-                // design is still unsaved. A different dirty tab still gets its regular turn.
-                let owner = self
-                    .autosaved
-                    .filter(|_| !self.app.session.is_dirty())
-                    .and_then(|(uid, _)| solidcraft_ui_egui::documents::open_sessions(&self.app).into_iter().find(|s| s.uid == uid && s.is_dirty()));
-                let s = owner.unwrap_or(&self.app.session);
-                let key = (s.uid, s.revision);
-                let changed = s.is_dirty() && self.autosaved != Some(key);
-                let wait = AUTOSAVE_S - (now - self.autosaved_at);
-                if changed && wait <= 0.0 {
-                    files::autosave(&self.files, Some((&s.design(), s.path.as_deref())));
-                    self.autosaved = Some(key);
-                    self.autosaved_at = now;
-                } else if changed {
-                    // Come back for it even when nothing else happens.
-                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
-                } else if !s.is_dirty() && self.autosaved.is_some() {
-                    files::autosave(&self.files, None);
-                    self.autosaved = None;
-                }
-            }
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             self.all_kept = self.keep_tick(Some(ctx), false);
+            self.autosave_tick(ctx);
+        }
+
+        fn autosave_tick(&mut self, ctx: &egui::Context) {
+            if !self.files.ready.get() {
+                return;
+            }
+            let now = ctx.input(|i| i.time);
+            if let Some(pending) = &mut self.autosave_pending {
+                let result = match pending.done.try_recv() {
+                    Ok(result) => result,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+                };
+                if result {
+                    self.autosave_exists = pending.revision.is_some();
+                    self.autosaved = pending.revision.take();
+                    self.autosave_discard = false;
+                } else {
+                    self.autosaved = None;
+                }
+                self.autosave_pending = None;
+            }
+            if self.files.recovery.borrow().is_some() {
+                return;
+            }
+            // A clean active tab leaves the previous owner's dirty design recoverable.
+            let owner =
+                self.autosaved.as_ref().filter(|_| !self.app.session.is_dirty()).and_then(|(uid, _, _)| {
+                    solidcraft_ui_egui::documents::open_sessions(&self.app).into_iter().find(|s| s.uid == *uid && s.is_dirty())
+                });
+            let session = owner.unwrap_or(&self.app.session);
+            let per_design = self.app.preferences.keep_unsaved_in_browser;
+            let desired = (!per_design && !self.autosave_discard && session.is_dirty()).then(|| autosave_revision(session));
+            // Wait until the per-design copy is current before giving up the single archive.
+            let remove = self.autosave_discard || (self.autosave_exists && desired.is_none() && (!per_design || self.all_kept));
+            if !remove && (desired.is_none() || self.autosaved == desired) {
+                return;
+            }
+            let wait = AUTOSAVE_S - (now - self.autosaved_at);
+            if wait > 0.0 {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            } else {
+                let (finished, done) = std::sync::mpsc::channel();
+                files::autosave(&self.files, desired.as_ref().map(|_| session), finished);
+                // If the archive succeeds and its metadata fails, it still needs removal later.
+                self.autosave_exists |= desired.is_some();
+                self.autosave_pending = Some(PendingAutosave { revision: desired, done });
+                self.autosaved_at = now;
+                ctx.request_repaint();
+            }
         }
 
         /// Keep each open design's unsaved changes in the browser, when the preference asks for
@@ -701,12 +749,13 @@ mod web {
                 for s in solidcraft_ui_egui::documents::open_sessions(app).into_iter().filter(|s| s.is_dirty()) {
                     let id = keep::entry_id(&page, s.uid);
                     wanted.insert(s.uid);
-                    let t = keep_track.entry(s.uid).or_insert(Track { revision: s.revision, last_change: time, first_unwritten: None });
-                    if t.revision != s.revision {
-                        t.revision = s.revision;
+                    let revision = (s.revision, solidcraft_engine::recovery::form_revision(s));
+                    let t = keep_track.entry(s.uid).or_insert(Track { revision, last_change: time, first_unwritten: None });
+                    if t.revision != revision {
+                        t.revision = revision;
                         t.last_change = time;
                     }
-                    if files.kept.borrow().get(&id).copied().flatten() == Some(s.revision) {
+                    if files.kept.borrow().get(&id).copied().flatten() == Some(revision) {
                         t.first_unwritten = None;
                         continue;
                     }
@@ -723,7 +772,7 @@ mod web {
                         continue;
                     }
                     if now || keep::due(time, first, t.last_change) {
-                        match solidcraft_engine::io::write_design_container(&s.design()) {
+                        match solidcraft_engine::recovery::capture_bytes(s) {
                             Ok(bytes) => {
                                 let entry = keep::Entry {
                                     id,
@@ -732,7 +781,7 @@ mod web {
                                     changed_at: t.last_change,
                                     preserve_from_save: solidcraft_ui_egui::save_job::protects_host_recovery(app, s),
                                 };
-                                files::write_kept(files, &entry, bytes, s.revision);
+                                files::write_kept(files, &entry, bytes, revision);
                                 t.first_unwritten = None;
                             }
                             Err(e) => {
@@ -774,7 +823,7 @@ mod web {
         /// (when it has a file) and Discard.
         fn keep_prompt(&mut self, ctx: &egui::Context) {
             let offered = self.files.keep_offered.borrow().clone();
-            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() {
+            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() || self.form_restoring.is_some() {
                 return;
             }
             let now = (js_sys::Date::now() / 1000.0) as u64;
@@ -807,23 +856,35 @@ mod web {
         fn keep_answer(&mut self, entry: &keep::Entry, answer: keep::Answer) {
             let Some(plan) = keep::plan(answer, entry, self.saved_exists(entry)) else { return };
             if plan.open_copy {
-                let copy = match files::prepare_kept(&entry.id, entry.path.as_deref()) {
-                    Ok(copy) => copy,
+                if self.app.file_picker_busy() {
+                    return;
+                }
+                if !solidcraft_ui_egui::documents::active_is_blank(&self.app) && self.app.docs.count() >= solidcraft_ui_egui::documents::MAX_OPEN {
+                    self.app.set_status("close a design before recovering another", true);
+                    return;
+                }
+                match files::recovered_kept(&entry.id, entry.path.as_deref()) {
+                    Ok(files::RecoveredCopy::Design(copy)) => {
+                        let after = keep::AfterOpen::KeptCopy {
+                            opened: copy.clone(),
+                            id: entry.id.clone(),
+                            path: entry.path.clone(),
+                            name: entry.name.clone(),
+                            drop: plan.drop_copy,
+                        };
+                        self.restore(&copy, after);
+                        return;
+                    }
+                    Ok(files::RecoveredCopy::Form(opening)) => {
+                        self.form_restoring =
+                            Some(FormRestoring { opening, after: FormRestoreAfter::Kept { id: entry.id.clone(), drop: plan.drop_copy } });
+                        return;
+                    }
                     Err(error) => {
                         self.app.set_status(error, true);
                         return;
                     }
-                };
-                // Finished in `restored` once it is in.
-                let after = keep::AfterOpen::KeptCopy {
-                    opened: copy.clone(),
-                    id: entry.id.clone(),
-                    path: entry.path.clone(),
-                    name: entry.name.clone(),
-                    drop: plan.drop_copy,
-                };
-                self.restore(&copy, after);
-                return;
+                }
             }
             if let Some(path) = &plan.open_saved {
                 if vfs::exists(path) {
@@ -900,7 +961,7 @@ mod web {
                     self.app.session.mark_unsaved();
                     self.app.home.open = false;
                     *self.files.recovery.borrow_mut() = None;
-                    files::autosave(&self.files, None);
+                    self.autosave_exists = true;
                 }
             }
         }
@@ -1069,6 +1130,10 @@ mod web {
                     Err(e) => self.app.set_status(e.to_string(), true),
                 },
                 "download_open" => {
+                    if self.app.session.forms_prototype.is_some() {
+                        self.app.set_status(self.app.tr("forms.prototype.finish_before_save").to_owned(), true);
+                        return;
+                    }
                     let d = &self.app.session.doc;
                     let result = self
                         .app
@@ -1119,40 +1184,98 @@ mod web {
 
         /// Offer the autosave an earlier session left.
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
-            if self.restoring.is_some() {
+            if self.restoring.is_some() || self.form_restoring.is_some() {
                 return;
             }
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
-            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?")
+            let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", self.app.tr_label("Recover unsaved design?"))
                 .required()
                 .show_body(ctx, |ui| {
-                    ui.label(format!("“{name}” had unsaved changes when this page last closed."));
+                    ui.label(self.app.tr_label("SolidCraft closed before these designs were saved. Their last autosave can be opened."));
+                    ui.label(&name);
                     ui.horizontal(|ui| {
-                        if ui_kit::button(ui, "Recover", ui_kit::Button::Normal).clicked() {
+                        let restore = ui_kit::button(ui, self.app.tr_label("Recover"), ui_kit::Button::Normal);
+                        let discard = ui_kit::button(ui, self.app.tr_label("Discard"), ui_kit::Button::Normal);
+                        solidcraft_ui_egui::scenario::publish_handle("browser_recovery:recover", restore.rect.center());
+                        solidcraft_ui_egui::scenario::publish_handle("browser_recovery:discard", discard.rect.center());
+                        if restore.clicked() {
                             answer = Some(true);
                         }
-                        if ui_kit::button(ui, "Discard", ui_kit::Button::Normal).clicked() {
+                        if discard.clicked() {
                             answer = Some(false);
                         }
                     });
                 });
             let Some(recover) = answer else { return };
             if recover {
-                let recovery = match files::prepare_recovery(path.as_deref()) {
-                    Ok(recovery) => recovery,
+                if self.app.file_picker_busy() {
+                    return;
+                }
+                if !solidcraft_ui_egui::documents::active_is_blank(&self.app) && self.app.docs.count() >= solidcraft_ui_egui::documents::MAX_OPEN {
+                    self.app.set_status("close a design before recovering another", true);
+                    return;
+                }
+                match files::recovered_session(path.as_deref()) {
+                    Ok(files::RecoveredCopy::Design(recovery)) => {
+                        let after = keep::AfterOpen::Recovery { opened: recovery.clone(), path, name };
+                        self.restore(&recovery, after);
+                        return;
+                    }
+                    Ok(files::RecoveredCopy::Form(opening)) => {
+                        self.form_restoring = Some(FormRestoring { opening, after: FormRestoreAfter::Recovery });
+                        return;
+                    }
                     Err(error) => {
                         self.app.set_status(error, true);
                         return;
                     }
-                };
-                // Finished in `restored` once it is in; until then the prompt stays away.
-                let after = keep::AfterOpen::Recovery { opened: recovery.clone(), path, name };
-                self.restore(&recovery, after);
-                return;
+                }
+            } else {
+                self.autosave_discard = true;
             }
             *self.files.recovery.borrow_mut() = None;
-            files::autosave(&self.files, None);
+            ctx.request_repaint();
+        }
+
+        fn restore_form(&mut self, ctx: &egui::Context) {
+            let Some(pending) = self.form_restoring.as_ref() else { return };
+            let (done, total) = pending.opening.progress();
+            let mut cancel = false;
+            let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_form_recovery"), "restore", self.app.tr("file_load.opening"))
+                .required()
+                .show_body(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!("{done} / {total}"));
+                    });
+                    cancel = ui_kit::button(ui, self.app.tr("ui.cancel"), ui_kit::Button::Normal).clicked();
+                });
+            let Some(mut pending) = self.form_restoring.take() else { return };
+            if cancel {
+                return;
+            }
+            match pending.opening.step() {
+                Ok(None) => self.form_restoring = Some(pending),
+                Ok(Some(session)) => {
+                    // Neither the recovery copy nor the open design is changed until
+                    // both the timeline and its draft have restored successfully.
+                    if solidcraft_ui_egui::documents::adopt(&mut self.app, *session) {
+                        self.app.home.open = false;
+                        match pending.after {
+                            FormRestoreAfter::Kept { id, drop: true } => self.drop_kept(&id),
+                            FormRestoreAfter::Kept { .. } => {}
+                            FormRestoreAfter::Recovery => {
+                                self.autosaved = Some(autosave_revision(&self.app.session));
+                                self.autosave_exists = true;
+                                *self.files.recovery.borrow_mut() = None;
+                            }
+                        }
+                    }
+                }
+                Err(error) => self.app.set_status(error, true),
+            }
+            ctx.request_repaint();
         }
 
         /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
@@ -1324,6 +1447,7 @@ mod web {
             self.tick_font(ctx);
             self.fetch_drawing_fonts(ctx);
             self.app.logic(ctx);
+            self.form_check_worker.poll(ctx);
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
@@ -1369,6 +1493,7 @@ mod web {
             self.app.retain_view_pictures(frame.wgpu_render_state());
             self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             let ctx = ui.ctx().clone();
+            self.restore_form(&ctx);
             if self.launch.persists() {
                 self.file_panel(&ctx);
                 self.recovery_prompt(&ctx);
@@ -1549,7 +1674,10 @@ mod web {
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
                         let (sender, receiver) = std::sync::mpsc::channel();
-                        let mut app = SolveApp::new(Session::default(), services).with_control(receiver);
+                        let form_check_worker = Rc::new(crate::form_check_worker::FormCheckWorker::default());
+                        let mut app = SolveApp::new(Session::default(), services)
+                            .with_control(receiver)
+                            .with_browser_form_check(form_check_worker.clone());
                         app.embedded = launch.embed;
                         app.embed_editor = launch.editor;
                         // Listening before reading: settings another tab writes from now on are
@@ -1601,9 +1729,13 @@ mod web {
                             linked,
                             full_url,
                             api,
+                            form_check_worker,
                             files,
                             autosaved_at: f64::NEG_INFINITY,
                             autosaved: None,
+                            autosave_pending: None,
+                            autosave_exists: false,
+                            autosave_discard: false,
                             renaming: None,
                             rename_focus: false,
                             recents_synced: false,
@@ -1627,6 +1759,7 @@ mod web {
                             keep_track: Default::default(),
                             all_kept: false,
                             restoring: None,
+                            form_restoring: None,
                         }))
                     }),
                 )

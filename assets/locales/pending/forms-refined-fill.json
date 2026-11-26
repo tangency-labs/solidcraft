@@ -1,0 +1,56 @@
+{
+  "de": {
+    "forms.fill.desktop_required": "Das Füllen von Löchern in lokal unterteilten Formen ist in der Desktop-App verfügbar.",
+    "forms.fill.refined_unavailable": "Löcher in lokal unterteilten Formen lassen sich ohne Anpassung, Extrusion oder Schnittwand füllen.",
+    "forms.fill.restore_material": "Stellt die durch Löschen von Flächen entfernte Oberfläche mit ihren Formänderungen wieder her.",
+    "forms.fill.select_rim": "Wählen Sie eine Kante oder einen Punkt am Rand einer Öffnung."
+  },
+  "en": {
+    "forms.fill.desktop_required": "Filling holes in refined Forms requires the desktop app.",
+    "forms.fill.refined_unavailable": "Fill Hole on a refined Form requires a Form without Match, extrusion or a trim wall.",
+    "forms.fill.restore_material": "Restores the surface removed by deleting faces, including its sculpted shape.",
+    "forms.fill.select_rim": "Select an edge or point on the rim of an opening."
+  },
+  "ja": {
+    "forms.fill.desktop_required": "局所細分化したフォームの穴を埋めるにはデスクトップアプリが必要です。",
+    "forms.fill.refined_unavailable": "局所細分化したフォームで穴を埋めるには、マッチ、押し出し、トリム壁がないことが必要です。",
+    "forms.fill.restore_material": "面の削除で取り除いたサーフェスを、編集した形状も含めて復元します。",
+    "forms.fill.select_rim": "開口部の境界上にあるエッジまたは点を選択してください。"
+  },
+  "ko": {
+    "forms.fill.desktop_required": "국부 세분화한 폼의 구멍을 채우려면 데스크톱 앱이 필요합니다.",
+    "forms.fill.refined_unavailable": "국부 세분화한 폼의 구멍을 채우려면 맞춤, 돌출 또는 트림 벽이 없어야 합니다.",
+    "forms.fill.restore_material": "면을 삭제해 제거한 표면을 편집한 형상과 함께 복원합니다.",
+    "forms.fill.select_rim": "개구부 경계의 모서리나 점을 선택하세요."
+  },
+  "zh": {
+    "forms.fill.desktop_required": "填补局部细分形状上的孔洞需要使用桌面应用。",
+    "forms.fill.refined_unavailable": "在局部细分形状上填补孔洞时，形状不得含有匹配、拉伸或修剪壁。",
+    "forms.fill.restore_material": "恢复删除面时移除的曲面及其雕塑形状。",
+    "forms.fill.select_rim": "选择开口边界上的边或点。"
+  },
+  "ar": {
+    "forms.fill.desktop_required": "يتطلب ملء الفتحات في الأشكال المُنقَّحة تطبيق سطح المكتب.",
+    "forms.fill.refined_unavailable": "يتطلب «ملء الفتحة» في شكل مُنقَّح شكلًا بلا مطابقة حدود أو بثق أو جدار قصّ.",
+    "forms.fill.restore_material": "يستعيد السطح الذي أُزيل بحذف الأوجه، بما في ذلك شكله المنحوت.",
+    "forms.fill.select_rim": "حدّد حافة أو نقطة على محيط فتحة."
+  },
+  "fr": {
+    "forms.fill.desktop_required": "Le remplissage des trous sur les formes raffinées nécessite l’application de bureau.",
+    "forms.fill.refined_unavailable": "Le remplissage d’un trou sur une forme raffinée requiert une forme sans raccordement, extrusion ni paroi de découpe.",
+    "forms.fill.restore_material": "Rétablit la surface supprimée, en conservant la géométrie sculptée.",
+    "forms.fill.select_rim": "Sélectionnez une arête ou un point du contour d’une ouverture."
+  },
+  "he": {
+    "forms.fill.desktop_required": "מילוי חורים בצורות חופשיות שעברו עידון דורש את יישום שולחן העבודה.",
+    "forms.fill.refined_unavailable": "מילוי חור בצורה שעברה עידון דורש צורה חופשית ללא התאמת גבול, שליפה או דופן גזומה.",
+    "forms.fill.restore_material": "שחזור המשטח שהוסר במחיקת הפאות, כולל צורתו לאחר העיצוב.",
+    "forms.fill.select_rim": "יש לבחור קצה או נקודה בשפת פתח."
+  },
+  "vi": {
+    "forms.fill.desktop_required": "Lấp lỗ trên hình đã chia nhỏ cần ứng dụng máy tính.",
+    "forms.fill.refined_unavailable": "Để lấp lỗ, hình đã chia nhỏ không được có khớp biên, phần đùn hoặc thành cắt xén.",
+    "forms.fill.restore_material": "Khôi phục bề mặt đã bị loại bỏ khi xóa mặt, kể cả các chi tiết tạo dáng.",
+    "forms.fill.select_rim": "Chọn một cạnh hoặc điểm trên vành của lỗ hở."
+  }
+}

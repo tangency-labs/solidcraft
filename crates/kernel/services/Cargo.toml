@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-kernel-services"
+description = "Record and spline services shared by the kernel adapter and its geometry foundation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcore-ops = { workspace = true }
