@@ -5996,7 +5996,7 @@
   "ui.plane_at_angle": "Раван под углом",
   "ui.plugin_context_changed": "Дизајн, контекст уређивања или подешавања додатка су се променили док је додатак радио. Ништа није примењено.",
   "ui.plugin_dialog_choose": "Изабери…",
-  "ui.plugin_dialog_disabled": "Овај додатак је искључен у Подешавања › Додаци.",
+  "ui.plugin_dialog_disabled": "Овај додатак је искључен у Подешавања › Проширења.",
   "ui.plugin_dialog_done": "{entry} је завршен.",
   "ui.plugin_dialog_failed": "Додатак се није покренуо: {error}",
   "ui.plugin_dialog_invalid": "{field} је изван дозвољених вредности.",
