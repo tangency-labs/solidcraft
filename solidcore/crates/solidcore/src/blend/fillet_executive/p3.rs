@@ -860,7 +860,9 @@ pub struct FilletExecutive<O> {
     pub groups_apart: bool,
     /// Not upstream (#2784): with [`Self::groups_apart`], the refusal recorded is that of
     /// bands that meet only across curved faces (`FaceConsumed` from the bands, or
-    /// `BandsOverlap`) while no blend adds material: the event in which each group's blend
+    /// `BandsOverlap`), or, where no band contact is found, of a band reaching another blended
+    /// edge of a curved face (the faces-outlast check's reach), while no blend adds material
+    /// and no polygon is taken whole: the event in which each group's blend
     /// takes off what it takes alone, so the body is the intersection of what each group
     /// leaves. The refusal, with its size, stands for when that construction gives no body.
     pub bands_meet_apart: bool,
@@ -3679,7 +3681,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             // where no band contact is found (each band covers the face past the other edge),
             // the reach the faces-outlast check found on a curved face stands for it
-            let reached = access.creation_bands_reached_curved_face();
+            let reached = no_polygon && access.creation_bands_reached_curved_face();
             let curved_only = if met { all_curved } else { reached };
             self.bands_meet_apart =
                 (met || reached) && curved_only && self.blends_take_material(k, access)?;
