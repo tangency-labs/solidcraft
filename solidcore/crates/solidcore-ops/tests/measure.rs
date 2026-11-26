@@ -1327,3 +1327,230 @@ fn a_body_of_unknown_naming_is_refused_by_the_check() {
         .set_naming(solidcore::topology::NamingScheme::Caller);
     assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
 }
+
+/// `Body::curve_face_gap_bound` bounds a spline and a conic on a face near 0, bounds a lifted
+/// spline at its shift, rejects out-of-range face indices, returns `None` for invalid interval
+/// or floor, and honours cancellation.
+#[test]
+fn curve_face_gap_bound_bounds_splines_and_conics_and_honours_cancel() {
+    use solidcore_ops::cancel::{self, CancelToken};
+    use solidcore_ops::curve_gap::GapCurve;
+    use solidcore_record::brep::Frame;
+
+    all_fixes();
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    let order = b.own_order();
+    assert_eq!(order.faces.len(), 6);
+
+    let on_top = GapCurve::new(&Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[2.0, 0.0, 33.0], [10.0, 16.0, 33.0]],
+    })
+    .unwrap();
+    let bounds_all: Vec<f64> = (0..6)
+        .map(|f| {
+            b.curve_face_gap_bound(&order, f, &on_top, [0.0, 1.0], 1e-9)
+                .unwrap()
+                .unwrap()
+        })
+        .collect();
+    let zero_faces: Vec<usize> = bounds_all
+        .iter()
+        .enumerate()
+        .filter_map(|(f, &d)| (d < 1e-9).then_some(f))
+        .collect();
+    assert_eq!(zero_faces.len(), 1, "exactly the top face: {bounds_all:?}");
+    let top = zero_faces[0];
+
+    let lifted = GapCurve::new(&Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[2.0, 0.0, 35.5], [10.0, 16.0, 35.5]],
+    })
+    .unwrap();
+    let gap = b
+        .curve_face_gap_bound(&order, top, &lifted, [0.0, 1.0], 1e-9)
+        .unwrap()
+        .unwrap();
+    assert!((2.5 - 1e-9..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
+
+    // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
+    // zero-gap quarter circle within 1e-9 (remainder <= 1e-10 plus evaluation rounding).
+    let circle = Curve::Circle {
+        frame: Frame {
+            origin: [6.0, 8.0, 33.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        radius: 2.0,
+    };
+    let (arc, arc_ivl) = GapCurve::of_conic(&circle, [0.0, std::f64::consts::FRAC_PI_2])
+        .unwrap()
+        .unwrap();
+    let arc_gap = b
+        .curve_face_gap_bound(&order, top, &arc, arc_ivl, 1e-10)
+        .unwrap()
+        .unwrap();
+    assert!(arc_gap < 1e-9, "quarter circle on top face: {arc_gap}");
+
+    assert_eq!(
+        b.curve_face_gap_bound(&order, 6, &on_top, [0.0, 1.0], 1e-9),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, usize::MAX, &on_top, [0.0, 1.0], 1e-9),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [1.0, 0.0], 1e-9)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [f64::NAN, 1.0], 1e-9)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [f64::NEG_INFINITY, 1.0], 1e-9)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], -1.0)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], f64::NAN)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], f64::INFINITY)
+            .unwrap(),
+        None
+    );
+
+    let token = CancelToken::new();
+    token.cancel();
+    assert_eq!(
+        cancel::within(&token, || {
+            b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], 1e-9)
+        }),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+}
+
+/// `Body::face_internal_point` and `Body::face_internal_points` return a point strictly inside
+/// each face of a box and of a holed plate, match per-face calls bit for bit, reject bad indices,
+/// handle empty orders, and stop mid-loop when cancelled.
+#[test]
+fn face_internal_points_lie_inside_each_face_and_honour_cancel() {
+    use solidcore_ops::cancel::{self, CancelToken};
+
+    all_fixes();
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    let order = b.own_order();
+    let pts = b.face_internal_points(&order).unwrap();
+    assert_eq!(pts.len(), 6);
+
+    let lo = [1.0, -2.0, 3.0];
+    let hi = [11.0, 18.0, 33.0];
+    let mut sides = std::collections::BTreeSet::new();
+    for (f, &p) in pts.iter().enumerate() {
+        assert_eq!(b.face_internal_point(&order, f).unwrap(), p, "face {f}");
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(
+            b.classify_point(p).unwrap(),
+            PointClass::OnBoundary,
+            "{p:?}"
+        );
+        assert!(
+            b.point_on_face(&order, f, p, 1e-9).unwrap().is_some(),
+            "face {f} point {p:?}"
+        );
+        let mut on = None;
+        for axis in 0..3 {
+            assert!(
+                (lo[axis] - 1e-9..=hi[axis] + 1e-9).contains(&p[axis]),
+                "{p:?}"
+            );
+            if (p[axis] - lo[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, false)).is_none(), "edge/corner {p:?}");
+            } else if (p[axis] - hi[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, true)).is_none(), "edge/corner {p:?}");
+            } else {
+                assert!(
+                    p[axis] > lo[axis] + 1e-6 && p[axis] < hi[axis] - 1e-6,
+                    "too close to edge: {p:?}"
+                );
+            }
+        }
+        assert!(
+            sides.insert(on.expect("point on a box face")),
+            "duplicate face"
+        );
+    }
+    assert_eq!(sides.len(), 6);
+
+    assert_eq!(b.face_internal_point(&order, 6), Err(Error::Argument));
+    assert_eq!(
+        b.face_internal_point(&order, usize::MAX),
+        Err(Error::Argument)
+    );
+    let mut empty = order.clone();
+    empty.faces.clear();
+    assert_eq!(
+        b.face_internal_points(&empty).unwrap(),
+        Vec::<[f64; 3]>::new()
+    );
+
+    // Pre-cancelled token refuses both single and batch queries.
+    let token = CancelToken::new();
+    token.cancel();
+    assert_eq!(
+        cancel::within(&token, || b.face_internal_point(&order, 0)),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(
+        cancel::within(&token, || b.face_internal_points(&order)),
+        Err(Error::Cancelled)
+    );
+    // Mid-loop cancellation stops after a bounded number of polls inside `face_internal_points`.
+    let limited = CancelToken::after_polls(2);
+    assert_eq!(
+        cancel::within(&limited, || b.face_internal_points(&order)),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+
+    // Holed plate (20 x 20 x 5 box minus radius-3 cylinder): 7 faces, 15 edges, 10 vertices.
+    let block = make_box([0.0; 3], [20.0, 20.0, 5.0]).unwrap();
+    let pin = make_cylinder([10.0, 10.0, -1.0], 3.0, 7.0).unwrap();
+    let plate = solidcore_ops::boolean::boolean(block, pin, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert_eq!(plate.counts().unwrap(), [7, 15, 10]);
+    let plate_order = plate.own_order();
+    let plate_pts = plate.face_internal_points(&plate_order).unwrap();
+    assert_eq!(plate_pts.len(), 7);
+    for (f, &p) in plate_pts.iter().enumerate() {
+        assert_eq!(plate.face_internal_point(&plate_order, f).unwrap(), p);
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(
+            plate.classify_point(p).unwrap(),
+            PointClass::OnBoundary,
+            "{p:?}"
+        );
+        assert!(
+            plate
+                .point_on_face(&plate_order, f, p, 1e-6)
+                .unwrap()
+                .is_some(),
+            "holed plate face {f}: {p:?}"
+        );
+    }
+}

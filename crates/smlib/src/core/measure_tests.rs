@@ -326,7 +326,7 @@ fn curve_face_gap_bound_bounds_splines_and_conics_and_handles_missing_face() {
 
     let lifted = Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[2.0, 0.0, 35.5], [10.0, 16.0, 35.5]] };
     let gap = super::curve_face_gap_bound(&b, &lifted, [0.0, 1.0], top, 1e-9).unwrap().unwrap();
-    assert!(gap >= 2.5 - 1e-9 && gap <= 2.5 + 1e-6, "lifted gap {gap}");
+    assert!((2.5 - 1e-9..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
 
     let arc = Curve::Circle { frame: Frame { origin: [6.0, 8.0, 33.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 2.0 };
     // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
