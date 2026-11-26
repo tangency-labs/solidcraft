@@ -9,7 +9,8 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::object::Shape;
 use solidcore::geom::tol::{
-    brep_zone_tol_3d, context_xsect_tol_3d, xsect_tol_3d_from_zones, zone_tol3d, SmallTopoType,
+    brep_zone_tol_3d, context_xsect_tol_3d, tol_mul, xsect_tol_3d_from_zones, zone_tol3d,
+    SmallTopoType,
 };
 use solidcore::heal::gap::GapFunction;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
@@ -127,11 +128,11 @@ fn point2(p: [f64; 2]) -> Result<solidcore::Point2> {
     Ok(solidcore::Point2::new(p[0], p[1]))
 }
 
-/// Mass properties of a body at unit density (mm, mm², mm³, mm⁵), and what they are worth.
+/// Mass properties of a body at unit density (mm, mmÂ², mmÂ³, mmâµ), and what they are worth.
 ///
 /// **Requested accuracy, estimated, not proved.** The kernel's integrator holds its error
 /// ESTIMATE under `requested_accuracy`; that is not a bound, and nothing may treat it as one.
-/// For a density ρ the mass is ρ·`volume` and the inertia scales by ρ.
+/// For a density Ï the mass is ÏÂ·`volume` and the inertia scales by Ï.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MassPropertiesEstimate {
     /// The accuracy the integrator's error estimate was held to (not a proved bound).
@@ -146,9 +147,9 @@ pub struct MassPropertiesEstimate {
     /// The centre of mass; of the area for a body with no material.
     pub centroid: [f64; 3],
     /// Ixx, Iyy, Izz about axes through the centroid parallel to the world axes:
-    /// ∫(y²+z²), ∫(z²+x²), ∫(x²+y²) dV.
+    /// âˆ«(yÂ²+zÂ²), âˆ«(zÂ²+xÂ²), âˆ«(xÂ²+yÂ²) dV.
     pub moments: [f64; 3],
-    /// Iyz, Izx, Ixy about the centroid: ∫yz, ∫zx, ∫xy dV relative to it.
+    /// Iyz, Izx, Ixy about the centroid: âˆ«yz, âˆ«zx, âˆ«xy dV relative to it.
     pub products: [f64; 3],
     /// The inertia tensor about the centroid (row-major), the kernel's: whose off-diagonal
     /// terms are the negated products.
@@ -215,6 +216,16 @@ pub enum ClassifiedPoint {
         /// Unit normal facing out of material.
         normal: Normal,
     },
+}
+
+/// Which sides of the plane through a point with a given normal immediately enter material of a
+/// body ([`Body::material_sides_at`]): `negative` for `-normal`, `positive` for `+normal`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MaterialSides {
+    /// Material lies immediately on the `-normal` side.
+    pub negative: bool,
+    /// Material lies immediately on the `+normal` side.
+    pub positive: bool,
 }
 
 /// Where the kernel's classification put a point ([`locate_points`]), before any rule for a
@@ -505,7 +516,7 @@ pub struct RayHit {
     /// The face, edge or vertex it meets.
     pub entity: RayEntity,
     /// The distance from the ray's origin along its unit direction: the hit point is
-    /// `origin + distance · direction / |direction|`.
+    /// `origin + distance Â· direction / |direction|`.
     pub distance: f64,
 }
 
@@ -802,7 +813,7 @@ impl Body {
     }
 
     /// How far the body reaches along the normal of the plane through `origin` with axes `x`
-    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
+    /// and `y` (`x Ã— y` made unit), measured from that plane: the least and the greatest level
     /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
     /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
     /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
@@ -1884,6 +1895,32 @@ impl Body {
         })?
     }
 
+    /// Which sides of the plane through `p` with `normal` immediately enter material of this
+    /// body: `negative` for `-normal`, `positive` for `+normal`. Decided on exact B-rep
+    /// classification and outward face normals (no mesh, and no body-size-scaled probe step).
+    ///
+    /// A point strictly inside material enters both sides; a point outside enters neither; a
+    /// point on the boundary enters the side opposite the outward normals of the solid faces
+    /// holding it, falling back to an exact probe just outside the boundary tolerance band only
+    /// at an ambiguous boundary (a grazing side wall, sharp ridge/groove, or face without an
+    /// outward material side).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a non-finite coordinate or a zero normal; those of point
+    /// classification and face boxes.
+    pub fn material_sides_at(
+        &self,
+        order: &Order,
+        p: [f64; 3],
+        normal: [f64; 3],
+    ) -> Result<MaterialSides> {
+        let p = point(p)?;
+        let n = solidcore::query::line_unit_direction(point(normal)?).ok_or(Error::Argument)?;
+        with_body("material_sides_at", self, |k, b| {
+            Ok(material_sides_in_body(k, b, order, p, n))
+        })?
+    }
+
     /// The area of record face `face` (`SmApiFaceComputeArea`) at `relative_accuracy`, as the
     /// kernel's contract takes it (ops passes it on as given). **Estimated, not proved**
     /// ([`MassPropertiesEstimate`]).
@@ -2110,7 +2147,7 @@ impl Body {
     }
 
     /// `count` points of record edge `edge`'s curve inside the edge, never at its ends: the
-    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 … count, of the
+    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 â€¦ count, of the
     /// edge's parameter interval. They are spaced evenly in parameter, not in length: on a
     /// line they are evenly spaced along it, on a rational arc or a spline they need not be. One
     /// point is [`Body::edge_middle`]'s. For a caller that checks what happened along an edge,
@@ -2562,6 +2599,162 @@ fn classify_with_normals(
         .collect()
 }
 
+/// Outward faceuse of `f` when `f` separates a material region from void; `Ok(None)` for a
+/// sheet face (void on both sides) or an internal partition (material on both sides).
+fn solid_outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Option<FaceuseId>> {
+    let (Some(x), Some(y)) = face_p2::faceuses(b, f)? else {
+        return Ok(None);
+    };
+    let material = |r: Option<RegionId>| match r {
+        Some(r) => region_material(b, r),
+        None => Ok(false),
+    };
+    let [rx, ry] = face_side_regions(b, f)?;
+    Ok(match (material(rx)?, material(ry)?) {
+        (true, false) => Some(y),
+        (false, true) => Some(x),
+        (false, false) | (true, true) => None,
+    })
+}
+
+/// Outward unit normal of solid boundary face `f` at `p` within `face_point_tol(k, b, f, tol)`,
+/// together with that membership band. Returns `Ok(None)` when `p` is off `f` or `f` does not
+/// separate material from void.
+fn solid_face_normal_in_body(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    p: Point3,
+    tol: f64,
+) -> Result<Option<(Normal, f64)>> {
+    let within = face_point_tol(k, b, f, tol)?;
+    let Some(uv) = q::face_parameters_at_point(k, b, f, p, within).map_err(status)? else {
+        return Ok(None);
+    };
+    let Some(fu) = solid_outer_faceuse(b, f).map_err(status)? else {
+        return Ok(None);
+    };
+    let n = q::face_normal_at_uv(k, b, f, uv, fu).map_err(status)?;
+    Ok(Some((
+        Normal {
+            value: array(n.value),
+            bound: n.bound,
+        },
+        within,
+    )))
+}
+
+/// Exact material-entry sides across the plane through `p` with unit normal `n`, in one
+/// `with_body` rollback scope.
+fn material_sides_in_body(
+    k: &Kernel,
+    b: &mut Brep,
+    order: &Order,
+    p: Point3,
+    n: Vec3,
+) -> Result<MaterialSides> {
+    let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let query = BrepQuery::of_brep(b);
+    let pc = query
+        .point_3d_classify(k, b, p, tol, true)
+        .map_err(status)?;
+    match point_class(located(b, &pc))? {
+        PointClass::Inside => Ok(MaterialSides {
+            negative: true,
+            positive: true,
+        }),
+        PointClass::Outside => Ok(MaterialSides::default()),
+        PointClass::OnBoundary => {
+            let hit = boundary_hit(&pc);
+            let candidates =
+                q::FacePointCandidates::new(k, b, &order.faces, None).map_err(status)?;
+            let n_arr = array(n);
+            let mut any_pos = false;
+            let mut any_neg = false;
+            let mut found_normal = false;
+            let mut band = tol_mul(tol, 2.0);
+            let mut visited = Vec::new();
+            let mut record = |normal: Normal, within: f64| {
+                found_normal = true;
+                if within.is_finite() && within > band {
+                    band = within;
+                }
+                let along = crate::affine::distance_along([0.0; 3], n_arr, normal.value);
+                if along > SQUARE_NORMAL_TOL {
+                    any_pos = true;
+                } else if along.is_sign_negative() && along.abs() > SQUARE_NORMAL_TOL {
+                    any_neg = true;
+                }
+            };
+            for (_, f) in candidates.at_point(p, tol, None).map_err(status)? {
+                if let Ok(Some((normal, within))) = solid_face_normal_in_body(k, b, f, p, tol) {
+                    visited.push(f);
+                    record(normal, within);
+                }
+            }
+            // Also consult incident faces of the boundary entity located by classification
+            // (for example a per-axis vertex box hit slightly outside `face_point_tol`).
+            let incident = match hit {
+                BoundaryHit::Face { face, .. } => vec![face],
+                BoundaryHit::Edge { edge, .. } => edge::faces(b, edge, None).map_err(status)?,
+                BoundaryHit::Vertex(vertex) => vertex::faces(b, vertex).map_err(status)?,
+                BoundaryHit::None => Vec::new(),
+            };
+            for f in incident {
+                if visited.contains(&f) {
+                    continue;
+                }
+                if solid_outer_faceuse(b, f).map_err(status)?.is_none() {
+                    continue;
+                }
+                let within = face_point_tol(k, b, f, tol).unwrap_or(tol);
+                if let Ok(Some(normal)) = normal_at_hit(k, b, hit, f, p, tol) {
+                    record(normal, within);
+                }
+            }
+            if found_normal {
+                match (any_pos, any_neg) {
+                    // Outward normals point along +n: material lies in -n (negative).
+                    (true, false) => {
+                        return Ok(MaterialSides {
+                            negative: true,
+                            positive: false,
+                        });
+                    }
+                    // Outward normals point along -n: material lies in +n (positive).
+                    (false, true) => {
+                        return Ok(MaterialSides {
+                            negative: false,
+                            positive: true,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            // Ambiguous boundary (grazing side wall, sharp ridge/groove, or no solid face
+            // normal): probe strictly outside the boundary tolerance band without scaling by
+            // body size so thin walls on large parts are not overshot.
+            let mut classify_step = |step: f64| -> Option<PointClass> {
+                let q = solidcore::query::point_along_line(p, n, step);
+                let pc = query.point_3d_classify(k, b, q, tol, true).ok()?;
+                point_class(located(b, &pc)).ok()
+            };
+            let neg_class = classify_step(tol_mul(band, -8.0));
+            let pos_class = classify_step(tol_mul(band, 8.0));
+            let accepts_boundary = found_normal && !any_pos && !any_neg;
+            let enters = |class: Option<PointClass>| match class {
+                Some(PointClass::Inside) => true,
+                Some(PointClass::OnBoundary) => accepts_boundary,
+                _ => false,
+            };
+            Ok(MaterialSides {
+                negative: enters(neg_class),
+                positive: enters(pos_class),
+            })
+        }
+    }
+}
+
 /// The face across rim edge `e` from the faces `set` ([`Body::outline_cuts`]): the one face of
 /// the edge's uses that is not in the set.
 ///
@@ -2703,7 +2896,7 @@ pub(crate) mod tests {
     }
 
     /// Separated unit boxes: the selected top at z = 1 and bottom at z = 4 come nearest
-    /// at corners (1, 1, 1) and (3, 4, 4), sqrt(2² + 3² + 3²) = sqrt(22) apart.
+    /// at corners (1, 1, 1) and (3, 4, 4), sqrt(2Â² + 3Â² + 3Â²) = sqrt(22) apart.
     #[test]
     fn closest_faces_keep_their_trimmed_boundaries() {
         all_fixes();
@@ -2735,7 +2928,7 @@ pub(crate) mod tests {
     fn centroid_and_mean_radius_and_displacement_adapt_kernel_results() {
         let summary = centroid_and_mean_radius(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
         assert_eq!(summary.centroid, [2.0, 2.0]);
-        // (2√2 + 4√5) / 3, evaluated independently.
+        // (2âˆš2 + 4âˆš5) / 3, evaluated independently.
         let expected = 3.924_233_011_581_783;
         assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
         assert_eq!(
@@ -3217,8 +3410,8 @@ pub(crate) mod tests {
         }
 
         // `Body::face_normal_at_point` tests membership in the Euclidean `face_point_tol` band
-        // (2 * tol here): `face_pt` (1.5 * tol) and `edge_pt` (sqrt(2) * 1.2 * tol ≈ 1.70 * tol)
-        // lie within it, whereas `vertex_pt` (sqrt(3) * 1.2 * tol ≈ 2.08 * tol) lies outside it
+        // (2 * tol here): `face_pt` (1.5 * tol) and `edge_pt` (sqrt(2) * 1.2 * tol â‰ˆ 1.70 * tol)
+        // lie within it, whereas `vertex_pt` (sqrt(3) * 1.2 * tol â‰ˆ 2.08 * tol) lies outside it
         // and proves `classify_points_with_normals` falls back to the located vertex hit.
         for p in [face_pt, edge_pt] {
             let Some(normal) = b.face_normal_at_point(&order, x0_face, p).unwrap() else {
@@ -3298,6 +3491,89 @@ pub(crate) mod tests {
                 Err(Error::Argument)
             );
         }
+    }
+
+    #[test]
+    fn material_sides_at_uses_exact_boundary_normals_and_probes() {
+        all_fixes();
+        let b = make_box([0., 0., 0.], [10., 10., 10.]).unwrap();
+        let order = kernel_order(&b);
+        let tol = read_body("zone_tol", &b, |k, g| {
+            Ok(brep_zone_tol_3d(k, g, SmallTopoType::NormalSize))
+        })
+        .unwrap();
+
+        // Interior enters both sides; exterior enters neither.
+        assert_eq!(
+            b.material_sides_at(&order, [5.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            MaterialSides {
+                negative: true,
+                positive: true,
+            }
+        );
+        assert_eq!(
+            b.material_sides_at(&order, [20.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            MaterialSides {
+                negative: false,
+                positive: false,
+            }
+        );
+
+        // Opposite planar faces with the same plane normal +X enter opposite sides.
+        assert_eq!(
+            b.material_sides_at(&order, [0.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            MaterialSides {
+                negative: false,
+                positive: true,
+            }
+        );
+        assert_eq!(
+            b.material_sides_at(&order, [10.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            MaterialSides {
+                negative: true,
+                positive: false,
+            }
+        );
+
+        // Face, edge, and vertex points in the boundary tolerance band resolve via exact normals.
+        for p in [
+            [-1.5 * tol, 5.0, 5.0],
+            [-1.2 * tol, -1.2 * tol, 5.0],
+            [-1.2 * tol, -1.2 * tol, -1.2 * tol],
+        ] {
+            assert_eq!(
+                b.material_sides_at(&order, p, [1.0, 0.0, 0.0]).unwrap(),
+                MaterialSides {
+                    negative: false,
+                    positive: true,
+                },
+                "boundary point {p:?}"
+            );
+        }
+
+        // Grazing side wall (face normal perpendicular to plane normal +Z) enters both sides.
+        assert_eq!(
+            b.material_sides_at(&order, [0.0, 5.0, 5.0], [0.0, 0.0, 1.0])
+                .unwrap(),
+            MaterialSides {
+                negative: true,
+                positive: true,
+            }
+        );
+
+        // Non-finite inputs and zero normals are rejected with Error::Argument.
+        assert_eq!(
+            b.material_sides_at(&order, [f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            b.material_sides_at(&order, [5.0, 5.0, 5.0], [0.0, 0.0, 0.0]),
+            Err(Error::Argument)
+        );
     }
 
     /// A partition meeting the exterior along an edge, first in record order, does not
@@ -3452,9 +3728,9 @@ pub(crate) mod tests {
         assert_eq!(lengths, [4, 4, 4]);
     }
 
-    /// A cylinder r 2, h 5 and a ball r 3: the side's area 2πrh and centroid on the axis at mid
-    /// height, a cap's area πr² and its normal ∓z, the rims' length 2πr with their middles on
-    /// the rim circles, a seam's length h; the ball's area 4πr², not planar.
+    /// A cylinder r 2, h 5 and a ball r 3: the side's area 2Ï€rh and centroid on the axis at mid
+    /// height, a cap's area Ï€rÂ² and its normal âˆ“z, the rims' length 2Ï€r with their middles on
+    /// the rim circles, a seam's length h; the ball's area 4Ï€rÂ², not planar.
     #[test]
     fn curved_faces_and_edges_measure_their_closed_forms() {
         use std::f64::consts::PI;
@@ -3533,8 +3809,8 @@ pub(crate) mod tests {
             (lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9,
             "{lo} {hi}"
         );
-        // x = Z and y = (1, -1, 0)/√2 make the normal x × y = (1, 1, 0)/√2: the box's corners
-        // reach from 0 to 20/√2 along it.
+        // x = Z and y = (1, -1, 0)/âˆš2 make the normal x Ã— y = (1, 1, 0)/âˆš2: the box's corners
+        // reach from 0 to 20/âˆš2 along it.
         let s = std::f64::consts::FRAC_1_SQRT_2;
         let [lo, hi] = b
             .levels_along([0.0; 3], [0.0, 0.0, 1.0], [s, -s, 0.0])
@@ -3637,8 +3913,8 @@ pub(crate) mod tests {
         assert_eq!(b.edge_middle(&o, 12), Err(Error::Argument));
     }
 
-    /// An L-block (the boxes [0,2]×[0,1]×[0,1] and [0,1]×[1,2]×[0,1]): volume 3, centroid
-    /// (5/6, 5/6, 1/2), ∫xy dV about it 7/4 − 3·(5/6)² = −1/3 and the other products 0, so
+    /// An L-block (the boxes [0,2]Ã—[0,1]Ã—[0,1] and [0,1]Ã—[1,2]Ã—[0,1]): volume 3, centroid
+    /// (5/6, 5/6, 1/2), âˆ«xy dV about it 7/4 âˆ’ 3Â·(5/6)Â² = âˆ’1/3 and the other products 0, so
     /// its tensor's xy terms are +1/3 (the negated product) and the rest of it off the diagonal 0.
     #[test]
     fn an_l_block_tensor_holds_its_negated_product() {

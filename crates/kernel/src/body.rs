@@ -2312,34 +2312,34 @@ impl Body {
         })
     }
 
-    /// Outward unit normals of every trimmed face of `self` holding `p` within its boundary
-    /// classification tolerance (the band of [`Self::classify_point`]), decided exactly on the
-    /// B-rep, no mesh. Empty for a mesh body, a non-finite point, or a point on no face.
-    pub fn boundary_normals_at(&self, p: Vec3) -> Result<Vec<Vec3>> {
-        if !p.is_finite() {
-            return Ok(Vec::new());
+    /// Which sides of the plane through `p` with normal `normal` immediately enter material of
+    /// `self`: `negative` for `-normal`, `positive` for `+normal`
+    /// ([`solidcore_ops::Body::material_sides_at`]). Decided on exact B-rep classification and
+    /// outward face normals (no display mesh); a mesh body's triangles are its exact shape and
+    /// are probed via [`Self::classify_point`].
+    pub fn material_sides_at(&self, p: Vec3, normal: Vec3) -> Result<solidcore_ops::MaterialSides> {
+        if !p.is_finite() || !normal.is_finite() {
+            return Ok(solidcore_ops::MaterialSides::default());
         }
-        let Some(form) = self.ops_body() else { return Ok(Vec::new()) };
+        if self.is_mesh() {
+            let Some(unit) = solidcore_ops::unit_direction([normal.x, normal.y, normal.z]) else {
+                return Ok(solidcore_ops::MaterialSides::default());
+            };
+            let step = (self.size() * 1e-5).max(self.record.tolerance * 4.0).max(1e-5);
+            let in_dir = |s: f64| {
+                solidcore_ops::point_along_line([p.x, p.y, p.z], unit, s)
+                    .map(|q| Vec3::new(q[0], q[1], q[2]))
+                    .is_some_and(|q| matches!(self.classify_point(q), Ok(PointClass::Inside)))
+            };
+            return Ok(solidcore_ops::MaterialSides { negative: in_dir(-step), positive: in_dir(step) });
+        }
+        let Some(form) = self.ops_body() else { return Ok(solidcore_ops::MaterialSides::default()) };
         let (ops, order) = &*form;
-        let pt = [p.x, p.y, p.z];
-        let search = self.record.tolerance.max(self.size() * 1e-5).max(1e-4) * 4.0;
-        let dists = ops.face_distances_within(order, &[pt], search).map_err(|e| KernelError::Failed(format!("boundary normals: {e}")))?;
-        let mut out = Vec::new();
-        for (fi, row) in dists.into_iter().enumerate() {
-            if row.first().copied().flatten().is_none_or(|d| d > search) {
-                continue;
-            }
-            if let Ok(Some(n)) = ops.face_normal_at_point(order, fi, pt) {
-                out.push(Vec3::new(n.value[0], n.value[1], n.value[2]));
-            }
+        match ops.material_sides_at(order, [p.x, p.y, p.z], [normal.x, normal.y, normal.z]) {
+            Ok(sides) => Ok(sides),
+            Err(solidcore_ops::Error::Argument) => Ok(solidcore_ops::MaterialSides::default()),
+            Err(e) => Err(KernelError::Failed(format!("material sides: {e}"))),
         }
-        if out.is_empty()
-            && let Ok(classes) = ops.classify_points_with_normals(order, &[pt], None)
-            && let Some(solidcore_ops::ClassifiedPoint::On { normal, .. }) = classes.first()
-        {
-            out.push(Vec3::new(normal.value[0], normal.value[1], normal.value[2]));
-        }
-        Ok(out)
     }
 
     /// Where the line through `through` along `direction` meets face `face_index`, of its

@@ -271,7 +271,7 @@ impl ModelBody {
         }
     }
 
-    /// The body's volume in mm³ ([`kernel::measure_mass`]), measured once and shared by clones: a
+    /// The body's volume in mmÂ³ ([`kernel::measure_mass`]), measured once and shared by clones: a
     /// body's measure depends on nothing else, so the bill of materials and the physical
     /// properties weigh it once however often they are asked. `None` when it can't be measured.
     pub fn volume(&self) -> Option<f64> {
@@ -606,7 +606,7 @@ impl ModelBody {
             None => self.mesh_in_place(),
         };
         // The placement folded into each of the plane's axes: a mesh point p lands at
-        // p · axis + offset, with no moved copy of the point made first.
+        // p Â· axis + offset, with no moved copy of the point made first.
         let [c0, c1, c2, t] = m.map(|r| Vec3::new(r[0], r[1], r[2]));
         let offset = t - plane.origin;
         let axis = |a: Vec3| (Vec3::new(c0.dot(a), c1.dot(a), c2.dot(a)), offset.dot(a));
@@ -695,7 +695,7 @@ impl ModelBody {
     }
 
     /// The chord tolerance of [`ModelBody::mesh`] (mm): 1/1000 of the definition's size, at least
-    /// 1 µm. Proper rigid placements retain that tolerance along with the reference triangles.
+    /// 1 Âµm. Proper rigid placements retain that tolerance along with the reference triangles.
     pub fn display_tol(&self) -> f64 {
         self.mesh_placement.as_ref().map(|placed| placed.tolerance).unwrap_or_else(|| (self.body.size() * 1e-3).max(1e-3))
     }
@@ -1856,7 +1856,7 @@ impl ModelState {
     /// had dropped out.
     fn added_bytes(&self, before: &ModelState) -> usize {
         // `before`'s bodies by solid, and its sketches by address: looked up per body and sketch,
-        // not searched (every feature's result is charged, so searching was bodies² per feature).
+        // not searched (every feature's result is charged, so searching was bodiesÂ² per feature).
         // Bodies sharing a solid are still told apart by `same_shape` (the mesh as well).
         let mut solids: std::collections::HashMap<usize, Vec<&Body>> = std::collections::HashMap::with_capacity(before.bodies.len());
         for o in &before.bodies {
@@ -4445,7 +4445,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     };
     // A component origin datum is found again wherever its component is placed now (#7313): the
     // feature reads that placement, the way a face anchor re-finds its face. Collected from
-    // every reference the feature holds, whichever kind carries it — before the kind match,
+    // every reference the feature holds, whichever kind carries it â€” before the kind match,
     // because a mirror with picked placements returns from it before the read loop runs.
     let mut datums: Vec<Vec<u64>> = Vec::new();
     f.kind.walk_geometry(&mut |g| match g {
@@ -6433,7 +6433,7 @@ pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f6
 pub(crate) fn val_with(vals: &BTreeMap<String, Value>, e: &str, k: Kind, members: Option<&dyn Fn(&str, &str) -> Result<Value>>) -> Result<f64> {
     let scale = vals.get(DESIGN_LEN).map(|x| x.v).unwrap_or(1.0);
     let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-    // Non-literal lengths (a parameter ± a bare number) must read that bare number in the design's
+    // Non-literal lengths (a parameter Â± a bare number) must read that bare number in the design's
     // units during the expression, not only when the whole result is unit-less (#9015).
     if k == Kind::Length && scale != 1.0 && !expr::is_literal(e) {
         let defaults = expr::Defaults { len: scale, ..expr::Defaults::default() };
@@ -6573,7 +6573,7 @@ pub fn emboss_placement(regions: Vec<Region2>, shift: Vec2, angle: f64) -> Resul
     }
     // Whole turns change nothing; left out, they keep an arc's start angle small.
     let angle = angle % std::f64::consts::TAU;
-    // A point p goes to R (p − middle) + middle + shift, which is R p + (shift + middle − R middle).
+    // A point p goes to R (p âˆ’ middle) + middle + shift, which is R p + (shift + middle âˆ’ R middle).
     let mut to = shift;
     if angle != 0.0 {
         let middle = crate::frame::anchor_point(&regions, crate::frame::Anchor::Center);
@@ -6941,7 +6941,7 @@ fn note_cut_cavity(before: &ModelState, after: &ModelState, f: &Feature, warning
         // The exact volumes before and after: what the cut took, the cavity when it took nothing else.
         let removed = match (kernel::measure_mass(&was.body), kernel::measure_mass(&now.body)) {
             (Ok(a), Ok(b)) if (a.volume - b.volume).is_finite() && a.volume > b.volume => {
-                format!(", taking {} mm³", show_mm(((a.volume - b.volume) * 100.0).round() / 100.0))
+                format!(", taking {} mmÂ³", show_mm(((a.volume - b.volume) * 100.0).round() / 100.0))
             }
             _ => String::new(),
         };
@@ -7447,7 +7447,7 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
             let other = component_name(owner);
             let name = &body.name;
             return DocError::Invalid(format!(
-                "{plain} in component '{own}'; the tool may overlap '{name}' in component '{other}' — activate that component or pick the body as a target"
+                "{plain} in component '{own}'; the tool may overlap '{name}' in component '{other}' â€” activate that component or pick the body as a target"
             ));
         }
     }
@@ -7574,7 +7574,7 @@ fn apply_traced_with(
                 }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
-                    "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
+                    "{} is a surface body, and {verb} needs a solid: cut it with Surface â€º Trim, or Thicken it first",
                     b.name
                 )));
             }
@@ -9198,81 +9198,18 @@ fn construction_axis_in_with(doc: Option<&Document>, st: &ModelState, name: &str
 }
 
 /// Which sides of the plane through `p` with unit normal `n` immediately enter material of `b`:
-/// `(down, up)` for `-n` and `+n`. Decided on exact B-rep classification and outward face
-/// normals (no display mesh, and no tiny fixed step that can land inside the boundary tolerance
-/// band). A point strictly inside `b` has material on both sides; a point on a face, edge or
-/// vertex enters the side opposite the outward normals of the faces holding it; an ambiguous
-/// boundary (a grazing side wall or sharp ridge/groove) falls back to an exact probe outside the
-/// boundary tolerance band.
-fn spot_touch_sides(b: &ModelBody, p: Vec3, n: Vec3) -> (bool, bool) {
+/// `negative` for `-n`, `positive` for `+n`, decided on exact B-rep classification and outward
+/// face normals ([`kernel::Body::material_sides_at`]).
+fn spot_touch_sides(b: &ModelBody, p: Vec3, n: Vec3) -> kernel::MaterialSides {
     if b.is_surface() {
-        return (false, false);
+        return kernel::MaterialSides::default();
     }
-    let tol = b.body.record().tolerance.max(1e-5);
-    let pad = (b.body.size() * 1e-4).max(tol * 16.0).max(1e-3);
-    if b.body.exact_bounds().is_ok_and(|bb| !bb.inflated(pad).contains(p)) {
-        return (false, false);
-    }
-    if b.body.is_mesh() {
-        let step = (b.body.size() * 1e-5).max(tol * 4.0).max(1e-5);
-        let in_dir = |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside));
-        return (in_dir(-n), in_dir(n));
-    }
-    match b.body.classify_point(p) {
-        Ok(kernel::PointClass::Inside) => (true, true),
-        Ok(kernel::PointClass::Outside) | Err(_) => (false, false),
-        Ok(kernel::PointClass::OnBoundary) => {
-            let normals = b.body.boundary_normals_at(p).unwrap_or_default();
-            let (mut any_pos, mut any_neg) = (false, false);
-            for normal in normals {
-                let along = kernel::services::affine::distance_along([0.0; 3], n.into(), normal.into());
-                if along > 1e-6 {
-                    any_pos = true;
-                } else if along < -1e-6 {
-                    any_neg = true;
-                }
-            }
-            match (any_pos, any_neg) {
-                // Outward normals point along +n: material lies in -n (down).
-                (true, false) => (true, false),
-                // Outward normals point along -n: material lies in +n (up).
-                (false, true) => (false, true),
-                // Grazing wall (neither) or sharp ridge/groove (both): probe strictly outside
-                // the boundary tolerance band without scaling up with body size (which could
-                // overshoot a thin wall on a large part).
-                (false, false) => {
-                    let step = (tol * 16.0).max(2e-4);
-                    let along_wall =
-                        |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside | kernel::PointClass::OnBoundary));
-                    (along_wall(-n), along_wall(n))
-                }
-                (true, true) => {
-                    let step = (tol * 16.0).max(2e-4);
-                    let inside = |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside));
-                    (inside(-n), inside(n))
-                }
-            }
-        }
-    }
+    b.body.material_sides_at(p, n).unwrap_or_default()
 }
 
-/// The nearest positive hit distance along `d` from `p` to any solid body in `scope`.
-fn spot_ahead_distance(st: &ModelState, p: Vec3, d: Vec3, scope: &[String]) -> Option<f64> {
-    let mut best: Option<f64> = None;
-    for b in st.bodies.iter().filter(|b| !b.is_surface() && in_hole_scope(scope, b)) {
-        let pad = (b.body.size() * 1e-4).max(b.body.record().tolerance * 16.0).max(1e-3);
-        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, d, &bb.inflated(pad))) {
-            continue;
-        }
-        if let Some((t, _)) = ray_face(b, p, d)
-            && t.is_finite()
-            && t > 0.0
-            && best.is_none_or(|bt| t < bt)
-        {
-            best = Some(t);
-        }
-    }
-    best
+/// Whether any solid body in `scope` lies ahead of `p` along `d`.
+fn spot_has_body_ahead(st: &ModelState, p: Vec3, d: Vec3, scope: &[String]) -> bool {
+    st.bodies.iter().filter(|b| !b.is_surface() && in_hole_scope(scope, b)).any(|b| ray_face(b, p, d).is_some())
 }
 
 /// The first face of `b` the ray from `o` along `d` meets, as `(distance, face)`, found on its
@@ -9290,9 +9227,10 @@ fn ray_face(b: &ModelBody, o: Vec3, d: Vec3) -> Option<(f64, usize)> {
 
 /// The side hole centres on a sketch drill to: into the material, whichever way the sketch plane
 /// faces. Material that touches a spot (the drill starts in it) wins over material further away,
-/// so a sketch on a plate's face drills that plate rather than one across an air gap: whichever
-/// side (`-n` or `+n`) more spots immediately enter wins, with ties going to `-n`. With no
-/// touching on either side it goes by the nearest body ahead, with ties going to `-n`.
+/// so a sketch on a plate's face drills that plate rather than one across an air gap: `-n` (away
+/// from the plane's normal) if any spot touches material that way, else `+n` if any spot touches
+/// material that way. With no touching on either side it goes by the bodies ahead: `-n` if any
+/// spot has a body ahead that way, else `+n` if any has, else `-n`.
 /// The way holes at these points of a sketch drill (see [`sketch_hole_dir`]), flipped or not.
 /// None when the sketch or a point is not there.
 pub fn sketch_hole_direction(st: &ModelState, sketch: u64, ids: &[String], flip: bool) -> Option<Vec3> {
@@ -9305,47 +9243,21 @@ pub fn sketch_hole_direction(st: &ModelState, sketch: u64, ids: &[String], flip:
 
 fn sketch_hole_dir(st: &ModelState, spots: impl Iterator<Item = Vec3> + Clone, n: Vec3, scope: &[String]) -> Vec3 {
     let down = -n;
-    let (mut touch_down, mut touch_up) = (0usize, 0usize);
+    let mut any_touch_up = false;
     for p in spots.clone() {
-        let (mut d_hit, mut u_hit) = (false, false);
         for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
-            let (d, u) = spot_touch_sides(b, p, n);
-            d_hit |= d;
-            u_hit |= u;
-            if d_hit && u_hit {
-                break;
+            let sides = spot_touch_sides(b, p, n);
+            if sides.negative {
+                return down;
             }
-        }
-        if d_hit {
-            touch_down += 1;
-        }
-        if u_hit {
-            touch_up += 1;
+            any_touch_up |= sides.positive;
         }
     }
-    if touch_down > 0 || touch_up > 0 {
-        return if touch_up > touch_down { n } else { down };
+    if any_touch_up {
+        return n;
     }
-    let (mut best_down, mut best_up): (Option<f64>, Option<f64>) = (None, None);
-    for p in spots {
-        if let Some(t) = spot_ahead_distance(st, p, down, scope)
-            && best_down.is_none_or(|bt| t < bt)
-        {
-            best_down = Some(t);
-        }
-        if let Some(t) = spot_ahead_distance(st, p, n, scope)
-            && best_up.is_none_or(|bt| t < bt)
-        {
-            best_up = Some(t);
-        }
-    }
-    let size = st.bodies.iter().filter(|b| in_hole_scope(scope, b)).map(|b| b.body.size()).fold(1.0, f64::max);
-    let tie = (size * 1e-6).max(1e-6);
-    match (best_down, best_up) {
-        (Some(dd), Some(du)) if du + tie < dd => n,
-        (None, Some(_)) => n,
-        _ => down,
-    }
+    let any_ahead = |d: Vec3| spots.clone().any(|p| spot_has_body_ahead(st, p, d, scope));
+    if any_ahead(down) || !any_ahead(n) { down } else { n }
 }
 
 /// The bodies a hole at sketch points finds its side and its faces on: the bodies it cuts when it
@@ -9514,7 +9426,7 @@ fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelStat
         }
     };
     if spots.is_empty() || spots.len() > 10_000 {
-        return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
+        return Err(DocError::Invalid("a hole needs 1â€¦10000 points".into()));
     }
     let from_inside = hole_from_inside(doc, f);
     for spot in &mut spots {
@@ -9728,7 +9640,7 @@ fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
     let st: &ModelState = &shown;
     let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
-        return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
+        return Err(DocError::Invalid("a hole needs 1â€¦10000 points".into()));
     }
     let kept_inside = !hole_from_inside(doc, f);
     let mesh_scope = hole_mesh_scope(st, hole_drill_scope(f));
@@ -10049,7 +9961,7 @@ fn spline_hull_contains(surface: &solidcore_record::brep::Surface, p: Vec3, tol:
 /// How far a planar face the hole enters by at `position` rises above `plane` (the hole's frame
 /// at the entry point, its normal out of the material) within `reach` of the axis: `reach` times
 /// the tangent of the face's tilt from square to the axis. Zero for an entry face square to the
-/// axis, a curved one (a round bar's: its rim is where the hole starts), or none. A face within 6°
+/// axis, a curved one (a round bar's: its rim is where the hole starts), or none. A face within 6Â°
 /// of running along the axis is not one the hole enters by, and adds nothing. Exact: decided
 /// directly on the B-rep's planar and flat-spline faces ([`solidcraft_kernel::Body::planar_face`]
 /// and [`solidcraft_kernel::Body::point_lies_on_face`]) without tessellating display meshes.
@@ -10194,7 +10106,7 @@ fn hole_tools_reaching(
             const MIN_ANGLE_DEG: f64 = 0.115;
             if !(2.0 * half > MIN_ANGLE_DEG.to_radians() && half < std::f64::consts::FRAC_PI_2) {
                 return Err(DocError::Invalid(format!(
-                    "the countersink angle must be more than {MIN_ANGLE_DEG}° and less than 180°, not {}°",
+                    "the countersink angle must be more than {MIN_ANGLE_DEG}Â° and less than 180Â°, not {}Â°",
                     ((2.0 * half).to_degrees() * 1e6).round() / 1e6
                 )));
             }
@@ -10247,7 +10159,7 @@ fn hole_tools_reaching(
             }
             let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
-            // The face lies `(position - base) · axis` along the cylinder from its base, and what
+            // The face lies `(position - base) Â· axis` along the cylinder from its base, and what
             // was left out lies in the run-on's column, at or above it.
             if let Some(more::PrimitivePrism::Cylinder { base, axis, height, .. }) = &mut prism {
                 *height = height.min((*position - *base).dot(*axis) + low.max(0.0));
@@ -10394,10 +10306,10 @@ pub fn revolve_extent_with_convention(
     convention: crate::RevolveConvention,
 ) -> Result<RevolveExtent> {
     let extent = revolve_extent_for_handle(st, plane, regions, (origin, axis), (angle, angle2), symmetric, to, convention)?;
-    // A solid needs an open sweep inside one full turn. Zero and a turn past 360° keep a
+    // A solid needs an open sweep inside one full turn. Zero and a turn past 360Â° keep a
     // handle frame (`revolve_extent_for_handle`) and still fail here, with the same message.
     if !(extent.sweep.abs() > 1e-9 && extent.sweep.abs() <= std::f64::consts::TAU + 1e-9) {
-        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
+        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360Â°".into()));
     }
     Ok(extent)
 }
@@ -10455,7 +10367,7 @@ pub fn revolve_extent_for_handle(
         (None, None, false) => (0.0, angle),
     };
     if !(sweep.is_finite() && start.is_finite()) {
-        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
+        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360Â°".into()));
     }
     let points: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
     let centre = plane.to_world(points.iter().fold(Vec2::default(), |sum, point| sum + *point) * (1.0 / points.len().max(1) as f64));
@@ -10605,7 +10517,7 @@ fn thin_distances(vals: &BTreeMap<String, Value>, thin: &crate::ThinWall) -> Res
 /// The regions a thin extrude's wall covers in its sketch.
 pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, thin: &crate::ThinWall) -> Result<Vec<Region2>> {
     if thin.curves.is_empty() || thin.curves.len() > 1000 {
-        return Err(DocError::Invalid("a thin extrude needs 1…1000 sketch curves".into()));
+        return Err(DocError::Invalid("a thin extrude needs 1â€¦1000 sketch curves".into()));
     }
     let (inside, outside) = thin_distances(vals, thin)?;
     let curves = thin
@@ -11494,7 +11406,7 @@ fn feature_tools_with_constructor(
             let x0 = x0.ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let x = x0 * a0.cos() + k.cross(x0) * a0.sin();
             let axis = if *clockwise { k * -1.0 } else { k };
-            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            // A left-handed coil turns about âˆ’axis and climbs along +axis: mirror the pitch.
             let pitch = if *clockwise { -p } else { p };
             // Square ends: the section lies across the helix's tangent at the start, and the screw
             // motion keeps it so, out to the other end.
@@ -11696,7 +11608,7 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
     if rails.len() > kernel::MAX_LOFT_RAILS {
-        return Err(DocError::Invalid(format!("a loft takes 1…{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
+        return Err(DocError::Invalid(format!("a loft takes 1â€¦{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
     }
     rails
         .iter()
@@ -11924,7 +11836,7 @@ fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::Point
         return Ok(None);
     }
     if curves.is_empty() || curves.len() > 1000 {
-        return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
+        return Err(DocError::Invalid("the path needs 1â€¦1000 curves".into()));
     }
     let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(curves.len());
     for c in curves {
@@ -11939,7 +11851,7 @@ fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::Point
                     let circle = solidcore_record::brep::Curve::Circle { frame, radius: arc.radius };
                     kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
                 }
-                // A drawn control point spline is its B-spline, as its Bézier spans (a spline
+                // A drawn control point spline is its B-spline, as its BÃ©zier spans (a spline
                 // through its control points is another curve).
                 Some(w) if w.control.is_some() => {
                     let c = w.control_curve().ok_or_else(|| DocError::Invalid(format!("3D control point spline `{}` has no curve", w.id)))?;
@@ -12196,13 +12108,13 @@ fn closest_on_curve(c: &solidcore_record::brep::Curve, [t0, t1]: [f64; 2], p: Ve
 /// off the path by the distance between the two.
 pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
     if curves.is_empty() || curves.len() > 1000 {
-        return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
+        return Err(DocError::Invalid("the path needs 1â€¦1000 curves".into()));
     }
     // A path through 3D sketch curves is followed as a 3D polyline.
     if let Some(path) = path_points(curves, start)? {
         return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
-    // Each curve as its exact pieces (Béziers, conics) where it has them, on the plane of the
+    // Each curve as its exact pieces (BÃ©ziers, conics) where it has them, on the plane of the
     // sketch it is in: the path may join curves of several sketches, whose planes differ
     // (#16168). A curve is turned round whole: its pieces stay one run.
     let mut curves: Vec<(Plane, Vec<solidcore_record::Seg2>)> = curves
@@ -12472,7 +12384,7 @@ fn mirror_matrix(pl: &Plane) -> Mat {
         let (ni, nj) = ([n.x, n.y, n.z][i], [n.x, n.y, n.z][j]);
         (if i == j { 1.0 } else { 0.0 }) - 2.0 * ni * nj
     };
-    // p' = p - 2 (p·n - d) n
+    // p' = p - 2 (pÂ·n - d) n
     [
         [m(0, 0), m(0, 1), m(0, 2), 0.0],
         [m(1, 0), m(1, 1), m(1, 2), 0.0],
@@ -12769,7 +12681,7 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
 fn pattern_count(vals: &BTreeMap<String, Value>, e: &str) -> Result<usize> {
     let n = expr::eval_count(e, vals)?;
     if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
-        return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+        return Err(DocError::Invalid(format!("pattern count must be 1â€¦{MAX_INSTANCES}")));
     }
     Ok(n as usize)
 }
@@ -12868,7 +12780,7 @@ pub fn pattern_row(
             let sides = if centred { 2 } else { 1 };
             let fit = ((reach + tol) / step).floor();
             if !fit.is_finite() || fit * sides as f64 >= MAX_INSTANCES as f64 {
-                return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+                return Err(DocError::Invalid(format!("pattern count must be 1â€¦{MAX_INSTANCES}")));
             }
             let gaps = fit as usize * sides;
             let short = reach - fit * step > tol;
@@ -13027,14 +12939,14 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 (Some(f), _) => {
                     let f = val(vals, f, Kind::Unitless)?;
                     if !(0.0..=1.0).contains(&f) {
-                        return Err(DocError::Invalid("the start point must be 0…1 of the path's length".into()));
+                        return Err(DocError::Invalid("the start point must be 0â€¦1 of the path's length".into()));
                     }
                     Some(f * total)
                 }
                 (None, Some(s)) => {
                     let s = val(vals, s, Kind::Length)?;
                     if !s.is_finite() || s < -1e-6 || s > total * (1.0 + 1e-5) + 1e-6 {
-                        return Err(DocError::Invalid(format!("the start point must lie on the path (0…{total:.3} mm)")));
+                        return Err(DocError::Invalid(format!("the start point must lie on the path (0â€¦{total:.3} mm)")));
                     }
                     Some(s.clamp(0.0, total))
                 }
@@ -13348,7 +13260,8 @@ fn cut_left_bodies_unchanged(before: &[Body], st: &ModelState) -> bool {
             || (!b.body.is_mesh()
                 && !old.is_mesh()
                 && !has_a_new_surface(old, &b.body)
-                && ((b.body.face_count() >= old.face_count() && no_face_from_tools(b)) || same_volume(old, &b.body)))
+                && ((old.shell_count() == 1 && b.body.shell_count() == 1 && b.body.face_count() >= old.face_count() && no_face_from_tools(b))
+                    || same_volume(old, &b.body)))
     })
 }
 
@@ -16564,7 +16477,7 @@ fn eval_feature_kind(
         }
         FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
             if tools.is_empty() || tools.len() + planes.len() > 64 || cells.is_empty() || cells.len() > 1000 {
-                return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
+                return Err(DocError::Invalid("Boundary Fill needs 1â€¦64 tool bodies and 1â€¦1000 cells".into()));
             }
             let tb: Vec<ModelBody> =
                 tools.iter().map(|t| st.body(t).cloned().ok_or_else(|| DocError::Unknown(format!("body `{t}`")))).collect::<Result<_>>()?;
@@ -17253,7 +17166,7 @@ fn eval_feature_kind(
                             return Err(closed_sheet_refusal(name));
                         }
                         return Err(DocError::Invalid(format!(
-                            "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                            "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface â€º Stitch"
                         )));
                     }
                 }
@@ -17881,7 +17794,7 @@ impl BodyNames {
     }
 }
 
-/// `base`, or `base (2)`, `base (3)`… if a body already has that name.
+/// `base`, or `base (2)`, `base (3)`â€¦ if a body already has that name.
 fn unique_body_name(st: &ModelState, base: &str) -> String {
     let base = if base.trim().is_empty() { "Body" } else { base.trim() };
     if st.body(base).is_none() {
@@ -19133,8 +19046,8 @@ mod chain_tests {
         assert_eq!(tangent_face_chain(b, &[Vec3::new(20.0, 15.0, 20.0); 2]), pts);
     }
 
-    /// A boss on a stepped plate: the boss's concave side edge at x 20 (z 20…40) runs on in a
-    /// straight line as the step's convex edge (z 0…20). A Fillet dialog's tangent chain from
+    /// A boss on a stepped plate: the boss's concave side edge at x 20 (z 20â€¦40) runs on in a
+    /// straight line as the step's convex edge (z 0â€¦20). A Fillet dialog's tangent chain from
     /// the boss edge is that edge alone, as the feature's exact chain is: a round cannot pass
     /// from one side of the faces to the other. The display mesh's walk took both.
     #[test]
@@ -19225,10 +19138,10 @@ mod chain_tests {
         assert_eq!(faces, Some(8));
     }
 
-    /// A 40 × 16 × 10 plate ending in a half cylinder of radius 8: its sides run into the
+    /// A 40 Ã— 16 Ã— 10 plate ending in a half cylinder of radius 8: its sides run into the
     /// cylinder's wall tangentially, along smooth edges such as the one at x 40, y 0. A fillet of
     /// the back top edge and that smooth edge rounds the back edge and says it skipped the
-    /// smooth one (#17919): 6400 + 320π − (1 − π/4)·16 mm³. Beside it a 10 mm cube, a body of its
+    /// smooth one (#17919): 6400 + 320Ï€ âˆ’ (1 âˆ’ Ï€/4)Â·16 mmÂ³. Beside it a 10 mm cube, a body of its
     /// own: a fillet of a cube edge and the plate's smooth edge rounds the cube edge and leaves
     /// the plate as it was (the plate's picks, all smooth, are skipped, not refused). The smooth
     /// edge alone is refused.
@@ -19276,7 +19189,7 @@ mod chain_tests {
             (r, volumes)
         };
         let (plate, cube) = (6400.0 + 320.0 * PI, 1000.0);
-        // A round of r 1 along an edge of length l takes (1 − π/4)·l mm³.
+        // A round of r 1 along an edge of length l takes (1 âˆ’ Ï€/4)Â·l mmÂ³.
         let round = |l: f64| (1.0 - FRAC_PI_4) * l;
         for (picks, expected) in [
             ([Vec3::new(0.0, 8.0, 10.0), Vec3::new(40.0, 0.0, 5.0)], [plate - round(16.0), cube]),
@@ -19289,7 +19202,7 @@ mod chain_tests {
             assert!(warning.contains("1 edge skipped: its faces meet tangentially") && warning.contains("(40, 0, 5)"), "{warning}");
             assert_eq!(volumes.len(), 2);
             for (v, e) in volumes.iter().zip(expected) {
-                // Far tighter than the 2.1 mm³ the smaller round takes away.
+                // Far tighter than the 2.1 mmÂ³ the smaller round takes away.
                 assert!((v - e).abs() < 1e-6 * e, "{picks:?}: {volumes:?} vs {expected:?}");
             }
         }
@@ -19298,7 +19211,7 @@ mod chain_tests {
         assert!(error.contains("is smooth"), "{error}");
     }
 
-    /// A 40 × 40 × 10 plate with a ball socket: a sphere of radius 3 cut from its front face
+    /// A 40 Ã— 40 Ã— 10 plate with a ball socket: a sphere of radius 3 cut from its front face
     /// (y 0), centred on it at (20, 0, 5). The body stores the socket's rim as three arcs, a
     /// quarter, a half and a quarter. A round or a chamfer of the rim with tangent_chain: false,
     /// picked halfway along the first quarter, blends that quarter alone and says that the 2 arcs
@@ -19341,7 +19254,7 @@ mod chain_tests {
                  picked edges (to blend them too, pick them in another fillet, which may fail where the edges meet)"
             )
         );
-        // A quarter of the rim rounded: about a quarter of the 1.05 mm³ the whole rim's round takes.
+        // A quarter of the rim rounded: about a quarter of the 1.05 mmÂ³ the whole rim's round takes.
         assert!(removed < -0.15 && removed > -0.4, "{removed}");
         let bevel = FeatureKind::Chamfer {
             edges: vec![crate::Position(quarter)],
@@ -19361,7 +19274,7 @@ mod chain_tests {
         assert!(added > 0.0, "{added}");
     }
 
-    /// A 40 × 40 × 10 plate with its four upright edges rounded r5: its top outline is one tangent
+    /// A 40 Ã— 40 Ã— 10 plate with its four upright edges rounded r5: its top outline is one tangent
     /// chain of 8 edges, 4 lines and 4 arcs. A round of the front top line with tangent_chain:
     /// false says the other 7 are still sharp at every radius. From r1.6 up the round runs on past
     /// the line's ends and takes the middle of each neighbouring arc, but most of those arcs stay
@@ -19535,7 +19448,7 @@ fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<T
 /// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat
 /// face picked in the viewport gives its plane tilted by rounding, about 2e-15: split by that,
 /// the face lying in the plane no longer meets the cut exactly, and the boolean nudges its tool
-/// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
+/// and leaves a slab a few Âµm thick under the face (#6762). A plane with nothing to drop stays
 /// as it is.
 fn square_to_axes(plane: &Plane) -> Plane {
     match solidcraft_kernel::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
@@ -19588,7 +19501,7 @@ mod named_face_lookup_tests {
     use super::*;
     use crate::naming::FaceHit;
 
-    /// A row of `n` 10 mm cubes `Part0`, `Part1`… 20 mm apart along x, without history: their
+    /// A row of `n` 10 mm cubes `Part0`, `Part1`â€¦ 20 mm apart along x, without history: their
     /// faces are named from geometry, which meshes them.
     fn parts(n: usize) -> ModelState {
         let mut st = ModelState::default();

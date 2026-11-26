@@ -492,6 +492,7 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
+pub use solidcore_ops::MaterialSides;
 pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::measure::ParallelTurnError;

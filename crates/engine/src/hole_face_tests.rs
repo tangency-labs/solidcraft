@@ -1332,11 +1332,11 @@ fn sketch_hole_flip_reverses_direction_and_warns_when_removing_no_material() {
 }
 
 /// On a C-shaped body at `x = -407` with another flange standing further along `-X` (across an air
-/// gap), a sketch on the `x = -407` face (or 1 micron outside it) drills `+X` into that face, not
-/// `-X` across the air gap.
+/// gap), a sketch on the `x = -407` face (exact or within the B-rep boundary tolerance) drills
+/// `+X` into that face, not `-X` across the air gap.
 #[test]
 fn sketch_hole_on_face_with_flange_across_gap_drills_its_own_face() {
-    for x_plane in [-407.0_f64, -407.001] {
+    for x_plane in [-407.0_f64, -407.0 - 1e-6] {
         let mut s = Session::default();
         // Main wall at x = -407..-380, joined at z = 0..10 to a parallel flange at x = -440..-430.
         run(
@@ -1364,4 +1364,39 @@ fn sketch_hole_on_face_with_flange_across_gap_drills_its_own_face() {
         assert!(!solid_at(&s, -399.0, 0.0, 30.0), "plane x = {x_plane}: drilled into main wall");
         assert!(solid_at(&s, -435.0, 0.0, 30.0), "plane x = {x_plane}: far flange untouched");
     }
+}
+
+/// Existing designs keep the legacy sketch-hole priority order: any spot touching `-n` wins over
+/// spots touching `+n` (even when more spots touch `+n`), and when no spot touches either side,
+/// look-ahead along `-n` wins over `+n` (even when material lies closer along `+n`).
+#[test]
+fn saved_sketch_holes_keep_legacy_tie_break_and_look_ahead_order() {
+    // 1. Mixed-side touching spots: two spots touch `+Z` on `High`, one spot touches `-Z` on
+    // `Low`. Legacy rule: any `-n` touch wins, so the hole drills `-Z` into `Low`.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 40, "height": 10, "body_name": "Low", "operation": "new"}));
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 10], "length": 20, "width": 40, "height": 10, "body_name": "High", "operation": "new"}));
+    let low_base = body_volume(&mut s, "Low");
+    let high_base = body_volume(&mut s, "High");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "10 mm", "name": "Split"}));
+    run(&mut s, "sketch.point", json!({"point": [30, 10], "id": "p_up1"}));
+    run(&mut s, "sketch.point", json!({"point": [30, 30], "id": "p_up2"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p_down"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Split", "points": ["p_up1", "p_up2", "p_down"], "diameter": 6, "depth": 5, "name": "H"}));
+    near(low_base - body_volume(&mut s, "Low"), pi() * 9.0 * 5.0);
+    near(body_volume(&mut s, "High"), high_base);
+    assert!(!solid_at(&s, 10.0, 20.0, 7.5) && solid_at(&s, 10.0, 20.0, 2.0));
+    assert!(solid_at(&s, 30.0, 10.0, 12.5) && solid_at(&s, 30.0, 30.0, 12.5));
+
+    // 2. Floating look-ahead: sketch at z = 12 between plates at z = 0..6 and z = 14..20 is
+    // closer to the upper plate (+Z, 2 mm) than the lower plate (-Z, 6 mm), touching neither.
+    // Legacy rule: `-n` ahead wins over `+n`, so the hole still drills `-Z` into the lower plate.
+    let mut s = Session::default();
+    slotted_part(&mut s, 6.0, 14.0);
+    let base = volume(&mut s);
+    let ids = points_sketch(&mut s, 12.0, &[[20.0, 20.0]]);
+    drill(&mut s, &ids, json!({"depth": 4}));
+    near(base - volume(&mut s), pi() * 25.0 * 4.0);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 20.0, 20.0, 16.0));
 }
