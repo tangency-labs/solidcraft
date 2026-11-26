@@ -757,69 +757,73 @@ pub(super) fn read_left_out_bodies(
             let progress = solidcraft_doc::progress::current();
             let parent_tid = std::thread::current().id();
             let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+            let scope = solidcraft_io::vfs::current_scope();
             let done = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> LeftOutJobOut {
-                solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
-                    solidcraft_doc::progress::watch_nested(progress.clone(), || {
-                        if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
-                            return LeftOutJobOut::Cancelled;
-                        }
-                        match job {
-                            LeftOutJob::Step { link_idx, link, file, flat } => {
-                                let run = || left_out_step(link, file, from, *flat, validation);
-                                #[cfg(test)]
-                                let (result, evals, reuses) = measure_eval_counts(run);
-                                #[cfg(not(test))]
-                                let result = run();
-                                LeftOutJobOut::Step {
-                                    link_idx: *link_idx,
-                                    result,
+                solidcraft_io::vfs::scoped(scope.clone(), || {
+                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                                return LeftOutJobOut::Cancelled;
+                            }
+                            match job {
+                                LeftOutJob::Step { link_idx, link, file, flat } => {
+                                    let run = || left_out_step(link, file, from, *flat, validation);
                                     #[cfg(test)]
-                                    evals,
-                                    #[cfg(test)]
-                                    reuses,
+                                    let (result, evals, reuses) = measure_eval_counts(run);
+                                    #[cfg(not(test))]
+                                    let result = run();
+                                    LeftOutJobOut::Step {
+                                        link_idx: *link_idx,
+                                        result,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                    }
+                                }
+                                LeftOutJob::Design { link_indices, key, file, configuration } => {
+                                    let branch =
+                                        BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
+                                    let (read, evals, reuses) = match reading_read_acquire(key) {
+                                        ReadAcquire::Ready(read) => (*read, 0usize, 0usize),
+                                        ReadAcquire::Claimed(claim) => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
+                                            let refused_here = READING.with(|r| r.borrow().refused);
+                                            claim.finish((refused_here == 0).then(|| read.clone()));
+                                            (read, evals, reuses)
+                                        }
+                                        ReadAcquire::Bypass => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
+                                            (read, evals, reuses)
+                                        }
+                                    };
+                                    #[cfg(not(test))]
+                                    let _ = (evals, reuses);
+                                    let (refused, outside, again) = branch.finish();
+                                    LeftOutJobOut::Design {
+                                        link_indices: link_indices.clone(),
+                                        key: key.clone(),
+                                        read,
+                                        refused,
+                                        outside,
+                                        again,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                    }
                                 }
                             }
-                            LeftOutJob::Design { link_indices, key, file, configuration } => {
-                                let branch =
-                                    BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
-                                let (read, evals, reuses) = match reading_read_acquire(key) {
-                                    ReadAcquire::Ready(read) => (*read, 0usize, 0usize),
-                                    ReadAcquire::Claimed(claim) => {
-                                        let run = || read_once(file, from, *configuration, validation);
-                                        #[cfg(test)]
-                                        let (read, evals, reuses) = measure_eval_counts(run);
-                                        #[cfg(not(test))]
-                                        let (read, evals, reuses) = (run(), 0usize, 0usize);
-                                        let refused_here = READING.with(|r| r.borrow().refused);
-                                        claim.finish((refused_here == 0).then(|| read.clone()));
-                                        (read, evals, reuses)
-                                    }
-                                    ReadAcquire::Bypass => {
-                                        let run = || read_once(file, from, *configuration, validation);
-                                        #[cfg(test)]
-                                        let (read, evals, reuses) = measure_eval_counts(run);
-                                        #[cfg(not(test))]
-                                        let (read, evals, reuses) = (run(), 0usize, 0usize);
-                                        (read, evals, reuses)
-                                    }
-                                };
-                                #[cfg(not(test))]
-                                let _ = (evals, reuses);
-                                let (refused, outside, again) = branch.finish();
-                                LeftOutJobOut::Design {
-                                    link_indices: link_indices.clone(),
-                                    key: key.clone(),
-                                    read,
-                                    refused,
-                                    outside,
-                                    again,
-                                    #[cfg(test)]
-                                    evals,
-                                    #[cfg(test)]
-                                    reuses,
-                                }
-                            }
-                        }
+                        })
                     })
                 })
             });
@@ -2522,35 +2526,40 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             let progress = solidcraft_doc::progress::current();
             let parent_tid = std::thread::current().id();
             let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+            let scope = solidcraft_io::vfs::current_scope();
             let evaluated = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> SourceJobOut {
-                solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
-                    solidcraft_doc::progress::watch_nested(progress.clone(), || {
-                        if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
-                            return SourceJobOut {
-                                link_indices: job.link_indices.clone(),
-                                result: None,
-                                #[cfg(test)]
-                                evals: 0,
-                                #[cfg(test)]
-                                reuses: 0,
+                solidcraft_io::vfs::scoped(scope.clone(), || {
+                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                                return SourceJobOut {
+                                    link_indices: job.link_indices.clone(),
+                                    result: None,
+                                    #[cfg(test)]
+                                    evals: 0,
+                                    #[cfg(test)]
+                                    reuses: 0,
+                                };
+                            }
+                            let branch = BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
+                            let run = || {
+                                source_bodies(&job.file, &job.bytes, &job.link, job.flat, validation).map(|(read, _)| read).map_err(|e| e.to_string())
                             };
-                        }
-                        let branch = BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid);
-                        let run =
-                            || source_bodies(&job.file, &job.bytes, &job.link, job.flat, validation).map(|(read, _)| read).map_err(|e| e.to_string());
-                        #[cfg(test)]
-                        let (result, evals, reuses) = measure_eval_counts(run);
-                        #[cfg(not(test))]
-                        let result = run();
-                        let _ = branch.finish();
-                        SourceJobOut {
-                            link_indices: job.link_indices.clone(),
-                            result: Some(result),
                             #[cfg(test)]
-                            evals,
-                            #[cfg(test)]
-                            reuses,
-                        }
+                            let (result, evals, reuses) = measure_eval_counts(run);
+                            #[cfg(not(test))]
+                            let result = run();
+                            let _ = branch.finish();
+                            SourceJobOut {
+                                link_indices: job.link_indices.clone(),
+                                result: Some(result),
+                                #[cfg(test)]
+                                evals,
+                                #[cfg(test)]
+                                reuses,
+                            }
+                        })
                     })
                 })
             });
@@ -4986,6 +4995,80 @@ mod tests {
         run(&mut seq, "component.insert_design", json!({"path": &leaves[0], "name": "Leaf0Copy", "translate": [250, 0, 0]}));
         assert!((volume(&mut multi) - volume(&mut seq)).abs() < 1e-6, "multi={} seq={}", volume(&mut multi), volume(&mut seq));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two sub-assemblies in `dir/subs`, saved without linked bodies, each linking its own part
+    /// in `dir/leaves` (`length` sizes the sub-assembly's own box).
+    fn save_scoped_subs(dir: &Path, length: f64) -> Vec<std::path::PathBuf> {
+        std::fs::create_dir_all(dir.join("subs")).unwrap();
+        std::fs::create_dir_all(dir.join("leaves")).unwrap();
+        (0..2)
+            .map(|k| {
+                let leaf = dir.join(format!("leaves/leaf_{k}.sc"));
+                if !leaf.exists() {
+                    save_box(&leaf, 10.0);
+                }
+                let mut sub = Session::default();
+                run(&mut sub, "solid.box", json!({"length": length, "width": 10, "height": 10, "body_name": format!("SubBox{k}")}));
+                run(&mut sub, "component.insert_design", json!({"path": leaf, "name": "Leaf", "translate": [30, 0, 0]}));
+                let path = dir.join(format!("subs/sub_{k}.sc"));
+                run(&mut sub, "file.save", json!({"path": path, "linked_bodies": false}));
+                path
+            })
+            .collect()
+    }
+
+    #[test]
+    fn opening_without_linked_bodies_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let mut top = Session::default();
+        for (k, sub) in subs.iter().enumerate() {
+            run(&mut top, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+        }
+        let top_path = dir.join("top.sc");
+        run(&mut top, "file.save", json!({"path": top_path, "linked_bodies": false}));
+        let bytes = std::fs::read(&top_path).unwrap();
+        let path = top_path.to_string_lossy().into_owned();
+        let open = || {
+            let doc = solidcraft_io::read_design(&bytes).unwrap();
+            Session::opened_at_validating(doc, None, Some(&path), Session::default().validation())
+        };
+        // The two sub-assemblies are read on worker threads, each reading its part there.
+        assert_eq!(open().model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let names: Vec<String> = solidcraft_io::vfs::scoped(Some(scope), open).model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(!names.iter().any(|n| n.starts_with("Plate")), "the parts outside the scope must not be read: {names:?}");
+        // An empty scope refuses both sub-assemblies.
+        assert_eq!(solidcraft_io::vfs::scoped(Some(Default::default()), open).model.state().bodies.len(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_links_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let assembly = || {
+            let mut s = Session::default();
+            for (k, sub) in subs.iter().enumerate() {
+                run(&mut s, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+            }
+            s
+        };
+        let (mut free, mut confined) = (assembly(), assembly());
+        assert_eq!(free.model.state().bodies.len(), 4);
+        save_scoped_subs(&dir, 20.0);
+        // Both changed sub-assemblies are read again on worker threads, each reading its part.
+        assert_eq!(run(&mut free, "component.update_links", json!({}))["updated"], json!(["Sub0", "Sub1"]));
+        assert_eq!(free.model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || confined.execute("component.update_links", &json!({})));
+        let err = refused.expect_err("the parts outside the scope must not be read").to_string();
+        assert!(err.contains("leaf_0.sc"), "{err}");
+        assert_eq!(confined.model.state().bodies.len(), 4, "a refused update keeps what the design had");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
