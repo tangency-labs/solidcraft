@@ -436,3 +436,63 @@ fn split_body_cuts_with_a_surface_body_where_its_placement_puts_it() {
     run("solid.split_body", p.clone());
     assert!(near(&cube_parts(&s), &[300.0, 300.0, 400.0]), "{p}: {:?}", cube_parts(&s));
 }
+
+/// #22525: Split Body splits a surface body along whole surface bodies into its regions, each a
+/// surface body of its own. `Shell` is a cylinder r = 50 surface extruded 100 up. `Pad` and
+/// `Pad2` are rectangular tubes on YZ extruded 80 along +x, so each crosses the shell's wall
+/// once near x = 50: `Pad` over |y| ≤ 10, z 40…60, `Pad2` over |y| ≤ 10, z 10…25. On the wall
+/// each cuts out a patch of height h and angle 2·asin(10/50): area h · 50 · 2·asin(0.2), so
+/// 2000·asin(0.2) = 402.716 and 1500·asin(0.2) = 302.037 mm². The rest is the shell's
+/// 2π · 50 · 100 = 31415.927 mm² less both. A tube that misses the shell
+/// is refused, and a reopened design builds the same parts.
+#[test]
+fn split_body_splits_a_surface_body_into_its_regions() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("sketch.create", json!({"plane": "XY", "name": "ShellSketch"}));
+    run("sketch.circle.center", json!({"center": [0, 0], "radius": 50, "id": "rim"}));
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "ShellSketch", "curves": ["rim"], "distance": 100, "body_name": "Shell"}));
+    for (name, z0, z1) in [("Pad", 40, 60), ("Pad2", 10, 25), ("Miss", 200, 220)] {
+        run("sketch.create", json!({"plane": "YZ", "name": name}));
+        let curves = run("sketch.rectangle.two_point", json!({"p0": [-10, z0], "p1": [10, z1]}))["created"]["curves"].clone();
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": name, "curves": curves, "distance": 80, "body_name": name}));
+    }
+    let areas = |s: &Session| {
+        let st = s.model.state();
+        let shells: Vec<_> = st.bodies.iter().filter(|b| b.name.starts_with("Shell")).collect();
+        assert!(shells.iter().all(|b| b.body.is_surface()), "every piece is a surface body");
+        let mut v: Vec<f64> = shells.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().area).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let whole = 2.0 * std::f64::consts::PI * 50.0 * 100.0;
+    let (pad, pad2) = (2000.0 * 0.2f64.asin(), 1500.0 * 0.2f64.asin());
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b);
+    assert!(near(&areas(&s), &[whole]));
+
+    let before = s.doc.to_json();
+    let tool = json!({"body": "Pad", "point": [40, 10, 50]});
+    for (p, says) in [
+        (json!({"body": "Shell", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Miss"]}), "`Miss` does not cut `Shell` through"),
+        (json!({"body": "Shell", "tool": {"body": "Miss", "point": [40, 10, 210]}, "tool_sheet": "body"}), "`Miss` does not cut `Shell` through"),
+    ] {
+        let e = s.execute("solid.split_body", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+
+    let one = json!({"body": "Shell", "tool": tool, "tool_sheet": "body"});
+    s.execute("solid.split_body", &one).unwrap_or_else(|e| panic!("{one}: {e}"));
+    assert!(near(&areas(&s), &[pad, whole - pad]), "{:?}", areas(&s));
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    let both = json!({"body": "Shell", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Pad2"]});
+    let id = s.execute("solid.split_body", &both).unwrap_or_else(|e| panic!("{both}: {e}"))["feature"].as_u64().unwrap();
+    let want = [pad2, pad, whole - pad - pad2];
+    assert!(near(&areas(&s), &want), "{:?}", areas(&s));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.result(id).unwrap().error.is_none());
+    assert!(near(&areas(&reopened), &want), "{:?}", areas(&reopened));
+}

@@ -16810,8 +16810,9 @@ fn eval_feature_kind(
                                     .collect::<Result<Vec<_>>>()?;
                                 traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
-                            // Every face of a surface body as it is (#9305).
-                            crate::SplitSheet::Body if tool_bodies.is_empty() => {
+                            // Every face of a surface body as it is (#9305). A surface body to
+                            // split takes the arm below, which splits a sheet as well (#22525).
+                            crate::SplitSheet::Body if tool_bodies.is_empty() && !mb.body.is_surface() => {
                                 if !tb.body.is_surface() {
                                     return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
                                 }
@@ -16821,7 +16822,9 @@ fn eval_feature_kind(
                             // Several surface bodies, each whole and as it is (#13303): each in turn
                             // cuts the pieces it crosses into closed solids and leaves the others,
                             // and each must cut one. The tool face gives the first body's sides,
-                            // the first face each other body's.
+                            // the first face each other body's. A surface body to split is cut
+                            // into its connected regions instead, each its own surface body
+                            // (#22525): a sheet has no sides to keep.
                             crate::SplitSheet::Body => {
                                 let names: Vec<&crate::BodyName> = std::iter::once(&t.body).chain(tool_bodies).collect();
                                 // A further placement's body (`Sheet (Part:2)`) is not in the model,
@@ -16855,7 +16858,12 @@ fn eval_feature_kind(
                                     let mut next = Vec::with_capacity(pieces.len() + 1);
                                     let mut cut = false;
                                     for piece in pieces {
-                                        match kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)? {
+                                        let parts = if piece.body.is_surface() {
+                                            kernel::split_sheet_where_it_cuts(&piece.body, &tool)?
+                                        } else {
+                                            kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)?
+                                        };
+                                        match parts {
                                             Some(parts) => {
                                                 cut = true;
                                                 for part in parts {

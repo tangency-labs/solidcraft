@@ -188,6 +188,7 @@ const ANSWERING: &[&str] = &[
     "split_body",
     "split_body_by_sheet",
     "trim_sheet",
+    "split_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
@@ -336,6 +337,7 @@ fn every_entry_point_answers() {
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
     says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
+    says("split_sheet", a.split_sheet(&sheet));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
