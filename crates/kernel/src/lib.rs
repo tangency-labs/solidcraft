@@ -315,6 +315,7 @@ pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
 pub use distance::interiors_disjoint;
+pub use distance::overlap_witness;
 pub use distance::point_closest;
 pub use dome::dome;
 pub use draft_corners::CornerFill;
