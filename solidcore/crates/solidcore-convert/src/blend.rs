@@ -89,6 +89,7 @@ fn definition(d: &r::BlendDefinitionRecord) -> kb::BlendDefinitionRecord {
                 kb::RadiusRecord::Constant { offsets: *offsets }
             }
             r::RadiusRecord::Law(law) => kb::RadiusRecord::Law(curve(law)),
+            r::RadiusRecord::Edge => kb::RadiusRecord::Edge,
             r::RadiusRecord::EqualSetback => kb::RadiusRecord::EqualSetback,
         },
         order: d.order,
@@ -114,6 +115,7 @@ fn record_definition(d: kb::BlendDefinitionRecord) -> r::BlendDefinitionRecord {
         radius: match d.radius {
             kb::RadiusRecord::Constant { offsets } => r::RadiusRecord::Constant { offsets },
             kb::RadiusRecord::Law(law) => r::RadiusRecord::Law(record_curve(law)),
+            kb::RadiusRecord::Edge => r::RadiusRecord::Edge,
             kb::RadiusRecord::EqualSetback => r::RadiusRecord::EqualSetback,
         },
         order: d.order,
@@ -249,6 +251,10 @@ fn chamfer(c: &r::ChamferRecord) -> kb::ChamferRecord {
             r::ChamferSizeRecord::Chord(l) => kb::ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        kind: match c.kind {
+            r::ChamferKindRecord::Offsets => kb::ChamferKindRecord::Offsets,
+            r::ChamferKindRecord::Setbacks => kb::ChamferKindRecord::Setbacks,
+        },
     }
 }
 
@@ -262,6 +268,10 @@ fn record_chamfer(c: kb::ChamferRecord) -> r::ChamferRecord {
             kb::ChamferSizeRecord::Chord(l) => r::ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        kind: match c.kind {
+            kb::ChamferKindRecord::Offsets => r::ChamferKindRecord::Offsets,
+            kb::ChamferKindRecord::Setbacks => r::ChamferKindRecord::Setbacks,
+        },
     }
 }
 
@@ -341,6 +351,71 @@ fn record_net_kind(k: kb::ExactNetKindRecord) -> r::ExactNetKindRecord {
 mod tests {
     use super::*;
 
+    /// A chamfer of setbacks, its kind and its radius the edge, crosses both ways unchanged.
+    #[test]
+    fn a_chamfer_of_setbacks_crosses_both_ways() {
+        for kind in [
+            r::ChamferKindRecord::Offsets,
+            r::ChamferKindRecord::Setbacks,
+        ] {
+            let c = r::ChamferRecord {
+                size: r::ChamferSizeRecord::Chord(1.5),
+                wedge: 0.,
+                kind,
+            };
+            let there = chamfer(&c);
+            assert_eq!(
+                there.kind.is_offsets(),
+                kind == r::ChamferKindRecord::Offsets
+            );
+            assert_eq!(record_chamfer(there), c);
+        }
+        let curve = r::NurbsCurveRecord {
+            dim: 3,
+            points_3d: true,
+            degree: 1,
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0., 0.], [1., 2., 3.]],
+            weights: None,
+        };
+        let form = r::NurbsSurfaceRecord {
+            u_degree: 1,
+            v_degree: 1,
+            u_count: 2,
+            v_count: 2,
+            u_knots: vec![0., 0., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0., 0.], [0., 1., 0.], [1., 0., 0.], [1., 1., 0.]],
+            weights: None,
+        };
+        let plane = r::SupportRecord::Nurbs {
+            kind: r::SupportKindRecord::Plane,
+            form,
+            revolution: None,
+        };
+        let d = r::BlendDefinition::Procedural(Box::new(r::BlendDefinitionRecord {
+            supports: [plane.clone(), plane],
+            sides: [1., 1.],
+            radius: r::RadiusRecord::Edge,
+            order: 0,
+            thumbweight: 0.,
+            leader: curve.clone(),
+            seeds: [curve.clone(), curve],
+            bound: 1e-7,
+            map: r::ParameterMapRecord {
+                a: [0., 0.],
+                b: [1., 1.],
+                swapped: false,
+            },
+            chamfer: Some(r::ChamferRecord {
+                size: r::ChamferSizeRecord::Distances([1., 2.]),
+                wedge: 0.,
+                kind: r::ChamferKindRecord::Setbacks,
+            }),
+        }));
+        assert_eq!(record_blend(blend(&d)), d);
+    }
+
     /// A definition crosses to the kernel's record and back field for field.
     #[test]
     fn a_definition_crosses_both_ways_unchanged() {
@@ -393,6 +468,7 @@ mod tests {
                     angle: 0.5,
                 },
                 wedge: 1.5,
+                kind: r::ChamferKindRecord::Offsets,
             }),
         };
         let procedural = r::BlendDefinition::Procedural(Box::new(r::BlendDefinitionRecord {

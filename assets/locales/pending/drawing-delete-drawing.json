@@ -3,7 +3,6 @@
     "ui.drawing_browser.delete_confirm": "حذف {name} وجميع أوراقها؟"
   },
   "de": {
-    "cmd.drawing_delete": "Zeichnung löschen",
     "ui.drawing_browser.delete_confirm": "{name} mit allen Blättern löschen?"
   },
   "en": {
@@ -16,7 +15,6 @@
     "ui.drawing_browser.delete_confirm": "{name} とすべてのシートを削除しますか？"
   },
   "ko": {
-    "cmd.drawing_delete": "도면 삭제",
     "ui.drawing_browser.delete_confirm": "{name}과 모든 시트를 삭제할까요?"
   },
   "vi": {

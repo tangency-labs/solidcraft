@@ -53,8 +53,8 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   helper), say so on the issue instead of building around it in the caller. A workaround that makes
   a limitation part of the design is held until the cause is fixed.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
-  reference data; check `git ls-files` before pushing. Run `cargo xtask fast` before every commit;
-  CI runs the full gate (`cargo xtask ci`) on the pull request.
+  reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before pushing: it runs what
+  your change needs.
   Commit after every feature arc that builds.
 - **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Contributors don't
   queue or merge their own PRs: a maintainer or steward adds `ready to merge` (and `approved-for-ci` for
@@ -162,7 +162,7 @@ at each step: what you found, what comes next, and what needs their decision.
 Explain that changes go to their own copy on GitHub. After approval, run:
 
 ```sh
-gh repo fork tangency-labs/solidcraft --clone --remote
+gh repo fork tangency-labs/solidcraft --clone
 cd solidcraft
 git remote -v
 ```
@@ -241,13 +241,10 @@ Use the affected crate and test module in commands such as:
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
 cargo xtask fmt --check
-cargo xtask fast
+cargo xtask ci
 ```
 
-Run `cargo xtask fast` before each implementation commit: it checks what the change
-touches (for a kernel change, pass `--units <id,...>` from the PR's `Units:` line to run
-their goldens). CI and the merge queue run the full suite; run `cargo xtask ci` locally only to reproduce a CI
-failure. Report exactly what passed and what could not run; do not claim the full
+Run `cargo xtask ci` before pushing: it runs what your change needs. Report exactly what passed and what could not run; do not claim the full
 suite passed. Follow
 [testing guidance](../../../docs/book/src/dev/testing.md) for applicable checks.
 Review the diff, keep one topic, and commit the finished change. Before an approved

@@ -50,7 +50,7 @@ fn schemas_and_the_key_check_agree() {
         &["activate_part", "face", "flip", "frame", "name", "offset", "origin", "plane", "project_edges", "view", "x_dir", "y_dir"],
     );
     assert_keys(input_schema_for::<ConstructionParams>(), &["curves", "points", "sketch", "value"]);
-    assert_keys(input_schema_for::<DeleteParams>(), &["entities", "sketch"]);
+    assert_keys(input_schema_for::<DeleteParams>(), &["entities", "preserve_projection_link", "sketch"]);
     assert_keys(input_schema_for::<MovePointParams>(), &["point", "sketch", "to"]);
     assert_keys(input_schema_for::<MovePointsParams>(), &["moves", "sketch", "tolerance"]);
     assert_keys(input_schema_for::<DragParams>(), &["entity", "from", "live", "sketch", "to", "with"]);
@@ -62,6 +62,7 @@ fn schemas_and_the_key_check_agree() {
             "grid",
             "show_constraints",
             "show_construction",
+            "show_control_polygons",
             "show_dimensions",
             "show_points",
             "show_profile",
@@ -656,6 +657,7 @@ fn a_misspelt_key_is_reported() {
                 show_constraints: true,
                 show_projected: true,
                 show_construction: true,
+                show_control_polygons: true,
                 grid: true,
                 snap: true,
                 slice: false,
@@ -840,6 +842,7 @@ fn edit_start_metadata_is_semantic_and_mixed_setters_preserve_visibility() {
         "body.repair",
         "timeline.paste",
         "sheet.flange",
+        "sheet.hardware",
         "plastic.boss",
         "frame.member",
         "frame.end_cap",
