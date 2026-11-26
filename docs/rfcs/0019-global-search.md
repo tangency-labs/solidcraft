@@ -75,9 +75,9 @@ Manifests gain one optional, pure-data block. The host reads it; no plugin code 
 [declares]
 labels   = ["Linear rail", "HIWIN MGN"]          # shown as the row's title options
 keywords = ["linear guide", "carriage", "block"] # words people type; not a copy of parameter choices
+vendor   = "HIWIN"
 [declares.labels_l10n]                            # per-locale variants; English is always matched too
 de = ["Linearführung", "HIWIN MGN"]
-vendor   = "HIWIN"
 
 [[declares.matches]]                              # generators: ordering codes they understand
 id         = "mgn-set"
@@ -100,6 +100,7 @@ Rules (enforced by the manifest validator at publish and at load):
 - Patterns use Rust's `regex` crate (linear time, no backreferences or lookaround). Caps: 400 characters
   per pattern, 32 patterns and 16 captures per plugin.
 - Anchored patterns only may claim `exact`; an unanchored one is at most `possible`.
+- An `exact` or `prefix` hit also needs its captured values, for the query actually typed, to pass the generator's parameter validator. A pattern matches a query prefix, so `MGN12H2R3000000` would capture a length of 3000 and leave `000` over; a hit whose values fail drops to `possible` and prefills nothing. The publish-time example checks alone do not cover arbitrary queries, which is why this is checked at search time too.
 - A `possible` hit is a suggestion row only: it never acts on Enter.
 - Every positive example's captured values must pass the generator's own parameter validator at publish
   (sizes, ranges, choices), so a pattern can't claim a code its generator would refuse.
@@ -208,7 +209,7 @@ a pattern whose examples don't hold, a stale snapshot without its date).
    behave alike.
 3. Snapshot size budget for the web app.
 4. Brand claims (yes, per review): only a vendor-linked or Official publisher may mark a vendor's codes
-   `exact`; Community and Unverified generators are capped at `prefix` for another brand's codes.
+   `exact`; Community generators are capped at `prefix` and Unverified at `possible` for another brand's codes.
 
 ## 7. Prior art
 
