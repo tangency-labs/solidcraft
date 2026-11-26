@@ -253,7 +253,7 @@
     {
       "id": "pcbway",
       "name": "PCBWay",
-      "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper sheets are smaller than the 3000 by 1500 mm given: their cuttable areas (the raw sheet less a 5 mm margin) are entered by material, and a material that is none of them is said not to have been checked for them.",
+      "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper have smaller sheets, entered by material (cuttable area: the sheet less a 5 mm margin).",
       "dxf_export": {
         "layers": "single",
         "bend_lines": false,
