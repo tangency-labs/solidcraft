@@ -2318,6 +2318,31 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
 }
 
+/// A KiCad board's link, which names no importer plugin, gets the same badges as any other: the
+/// badge is only looked at again when the window returns to the front, like every link's.
+#[test]
+fn a_changed_kicad_boards_link_gets_the_changed_badge() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-badge-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let board = dir.join("board.kicad_pcb");
+    let write = |width: &str| {
+        std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))")).unwrap();
+    };
+    write("20");
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("doc.open", &json!({"path": board})).unwrap();
+    let links = s.execute("component.links", &json!({})).unwrap();
+    let (component, badge) = crate::browser_links::badge_of(&links["links"][0]).unwrap();
+    assert_eq!((badge.state, badge.note), (LinkState::Linked, None));
+    write("30.5");
+    let links = s.execute("component.links", &json!({})).unwrap();
+    let (again, badge) = crate::browser_links::badge_of(&links["links"][0]).unwrap();
+    assert_eq!(again, component);
+    assert_eq!((badge.state, badge.note), (LinkState::Changed, Some("ui.link_changed")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A design opened from its file reads its link next to that file, and asks once.
 #[test]
 fn a_saved_designs_linked_component_shows_its_badge() {

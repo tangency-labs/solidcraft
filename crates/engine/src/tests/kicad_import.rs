@@ -291,3 +291,31 @@ fn a_board_that_cannot_be_read_again_keeps_its_bodies() {
     assert_eq!(s.doc.links.len(), 1, "the link stays");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+/// The board a caller named to `doc.open` stays one Update Links may read again when the window
+/// takes the opened design over, or accepts the worker's result: its link is looked at, not "not
+/// allowed". (Called directly, not through the window's loop.)
+#[test]
+fn the_board_a_caller_named_stays_allowed_when_the_window_takes_the_design() {
+    let state = |window: &mut Session| {
+        let listed = run(window, "component.links", json!({}));
+        (listed["links"][0]["found"].clone(), listed["links"][0]["state"].clone())
+    };
+    let path = board_file("live-link-window", 2.0);
+
+    // The window takes over a design opened in a scratch session.
+    let mut scratch = Session::default();
+    run(&mut scratch, "doc.open", json!({"path": path.to_string_lossy()}));
+    let mut window = Session::default();
+    window.replace_design(scratch);
+    assert_eq!(state(&mut window), (json!(true), json!(null)));
+
+    // The window accepts the result of a worker that opened it.
+    let mut window = Session::default();
+    let mut worker = window.scratch();
+    run(&mut worker, "doc.open", json!({"path": path.to_string_lossy()}));
+    window.accept_computed(worker).unwrap();
+    assert_eq!(window.doc.links.len(), 1);
+    assert_eq!(state(&mut window), (json!(true), json!(null)));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
