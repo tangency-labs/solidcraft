@@ -23,6 +23,7 @@ use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
 pub mod cell_grid;
+pub mod develop;
 pub mod exchange;
 pub mod frames;
 pub mod modelling;
@@ -77,6 +78,9 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Sheet development: a sheet metal part laid out flat and folded back
+    /// ([`develop::Develop`]).
+    Develop,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
 }
@@ -98,6 +102,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Develop,
         OpKind::Frames,
     ];
 
@@ -118,6 +123,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Develop => "develop",
             OpKind::Frames => "frames",
         }
     }
