@@ -1,0 +1,270 @@
+{
+ "area": "fillets",
+ "bodies": {
+  "b2": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b1"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 28.0,
+    "draft": 0.0,
+    "profile": [
+     {
+      "line": {
+       "end": [
+        -12.9,
+        9.0,
+        -14.0
+       ],
+       "start": [
+        -5.25761655479867,
+        28.105958636951645,
+        -14.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        12.9,
+        9.0,
+        -14.0
+       ],
+       "start": [
+        -12.9,
+        9.0,
+        -14.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        20.54238344520141,
+        28.105958636951637,
+        -14.0
+       ],
+       "start": [
+        12.9,
+        9.0,
+        -14.0
+       ]
+      }
+     },
+     {
+      "arc": {
+       "axis": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "center": [
+        15.8999999899725,
+        29.962912016715624,
+        -14.0
+       ],
+       "end": -0.19379313632652942,
+       "radius": 5.0,
+       "reference": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "start": -0.3805063766801446
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -4.9935959858909,
+        29.0,
+        -14.0
+       ],
+       "start": [
+        20.806404014109184,
+        29.0,
+        -14.0
+       ]
+      }
+     },
+     {
+      "arc": {
+       "axis": [
+        -0.0,
+        -0.0,
+        -1.0
+       ],
+       "center": [
+        -9.900000010027586,
+        29.962912016715613,
+        -14.0
+       ],
+       "end": 0.38050637668014076,
+       "radius": 5.0,
+       "reference": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "start": 0.19379313632652723
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b2"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b3"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b2"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b4"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b4"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b5"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b5"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b6"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b6"
+   ],
+   "op": "blend_dropping",
+   "outputs": [
+    "b7"
+   ],
+   "params": {
+    "edges": {
+     "kind": "edge",
+     "picked": [
+      {
+       "at": [
+        [
+         14.0,
+         20.806404014109184,
+         29.0
+        ],
+        [
+         14.0,
+         -4.993595985890899,
+         29.0
+        ]
+       ],
+       "index": 5
+      }
+     ],
+     "points": [
+      [
+       14.0,
+       7.9064040141091425,
+       29.0
+      ]
+     ],
+     "tolerance": 2.4093820666384915
+    },
+    "kind": "round",
+    "sizes": [
+     1.9
+    ],
+    "turn": "mitre"
+   }
+  }
+ ],
+ "case": "report-round-wider-than-a-round-the-edge-ends-on",
+ "expected": {
+  "body_count": 1,
+  "method": "The profile of report-chamfer-wider-than-a-round-the-edge-ends-on: 25.8 wide at every height, area 516, extruded 28 along x: 14448. The round of the square edge at x = 14, z = 29 takes the region between the corner and a quarter circle of radius 1.9 from every section y = const that reaches it, carried on past the edge's ends as far as the part goes; by Cavalieri over z the material it removes is 25.8 * 1.9^2 * (1 - pi/4) = 19.987586. V = 14448 - 19.987586 = 14428.012414.",
+  "outcome": "solid",
+  "source": "analytic",
+  "sources": [],
+  "volume_mm3": 14428.012414142511,
+  "what": "a 1.9 mm round on the straight top edge at the end of a block whose slanted sides end at the top in a 5 mm cove (front) and a 5 mm round (back), each cut off by the top 0.894 mm above where it starts, so the round is wider than the round and the cove it ends on: 'the fillet is larger than the faces beside its edges allow; the largest radius that fits is 0.894 mm'"
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "outcome": {
+  "ran": true,
+  "raw_counts": {
+   "edges": 21,
+   "faces": 9,
+   "vertices": 14
+  }
+ },
+ "records": "report-round-wider-than-a-round-the-edge-ends-on.bodies.json.gz",
+ "result": [
+  {
+   "body": "Body1",
+   "made": "b7"
+  }
+ ],
+ "rig": {
+  "error": null,
+  "known_failing": null,
+  "measured": {
+   "area_mm2": 3658.7802762531924,
+   "body_count": 1,
+   "edges": 21,
+   "faces": 9,
+   "vertices": 14,
+   "volume_mm3": 14428.012414142535
+  },
+  "refused_with": null,
+  "status": "pass"
+ },
+ "sources": [],
+ "traced_ops": [
+  "extrude",
+  "copy",
+  "copy",
+  "copy",
+  "tagged",
+  "blend_dropping"
+ ],
+ "ungraded": [],
+ "what": "a 1.9 mm round on the straight top edge at the end of a block whose slanted sides end at the top in a 5 mm cove (front) and a 5 mm round (back), each cut off by the top 0.894 mm above where it starts, so the round is wider than the round and the cove it ends on: 'the fillet is larger than the faces beside its edges allow; the largest radius that fits is 0.894 mm'",
+ "why_not": []
+}
