@@ -2322,6 +2322,34 @@ pub struct BodyCollisionParams {
     pub shape: String,
 }
 
+/// Draw bodies with or without their edge lines, whatever the visual style.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyEdgeLinesParams {
+    /// The body, by name. Give this or `bodies`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Several bodies, by name. Give this or `body`.
+    #[serde(default)]
+    pub bodies: Option<Vec<String>>,
+    /// `false` draws the bodies without their edge lines; `true` (the default) draws them as the
+    /// visual style says.
+    #[serde(default)]
+    pub show: Option<bool>,
+}
+
+/// What `body.edge_lines` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyEdgeLinesResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// Whether they now draw their edge lines.
+    pub show: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `body.collision` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyCollisionResult {

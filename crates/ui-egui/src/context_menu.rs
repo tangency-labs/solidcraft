@@ -1185,6 +1185,9 @@ fn construction_feature(app: &SolveApp, name: &str) -> Option<u64> {
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let names = json!(bodies);
     let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    // Hide Edge Lines draws the bodies without their outlines in every visual style (#21975);
+    // once every one of them is set so, the item puts them back.
+    let all_edgeless = bodies.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
@@ -1212,6 +1215,8 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
+        cmd(app, "body.edge_lines", if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" })
+            .with(json!({ "bodies": names, "show": all_edgeless })),
         isolate_bodies_item(app, bodies),
     ];
     if browser {

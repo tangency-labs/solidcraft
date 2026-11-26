@@ -231,6 +231,45 @@ pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"bodies": bodies, "shape": text}))
 }
 
+pub(super) const BODY_EDGE_LINES_CONTRACT: crate::schema::TypedContract<crate::schema::component::BodyEdgeLinesParams> =
+    crate::schema::TypedContract::new();
+
+/// Draw bodies with or without their edge lines, whatever the visual style.
+pub(super) fn body_edge_lines(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.edge_lines";
+    let bodies: Vec<String> = match (crate::params::str_(p, "body"), p.get("bodies").filter(|v| !v.is_null())) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `body` or `bodies`, not both")),
+        (None, None) => return Err(bad(cmd, "give `body` or `bodies`")),
+        (Some(name), None) => vec![name.to_string()],
+        (None, Some(list)) => {
+            let list = list.as_array().ok_or_else(|| bad(cmd, "`bodies` must be a list of body names"))?;
+            list.iter()
+                .map(|v| v.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`bodies` must be a list of body names")))
+                .collect::<Result<_>>()?
+        }
+    };
+    if bodies.is_empty() {
+        return Err(bad(cmd, "`bodies` is empty"));
+    }
+    let state = s.model.state();
+    if let Some(name) = bodies.iter().find(|name| !state.bodies.iter().any(|b| b.name == **name)) {
+        return Err(bad(cmd, format!("no body `{name}`")));
+    }
+    let show = match p.get("show").filter(|v| !v.is_null()) {
+        None => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`show` must be true or false"))?,
+    };
+    let doc = s.doc_mut();
+    for b in &bodies {
+        if show {
+            doc.edgeless_bodies.remove(b);
+        } else {
+            doc.edgeless_bodies.insert(b.clone());
+        }
+    }
+    Ok(json!({"bodies": bodies, "show": show}))
+}
+
 pub(super) const PHYSICAL_OVERRIDE_CONTRACT: crate::schema::TypedContract<crate::schema::component::PhysicalOverrideParams> =
     crate::schema::TypedContract::new();
 

@@ -3371,6 +3371,11 @@ pub(super) fn copy_keeps_appearance_for(
             if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
                 s.doc_mut().collision_shapes.insert(copy.clone(), shape);
             }
+            if s.doc.edgeless_bodies.contains(source) {
+                s.doc_mut().edgeless_bodies.insert(copy.clone());
+            } else {
+                s.doc_mut().edgeless_bodies.remove(copy);
+            }
         }
     }
     Ok(())
