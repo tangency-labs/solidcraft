@@ -1,0 +1,65 @@
+{
+  "en": {
+    "ui.properties.frame": "Frame",
+    "ui.properties.frame_in_parent": "In parent",
+    "ui.properties.frame_world": "World",
+    "ui.properties.position": "Position",
+    "ui.properties.rotation": "Rotation"
+  },
+  "ar": {
+    "ui.properties.frame": "الإطار المرجعي",
+    "ui.properties.frame_in_parent": "في الأصل",
+    "ui.properties.frame_world": "العالم",
+    "ui.properties.position": "الموضع",
+    "ui.properties.rotation": "الدوران"
+  },
+  "de": {
+    "ui.properties.frame": "Bezugssystem",
+    "ui.properties.frame_in_parent": "In der übergeordneten Komponente",
+    "ui.properties.frame_world": "Welt",
+    "ui.properties.position": "Position",
+    "ui.properties.rotation": "Drehung"
+  },
+  "he": {
+    "ui.properties.frame": "מערכת ייחוס",
+    "ui.properties.frame_in_parent": "ברכיב האב",
+    "ui.properties.frame_world": "עולם",
+    "ui.properties.position": "מיקום",
+    "ui.properties.rotation": "סיבוב"
+  },
+  "it": {
+    "ui.properties.frame": "Riferimento",
+    "ui.properties.frame_in_parent": "Nel componente padre",
+    "ui.properties.frame_world": "Mondo",
+    "ui.properties.position": "Posizione",
+    "ui.properties.rotation": "Rotazione"
+  },
+  "ja": {
+    "ui.properties.frame": "基準座標系",
+    "ui.properties.frame_in_parent": "親コンポーネント内",
+    "ui.properties.frame_world": "ワールド",
+    "ui.properties.position": "位置",
+    "ui.properties.rotation": "回転"
+  },
+  "ko": {
+    "ui.properties.frame": "기준 좌표계",
+    "ui.properties.frame_in_parent": "상위 컴포넌트 기준",
+    "ui.properties.frame_world": "월드",
+    "ui.properties.position": "위치",
+    "ui.properties.rotation": "회전"
+  },
+  "vi": {
+    "ui.properties.frame": "Hệ quy chiếu",
+    "ui.properties.frame_in_parent": "Trong thành phần cha",
+    "ui.properties.frame_world": "Toàn cục",
+    "ui.properties.position": "Vị trí",
+    "ui.properties.rotation": "Góc xoay"
+  },
+  "zh": {
+    "ui.properties.frame": "参考系",
+    "ui.properties.frame_in_parent": "在父组件中",
+    "ui.properties.frame_world": "世界",
+    "ui.properties.position": "位置",
+    "ui.properties.rotation": "旋转"
+  }
+}

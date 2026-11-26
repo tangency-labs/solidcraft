@@ -46,6 +46,7 @@ mod reseam;
 pub(crate) mod seams;
 mod slivers;
 mod touching;
+mod tracked;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -1216,7 +1217,13 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
-        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+        let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
+        if let Some(why) = skipped {
+            // The body keeps its imported trims, which passed every check; say so rather than
+            // leave a reader to find that its round faces were not tidied along their seams.
+            notes.push(format!("the seams of faces on closed surfaces were not completed, the body keeps its imported trims ({why})"));
+        }
+        if let Some((completed, from)) = completion {
             face_origin = from
                 .iter()
                 .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
@@ -1759,6 +1766,11 @@ impl<'t> Assembly<'t> {
         };
         let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // A spline face's trim that lies far off its edge (the kernel's drop settled on another part
+        // of the surface) is made again by following the edge along the surface.
+        if form.is_none() {
+            tracked::retrack(&surface, &self.edges, &edge_loops, &mut pcs)?;
+        }
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
@@ -2637,9 +2649,11 @@ pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
 /// onto that end. Left there, the seam completion moves the use a whole period, to the seam's
 /// other side, a period from the uses it joins (face #553893 of the Pro Shop file, a period of
 /// 0.0215 and a seam use 4.3e-11 past it). A use further past crosses the seam, and a loop of
-/// one use has no neighbour: those stay. A B-spline is a convex combination of its control
-/// points, so the pcurve then lies on the range, and moves by no more than its points did; the
-/// gap to the edge is measured and covered (`raise_edges`). The number of uses moved.
+/// one use has no neighbour: those stay. So does a use whose neighbours do not end on the seam
+/// (a loop lifted past it, whose next use starts a turn back, as at a sphere's pole: put on the
+/// seam, the use would lie a quarter turn from its edge). A B-spline is a convex combination of
+/// its control points, so the pcurve then lies on the range, and moves by no more than its points
+/// did; the gap to the edge is measured and covered (`raise_edges`). The number of uses moved.
 pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let domain = on.domain();
@@ -2678,6 +2692,11 @@ pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs
                 // How far it misses the uses beside it at its vertices.
                 let at = |q: &[f64; 2]| q.get(d).copied().unwrap_or(f64::NAN);
                 let miss = (at(start) - at(prev_end)).abs().max((at(end) - at(next_start)).abs());
+                // Only beside a use that ends on the seam.
+                let on_end = |x: f64| (x - lo).abs() <= round || (x - hi).abs() <= round;
+                if !(on_end(at(prev_end)) || on_end(at(next_start))) {
+                    continue;
+                }
                 let Some(c) = pc.get_mut(k) else { continue };
                 let xs: Vec<f64> = control_points(c).iter().map(at).collect();
                 let past = xs.iter().fold(0.0f64, |m, &x| m.max(lo - x).max(x - hi));

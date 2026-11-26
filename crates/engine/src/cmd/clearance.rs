@@ -62,6 +62,12 @@ const MAX_CACHED: usize = 2 * MAX_PAIRS;
 #[derive(Default)]
 pub(crate) struct PairCache(HashMap<(u64, u64, [u64; 3]), PairResult>);
 
+impl PairCache {
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 /// What one pair came to.
 #[derive(Clone, Default)]
 struct PairResult {
@@ -203,17 +209,37 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .as_ref()
     };
+    let mut incomplete = vec![false; n];
     let boxes: Vec<Aabb3> = (0..n)
         .map(|i| match (solid.get(i), meshes.get(i).and_then(Option::as_ref)) {
             (Some(b), Some(m)) if flag(&used, i) => {
-                // Over the triangles with finite corners, as a shape's set of them is.
+                // Over the triangles with finite corners, as a shape's set of them is. Also track
+                // whether any face was left unmeshed so an incomplete or empty display mesh never
+                // silently prunes a body from overlap/clearance checks.
                 let mut bx = Aabb3::EMPTY;
-                for p in m.triangles.iter().filter_map(|t| m.tri(t)).filter(|p| p.iter().all(|v| v.is_finite())) {
+                let mut seen_faces = vec![false; b.body.face_count()];
+                for (k, t) in m.triangles.iter().enumerate() {
+                    let Some(p) = m.tri(t) else { continue };
+                    if !p.iter().all(|v| v.is_finite()) {
+                        continue;
+                    }
                     p.into_iter().for_each(|v| bx.add(v));
+                    if let Some(seen) = m.tri_face.get(k).and_then(|&fi| seen_faces.get_mut(fi as usize)) {
+                        *seen = true;
+                    }
                 }
                 let chord = b.display_tol();
                 let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-                if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } }
+                let mesh_box = if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } };
+                if bx.is_empty() || seen_faces.iter().any(|&seen| !seen) {
+                    if let Some(slot) = incomplete.get_mut(i) {
+                        *slot = true;
+                    }
+                    let exact = b.body.exact_bounds().ok().unwrap_or_else(|| b.outline_bounds()).inflated(2.0 * b.body.record().tolerance);
+                    mesh_box.union(&exact)
+                } else {
+                    mesh_box
+                }
             }
             _ => Aabb3::EMPTY,
         })
@@ -251,7 +277,8 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(PairResult::default()) };
         let (Some(ba), Some(bb)) = (solid.get(i), solid.get(j)) else { return Ok(PairResult::default()) };
         let (Some(ka), Some(kb)) = (kept_body(i), kept_body(j)) else { return Ok(PairResult::default()) };
-        Ok(measure_pair((ba, ka), a, (bb, kb), b, gap, min_volume, tolerance))
+        let incomplete_pair = flag(&incomplete, i) || flag(&incomplete, j);
+        Ok(measure_pair((ba, ka), a, (bb, kb), b, gap, min_volume, tolerance, incomplete_pair))
     });
     if let Ok(mut cache) = s.clearance_cache.lock() {
         for (&k, r) in todo.iter().zip(&measured) {
@@ -406,6 +433,7 @@ fn collect_pair_results(
 
 /// One pair: its overlap when the meshes meet or one holds the other, otherwise its distance
 /// when it may be closer than `gap`.
+#[allow(clippy::too_many_arguments)]
 fn measure_pair(
     (ba, ka): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
     a: &DistanceShape,
@@ -414,6 +442,7 @@ fn measure_pair(
     gap: f64,
     min_volume: f64,
     tolerance: f64,
+    incomplete_pair: bool,
 ) -> PairResult {
     let mut out = PairResult::default();
     let slack = 2.0 * (a.chord() + b.chord());
@@ -430,64 +459,11 @@ fn measure_pair(
         nested && i.positions.first().is_some_and(|p| o.contains(*p))
     };
     let touching = mesh.is_some_and(|m| m.distance <= slack);
-    if touching || holds(ba, bb) || holds(bb, ba) {
-        // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
-        // check of the shared part runs here: a part it refuses is reported, not measured.
-        let intersect = |first, second| {
-            solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
-                solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)
-            })
-            .0
-        };
-        let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
-        let fallback_distance = |out: &mut PairResult| {
-            if is_cancelled() {
-                return;
-            }
-            if let Ok(Some(mut d)) = solidcraft_kernel::body_distance(a, b, f64::INFINITY) {
-                if d.distance < tolerance {
-                    d.distance = 0.0;
-                }
-                out.distance = Some(d);
-            }
-        };
-        let shared = match intersect(ka, kb) {
-            Ok(o) => Ok(o),
-            Err(first_err) => {
-                if is_cancelled() {
-                    Err(first_err)
-                } else {
-                    match intersect(kb, ka) {
-                        Ok(o) => Ok(o),
-                        Err(_) if !is_cancelled() && solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) => Ok(None),
-                        Err(_) => Err(first_err),
-                    }
-                }
-            }
-        };
-        match shared {
-            Err(e) => {
-                out.unchecked = Some(e.to_string());
-                fallback_distance(&mut out);
-                return out;
-            }
-            Ok(Some(o)) => match measure_near_origin(&o, shared_region(a, b).center()) {
-                Ok(m) => {
-                    if m.volume > 0.0
-                        && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
-                    {
-                        out.unchecked = Some(why);
-                        return out;
-                    }
-                    out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
-                }
-                Err(e) => {
-                    out.unchecked = Some(e.to_string());
-                    fallback_distance(&mut out);
-                    return out;
-                }
-            },
-            Ok(None) => {}
+    let may_overlap = touching || holds(ba, bb) || holds(bb, ba) || (incomplete_pair && !solidcraft_kernel::apart(ka, kb).unwrap_or(false));
+    if may_overlap {
+        intersect_pair((ka, a), (kb, b), min_volume, tolerance, incomplete_pair, &mut out);
+        if out.unchecked.is_some() {
+            return out;
         }
         if out.overlap.is_some_and(|o| o.0 >= min_volume) {
             return out;
@@ -500,6 +476,9 @@ fn measure_pair(
         }
     }
     if mesh.is_none() {
+        if incomplete_pair && gap > 0.0 {
+            out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+        }
         return out;
     }
     match solidcraft_kernel::body_distance(a, b, gap) {
@@ -507,12 +486,231 @@ fn measure_pair(
             if d.distance < tolerance {
                 d.distance = 0.0;
             }
-            out.distance = Some(d);
+            if incomplete_pair && (d.distance > 0.0 || !d.exact) {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            } else {
+                out.distance = Some(d);
+            }
         }
-        Ok(None) => {}
+        Ok(None) => {
+            if incomplete_pair && gap > 0.0 {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            }
+        }
         Err(e) => out.unchecked = Some(e.to_string()),
     }
     out
+}
+
+/// Runs the exact intersection boolean for one pair under `Validation::EachStep`, retrying in
+/// reversed operand order, checking certified disjointness (`interiors_disjoint`), retrying
+/// shifted near the shared region on kernel failure, and falling back to a sanity-checked
+/// `Validation::Off` measurement when SMLib's check alone refused the temporary overlap solid
+/// while both operands passed; verifies an empty boolean result against exact interior point
+/// witnesses so a real overlap is never silently reported as clear; and attaches a non-boolean
+/// fallback distance when a pair still lands in `unchecked`.
+fn intersect_pair(
+    (ka, a): (&solidcraft_kernel::Body, &DistanceShape),
+    (kb, b): (&solidcraft_kernel::Body, &DistanceShape),
+    min_volume: f64,
+    tolerance: f64,
+    incomplete_pair: bool,
+    out: &mut PairResult,
+) {
+    let at = shared_center(a, b, ka, kb);
+    let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+    if is_cancelled() {
+        out.unchecked = Some("cancelled".into());
+        return;
+    }
+    let fallback_distance = |out: &mut PairResult| {
+        if is_cancelled() {
+            return;
+        }
+        if let Ok(Some(mut d)) = solidcraft_kernel::body_distance(a, b, f64::INFINITY) {
+            if d.distance < tolerance {
+                d.distance = 0.0;
+            }
+            if !incomplete_pair || (d.distance == 0.0 && d.exact) {
+                out.distance = Some(d);
+            }
+        }
+    };
+    let record_overlap = |m: solidcraft_kernel::MassMeasure, out: &mut PairResult| {
+        if m.volume > 0.0
+            && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
+        {
+            out.unchecked = Some(why);
+            return;
+        }
+        out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+    };
+    let verify_empty = |out: &mut PairResult| {
+        if is_cancelled() {
+            out.unchecked = Some("cancelled".into());
+            return;
+        }
+        match solidcraft_kernel::overlap_witness(a, b) {
+            Ok(None) => {}
+            Err(e) => {
+                out.unchecked = Some(e.to_string());
+                fallback_distance(out);
+            }
+            Ok(Some(witness)) => {
+                // Exact point classification proved interior overlap despite the empty boolean:
+                // retry shifted directly to the witness point (both operand orders) before
+                // recording the pair as unchecked.
+                let recovered = if is_cancelled() {
+                    None
+                } else if let Some(m) = intersect_shifted(ka, kb, witness, false) {
+                    Some(m)
+                } else if !is_cancelled() {
+                    intersect_shifted(ka, kb, witness, true)
+                } else {
+                    None
+                };
+                if let Some(m) = recovered {
+                    record_overlap(m, out);
+                } else {
+                    out.unchecked = Some(format!(
+                        "overlap at [{:.3}, {:.3}, {:.3}] could not be intersected by the boolean kernel",
+                        witness.x, witness.y, witness.z
+                    ));
+                    fallback_distance(out);
+                }
+            }
+        }
+    };
+
+    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+    // check of the shared part runs here: a part it refuses is reported unless a sanity-checked
+    // measurement-only fallback recovers a valid overlap when both operands passed SMLib's check.
+    match run_intersect(ka, kb) {
+        Ok(Some(o)) => match measure_near_origin(&o, at) {
+            Ok(m) => record_overlap(m, out),
+            Err(e) => {
+                out.unchecked = Some(e.to_string());
+                fallback_distance(out);
+            }
+        },
+        Err(first_err) => {
+            if is_cancelled() {
+                out.unchecked = Some(first_err.to_string());
+                return;
+            }
+            match run_intersect(kb, ka) {
+                Ok(Some(o)) => match measure_near_origin(&o, at) {
+                    Ok(m) => record_overlap(m, out),
+                    Err(e) => {
+                        out.unchecked = Some(e.to_string());
+                        fallback_distance(out);
+                    }
+                },
+                Ok(None) => verify_empty(out),
+                Err(second_err) => {
+                    if is_cancelled() {
+                        out.unchecked = Some(first_err.to_string());
+                        return;
+                    }
+                    if solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
+                        return;
+                    }
+                    if !is_cancelled()
+                        && let Some(m) = retry_shifted_intersect(ka, kb, at, &is_cancelled)
+                    {
+                        record_overlap(m, out);
+                        return;
+                    }
+                    match super::interference::fallback_unchecked_overlap(
+                        ka,
+                        kb,
+                        (&first_err, &second_err),
+                        |o| measure_near_origin(o, at),
+                        |v| v > 0.0 && v >= min_volume,
+                        is_cancelled,
+                    ) {
+                        super::interference::UncheckedFallback::Measured(m) => {
+                            out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+                        }
+                        super::interference::UncheckedFallback::Cancelled => {
+                            out.unchecked = Some(first_err.to_string());
+                        }
+                        super::interference::UncheckedFallback::NotRecovered => {
+                            out.unchecked = Some(first_err.to_string());
+                            fallback_distance(out);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None) => verify_empty(out),
+    }
+}
+
+fn run_intersect(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> solidcraft_kernel::Result<Option<solidcraft_kernel::Body>> {
+    solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect))
+        .0
+}
+
+/// Retries a failed intersection near the origin (when placed away from it) in both operand orders.
+/// Only a validated non-empty solid result replaces the original error.
+fn retry_shifted_intersect(
+    ka: &solidcraft_kernel::Body,
+    kb: &solidcraft_kernel::Body,
+    at: solidcore_record::Vec3,
+    is_cancelled: &impl Fn() -> bool,
+) -> Option<solidcraft_kernel::MassMeasure> {
+    let far = at.x.abs().max(at.y.abs()).max(at.z.abs()) > 1.0;
+    if !far || is_cancelled() {
+        return None;
+    }
+    if let Some(m) = intersect_shifted(ka, kb, at, false) {
+        return Some(m);
+    }
+    if is_cancelled() {
+        return None;
+    }
+    intersect_shifted(ka, kb, at, true)
+}
+
+/// Intersects `ka` and `kb` translated by `-at` (so the shared region sits at the origin) and
+/// translates the measured overlap box and centroid back by `+at`.
+fn intersect_shifted(
+    ka: &solidcraft_kernel::Body,
+    kb: &solidcraft_kernel::Body,
+    at: solidcore_record::Vec3,
+    swap: bool,
+) -> Option<solidcraft_kernel::MassMeasure> {
+    if !at.is_finite() {
+        return None;
+    }
+    let ta = solidcraft_kernel::transform(ka, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0).ok()?;
+    let tb = solidcraft_kernel::transform(kb, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0).ok()?;
+    let (first, second) = if swap { (&tb, &ta) } else { (&ta, &tb) };
+    let overlap = run_intersect(first, second).ok()??;
+    let mut m = solidcraft_kernel::measure_mass(&overlap).ok()?;
+    if !m.volume.is_finite() || m.volume <= 0.0 {
+        return None;
+    }
+    m.centroid += at;
+    m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
+    Some(m)
+}
+
+/// Center of the shared region of `a` and `b`, falling back to their exact bounding boxes when a
+/// display mesh is empty or incomplete.
+fn shared_center(a: &DistanceShape, b: &DistanceShape, ka: &solidcraft_kernel::Body, kb: &solidcraft_kernel::Body) -> solidcore_record::Vec3 {
+    let region = shared_region(a, b);
+    if !region.is_empty() {
+        return region.center();
+    }
+    if let (Ok(ea), Ok(eb)) = (ka.exact_bounds(), kb.exact_bounds()) {
+        let exact = ea.intersection(&eb);
+        if !exact.is_empty() {
+            return exact.center();
+        }
+    }
+    solidcore_record::Vec3::ZERO
 }
 
 /// The box where two bodies may share volume: where their boxes meet, grown by a margin.
@@ -528,11 +726,11 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
     Aabb3 { min: min - g, max: max + g }
 }
 
-/// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
+/// [`solidcraft_kernel::measure_mass`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure> {
     let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
-    let mut m = solidcraft_kernel::measure(&moved)?;
+    let mut m = solidcraft_kernel::measure_mass(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
     Ok(m)

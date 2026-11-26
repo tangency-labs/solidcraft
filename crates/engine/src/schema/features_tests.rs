@@ -70,9 +70,12 @@ fn schemas_and_the_key_check_agree() {
             "thickness2",
             "thin",
             "through_all",
+            "through_all2",
             "to",
+            "to2",
             "to_body_apart",
             "to_offset",
+            "to_offset2",
             "touching",
         ],
     );
@@ -134,7 +137,20 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<PipeParams>(),
-        &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
+        &[
+            "body_name",
+            "body_names",
+            "diameter",
+            "name",
+            "operation",
+            "participants",
+            "path",
+            "path_body",
+            "path_edges",
+            "path_sketch",
+            "targets",
+            "wall",
+        ],
     );
     assert_keys(
         input_schema_for::<BoundingSolidParams>(),
@@ -145,7 +161,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
     assert_keys(
         input_schema_for::<MirrorParams>(),
-        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane", "touching"],
+        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "placements", "plane", "touching"],
     );
     assert_keys(
         input_schema_for::<FilletParams>(),
@@ -531,6 +547,29 @@ fn sweep_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
         assert_eq!(edges["type"], "array", "{schema}");
         assert_eq!(edges["minItems"], 1, "{schema}");
         assert_eq!(edges["maxItems"], 1000, "{schema}");
+    }
+}
+
+/// #16084: a pipe's path may be a chain of a body's edges, as a sweep's may, so its contract
+/// takes `path_body` and `path_edges` with the sweep's checks, and still refuses a key that is
+/// not one of the command's.
+#[test]
+fn pipe_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
+    let pipe = crate::schema::TypedContract::<PipeParams>::new();
+    let p = json!({"path_body": "Body1", "path_edges": [[0, 0, 0], [10, 0, 0]], "diameter": 4});
+    assert!(crate::schema::Contract::check(&pipe, &p).is_empty(), "{p}");
+    let typo = json!({"path_body": "Body1", "path_edges": [[0, 0, 0]], "diameter": 4, "path_boddy": "Body1"});
+    let issues = crate::schema::Contract::check(&pipe, &typo);
+    assert_eq!(issues.len(), 1, "{typo}");
+    assert_eq!(issues[0].message, "unknown key `path_boddy`; did you mean `path_body`?", "{typo}");
+    for (p, key, message) in [
+        (json!({"path_body": 5, "diameter": 4}), "path_body", "`path_body` must be a body name"),
+        (json!({"path_edges": [], "diameter": 4}), "path_edges", "the path needs 1…1000 edges"),
+    ] {
+        let issues = crate::schema::Contract::check(&pipe, &p);
+        assert_eq!(issues.len(), 1, "{p}");
+        assert_eq!(issues[0].path, key, "{p}");
+        assert_eq!(issues[0].message, message, "{p}");
     }
 }
 
@@ -1271,7 +1310,21 @@ fn ring_with(key: &str, value: Value) -> Value {
 fn circular_pattern_schema_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<PatternCircularParams>(),
-        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+        &[
+            "alignment",
+            "angle",
+            "axis",
+            "bodies",
+            "body_name",
+            "body_names",
+            "components",
+            "count",
+            "features",
+            "join",
+            "name",
+            "participants",
+            "reversed",
+        ],
     );
 }
 
@@ -1408,6 +1461,7 @@ fn pattern_schemas_and_the_key_check_agree() {
             "extent1",
             "extent2",
             "features",
+            "join",
             "name",
             "participants",
             "reversed",
@@ -1431,6 +1485,8 @@ fn pattern_schemas_and_the_key_check_agree() {
             "orientation",
             "participants",
             "path",
+            "path_body",
+            "path_edges",
             "path_sketch",
             "sketch",
             "spacing",
@@ -1857,4 +1913,26 @@ fn shell_and_draft_reply_with_their_schemas() {
     assert!(r["param_warnings"].to_string().contains("tangent_chian"), "{r}");
     let error = cube(ParamCheck::Strict).execute("solid.shell", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`tangent_chian`"), "{error}");
+}
+
+#[test]
+fn mirror_placements_schema_and_contract_agree() {
+    let schema = input_schema_for::<MirrorParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"bodies": ["B"], "placements": null, "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [[]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [[1]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B", "B"], "placements": [[1], [2, 3]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": "bad", "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": 5, "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [1], "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [[-1]], "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [["a"]], "plane": "YZ"}), false),
+    ] {
+        let issues = crate::schema::issues("solid.mirror", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
 }
