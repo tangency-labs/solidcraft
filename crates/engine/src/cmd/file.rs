@@ -1379,17 +1379,38 @@ fn parse_kicad_color(v: &Value) -> Option<[u8; 3]> {
 }
 
 fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions) -> Result<Value> {
+    add_kicad_with(s, path, name, options, &KicadPaths::current())
+}
+
+/// [`add_kicad`] with the KiCad variables and library given (the tests' entry point).
+fn add_kicad_with(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions, paths: &KicadPaths) -> Result<Value> {
     let board_path = solidcraft_io::kicad_board_path(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let board_path = board_path.to_string_lossy();
     let bytes =
         solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
     let model_dir = std::path::Path::new(board_path.as_ref()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
-    let paths = KicadPaths::current();
+    let libraries = paths.libraries();
+    let access = KicadModelAccess { board: board_path.as_ref(), libraries: &libraries };
+    // The folders of the models the agent's folders refused: the warning a model gets is a few
+    // words, so the folders and how to allow them are told once, below.
+    let refused_folders = std::cell::RefCell::new(Vec::<String>::new());
     let mut load = |model: &str| {
         let resolved = paths.resolve(model, &model_dir).map_err(|e| e.to_string())?;
-        // A board names its models; they follow the same rule as any other path a document names.
-        solidcraft_io::vfs::check_design_path(&resolved, Some(board_path.as_ref())).map_err(|e| e.to_string())?;
-        read_kicad_model(&resolved).map_err(|e| format!("{resolved}: {e}"))
+        read_kicad_model(&resolved, &access).map_err(|e| {
+            if e.kind() != std::io::ErrorKind::PermissionDenied {
+                return format!("{resolved}: {e}");
+            }
+            if e.to_string().contains("outside the folders this agent may use")
+                && let Some(folder) = std::path::Path::new(&resolved).parent()
+                && let Ok(mut folders) = refused_folders.try_borrow_mut()
+            {
+                let folder = folder.display().to_string();
+                if !folders.contains(&folder) {
+                    folders.push(folder);
+                }
+            }
+            e.to_string()
+        })
     };
     let imported =
         solidcraft_io::read_kicad(&bytes, &board_path, options, &mut load).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
@@ -1411,7 +1432,17 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
         features.push(import::add_step_in_component(s, placed.component, "board.step", step, &feature_name)?);
     }
     let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
-    let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": feature.warnings});
+    let mut warnings = json!(feature.warnings);
+    let refused = refused_folders.take();
+    if !refused.is_empty()
+        && let Some(list) = warnings.as_array_mut()
+    {
+        let folders = refused.iter().map(|f| format!("`{f}`")).collect::<Vec<_>>().join(", ");
+        list.push(json!(format!(
+            "component models in {folders} are outside the folders this agent may use, so those components have no model: allow a folder with `--allow-path <folder>` in the MCP server's arguments, then open the board again"
+        )));
+    }
+    let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": warnings});
     // The component the board was placed in, as the other imports report theirs.
     out["component"] = json!(placed.component);
     out["component_name"] = json!(placed.name);
@@ -1469,6 +1500,22 @@ impl KicadPaths {
             return self.library.as_ref().map(|dir| dir.to_string_lossy().into_owned());
         }
         None
+    }
+
+    /// The folders a board's model references may lead to even when an agent's scope does not
+    /// hold them: KiCad's 3D model library as installed here, and what the shell and KiCad's own
+    /// variable table say its model variables are. All of them are the machine's own settings,
+    /// never the board's.
+    fn libraries(&self) -> Vec<std::path::PathBuf> {
+        let mut folders: Vec<std::path::PathBuf> = self.library.iter().cloned().collect();
+        // `vars_os`: an unrelated variable that is not Unicode must not panic an import.
+        let shell = std::env::vars_os().filter_map(|(name, value)| Some((name.into_string().ok()?, std::path::PathBuf::from(value))));
+        let configured = self.configured.iter().map(|(name, value)| (name.clone(), std::path::PathBuf::from(value)));
+        folders.extend(
+            shell.chain(configured).filter(|(name, value)| is_kicad_3dmodel_variable(name) && !value.as_os_str().is_empty()).map(|(_, value)| value),
+        );
+        folders.dedup();
+        folders
     }
 
     fn resolve(&self, path: &str, model_dir: &std::path::Path) -> std::io::Result<String> {
@@ -1596,9 +1643,9 @@ fn kicad_variables_of(bytes: &[u8]) -> Vec<(String, String)> {
 /// KiCad 10 packages have no VRML at all, while a board drawn with older footprints still names
 /// `….wrl` — so a reference to a file that is not here is answered by the model of the same name
 /// in another format we can read, which is what KiCad's own 3D viewer does.
-fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile> {
+fn read_kicad_model(path: &str, access: &KicadModelAccess) -> std::io::Result<solidcraft_io::KicadModelFile> {
     let named = std::path::Path::new(path);
-    let missing = match read_kicad_model_file(named) {
+    let missing = match read_kicad_model_file(named, access) {
         Ok(bytes) => return Ok(solidcraft_io::KicadModelFile { path: path.to_string(), bytes }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => error,
         Err(error) => return Err(error),
@@ -1617,17 +1664,35 @@ fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile
         name.push(".");
         name.push(other);
         let candidate = dir.join(name);
-        if let Ok(bytes) = read_kicad_model_file(&candidate) {
+        if let Ok(bytes) = read_kicad_model_file(&candidate, access) {
             return Ok(solidcraft_io::KicadModelFile { path: candidate.to_string_lossy().into_owned(), bytes });
         }
     }
     Err(missing)
 }
 
-fn read_kicad_model_file(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+/// What a board's model files may be read from, beyond the folders an agent's scope holds.
+struct KicadModelAccess<'a> {
+    /// The board the models belong to: the network location it came from counts as allowed.
+    board: &'a str,
+    /// KiCad's 3D model library folders ([`KicadPaths::libraries`]).
+    libraries: &'a [std::path::PathBuf],
+}
+
+/// The file extensions of the models KiCad's 3D library holds (any case).
+const KICAD_MODEL_EXTENSIONS: &[&str] = &["wrl", "wrz", "step", "stp", "stpz"];
+
+fn read_kicad_model_file(path: &std::path::Path, access: &KicadModelAccess) -> std::io::Result<Vec<u8>> {
     let text = path.to_string_lossy();
     let limit = if solidcraft_io::is_vrml_path(&text) { solidcraft_io::MAX_VRML_BYTES } else { solidcraft_io::MAX_STEP_BYTES };
-    solidcraft_io::vfs::read(&text, limit)
+    // A board names its models; they follow the same rule as any other path a document names,
+    // except that a model of KiCad's own 3D library is readable when the agent opened the board:
+    // the agent was handed the board, the library is public and read-only, and nothing but model
+    // files can be reached that way. Any other folder stays refused (`--allow-path` adds it).
+    match solidcraft_io::vfs::check_design_path(&text, Some(access.board)) {
+        Ok(()) => solidcraft_io::vfs::read(&text, limit),
+        Err(refused) => solidcraft_io::vfs::read_in_library(&text, access.libraries, KICAD_MODEL_EXTENSIONS, limit).unwrap_or(Err(refused)),
+    }
 }
 
 fn is_kicad_3dmodel_variable(name: &str) -> bool {
@@ -4182,6 +4247,81 @@ mod tests {
         assert!(s.execute("file.revert_saved", &json!({})).is_err());
         assert_eq!(s.doc.features.len(), before, "a failed revert keeps the design");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An agent that opened a board can read the models of KiCad's 3D library, which lie outside
+    /// its folders, and nothing else outside them: not another file type in the library, not a
+    /// library file reached through `..`, not a model in a folder the machine does not name.
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[test]
+    fn an_agent_reads_the_models_of_kicads_library_beside_the_board_it_opened() {
+        use solidcraft_io::vfs::{PathScope, scoped};
+        let base = std::env::temp_dir().join(format!("solidcraft-kicad-library-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (project, library, elsewhere) = (base.join("project"), base.join("kicad").join("3dmodels"), base.join("elsewhere"));
+        for dir in [&project, &library, &elsewhere] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let wrl = b"#VRML V2.0 utf8\nShape { geometry Box { size 2 2 2 } }";
+        std::fs::write(library.join("part.wrl"), wrl).unwrap();
+        std::fs::write(library.join("notes.txt"), b"not a model").unwrap();
+        std::fs::write(elsewhere.join("part.wrl"), wrl).unwrap();
+        std::fs::write(base.join("secret.wrl"), wrl).unwrap();
+        let board = project.join("board.kicad_pcb");
+        let write_board = |model: &str| {
+            std::fs::write(
+                &board,
+                format!(
+                    "(kicad_pcb (general (thickness 1.6))\n  (gr_rect (start 0 0) (end 20 10) (layer \"Edge.Cuts\"))\n  (footprint \"part\" (at 5 5) (layer \"F.Cu\") (property \"Reference\" \"U1\")\n    (model \"{model}\")))"
+                ),
+            )
+            .unwrap();
+        };
+        let paths = KicadPaths { configured: vec![("KICAD9_3DMODEL_DIR".into(), library.to_string_lossy().into_owned())], library: None };
+        let open = |model: &str| {
+            write_board(model);
+            let scope = PathScope::new([]).with_design_file(&board.to_string_lossy());
+            let mut s = Session::default();
+            let reply = scoped(Some(scope), || {
+                add_kicad_with(&mut s, &board.to_string_lossy(), None, &solidcraft_io::KicadOptions::default(), &paths).unwrap()
+            });
+            reply["warnings"].as_array().cloned().unwrap_or_default().iter().filter_map(|w| w.as_str().map(str::to_owned)).collect::<Vec<_>>()
+        };
+        // The library's model comes in, with no warning.
+        let warnings = open("${KICAD9_3DMODEL_DIR}/part.wrl");
+        assert!(warnings.iter().all(|w| !w.contains("part.wrl")), "{warnings:?}");
+        // A file that is not a model, a way out of the library, and a folder nothing names are refused.
+        let outside = elsewhere.join("part.wrl").to_string_lossy().into_owned();
+        for (model, why) in [
+            ("${KICAD9_3DMODEL_DIR}/notes.txt", "unsupported 3D model format"),
+            ("${KICAD9_3DMODEL_DIR}/../../secret.wrl", "outside the folders this agent may use"),
+            (outside.as_str(), "outside the folders this agent may use"),
+        ] {
+            let warnings = open(model);
+            assert!(warnings.iter().any(|w| w.contains(why)), "{model}: {warnings:?}");
+            if why.starts_with("outside") {
+                assert!(warnings.iter().any(|w| w.contains("--allow-path <folder>")), "the refusal names how to allow it: {warnings:?}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The KiCad options of `doc.open`'s schema are the ones the format table offers for a board.
+    #[test]
+    fn the_open_schema_names_the_kicad_options_the_format_table_does() {
+        use solidcraft_io::formats;
+        let mut table: Vec<&str> = formats::FORMATS
+            .iter()
+            .filter_map(|f| f.import.as_ref())
+            .filter(|i| matches!(i.target, formats::ImportTarget::Kicad))
+            .flat_map(|i| i.options.iter().map(|o| o.param))
+            .collect();
+        let mut schema: Vec<&str> = crate::schema::file::KICAD_OPEN_OPTIONS.to_vec();
+        table.sort_unstable();
+        schema.sort_unstable();
+        assert_eq!(schema, table);
+        let properties = crate::schema::file::kicad_open_properties();
+        assert!(schema.iter().all(|name| properties.contains_key(*name)));
     }
 
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.

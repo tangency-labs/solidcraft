@@ -56,6 +56,9 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<OpenParams>(),
         &[
+            "color",
+            "components",
+            "copper",
             "folder",
             "format",
             "geometry",
@@ -69,8 +72,11 @@ fn schemas_and_the_key_check_agree() {
             "path",
             "read_only",
             "reader",
+            "representation",
             "reuse_import",
+            "silkscreen",
             "tab",
+            "thickness",
             "units",
             "up",
             "verify",
