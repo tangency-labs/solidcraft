@@ -2938,6 +2938,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
     p.space_mouse_motion = d.space_mouse_motion;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
+    p.space_mouse_horizon_lock = d.space_mouse_horizon_lock;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -2948,6 +2949,7 @@ fn picture_and_boat(
     boat: &mut Option<crate::test_boat::Boat>,
     motion: Option<crate::space_mouse::DeviceMotion>,
     free_orbit: bool,
+    horizon_lock: bool,
     has_picture: bool,
     picture: impl FnOnce(&mut egui::Ui),
     pads: impl FnOnce(&mut egui::Ui),
@@ -2962,7 +2964,7 @@ fn picture_and_boat(
     let width = if beside { (room - PICTURE_WIDTH - gap).min(BOAT_MAX) } else { room.min(BOAT_MAX) };
     let mut boat_and_reset = |ui: &mut egui::Ui| {
         ui.vertical(|ui| {
-            crate::test_boat::show(ui, boat, motion, free_orbit, egui::vec2(width.max(0.0), BOAT_HEIGHT));
+            crate::test_boat::show(ui, boat, motion, free_orbit, horizon_lock, egui::vec2(width.max(0.0), BOAT_HEIGHT));
             if ui_kit::button(ui, solidcraft_ui_text::tr("ui.3d_mouse_reset_view"), ui_kit::Button::Normal).clicked() {
                 crate::test_boat::reset(boat);
             }
@@ -3343,6 +3345,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
                 "locked": app.policy.locked(),
                 "check_updates": crate::policy::check_updates(app),
                 "settings": crate::policy::in_force(app),
+                "off": app.policy.turned_off(),
             });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
@@ -6008,6 +6011,7 @@ mod tests {
         p.space_mouse_model_pivot = true;
         p.space_mouse_motion = SpaceMouseMotion::TargetCamera;
         p.space_mouse_sketch_orbit = true;
+        p.space_mouse_horizon_lock = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -6020,6 +6024,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_horizon_lock, d.space_mouse_horizon_lock);
         assert_eq!(p.space_mouse_motion, d.space_mouse_motion);
         // Kept: the calibration (dead zone too), the buttons, the offered and adopted sets, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
