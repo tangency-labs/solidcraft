@@ -754,6 +754,111 @@ pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> 
     corner + u * s + v * t
 }
 
+/// Why [`box_extent_along`], [`axis_along_own_axes`] and [`plane_offset_square_to`] refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisRefusal {
+    /// A number of the map, the axis or the box is not finite.
+    NotFinite,
+    /// The axis has no direction (it is zero, or too short to unitize).
+    ZeroAxis,
+    /// The map flattens space, so it has no inverse.
+    FlatMap,
+}
+
+/// `axis` (a direction in the outer frame) as the placed body's own frame sees it, unit: the
+/// linear part of the inverse of `placement` applied to it, unitized.
+fn own_direction(placement: &Transform, axis: Vec3) -> Result<Vec3, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let inverse = placement.inverse().map_err(|_| AxisRefusal::FlatMap)?;
+    let own = inverse
+        .transform_vector(axis)
+        .unitize()
+        .map_err(|_| AxisRefusal::ZeroAxis)?;
+    if finite3(own) {
+        Ok(own)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: how far a body's box `min`..`max` (in the body's own frame), placed in the outer
+/// frame by `placement`, reaches along the outer direction `axis` (any length): the box's
+/// [`crate::geom::extent3d::Extent3d::span_along`] along the unit direction that `axis` is in the
+/// body's own frame, high less low. Tight when `axis` runs along one of the body's own axes
+/// ([`axis_along_own_axes`]).
+///
+/// # Errors
+/// [`AxisRefusal`]: a number not finite (also the box's, or an extent not finite), a zero
+/// `axis`, or a `placement` that flattens space.
+pub fn box_extent_along(
+    min: Point3,
+    max: Point3,
+    placement: &Transform,
+    axis: Vec3,
+) -> Result<f64, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    if !finite3(min) || !finite3(max) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let [low, high] =
+        crate::geom::extent3d::Extent3d::from_bounds(min.x, min.y, min.z, max.x, max.y, max.z)
+            .span_along(Point3::ZERO, own);
+    let extent = high - low;
+    if extent.is_finite() {
+        Ok(extent)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: whether the outer direction `axis` runs along one of the own axes of a body
+/// placed by `placement` (so a box of the body is tight along it): the unit direction `axis` is
+/// in the body's own frame has a component of at least `1 - 1e-9` in size.
+///
+/// # Errors
+/// [`AxisRefusal`] for a number not finite, a zero `axis`, or a `placement` that flattens space.
+pub fn axis_along_own_axes(placement: &Transform, axis: Vec3) -> Result<bool, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    Ok([own.x, own.y, own.z].iter().any(|c| c.abs() >= 1.0 - 1e-9))
+}
+
+/// Not upstream: where a flat face, a plane through `origin` with normal `normal` in a body's own
+/// frame, cuts the outer direction `axis` once the body is placed by `placement`, if it is square
+/// to it: `Some` of the offset of the placed `origin` along the unit `axis` from the outer
+/// origin when the placed normal is parallel to `axis` (the unit vectors' cross product no
+/// longer than `1e-9`), `None` when it is not, or when `origin` or `normal` is not finite or the
+/// placed normal has no direction.
+///
+/// # Errors
+/// [`AxisRefusal`] for a `placement` or `axis` with a number not finite, or a zero `axis`.
+pub fn plane_offset_square_to(
+    placement: &Transform,
+    origin: Point3,
+    normal: Vec3,
+    axis: Vec3,
+) -> Result<Option<f64>, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let axis = axis.unitize().map_err(|_| AxisRefusal::ZeroAxis)?;
+    if !finite3(origin) || !finite3(normal) {
+        return Ok(None);
+    }
+    let Ok(placed) = placement.transform_vector(normal).unitize() else {
+        return Ok(None);
+    };
+    if placed.cross(axis).length() > 1e-9 {
+        return Ok(None);
+    }
+    Ok(Some(
+        placement
+            .transform_point(origin)
+            .distance_along(Point3::ZERO, axis),
+    ))
+}
+
 /// The operation name of the refusals of [`centroid_and_mean_radius`].
 const OP_CENTROID: &str = "math::centroid_and_mean_radius";
 

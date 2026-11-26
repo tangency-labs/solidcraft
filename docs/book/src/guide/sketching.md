@@ -239,11 +239,14 @@ adds folders to the ones searched for installed fonts. On Windows, SolidCraft al
 font files from the current user's and machine's `Software\Microsoft\Windows NT\CurrentVersion\Fonts`
 registry keys, including absolute file paths outside the standard Windows and per-user Fonts
 folders. Restart SolidCraft after installing fonts to refresh the cached list. A text's `height`, its
-`angle` and each coordinate of its `at` can be expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
-`"at": ["plate_width / 2", 5]`): the text keeps the expression and follows the parameters when they change, and
+`angle`, each coordinate of its `at`, its `letter_spacing` and its `line_spacing` (a factor) can be
+expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
+`"at": ["plate_width / 2", 5]`, `"line_spacing": "leading"`), in the commands and in the **Edit Text**
+dialog's fields: the text keeps the expression and follows the parameters when they change, and
 saves it with the design. A number takes the place of an expression, and so does moving the text or dragging its
-handles (what moves becomes a number; turning a text leaves its height as it was). A string that names no
-parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
+handles (what moves becomes a number; turning a text leaves its height as it was). A value typed as
+`name = value` (`"letter_spacing": "gap = 2 mm"`) adds that parameter and the text follows it. Any other string
+that names no parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
 not two numbers or expressions, a `height` or `angle` that is neither (or a `height` that is not positive) and an
 expression that cannot be worked out with a message, instead of drawing the text with a default; left out, they
 keep their defaults.
@@ -485,6 +488,20 @@ polygon joins the control points. Drag a control point to reshape the curve, as 
 point: the curve stays smooth along its whole length. The Control Point Spline tool on the Sketch
 tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
 kind of spline as a path or a rail.
+
+**3D Sketch**, in the menu of the Model tab's Sketch panel, starts such a sketch in one step: it
+asks for no plane, turns 3D Sketch on and starts 3D Line, and the view stays as it is. The sketch
+rests on the XY origin plane of the active component, so a click in empty space lands there. To
+leave that plane, snap to a vertex, edge or face of the model or to a point already drawn in 3D,
+or finish the line, click one of its points and drag the X, Y or Z arrow.
+
+**Fillet** rounds the corner where two 3D lines share an end point, for the bends of a tube or
+pipe path: pick the two lines and give the radius. Both lines are shortened and a 3D arc in
+their plane joins them, tangent to both. The radius is a dimension with its own parameter, so
+you can change it later. A constraint that held the sharp corner (a fixed point, a dimension to
+it, a third curve joined there) holds a 3D point that stays at the corner on both lines. Fillet
+takes no other 3D curve, and Chamfer takes none. Scripts call `sketch.fillet` with the two lines
+as `a` and `b`.
 
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.

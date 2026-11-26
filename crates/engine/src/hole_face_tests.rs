@@ -870,7 +870,7 @@ fn a_saved_hole_turned_towards_a_touching_part_drills_its_own_part_when_opened()
 
 fn hole_direction(s: &Session, name: &str) -> Vec3 {
     match &s.doc.find_feature(name).unwrap().kind {
-        solidcraft_doc::FeatureKind::Hole { direction, .. } => direction.0,
+        solidcraft_doc::FeatureKind::Hole { direction, .. } => solidcraft_doc::literal_dir(direction).unwrap(),
         other => panic!("{name} is not a hole: {}", other.type_name()),
     }
 }
