@@ -7622,7 +7622,8 @@ fn triangle_tray(with_return: bool) -> Session {
         "sheet.manage_rules",
         json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true}),
     );
-    let h = 60.0 * 3f64.sqrt();
+    // The triangle's height, 60·√3.
+    let h = 103.923_048_454_132_63;
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
     run(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [120.0, 0.0], [60.0, h]], "closed": true}));
     run(&mut s, "sketch.finish", json!({}));
@@ -7648,12 +7649,11 @@ fn a_return_alone_on_a_wall_between_acute_corners_keeps_clear_of_the_walls_besid
     // edge, and the return keeps g·cos(α/2) clear of it (half the gap g = 0.5 off the mitre
     // between the two). The return's start, R + T = 3 in from its wall's outer face, comes
     // nearest that face, so its bend stops (T + g·cos(α/2) + (R + T)·cos α) / sin α along the edge
-    // from each corner.
-    let stop = |alpha: f64| (2.0 + 0.5 * (alpha / 2.0).cos() + 3.0 * alpha.cos()) / alpha.sin();
-    let acute = (90.0f64 / 20.0).atan();
+    // from each corner, and the bend is 120 less twice that long: 110.917 096 at α = 60° (the
+    // triangle) and 113.770 021 at α = atan(90 / 20) (the trapezoid, 77.47°).
     let cases = [
-        ("triangle", triangle_tray(true), triangle_tray(false), 120.0 - 2.0 * stop(PI / 3.0)),
-        ("trapezoid", tray_with_returns(80.0, 90.0, "0.5 mm", &[0]), tray_with_returns(80.0, 90.0, "0.5 mm", &[]), 120.0 - 2.0 * stop(acute)),
+        ("triangle", triangle_tray(true), triangle_tray(false), 110.917_096_231_345_24),
+        ("trapezoid", tray_with_returns(80.0, 90.0, "0.5 mm", &[0]), tray_with_returns(80.0, 90.0, "0.5 mm", &[]), 113.770_021_333_771_17),
     ];
     for (name, mut s, mut without, want) in cases {
         assert!(no_errors_or_warnings(&s), "{name}: {:?}", s.model.results);
