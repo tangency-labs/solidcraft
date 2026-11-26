@@ -130,9 +130,6 @@ impl SplitCorners for TestCorners {
     fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
         Ok(self.corner_type(id)? == FilletCornerType::NByTwo)
     }
-    fn deferred_join(&self, _: FilletCornerId) -> Result<bool> {
-        Ok(false)
-    }
 }
 
 impl Fixture {

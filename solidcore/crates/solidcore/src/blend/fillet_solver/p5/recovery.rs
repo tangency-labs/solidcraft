@@ -877,7 +877,7 @@ impl Recovery<'_> {
     /// # Errors
     /// Those of the lookups, the drop and the edge's evaluation.
     fn deferred_join_plane(&mut self, corner: FilletCornerId) -> Result<Option<(Point3, Vec3)>> {
-        if !self.corners.deferred_join(corner)? {
+        if !self.corners.deferred_join(corner) {
             return Ok(None);
         }
         let Some(v) = self.corners.lookup().corner(corner)?.filleted_vertex() else {
@@ -938,7 +938,7 @@ impl Recovery<'_> {
                 let Some(corner) = record.fillet_corner() else {
                     continue;
                 };
-                if !self.corners.deferred_join(corner)? {
+                if !self.corners.deferred_join(corner) {
                     continue;
                 }
                 if let Some(vu) = self

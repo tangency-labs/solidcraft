@@ -1268,6 +1268,95 @@ mod tests {
             );
         }
 
+        /// Half a ball of radius `r` (from 0 to 180 degrees about the z axis) cut by the plane
+        /// z = `z0`, the part z <= `z0` kept, its rim (the half circle of radius sqrt(r² - z0²) at
+        /// z0) chamfered by setbacks 1 and 1: in the plane through the axis the plane foot is 1
+        /// in from the rim, P = (r0 - 1, z0), and the sphere foot a chord 1 from it down the
+        /// meridian, S at the angle φ = 2 asin(1 / (2 r)) below the rim's latitude a0. The solid
+        /// loses the region between the chord PS, the flat from P to the rim E, and the arc from E
+        /// to S, turned half a turn about the axis (Pappus): the triangle PES, its area with
+        /// centroid at radius (P + E + S)_r / 3, and the circular segment of the chord ES, area
+        /// r² (φ - sin φ) / 2 with centroid 4 r sin³(φ/2) / (3 (φ - sin φ)) from the centre along
+        /// the latitude (a0 + a1) / 2. The whole turn's volumes, bnoa's (#20253), are `full`; the
+        /// half turn's are half, its ends on the flat faces through the axis (the station planes
+        /// there), as for the half cylinder.
+        fn ball_rim_chamfered_by_setbacks_1_and_1(r: f64, z0: f64, full: f64) {
+            let r0 = (r * r - z0 * z0).sqrt();
+            let a0 = z0.atan2(r0);
+            let phi = 2.0 * (0.5 / r).asin();
+            let a1 = a0 - phi;
+            let (p, e, s) = ([r0 - 1.0, z0], [r0, z0], [r * a1.cos(), r * a1.sin()]);
+            let tri = 0.5 * ((e[0] - p[0]) * (s[1] - p[1]) - (s[0] - p[0]) * (e[1] - p[1])).abs();
+            let tri_r = (p[0] + e[0] + s[0]) / 3.0;
+            let seg = 0.5 * r * r * (phi - phi.sin());
+            let seg_r = 4.0 * r * (0.5 * phi).sin().powi(3) / (3.0 * (phi - phi.sin()))
+                * (0.5 * (a0 + a1)).cos();
+            let removed_full = 2.0 * PI * (tri * tri_r + seg * seg_r);
+            let cap = r - z0;
+            let kept_full = 4.0 / 3.0 * PI * r.powi(3) - PI * cap * cap * (3.0 * r - cap) / 3.0;
+            assert!(
+                (kept_full - removed_full - full).abs() <= 1e-7,
+                "{} vs {full}",
+                kept_full - removed_full
+            );
+            let mut k = fixed_kernel();
+            let ball = crate::primitive::api_primitives::create_partial_sphere(
+                &mut k,
+                Point3::new(0.0, 0.0, 0.0),
+                r,
+                0.0,
+                180.0,
+            )
+            .unwrap();
+            let below = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::new(-2.0 * r, -2.0 * r, -2.0 * r),
+                4.0 * r,
+                4.0 * r,
+                z0 + 2.0 * r,
+            )
+            .unwrap();
+            let mut b =
+                crate::boolean::api_brep::boolean_intersection(&mut k, ball, below).unwrap();
+            assert!(closed(&b));
+            let rim: Vec<EdgeId> = crate::topology::brep::p1::edges(&b, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| {
+                    along_edge(&k, &b, e)
+                        .iter()
+                        .all(|q| (q.z - z0).abs() < 1e-9 && q.y > 1e-6)
+                })
+                .collect();
+            assert_eq!(rim.len(), 1, "{rim:?}");
+            let top = face_holding(&k, &b, |bx| {
+                (bx.min().z - z0).abs() < 1e-9 && (bx.max().z - z0).abs() < 1e-9
+            });
+            assert_eq!(top.len(), 1);
+            chamfer_setbacks(&mut k, &mut b, &rim, &[[1.0, 1.0]], &top).unwrap();
+            assert!(closed(&b));
+            let faces = setback_faces(&k, &b);
+            assert_eq!(faces.len(), 1, "one chamfer of setbacks");
+            let bound = faces[0].1;
+            // the chamfer's area: the chord PS turned half a turn about the axis at its
+            // midpoint's radius (Pappus)
+            let chord = ((s[0] - p[0]).powi(2) + (s[1] - p[1]).powi(2)).sqrt();
+            let area = PI * 0.5 * (p[0] + s[0]) * chord;
+            let v = volume(&k, &mut b);
+            let want = 0.5 * full;
+            assert!(
+                (v - want).abs() <= bound * area + 1e-8 * want,
+                "{v} vs {want} (bound {bound})"
+            );
+        }
+
+        /// A ball of radius 10 cut at z = 5, the part below kept (a wedge of 120 degrees at the
+        /// rim, of radius 8.660254037844387): 3510.1200237 for the whole turn.
+        #[test]
+        fn a_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7);
+        }
+
         /// zhuangzard's enclosure front (tangency-labs/solidcraft#13710), in x (width), y
         /// (height) and z (depth, the front at z = 0): the side profile (depth, height) [0, 0],
         /// [60, 0], [60, 40], [20, 40], [0, 15] swept 120 across, meeting the 100 x 40 front
@@ -1336,30 +1425,36 @@ mod tests {
         /// point of the original edges, where the line to it is square to the edge) to the
         /// face's certified bound and the rail's tolerance; every join between them is within the
         /// solvers' 3D tolerance (the corner code refuses a join farther apart).
+        /// The enclosure front's slanted face and its chain of five edges (the top, the two
+        /// rounds of radius `r`, the two sides; not the edge on the front face).
+        fn front_chain(k: &Kernel, b: &Brep) -> (FaceId, Vec<EdgeId>) {
+            let slant = face_holding(k, b, |bx| {
+                bx.min().z.abs() < 1e-6
+                    && (bx.max().z - 20.0).abs() < 1e-6
+                    && (bx.min().y - 15.0).abs() < 1e-6
+                    && (bx.max().y - 40.0).abs() < 1e-6
+            });
+            assert_eq!(slant.len(), 1);
+            let slant = slant[0];
+            let front_face = face_holding(k, b, |bx| {
+                bx.min().z.abs() < 1e-6 && bx.max().z.abs() < 1e-6
+            });
+            assert_eq!(front_face.len(), 1);
+            let chain: Vec<EdgeId> = crate::topology::face::p4::edges(b, slant, None, false, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| !edge::faces(b, e, None).unwrap().contains(&front_face[0]))
+                .collect();
+            assert_eq!(chain.len(), 5, "{chain:?}");
+            (slant, chain)
+        }
+
         fn chain_holds_its_setbacks(r: f64, sizes: &[[f64; 2]], chamfer_faces: usize) {
             for &d in sizes {
                 let mut k = fixed_kernel();
                 let mut b = enclosure_front_with(&mut k, r);
                 assert!(closed(&b));
-                let slant = face_holding(&k, &b, |bx| {
-                    bx.min().z.abs() < 1e-6
-                        && (bx.max().z - 20.0).abs() < 1e-6
-                        && (bx.min().y - 15.0).abs() < 1e-6
-                        && (bx.max().y - 40.0).abs() < 1e-6
-                });
-                assert_eq!(slant.len(), 1);
-                let slant = slant[0];
-                let front_face = face_holding(&k, &b, |bx| {
-                    bx.min().z.abs() < 1e-6 && bx.max().z.abs() < 1e-6
-                });
-                assert_eq!(front_face.len(), 1);
-                let chain: Vec<EdgeId> =
-                    crate::topology::face::p4::edges(&b, slant, None, false, None)
-                        .unwrap()
-                        .into_iter()
-                        .filter(|&e| !edge::faces(&b, e, None).unwrap().contains(&front_face[0]))
-                        .collect();
-                assert_eq!(chain.len(), 5, "{chain:?}");
+                let (slant, chain) = front_chain(&k, &b);
                 let originals: Vec<crate::curve::curve::Curve> = chain
                     .iter()
                     .map(|&e| edge::curve(&b, e).unwrap().unwrap().clone())
@@ -1456,6 +1551,61 @@ mod tests {
         #[test]
         fn the_enclosure_front_chain_just_past_the_sag_tolerance_is_deferred_and_closes() {
             chain_holds_its_setbacks(10.0, &[[0.064, 0.064]], 7);
+        }
+
+        /// Between the deferral's true boundary and 0.064: setbacks 0.05, whose sag at the side
+        /// vertices, h² / 20 with h = 0.8 · 0.05 / sqrt(1.64) = 0.031235, is 4.878e-5, 1.22
+        /// times the 3D tolerance 4e-5 (the boundary is h² / 20 = 4e-5, d = 0.045277): deferred.
+        /// The round's cylinder foot crosses the seam ε = 0.0031235 rad before V (200 (1 - cos
+        /// ε) + 156.25 tan² ε = d²), so each round's roll-over piece runs over that sliver of the
+        /// round, an arc of 0.0400 of the edge (|C′| = sqrt(100 sin² θ + 164 cos² θ) over
+        /// θ ∈ [π - ε, π]); seven chamfers of setbacks (five edges, a piece on each round).
+        #[test]
+        fn the_enclosure_front_chain_with_a_sliver_of_a_piece_is_deferred_and_closes() {
+            chain_holds_its_setbacks(10.0, &[[0.05, 0.05]], 7);
+        }
+
+        /// The chain with the sides chamfered by 0.8 along the slanted face and 0.6 down the side
+        /// faces, the top and the rounds by 0.8 and 0.8: at the side vertices the Join is
+        /// deferred (the round's foot at V, 0.8 from the edge on the cylinder, and the side
+        /// chamfer's, 0.6 on the side face, lie 0.2 and more apart), and the round's roll-over
+        /// piece, 0.8 from the edge on the side face, would end on V's plane 0.2 from the side
+        /// chamfer's foot, 0.6 down: the two do not meet. Refused, typed, naming the setbacks
+        /// (the native side chamfer's 0.8 and 0.6 against the round's 0.8 and 0.8).
+        #[test]
+        fn a_deferred_join_of_unequal_setbacks_is_refused_naming_them() {
+            let mut k = fixed_kernel();
+            let mut b = enclosure_front(&mut k);
+            let (slant, chain) = front_chain(&k, &b);
+            let sizes: Vec<[f64; 2]> = chain
+                .iter()
+                .map(|&e| {
+                    if along_edge(&k, &b, e)
+                        .iter()
+                        .all(|p| (p.x.abs() - 50.0).abs() < 1e-9)
+                    {
+                        [0.8, 0.6]
+                    } else {
+                        [0.8, 0.8]
+                    }
+                })
+                .collect();
+            assert_eq!(sizes.iter().filter(|s| s[1] == 0.6).count(), 2);
+            let err =
+                chamfer_setbacks(&mut k, &mut b, &chain, &sizes, &[slant; 5]).expect_err("refused");
+            let mut at = Some(&err);
+            let mut found = None;
+            while let Some(e) = at {
+                if let Some(&crate::error::blend::BlendFailure::DeferredJoinSetbacksDiffer {
+                    native,
+                    other,
+                }) = e.blend_failure()
+                {
+                    found = Some((native, other));
+                }
+                at = e.cause();
+            }
+            assert_eq!(found, Some(([0.8, 0.6], [0.8, 0.8])), "{err:?}");
         }
 
         /// The chain with rounds of 6 (about (+-44, 34)) chamfered by 0.8: the sag at the side

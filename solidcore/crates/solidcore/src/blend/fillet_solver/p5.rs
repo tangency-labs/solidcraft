@@ -641,9 +641,6 @@ mod tests {
         fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
             Ok((self.0)(id)? == FilletCornerType::NByTwo)
         }
-        fn deferred_join(&self, _: FilletCornerId) -> Result<bool> {
-            Ok(false)
-        }
     }
 
     struct NoOwnership;

@@ -4183,12 +4183,25 @@ impl FilletBrep {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
             }
-            // (#13710) a deferred Join's blend that is not native on a side has its foot
-            // there off its own face (`join::setback_seam_sides` defers only then, having
-            // found that foot over the trace's domains): its section is solved over the
-            // same domains, which a support trimmed to its face does not hold otherwise
+            // (#13710) at a deferred Join the blend not native on a side has its foot there
+            // off its own face (`join::setback_seam_sides` defers only then, having found
+            // that foot over the trace's domains): that rail (its face not one of the
+            // section's two) is solved over the trace's domain, which a support trimmed to
+            // its face does not hold otherwise. Every other rail keeps its natural domain,
+            // its foot on its own face, so a wider one cannot reach its mirror root
             if deferred {
-                [domain1, domain2] = fs.trace_domains(k)?;
+                let fs = solvers.solver(sid)?;
+                let wide = fs.trace_domains(k)?;
+                for (rail, (domain, wide)) in [&mut domain1, &mut domain2]
+                    .into_iter()
+                    .zip(wide)
+                    .enumerate()
+                {
+                    let face = eu1::face(target, solver_edgeuse(fs, rail, OP)?)?;
+                    if face != Some(first_face) && face != Some(other_face) {
+                        *domain = wide;
+                    }
+                }
             }
             let (found, tsect) = point_on_plane_solve(
                 k,

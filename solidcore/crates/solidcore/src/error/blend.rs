@@ -666,6 +666,20 @@ pub enum BlendFailure {
     /// has no ends to take (#16491). Unsupported ([`ErrorKind::Unsupported`]): the kernel
     /// builds no section for such a Join; status `SM_ERR`.
     JoinBlendsRollOffSection,
+    /// A Join of two chamfers of setbacks across a smooth seam, deferred until the roll-over
+    /// (#13710), whose blends do not stand off the section's faces by the same setbacks:
+    /// `native`, the setbacks of the blend native on the seam's side (on the face the two
+    /// share, then on the seam's face), against `other`, the other blend's (on the shared
+    /// face, then on its own face past the seam, the one its roll-over piece moves onto the
+    /// native's). The piece's section at V then lies apart from the native's, so the two do
+    /// not meet. Unsupported ([`ErrorKind::Unsupported`]): no construction joins them yet;
+    /// status `SM_ERR`.
+    DeferredJoinSetbacksDiffer {
+        /// The native blend's setbacks.
+        native: [f64; 2],
+        /// The other blend's setbacks.
+        other: [f64; 2],
+    },
     /// A curve of kind `kind` that a blend joins end to end with another
     /// (`SmBSplineCurve::JoinWith`: a fillet corner's edge curves, a removed fillet's edge
     /// curves) has no B-spline part to join. Unsupported ([`ErrorKind::Unsupported`]); status
@@ -1503,6 +1517,7 @@ impl BlendFailure {
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::IsoDirectionNotUOrV => SM_ERR_NULL_POINTER,
             Self::JoinBlendsRollOffSection => SM_ERR,
+            Self::DeferredJoinSetbacksDiffer { .. } => SM_ERR,
             Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::JoinSectionNotConverged { .. } => SM_ERR,
             Self::KeptFeatureLeavesBaseOpen => SM_ERR,
@@ -1680,6 +1695,7 @@ impl BlendFailure {
             Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
             Self::IsoDirectionNotUOrV => ErrorKind::InvalidInput,
             Self::JoinBlendsRollOffSection => ErrorKind::Unsupported,
+            Self::DeferredJoinSetbacksDiffer { .. } => ErrorKind::Unsupported,
             Self::JoinCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::JoinSectionNotConverged { .. } => ErrorKind::NotConverged,
             Self::KeptFeatureLeavesBaseOpen => ErrorKind::Unsupported,
@@ -1870,6 +1886,7 @@ impl BlendFailure {
             Self::InvalidValue(_) => true,
             Self::IsoDirectionNotUOrV => true,
             Self::JoinBlendsRollOffSection => true,
+            Self::DeferredJoinSetbacksDiffer { .. } => true,
             Self::JoinCurveNotBSpline { .. } => true,
             Self::JoinSectionNotConverged { .. } => true,
             Self::KeptFeatureLeavesBaseOpen => true,
@@ -2287,6 +2304,16 @@ impl core::fmt::Display for BlendFailure {
                 f,
                 "{}: no blend of the Join rolls on the two faces its shared section ends on",
                 self.class()
+            ),
+            Self::DeferredJoinSetbacksDiffer { native, other } => write!(
+                f,
+                "{}: chamfers of setbacks meeting across a smooth seam need the same setbacks \
+                 on the faces they meet on: {} and {} against {} and {}",
+                self.class(),
+                native[0],
+                native[1],
+                other[0],
+                other[1]
             ),
             Self::JoinCurveNotBSpline { kind } => write!(
                 f,

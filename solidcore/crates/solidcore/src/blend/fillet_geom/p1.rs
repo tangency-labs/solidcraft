@@ -690,21 +690,28 @@ impl<'c> CornerLookup<'c> {
     /// `SM_ERR_NULL_POINTER` for an id neither the running corner nor in the table (a
     /// caller without a corner store holds an empty table).
     pub fn corner(&self, id: FilletCornerId) -> Result<&'c FilletCorner> {
+        // upstream dereferences the corner pointer; one this caller cannot resolve is
+        // the NULL its NER would return for
+        self.get(id)
+            .ok_or_else(|| broken_link(OP_CORNER, CORNER_NOT_RECORDED))
+    }
+
+    /// The corner `id` where this caller holds it: the running corner, the executive's
+    /// or the table's; `None` for any other id.
+    #[must_use]
+    pub fn get(&self, id: FilletCornerId) -> Option<&'c FilletCorner> {
         if let Some((this_id, this)) = self.this {
             if this_id == Some(id) {
-                return Ok(this);
+                return Some(this);
             }
         }
         if let Some(exec) = self.exec {
             if let Some(c) = exec.corners.get(&id) {
-                return Ok(c);
+                return Some(c);
             }
         }
-        // upstream dereferences the corner pointer; one this caller cannot resolve is
-        // the NULL its NER would return for
         self.table
             .and_then(|table| usize::try_from(id.0).ok().and_then(|i| table.get(i)))
-            .ok_or_else(|| broken_link(OP_CORNER, CORNER_NOT_RECORDED))
     }
 
     /// `pCorner->GetExtendedSurface(pOriginalFace)`

@@ -701,6 +701,43 @@ fn setback_seam_sides(
             (false, true) => fb,
             _ => continue,
         };
+        // the piece the other blend rolls onto the native's face meets the native's section
+        // at V only where the two stand off the section's faces alike: each blend's setbacks
+        // on the face they share, then on its face on the seam's side (the native's own, the
+        // other's that its piece leaves for the native's)
+        let setbacks = |fs: &crate::blend::fillet_standard_solver::setback::SetbackFs,
+                        target: &Brep,
+                        face: FaceId|
+         -> Result<[f64; 2]> {
+            let seam_rail = fs
+                .curve_based
+                .solver
+                .find_index_of_rail_on_face(target, Some(face))?;
+            let shared = fs.setbacks.get(1usize.saturating_sub(seam_rail));
+            let own = fs.setbacks.get(seam_rail);
+            match (shared, own) {
+                (Some(&shared), Some(&own)) if seam_rail <= 1 => Ok([shared, own]),
+                _ => Err(SolidError::invalid_input(
+                    OP,
+                    "a setback solver's rail index",
+                )),
+            }
+        };
+        let (a, b) = (setbacks(&fs0, &*target, fa)?, setbacks(&fs1, &*target, fb)?);
+        let (native_setbacks, other_setbacks) = if native == fa { (a, b) } else { (b, a) };
+        if native_setbacks
+            .iter()
+            .zip(&other_setbacks)
+            .any(|(n, o)| (n - o).abs() > tol)
+        {
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::DeferredJoinSetbacksDiffer {
+                    native: native_setbacks,
+                    other: other_setbacks,
+                },
+            ));
+        }
         *slot = Some(native);
         if let Some(b) = between.get_mut(s) {
             b.clear();
