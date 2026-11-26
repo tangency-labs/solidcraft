@@ -92,6 +92,80 @@ fn a_point_pick_is_stored_by_curves() {
     assert!((volumes(&s)[0] - 4000.0).abs() < 1.0, "{:?}", volumes(&s));
 }
 
+/// The parabola y = x² as a conic (rho 0.5 between (-6, 36) and (6, 36) with its tangents'
+/// meeting at (0, -36)), fixed, and a chord across it `h` above its vertex: the region between
+/// them has the area 4/3 h^(3/2), and the chord uses a part of the conic only.
+fn parabola_and_chord() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "4 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bowl"}));
+    run(&mut s, "sketch.conic", json!({"start": [-6, 36], "end": [6, 36], "apex": [0, -36], "rho": 0.5, "connect": false}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["n1.start", "n1.end", "n1.apex"]}));
+    run(&mut s, "sketch.line", json!({"points": [[-2, 4], [2, 4]], "ids": ["chord"]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "chord", "mode": "horizontal"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "chord.start", "b": "n1"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "chord.end", "b": "n1"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "chord.start"], "type": "vertical", "value": "h"}));
+    s
+}
+
+/// How many times the saved loop of the last feature names the conic: one per span.
+fn conic_spans(s: &Session) -> usize {
+    let ProfileSel::Curves { loops } = extrude_kind(s) else { panic!("{:?}", extrude_kind(s)) };
+    loops[0].iter().filter(|id| *id == "n1").count()
+}
+
+fn exact_volumes(s: &Session) -> Vec<f64> {
+    s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect()
+}
+
+/// A point pick of a region that a part of a conic bounds is stored with the conic once per
+/// span it is flattened into. A parameter that moves the chord changes how many spans lie on
+/// the loop, and the feature still extrudes the one region the conic and the chord bound.
+#[test]
+fn a_point_pick_bounded_by_part_of_a_conic_follows_a_parameter_change() {
+    let mut s = parabola_and_chord();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bowl", "profiles": [{"point": [0, 3]}], "distance": 3}));
+    let saved = conic_spans(&s);
+    assert!(saved > 1, "the pick must be stored span by span to show the case: {saved}");
+    let v = exact_volumes(&s);
+    assert!((v[0] - 4.0 / 3.0 * 8.0 * 3.0).abs() < 1e-3, "4/3 x 4^1.5 x 3 = 32: {v:?}");
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    let now = s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "n1").count();
+    assert_ne!(now, saved, "the change must move the number of spans on the loop");
+    assert_eq!(last_error(&s), None);
+    let v = exact_volumes(&s);
+    assert!((v[0] - 4.0 / 3.0 * 125.0 * 3.0).abs() < 1e-3, "4/3 x 25^1.5 x 3 = 500: {v:?}");
+    // A design saved with the span count of another size opens with the region too.
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert_eq!(last_error(&reopened), None);
+    assert!((exact_volumes(&reopened)[0] - 500.0).abs() < 1e-3);
+}
+
+/// Two regions bounded by the same curves are told apart by their span counts only. When the
+/// counts move, neither is the saved one for sure, and the pick is an error, not a guess.
+#[test]
+fn a_span_pick_between_two_regions_of_the_same_curves_is_not_guessed() {
+    let mut s = parabola_and_chord();
+    // A wall from the parabola at x = 1 up to the chord: both sides of it are bounded by the
+    // conic, the chord and the wall, the left side by more of the conic.
+    run(&mut s, "sketch.line", json!({"points": [[1, 1], [1, 4]], "ids": ["wall"]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "wall", "mode": "vertical"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "wall.start", "b": "n1"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "wall.end", "b": "chord"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "wall.start"], "type": "horizontal", "value": "1 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bowl", "profiles": [{"point": [-1, 3]}], "distance": 3}));
+    assert!(conic_spans(&s) > 1);
+    // Left of the wall: the integral of 4 - x² from -2 to 1 is 9.
+    let v = exact_volumes(&s);
+    assert!((v[0] - 27.0).abs() < 1e-3, "{v:?}");
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    let error = last_error(&s).expect("two regions share the curves, and neither has the saved spans");
+    assert!(error.contains("no profile of Bowl is bounded by exactly"), "{error}");
+}
+
 /// New explicit API lists are sets even when reordered or repeated. Their saved
 /// form must not accidentally become a legacy graph-span multiset.
 #[test]
