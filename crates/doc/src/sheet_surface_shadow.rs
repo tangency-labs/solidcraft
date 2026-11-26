@@ -318,12 +318,12 @@ pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> 
     Ok(out)
 }
 
-/// Whether faces `a` and `b` lie on one surface within `tol` over `reach`
+/// Whether faces `a` and `b` lie on one surface within `tol` inside `region`
 /// ([`solidcraft_kernel::same_surface`]), or on the same record surface where neither is
 /// analytic: a cut leaves the faces it didn't make on the surfaces they had.
-fn same_surface(a: (Option<FaceSurface>, &Record), b: (Option<FaceSurface>, &Record), tol: f64, reach: f64) -> bool {
+fn same_surface(a: (Option<FaceSurface>, &Record), b: (Option<FaceSurface>, &Record), tol: f64, region: &solidcraft_geom::Aabb3) -> bool {
     match (a.0, b.0) {
-        (Some(x), Some(y)) => solidcraft_kernel::same_surface(&x, &y, tol, reach),
+        (Some(x), Some(y)) => solidcraft_kernel::same_surface(&x, &y, tol, region),
         (None, None) => a.1 == b.1,
         _ => false,
     }
@@ -339,7 +339,8 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
     let (ra, rb) = (was.record(), now.record());
     let (qa, qb) = (Query::new(ra), Query::new(rb));
     let (sag, accept) = ((was.size() * 1e-4).max(1e-4), tol * 10.0);
-    let reach = was.size().max(now.size());
+    let bounds = |b: &Body| b.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
+    let region = bounds(was).union(&bounds(now));
     let edges_of = |loops: &[Bounds]| -> Vec<usize> {
         loops
             .iter()
@@ -359,7 +360,7 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
         .filter(|(f, face)| {
             let here = (face_surface(now, *f), &face.surface);
             let under: Vec<(usize, &[Bounds])> =
-                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol, reach)).map(|(o, (_, loops))| (o, *loops)).collect();
+                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol, &region)).map(|(o, (_, loops))| (o, *loops)).collect();
             if under.is_empty() {
                 return true;
             }

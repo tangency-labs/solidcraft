@@ -12963,12 +12963,13 @@ fn has_a_new_surface(old: &Body, new: &Body) -> bool {
 }
 
 /// For each face of `new`, whether it lies on a surface no face of `old` lies on, compared as
-/// [`has_a_new_surface`] compares them: over the larger body's size ([`kernel::same_surface`]).
+/// [`has_a_new_surface`] compares them, inside the two bodies' box ([`kernel::same_surface`]).
 fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     use kernel::FaceSurface as S;
-    let reach = old.size().max(new.size());
-    let tol = (reach * 1e-7).max(1e-7);
-    let same = |a: &S, b: &S| kernel::same_surface(a, b, tol, reach);
+    let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
+    let bounds = |b: &Body| b.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
+    let region = bounds(old).union(&bounds(new));
+    let same = |a: &S, b: &S| kernel::same_surface(a, b, tol, &region);
     let (old_rec, new_rec) = (old.record(), new.record());
     let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
         (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();

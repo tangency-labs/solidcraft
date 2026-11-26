@@ -297,17 +297,26 @@ impl Analytic {
     }
 }
 
-/// Whether `a` and `b` are one surface within `tol` over `reach`
-/// (`solidcore::query::same_surface::same_surface`): positions and radii within `tol`, the
-/// points of each plane or axis within `reach` of its origin within `tol` of the other's, cones
-/// with radii within `tol` at the height `reach`; surfaces of two kinds never. The test whether
-/// two faces anywhere on two bodies lie on one surface.
+/// Whether `a` and `b` are one surface within `tol` inside the box from `min` to `max`
+/// (`solidcore::query::same_surface::same_surface`): cones (a cylinder is one of half-angle
+/// 0), spheres and tori by the definitions the boolean compares them by, planes when every point
+/// of either inside the box surely lies within `tol` of the other; surfaces of two kinds never.
+/// The test whether two faces anywhere on two bodies lie on one surface, with the bodies' box.
 ///
 /// # Errors
 ///
-/// [`Error::Refused`] for a `tol` or `reach` that is negative or not finite, a number that is
-/// not finite or a direction of zero length.
-pub fn same_surface(a: Analytic, b: Analytic, tol: f64, reach: f64) -> Result<bool> {
-    solidcore::query::same_surface::same_surface(&a.kernel(), &b.kernel(), tol, reach)
+/// [`Error::Refused`] for a `tol` that is negative or not finite, a box that is empty, not
+/// finite or of no extent, a number that is not finite, a direction of zero length, or a cone's
+/// half-angle of a right angle or more.
+pub fn same_surface(
+    a: Analytic,
+    b: Analytic,
+    tol: f64,
+    min: [f64; 3],
+    max: [f64; 3],
+) -> Result<bool> {
+    let v = |p: [f64; 3]| solidcore::Vec3::new(p[0], p[1], p[2]);
+    let region = solidcore::geom::extent3d::Extent3d::from_points(v(min), v(max));
+    solidcore::query::same_surface::same_surface(&a.kernel(), &b.kernel(), tol, &region)
         .map_err(crate::error::status)
 }
