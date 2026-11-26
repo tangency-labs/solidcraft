@@ -1143,13 +1143,8 @@ fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Optio
         .collect()
 }
 
-/// Keep measured Length and Angle fields clear of the projected line and each other.
-/// Opposite sides are preferred; drawing-area edges may require both fields on one side.
-/// Retry first-field candidates when the second field cannot fit. Candidate count is bounded
-/// for the two fields. Only if the original candidates fail, also try axis-aligned
-/// neighbors and slides away from the line. An area too small to fit them can only clamp.
-///
-/// A field also keeps off `pointer`. While the pointer rests on a field the tool has no hover and
+/// Where the Line tool's measured Length and Angle fields go: [`line_input_search`], with the
+/// fields also kept off `pointer`. While the pointer rests on a field the tool has no hover and
 /// the preview stays at the last point, so a field left there would take the click meant for the
 /// next point (#22769). Where no placement clears the pointer, the fields go where they would
 /// without one.
@@ -1163,6 +1158,11 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
     if under(&placed) { line_input_search(segment, sizes, view, gap, None) } else { placed }
 }
 
+/// Keep measured Length and Angle fields clear of the projected line, each other and `pointer`
+/// (when given). Opposite sides are preferred; drawing-area edges may require both fields on one
+/// side. Retry first-field candidates when the second field cannot fit. Candidate count is bounded
+/// for the two fields. Only if the original candidates fail, also try axis-aligned neighbors and
+/// slides away from the line. An area too small to fit them can only clamp.
 fn line_input_search(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;

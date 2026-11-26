@@ -1406,3 +1406,27 @@ fn line_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
         super::line_input_positions(segment, &sizes, Some(Room::new(tiny, None)), 8.0, None)
     );
 }
+
+/// A typed length keeps its value while the pointer moves onto its field: the field moves off the
+/// pointer, as the untyped ones do, and the box still holds what was typed.
+#[test]
+fn a_typed_line_length_keeps_its_value_when_the_pointer_lands_on_its_field() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[-31,-17]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[3,7]}})).unwrap();
+    h.step(&json!({"move":{"sketch":[18,15]}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text":"25"})).unwrap();
+    h.frames(3);
+    let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).unwrap();
+    let spot = field.center();
+    h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+    h.frames(3);
+    let moved = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).unwrap();
+    assert!(!moved.expand(2.0).contains(spot), "the typed field at {moved:?} is under the pointer at {spot:?}");
+    let length = &h.app.tool.as_ref().unwrap().dims[0];
+    assert_eq!((length.label, length.value.as_str(), length.locked), ("Length", "25", true));
+}
