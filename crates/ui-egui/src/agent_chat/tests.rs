@@ -581,18 +581,7 @@ fn the_gate_refuses_and_limits() {
 fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     // Distinct designs: what counts is which `Arc` a snapshot holds.
     let doc = |_: usize| Arc::new(solidcraft_engine::doc::Document::default());
-    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot {
-        label: String::new(),
-        doc: d.clone(),
-        active_sketch: None,
-        sketching_view: None,
-        sketch_restore_marker: None,
-        active_sheet_sketch: None,
-        pending_moves: Default::default(),
-        part: None,
-        visibility: Default::default(),
-        section: None,
-    };
+    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot::with_doc(d.clone());
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
     let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
@@ -629,7 +618,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
     // A full history of steps that all kept one design (section steps): the turn's steps follow
     // the step on top at its start.
-    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let step = |i: usize| {
+        let mut s = snap(&docs[3]);
+        s.label = i.to_string();
+        s
+    };
     let start = UndoMark::of(&[step(1), step(2), step(3)]);
     let mut undo = vec![step(3), step(4), step(5)];
     assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
@@ -6472,6 +6465,55 @@ fn timed_chat() -> (crate::scenario::Harness, Script) {
     h.app.agent_chat.state = Some(State::Ready);
     h.frames(2);
     (h, script)
+}
+
+#[test]
+fn current_stage_follows_the_active_plan_above_the_conversation() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    let stage_rect = || crate::scenario::rect_of("agent_chat:current_stage");
+    let report_plan = |steps: &[(&str, &str)]| {
+        script.report(Event::Plan(steps.iter().map(|(name, status)| (name.to_string(), status.to_string())).collect()));
+    };
+    send(&mut h.app, &ctx, "make a mounting plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "a turn can run without a plan");
+
+    report_plan(&[("Set the hole diameter", "pending"), ("\n Inspect the mounting face\nMore detail", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 1);
+    assert!(stage_rect().unwrap().bottom() <= crate::scenario::rect_of("agent_chat:conversation").unwrap().top());
+
+    report_plan(&[("Inspect the mounting face", "completed"), ("Drill the holes", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Drill the holes"), 1);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 0);
+
+    report_plan(&[("Drill the holes", "completed"), ("Measure the diameter", "pending"), (" ", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "no named running step");
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    report_plan(&[]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "an empty plan clears the line");
+
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    ended(&script, "");
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the turn ended");
+    assert!(h.app.agent_chat.items.iter().any(|i| matches!(i, Item::Plan(steps) if steps.iter().any(|(name, _)| name == "Measure the diameter"))));
+
+    send(&mut h.app, &ctx, "add a second plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the next turn starts without the old plan");
+    report_plan(&[("Make the second plate", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    cancel(&mut h.app);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "Stop hides the line before the agent acknowledges it");
 }
 
 /// Move everything in the conversation `ms` into the past, as if that long had gone by.

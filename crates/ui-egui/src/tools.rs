@@ -1448,7 +1448,23 @@ pub(crate) fn paint_curve(
     stroke: Stroke,
     budget: &mut solidcraft_engine::render::SamplingBudget,
 ) {
-    for part in crate::sketch_display::curve_with_budget(sketch, index, plane, proj, painter.ctx().pixels_per_point(), budget).parts {
+    paint_curve_placed(sketch, index, plane, painter, proj, stroke, budget, None);
+}
+
+/// [`paint_curve`], with each piece moved by `placed` first (the Insert SVG/DXF window's
+/// placement, drawn without importing the drawing again).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_curve_placed(
+    sketch: &solidcraft_engine::sketch::Sketch,
+    index: usize,
+    plane: &solidcore_record::Plane,
+    painter: &egui::Painter,
+    proj: &Proj,
+    stroke: Stroke,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+    placed: Option<&dyn Fn(solidcore_record::Seg2) -> solidcore_record::Seg2>,
+) {
+    for part in crate::sketch_display::curve_with_budget_placed(sketch, index, plane, proj, painter.ctx().pixels_per_point(), budget, placed).parts {
         let mode = sketch.curves.get(index).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
         paint_sketch_path(&part, mode, painter, proj, stroke);
     }

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.3d_mouse_key_held": "{key}, held",
+    "ui.3d_mouse_key_lock": "Lock key"
+  },
+  "de": {
+    "ui.3d_mouse_key_held": "{key}, gehalten",
+    "ui.3d_mouse_key_lock": "Sperrtaste"
+  },
+  "ar": {
+    "ui.3d_mouse_key_held": "{key}، ضغط مطوّل",
+    "ui.3d_mouse_key_lock": "مفتاح القفل"
+  },
+  "he": {
+    "ui.3d_mouse_key_held": "{key}, לחיצה ארוכה",
+    "ui.3d_mouse_key_lock": "מקש נעילה"
+  },
+  "ja": {
+    "ui.3d_mouse_key_held": "{key}（長押し）",
+    "ui.3d_mouse_key_lock": "ロックキー"
+  },
+  "ko": {
+    "ui.3d_mouse_key_held": "{key}, 길게 누름",
+    "ui.3d_mouse_key_lock": "잠금 키"
+  },
+  "vi": {
+    "ui.3d_mouse_key_held": "{key}, giữ lâu",
+    "ui.3d_mouse_key_lock": "Phím khóa"
+  },
+  "zh": {
+    "ui.3d_mouse_key_held": "{key}（长按）",
+    "ui.3d_mouse_key_lock": "锁定键"
+  }
+}
