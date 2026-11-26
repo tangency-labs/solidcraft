@@ -57,6 +57,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
