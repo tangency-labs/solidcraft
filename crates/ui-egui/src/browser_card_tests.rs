@@ -2367,3 +2367,40 @@ fn a_saved_designs_linked_component_shows_its_badge() {
     h.frames(5);
     assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
 }
+
+/// "Hide the Sketches folder": the History lists the sketches, so the Browser leaves its Sketches
+/// folder out, except while searching.
+#[test]
+fn the_sketches_folder_hides_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY", "name":"Outline"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":5})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Sketches").is_some(), "off by default: the folder is there");
+    h.app.preferences.browser_hide_sketches_folder = true;
+    h.settle();
+    assert!(handle_at("row:Sketches").is_none(), "on: no Sketches folder");
+    assert!(handle_at("row:Bodies").is_some() || handle_at("row:Origin").is_some(), "the rest of the tree still draws");
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Outline".to_string();
+    h.frames(2);
+    assert!(handle_at("row:Sketches").is_some(), "a search still finds sketches in their folder");
+}
+
+/// "Hide the Construction folder": the History lists the construction planes, axes and points, so
+/// the Browser leaves its Construction folder out, except while searching.
+#[test]
+fn the_construction_folder_hides_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Lid plane"})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_some(), "off by default: the folder is there");
+    h.app.preferences.browser_hide_construction_folder = true;
+    h.settle();
+    assert!(handle_at("row:Construction").is_none(), "on: no Construction folder");
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Lid plane".to_string();
+    h.frames(2);
+    assert!(handle_at("row:Construction").is_some(), "a search still finds the plane in its folder");
+}

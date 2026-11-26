@@ -3330,6 +3330,18 @@ fn folder_static(folder: &str) -> &'static str {
 /// under the component or placement row (Preferences › Interface › Bodies folders, #4217).
 /// `scope` is that row's tree key (`c{id}`, `o:{path}`) and `bodies` how many items the folder
 /// holds. The design's own folder always stays, and so does a hidden one: its eye is the way back.
+/// Whether this folder is left out because "Hide the Sketches folder" or "Hide the Construction
+/// folder" is on: the History lists those items. A search still lists the folder, so an item can be
+/// found by name.
+fn folder_hidden_by_preference(app: &SolveApp, folder: &str) -> bool {
+    let hidden = match folder {
+        "sketches" => app.preferences.browser_hide_sketches_folder,
+        "construction" => app.preferences.browser_hide_construction_folder,
+        _ => false,
+    };
+    hidden && !app.tree.search.on()
+}
+
 fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool {
     use crate::prefs::BodiesFolders;
     if comp == 0 || bodies == 0 || app.session.folder_hidden(&format!("{scope}/bodies")) {
@@ -3360,6 +3372,9 @@ fn folder_rows_at(
     }
     // A search lists the folders that hold a match (`folder_level` lists the matches).
     let searching = app.tree.search.on();
+    if folder_hidden_by_preference(app, folder) {
+        return;
+    }
     if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
         return;
     }
