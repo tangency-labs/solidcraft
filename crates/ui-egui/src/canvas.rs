@@ -905,6 +905,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         draw_angle_plane(app, ui, painter, proj, d, bs, focus);
         return;
     }
+    // Deferred secondary value box ("Distance 2") drawn after the primary box so Tab moves
+    // from Distance to Distance 2 instead of skipping past it.
+    let mut secondary_box: Option<(Pos2, bool)> = None;
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     // A second side through all or to an object has no distance to drag.
     let second_is_distance = !crate::dialogs::object_on(&d.inputs, crate::dialogs::TO_OBJECT2) && !matches!(d.kind, Kind::Extrude { all2: true, .. });
@@ -937,16 +940,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 distance2,
             )
         });
-        value_box_in(
-            ui,
-            (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
-            "Distance 2",
-            distance2,
-            (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
-            *distance2 != before,
-            false,
-            box_place(app, proj),
-        );
+        secondary_box = Some((ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), *distance2 != before));
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
@@ -1144,37 +1138,29 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { distance2, mode, .. }) = &mut d.kind
         && crate::sketch_modify_ui::offset_two_sides(*mode)
         && let Some(n) = dir
-        && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();
-        if let Some(ts) = drag_arrow(
-            &app.session.doc,
-            ui,
-            painter,
-            proj,
-            base,
-            bs,
-            -n,
-            l2.abs(),
-            false,
-            egui::Id::unique("sc_manipulator_offset2"),
-            half_height,
-            0.0,
-            decimals,
-            distance2,
-        ) {
-            // Its own area and field, so it does not share Distance's focus or text.
-            value_box_in(
+        // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
+        // but the box stays below the base so the typing can be finished there.
+        let ts = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite()).and_then(|l2| {
+            drag_arrow(
+                &app.session.doc,
                 ui,
-                (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
-                "Distance 2",
-                distance2,
-                (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
-                *distance2 != before,
+                painter,
+                proj,
+                base,
+                bs,
+                -n,
+                l2.abs(),
                 false,
-                box_place(app, proj),
-            );
-        }
+                egui::Id::unique("sc_manipulator_offset2"),
+                half_height,
+                0.0,
+                decimals,
+                distance2,
+            )
+        });
+        secondary_box = Some((ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), *distance2 != before));
     }
     // Spacing and Extent: Extent has its own arrow and box beside Spacing's, in the second
     // arrow colour (#8523).
@@ -1220,7 +1206,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         _ => None,
     };
     let mut second = second_before.clone();
-    let Some((label, kind, value)) = d.primary() else { return };
+    let Some((label, kind, value)) = d.primary() else {
+        draw_secondary_box(app, ui, proj, d, secondary_box);
+        return;
+    };
     let label = match (two_distances, on_second) {
         (true, true) => "Distance 2",
         (true, false) => "Distance 1",
@@ -1364,6 +1353,28 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         *direction = reversed;
         smart.manual_dir = true;
         *auto_op = false;
+    }
+    draw_secondary_box(app, ui, proj, d, secondary_box);
+}
+
+fn draw_secondary_box(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, d: &mut Dialog, secondary_box: Option<(Pos2, bool)>) {
+    let Some((at2, select_all2)) = secondary_box else { return };
+    let distance2 = match &mut d.kind {
+        Kind::Extrude { distance2, .. } | Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { distance2, .. }) => Some(distance2),
+        _ => None,
+    };
+    if let Some(distance2) = distance2 {
+        // Its own area and field, drawn after the primary box so Tab moves Distance -> Distance 2.
+        value_box_in(
+            ui,
+            (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
+            "Distance 2",
+            distance2,
+            (at2, egui::Align2::LEFT_TOP),
+            select_all2,
+            false,
+            box_place(app, proj),
+        );
     }
 }
 
@@ -1884,7 +1895,7 @@ fn drag_arrow_to(
     } else {
         on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
     };
-    let r = ui.interact(area, id, egui::Sense::drag());
+    let r = ui.interact(area, id, egui::Sense::DRAG);
     let double = r.contains_pointer() && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
@@ -2470,7 +2481,7 @@ fn taper_handle(
     let l = span.len();
     let end = foot + span + e * (l * angle.tan().clamp(-10.0, 10.0));
     let (Some(fs), Some(es)) = (proj.to_screen(foot), proj.to_screen(end)) else { return };
-    let r = ui.interact(egui::Rect::from_center_size(es, vec2(16.0, 16.0)), egui::Id::unique("sc_taper"), egui::Sense::drag());
+    let r = ui.interact(egui::Rect::from_center_size(es, vec2(16.0, 16.0)), egui::Id::unique("sc_taper"), egui::Sense::DRAG);
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
@@ -2877,7 +2888,7 @@ fn rotation_handle(
 ) -> Option<Pos2> {
     let end = proj.to_screen(centre + (e1 * boundary.cos() + e2 * boundary.sin()) * radius)?;
     crate::scenario::publish_handle(name, end);
-    let response = ui.interact(egui::Rect::from_center_size(end, vec2(20.0, 20.0)), egui::Id::unique(("sc_rotator", name)), egui::Sense::drag());
+    let response = ui.interact(egui::Rect::from_center_size(end, vec2(20.0, 20.0)), egui::Id::unique(("sc_rotator", name)), egui::Sense::DRAG);
     let hot = response.hovered() || response.dragged();
     let color = if hot { Tokens::get().accent } else { Tokens::get().manipulator };
     painter.circle(end, if hot { 7.0 } else { 5.5 }, color, Stroke::new(1.5, Color32::WHITE));

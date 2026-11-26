@@ -241,17 +241,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params(
-            "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
+            "body?, path?, units?: mm|inches (default mm: the drawing in millimetres, $INSUNITS 4; inches: every coordinate, radius and text height in inches, $INSUNITS 1, $MEASUREMENT 0, \
+              the bend notes' radii and the pocket layers' depths in inches too), \
+            curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
+             markings?: bool (default true; false leaves the letter contours on TEXT/ETCH and the bend notes out, for a cutter that would etch them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
-             → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
-             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION, FORM_UP and FORM_DOWN (a bead's dashed \
+             → DXF (AutoCAD 2000, in `units`): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
+             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth, named in `_IN` with their inches in an inches drawing), PERFORATION, and FORM_UP and FORM_DOWN (a bead's dashed \
              centreline and footprint, its note `BEAD UP D2 W10` on BEND_NOTES), and HARDWARE (only with hardware_notes: true and layers: roles); inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
@@ -1672,15 +1675,47 @@ pub enum DxfText {
     Etch,
 }
 
+/// The units the flat-pattern DXF is written in (the geometry of the part is in millimetres).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DxfUnits {
+    /// Millimetres: `$INSUNITS 4`, `$MEASUREMENT 1`.
+    #[default]
+    Millimetres,
+    /// Inches: `$INSUNITS 1`, `$MEASUREMENT 0`.
+    Inches,
+}
+
+impl DxfUnits {
+    /// The header's `$INSUNITS` (DXF: 1 inches, 4 millimetres).
+    pub fn insunits(self) -> i32 {
+        match self {
+            DxfUnits::Millimetres => 4,
+            DxfUnits::Inches => 1,
+        }
+    }
+    /// A length in millimetres in the drawing's units.
+    pub fn scale(self) -> f64 {
+        match self {
+            DxfUnits::Millimetres => 1.0,
+            DxfUnits::Inches => 1.0 / 25.4,
+        }
+    }
+}
+
 /// What `sheet.export_dxf` is asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DxfOptions {
+    /// The units the drawing's coordinates are written in (the geometry is in millimetres).
+    pub units: DxfUnits,
     pub curves: DxfCurves,
     pub text: DxfText,
     /// The height (mm) of the note beside each bend line, when it is to have one.
     pub bend_notes: Option<f64>,
     /// Leave the bend lines out (BEND_UP, BEND_DOWN), for a cutter that would cut them (#4314).
     pub no_bend_lines: bool,
+    /// Leave the markings out (the letters on TEXT/ETCH and the bend notes), for a cutter that
+    /// would etch them.
+    pub no_markings: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
     /// The height (mm) of the note beside each press-in hardware hole, on layer HARDWARE (#17752);
@@ -1716,17 +1751,17 @@ fn dxf_layer(
     file.declare_layer(name, color, linetype, None)
 }
 
-/// A number in a bend note: at most three decimals, none when they are zeros (`90`, `2.5`).
-fn compact(v: f64) -> String {
-    let t = format!("{v:.3}");
+/// A number in a bend note: at most `digits` decimals, none when they are zeros (`90`, `2.5`).
+fn compact(v: f64, digits: usize) -> String {
+    let t = format!("{v:.digits$}");
     let t = t.trim_end_matches('0').trim_end_matches('.');
     if t.is_empty() || t == "-0" { "0".into() } else { t.into() }
 }
 
 /// The note beside a bend line, `B1 UP 90° R2.5` (number, direction, angle as `display` reads
 /// it, inner radius): as high as `height`, centred half a height beside the middle of the line,
-/// parallel to it and readable from below or from the right.
-fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay) -> solidcraft_io::DxfShape {
+/// parallel to it and readable from below or from the right. The radius is in the drawing's units.
+fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay, units: DxfUnits) -> solidcraft_io::DxfShape {
     let along = (b.end - b.start).normalized().unwrap_or(Vec2::X);
     let mut angle = along.angle().to_degrees();
     if angle > 90.0 + 1e-9 {
@@ -1735,11 +1770,21 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
         angle += 180.0;
     }
     let beside = Vec2::from_angle(angle.to_radians()).perp();
+    let digits = match units {
+        DxfUnits::Millimetres => 3,
+        DxfUnits::Inches => 4,
+    };
     solidcraft_io::DxfShape::Text {
         at: (b.start + b.end) * 0.5 + beside * (height * 0.5),
         height,
         angle_deg: angle,
-        text: format!("B{} {} {}° R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
+        text: format!(
+            "B{} {} {}° R{}",
+            b.index,
+            if b.up { "UP" } else { "DOWN" },
+            compact(display.of(b.angle_deg), 3),
+            compact(b.radius * units.scale(), digits)
+        ),
     }
 }
 
@@ -1747,17 +1792,17 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 fn hardware_note(h: &solidcraft_doc::sheet::SheetHardware) -> String {
     let kind = h.kind.name().replace('_', " ");
     match h.length {
-        Some(length) => format!("{} {kind} {} mm", h.thread, compact(length)),
+        Some(length) => format!("{} {kind} {} mm", h.thread, compact(length, 3)),
         None => format!("{} {kind}", h.thread),
     }
 }
 
-/// A DXF (AutoCAD 2000, mm) of a sheet's flat pattern (#6748) on layers by role: OUTLINE (the
-/// outer contour of each piece), CUT (what is cut out inside it, and the loose pieces of a cut),
-/// TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked
-/// for), one layer per pocket depth, PERFORATION, ROLL, and FORM_UP and FORM_DOWN (each formed
-/// bead's centreline and footprint, dashed). Inner contours are written before the outline, so a
-/// program that follows the file's order cuts inside-out. Free-form curves as
+/// A DXF (AutoCAD 2000) of a sheet's flat pattern (#6748) on layers by role, in `o.units`:
+/// OUTLINE (the outer contour of each piece), CUT (what is cut out inside it, and the loose pieces
+/// of a cut), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES
+/// (when asked for), one layer per pocket depth, PERFORATION, ROLL, and FORM_UP and FORM_DOWN
+/// (each formed bead's centreline and footprint, dashed). Inner contours are written before the
+/// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
 /// `o.curves` says. A DXF profile writes it its own way: its layer, colour and linetype for each
 /// role, and the roles it turns off left out.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
@@ -1834,7 +1879,11 @@ impl FlatDrawing {
             } else {
                 "INTERNAL"
             };
-            format!("POCKET_{side}_Z{:.6}_TO_{:.6}_MM", p.z0, p.z1)
+            let (suffix, z0, z1) = match o.units {
+                DxfUnits::Millimetres => ("MM", p.z0, p.z1),
+                DxfUnits::Inches => ("IN", p.z0 * o.units.scale(), p.z1 * o.units.scale()),
+            };
+            format!("POCKET_{side}_Z{z0:.6}_TO_{z1:.6}_{suffix}")
         };
         // A piece inside another piece's hole (a letter's counter, the middle of a ring cut) is no
         // outline of the sheet but a loose piece the cut leaves.
@@ -1857,6 +1906,8 @@ impl FlatDrawing {
         let mut loops: Vec<(Pass, &solidcore_record::Loop2, String)> = Vec::new();
         for (j, r) in regions.iter().enumerate() {
             for (k, lp) in std::iter::once(&r.outer).chain(&r.holes).enumerate() {
+                // A letter's cut contour is a marking; a piece whose outer contour is the sheet's own
+                // outline stays.
                 let (pass, layer) = if k == 0 && !nested.get(j).copied().unwrap_or(false) {
                     (Pass::Outline, "OUTLINE")
                 } else if letters.is_letter(lp) {
@@ -1867,6 +1918,9 @@ impl FlatDrawing {
                 } else {
                     (Pass::Cut, "CUT")
                 };
+                if o.no_markings && (layer == "TEXT" || layer == "ETCH") {
+                    continue;
+                }
                 loops.push((pass, lp, layer.to_string()));
             }
         }
@@ -1874,6 +1928,9 @@ impl FlatDrawing {
             let layer = pocket_layer(p);
             for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
                 // Text machined to a depth is a marking, whatever its depth.
+                if o.no_markings && letters.is_letter(lp) {
+                    continue;
+                }
                 if letters.is_letter(lp) {
                     loops.push((Pass::Etch, lp, "ETCH".to_string()));
                 } else {
@@ -1892,7 +1949,7 @@ impl FlatDrawing {
             .saturating_add(self.slits.len().saturating_mul(2))
             .saturating_add(self.hardware.len())
             .saturating_add(self.beads.len().saturating_mul(4));
-        let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
+        let mut file = DxfFile::for_flat_pattern_export_units(loops.len(), lines, self.perforation.len(), o.units.insunits())?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The
             // compatibility writer keeps their historical sorted table order.
@@ -1900,6 +1957,13 @@ impl FlatDrawing {
                 dxf_layer(&mut file, name, false)?;
             }
         }
+        // In the file's units: every length scaled before it is written; the notes' text and the
+        // layers' names read in those units.
+        let k = o.units.scale();
+        let push = |file: &mut DxfFile<DxfShape>, layer: solidcraft_io::DxfLayerId, shape: DxfShape| -> Result<()> {
+            file.push(layer, shape.scaled(k), None)?;
+            Ok(())
+        };
         for (i, (_, h, layer)) in loops.into_iter().enumerate() {
             let style = match o.curves {
                 DxfCurves::Exact => DxfPathStyle::Exact,
@@ -1910,7 +1974,7 @@ impl FlatDrawing {
             if !shapes.is_empty() {
                 let layer = dxf_layer(&mut file, &layer, o.one_layer)?;
                 for shape in shapes {
-                    file.push(layer, shape, None)?;
+                    push(&mut file, layer, shape)?;
                 }
             }
         }
@@ -1918,23 +1982,25 @@ impl FlatDrawing {
         // back, as the outline would run round a cut with no width.
         for (a, b) in &self.slits {
             let layer = dxf_layer(&mut file, "OUTLINE", o.one_layer)?;
-            file.push(layer, DxfShape::Line(*a, *b), None)?;
-            file.push(layer, DxfShape::Line(*b, *a), None)?;
+            push(&mut file, layer, DxfShape::Line(*a, *b))?;
+            push(&mut file, layer, DxfShape::Line(*b, *a))?;
         }
         for b in &self.bends {
             if !o.no_bend_lines {
                 let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o.one_layer)?;
-                file.push(layer, DxfShape::Line(b.start, b.end), None)?;
+                push(&mut file, layer, DxfShape::Line(b.start, b.end))?;
             }
-            if let Some(height) = o.bend_notes {
+            if let Some(height) = o.bend_notes
+                && !o.no_markings
+            {
                 let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
-                file.push(layer, bend_note(b, height, self.display), None)?;
+                push(&mut file, layer, bend_note(b, height, self.display, o.units))?;
             }
         }
         if !self.perforation.is_empty() {
             let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
             for (c, r) in &self.perforation {
-                file.push(layer, DxfShape::Circle { c: *c, r: *r }, None)?;
+                push(&mut file, layer, DxfShape::Circle { c: *c, r: *r })?;
             }
         }
         // The hardware's notes, each beside its hole on layer HARDWARE, as a bend's note is.
@@ -1942,21 +2008,31 @@ impl FlatDrawing {
             for (c, r, text) in &self.hardware {
                 let layer = dxf_layer(&mut file, "HARDWARE", o.one_layer)?;
                 let at = solidcraft_kernel::affine::note_beside((*c, *r), height);
-                file.push(layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() }, None)?;
+                push(&mut file, layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() })?;
             }
         }
         // Formed beads: the centreline and the footprint, dashed, and a note `BEAD UP D2 W10`.
         for b in &self.beads {
             let layer = dxf_layer(&mut file, if b.up { "FORM_UP" } else { "FORM_DOWN" }, o.one_layer)?;
-            file.push(layer, DxfShape::Line(b.a, b.b), None)?;
+            push(&mut file, layer, DxfShape::Line(b.a, b.b))?;
             for (i, corner) in b.footprint.iter().enumerate() {
                 let next = b.footprint.get((i + 1) % 4).copied().unwrap_or(*corner);
-                file.push(layer, DxfShape::Line(*corner, next), None)?;
+                push(&mut file, layer, DxfShape::Line(*corner, next))?;
             }
             if let (Some(height), Some((at, angle))) = (o.bend_notes, b.note) {
-                let text = format!("BEAD {} D{} W{}", if b.up { "UP" } else { "DOWN" }, compact(b.depth), compact(b.width));
+                // Depth and width in the file's units, as a bend note's radius.
+                let digits = match o.units {
+                    DxfUnits::Millimetres => 3,
+                    DxfUnits::Inches => 4,
+                };
+                let text = format!(
+                    "BEAD {} D{} W{}",
+                    if b.up { "UP" } else { "DOWN" },
+                    compact(b.depth * o.units.scale(), digits),
+                    compact(b.width * o.units.scale(), digits)
+                );
                 let notes = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
-                file.push(notes, DxfShape::Text { at, height, angle_deg: angle.to_degrees(), text }, None)?;
+                push(&mut file, notes, DxfShape::Text { at, height, angle_deg: angle.to_degrees(), text })?;
             }
         }
         // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
@@ -1964,7 +2040,7 @@ impl FlatDrawing {
         if !o.no_bend_lines && !self.rolls.is_empty() {
             let layer = dxf_layer(&mut file, "ROLL", o.one_layer)?;
             for (a, b) in &self.rolls {
-                file.push(layer, DxfShape::Line(*a, *b), None)?;
+                push(&mut file, layer, DxfShape::Line(*a, *b))?;
             }
         }
         // The drawing is made on the standard layers either way; a profile restyles it as it is
@@ -1973,6 +2049,15 @@ impl FlatDrawing {
             None => solidcraft_io::write_dxf_file(&file)?,
             Some(profile) => solidcraft_io::write_dxf_file_as(&file, profile)?,
         })
+    }
+}
+
+/// A DXF export's `units`: millimetres or inches, in any case.
+pub(crate) fn dxf_units(t: &str) -> Option<DxfUnits> {
+    match t.to_ascii_lowercase().as_str() {
+        "mm" => Some(DxfUnits::Millimetres),
+        "inches" => Some(DxfUnits::Inches),
+        _ => None,
     }
 }
 
@@ -2012,6 +2097,10 @@ pub(crate) fn dxf_note_height(mm: f64) -> Option<f64> {
 
 /// What a `sheet.export_dxf` call asks for; a value it cannot use is refused.
 fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
+    let units = match str_(p, "units") {
+        None => DxfUnits::Millimetres,
+        Some(v) => dxf_units(v).ok_or_else(|| bad(cmd, "`units` must be mm or inches"))?,
+    };
     let curves = match str_(p, "curves") {
         None => DxfCurves::Exact,
         Some(v) => dxf_curves(v).ok_or_else(|| bad(cmd, "`curves` must be exact or arcs"))?,
@@ -2034,6 +2123,11 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(false)) => true,
         Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
     };
+    let no_markings = match p.get("markings").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(true)) => false,
+        Some(Value::Bool(false)) => true,
+        Some(_) => return Err(bad(cmd, "`markings` must be true or false")),
+    };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
         Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
@@ -2045,7 +2139,7 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(true)) => (!one_layer).then_some(height),
         Some(_) => return Err(bad(cmd, "`hardware_notes` must be true or false")),
     };
-    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer, hardware_notes })
+    Ok(DxfOptions { units, curves, text, bend_notes, no_bend_lines, no_markings, one_layer, hardware_notes })
 }
 
 /// A `sheet.export_dxf` call's `profile`: a profile file's path, or the profile itself as an

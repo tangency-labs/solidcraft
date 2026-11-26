@@ -128,6 +128,9 @@
 //!    searched) is shown farther than the tolerance by an enclosure of that side;
 //! 2. every crease side of a member is shown farther by its own enclosure, or lies in closed
 //!    excluded boxes (no other member meets it, and what lies across it is read as below);
+//!    a crease where the net breaks (a knot of multiplicity above the degree) is shown by its
+//!    own enclosure only: the two pieces' edges there are apart, so the box excluded across
+//!    it holds the other piece's edge, not this one's;
 //! 3. every other point of `R`'s outer border lies in a closed excluded box: no record but a
 //!    member meets a member, corners included, and every leaf across a member's side on its
 //!    leaf's border is read as above (a leaf whose pass did not run, or whose records were
@@ -501,7 +504,10 @@
 //! frame, at most [`FRAME_TIGHTENINGS`] operators for each tight box: two a junction of the
 //! chain, one an end), [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
 //! told apart; at most [`MAX_KEPT_SEARCHES`] searches and [`MAX_KEPT_BYTES`] bytes kept in
-//! one [`LinePasses`], past which a search is not kept (a solve repeating it searches).
+//! one [`LinePasses`], past which a search is not kept (a solve repeating it searches); at
+//! most [`crate::surface::implicit::MAX_SIDE_POINTS`] control points in a net the side
+//! bounds read, and as many in the Bézier patches they decompose it into, past which (or
+//! past [`crate::nurbs::knots::MAX_DEGREE`]) the net has no side bound.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
@@ -559,6 +565,9 @@ pub(crate) struct LineNet {
     /// The interior knots of multiplicity at least the degree, in u and in v: the knot lines
     /// across which the net is below `C¹` in parameter (each once, ascending).
     creases: [Vec<f64>; 2],
+    /// Of the creases, those of multiplicity above the degree, in u and in v: where the net
+    /// breaks, its two pieces' edges apart (each once, ascending).
+    breaks: [Vec<f64>; 2],
     /// The complete surface of revolution the net is a patch of, for the kinds the side
     /// test reads ([`Revolved`]); `None` for every other surface.
     revolved: Option<Revolved>,
@@ -604,6 +613,11 @@ impl LineNet {
         let (Some(u), Some(v)) = (ends(&net.u, net.p, net.nu), ends(&net.v, net.q, net.nv)) else {
             return Ok(None);
         };
+        // (a break is a crease of multiplicity above the degree)
+        let breaks = [
+            creases(&net.u, net.p.saturating_add(1), u),
+            creases(&net.v, net.q.saturating_add(1), v),
+        ];
         let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
         let revolved = Revolved::of(surface, &net);
         let form = revolved.and_then(|_| base.gw_nurb().cloned());
@@ -612,6 +626,7 @@ impl LineNet {
             net,
             range: [u, v],
             creases,
+            breaks,
             revolved,
             form,
             closes,
@@ -646,6 +661,18 @@ impl LineNet {
                 cu && lo.x <= u0 && hi.x >= u1,
                 cv && lo.y <= v0 && hi.y >= v1,
             ],
+        }
+    }
+
+    /// Whether the side `s` of the `(u, v)` box `b` (in the order of
+    /// [`LineNet::side_kinds`]) lies on a break of the net ([`LineNet::breaks`]).
+    fn breaks_at(&self, b: Scratch, s: usize) -> bool {
+        let [bu, bv] = &self.breaks;
+        match s {
+            0 => bu.contains(&b.u.lo),
+            1 => bu.contains(&b.u.hi),
+            2 => bv.contains(&b.v.lo),
+            _ => bv.contains(&b.v.hi),
         }
     }
 
@@ -2138,7 +2165,11 @@ pub(crate) fn drop_fenced(
                         // crease; what lies across it is another leaf's end, which the
                         // drop's sets do not reach)
                         SideKind::Boundary => want.push(side),
-                        SideKind::Crease if net.on_a_seam(&line.solve_domain, b, s) => {
+                        // (nor does a break: the box excluded across it holds the other
+                        // piece's edge, apart from this side)
+                        SideKind::Crease
+                            if net.on_a_seam(&line.solve_domain, b, s) || net.breaks_at(b, s) =>
+                        {
                             want.push(side);
                         }
                         SideKind::Crease => {
@@ -6461,6 +6492,7 @@ impl LineNet {
             net,
             range,
             creases,
+            breaks,
             revolved,
             form,
             closes,
@@ -6485,7 +6517,7 @@ impl LineNet {
         list(&mut out, pw);
         let [[u0, u1], [v0, v1]] = *range;
         out.extend([u0, u1, v0, v1].map(f64::to_bits));
-        for c in creases {
+        for c in creases.iter().chain(breaks) {
             list(&mut out, c);
         }
         out.extend(closes.map(u64::from));
@@ -7318,6 +7350,73 @@ mod tests {
         let (kept, done) = excluded(&k, near, d, whole, set(), MAX_DROP_ENCLOSURES);
         assert_eq!(kept, set());
         assert_eq!(done.no_root + done.edge, 0);
+    }
+
+    /// A crease where the net breaks (a knot of multiplicity above the degree) is no fence:
+    /// the box excluded across it holds the other piece's edge, which may lie far from this
+    /// one's. A net of degree 1 in u with a double knot at u = ½, its left piece `(u, v, 0)`
+    /// and its right piece `(u + 10, v, 0)`, and a box with no root against the knot on the
+    /// left: a vertical line through `(0.5005, 0.5)` has no root but passes half a tolerance
+    /// (0.0005 of 0.001) from the left piece's edge, and the right piece leaves nothing
+    /// across. The set is kept (its side on the break is enclosed, and is not farther). With
+    /// a line 0.01 above the net the same side is shown farther by its own enclosure (one
+    /// made) and the set is dropped; on the net continuous across u = ½ (a single knot) the
+    /// excluded box across still fences the side, and no enclosure is made.
+    #[test]
+    fn a_crease_where_the_net_breaks_is_shown_by_its_own_enclosure() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let net_of = |xs: &[f64], u: Vec<f64>| {
+            let rows = xs
+                .iter()
+                .map(|&x| {
+                    (0..2)
+                        .map(|j| CPoint::new(x, f64::from(j), 0.0, NOW))
+                        .collect()
+                })
+                .collect();
+            let n = crate::nurbs::srf_basic::Surface::new(rows, 1, 1, u, vec![0.0, 0.0, 1.0, 1.0])
+                .unwrap();
+            Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
+                n, false,
+            ))
+        };
+        let broken = net_of(&[0.0, 0.5, 10.5, 11.0], vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        let joined = net_of(&[0.0, 0.5, 1.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]);
+        let tol = 1.0e-3;
+        let drop = |s: &Surface, p: Vec3, d: Vec3| {
+            let net = LineNet::of(&k, s).unwrap().unwrap();
+            let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, 1.0],
+                solve_domain: solve,
+                tol,
+            };
+            let recs = vec![rec(FloorKind::NoRoot, [0.45, 0.5], [0.45, 0.55])];
+            let mut leaves = [leaf_of(solve, Stop::Finished, Some(recs))];
+            let sides = leaf_sides(&[solve], &solve, net.seams(&solve));
+            let done =
+                drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
+            (leaves[0].floor.take().unwrap(), done)
+        };
+        assert_eq!(
+            LineNet::of(&k, &broken).unwrap().unwrap().breaks,
+            [vec![0.5], vec![]]
+        );
+        assert!(LineNet::of(&k, &joined).unwrap().unwrap().breaks[0].is_empty());
+        let (near, down) = (Vec3::new(0.5005, 0.5, -1.0), Vec3::new(0.0, 0.0, 2.0));
+        let (kept, done) = drop(&broken, near, down);
+        assert_eq!(kept.len(), 1, "{done:?}");
+        assert_eq!((done.no_root, done.enclosures), (0, 1));
+        let (above, along) = (Vec3::new(-2.0, 0.5, 0.01), Vec3::new(4.0, 0.0, 0.0));
+        let (kept, done) = drop(&broken, above, along);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.no_root, done.enclosures), (1, 1));
+        let (kept, done) = drop(&joined, above, along);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.no_root, done.enclosures), (1, 0));
     }
 
     /// A crease side shared by two members is shown farther by its own enclosure or keeps
@@ -8355,10 +8454,13 @@ mod tests {
     /// A net fitted to a definition is not its surface, and gets no pass: a B-spline net
     /// carrying a swept wall's definition (a screw motion, its bound above 0) is refused, and
     /// so is the evaluation copy a surface cache holds of it, which drops the definition but
-    /// keeps that its net is fitted. The same net with no definition (a plain B-spline: its
-    /// net is the surface), and its evaluation copy, keep the pass.
+    /// keeps that its net is fitted, and so is a copy or a piece of that copy, and the plane
+    /// its copy with analytics recognises (the net is planar). The same net with no
+    /// definition (a plain B-spline: its net is the surface), its evaluation copy and their
+    /// copies keep the pass.
     #[test]
     fn a_net_fitted_to_a_definition_gets_no_pass() {
+        use crate::nurbs::b_spline_surface::SurfParamType;
         use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
         let k = Kernel::default();
         let bare = Surface::from(
@@ -8395,6 +8497,35 @@ mod tests {
         assert!(LineNet::of(&k, &copy.clone_for_evaluation().unwrap())
             .unwrap()
             .is_none());
+        // a copy (or a copy with analytics) of the evaluation copy is still a fitted net, and
+        // gets no pass; a copy of the plain B-spline, or of its evaluation copy, is its net
+        let (left, right) = copy.split_at(&k, 0.5, SurfParamType::U).unwrap();
+        for again in [
+            copy.copy(&k).unwrap(),
+            copy.copy_and_add_analytics(&k).unwrap(),
+            left,
+            right,
+        ] {
+            assert!(again.net_is_fitted());
+            assert!(LineNet::of(&k, &again).unwrap().is_none());
+        }
+        // the swept wall's net is planar: its copy with analytics is a plane, which keeps no
+        // sweep, but keeps that it is made from the fitted net
+        let plane = swept.copy_and_add_analytics(&k).unwrap();
+        assert!(matches!(
+            plane.kind(),
+            crate::surface::surface::SurfaceKind::Plane(_)
+        ));
+        assert!(plane.procedural_definition().is_none());
+        assert!(plane.net_is_fitted());
+        assert!(LineNet::of(&k, &plane).unwrap().is_none());
+        for plain in [
+            bare.copy(&k).unwrap(),
+            bare.clone_for_evaluation().unwrap().copy(&k).unwrap(),
+        ] {
+            assert!(!plain.net_is_fitted());
+            assert!(LineNet::of(&k, &plain).unwrap().is_some());
+        }
     }
 
     /// The side bounds poll the solve's cancel token before each Bézier patch: a token

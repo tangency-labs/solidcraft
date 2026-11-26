@@ -1064,14 +1064,23 @@ An ordinary plugin form has a **Preview** box, on when it opens; with it off, no
 A populated form for editing a stored operation starts with Preview off and retains stale picks
 for field validation. Nothing runs until Apply or an explicit Preview request.
 
-- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
-  nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
-  and the selection never change. The run has none of the plugin's folder or command-group grants,
-  so it reads and writes no file and reaches nothing past the design; a plugin that needs them
-  shows "Preview:" with the refusal under its fields, and Run still runs it with its grants.
-- It runs again only when the parameters or the design change, under the plugin's own fuel,
-  memory and deadline limits, off the window's thread. A run left behind by newer inputs is
-  dropped.
+- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged. It runs on
+  a scratch session that is thrown away, so the design, the undo history and the selection never
+  change. The run has none of the plugin's folder or command-group grants, so it reads and writes
+  no file and reaches nothing past the design. Run still runs it with its grants.
+- A preview that fails shows "Preview:" and the run's error at the top of the dialog, above the
+  fields, in the error colour: the plugin's own refusal ("doors must be 0, 1 or 2") or a missing
+  grant. The error belongs to the current inputs, and it goes when they change.
+- The entry can tell that it runs as a preview: the command `plugin.preview` answers
+  `{"preview": true}` there and `{"preview": false}` in a run whose result is kept. List it in
+  `runtime.commands` like any other command; it needs no command group. An entry that builds a
+  lot of geometry can then leave out detail the preview does not need, such as small holes or
+  hardware models, and preview in a fraction of the time. A script tries that path with
+  `plugin.run`'s `preview: true`.
+- It runs again only when the parameters or the design change, once they have stood unchanged
+  for about 300 ms, under the plugin's own fuel, memory and deadline limits, off the window's
+  thread. A run left behind by newer inputs is cancelled at the plugin's next host call (as a
+  long job's Cancel stops it): the current inputs do not wait for it.
 - When the first successful preview is drawn, the app applies that run's last view command once
   if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
   bodies; even an empty result consumes this first-preview action. Later field changes leave the
