@@ -159,6 +159,16 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<XRef>,
     },
+    /// A point on a sketch of the origin's component (`origin`, `p1`, `c1.center`, `l1.end`, ...):
+    /// origin at the solved sketch point, z along the sketch plane's normal, x along `x` (or the
+    /// sketch plane's x axis when `x` is omitted). Re-resolved on every solve so the joint follows
+    /// sketch and parameter edits.
+    SketchPoint {
+        sketch: u64,
+        point: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<XRef>,
+    },
 }
 
 /// The z of an edge origin that isn't its face's normal (component coordinates); its x follows
@@ -343,7 +353,11 @@ impl XRef {
 impl Snap {
     pub fn secondary_axis_feature_mut(&mut self) -> Option<&mut u64> {
         let x = match self {
-            Self::FaceCenter { x, .. } | Self::CircleCenter { x, .. } | Self::Plane { x, .. } | Self::Axis { x, .. } => x,
+            Self::FaceCenter { x, .. }
+            | Self::CircleCenter { x, .. }
+            | Self::Plane { x, .. }
+            | Self::Axis { x, .. }
+            | Self::SketchPoint { x, .. } => x,
             _ => return None,
         };
         match x {
@@ -358,6 +372,14 @@ impl Snap {
         }
     }
 
+    /// The sketch feature id of a sketch-point snap, to rewrite it when copying a component.
+    pub fn sketch_feature_mut(&mut self) -> Option<&mut u64> {
+        match self {
+            Self::SketchPoint { sketch, .. } => Some(sketch),
+            _ => None,
+        }
+    }
+
     fn strict_alignment(&self) -> bool {
         matches!(
             self,
@@ -365,12 +387,17 @@ impl Snap {
                 | Self::CircleCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
                 | Self::Plane { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
                 | Self::Axis { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                | Self::SketchPoint { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
         )
     }
 
     fn helper_alignment(&self) -> bool {
         let x = match self {
-            Self::FaceCenter { x, .. } | Self::CircleCenter { x, .. } | Self::Plane { x, .. } | Self::Axis { x, .. } => x.as_ref(),
+            Self::FaceCenter { x, .. }
+            | Self::CircleCenter { x, .. }
+            | Self::Plane { x, .. }
+            | Self::Axis { x, .. }
+            | Self::SketchPoint { x, .. } => x.as_ref(),
             _ => None,
         };
         matches!(
@@ -396,7 +423,7 @@ impl Snap {
         if let Snap::Edge { edge, face, corner, .. } = self {
             out.extend(edge.iter().chain(face.iter()).chain(corner.iter()));
         }
-        if let Snap::Plane { x, .. } | Snap::Axis { x, .. } = self {
+        if let Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } = self {
             out.extend(x.as_ref().into_iter().flat_map(XRef::geometry_names));
         }
         out
@@ -416,20 +443,23 @@ impl Snap {
                 out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
-            Snap::Plane { x, .. } | Snap::Axis { x, .. } => out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut)),
+            Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
+                out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
+            }
             _ => {}
         }
         out
     }
 
-    /// The direction a face, circle, plane or axis snap keeps as its frame's x (`XRef::Dir`),
-    /// in the component's coordinates; `None` for a face reference or none.
+    /// The direction a face, circle, plane, axis or sketch-point snap keeps as its frame's x
+    /// (`XRef::Dir`), in the component's coordinates; `None` for a face reference or none.
     pub fn frame_x(&self) -> Option<Vec3> {
         match self {
             Snap::FaceCenter { x: Some(XRef::Dir(d)), .. }
             | Snap::CircleCenter { x: Some(XRef::Dir(d)), .. }
             | Snap::Plane { x: Some(XRef::Dir(d)), .. }
-            | Snap::Axis { x: Some(XRef::Dir(d)), .. } => Some(*d),
+            | Snap::Axis { x: Some(XRef::Dir(d)), .. }
+            | Snap::SketchPoint { x: Some(XRef::Dir(d)), .. } => Some(*d),
             _ => None,
         }
     }
@@ -477,6 +507,7 @@ impl Snap {
             Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
             Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
             Snap::Plane { pick, x, .. } | Snap::Axis { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
+            Snap::SketchPoint { sketch, point, x } => *sketch != 0 && !point.is_empty() && point.len() <= 512 && x_ok(x),
         }
     }
 }
@@ -743,7 +774,7 @@ impl RefShape {
             Snap::Axis { .. } => RefShape::Axis,
             Snap::CircleCenter { .. } => RefShape::Round,
             Snap::Edge { .. } => RefShape::Edge,
-            Snap::Point { .. } => RefShape::Point,
+            Snap::Point { .. } | Snap::SketchPoint { .. } => RefShape::Point,
         }
     }
 }
@@ -1659,6 +1690,25 @@ fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat>
                 None => line_origin,
             };
             let x_axis = face::x_axis(doc, st, comp, x.as_ref(), origin)?;
+            frame_with_x_policy(origin, z, x_axis, o.snap.strict_alignment()).ok_or_else(bad)
+        }
+        Snap::SketchPoint { sketch, point, x } => {
+            let comp = component_of(doc, o.occurrence)?;
+            let Some(feat) = doc.feature(*sketch) else {
+                return Err(DocError::Unknown(format!("sketch {sketch} is gone")));
+            };
+            if feat.component != comp {
+                return Err(DocError::Unknown(format!("sketch `{}` is not on this component (occurrence {})", feat.name, o.occurrence)));
+            }
+            let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch `{}` has no solved geometry", feat.name)))?;
+            let pt_idx = ss.sketch.resolve_point(point).ok_or_else(|| DocError::Unknown(format!("sketch `{}` has no point `{point}`", feat.name)))?;
+            let p2 = ss.sketch.point(pt_idx).ok_or_else(|| DocError::Unknown(format!("sketch `{}` has no point `{point}`", feat.name)))?;
+            let origin = ss.plane.to_world(p2);
+            let z = ss.plane.normal().normalized().ok_or_else(bad)?;
+            let x_axis = match x {
+                Some(_) => face::x_axis(doc, st, comp, x.as_ref(), origin)?,
+                None => Some(ss.plane.x),
+            };
             frame_with_x_policy(origin, z, x_axis, o.snap.strict_alignment()).ok_or_else(bad)
         }
     }
