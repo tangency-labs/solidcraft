@@ -559,6 +559,44 @@ mod tests {
         assert!(crate::scenario::rect_of("tab:design:0").is_some() && crate::scenario::rect_of("tab:design:1").is_some(), "the command shows them");
     }
 
+    /// Groups saved at quit come back with their designs: each saved design that opens again joins
+    /// its group, which is made as it was (named, coloured, folded), and a design that was in none
+    /// joins none.
+    #[test]
+    fn groups_come_back_with_their_designs_after_a_restart() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-groups-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths: Vec<String> = (0..3).map(|k| dir.join(format!("{k}.solidcraft")).to_string_lossy().into_owned()).collect();
+        let mut h = three_designs();
+        for (k, path) in paths.iter().enumerate() {
+            documents::switch(&mut h.app, k);
+            h.app.session.execute("file.save", &json!({"path": path})).unwrap();
+        }
+        let group = call(&mut h, "tab.group.create", json!({"tab": 0, "name": "Pair", "colour": "green"}))["result"]["group"].as_u64().unwrap();
+        call(&mut h, "tab.group.add", json!({"group": group, "tab": 1}));
+        call(&mut h, "tab.group.update", json!({"group": group, "collapsed": true}));
+        let saved = super::remembered(&mut h.app);
+        let pair = crate::tab_groups::RememberedGroup { name: "Pair".into(), colour: "green".into(), collapsed: true, designs: paths[..2].to_vec() };
+        assert_eq!(saved, vec![pair.clone()], "the group and its two designs are remembered");
+        // The next launch: the saved designs open again, the second first, and join the group.
+        let mut again = Harness::new();
+        again.app.home.open = false;
+        again.app.preferences.open_design_groups = saved;
+        for path in [&paths[1], &paths[0]] {
+            again.app.open_path(path);
+            super::design_opened(&mut again.app, path);
+        }
+        again.frames(2);
+        assert_eq!(groups(&mut again).len(), 1, "one group comes back");
+        assert_eq!(again.app.docs.groups.groups()[0].collapsed, true, "folded as it was");
+        assert_eq!(super::remembered(&mut again.app), vec![pair.clone()], "both designs are in it");
+        // A design that was in no group is not put in one.
+        again.app.open_path(&paths[2]);
+        super::design_opened(&mut again.app, &paths[2]);
+        assert_eq!(super::remembered(&mut again.app), vec![pair], "the design in no group stays out");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// From a tab's menu: a new group, named in its label as soon as it is made; another design
     /// added from its menu moves next to it; the label's menu recolours it; a double click renames
     /// it, Escape keeps the old name; Remove and Ungroup leave the designs open.
