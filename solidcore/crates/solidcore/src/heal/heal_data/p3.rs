@@ -47,9 +47,10 @@
 //! Partial lists from completed merge intervals survive ignored failures.
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
-//! `Fix_DegenEdges` squeezes an open edge by the certified
-//! `heal::tolerance_defects::collapse_short_edge` (not upstream's `SqueezeEdge`): the
-//! survivor moves to its cluster's point and the neighbouring edges are re-ended there.
+//! `Fix_DegenEdges` decides each listed edge again with its tolerance as it is then, and
+//! squeezes an open edge by the certified `heal::tolerance_defects::collapse_short_edge`
+//! (not upstream's `SqueezeEdge`): the survivor moves to the midpoint of the two vertices
+//! and the neighbouring edges are re-ended there.
 
 use crate::error::heal::HealFailure;
 use crate::error::topology::TopologyFailure;
@@ -454,14 +455,15 @@ impl<O: LoopObject> HealData<O> {
     /// Squeezes degenerate edges in reverse problem-list order, deleting closed
     /// single-vertex edges instead, then updates all target and problem lists.
     ///
-    /// Not upstream: an open edge is squeezed by
-    /// [`crate::heal::tolerance_defects::collapse_short_edge`], into the centre of the box of
-    /// its cluster of short edges ([`crate::heal::tolerance_defects::squeeze_targets`], the
-    /// midpoint of its two vertices for one short edge), keeping the vertex with the larger
-    /// tolerance, and every edge that met either vertex is re-ended there, each step certified
-    /// over the whole curve. An edge whose squeeze is not certified (`Refusal`) is left as it
-    /// is. Upstream's `SqueezeEdge` keeps the start vertex where it is and leaves the
-    /// neighbouring curves ending at the vertex it deletes.
+    /// Not upstream: each listed edge is decided again on the B-rep as it is now
+    /// ([`super::p2::degenerate_edge`] with the edge's tolerance, which `Fix_TolSizes` may
+    /// have changed since the edge was cached), and one that is no longer degenerate is left.
+    /// An open edge is squeezed by [`crate::heal::tolerance_defects::collapse_short_edge`] into
+    /// the midpoint of its two vertices, keeping the vertex with the larger tolerance, and every
+    /// edge that met either vertex is re-ended there, each step certified over the whole curve;
+    /// an edge whose squeeze is not certified (`Refusal`) is left as it is. Upstream's
+    /// `SqueezeEdge` keeps the start vertex where it is and leaves the neighbouring curves
+    /// ending at the vertex it deletes.
     pub fn fix_degen_edges(
         &mut self,
         k: &mut Kernel,
@@ -473,8 +475,6 @@ impl<O: LoopObject> HealData<O> {
             return Ok(());
         }
         with_editing_enabled(b, |b| {
-            // the clusters' points, found before the first squeeze
-            let mut targets: Option<Vec<(VertexId, Point3)>> = None;
             let mut changes = Changes::default();
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
@@ -484,22 +484,16 @@ impl<O: LoopObject> HealData<O> {
                          though it lists only properties it built for an edge",
                     )
                 })?;
-                if p.bad_degen_edge.is_false() {
+                if p.bad_degen_edge.is_false()
+                    || !super::p2::degenerate_edge(b, e, edge::tolerance(b, e)?)?
+                {
                     continue;
                 }
                 let (a, d) = edge::start_end_vertices(b, e)?;
                 let edits = if a == d {
                     delete_edge(k, b, e)?
                 } else {
-                    if targets.is_none() {
-                        targets = Some(crate::heal::tolerance_defects::squeeze_targets(k, b)?);
-                    }
-                    let target = targets
-                        .iter()
-                        .flatten()
-                        .find(|(x, _)| Some(*x) == a || Some(*x) == d)
-                        .map(|(_, p)| *p);
-                    collapse_edge(k, b, e, target)?
+                    collapse_edge(k, b, e)?
                 };
                 changes.append(edits);
             }
@@ -673,17 +667,12 @@ fn squeeze_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId, survivor: VertexId) -> 
     });
     r.map(|()| changes)
 }
-/// [`crate::heal::tolerance_defects::collapse_short_edge`] of `e` into `target` under the edit
-/// tracker ([`tracked_edit`]): what it changed. A refused squeeze changes nothing, so nothing
-/// is tracked, and the edge is left.
-fn collapse_edge(
-    k: &mut Kernel,
-    b: &mut Brep,
-    e: EdgeId,
-    target: Option<Point3>,
-) -> Result<Changes> {
+/// [`crate::heal::tolerance_defects::collapse_short_edge`] of `e` into the midpoint of its
+/// vertices under the edit tracker ([`tracked_edit`]): what it changed. A refused squeeze
+/// changes nothing, so nothing is tracked, and the edge is left.
+fn collapse_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<Changes> {
     let (r, changes) = tracked_edit(k, b, |k, b, env| {
-        crate::heal::tolerance_defects::collapse_short_edge(k, b, env, e, target)
+        crate::heal::tolerance_defects::collapse_short_edge(k, b, env, e, None)
     });
     match r? {
         // a refusal changed nothing, so its tracked lists are empty

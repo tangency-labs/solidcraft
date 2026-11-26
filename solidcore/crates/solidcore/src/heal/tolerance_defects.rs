@@ -8,7 +8,7 @@
 //! context's approximation tolerance (so an edge shorter than its own, larger tolerance is not
 //! one), always keeps the start vertex, and leaves the neighbour edges' curves ending at the
 //! vertex it deletes. The healer's step now decides with [`short_edge_bound`] and squeezes with
-//! [`collapse_short_edge`] (`HealData::fix_degen_edges`).
+//! [`collapse_short_edge`] (`HealData::fix_degen_edges`), each edge into its own midpoint.
 //!
 //! | Rust | Upstream |
 //! |------|----------|

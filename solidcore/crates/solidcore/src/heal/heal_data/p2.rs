@@ -3613,12 +3613,14 @@ fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
     sum.is_finite().then_some(sum)
 }
 
-/// Whether edge `e` is degenerate (`m_bBadDegenEdge`): its whole curve is certified within
-/// `tol`, the edge's tolerance, of the point its squeeze puts its vertices at
-/// ([`short_edge_bound`]: interval enclosures of the whole curve, against the midpoint of its
-/// two vertices), or for a closed edge of its one vertex. A curve with no enclosure, or one that
-/// reaches farther, is not shown degenerate, nor is an edge without its vertices (there is no
-/// point to squeeze it into), and a NaN bound or tolerance is not within.
+/// Whether edge `e` is degenerate (`m_bBadDegenEdge`): it lies within `tol`, the edge's
+/// tolerance, of one point, so its tolerance covers its length. An open edge is degenerate when
+/// its vertices are within `tol` of each other (a longer edge is a valid one, `SmBrep` Edge test
+/// 7) and its whole curve is certified within `tol` of their midpoint, the point its squeeze
+/// puts them at ([`short_edge_bound`]: interval enclosures of the whole curve); a closed edge
+/// when its whole curve is certified within `tol` of its vertex. A curve with no enclosure, or
+/// one that reaches farther, is not shown degenerate, nor is an edge without its vertices (there
+/// is no point to squeeze it into), and a NaN distance, bound or tolerance is not within.
 ///
 /// Not upstream: `SetProps_Metadata` asks the curve's sampled `IsDegenerate` against the
 /// context's approximation tolerance, so an edge shorter than its own, larger tolerance was not
@@ -3628,8 +3630,8 @@ fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
 ///
 /// [`SolidError::NotFound`] for a dangling edge or vertex; `InvalidInput` for an edge without
 /// a curve.
-fn degenerate_edge(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
-    use crate::heal::stitch::bounds::curve_to_point;
+pub(crate) fn degenerate_edge(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
+    use crate::heal::stitch::bounds::{curve_to_point, points};
     use crate::heal::tolerance_defects::short_edge_bound;
 
     let (Some(v), Some(w)) = edge::start_end_vertices(b, e)? else {
@@ -3643,6 +3645,10 @@ fn degenerate_edge(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
             _ => return Ok(false),
         }
     } else {
+        match points(vertex::point(b, v)?, vertex::point(b, w)?) {
+            Ok(apart) if apart <= tol => {}
+            _ => return Ok(false),
+        }
         match short_edge_bound(b, e, None)? {
             Ok(bound) => bound,
             Err(_) => return Ok(false),

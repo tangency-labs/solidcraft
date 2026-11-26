@@ -1462,11 +1462,11 @@ fn ridge_block(size: f64, ridge: f64, tols: Tols) -> Record {
 }
 
 /// The healer's degenerate-edge test is certified against the edge's own tolerance (#17738): on
-/// a 0.1 block read with tolerances of 1e-6, a ridge 4.5e-6 long lies at least 2.25e-6 from its
-/// midpoint, farther than its tolerance (1e-6 as read, 2e-6 once the healer has set the body's
-/// from its size class), so it is a real edge and the healed body is the record's. The sampled
-/// test read the context's approximation tolerance (5e-6), called the ridge degenerate and
-/// squeezed it into one end, which left the four edges at the other 4.5e-6 off their vertex.
+/// a 0.1 block read with tolerances of 1e-6 (a record holds twice the zone: 5e-7), a ridge 4.5e-6
+/// long is longer than its tolerance (5e-7 as read, 1e-6 once the healer has set the body's from
+/// its size class), so it is a real edge and the healed body is the record's. The sampled test
+/// read the context's approximation tolerance (5e-6), called the ridge degenerate and squeezed it
+/// into one end, which left the four edges at the other 4.5e-6 off their vertex.
 #[test]
 fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
     let tols = Tols {
@@ -1495,20 +1495,20 @@ fn the_healer_keeps_an_edge_longer_than_its_tolerance() {
     );
 }
 
-/// The healer's degenerate-edge step on the hair step (#17738): its riser's two end edges, 3e-4
-/// long, lie within their 1e-3 tolerance of their midpoints (the certified bound), so the cache
-/// lists them, though the sampled test read only the context's approximation tolerance (5e-6)
-/// and listed none. Each is squeezed into its midpoint and the four edges that met its vertices
-/// are re-ended there: every edge's curve ends at its vertices, not at the vertex removed, and
-/// no tolerance grows.
-#[test]
-fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours() {
+/// The hair step's riser end edges, `step` long, as the healer's edge cache lists them as
+/// degenerate, and the B-rep with its record order.
+fn degenerate_riser_ends(
+    k: &mut solidcore::Kernel,
+    step: f64,
+) -> (
+    solidcore::topology::Brep,
+    solidcore::heal::heal_data::p2::HealData<solidcore::EntityRef>,
+) {
     use solidcore::heal::face_props::HealerOpType;
     use solidcore::heal::heal_data::p2::HealData;
-    use solidcore::topology::{brep::p1, edge, vertex};
-    let rec = hair_step_box(3e-4, TOLS);
-    let mut k = solidcore::Kernel::default();
-    let (mut b, _) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+    use solidcore::topology::brep::p1;
+    let (mut b, _) =
+        solidcore_convert::brep::to_kernel(k, &hair_step_box(step, TOLS), true).unwrap();
     let (vs, es, fs) = (
         p1::vertices(&b, None).unwrap(),
         p1::edges(&b, None).unwrap(),
@@ -1516,9 +1516,48 @@ fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours()
     );
     assert_eq!((fs.len(), es.len(), vs.len()), (8, 18, 12));
     let mut h = HealData::<solidcore::EntityRef>::with_targets(&vs, &es, &fs);
-    h.cache_edge_props(&k, &mut b, HealerOpType::CacheEdgeprops)
+    h.cache_edge_props(k, &mut b, HealerOpType::CacheEdgeprops)
         .unwrap();
+    (b, h)
+}
+
+/// The healer's degenerate-edge step on the hair step (#17738), whose edges' tolerance is 5e-4
+/// (half the record's 1e-3). The riser's two end edges, 3e-4 long, lie within that tolerance of
+/// their midpoints (the certified bound), so the cache lists them, though the sampled test read
+/// only the context's approximation tolerance (5e-6) and listed none. Each is squeezed into its
+/// midpoint and the four edges that met its vertices are re-ended there: every edge's curve ends
+/// at its vertices, not at the vertex removed, and no tolerance grows. End edges 7.5e-4 long, a
+/// half longer than their tolerance, are real edges, though they too lie within it of their
+/// midpoints: the cache lists none.
+#[test]
+fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours() {
+    use solidcore::heal::face_props::HealerOpType;
+    use solidcore::topology::{brep::p1, edge, vertex};
+    let mut k = solidcore::Kernel::default();
+    let (_, long) = degenerate_riser_ends(&mut k, 7.5e-4);
+    assert!(long.bad_edge_props_degen_edges.prob_array.is_empty());
+
+    let (mut b, mut h) = degenerate_riser_ends(&mut k, 3e-4);
     assert_eq!(h.bad_edge_props_degen_edges.prob_array.len(), 2);
+    let tol_of = |b: &solidcore::topology::Brep| {
+        (
+            p1::edges(b, None)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e, edge::tolerance(b, e).unwrap()))
+                .collect::<HashMap<_, _>>(),
+            p1::vertices(b, None)
+                .unwrap()
+                .into_iter()
+                .map(|v| (v, vertex::tolerance(b, v).unwrap()))
+                .collect::<HashMap<_, _>>(),
+        )
+    };
+    let (edge_tol, vertex_tol) = tol_of(&b);
+    assert!(
+        edge_tol.values().all(|&t| (t - 5e-4).abs() <= 1e-15),
+        "{edge_tol:?}"
+    );
     h.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges)
         .unwrap();
     let (vs, es) = (
@@ -1535,7 +1574,7 @@ fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours()
             "no vertex at {mid:?}"
         );
     }
-    for e in es {
+    for &e in &es {
         let (Some(s), Some(t)) = edge::start_end_vertices(&b, e).unwrap() else {
             panic!("{e:?} without its vertices")
         };
@@ -1548,9 +1587,13 @@ fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours()
                 .distance(vertex::point(&b, v).unwrap());
             assert!(gap <= 1e-12, "{e:?} ends {gap} off its vertex");
         }
-        assert!(edge::tolerance(&b, e).unwrap() <= TOLS.edge);
     }
-    for v in vs {
-        assert!(vertex::tolerance(&b, v).unwrap() <= TOLS.vertex);
+    // every edge and vertex kept has the tolerance it was read with, or less
+    let (edge_after, vertex_after) = tol_of(&b);
+    for (e, t) in edge_after {
+        assert!(t <= edge_tol[&e], "{e:?}: {t} from {}", edge_tol[&e]);
+    }
+    for (v, t) in vertex_after {
+        assert!(t <= vertex_tol[&v], "{v:?}: {t} from {}", vertex_tol[&v]);
     }
 }
