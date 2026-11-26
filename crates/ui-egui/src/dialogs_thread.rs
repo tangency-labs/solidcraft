@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
-    Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, parse_metric_thread, parse_tapped_thread,
+    Document, Expr, Feature, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, parse_metric_thread, parse_tapped_thread,
     tapped_thread_sizes,
 };
 use solidcraft_engine::{Sel, Session};
@@ -215,6 +215,7 @@ fn tap_drill_label(size: &TappedThread) -> String {
 /// refuses it ([`ThreadForm::refused`]).
 const FORMS: &[(&str, ThreadForm)] = &[
     ("ISO metric", ThreadForm::Metric),
+    ("thread.form_unified", ThreadForm::Unified),
     ("Trapezoidal (ISO 2904)", ThreadForm::Trapezoidal),
     ("Acme (ASME B1.5)", ThreadForm::Acme),
     ("Buttress (DIN 513)", ThreadForm::Buttress),
@@ -240,7 +241,7 @@ const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
 const FLANKS: &[(&str, SteepFlank)] = &[("End", SteepFlank::End), ("Start", SteepFlank::Start)];
 
 /// The pick of the end the thread is measured from (`from`).
-const START_END: &str = "Start end (optional)";
+const START_END: &str = "Start side (optional)";
 /// The face or plane an Up To extent runs to (`up_to`).
 const UP_TO: &str = "Up to";
 const UP_TO_ACCEPT: Accept = FACES | PLANES;
@@ -330,7 +331,7 @@ fn is_buttress(form: ThreadForm) -> bool {
 /// Sizes in inches are listed by designation, and their pitch is part of it (threads per inch):
 /// the inch forms and the pipe threads, whose nominal sizes are pipe sizes.
 fn inch(form: ThreadForm) -> bool {
-    matches!(form, ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
+    matches!(form, ThreadForm::Unified | ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
 }
 
 /// A pipe thread: one start, turning one way.
@@ -486,8 +487,8 @@ pub(crate) fn rows(
     }
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
-        // The start, a free end: plain or chamfered. A thread saved chamfered at both ends
-        // keeps that.
+        // The start, a free end: plain or chamfered; and with it chamfered, every other free end
+        // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
         choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
         o.tip = match (chamfered, o.tip) {
@@ -496,6 +497,9 @@ pub(crate) fn rows(
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
+            let mut both = o.tip == ThreadTip::Both;
+            crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2);
+            o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
@@ -522,6 +526,28 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
 /// The Size choice of a form with a size table, and the Pitch choice of the metric ones (an
 /// inch designation names its threads per inch).
 fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggested: &mut Option<String>) {
+    if f == ThreadForm::Unified {
+        let mut labels = f.designations();
+        if !designation.trim().is_empty() && !labels.iter().any(|s| s == designation) {
+            labels.push(designation.clone());
+        }
+        let mut selected = labels.iter().position(|s| s == designation).unwrap_or(labels.len());
+        let before = selected;
+        if selected == labels.len() {
+            labels.push("Select size".into());
+        }
+        form_row(ui, "Size", |ui| {
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            combo(ui, "thread_diameter", &labels, &mut selected);
+        });
+        if selected != before
+            && let Some(label) = labels.get(selected)
+        {
+            *designation = label.clone();
+            *suggested = None;
+        }
+        return;
+    }
     let table = f.sizes();
     let current = parse(f, designation);
     // ISO 7-1 writes the internal taper thread Rc: a size picked for a hole the dialog sized Rc
@@ -647,13 +673,38 @@ fn up_to(inputs: &[SelInput]) -> Option<Value> {
 /// The face's size in the dialog's form, for an automatic size.
 pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
     picks.first().and_then(|sel| match sel {
-        Sel::Face { point, .. } => solidcraft_engine::doc::suggested_thread_in(&crate::open_meshing::session_world(s), *point, o.form).ok(),
+        Sel::Face { body, point, .. } => {
+            let world = crate::open_meshing::session_world(s);
+            let mut state = solidcraft_engine::doc::ModelState::default();
+            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
+            solidcraft_engine::doc::suggested_thread_in(&state, *point, o.form).ok()
+        }
+        _ => None,
+    })
+}
+
+/// The size to fill in for a face automatic sizing has none for: a metric cylinder past the coarse
+/// table (a Ø150 shaft) takes a size with its pitch (`M150x4`), which the Size and Pitch rows then
+/// offer to change. The dialog records it as filled in, apart from the suggestion, so a new face
+/// replaces it but an authored size stays.
+pub(crate) fn large_size(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
+    if o.form != ThreadForm::Metric {
+        return None;
+    }
+    picks.first().and_then(|sel| match sel {
+        Sel::Face { body, point, .. } => {
+            let world = crate::open_meshing::session_world(s);
+            let mut state = solidcraft_engine::doc::ModelState::default();
+            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
+            solidcraft_engine::cmd::large_thread_size(&state, *point)
+        }
         _ => None,
     })
 }
 
 /// A saved thread's dialog: every option as saved, with its picks.
-pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
+pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
+    let kind = &feature.kind;
     let FeatureKind::Thread {
         face,
         designation,
@@ -672,6 +723,9 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         steep_flank,
         // Kept by the edit itself (`timeline.redefine`), not a dialog option.
         old_auto_size: _,
+        additional_faces,
+        target_bodies,
+        single_face_selection,
     } = kind
     else {
         return;
@@ -697,8 +751,36 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
     };
+    let refill = |slot: usize, saved| {
+        let target = kind.thread_target_body(slot);
+        let target_slot = slot != 1 || !matches!(up_to, Some(ThreadLimit::Face(_)));
+        let mut pick = if !target_bodies.is_empty() && target_slot {
+            let body = target.unwrap_or("");
+            feature
+                .face_names
+                .get(slot)
+                .and_then(|name| crate::dialogs::named_refill_on_body(s, body, name, saved))
+                .or_else(|| Some(Sel::Face { body: body.to_string(), index: usize::MAX, point: saved }))
+        } else {
+            feature
+                .face_names
+                .get(slot)
+                .and_then(|name| crate::dialogs::named_refill(s, kind.face_body(), name, saved, false))
+                .or_else(|| face_sel(s, saved))
+        };
+        if let Some(Sel::Face { point, .. }) = &mut pick {
+            *point = solidcraft_engine::doc::restored_thread_pick(saved, *point);
+        }
+        pick
+    };
+    // Face names follow the geometry walk: primary, optional Up To face, then added faces.
+    let added_at = 1 + usize::from(matches!(up_to, Some(ThreadLimit::Face(_))));
     if let Some(inp) = d.inputs.first_mut() {
-        inp.items = face_sel(s, face.0).into_iter().collect();
+        inp.multi = !additional_faces.is_empty() || (!single_face_selection && !target_bodies.is_empty());
+        inp.items = std::iter::once((0, face))
+            .chain(additional_faces.iter().enumerate().map(|(index, pick)| (added_at + index, pick)))
+            .filter_map(|(slot, pick)| refill(slot, pick.0))
+            .collect();
     }
     sync_inputs(&mut d.inputs, &mut d.active, &options);
     // A place no pick finds again (the model changed) is still the place saved.
@@ -712,7 +794,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         set(d, START_END, place(edge_sel(s, from.0), from.0));
     }
     match up_to {
-        Some(ThreadLimit::Face(at)) => set(d, UP_TO, place(face_sel(s, at.0), at.0)),
+        Some(ThreadLimit::Face(at)) => set(d, UP_TO, place(refill(1, at.0), at.0)),
         Some(ThreadLimit::Plane(plane)) => {
             if let Some(sel) = plane_sel(s, plane) {
                 set(d, UP_TO, sel);
@@ -725,6 +807,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         designation: designation.clone().unwrap_or_default(),
         length: length.as_ref().map(expr).unwrap_or_default(),
         suggested: None,
+        filled: None,
         of: Vec::new(),
         options,
     };
@@ -757,7 +840,7 @@ mod contribution_tests {
     fn custom_hole_widget() -> crate::scenario::Harness {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -840,7 +923,7 @@ mod contribution_tests {
     fn a_tapped_hole_is_modelled_with_the_threads_end() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -873,7 +956,7 @@ mod contribution_tests {
     fn a_tapped_holes_drill_is_the_tap_makers_or_one_within_its_range() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -916,7 +999,7 @@ mod contribution_tests {
     fn manual_designation_keeps_keyboard_focus_when_custom_fields_appear() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -1105,7 +1188,7 @@ mod contribution_tests {
     }
 
     #[test]
-    fn expanded_catalogue_rejects_external_taper_holes_and_nonmetric_thread_features() {
+    fn expanded_catalogue_rejects_external_taper_holes_and_mismatched_thread_forms() {
         let (mut app, _) = hole();
         let before = app.session.doc.to_json();
         for name in ["R1/4", "1/4-20 UNF"] {
@@ -1114,7 +1197,7 @@ mod contribution_tests {
         }
         app.run("solid.hole", json!({"position":[10,10,10],"thread":"M8"})).unwrap();
         let before = app.session.doc.to_json();
-        for designation in ["1/4-20 UNC", "G 1/4", "Rp 1/4"] {
+        for designation in ["G 1/4", "Rp 1/4"] {
             for modeled in [false, true] {
                 assert!(app.run("solid.thread", json!({"face":[13.4,10,5],"designation":designation,"modeled":modeled})).is_err());
                 assert_eq!(app.session.doc.to_json(), before);
@@ -1132,7 +1215,7 @@ mod contribution_tests {
         let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
         // The thread is metric (the M8 it was made as): a unified designation is not one of its.
         let error = reopened.model.results.last().unwrap().error.clone().unwrap();
-        assert!(error.contains("unknown metric thread `1/4-20 UNC`"), "{error}");
+        assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
     }
 
     #[test]

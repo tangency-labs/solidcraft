@@ -1974,6 +1974,10 @@ enum Rec {
     Deferred(SolidError),
 }
 
+/// The status upstream's `sm_SurfaceDropPoint` returns when no tolerance drops the point
+/// (`SM_ERR`), which the Rust side answers with `None`.
+const SM_ERR_DROP_MISS: f64 = 1001.0;
+
 /// `Ok(value)` or `Err(status)` of a kernel result; an unported callee returns the
 /// deferral from the enclosing function.
 macro_rules! try_status {
@@ -2088,7 +2092,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 v3(*pnt),
                 *tol
             )) {
-                Ok(sols) => {
+                Ok(Some(sols)) => {
                     o.extend([0.0, sols.len() as f64]);
                     for n in 0..sols.len() {
                         if let Some(sol) = sols.get(n) {
@@ -2100,6 +2104,8 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                         }
                     }
                 }
+                // the miss is upstream's `SM_ERR` ("Unable to drop point")
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0]),
                 Err(st) => o.extend([st, 0.0]),
             }
         }
@@ -2126,13 +2132,15 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 *tol,
             );
             match try_status!(r) {
-                Ok(x) => {
+                Ok(Some(x)) => {
                     o.push(0.0);
                     // (the C++ dumps the SmBSplineCurve outputs' NURBs)
                     dump_bcurve(&mut o, x.curve_3d.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface1_uv_curve.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface2_uv_curve.as_ref().and_then(b_spline_part));
                 }
+                // a point that drops nowhere: upstream returns the drop's `SM_ERR`
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0, 0.0, 0.0]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }
             o.extend([d.x, d.y, d.z]);
@@ -3558,6 +3566,97 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// The trims whose golden moved from a success to a refusal when
+    /// `fillet_statuses_pass_on` and `fillet_trim_status` were removed (WR-661, WR-604).
+    /// Upstream ignored the failed step and returned success with only the components
+    /// trimmed before it. Each case asks for a trim that cannot be made, which this test
+    /// checks against the numbers in the returned error: a parameter outside the curve's
+    /// or surface's domain, two intervals that do not overlap (one may be the empty
+    /// "inside out" extent that main stored as an edge interval), or a zero-width trim.
+    #[test]
+    fn wr661_moved_trims_ask_for_a_trim_that_does_not_exist() {
+        use solidcore::error::geom::GeomFailure;
+        use solidcore::error::nurbs::{BSplineFailure, NurbsFailure};
+        use solidcore::error::Reason;
+        const MOVED: [&str; 24] = [
+            "fb_trim_outside",
+            "fb_trim_point",
+            "gen0139",
+            "gen0185",
+            "gen0245",
+            "gen0438",
+            "gen0476",
+            "gen0829",
+            "gen1351",
+            "gen1440",
+            "gen1452",
+            "gen1477",
+            "gen1609",
+            "gen1626",
+            "gen1647",
+            "gen1709",
+            "trim_disjoint_rail_interval",
+            "trim_disjoint_surface_domain",
+            "trim_failed_center_line",
+            "trim_failed_other1",
+            "trim_failed_other2",
+            "trim_failed_rail0",
+            "trim_failed_rail1",
+            "trim_failed_surface_point",
+        ];
+        for name in MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let Inputs::Fb {
+                model,
+                query: Query::Trim { g, interval },
+            } = &inputs
+            else {
+                panic!("{name}: not a trim");
+            };
+            let mut m = RustModel::build(model).expect("model");
+            let g = m.geom(*g).expect("geometry");
+            let mut ivl = Extent1d::from_min_max(interval[0], interval[1]);
+            let e = m
+                .fb
+                .trim_geom(&m.k, g, &mut ivl)
+                .expect_err("the trim is refused");
+            // The margin by which the request misses must be well beyond any snap
+            // the trims apply (`100 * scaled_zero` on a B-spline, `EFF_ZERO_SQRT` on
+            // a surface iso), relative to the domain's size: a miss of a few ulps
+            // would be a snapping defect, not an impossible request.
+            let beyond_snap = |margin: f64, scale: f64| {
+                let snap = solidcore::math::EFF_ZERO_SQRT * scale.max(1.0);
+                println!("{name}: misses by {margin:e} (snap {snap:e})");
+                assert!(margin > snap, "{name}: misses by only {margin:e}");
+            };
+            match e.failure().map(|f| &f.reason) {
+                Some(Reason::Nurbs(NurbsFailure::BSpline(BSplineFailure::ParameterOutside {
+                    parameter,
+                    lo,
+                    hi,
+                }))) => beyond_snap(
+                    (lo - parameter).max(parameter - hi),
+                    (hi - lo).abs().max(parameter.abs()),
+                ),
+                Some(Reason::Geom(GeomFailure::Disjoint { a, b })) => beyond_snap(
+                    (a[0] - a[1])
+                        .max(b[0] - b[1])
+                        .max(b[0] - a[1])
+                        .max(a[0] - b[1]),
+                    a.iter().chain(b.iter()).fold(0.0_f64, |s, x| s.max(x.abs())),
+                ),
+                _ => {
+                    assert!(
+                        matches!(e, SolidError::InvalidInput { .. }),
+                        "{name}: unexpected refusal {e:?}"
+                    );
+                    assert_eq!(interval[0], interval[1], "{name}: {e:?}");
+                }
+            }
+        }
+    }
+
     /// Runs chosen cases through the Rust side, for memory checking: `cargo test -p
     /// goldens --lib --no-run`, then the test binary under valgrind with `--ignored
     /// case_sample --nocapture`. `CASE_SEEDS` (default 2000) sizes the case list as `--seeds` does;
@@ -3680,5 +3779,45 @@ mod tests {
         ] {
             assert!(seen.contains(&op), "op {op} never generated");
         }
+    }
+}
+
+/// #21383: the 7 `EvaluateMate` rows the G1R change moved. Each point lies outside
+/// the mate's domain, so `evaluate_mate` returns `evaluate_point_on_extended_surface` on
+/// the mate's NURB: a fresh G1R extension that `crate::g1r_cert::certify_unbounded`
+/// replays step by step, certifies G1 across each grown side with its input kept bit for
+/// bit, and requires to be the evaluator's surface bit for bit.
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::certify_unbounded;
+
+    const MOVED: [&str; 7] = ["gen0003", "gen0240", "gen0242", "gen0367", "gen0787", "gen1470", "gen1816"];
+
+    #[test]
+    fn each_moved_row_evaluates_a_certified_g1_extension() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::EvaluateMate { surface, uv } = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not EvaluateMate", c.name)
+            };
+            let s = surface_of(&surface).unwrap();
+            assert!(!s.natural_uv_domain_with_nurb(&k).unwrap().contains_point(Point2::new(uv[0], uv[1]), 0.0), "{}", c.name);
+            let nurb = match s.kind_with_nurb(&k).unwrap() {
+                SurfaceKind::BSpline(b) => b.gw_nurb().unwrap().clone(),
+                SurfaceKind::SurfOfRevolution(r) => r.base().gw_nurb().unwrap().clone(),
+                SurfaceKind::SurfOfExtrusion(e) => e.base().gw_nurb().unwrap().clone(),
+                _ => panic!("{}: mate kind", c.name),
+            };
+            let mixed = certify_unbounded(&nurb, uv[0], uv[1]).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+            assert!(mixed > 0, "{}: no mixed-ratio step", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }

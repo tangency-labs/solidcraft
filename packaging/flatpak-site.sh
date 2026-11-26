@@ -12,7 +12,7 @@ app_id=io.tangencylabs.solidcraft
 # repository, marked end-of-life with a rebase to $app_id once a release under $app_id has been
 # imported. Until then (the latest release is still from before the move), the release's bundles
 # carry an old id and are published as they are.
-legacy_ids=(ai.storyteller.solidcraft ai.storyteller.solvecraft)
+legacy_ids=(ai.storyteller.solidcraft)
 if [ -z "$tag" ]; then
   tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
     --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
@@ -40,10 +40,24 @@ base_url="${PAGES_BASE_URL%/}"
 # HTTPS (the remote URL is stored by every client that adds it).
 base_url="https://${base_url#*://}"
 previous_url="$base_url/flatpak/repo"
-if curl --fail --silent --location --output /dev/null "$previous_url/summary"; then
+if curl --fail --silent --location --retry 3 --retry-delay 2 --retry-connrefused --output /dev/null "$previous_url/summary"; then
   ostree --repo="$repo_dir" remote add --no-gpg-verify previous "$previous_url"
-  ostree --repo="$repo_dir" pull --mirror previous
+  # Transient server errors (such as intermittent HTTP 503s from the Pages host) must not fail
+  # the whole deployment; retry up to 5 times (#22154).
+  pulled=0
+  for attempt in 1 2 3 4 5; do
+    if ostree --repo="$repo_dir" pull --network-retries=5 --mirror previous; then
+      pulled=1
+      break
+    fi
+    echo "warning: ostree pull failed (attempt $attempt/5); retrying in $((attempt * 3))s..." >&2
+    sleep $((attempt * 3))
+  done
   ostree --repo="$repo_dir" remote delete previous
+  if [ "$pulled" -eq 0 ]; then
+    echo "error: failed to mirror previous repository from $previous_url after 5 attempts" >&2
+    exit 1
+  fi
 fi
 for arch in x86_64 aarch64; do
   asset="solidcraft-$version-linux-$arch.flatpak"
@@ -80,8 +94,7 @@ done
 # `flatpak update` then offers existing installs of an old id the move to the new one, and
 # Flatpak moves their ~/.var/app data folder along. The mark is a new commit on the old ref (the
 # same app, so a skipped update changes nothing); it is made once and mirrored by later runs. A
-# ref already marked with a rebase to an older id (ai.storyteller.solvecraft pointed at
-# ai.storyteller.solidcraft) is marked again, so every old install moves straight to $app_id.
+# ref is marked again if its rebase points elsewhere, so every old install moves to $app_id.
 for arch in x86_64 aarch64; do
   new_ref="app/$app_id/$arch/stable"
   # Only rebase to an app the repository has: a release from before the move has no new ref.
@@ -118,7 +131,4 @@ flatpak remote-add --user --if-not-exists solidcraft $base_url/flatpak/solidcraf
 flatpak install --user solidcraft $published_id
 flatpak run $published_id</pre></main></body></html>
 HTML
-# Compatibility shim (docs/compatibility.md): links and instructions from before the rename point
-# at solvecraft.flatpakrepo. Existing remotes keep working either way: they store the repo URL.
-cp "$site/flatpak/solidcraft.flatpakrepo" "$site/flatpak/solvecraft.flatpakrepo"
 touch "$site/.nojekyll"

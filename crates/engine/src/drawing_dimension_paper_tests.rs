@@ -1,7 +1,7 @@
 use solidcore_record::Vec3;
 use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, ModelPoint, Silhouette, Status};
+use solidcraft_doc::drawing::measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
 use solidcraft_geom::paper::Scene;
 use solidcraft_geom::paper::line::LineGroup;
@@ -37,6 +37,7 @@ fn read(points: &[[f64; 2]], text: &str) -> Resolved {
         status: Status::Ok,
         measured: None,
         text: Some(text.into()),
+        number: None,
         label: None,
         members: Vec::new(),
         exact: true,
@@ -286,6 +287,65 @@ fn a_cones_angle_is_drawn_between_its_silhouettes() {
     assert!((between - 120f64.to_radians()).abs() < 1e-9, "{tips:?}");
 }
 
+/// The centre of a group's one line of level text, and whether anything else in the group, or a line
+/// from `vertex` out along `rays`, comes into its box. Each piece is checked at 200 points along it.
+fn text_crossed(group: &Group, vertex: Vec2, rays: [Vec2; 2]) -> (Vec2, bool) {
+    let run = runs(group)[0];
+    let half = Vec2::new(measured(&run.text), TEXT_MM) * 0.5;
+    let centre = run.origin + half;
+    let inside = |p: Vec2| (p.x - centre.x).abs() < half.x && (p.y - centre.y).abs() < half.y;
+    let (mut lines, _) = parts(group);
+    lines.extend(rays.map(|u| vec![vertex, vertex + u * 100.0]));
+    let lines_in =
+        lines.iter().flat_map(|l| l.iter().zip(l.iter().skip(1))).any(|(a, b)| (0..=200).any(|i| inside(*a + (*b - *a) * (i as f64 / 200.0))));
+    let arrows_in = group.items.iter().filter(|item| matches!(item, Item::Fill { .. })).any(|item| {
+        let b = fill_box(item);
+        b.max.x > centre.x - half.x && b.min.x < centre.x + half.x && b.max.y > centre.y - half.y && b.min.y < centre.y + half.y
+    });
+    (centre, lines_in || arrows_in)
+}
+
+/// A narrow angle's number that doesn't fit inside it goes outside, beyond the arrow at its
+/// counter-clockwise end, a gap past the arrow's tail along the arc's tangent, so neither the part's
+/// edges nor the dimension's own lines cross it (#13937): the issue's wedge, a 10° corner at 1:1 with its
+/// "10.00°" 10 mm out. A cone as narrow does the same; a right angle keeps its number in the middle, and a
+/// placed number keeps its place.
+#[test]
+fn a_narrow_angles_number_goes_outside_the_angle() {
+    let angle = || DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: false };
+    let ten = 10f64.to_radians();
+    let end = Vec2::from_angle(ten);
+    let wedge = [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0 * ten.tan()], [0.0, 0.0]];
+    let group = drawn(angle(), 10.0, &wedge, "10.00°", "1:1");
+    let (centre, crossed) = text_crossed(&group, Vec2::ZERO, [Vec2::X, end]);
+    // From the tip at 10°, along the tangent there: a tail of 2 arrows, a gap and the box's half reach.
+    let (out, half) = (end.perp(), Vec2::new(measured("10.00°"), TEXT_MM) * 0.5);
+    let want = end * 10.0 + out * (2.0 * SIZES.arrow + SIZES.gap + half.x * out.x.abs() + half.y * out.y.abs());
+    assert!(close(centre.x, want.x) && close(centre.y, want.y), "{centre:?} for {want:?}");
+    assert!(!crossed, "{:?}", parts(&group));
+
+    // A cone 10° across, its silhouettes running out from its apex: the same.
+    let (c, s) = ((ten / 2.0).cos(), (ten / 2.0).sin());
+    let sides = [[0.0, 0.0], [50.0 * c, -50.0 * s], [0.0, 0.0], [50.0 * c, 50.0 * s]];
+    let group = drawn(DimensionKind::Cone { face: face() }, 10.0, &sides, "10.0°", "1:1");
+    let rays = [Vec2::new(c, -s), Vec2::new(c, s)];
+    let (centre, crossed) = text_crossed(&group, Vec2::ZERO, rays);
+    assert!(!crossed && centre.dot(rays[1].perp()) > 0.0, "beyond the counter-clockwise side: {centre:?} {:?}", parts(&group));
+
+    // A right angle 20 mm out has room: its number stays in the middle.
+    let square = [[10.0, 0.0], [50.0, 0.0], [0.0, 10.0], [0.0, 50.0]];
+    let (centre, _) = text_crossed(&drawn(angle(), 20.0, &square, "90.00°", "1:1"), Vec2::ZERO, [Vec2::X, Vec2::new(0.0, 1.0)]);
+    let middle = Vec2::new(1.0, 1.0) * (20.0 * FRAC_1_SQRT_2);
+    assert!(close(centre.x, middle.x) && close(centre.y, middle.y), "{centre:?}");
+
+    // A placed number keeps its place in the narrow wedge: the offset out towards it.
+    let placed = dimension(angle(), 10.0, TextPlace::At([20.0, 1.0]));
+    let group = laid(&placed, &read(&wedge, "10.00°"), &view_at("1:1")).unwrap().group;
+    let (centre, _) = text_crossed(&group, Vec2::ZERO, [Vec2::X, end]);
+    let towards = Vec2::new(20.0, 1.0).normalized().unwrap() * 10.0;
+    assert!(close(centre.x, towards.x) && close(centre.y, towards.y), "{centre:?}");
+}
+
 /// A chain is one line of frames at one offset: a shared extension line is drawn once, whichever
 /// point is further from the line.
 #[test]
@@ -419,64 +479,6 @@ fn ordinate_numbers_that_would_overlap_move_apart_and_their_leaders_jog() {
     let (centre, two) = middle(30.0, 31.0);
     assert!(two == 2 && close(centre, 30.5), "{centre} of {two}");
     assert!(lines.iter().any(|l| l.len() == 2 && close(l[0].x, 0.0)), "the origin's has room: {lines:?}");
-}
-
-/// Texts at least `pitch` apart, moved as little as can be: those with room stay, those that would
-/// overlap move apart, centred on their ideal places, whatever their number.
-#[test]
-fn spread_moves_only_what_would_overlap() {
-    let pitch = 4.5;
-    assert_eq!(spread(&[], pitch), Vec::<f64>::new());
-    assert_eq!(spread(&[7.0], pitch), [7.0]);
-    assert_eq!(spread(&[0.0, 10.0, 30.0], pitch), [0.0, 10.0, 30.0], "room for all");
-    assert_eq!(spread(&[0.0, 1.0], pitch), [-1.75, 2.75], "a pair, about its middle");
-    assert_eq!(spread(&[5.0, 5.0, 5.0], pitch), [0.5, 5.0, 9.5], "three at one place");
-    // A block that grows into a neighbour takes it in: 0, 1 and 4 pool round 5/3.
-    let pooled = spread(&[0.0, 1.0, 4.0, 20.0], pitch);
-    let expected = [5.0 / 3.0 - pitch, 5.0 / 3.0, 5.0 / 3.0 + pitch, 20.0];
-    assert!(pooled.iter().zip(expected).all(|(a, b)| close(*a, b)), "{pooled:?}");
-    let all = spread(&[3.0; 65], pitch);
-    assert!(close(all.iter().sum::<f64>() / 65.0, 3.0) && all.windows(2).all(|w| close(w[1] - w[0], pitch)), "{all:?}");
-}
-
-/// Any places, in order, at any spacing: as many places come back, in the same order, at least the
-/// pitch apart, finite, each run of touching texts centred on its members' ideal places, and a text
-/// that touches none where it was.
-#[test]
-fn spread_fuzz_keeps_its_rules() {
-    let mut state = 0x1305_2c0d_u64;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    for round in 0..4000 {
-        let count = match round % 4 {
-            0 => 0,
-            1 => 1,
-            2 => 65,
-            _ => (next() % 12) as usize,
-        };
-        let pitch = [0.1, 1.0, 4.5, 30.0][(next() % 4) as usize];
-        let spacing = [0.0, 0.01, 1.0, 5.0, 50.0][(next() % 5) as usize];
-        let mut ideal: Vec<f64> = (0..count).map(|_| (next() % 1000) as f64 * spacing * 0.01 - 3.0).collect();
-        ideal.sort_by(f64::total_cmp);
-        let got = spread(&ideal, pitch);
-        assert_eq!(got.len(), ideal.len());
-        assert!(got.iter().all(|x| x.is_finite()), "{got:?}");
-        assert!(got.windows(2).all(|w| w[1] - w[0] >= pitch - 1e-9), "{ideal:?} -> {got:?}");
-        // Runs of texts that touch, each centred on its members' ideal places.
-        let mut from = 0;
-        for i in 1..=got.len() {
-            if i == got.len() || got[i] - got[i - 1] > pitch + 1e-9 {
-                let (a, b) = (&ideal[from..i], &got[from..i]);
-                let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
-                assert!((mean(a) - mean(b)).abs() < 1e-6, "{a:?} -> {b:?}");
-                from = i;
-            }
-        }
-    }
 }
 
 /// A chain as long as a chain goes, with tight spans between its points, stays in one group.
@@ -994,24 +996,6 @@ fn hostile_points_and_offsets_never_panic() {
     }
 }
 
-/// A straight line inside a longer one along it is drawn by the longer one; a line that runs past
-/// its ends, beside it or across it isn't, and a bent line only by the same bent line.
-#[test]
-fn a_line_inside_a_longer_one_along_it_is_covered() {
-    let p = |x: f64, y: f64| Vec2::new(x, y);
-    let long = [p(0.0, 1.0), p(0.0, 20.0)];
-    assert!(covered(&[p(0.0, 1.0), p(0.0, 13.0)], &long));
-    assert!(covered(&[p(0.0, 20.0), p(0.0, 5.0)], &long), "either way round");
-    assert!(covered(&long, &long));
-    assert!(!covered(&[p(0.0, 1.0), p(0.0, 21.0)], &long), "past its end");
-    assert!(!covered(&[p(0.5, 1.0), p(0.5, 13.0)], &long), "beside it");
-    assert!(!covered(&[p(-1.0, 5.0), p(1.0, 5.0)], &long), "across it");
-    assert!(!covered(&long, &[p(0.0, 1.0), p(0.0, 13.0)]), "the shorter doesn't draw the longer");
-    let bent = [p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)];
-    assert!(covered(&bent, &bent) && !covered(&[p(0.0, 0.0), p(5.0, 5.0)], &bent));
-    assert!(!covered(&[p(0.0, 0.0), p(0.0, 0.0)], &[p(1.0, 0.0), p(1.0, 0.0)]), "two points apart");
-}
-
 /// A line inside a longer one along it leaves the longer one alone, whichever is drawn first: no
 /// layout sends the shorter one second today, so only this shows that order.
 #[test]
@@ -1021,7 +1005,7 @@ fn a_line_inside_a_longer_one_is_drawn_once_whichever_comes_first() {
     for order in [[long.clone(), short.clone()], [short, long.clone()]] {
         let mut drawn = Drawn::default();
         order.into_iter().for_each(|line| drawn.line(LineRole::Extension, line));
-        assert!(drawn.lines.len() == 1 && same_line(&drawn.lines[0], &long), "{:?}", drawn.lines);
+        assert_eq!(drawn.lines, std::slice::from_ref(&long));
         assert_eq!(drawn.laid.lines, [(LineRole::Extension, long.clone())], "the layout keeps the longer line too");
     }
 }

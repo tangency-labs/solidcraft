@@ -23,7 +23,6 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore::blend::fillet_removal::delete_fillet_face;
-use solidcore::kernel::Kernel;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::Brep;
 use solidcore::Result as SolidResult;
@@ -99,7 +98,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
         // Rust reader (no C++ export or owner reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
@@ -150,6 +149,8 @@ impl UnitDiff for Runner {
 mod exact_only_tests {
     use super::{path, Inputs};
     use solidcore::blend::fillet_removal::FilletRemoval;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{ErrorKind, SolidError};
     use solidcore::kernel::Kernel;
     use solidcore::topology::brep::p1 as bp1;
     use solidcore::topology::face::p2 as face2;
@@ -199,15 +200,20 @@ mod exact_only_tests {
     }
 
     /// `SmFilletRemoval(face, face tolerance)` on face `index` of `file`, exact only or
-    /// not, with editing enabled: whether it succeeded, `NotExact`, and the solid's
-    /// snapshot before and after.
+    /// not, with editing enabled: its error, `NotExact`, and the solid's snapshot before
+    /// and after.
     #[allow(clippy::type_complexity)]
     fn remove(
         file: &str,
         index: usize,
         exact_only: bool,
-    ) -> (bool, bool, (usize, usize, Vec<[f64; 3]>), (usize, usize, Vec<[f64; 3]>)) {
-        let mut k = Kernel::default();
+    ) -> (
+        Option<SolidError>,
+        bool,
+        (usize, usize, Vec<[f64; 3]>),
+        (usize, usize, Vec<[f64; 3]>),
+    ) {
+        let mut k = crate::runner_kernel();
         let mut b = read(&mut k, file);
         let f = bp1::faces(&b, None).unwrap()[index];
         let before = snapshot(&b);
@@ -217,7 +223,7 @@ mod exact_only_tests {
         removal.set_exact_only(exact_only);
         let r = removal.remove_face(&mut k, &mut b);
         b.refresh_cached_topology();
-        (r.is_ok(), removal.not_exact(), before, snapshot(&b))
+        (r.err(), removal.not_exact(), before, snapshot(&b))
     }
 
     #[test]
@@ -225,17 +231,27 @@ mod exact_only_tests {
         let mut refused = Vec::new();
         let mut exact = 0;
         for file in FILES {
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let count = bp1::faces(&read(&mut k, file), None).unwrap().len();
             for index in 0..count {
-                let (ok, not_exact, before, after) = remove(file, index, true);
+                let (error, not_exact, before, after) = remove(file, index, true);
+                let ok = error.is_none();
                 if not_exact {
                     assert!(!ok, "{file} face {index}: not exact but removed");
                     assert_eq!(after, before, "{file} face {index}: refused but changed");
+                    // every not-exact refusal is class 130, a refusal, never a stage failure
+                    let e = error.unwrap();
+                    assert_eq!(e.kind(), ErrorKind::RemovalNotExact, "{file} face {index}: {e}");
+                    assert!(e.is_refusal() && !e.is_defect(), "{file} face {index}: {e}");
+                    assert_ne!(
+                        e.blend_failure(),
+                        Some(&BlendFailure::StageFailed),
+                        "{file} face {index}"
+                    );
                     refused.push(format!("{file} face {index}"));
                 } else if ok {
-                    let (default_ok, _, _, default_after) = remove(file, index, false);
-                    assert!(default_ok, "{file} face {index}: exact only removed, default not");
+                    let (default_error, _, _, default_after) = remove(file, index, false);
+                    assert!(default_error.is_none(), "{file} face {index}: exact only removed, default not");
                     assert_eq!(after.0, default_after.0, "{file} face {index}: faces");
                     assert_eq!(after.1, default_after.1, "{file} face {index}: edges");
                     exact += 1;
@@ -245,5 +261,53 @@ mod exact_only_tests {
         eprintln!("exact-only: {exact} removed, refused as not exact: {refused:?}");
         assert!(!refused.is_empty(), "no fixture face was refused as not exact");
         assert!(exact > 0, "no fixture face was removed exactly");
+    }
+}
+
+/// WR-605's ring test on a face that is no ring: `nurb_fillet.smb` face 7 (the row
+/// `nurb_fillet_face7`) has two closed manifold rails that are not tangent, so it is no
+/// ring and is refused. The refusal leaves the B-rep's sampled geometry (every edge
+/// curve, edge use UV trim and face surface, as the row records it) bit for bit as the
+/// four-sided removal's own refusal leaves it: the ring test reads the rails' tangency,
+/// which makes UV trim curves, on a copy standing for the B-rep.
+#[cfg(test)]
+mod ring_test_tests {
+    use super::{geometry, path, Inputs};
+    use solidcore::blend::fillet_removal::{delete_fillet_face, FilletRemoval};
+    use solidcore::topology::brep::p1 as bp1;
+    use solidcore::topology::face::p2 as face2;
+
+    /// Face 7 of `nurb_fillet.smb` removed by `DeleteFilletFace` (`delete`) or by the
+    /// four-sided removal alone: asserts it is refused, and gives the sampled geometry
+    /// after.
+    fn refused(delete: bool) -> Vec<f64> {
+        let i = Inputs {
+            file: "Solids/nurb_fillet.smb".into(),
+            ..Inputs::default()
+        };
+        let mut k = crate::runner_kernel();
+        let mut b = crate::own_reader::read_file_rebuild(&mut k, &path(&i).unwrap(), false)
+            .unwrap()
+            .unwrap();
+        let f = bp1::faces(&b, None).unwrap()[7];
+        b.set_editing_enabled(true);
+        let r = if delete {
+            delete_fillet_face(&mut k, &mut b, f, None)
+        } else {
+            let tol = face2::tolerance(&b, f).unwrap();
+            FilletRemoval::new(f, tol).remove_face(&mut k, &mut b)
+        };
+        b.refresh_cached_topology();
+        assert!(r.is_err(), "face 7 removed");
+        geometry(&k, &b, true).unwrap()
+    }
+
+    #[test]
+    fn a_face_that_is_no_ring_is_refused_as_the_four_sided_removal_refuses_it() {
+        let (delete, four_sided) = (refused(true), refused(false));
+        assert_eq!(delete.len(), four_sided.len());
+        for (i, (a, b)) in delete.iter().zip(&four_sided).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "sample {i}: {a} != {b}");
+        }
     }
 }

@@ -107,9 +107,6 @@ fn options(prefix: &'static str) -> Options<'static, Fake> {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: "Search",
-            no_results: "Nothing matches",
-            restore_defaults: "Restore Defaults",
             restore_defaults_hint: "Reset this page",
         },
         sidebar_footer: None,
@@ -178,9 +175,16 @@ fn the_window_switches_page_searches_and_highlights_and_cancel_restores_the_snap
 
     frame(&ctx, &mut fake, key(egui::Key::Enter));
     assert_eq!((fake.window.section, fake.window.filter.as_str()), (0, ""), "Enter opens the match's page and leaves search");
+    let first_draw = settings_search::current_reveal(&ctx).map(|r| r.until);
     frame(&ctx, &mut fake, Vec::new());
     assert_eq!(fake.drawn, ["alpha"]);
     assert!(registry::handle_at("test:revealed").is_some(), "the opened row is outlined");
+    // The outline's time starts when the row first draws, and later frames keep it.
+    let first_draw = first_draw.filter(|t| !t.is_nan()).or_else(|| settings_search::current_reveal(&ctx).map(|r| r.until));
+    frame(&ctx, &mut fake, Vec::new());
+    assert!(first_draw.is_some_and(|t| !t.is_nan()), "the row's first draw starts the outline's time");
+    assert_eq!(fake.window.reveal.as_ref().map(|r| r.until), first_draw, "the window keeps the time the row's first draw set");
+    assert_eq!(settings_search::current_reveal(&ctx).map(|r| r.until), first_draw);
 
     fake.values.grid = true;
     frame(&ctx, &mut fake, Vec::new());
@@ -301,4 +305,110 @@ fn invalid_draft_fields_keep_ok_and_apply_editable_until_corrected() {
         assert!(fake.values.grid);
         assert_eq!(fake.window.open, button == Button::Apply);
     }
+}
+
+/// #15908: the footer's Restore Defaults is drawn like Cancel, Apply and OK: the same rounded corners
+/// on a frame of its own, not the hairline square outline a frameless button shows.
+#[test]
+fn restore_defaults_is_drawn_like_the_footer_buttons() {
+    let (ctx, mut fake) = opened();
+    registry::clear_handles();
+    let output = crate::test_support::raw_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            show(ui.ctx(), &mut fake, PAGES, &options("test"), |_| {});
+        },
+    );
+    /// The corner radius of the rectangle drawn over `rect`: on its centre, about its size.
+    fn corners(shape: &egui::Shape, rect: egui::Rect) -> Option<egui::CornerRadius> {
+        match shape {
+            egui::Shape::Rect(r)
+                if (r.rect.center() - rect.center()).length() < 2.0
+                    && r.rect.width() <= rect.width() + 16.0
+                    && r.rect.height() <= rect.height() + 16.0
+                    && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0) =>
+            {
+                Some(r.corner_radius)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| corners(s, rect)),
+            _ => None,
+        }
+    }
+    let of = |name: &str| {
+        let rect = registry::rect_of(name).unwrap_or_else(|| panic!("{name} is published"));
+        output.shapes.iter().find_map(|clipped| corners(&clipped.shape, rect)).unwrap_or_else(|| panic!("{name} is drawn on a frame"))
+    };
+    assert_eq!(of("test:defaults"), of("test:cancel"), "Restore Defaults has Cancel's corners");
+}
+
+/// Every `prefs.` id the kit's own code names (outside its tests) is in solidcraft-ui-text's
+/// English catalogue, so a host that shows the kit's Preferences window and pages gets the words
+/// from the shared crate rather than from its own catalogue (#17904).
+#[test]
+fn kit_prefs_ids_are_in_ui_text_for_english() {
+    use std::collections::BTreeSet;
+    use syn::visit::Visit;
+
+    /// `#[cfg(test)]` on an item: its literals are test fixtures, not words the kit shows.
+    fn is_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| a.path().is_ident("cfg") && a.meta.require_list().is_ok_and(|list| list.tokens.to_string() == "test"))
+    }
+
+    /// Collects the `prefs.` string literals of the items it visits, skipping test items.
+    #[derive(Default)]
+    struct PrefsIds(BTreeSet<String>);
+
+    impl<'ast> Visit<'ast> for PrefsIds {
+        fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_item_mod(self, item);
+            }
+        }
+        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_item_fn(self, item);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_impl_item_fn(self, item);
+            }
+        }
+        fn visit_lit_str(&mut self, lit: &'ast syn::LitStr) {
+            let value = lit.value();
+            if value.starts_with("prefs.") {
+                self.0.insert(value);
+            }
+        }
+    }
+
+    fn walk(dir: &std::path::Path, ids: &mut PrefsIds, files: &mut usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, ids, files);
+            } else if path.extension().is_some_and(|x| x == "rs") && !path.to_string_lossy().ends_with("_tests.rs") {
+                let source = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                let file = syn::parse_file(&source).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                ids.visit_file(&file);
+                *files += 1;
+            }
+        }
+    }
+
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut ids = PrefsIds::default();
+    let mut files = 0;
+    walk(&src, &mut ids, &mut files);
+    assert!(files > 0 && !ids.0.is_empty(), "the kit's sources name prefs ids to check");
+    let english: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(solidcraft_ui_text::SHARED_ENGLISH).expect("the English catalogue is a JSON object");
+    let missing: Vec<&String> = ids.0.iter().filter(|id| !english.contains_key(id.as_str())).collect();
+    assert!(missing.is_empty(), "not in crates/ui-text/locales/en.json: {missing:?}");
 }

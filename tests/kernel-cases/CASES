@@ -362,7 +362,7 @@ fillets/2811-fillet-rib-roots
 fillets/2852-fillet-outer-round-concentric-with-inner
 fillets/2852-fillet-outer-round-r30-past-inner-round-refused
 fillets/2893-chamfer-distance-and-angle-past-the-wall-refused
-fillets/2893-chamfer-two-distances-across-the-whole-top-refused
+fillets/2893-chamfer-two-distances-across-the-whole-top-is-a-cone
 fillets/2893-chamfer-two-distances-elliptical-rim
 fillets/2893-chamfer-two-distances-past-the-bottom
 fillets/2893-chamfer-two-distances-past-the-top-refused

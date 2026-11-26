@@ -32,7 +32,7 @@
 //!   definition: the fill and its certificates are made anew and the net must be its patch,
 //!   number for number.
 //! - [`MixedDefinition`]: one of a Mixed corner's two faces, by its rule: the bicubically
-//!   blended Coons patch in R^4 (bilinear for chamfers) of its four sides and their ribbons
+//!   blended Coons patch in R^4 (the chamfer's for chamfers) of its four sides and their ribbons
 //!   ([`crate::blend::blend_corner::mixed::algebra::coons`]), the sides made from the two
 //!   trimmed blends (the trimline and the blend's cross partial along it) and the conic
 //!   inflection X-V in T. Its supports are the two blends and T. Re-certified by running
@@ -53,7 +53,9 @@
 use std::sync::Arc;
 
 use crate::blend::blend_corner::mixed::algebra::{self, Crv, Side, V4};
-use crate::blend::blend_setback::{containment_kept, fill_hole, Face, Fill, Round};
+use crate::blend::blend_setback::{
+    containment_kept, fill_hole_counted, Face, Fill, FillStats, Round,
+};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -174,6 +176,10 @@ pub struct SetbackFill {
     pub(crate) convex: bool,
     /// The certified containment: the most the fill stands past a face (at most `tol`).
     pub(crate) containment: f64,
+    /// Whether the fill was built with the convexity certificate (the growth's, #13775):
+    /// the refill re-runs the rule at the same certification, so the degree it picks
+    /// matches the fill's own.
+    pub(crate) certified: bool,
 }
 
 /// One of a Setback's fill patches: the fill's definition (shared by its patches) and the
@@ -187,7 +193,7 @@ pub struct SetbackDefinition {
 }
 
 /// One of a Mixed corner's faces by its rule: the Coons patch of its four sides (`c0`, `c1`,
-/// `d0`, `d1`), bicubically blended (or bilinear, for chamfers), turned (`u`, `v` swapped)
+/// `d0`, `d1`), bicubically blended (or the chamfer's, G0), turned (`u`, `v` swapped)
 /// where its normal must leave the material; the two trimmed blends and T, its supports; the
 /// trimline's side, the blend it lies on and its uv on it; the conic X-V's side in T.
 #[derive(Debug, Clone)]
@@ -198,7 +204,7 @@ pub struct MixedDefinition {
     pub(crate) common: Box<Surface>,
     /// The four sides and their ribbons.
     pub(crate) sides: Box<[Side; 4]>,
-    /// Whether the rule is the bilinear Coons patch (chamfers, G0).
+    /// Whether the rule is the chamfer's Coons patch ([`algebra::coons_chamfer`], G0).
     pub(crate) bilinear: bool,
     /// Whether the patch is turned.
     pub(crate) transposed: bool,
@@ -537,6 +543,7 @@ impl SetbackFill {
         tol: f64,
         convex: bool,
         containment: f64,
+        certified: bool,
     ) -> Result<Self> {
         if !(order == 1 || order == 2)
             || !(tol.is_finite() && tol > 0.0)
@@ -567,6 +574,7 @@ impl SetbackFill {
             tol,
             convex,
             containment,
+            certified,
         })
     }
 
@@ -577,7 +585,7 @@ impl SetbackFill {
     ///
     /// The rule's refusal; `InvalidInput` for a fill that stands past a face farther than
     /// the tolerance; those of the rule's evaluations.
-    pub fn refill(&self, k: &Kernel) -> Result<Fill> {
+    pub fn refill(&self, k: &Kernel, certify: bool) -> Result<Fill> {
         let rounds: Vec<Round<'_>> = self
             .rounds
             .iter()
@@ -588,7 +596,19 @@ impl SetbackFill {
                 corner_above: r.corner_above,
             })
             .collect();
-        let fill = fill_hole(k, &self.faces, &rounds, self.order, self.tol).map_err(|r| r.error)?;
+        // the refill verifies the definition's geometry (it rebuilds the same patches):
+        // a fill built with the certificate must refill with it (the degree it picked),
+        // and a fill built without it (the growth's fallback, #13775) without
+        let fill = fill_hole_counted(
+            k,
+            &self.faces,
+            &rounds,
+            self.order,
+            self.tol,
+            certify,
+            &mut FillStats::default(),
+        )
+        .map_err(|r| r.error)?;
         if containment_kept(k, &fill, &self.faces, self.tol)? > self.tol {
             return Err(refuse("a setback's fill stands past a face it meets"));
         }
@@ -611,7 +631,7 @@ impl SetbackDefinition {
     /// The rule run again from the definition, and the net's certified distance from its
     /// patch ([`net_distance`]: 0 where it is the patch), held to the fill's tolerance.
     fn recertify(&self, k: &Kernel, net: &Surface) -> Result<f64> {
-        let fill = self.fill.refill(k)?;
+        let fill = self.fill.refill(k, self.fill.certified)?;
         let patch = fill
             .patches
             .get(self.patch)
@@ -632,7 +652,7 @@ impl MixedDefinition {
     pub fn patch(&self) -> Result<BSplineSurface> {
         let [c0, c1, d0, d1] = &*self.sides;
         let mut srf = if self.bilinear {
-            algebra::coons_bilinear(c0, c1, d0, d1)?
+            algebra::coons_chamfer(c0, c1, d0, d1, self.tol)?
         } else {
             algebra::coons(c0, c1, d0, d1)?
         };

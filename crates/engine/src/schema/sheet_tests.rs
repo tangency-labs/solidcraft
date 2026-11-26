@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams, PerforationPattern, ReliefShapeParam,
-    SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
+    PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, TabParams, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -47,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<FlangeParams>(),
         &keys(&[
             "angle",
+            "bend_relief_shape",
             "body",
             "corner_relief",
             "corner_relief_shape",
@@ -56,6 +57,7 @@ fn schemas_and_the_key_check_agree() {
             "flip",
             "height",
             "height_from",
+            "orientation",
             "position",
             "profiles",
             "radius",
@@ -63,21 +65,27 @@ fn schemas_and_the_key_check_agree() {
             "rule",
             "segments",
             "sketch",
+            "symmetric",
             "then",
             "type",
         ]),
     );
     assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
-    assert_keys(input_schema_for::<FoldParams>(), &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch"]));
-    assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
-    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "face", "rule"]));
+    assert_keys(
+        input_schema_for::<FoldParams>(),
+        &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch", "stays"]),
+    );
+    assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body", "fixed"]));
+    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "direction", "engrave", "face", "faces", "rule", "skip"]));
+    assert_keys(input_schema_for::<RecognizeParams>(), &keys(&["bends", "body", "face", "new_rule", "rule", "skip"]));
+    assert_keys(input_schema_for::<MeasureBodyParams>(), &["body", "face"]);
     assert_keys(input_schema_for::<PathFlangeParams>(), &keys(&["body", "curves", "edge", "radius", "sketch"]));
     assert_keys(input_schema_for::<FlatPatternParams>(), &["body"]);
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
-        &["bend_lines", "bend_notes", "body", "curves", "layers", "note_height", "path", "per_body", "text"],
+        &["bend_lines", "bend_notes", "body", "curves", "layers", "note_height", "path", "per_body", "profile", "text"],
     );
 }
 
@@ -195,7 +203,9 @@ fn the_value_types_match_the_readers() {
     );
     words(&["outer", " Inner ", "TANGENT"], &[json!("sharp"), json!(""), json!(5)], &|v| parse::<HeightFromParam>(v).is_some());
     words(&["centerline", "Start", "END", "mould", "Mold"], &[json!("center"), json!("side"), json!(null)], &|v| parse::<FoldPosition>(v).is_some());
+    words(&["left", "Right", "LEFT"], &[json!("up"), json!(" left"), json!(""), json!(5), json!(null)], &|v| parse::<FoldStays>(v).is_some());
     words(&["notch", " Round ", "rectangular", "TEAR"], &[json!("oval"), json!(""), json!(5)], &|v| parse::<ReliefShapeParam>(v).is_some());
+    words(&["inside", "Outside", "INSIDE"], &[json!("both"), json!(""), json!(5)], &|v| parse::<MaterialSide>(v).is_some());
     // A bend table's format: what the handler reads, in any case but without blanks.
     let formats = ["csv", "CSV", "Json", "jSoN"];
     words(&formats, &[json!(" csv"), json!("xml"), json!(""), json!(5), json!(null)], &|v| parse::<BendTableFormatParam>(v).is_some());
@@ -315,6 +325,9 @@ fn strict_keeps_todays_errors() {
         ("sheet.convert", json!({"body": "Plate", "face": [50, 130, 2.5], "bends": [[1, 2]]})),
         ("sheet.convert", json!({"body": "Plate", "face": ""})),
         ("sheet.convert", json!({"body": "Plate", "face": true})),
+        ("sheet.convert", json!({"body": "Plate", "direction": "both"})),
+        ("sheet.convert", json!({"body": "Plate", "skip": [[50, 130, 2.5], ""]})),
+        ("sheet.convert", json!({"body": "Plate", "engrave": [[50, 130, 2.5], ""]})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": []})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": vec!["l1"; 65]})),
         ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": ["l1"], "radius": "2 deg"})),
@@ -425,7 +438,7 @@ fn replies_match_the_output_schema() {
     ] {
         ok(&mut s, id, p);
     }
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
     check(ok(&mut s, "sheet.fold", json!({"sketch": "FoldLine", "curve": "fl", "position": "start", "flip": true, "body": body})));
     let mut s = warn();
     for (id, p) in [
@@ -462,20 +475,25 @@ fn rule_commands_publish_contracts_and_refuse_unknown_keys() {
 
 #[test]
 fn rule_contract_keys_and_readers_match() {
-    use super::{AngleDisplayParam, ManageRulesParams, RuleName, RulesParams};
+    use super::{AngleDisplayParam, ManageRulesParams, RuleLibraryParams, RuleName, RulesParams};
     assert_keys(input_schema_for::<RulesParams>(), &[]);
+    assert_keys(input_schema_for::<RuleLibraryParams>(), &["material"]);
     assert_keys(
         input_schema_for::<ManageRulesParams>(),
         &[
             "active",
             "angle_display",
+            "bend_method",
             "bend_radius",
+            "bend_relief_shape",
             "corner_relief",
             "corner_relief_shape",
             "delete",
             "gap",
+            "gauge",
             "hem_gap",
             "k_factor",
+            "material",
             "name",
             "relief_depth",
             "relief_width",
@@ -501,6 +519,7 @@ fn rule_contract_keys_and_readers_match() {
         ("sheet.manage_rules", json!({"name": "R", "angle_display": "outer"})),
         ("sheet.manage_rules", json!({"name": "R", "angle_display": 5})),
         ("sheet.manage_rules", json!({"name": "R", "corner_relief_shape": "oval"})),
+        ("sheet.manage_rules", json!({"name": "R", "bend_relief_shape": "round"})),
         ("sheet.manage_rules", json!({"name": "R", "thickness": -1})),
         ("sheet.manage_rules", json!({"name": "R", "k_factor": 2})),
         ("sheet.manage_rules", json!({"name": "Missing", "delete": true})),
@@ -519,20 +538,20 @@ fn rule_replies_match_the_output_schemas_without_warnings() {
             "sheet.manage_rules",
             json!({"name": "  Metric  ", "thickness": 2, "k_factor": "0.4", "bend_radius": "Thickness / 2",
             "relief_width": 1, "relief_depth": "Thickness", "corner_relief": 3, "corner_relief_shape": " Round ",
-            "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
+            "bend_relief_shape": " Obround ", "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
         ),
         (
             "sheet.manage_rules",
             json!({"name": "Metric", "thickness": "3 mm", "k_factor": 0.5, "bend_radius": 1,
             "relief_width": "1 mm", "relief_depth": 2, "corner_relief": "3 mm", "corner_relief_shape": "tear",
-            "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
+            "bend_relief_shape": "TEAR", "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
         ),
         ("sheet.manage_rules", json!({"name": "Other"})),
         (
             "sheet.manage_rules",
             json!({"name": "Other", "thickness": null, "k_factor": null, "bend_radius": null,
             "relief_width": null, "relief_depth": null, "corner_relief": null, "corner_relief_shape": null,
-            "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
+            "bend_relief_shape": null, "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
         ),
         ("sheet.rules", json!({})),
         ("sheet.manage_rules", json!({"name": "Other", "active": true})),
@@ -627,7 +646,7 @@ fn path_flange_replies_match_the_output_schema() {
         (json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p2", "p1"], "radius": null, "body": null}), 3),
     ] {
         let mut s = path_bracket();
-        let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+        let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
         let mut p = p;
         if p["body"] == "?" {
             p["body"] = json!(body);
@@ -673,7 +692,7 @@ fn flat_pattern_replies_match_the_output_schema() {
     let schema = output_schema_for::<FlatPatternResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let f = quiet(&mut s, "sheet.flat_pattern", json!({}));
     assert!(conforms(schema, schema, &f), "{f} doesn't match {schema}");
     // Every part of the reply is there, from the features above.
@@ -720,7 +739,7 @@ fn bend_table_replies_match_the_output_schema() {
     let schema = output_schema_for::<BendTableResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let flat = quiet(&mut s, "sheet.flat_pattern", json!({}));
     let rows = flat["bends"].as_array().map_or(0, Vec::len);
     let table = |s: &mut Session, p: Value| {
@@ -757,7 +776,7 @@ fn export_dxf_replies_match_the_output_schema() {
     let schema = output_schema_for::<ExportDxfResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
     let rows = quiet(&mut s, "sheet.flat_pattern", json!({}))["bends"].as_array().map_or(0, Vec::len);
     let dxf = |s: &mut Session, p: Value| {
         let r = quiet(s, "sheet.export_dxf", p);
@@ -807,4 +826,152 @@ fn export_dxf_replies_match_the_output_schema() {
     let r = s.execute("sheet.export_dxf", &json!({"cures": "arcs"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_some(), "{r}");
     assert!(conforms(schema, schema, &r), "{r}");
+}
+
+// ---- Tab (#8325) ----
+
+#[test]
+fn tab_schema_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<TabParams>(), &keys(&["body", "exact_regions", "profiles", "sketch"]));
+}
+
+#[test]
+fn tab_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("sheet.tab", json!({"sketch": true})),
+        ("sheet.tab", json!({"sketch": "Nowhere"})),
+        ("sheet.tab", json!({"profiles": [{"point": [1]}]})),
+        ("sheet.tab", json!({"profiles": [["l1"], 7]})),
+    ]);
+}
+
+/// [`sheet`] and a 40 x 40 profile `Ear` on its top face, from (30, 50) to (70, 90): over its
+/// long edge by 30 mm.
+fn sheet_with_tab_sketch(param_check: ParamCheck) -> Session {
+    use solidcraft_geom::prelude::*;
+    let mut s = sheet();
+    s.param_check = param_check;
+    if let Err(e) = s.execute("sketch.create", &json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})) {
+        panic!("{e}");
+    }
+    let plane = s.model.state().sketches.last().map(|ss| ss.plane).unwrap_or_else(|| panic!("no sketch"));
+    let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+    for (id, p) in [("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})), ("sketch.finish", json!({}))] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    s
+}
+
+/// Every form the command takes answers with a `FeatureResult` and, in Warn, no warnings.
+#[test]
+fn tab_replies_with_feature_result() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    // The face's projected outline parts the drawn profile into regions: the exact region past the
+    // face's y = 60 edge, picked by a point in it (an index would be the regions' order).
+    let past = {
+        use solidcraft_geom::prelude::*;
+        let s = sheet_with_tab_sketch(ParamCheck::Warn);
+        let plane = s.model.state().sketches.last().map(|ss| ss.plane).unwrap_or_else(|| panic!("no sketch"));
+        let q = plane.to_local(solidcore_record::Vec3::new(50.0, 80.0, 2.5));
+        [q.x, q.y]
+    };
+    for p in [
+        json!({}),
+        json!({"sketch": "Ear"}),
+        json!({"sketch": "Ear", "profiles": "all", "body": "Body1", "name": "Ear tab"}),
+        json!({"sketch": "Ear", "profiles": [{"point": past}], "exact_regions": true}),
+    ] {
+        let mut s = sheet_with_tab_sketch(ParamCheck::Warn);
+        let r = s.execute("sheet.tab", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        assert_eq!(r["created_bodies"], json!([]), "{p}: no new body");
+        assert_eq!(r["changed_bodies"], json!(["Body1"]), "{p}");
+    }
+    let mut s = sheet_with_tab_sketch(ParamCheck::Strict);
+    let e = s.execute("sheet.tab", &json!({"sketch": "Ear", "height": 5})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("height"), "{e}");
+    assert!(matches!(s.execute("sheet.tab", &json!({"sketch": "Ear"})), Ok(Value::Object(_))));
+}
+
+// ---- Bead (#11054) ----
+
+#[test]
+fn bead_schema_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<super::BeadParams>(),
+        &keys(&[
+            "angle",
+            "base_radius",
+            "body",
+            "crown_radius",
+            "crown_width",
+            "curves",
+            "depth",
+            "end_length",
+            "flip",
+            "margin",
+            "shape",
+            "sketch",
+            "width",
+        ]),
+    );
+}
+
+#[test]
+fn bead_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("sheet.bead", json!({"sketch": true, "curves": ["c1"], "depth": 2, "width": 10})),
+        ("sheet.bead", json!({"sketch": "Nowhere", "curves": ["c1"], "depth": 2, "width": 10})),
+    ]);
+}
+
+#[test]
+fn a_bead_reply_matches_the_output_schema() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    // A plate 80 x 50 x 1 thickened from its top face (z = 1), and a line on that face.
+    for (id, p) in [
+        ("solid.box", json!({"length": 80, "width": 50, "height": 1, "body_name": "Plate"})),
+        ("sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [40, 25, 1]})),
+        ("sketch.create", json!({"plane": "XY", "offset": 1, "name": "Beads"})),
+        ("sketch.line", json!({"points": [[20, 25], [60, 25]], "ids": ["c1"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    let r = s
+        .execute(
+            "sheet.bead",
+            &json!({"sketch": "Beads", "curves": ["c1"], "depth": 2, "width": 10, "base_radius": 0.5, "crown_radius": 0.5, "name": "Rib"}),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    // A misspelt key, in the warn mode, on a second line clear of the first bead: the call runs,
+    // and the reply carrying its warning still matches.
+    s.param_check = ParamCheck::Warn;
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "offset": 1, "name": "More"})),
+        ("sketch.line", json!({"points": [[20, 40], [60, 40]], "ids": ["c1"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    let r = s
+        .execute(
+            "sheet.bead",
+            &json!({"sketch": "More", "curves": ["c1"], "depth": 2, "width": 10, "base_radius": 0.5, "crown_radius": 0.5, "colour": "red"}),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    let warned = r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("colour"))));
+    assert!(warned, "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
 }

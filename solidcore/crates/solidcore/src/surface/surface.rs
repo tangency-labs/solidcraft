@@ -10,6 +10,7 @@
 pub mod approximate;
 pub mod assert_valid;
 pub mod exact_pieces;
+pub mod fold_certificate;
 pub mod p1;
 pub mod p10;
 pub mod p11;
@@ -23,6 +24,5 @@ pub mod p8;
 pub mod p9;
 
 pub use p1::StepSurface;
-pub use p2::{
-    CacheTreeState, Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType,
-};
+pub use p2::{Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType};
+pub(crate) use p6::SurfaceContinuities;

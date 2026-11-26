@@ -18,8 +18,9 @@ source, package instructions and test-distribution launchers live outside this r
 they cannot be built from this checkout. A package must contain a
 WebAssembly **component**, not just a core Wasm module.
 
-Use only a separately supplied test distribution built for this host's `craft:plugin@0.1.0` WIT.
-Its manifests say `"capabilities": ["commands@0.1"]`. Kits from the earlier
+Use only a separately supplied test distribution built for this host's `craft:plugin@0.2.0` WIT, or
+for `craft:plugin@0.1.0`, which the host still runs. Its manifests say
+`"capabilities": ["commands@0.2"]` (or `commands@0.1`). Kits from the earlier
 `solidcraft:plugin@1.0.0` preview are refused at inspection with a message saying what they were
 built for; editing their manifest alone does not update compiled components, which must be rebuilt
 against the new WIT. Check the distribution's `BUILD-INFO.json`
@@ -135,7 +136,7 @@ discards the transaction, including errors caught by the guest. A successful edi
 is committed as one undo step.
 
 The optional `model.mesh` grant returns an evaluated body's component-local vertices
-and triangle indices, up to 8192 vertices and 16384 triangles, subject also to a
+and triangle indices, corners at the same point shared, up to 8192 vertices and 16384 triangles, subject also to a
 1 MiB result cap. It contains no reconstruction or conversion algorithm. The bundled
 box sample does not request that grant.
 

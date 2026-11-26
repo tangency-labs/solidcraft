@@ -826,6 +826,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         surface: Some(&s),
                         uv_domain: dom,
                         surface_cache: None,
+                        modes: None,
                         face_queries: None,
                     }
                     .identical_solutions(&sa, &sb),
@@ -842,6 +843,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         ray_fire: false,
                         distance_tolerance: 0.0,
                         surface_cache: None,
+                        modes: None,
                         face_queries: None,
                         face_cache: None,
                         kernel: &k,
@@ -1873,6 +1875,156 @@ mod tests {
             Err(Fail::Deferred(_)) => println!("deferred"),
             Err(Fail::Harness(e)) => println!("harness: {e}"),
         }
+    }
+
+    /// The generated drop case `c`: its surface, point, domain and options.
+    fn wr56_drop(c: usize) -> (Surface, Vec3, Extent2d, DropPointOptions) {
+        let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p5", c));
+        let i: Inputs = serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap();
+        let OpIn::Drop {
+            dom,
+            p,
+            guess,
+            sop,
+            tgt,
+            want,
+        } = &i.op
+        else {
+            panic!("case {c}: not a drop");
+        };
+        let opts = DropPointOptions {
+            guess_uv: guess.map(p2),
+            operation: sop_of(*sop).unwrap(),
+            tgt_seam_side: tgt.map(v3),
+            want_solutions: *want,
+        };
+        (surface_of(&i.surface).unwrap(), v3(*p), dom_of(*dom), opts)
+    }
+
+    /// WR-56 (#17467, #17773): guessed drops whose local result moved from its guess. The
+    /// global solve decides them, and the local result is kept when the global solve finds
+    /// nothing or nothing as near.
+    /// - `gen0558`: minimization keeps the local foot on the `v = 1` side, 3.2e-5 from
+    ///   the point, where the global solve finds nothing. Its nearest-distance enclosure
+    ///   ([`crate::certify::nearest`]) proves no intersection within 2e-5 (#17647).
+    /// - `gen2872`: the point is on the surface twice, on both sides of a seam; both are
+    ///   returned (want solutions), each within the evaluation's rounding of the point,
+    ///   where main and the in-order test returned one local foot 3.5e-12 off.
+    /// - `gen1398`: the answer is no farther than main's (3.645652443993998e-10); the
+    ///   point is that near the surface, so the enclosure bounds it only from above.
+    #[test]
+    fn wr56_moved_guessed_drops_are_decided_by_the_global_solve() {
+        use crate::certify::{evaluation_slack, nearest};
+        let k = Kernel::default();
+
+        let (s, p, dom, opts) = wr56_drop(558);
+        assert_eq!(opts.operation, SolverOperation::Intersect);
+        let minimize = DropPointOptions { operation: SolverOperation::Minimize, ..opts };
+        let r = s.drop_point::<Obj>(&k, p, &dom, &minimize).unwrap();
+        assert!(r.success, "gen0558: the drop failed");
+        let d = p.distance(s.evaluate_point(&k, r.result_uv).unwrap());
+        let e = nearest(&k, &s, Some(&dom), p, r.result_uv);
+        eprintln!("gen0558: foot {:?} distance {d:e} in {e:?}", r.result_uv);
+        assert!(e.holds(d), "gen0558: {d:e} outside {e:?}");
+        assert!(d < 3.2e-5, "gen0558: {d:e}");
+        // the nearest point to within 1.1e-13 (measured width 1.05e-13)
+        assert!(e.width() <= 1.1e-13, "gen0558: {e:?} is not tight");
+        // A free surface uses SM_XSECT_TOL_3D = twice the zone tolerance (p5::drop_point_from).
+        // The lower bound covers the whole source domain, so a good nearest foot still
+        // cannot be reported as an intersection, with or without the original guess.
+        let intersection_tolerance = 2.0 * solidcore::geom::tol::ZONE_TOL_3D;
+        assert!(e.lo > intersection_tolerance, "gen0558: {e:?} does not prove refusal");
+        for guess_uv in [opts.guess_uv, None] {
+            let intersection = s.drop_point::<Obj>(&k, p, &dom, &DropPointOptions { guess_uv, ..opts }).unwrap();
+            assert!(!intersection.success, "gen0558: intersection from {guess_uv:?}: {intersection:?}");
+        }
+
+        let (s, p, dom, opts) = wr56_drop(2872);
+        assert!(opts.want_solutions);
+        let r = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+        let slack = evaluation_slack(&k, &s);
+        assert!(r.success && r.is_multivalued, "gen2872: {r:?}");
+        let uvs: Vec<Point2> = r
+            .solutions
+            .as_slice()
+            .iter()
+            .map(|x| Point2::new(x.start.param(0).unwrap(), x.start.param(1).unwrap()))
+            .collect();
+        assert_eq!(uvs.len(), 2, "gen2872: {uvs:?}");
+        assert!(uvs[0].distance(uvs[1]) > 1.0, "gen2872: {uvs:?}");
+        for uv in &uvs {
+            let d = p.distance(s.evaluate_point(&k, *uv).unwrap());
+            eprintln!("gen2872: solution {uv:?} distance {d:e} (slack {slack:e})");
+            assert!(d <= slack, "gen2872: {uv:?} at {d:e}");
+        }
+        let before = p.distance(
+            s.evaluate_point(&k, Point2::new(1.193_852_141_363_828_8, 1.655_483_801_347_883_9))
+                .unwrap(),
+        );
+        eprintln!("gen2872: the foot before {before:e}");
+        assert!(before > slack, "gen2872: {before:e}");
+
+        let (s, p, dom, opts) = wr56_drop(1398);
+        let r = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+        assert!(r.success, "gen1398: the drop failed");
+        let d = p.distance(s.evaluate_point(&k, r.result_uv).unwrap());
+        let e = nearest(&k, &s, Some(&dom), p, r.result_uv);
+        eprintln!("gen1398: foot {:?} distance {d:e} gap {:e} in {e:?}", r.result_uv, r.gap);
+        assert!(e.holds(d), "gen1398: {d:e} outside {e:?}");
+        assert!(r.gap <= 3.645_652_443_993_998e-10, "gen1398: {:e}", r.gap);
+    }
+
+    /// Changed Intersect answers are judged against their source surfaces: a rejected
+    /// candidate alone does not prove that the whole domain has no intersection.
+    #[test]
+    fn intersect_drop_golden_changes_have_source_distance_certificates() {
+        use crate::certify::{measured, nearest};
+        use solidcore::query::distance_bound::surface_distance_lower_bound;
+
+        let k = Kernel::default();
+        let tolerance = 2.0 * solidcore::geom::tol::ZONE_TOL_3D;
+        let mut proved_refusals = 0;
+        let mut proved_replacements = 0;
+        for (case, old_foot) in [
+            (558, Point2::new(0.9327713223276072, 1.0)),
+            (806, Point2::new(0.6794158741442825, 1.4965298865660681)),
+            (1172, Point2::new(2.7600218193375856e-05, 0.6965740234534229)),
+            (1254, Point2::new(0.0009519510513738703, 0.5596734533522638)),
+            (1391, Point2::new(-0.8673944496966531, 1.5466099899539185)),
+            (1541, Point2::new(0.9175383510315178, 1.7746642061965376)),
+            (1716, Point2::new(1.7013745937546811, 0.41217481751006196)),
+            (1938, Point2::new(0.9845778731691152, 0.1566348061264637)),
+            (2090, Point2::new(0.12012250324363609, 0.4931017098568113)),
+            (2431, Point2::new(0.15937675047902464, 1.2652887429776412)),
+            (2678, Point2::new(0.27705569016558657, 0.6210646957296164)),
+        ] {
+            let (s, p, dom, opts) = wr56_drop(case);
+            assert_eq!(opts.operation, SolverOperation::Intersect, "gen{case:04}");
+            assert!(opts.guess_uv.is_some(), "gen{case:04}: no local guess");
+            let old_gap = p.distance(s.evaluate_point(&k, old_foot).unwrap());
+            assert!(old_gap.is_finite() && old_gap > tolerance, "gen{case:04}: old {old_gap:e}");
+            let answer = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+            if case == 1716 {
+                assert!(answer.success, "gen{case:04}: {answer:?}");
+                let actual = p.distance(s.evaluate_point(&k, answer.result_uv).unwrap());
+                assert!(actual.is_finite() && actual <= tolerance, "gen{case:04}: actual {actual:e}");
+                assert!(answer.gap.is_finite() && answer.gap <= tolerance, "gen{case:04}: {answer:?}");
+                let enclosed = nearest(&k, &s, Some(&dom), p, answer.result_uv);
+                assert!(enclosed.holds(actual), "gen{case:04}: {actual:e} outside {enclosed:?}");
+                eprintln!("gen{case:04}: old candidate {old_foot:?} gap {old_gap:e}; new {:?} gap {actual:e} in {enclosed:?}", answer.result_uv);
+                proved_replacements += 1;
+            } else {
+                // Request a lower bound at the actual intersection tolerance. Success
+                // requires a strict certified separation of the whole source domain.
+                let lower = surface_distance_lower_bound(&k, measured(&s), Some(&dom), p, tolerance).unwrap();
+                eprintln!("gen{case:04}: old candidate {old_foot:?} gap {old_gap:e}; whole-domain lower {lower:e}; success {}", answer.success);
+                assert!(lower > tolerance, "gen{case:04}: only the old candidate is proved too far; lower {lower:e}");
+                assert!(!answer.success, "gen{case:04}: {answer:?}");
+                proved_refusals += 1;
+            }
+        }
+        assert_eq!(proved_refusals, 10);
+        assert_eq!(proved_replacements, 1);
     }
 
     /// Generated cases cover every op, and most of the comparable ones are not deferred.

@@ -186,22 +186,22 @@ surface = [
   "ruled", "stitch", "thicken", "unstitch", "untrim",
 ]
 sketch = [
-  "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
+  "airfoil", "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
   "blend", "circle", "circle2", "circle3", "circle_tt",
   "circle_ttt", "conic", "constrainer", "dimension", "ellipse", "equation_curve",
   "extend", "finish", "fit_section", "include",
-  "intersect", "intersection_curve", "iso_curve", "line", "line_mid",
+  "intersect", "intersection_curve", "iso_curve", "line", "line_mid", "merge_lines",
   "offset", "offset_two_sides", "offset_symmetric", "point", "polygon", "polygon_circumscribed", "polygon_edge",
-  "project", "project_surface", "rect", "rect3", "rect_center",
-  "rect_rounded", "sketch", "sketch_chamfer", "sketch_chamfer_angle", "sketch_chamfer_two_distances",
+  "project", "project_surface", "rect", "rect3", "rect_center", "rect_edge_center",
+  "rect_rounded", "sketch", "sketch3d", "sketch_chamfer", "sketch_chamfer_angle", "sketch_chamfer_two_distances",
   "sketch_fillet", "sketch_mirror", "slot", "slot_center", "slot_overall",
   "snap", "spline", "spline_cv", "spun", "svg",
   "trim",
 ]
 constraint = [
   "auto_constrain", "c_coincident", "c_collinear", "c_concentric", "c_equal",
-  "c_fix", "c_hv", "c_midpoint", "c_parallel", "c_perpendicular",
-  "c_polygon", "c_smooth", "c_symmetry", "c_tangent",
+  "c_fix", "c_horizontal", "c_hv", "c_midpoint", "c_parallel", "c_perpendicular",
+  "c_pierce", "c_polygon", "c_smooth", "c_symmetry", "c_tangent", "c_vertical",
 ]
 construction = [
   "centerline", "construction", "construction_line", "construction_line_angle",
@@ -211,4 +211,5 @@ construction = [
 ]
 mesh = [
   "mesh_body",
+  "mesh_reduce",
 ]

@@ -23,12 +23,12 @@ const LIST: TypedContract<NoteListParams> = TypedContract::new();
 const MAX_NOTES: usize = 1000;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("note.add", "Add Note", crate::checked!("note.add", note_add))
+    CommandSpec::new("note.add", "Add Note", crate::checked!("note.add", note_add)).begins_edit()
         .icon("text")
         .contract(&ADD)
         .output(output_schema_for::<NoteId>)
-        .params("anchor: [x,y,z] (the point in model space, mm); text: the note (may span lines); hidden?: bool (saved but not drawn) → note: id"),
-    CommandSpec::new("note.update", "Edit Note", crate::checked!("note.update", note_update))
+        .params("anchor?: [x,y,z] (the point in model space, mm; without it, where the selection points, or the origin); text: the note (may span lines); hidden?: bool (saved but not drawn) → note: id"),
+    CommandSpec::new("note.update", "Edit Note", crate::checked!("note.update", note_update)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .contract(&UPDATE)
         .output(output_schema_for::<NoteId>)
@@ -43,13 +43,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST)
         .output(output_schema_for::<NotesList>)
         .noundo()
+        .read_only()
         .doc_only()
         .params("→ notes: [{id, anchor: [x,y,z], text, hidden}] in creation order"),
 ];
 
 fn note_add(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "note.add";
-    let anchor = req_vec3(CMD, p, "anchor")?;
+    // Without an anchor the note lands where the selection points, or at the origin (#16015).
+    let anchor = match p.get("anchor") {
+        Some(_) => req_vec3(CMD, p, "anchor")?,
+        None => super::selection::anchor_from_selection(s),
+    };
     let text = str_(p, "text").ok_or_else(|| bad(CMD, "`text` is required"))?;
     if !Note::text_is_valid(text) {
         return Err(bad(CMD, format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));

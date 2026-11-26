@@ -7,8 +7,10 @@ use solidcraft_theme::Tokens;
 pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
+pub(super) const HANDLE: &str = "sc_form_handle";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
 pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
+const LABEL_TOOLTIP: &str = "sc_row_label_tooltip";
 
 /// A form whose card widens so its widest label fits (#10620). Each pass the form publishes,
 /// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
@@ -69,6 +71,19 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
 /// selected_bg, selected_ink`.
 pub fn selection_ink(t: &Tokens) -> egui::Color32 {
     if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+}
+
+/// The ink to draw on `fill`: `preferred` where it reads there (at least `floor`:1, 3 for icons,
+/// bold labels and marks, 4.5 for body text), else whichever of the theme's selected and body
+/// inks reads better. Themes whose own ink reads keep it; SolidCraft 95, CGA and the 1-bit pair,
+/// whose primary colour is their selection colour, and themes whose primary sits too close to
+/// it get an ink that reads. Tokens: `selected_ink, form_ink`.
+pub fn ink_on(t: &Tokens, fill: egui::Color32, preferred: egui::Color32, floor: f64) -> egui::Color32 {
+    use solidcraft_theme::contrast_ratio;
+    if contrast_ratio(preferred, fill) >= floor {
+        return preferred;
+    }
+    if contrast_ratio(t.selected_ink, fill) >= contrast_ratio(t.form_ink, fill) { t.selected_ink } else { t.form_ink }
 }
 
 /// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
@@ -179,6 +194,10 @@ pub fn label(ui: &Ui) -> &str {
     ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(LABEL)).map(String::as_str).unwrap_or("")
 }
 
+fn handle_tag(ui: &Ui) -> Option<&str> {
+    ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(HANDLE)).map(String::as_str)
+}
+
 /// Publish accessibility and scenario geometry. Tokens: `none`.
 pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
     let t = Tokens::get();
@@ -200,6 +219,12 @@ pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
 /// Aligned label/control row, 28 pt. Tokens: `control_height, form_label_width, font_label, dialog_label, space_8`.
 pub fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R) -> R {
     sized_row(ui, text, row_height(), control)
+}
+
+/// Override row labels' hover text within `add` when a description is available.
+/// Controls retain their own tooltips. Tokens: the enclosed rows' tokens.
+pub fn with_row_label_tooltip<R>(ui: &mut Ui, tip: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL_TOOLTIP, tip.to_owned())), add).inner
 }
 
 /// Aligned label/value row for read-only text (what a sketch is on now): the value wraps in the
@@ -250,6 +275,15 @@ pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     })
 }
 
+/// Expression row whose scenario/accessibility handles use `handle` instead of `label`, for
+/// disambiguating rows that share a caption in the same dialog.
+pub fn expr_row_as(ui: &mut Ui, label: &str, handle: &str, value: &mut String) -> bool {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(HANDLE, handle.to_owned())), |ui| {
+        expr_row(ui, label, value)
+    })
+    .inner
+}
+
 /// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
 pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
@@ -286,6 +320,18 @@ pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &st
     })
 }
 
+/// Expression row with an empty-value hint and step arrows; `next` steps the text as
+/// [`super::stepped_field`] describes, and `step` names the amount the arrows add. Its label
+/// scrubs a literal value as `expr_row`'s does. Tokens: `row, stepped_field`.
+pub fn step_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, step: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::stepped_field(ui, value, hint, step, &next)
+    })
+}
+
 /// Expression row with an empty-value hint whose value the form checks: with `warning`, the
 /// field is outlined in the warning colour and the message sits under it in that colour, so the
 /// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,
@@ -306,6 +352,19 @@ pub fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bo
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
+}
+
+/// A card row whose control is one action: the kit's [`super::button_at`] across the control
+/// column, under an empty label column so it lines up with the rows' fields, its text the
+/// catalog's for `label`. Returns whether it was clicked. Published as `dialog:action:{key}`.
+/// Tokens: `row, button`.
+pub fn action_row(ui: &mut Ui, key: &str, label: &str) -> bool {
+    row(ui, "", |ui| {
+        let rect = ui.max_rect();
+        let response = super::button_at(ui, &format!("action_row:{key}"), rect, solidcraft_ui_text::tr_label(label), super::Button::Normal);
+        solidcraft_ui_registry::publish_target(&format!("dialog:action:{key}"), response.rect);
+        response.clicked()
+    })
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
@@ -363,6 +422,15 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
     let help = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
+    let tooltip = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(LABEL_TOOLTIP)).cloned();
+    let add_label = |ui: &mut Ui| {
+        let response = ui.add(
+            egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label))
+                .truncate()
+                .show_tooltip_when_elided(tooltip.is_none()),
+        );
+        response.backing_on_hover_text(tooltip.as_deref().unwrap_or(&shown))
+    };
     if label_width > 0.0 {
         ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             // Left aligned in the label column, as in the design.
@@ -374,18 +442,14 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
                         egui::UiBuilder::new()
                             .max_rect(egui::Rect::from_min_size(label_rect.min, vec2(width, height)))
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                        |ui| {
-                            ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
-                                .backing_on_hover_text(&shown)
-                        },
+                        add_label,
                     )
                     .inner;
                 let help = super::help_icon(ui, help);
                 solidcraft_ui_registry::publish_rect(&format!("dialog:row_label:{text}"), label.rect);
                 solidcraft_ui_registry::publish_rect(&format!("dialog:row_help:{text}"), help.rect);
             } else {
-                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
-                    .backing_on_hover_text(shown);
+                add_label(ui);
             }
         });
     }
@@ -410,10 +474,11 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
             },
         )
         .inner;
-    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{text}"), rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{text}"), label_rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{text}"), control_rect);
-    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{text}"), rect.center());
+    let handle_key = handle_tag(ui).unwrap_or(text);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{handle_key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{handle_key}"), label_rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{handle_key}"), control_rect);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{handle_key}"), rect.center());
     result
 }
 
@@ -787,13 +852,13 @@ pub fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R
 
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
-    let label = label(ui);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    let handle = handle_tag(ui).unwrap_or_else(|| label(ui));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{handle}"), response.rect);
     // A click lands where the field shows: a field scrolled out of a dialog's field area, under
     // its footer, has no handle (a click at its centre would press the button over it).
     let shown = response.rect.intersect(ui.clip_rect());
     if shown.is_positive() {
-        solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), shown.center());
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{handle}"), shown.center());
     }
 }
 
@@ -844,6 +909,17 @@ pub fn note_height(ui: &Ui, text: &str) -> f32 {
     note_galley(ui, text).size().y + Tokens::get().space_4 * 2.0
 }
 
+/// Take the room [`text`] would take in the `Text::Hint` style at the current width: the same
+/// allocation [`text`] would make, so the rows under a hint whose words are only shown some of the
+/// time stay where they are while the words are hidden. Nothing is painted, and no handle or
+/// widget info is published: the row is not there to be found.
+pub fn hint_space(ui: &mut Ui, text: &str) {
+    let t = Tokens::get();
+    let width = dimension(ui.available_width());
+    let galley = ui.painter().layout(text.to_owned(), egui::FontId::proportional(t.font_body), t.form_dim, width);
+    ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
+}
+
 pub fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     text_impl(ui, text, style, None)
 }
@@ -859,6 +935,11 @@ pub fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) ->
 /// 12.500 g"). True on the click that copied.
 pub fn copy_cell(ui: &mut Ui, value: &str, name: &str, mono: bool, hint: &str) -> bool {
     let response = text_impl(ui, value, if mono { Text::MonoCell } else { Text::Cell }, Some(hint));
+    let response = if ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+        response.interact(egui::Sense::click())
+    } else {
+        response
+    };
     // A copy control rather than a label: it reads as a button, and keyboard focus shows a ring
     // (Enter or Space copies, as a click does).
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
@@ -913,7 +994,11 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     let response = if fixed {
         let (rect, response) = ui.allocate_exact_size(
             vec2(dimension(ui.available_width()), row_height()),
-            if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
+            if matches!(style, Text::Value(_, _)) || ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+                egui::Sense::hover()
+            } else {
+                egui::Sense::click()
+            },
         );
         let tooltip = hover_hint.map(|hint| {
             if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {

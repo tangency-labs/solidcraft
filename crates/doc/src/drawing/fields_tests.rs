@@ -59,12 +59,44 @@ fn the_drawings_fields() {
     // Without a number of its own, the drawing is numbered by the component its sheet documents,
     // by name; without either, nothing.
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
     let number = || vec![field(Source::Drawing, "number")];
     assert_eq!(shown(&d, 0, Some(bracket), number()), "DRW-0042", "its own number first");
     Arc::make_mut(&mut d.properties).set(Owner::Design, "part_number", json!("")).unwrap();
     assert_eq!(shown(&d, 0, Some(bracket), number()), "Bracket");
     assert_eq!(shown(&d, 0, None, number()), "");
+}
+
+/// The drawing's language is a field for the ISO 7200 language cell (#20121): its code in capitals,
+/// whatever case or region it was saved with.
+#[test]
+fn the_drawings_language_reads_as_its_code_in_capitals() {
+    let mut d = drawing();
+    let language = || vec![field(Source::Drawing, "language")];
+    assert!(has_key(Source::Drawing, "language") && !has_key(Source::Sheet, "language"));
+    assert_eq!(shown(&d, 0, None, language()), "EN");
+    d.language = "pt-br".into();
+    assert_eq!(shown(&d, 0, None, language()), "PT-BR");
+    assert!(Values { drawing: &d, sheet: 0, component: Documented::Nothing }.empty_fields(&Content(language())).is_empty());
+}
+
+/// The built-in block's new cells read what the drawing knows: the sheet's scale, the drawing's
+/// language, the newest revision row's revision; the shop's own three read nothing.
+#[test]
+fn the_built_in_blocks_iso_7200_cells_follow_the_drawing() {
+    let d = drawing();
+    let block = d.sheets[0].title_block.clone().unwrap();
+    let read = |name: &str| {
+        let cell = block.cells.iter().find(|c| c.name == name).unwrap();
+        let CellKind::Text(text) = &cell.kind else { panic!("{name} is text") };
+        shown(&d, 0, None, text.content.0.clone())
+    };
+    assert_eq!(read("language"), "EN");
+    for own in ["document_type", "document_status", "department"] {
+        assert_eq!(read(own), "", "{own}");
+    }
+    // No base view and no revision row yet: nothing to show, and no row to blame.
+    assert_eq!((read("scale").as_str(), read("revision").as_str()), ("", ""));
 }
 
 /// Sheets are numbered among the counted ones: the second of three is "2/3". A sheet left out of
@@ -101,7 +133,7 @@ fn revision_fields_read_the_newest_row() {
 fn empty_fields_are_named_by_source_and_key() {
     let mut d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
     let content = Content(vec![
         field(Source::Component, "name"),
         Part::Text(" ".into()),
@@ -131,7 +163,14 @@ fn the_components_fields() {
     let mut metadata = Metadata::default();
     metadata.set(Owner::Component, "part_number", json!("BRK-7")).unwrap();
     let properties = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: Some(&properties), material: Some("Steel"), mass: Some("0.39 kg") };
+    let bracket = Component {
+        name: "Bracket",
+        metadata: &metadata,
+        properties: Some(&properties),
+        material: Some("Steel"),
+        mass: Some("0.39 kg"),
+        sheet_metal: None,
+    };
     let keys = ["name", "part_number", "material", "mass", "properties.finish", "description"];
     let read = |component| keys.map(|key| shown(&d, 0, component, vec![field(Source::Component, key)]));
     assert_eq!(read(Some(bracket)), ["Bracket", "BRK-7", "Steel", "0.39 kg", "Zinc plated", ""]);
@@ -141,6 +180,108 @@ fn the_components_fields() {
     let blank = BTreeMap::from([("finish".to_string(), String::new())]);
     let finish = vec![field(Source::Component, "properties.finish")];
     assert_eq!(shown(&d, 0, Some(Component { properties: Some(&blank), ..bracket }), finish), "");
+}
+
+/// A 2 mm sheet made with rule `AL2`, K-factor 0.44, bent at 1 mm, whose flat is 120.5 by
+/// 300.25 mm along its axes.
+fn al2() -> SheetBody<'static> {
+    SheetBody { rule: "AL2", thickness: 2.0, k_factor: 0.44, bend_radius: Some(1.0), flat: Some([120.5, 300.25]) }
+}
+
+/// The six sheet metal fields of a component with one sheet body: lengths in the drawing's units
+/// with two decimals (inches keep a fourth where it means something, as a dimension does: 2 mm is
+/// 0.07874 in), the flat's longer side its length whichever axis it runs along, and the K-factor
+/// without trailing zeros.
+#[test]
+fn a_sheet_metal_parts_fields() {
+    let d = drawing();
+    let metadata = Metadata::default();
+    let read = |sheet: &SheetMetal| {
+        let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: Some(sheet) };
+        SHEET_METAL.map(|key| shown(&d, 0, Some(bracket), vec![field(Source::Component, key)]))
+    };
+    // In SHEET_METAL's order: bend_radius, flat_length, flat_width, k_factor, sheet_rule, thickness.
+    assert_eq!(read(&SheetMetal::of(&[al2()], "mm")), ["1.00 mm", "300.25 mm", "120.50 mm", "0.44", "AL2", "2.00 mm"]);
+    assert_eq!(read(&SheetMetal::of(&[al2()], "in")), ["0.0394 in", "11.8209 in", "4.7441 in", "0.44", "AL2", "0.0787 in"]);
+    let turned = SheetBody { flat: Some([300.25, 120.5]), ..al2() };
+    assert_eq!(read(&SheetMetal::of(&[turned], "mm"))[1..3], ["300.25 mm", "120.50 mm"], "length is the longer side");
+    let k = |k_factor| SheetMetal::of(&[SheetBody { k_factor, ..al2() }], "mm").k_factor;
+    assert_eq!([k(0.5), k(1.0 / 3.0), k(0.0), k(f64::NAN)], [Some("0.5".into()), Some("0.333".into()), Some("0".into()), None]);
+    // A note reads them as text around them.
+    let sheet = SheetMetal::of(&[al2()], "mm");
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: Some(&sheet) };
+    let note =
+        vec![Part::Text("t = ".into()), field(Source::Component, "thickness"), Part::Text(", ".into()), field(Source::Component, "sheet_rule")];
+    assert_eq!(shown(&d, 0, Some(bracket), note), "t = 2.00 mm, AL2");
+}
+
+/// A component's sheet metal field shows only what every one of its sheet bodies gives: two bodies
+/// cut from one rule agree on everything but what differs between them; a body whose bends differ
+/// or whose flat doesn't describe it has no bend radius or flat size, so the component has none;
+/// a component with no sheet body has none at all, and never a value from another part.
+#[test]
+fn sheet_metal_fields_show_only_what_every_sheet_body_agrees_on() {
+    let both = SheetMetal::of(&[al2(), SheetBody { flat: Some([300.25, 120.5]), ..al2() }], "mm");
+    let one = SheetMetal::of(&[al2()], "mm");
+    assert_eq!(both, one, "the same flat turned round is the same size");
+    let thicker = SheetBody { thickness: 3.0, bend_radius: Some(1.5), flat: Some([120.0, 300.25]), ..al2() };
+    let differ = SheetMetal::of(&[al2(), thicker], "mm");
+    let expected = SheetMetal {
+        thickness: None,
+        sheet_rule: Some("AL2".into()),
+        k_factor: Some("0.44".into()),
+        bend_radius: None,
+        flat_length: Some("300.25 mm".into()),
+        flat_width: None,
+    };
+    assert_eq!(differ, expected);
+    let altered = SheetBody { bend_radius: None, flat: None, ..al2() };
+    let altered = SheetMetal::of(&[altered], "mm");
+    assert_eq!([&altered.bend_radius, &altered.flat_length, &altered.flat_width], [&None, &None, &None]);
+    assert_eq!(altered.thickness.as_deref(), Some("2.00 mm"), "the flat doesn't change the sheet's thickness");
+    let nan = SheetMetal::of(&[SheetBody { thickness: f64::NAN, flat: Some([f64::INFINITY, 1.0]), ..al2() }], "mm");
+    assert_eq!([&nan.thickness, &nan.flat_length, &nan.flat_width], [&None, &None, &None], "never a number that isn't one");
+    assert_eq!(SheetMetal::of(&[], "mm"), SheetMetal::default(), "no sheet body");
+    // Read through a sheet: empty for a component that isn't sheet metal, lost for one deleted.
+    let d = drawing();
+    let metadata = Metadata::default();
+    let plain = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let content = Content(vec![field(Source::Component, "name"), field(Source::Component, "thickness"), field(Source::Component, "flat_length")]);
+    let values = |component| Values { drawing: &d, sheet: 0, component };
+    assert_eq!(values(Documented::Present(plain)).state(Source::Component, "thickness"), FieldState::Empty);
+    assert_eq!(values(Documented::Present(plain)).empty_fields(&content), ["component.thickness", "component.flat_length"]);
+    let sheet = Component { sheet_metal: Some(&differ), ..plain };
+    assert_eq!(values(Documented::Present(sheet)).empty_fields(&content), ["component.thickness"]);
+    assert_eq!(values(Documented::Gone).state(Source::Component, "k_factor"), FieldState::Lost);
+    assert_eq!(no_field(Source::Component, "flat_width"), None);
+    assert_eq!(no_field(Source::Drawing, "thickness").as_deref(), Some("the drawing has no field `thickness`"), "a component's field only");
+}
+
+/// The `finish` field reads the part's finish property (a design's own too: its block's component 0);
+/// a part without one shows its free property of that name, as the built-in block's Finish cell did, and
+/// the `properties.finish` field still reads the free property alone.
+#[test]
+fn the_finish_field_reads_the_finish_property_then_the_free_one() {
+    fn part<'a>(metadata: &'a Metadata, properties: Option<&'a BTreeMap<String, String>>) -> Option<Component<'a>> {
+        Some(Component { name: "Bracket", metadata, properties, material: None, mass: None, sheet_metal: None })
+    }
+    let d = drawing();
+    let free = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
+    // A fn, not a closure: each call borrows the component for itself.
+    fn read(d: &Drawing, component: Option<Component>, key: &str) -> String {
+        shown(d, 0, component, vec![field(Source::Component, key)])
+    }
+    assert!(has_key(Source::Component, "finish") && has_key(Source::Component, "properties.finish"));
+    let mut metadata = Metadata::default();
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "", "nothing set");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Zinc plated", "the free property shows as before");
+    metadata.set(Owner::Component, "finish", json!("Powder coat, RAL 9005, matt")).unwrap();
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Powder coat, RAL 9005, matt", "the part property wins");
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "Powder coat, RAL 9005, matt", "the design has no free properties");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "properties.finish"), "Zinc plated", "that field is unchanged");
+    assert_eq!(read(&d, None, "finish"), "");
+    let blank = Metadata(serde_json::from_value(json!({"finish": ""})).unwrap());
+    assert_eq!(read(&d, part(&blank, Some(&free)), "finish"), "Zinc plated", "an empty property is none");
 }
 
 /// A field its source doesn't have is refused when a block is given and when a drawing is read,
@@ -180,7 +321,7 @@ fn unknown_fields_and_overrides_are_refused() {
 fn each_field_is_shown_empty_or_lost() {
     let d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
     let blank = BTreeMap::from([("finish".to_string(), String::new())]);
     let state = |component, source, key| Values { drawing: &d, sheet: 0, component }.state(source, key);
     let present = Documented::Present(bracket);
@@ -218,7 +359,16 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     let (first, second) = (d.sheets[0].id, d.sheets[1].id);
     let view = |id, sheet, kind, scale: &str| {
         let settings = ViewOverrides { scale: Some(scale.parse().unwrap()), ..ViewOverrides::default() };
-        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })
+        Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings,
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+            label: None,
+        })
     };
     let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
     d.add_views([
@@ -247,6 +397,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
             place: ViewPlace::At([150.0, 150.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         })
     };
@@ -265,7 +416,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
 fn a_field_its_source_lacks_reads_unknown() {
     let d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
     let values = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
     assert_eq!(values.state(Source::Component, "weight"), FieldState::Unknown);
     assert_eq!(values.state(Source::Sheet, "scales"), FieldState::Unknown);

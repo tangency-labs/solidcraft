@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_io::{DxfEntity, DxfShape};
+use solidcraft_io::DxfShape;
 
 /// A closed ring needs this many segments to count as a circle, an open run this many to count as
 /// an arc. A hexagon or an octagon has every corner on a circle too; the chord check below turns
@@ -15,18 +15,10 @@ use solidcraft_io::{DxfEntity, DxfShape};
 const MIN_CLOSED: usize = 8;
 const MIN_OPEN: usize = 4;
 
-/// The visible lines of `entities` with the tessellated circles and arcs among them replaced by
+/// The visible lines `segments` as shapes, with the tessellated circles and arcs among them as
 /// `CIRCLE` and `ARC`. `tolerance` is the chord tolerance the drawing was made with: a chain is a
 /// curve only when its chords sag from the circle by no more than about that much.
-pub(super) fn recognise(entities: Vec<DxfEntity>, tolerance: f64) -> Vec<DxfEntity> {
-    let mut rest = Vec::new();
-    let mut segments: Vec<(Vec2, Vec2)> = Vec::new();
-    for e in entities {
-        match e {
-            DxfEntity { layer, shape: DxfShape::Line(a, b) } if layer == "VISIBLE" => segments.push((a, b)),
-            other => rest.push(other),
-        }
-    }
+pub(super) fn recognise(mut segments: Vec<(Vec2, Vec2)>, tolerance: f64) -> Vec<DxfShape> {
     let extent = segments.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
     // The two faces of a hole project to rings a hair apart; points that close are one point.
     snap(&mut segments, (tolerance * 1e-2).max(extent * 1e-9));
@@ -48,18 +40,18 @@ pub(super) fn recognise(entities: Vec<DxfEntity>, tolerance: f64) -> Vec<DxfEnti
     }
 
     let mut used = vec![false; segments.len()];
-    let mut out = rest;
+    let mut out = Vec::new();
     for start in 0..segments.len() {
         if used.get(start).copied().unwrap_or(true) {
             continue;
         }
         let chain = chain_from(start, &segments, &nodes, &mut used, &key);
         match fit(&chain.points, chain.closed, tolerance) {
-            Some(shape) => out.push(DxfEntity { layer: "VISIBLE".into(), shape }),
+            Some(shape) => out.push(shape),
             None => {
                 for w in chain.points.windows(2) {
                     if let [a, b] = w {
-                        out.push(DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(*a, *b) });
+                        out.push(DxfShape::Line(*a, *b));
                     }
                 }
             }

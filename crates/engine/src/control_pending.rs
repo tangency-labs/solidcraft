@@ -36,7 +36,10 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.ends_with(".list")
         || id == "document.revision"
         || id == "view.status_items"
-        || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
+        || matches!(
+            id,
+            "doc.info" | "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers"
+        )
 }
 
 /// What the command `id` with `params` does: an export that is given a `path` (`*.export*`, as
@@ -65,6 +68,8 @@ pub fn effect(method: &str, params: &Value) -> Effect {
         "ui.render" => Effect::WritesFile,
         "ui.screenshot" if params.get("path").is_some_and(|p| !p.is_null()) => Effect::WritesFile,
         "ui.screenshot" => Effect::ReadsOnly,
+        "ui.help" if params.get("item").is_none_or(Value::is_null) => Effect::ReadsOnly,
+        "control.joint_drive" if params.get("action").and_then(Value::as_str) != Some("finish") => Effect::ReadsOnly,
         m if READ_METHODS.contains(&m) => Effect::ReadsOnly,
         _ => Effect::Changes,
     }
@@ -93,16 +98,27 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn only_finishing_an_interactive_joint_drive_changes_the_design() {
+        for action in ["begin", "update", "cancel"] {
+            assert_eq!(effect("control.joint_drive", &json!({"action": action})), Effect::ReadsOnly);
+        }
+        assert_eq!(effect("control.joint_drive", &json!({"action": "finish"})), Effect::Changes);
+    }
+
+    #[test]
     fn reads_are_told_from_changes() {
         for (m, p) in [
             ("ui.inspect", json!({})),
             ("ui.screenshot", json!({})),
+            ("ui.help", json!({})),
+            ("ui.help", json!({"item": null})),
             ("document.export", json!({})),
             ("document.inspect", json!({"measure": true})),
             ("engine.execute", json!({"command": "sketch.inspect"})),
             ("engine.execute", json!({"command": "view.status_items", "params": {}})),
             ("engine.execute", json!({"command": "inspect.measure"})),
             ("engine.execute", json!({"command": "model.edges", "params": {"body": "Body1"}})),
+            ("engine.execute", json!({"command": "doc.info"})),
             ("engine.execute", json!({"command": "parameters.export", "params": {"format": "csv"}})),
         ] {
             assert!(reads_only(m, &p), "{m} {p}");
@@ -113,9 +129,19 @@ mod tests {
             ("engine.execute", json!({})),
             ("engine.batch", json!({"commands": []})),
             ("ui.click", json!({"x": 1, "y": 2})),
+            ("ui.help", json!({"item": "about"})),
+            ("ui.help", json!({"item": "report"})),
+            ("ui.help", json!({"item": "updates"})),
+            ("ui.help", json!({"item": "install_cli"})),
+            ("ui.help", json!({"item": ""})),
+            ("ui.help", json!({"item": false})),
+            ("ui.help", json!({"item": 0})),
+            ("ui.help", json!({"item": []})),
+            ("ui.help", json!({"item": {}})),
             ("app.quit", json!({})),
             ("document.import", json!({"text": "{}"})),
             ("document.saved", json!({"revision": 1})),
+            ("document.close", json!({"document_id": "current"})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");

@@ -1,0 +1,205 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b28": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  2.579351122989408,
+                  -10.0,
+                  5.0
+                ]
+              ],
+              "index": 29
+            },
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 25
+            },
+            {
+              "at": [
+                [
+                  1.3115,
+                  -7.2811,
+                  7.438696885238559
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 35
+            }
+          ],
+          "points": [
+            [
+              2.2579133505932862,
+              -9.31067840417481,
+              5.689321595825189
+            ],
+            [
+              1.6944143898890736,
+              -8.102257875551375,
+              6.809353988713904
+            ],
+            [
+              1.3819266007904916,
+              -7.432129471376564,
+              7.3393808355079955
+            ]
+          ],
+          "tolerance": 1.601781059358212
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.4,
+          0.4,
+          0.4
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "18823-chamfer-slot-wall-edge-running-on-into-a-round",
+  "expected": {
+    "body_count": 1,
+    "method": "Before: V0 = 5000 (the block: 20 x (20 x 15 - 10 x 10 / 2)) less the groove with its rounds and less the slot. The groove and its rounds are a prism along the slope: section = the cylinder's segment below the slope, 9 acos(5/6) - 2.5 sqrt(2.75) = 1.1253889, plus two round corners of 0.0063788 each (Green's theorem on the corner bounded by the slope, the cylinder and the r1 ball, whose centre is at x = sqrt(4^2 - 3.5^2) = 1.9364917, 1 below the slope), A = 1.1381466, its centroid 0.199536 below the slope; the front face y = -10 and the top z = 15 cut it at axial distance 10 sqrt 2 + 2 x 0.199536 apart at the centroid: 16.550017. The slot takes the block between z = 2 and the slope over y -10..-7.2811 (width 1.8103): 1.8103 x integral of (y + 13) dy = 21.457320, less the part of the groove and rounds inside it, 0.020024 (integrated over the section with the slot's exact length at each point). V0 = 4962.01269. The chamfer, as solidcore defines one (surface/procedural_blend/chamfer.rs): the offsets, not the setbacks, are kept along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg), r = 0.4 tan(36.306 deg) = 0.293895 off the wall and off the slope, the r1 round or the r3 groove. The chamfer is the chord between the feet of the point standing r off both faces; its setbacks are 0.4 along the slope's edge and grow along the round and the groove, where the wedge between the wall and the face narrows (to about 48 deg near the slot's back wall; a setback is r / tan(wedge / 2), about 0.66 there). The material on the edge's side of the chords, inside the part and in front of the slot's back wall, integrated section by section on a grid (independently of the kernel): 0.443780 at a 0.005 grid, 0.443228 at 0.01. The integration covers the whole chain from the front face to the slot's back wall, the stretches between each shared section and the edges' vertex included (the point standing r off both faces is solved at every station along the chain, across the seams where the slope, the round and the groove run into each other); by y along the chain: -10..-9.5246 (to the section through the slope rail's crossing with the round) 0.0539, -9.5246..-8.6214 (to the slope edge's end) 0.1289, -8.6214..-7.5832 (beside the round's edge) 0.2054, -7.5832..-7.2811 (beside the groove's edge) 0.0555, at the 0.005 grid. V in V0 - (0.44378 +- 0.003) = [4961.5659, 4961.5719]; one closed body. A chamfer that kept 0.4 setbacks all along would remove less (about 0.32 to 0.36); that is another definition, which chamfer.rs names.",
+    "source": "analytic",
+    "volume_mm3": [
+      4961.5659,
+      4961.5719
+    ],
+    "what": "a 20 mm block whose front half slopes up at 45 deg (profile (-10,0),(10,0),(10,15),(0,15),(-10,5) in (y,z), x -10..10); a groove down the middle of the slope (a cylinder r3 along the slope, its axis 2.5 above it) with both edges rounded r1; a slot with vertical walls, slanted 65 deg in plan (the parallelogram (3.2133,-11.3595),(5.0236,-11.3595),(3.1218,-7.2811),(1.3115,-7.2811), z 2 up), whose inner wall runs into the round and the groove. A 0.4 chamfer on the edge where the slot's inner wall meets the slope, with its tangent chain: that edge runs on tangentially into the wall's edges with the r1 round and with the groove. Refused on 0.44.0 as larger than its faces allow (largest 0.3703): the band check took the shared section where two of the chain's chamfers meet for the end of the first edge"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 55,
+      "faces": 21,
+      "vertices": 36
+    }
+  },
+  "records": "18823-chamfer-slot-wall-edge-running-on-into-a-round.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b32"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1811.2513600198297,
+      "body_count": 1,
+      "edges": 52,
+      "faces": 20,
+      "vertices": 34,
+      "volume_mm3": 4961.569335275694
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#18823"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a 20 mm block whose front half slopes up at 45 deg (profile (-10,0),(10,0),(10,15),(0,15),(-10,5) in (y,z), x -10..10); a groove down the middle of the slope (a cylinder r3 along the slope, its axis 2.5 above it) with both edges rounded r1; a slot with vertical walls, slanted 65 deg in plan (the parallelogram (3.2133,-11.3595),(5.0236,-11.3595),(3.1218,-7.2811),(1.3115,-7.2811), z 2 up), whose inner wall runs into the round and the groove. A 0.4 chamfer on the edge where the slot's inner wall meets the slope, with its tangent chain: that edge runs on tangentially into the wall's edges with the r1 round and with the groove. Refused on 0.44.0 as larger than its faces allow (largest 0.3703): the band check took the shared section where two of the chain's chamfers meet for the end of the first edge",
+  "why_not": []
+}

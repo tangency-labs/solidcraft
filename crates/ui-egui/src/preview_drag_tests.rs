@@ -8,10 +8,15 @@ fn colors() -> Colors {
         added: [2, 2, 2, 255],
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
+        lost: [5, 5, 5, 100],
+        selected: [7, 7, 7, 255],
+        mirrored: [6, 6, 6, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        replaced_ghost: true,
+        glass_new: false,
     }
 }
 
@@ -288,7 +293,7 @@ fn a_preview_left_behind_stops_before_its_next_feature() {
     // The job waits before the fillet (feature 1) until it is cancelled.
     progress.hold_at(1);
     pv.running_stream_key = keys(&first).1;
-    spawn(&mut pv, keys(&first).0, s.scratch(), first, colors(), false, progress.clone());
+    spawn(&mut pv, keys(&first).0, s.scratch(), first, colors(), false, PreviewWork { progress: progress.clone(), ..PreviewWork::default() });
     let (key, stream) = keys(&second);
     pv.poll(key, stream);
     assert!(progress.is_cancelled() && pv.running.is_none() && pv.detached.len() == 1, "left behind and asked to stop");
@@ -299,4 +304,29 @@ fn a_preview_left_behind_stops_before_its_next_feature() {
         pv.poll(key, stream);
     }
     assert!(pv.shown_key.is_none() && !pv.active && pv.error.is_none(), "its result is never shown");
+}
+
+/// A Rectangular Pattern's preview leaves a run for values typed on the way to others behind
+/// instead of waiting for it (#8523): a spacing of 1 on the way to 15 over an 80 mm extent makes
+/// 81 copies. Every value is its own setup, so a changed one never reuses the old result.
+#[test]
+fn a_rectangular_pattern_preview_leaves_runs_for_old_values_behind() {
+    let pattern = |spacing: &str| {
+        vec![(
+            "solid.pattern.rectangular".to_string(),
+            json!({"bodies":["Body1"],"dir1":[1,0,0],"distance1":"spacing_extent","spacing1":spacing,"extent1":"80 mm"}),
+        )]
+    };
+    let one = stream_key(&pattern("1 mm"), 7, colors());
+    assert!(one.is_some());
+    assert_ne!(one, stream_key(&pattern("15 mm"), 7, colors()));
+    assert_eq!(one, stream_key(&pattern("1 mm"), 7, colors()));
+    let s = fixture();
+    let mut pv = PreviewState::default();
+    let (tx, rx) = std::sync::mpsc::channel::<Job>();
+    pv.running = Some((job_key(&pattern("1 mm"), s.revision, colors()), rx));
+    pv.running_stream_key = stream_key(&pattern("1 mm"), s.revision, colors());
+    pv.poll(job_key(&pattern("15 mm"), s.revision, colors()), stream_key(&pattern("15 mm"), s.revision, colors()));
+    assert!(pv.running.is_none(), "the run for the old spacing is left behind");
+    drop(tx);
 }

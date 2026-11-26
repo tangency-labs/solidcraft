@@ -15,6 +15,7 @@
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
 //! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
+//! | [`primitive_outward`] | (not upstream) a primitive's volume sign from its closed form |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`vertex_fans`] | `SplitVertexByFans`, `JoinVertexFans` (the fork's, `4ecfbab`) |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
@@ -23,6 +24,7 @@
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
 
 pub mod cutting;
+pub mod dome;
 pub mod enclosing;
 pub mod local_operation;
 pub mod mirror;
@@ -38,6 +40,8 @@ pub mod p7;
 pub mod p8;
 pub mod p9;
 pub mod planar_section;
+pub mod primitive_outward;
+pub mod seam_turn;
 pub mod sheet;
 pub mod side_extend;
 pub mod trim_extend;
@@ -50,7 +54,9 @@ pub use p10::{
     make_topology_from_data, merge_curves_on_surface_through_surface, MakeTopologyOptions,
     TopologyEnv, HEALER_VERSION,
 };
-pub use p2::{is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState};
+pub use p2::{
+    create_missing_uv_trim_curves, is_manifold_solid, is_sheet, shell_vertices, ArenaNotifyState,
+};
 pub use p3::{
     api_brep_copy, delete_face, new_brep, orient_trimmed_surfaces, topology_ref,
     with_kernel_callbacks, DeleteFaceOptions,
@@ -81,7 +87,8 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 ///
 /// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
 /// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
-/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as
+/// `NotSolidBecause(VolumeUndecided)`.
 /// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
 /// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
 /// a face without trim loops, or weights not proved positive.
@@ -227,7 +234,7 @@ pub fn valid_and_outward_failure(
 ) -> crate::Result<Option<SolidTest>> {
     let c = validation::check_brep(k, b, validation::CheckLevel::Level0)?;
     // `AssertValid` does not run (`None`) where a pointer report failed
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid.is_none() {
+    if !c.pointers.is_passed() || c.assert_valid.is_none() {
         return Ok(Some(SolidTest::PointersInvalid));
     }
     if c.assert_valid != Some(true) {

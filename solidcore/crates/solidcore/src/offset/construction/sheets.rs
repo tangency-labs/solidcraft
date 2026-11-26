@@ -33,22 +33,40 @@
 //! |A_u x A_v|^2`, `H = E'n'' + G'l'' - 2F'm''`, `K = l''n'' - m''^2`, `E' = A_u.A_u`, ...
 //! and `l'' = (P_uu w - w_uu P).(A_u x A_v)`, ...: polynomials and one square root,
 //! bounded per patch and subdivided until certified, or until a point with `Q < 0` (a
-//! fold) is found. The homogeneous normal carries a factor w, `A_u x A_v = w N'`, so
-//! `X = w X'`, `H = w H'`, `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
+//! fold) is found. Where the term under the root counts against `Q`, the root is bounded
+//! by its tangent, `X <= (X^2 + c^2) / (2c)`, so one polynomial bounds `Q` and the bound
+//! closes quadratically as a patch shrinks. The forms are built in the patch's own frame
+//! and carry a running error bound (`bernstein::Bounded`) that both bounds count, so
+//! their rounding follows the patch's size, not its distance from the origin. The
+//! homogeneous normal carries a factor w, `A_u x A_v = w N'`, so `X = w X'`, `H = w H'`,
+//! `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
 //! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
 //! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
-//! bicubic-by-septic net reaches degree 112 in Q, past the Bernstein forms' cap of 96, and
-//! 80 in the bracket). A face not certified regular is refused (D5), naming the largest
-//! wall that works: the smallest radius of curvature on the displaced side.
+//! bicubic-by-septic net reaches degree 112 in Q and 80 in the bracket; the tangent bound's
+//! product reaches 100, within the Bernstein forms' cap of 128). A face not certified
+//! regular is refused (D5), naming the largest wall that works: the smallest radius of
+//! curvature on the displaced side.
 //!
 //! Deviations: not upstream. Bounds: at most [`MAX_ROUNDS`] refinement rounds and
 //! [`MAX_SPANS`] spans per direction for the offset; at most [`MAX_REGULARITY_PATCHES`]
 //! subdivided patches for the regularity test (a loop over an explicit stack, no
 //! recursion; the kernel's cancel token is polled per round, per row of patches and per
-//! patch examined). A face is refused when a point with `Q < 0` is found (it folds) or
-//! when the budget runs out uncertified (D5: not certified regular), which includes a
-//! base whose normal vanishes on the face (a pole), where no regular sheet is certified.
+//! patch examined). A face is refused when a point with `Q < 0` is proved (it folds) or
+//! when the budget runs out uncertified (D5: not certified regular, never a fold), which
+//! includes a base whose normal vanishes on the face (a pole), where no regular sheet is
+//! certified. A patch's middle where `Q` evaluates below 0 is a fold only once proved: the
+//! face's own point and partials there are enclosed in interval arithmetic from its net
+//! (`nurbs_partials_over_box`), not from the Bernstein forms, whose coefficients carry
+//! the rounding of their construction, and `det(I - d W) |N|^4 = |N|^4 - d |N| H + d^2 K`
+//! (`N = S_u x S_v`, `H = E n + G l - 2 F m`, `K = l n - m^2`, `l = S_uu . N`, ...) must
+//! be proved negative with `|N|^2` proved positive; otherwise the patch is subdivided as
+//! any other (#13685: a cylinder inset by exactly its radius, `Q = 0` everywhere, has
+//! middles where `Q` rounds to `-1e-13`).
 
+use crate::blend::fillet_section::certificate::nurbs_partials_over_box;
+use crate::blend::fillet_section::interval::Ivl;
+use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::station::Nurbs;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -58,7 +76,9 @@ use crate::nurbs::nurbs_srf::decompose_srf;
 use crate::nurbs::srf_basic::Surface as Nurb;
 
 use super::bernstein::{
-    cross, deriv_u3, deriv_v3, dot, eval3, mul3, restrict3, sub3, Bernstein2, Bernstein3, Binomials,
+    cross, cross_bounded, deriv_u3, deriv_u3_bounded, deriv_v3, deriv_v3_bounded, dot, dot_bounded,
+    eval3, mul3, mul3_bounded, restrict3, sub3, sub3_bounded, unbounded3, Bernstein2, Bernstein3,
+    Binomials, Bounded, Bounded3, MAX_DEGREE,
 };
 
 const OP: &str = "offset::construction::sheets";
@@ -256,13 +276,32 @@ fn local(range: [f64; 4], u: f64, v: f64) -> (f64, f64) {
 /// The homogeneous first derivatives `A_u = P_u w - P w_u`, `A_v` of a patch (`P_u`,
 /// `P_v` for a non-rational one).
 fn homogeneous_tangents(patch: &Patch, b: &Binomials) -> Result<(Bernstein3, Bernstein3)> {
-    let pu = deriv_u3(&patch.p);
-    let pv = deriv_v3(&patch.p);
-    match &patch.w {
+    let (p, w) = bounded_patch(patch);
+    let (au, av) = homogeneous_tangents_bounded(&p, w.as_ref(), b)?;
+    Ok((unbounded3(au), unbounded3(av)))
+}
+
+/// [`homogeneous_tangents`] of the net `p` with weights `w`, with error bounds.
+fn homogeneous_tangents_bounded(
+    p: &Bounded3,
+    w: Option<&Bounded>,
+    b: &Binomials,
+) -> Result<(Bounded3, Bounded3)> {
+    let pu = deriv_u3_bounded(p);
+    let pv = deriv_v3_bounded(p);
+    match w {
         None => Ok((pu, pv)),
         Some(w) => Ok((
-            sub3(&mul3(&pu, w, b)?, &mul3(&patch.p, &w.deriv_u(), b)?, b)?,
-            sub3(&mul3(&pv, w, b)?, &mul3(&patch.p, &w.deriv_v(), b)?, b)?,
+            sub3_bounded(
+                &mul3_bounded(&pu, w, b)?,
+                &mul3_bounded(p, &w.deriv_u(), b)?,
+                b,
+            )?,
+            sub3_bounded(
+                &mul3_bounded(&pv, w, b)?,
+                &mul3_bounded(p, &w.deriv_v(), b)?,
+                b,
+            )?,
         )),
     }
 }
@@ -273,21 +312,105 @@ fn homogeneous_tangents(patch: &Patch, b: &Binomials) -> Result<(Bernstein3, Ber
 /// forms built on it four times that less ([`RegularityForms`]); `P_u x P_v` for a
 /// polynomial patch.
 fn reduced_normal(patch: &Patch, b: &Binomials) -> Result<Bernstein3> {
-    let pu = deriv_u3(&patch.p);
-    let pv = deriv_v3(&patch.p);
-    let n = cross(&pu, &pv, b)?;
-    match &patch.w {
+    let (p, w) = bounded_patch(patch);
+    Ok(unbounded3(reduced_normal_bounded(&p, w.as_ref(), b)?))
+}
+
+/// [`reduced_normal`] of the net `p` with weights `w`, with error bounds.
+fn reduced_normal_bounded(p: &Bounded3, w: Option<&Bounded>, b: &Binomials) -> Result<Bounded3> {
+    let pu = deriv_u3_bounded(p);
+    let pv = deriv_v3_bounded(p);
+    let n = cross_bounded(&pu, &pv, b)?;
+    match w {
         None => Ok(n),
-        Some(w) => sub3(
-            &sub3(
-                &mul3(&n, w, b)?,
-                &mul3(&cross(&pu, &patch.p, b)?, &w.deriv_v(), b)?,
+        Some(w) => sub3_bounded(
+            &sub3_bounded(
+                &mul3_bounded(&n, w, b)?,
+                &mul3_bounded(&cross_bounded(&pu, p, b)?, &w.deriv_v(), b)?,
                 b,
             )?,
-            &mul3(&cross(&patch.p, &pv, b)?, &w.deriv_u(), b)?,
+            &mul3_bounded(&cross_bounded(p, &pv, b)?, &w.deriv_u(), b)?,
             b,
         ),
     }
+}
+
+/// The patch's net and weights as they are, exact.
+fn bounded_patch(patch: &Patch) -> (Bounded3, Option<Bounded>) {
+    let [x, y, z] = &patch.p;
+    (
+        [
+            Bounded::exact(x.clone()),
+            Bounded::exact(y.clone()),
+            Bounded::exact(z.clone()),
+        ],
+        patch.w.clone().map(Bounded::exact),
+    )
+}
+
+/// The patch moved by minus `c`, the middle of its points' box: `P - c w` (`P - c` for a
+/// polynomial patch). Any `c` moves the net exactly to the same surface moved, and the
+/// regularity forms are the same polynomials in any frame (`A_u` and `A_v` do not change,
+/// nor the second forms `P_uu w - P w_uu`, ...). Each coefficient is one fused
+/// multiply-add, rounded once on its own value, so the move costs `gamma(1)` of the moved
+/// net (and `f64::MIN_POSITIVE` for underflow), and the forms' rounding follows the
+/// patch's size, not its distance from the origin (`docs/definitions-and-certificates.md`
+/// §7, invariant 5). The net is taken as the Bezier decomposition and the restriction to
+/// the face's box computed it: their own rounding, at the scale of the coordinates, is not
+/// counted (`docs/offset-and-shell.md` §4.2). A coefficient that overflows leaves an
+/// infinite bound, which certifies nothing.
+///
+/// # Errors
+///
+/// `InvalidInput` for a weight that is not positive or a point that is not finite.
+fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
+    let [px, py, pz] = &patch.p;
+    let ws: Vec<f64> = match &patch.w {
+        Some(w) => w.coefficients().to_vec(),
+        None => vec![1.0; px.coefficients().len()],
+    };
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for (i, &w) in ws.iter().enumerate() {
+        if !positive(w) || !w.is_finite() {
+            return Err(invalid("a weight that is not positive"));
+        }
+        for (k, c) in [px, py, pz].into_iter().enumerate() {
+            let x = c.coefficients().get(i).copied().unwrap_or(f64::NAN) / w;
+            if !x.is_finite() {
+                return Err(invalid("a control point that is not finite"));
+            }
+            if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
+                *l = l.min(x);
+                *h = h.max(x);
+            }
+        }
+    }
+    let moved = |c: &Bernstein2, k: usize| -> Result<Bounded> {
+        let mid = match (lo.get(k), hi.get(k)) {
+            (Some(&l), Some(&h)) => 0.5 * l + 0.5 * h,
+            _ => 0.0,
+        };
+        let coefficients = c
+            .coefficients()
+            .iter()
+            .zip(&ws)
+            .map(|(&x, &w)| (-mid).mul_add(w, x))
+            .collect();
+        let (du, dv) = c.degrees();
+        let f = Bernstein2::new(du, dv, coefficients)?;
+        let size = f.max_abs_coefficient();
+        let err = if size.is_finite() {
+            gamma(1) * size + f64::MIN_POSITIVE
+        } else {
+            f64::INFINITY
+        };
+        Ok(Bounded { f, err })
+    };
+    Ok((
+        [moved(px, 0)?, moved(py, 1)?, moved(pz, 2)?],
+        patch.w.clone().map(Bounded::exact),
+    ))
 }
 
 /// The point `S` and unit normal `n` (`S_u x S_v`, normalised) of the surface whose
@@ -883,39 +1006,44 @@ pub fn certified_offset(k: &Kernel, s: &Nurb, d: f64, tol: f64) -> Result<Certif
     })
 }
 
-/// The regularity forms of one patch: `Q = q0 - X q1` with `X = sqrt(x2)`.
+/// The regularity forms of one patch: `Q = q0 - X q1` with `X = sqrt(x2)`, built in the
+/// patch's own frame ([`own_frame`]), each with a bound of its coefficients' rounding
+/// ([`Bounded`]).
 #[derive(Debug, Clone)]
 struct RegularityForms {
     /// `X'^4 + d^2 w^2 K'`.
-    q0: Bernstein2,
+    q0: Bounded,
     /// `d H'`.
-    q1: Bernstein2,
+    q1: Bounded,
     /// `X'^2`.
-    x2: Bernstein2,
+    x2: Bounded,
 }
 
 impl RegularityForms {
     fn new(s: &Patch, d: f64, b: &Binomials) -> Result<Self> {
-        let (au, av) = homogeneous_tangents(s, b)?;
-        let ax = reduced_normal(s, b)?;
-        let x2 = dot(&ax, &ax, b)?;
-        let second = |pdd: Bernstein3, wdd: Option<Bernstein2>| -> Result<Bernstein2> {
-            let v = match (&s.w, wdd) {
-                (Some(w), Some(wdd)) => sub3(&mul3(&pdd, w, b)?, &mul3(&s.p, &wdd, b)?, b)?,
+        let (p, w) = own_frame(s)?;
+        let w = w.as_ref();
+        let (au, av) = homogeneous_tangents_bounded(&p, w, b)?;
+        let ax = reduced_normal_bounded(&p, w, b)?;
+        let x2 = dot_bounded(&ax, &ax, b)?;
+        let second = |pdd: Bounded3, wdd: Option<Bounded>| -> Result<Bounded> {
+            let v = match (w, wdd) {
+                (Some(w), Some(wdd)) => {
+                    sub3_bounded(&mul3_bounded(&pdd, w, b)?, &mul3_bounded(&p, &wdd, b)?, b)?
+                }
                 _ => pdd,
             };
-            dot(&v, &ax, b)
+            dot_bounded(&v, &ax, b)
         };
-        let puu = deriv_u3(&deriv_u3(&s.p));
-        let puv = deriv_v3(&deriv_u3(&s.p));
-        let pvv = deriv_v3(&deriv_v3(&s.p));
-        let w = s.w.as_ref();
+        let puu = deriv_u3_bounded(&deriv_u3_bounded(&p));
+        let puv = deriv_v3_bounded(&deriv_u3_bounded(&p));
+        let pvv = deriv_v3_bounded(&deriv_v3_bounded(&p));
         let l = second(puu, w.map(|w| w.deriv_u().deriv_u()))?;
         let m = second(puv, w.map(|w| w.deriv_u().deriv_v()))?;
         let n = second(pvv, w.map(|w| w.deriv_v().deriv_v()))?;
-        let e1 = dot(&au, &au, b)?;
-        let f1 = dot(&au, &av, b)?;
-        let g1 = dot(&av, &av, b)?;
+        let e1 = dot_bounded(&au, &au, b)?;
+        let f1 = dot_bounded(&au, &av, b)?;
+        let g1 = dot_bounded(&av, &av, b)?;
         let h = e1
             .mul(&n, b)?
             .add(&g1.mul(&l, b)?, b)?
@@ -923,47 +1051,125 @@ impl RegularityForms {
         let k = l.mul(&n, b)?.sub(&m.mul(&m, b)?, b)?;
         let w2 = match w {
             Some(w) => w.mul(w, b)?,
-            None => Bernstein2::constant(1.0),
+            None => Bounded::exact(Bernstein2::constant(1.0)),
         };
-        let q0 = x2.mul(&x2, b)?.add_scaled(&w2.mul(&k, b)?, d * d, b)?;
+        // `d^2 w^2 K'` as `d (d w^2 K')`, each product with `d` counted
+        let q0 = x2.mul(&x2, b)?.add_scaled(&w2.mul(&k, b)?.scale(d), d, b)?;
         let q1 = h.scale(d);
         Ok(Self { q0, q1, x2 })
     }
 
-    /// Whether `Q > 0` is certified on the whole patch.
-    fn certified(&self) -> bool {
-        if !positive(self.x2.min_coefficient()) {
-            return false;
+    /// Whether `Q > 0` is certified on the whole patch: by the coefficients' ranges, or
+    /// else by the tangent bound ([`Self::tangent_certified`]). Each form's coefficients
+    /// are widened by their rounding bound, and the comparison by `gamma(8)` of the
+    /// magnitudes it compares (the few roundings of the root, the products and the sums).
+    /// A form that is not finite certifies nothing.
+    ///
+    /// # Errors
+    ///
+    /// Those of the Bernstein products.
+    fn certified(&self, b: &Binomials) -> Result<bool> {
+        if !(self.q0.is_finite() && self.q1.is_finite() && self.x2.is_finite()) {
+            return Ok(false);
         }
-        let x_max = self.x2.max_coefficient().max(0.0).sqrt();
-        let x_min = self.x2.min_coefficient().sqrt();
-        let q1_max = self.q1.max_coefficient();
+        let x2_min = self.x2.f.min_coefficient() - self.x2.err;
+        if !positive(x2_min) {
+            return Ok(false);
+        }
+        let x_max = (self.x2.f.max_coefficient() + self.x2.err).sqrt();
+        let x_min = x2_min.sqrt();
+        let q1_max = self.q1.f.max_coefficient() + self.q1.err;
         // - X q1 >= - X_max q1_max where q1 may be positive, >= - X_min q1_max where not
         let worst = if q1_max > 0.0 {
             x_max * q1_max
         } else {
             x_min * q1_max
         };
-        self.q0.min_coefficient() - worst > 0.0
+        let q0_min = self.q0.f.min_coefficient() - self.q0.err;
+        if q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) + f64::MIN_POSITIVE {
+            return Ok(true);
+        }
+        self.tangent_certified(b)
+    }
+
+    /// `Q > 0` on the whole patch from one polynomial, where `q1 >= 0`. The square root is
+    /// concave, so for any `c > 0` it lies under its tangent at `c^2`:
+    /// `X <= (x2 + c^2) / (2c)`, and with `q1 >= 0`
+    /// `Q = q0 - X q1 >= R = q0 - q1 (x2 + c^2) / (2c)`, a Bernstein polynomial whose
+    /// least coefficient bounds it. The ranges above bound `q0` and `X q1` apart, at
+    /// different points of the patch, so their gap closes only linearly as the patch
+    /// shrinks; `R` is off `Q` by `q1 (X - c)^2 / (2c)`, which closes quadratically, and
+    /// its coefficients approach its values quadratically too (Farouki & Rajan 1987). On a
+    /// round inset to 86 % of its radius, `Q` is 0.14 of `q0`: the ranges needed about 790
+    /// quarters per patch, `R` certifies the patch whole (#18557).
+    ///
+    /// Every `c > 0` makes `R` a lower bound; `c` only chooses where it is tight, at the
+    /// value of `X` at the patch's middle. With `c^2` and `1 / (2c)` rounded, the tangent
+    /// is above `X` within `gamma(2)` of itself, a slack of `gamma(2)` of
+    /// `max|q1 (x2 + c^2)| / (2c)`. `R`'s least coefficient, less its rounding bound
+    /// ([`Bounded`]: the forms', the products' and the sums') and that slack, must stay
+    /// above 0 by `gamma(4)` of the magnitudes compared. `q1 >= 0` is proved the same way,
+    /// its least coefficient above its rounding bound. A product past [`MAX_DEGREE`] is not
+    /// formed, and a coefficient that is not finite certifies nothing: the patch is left to
+    /// the ranges and to subdivision.
+    ///
+    /// `R` touches `Q` at the middle, where `c` is taken, so its least coefficient is at
+    /// most `Q` there, up to rounding, and must clear at least `q0`'s rounding bound. A
+    /// patch whose middle is not above that bound is left to the ranges without forming the
+    /// products: on a face that collapses (`Q = 0`) or folds, every patch of the budget
+    /// would otherwise form them.
+    ///
+    /// # Errors
+    ///
+    /// Those of the Bernstein products.
+    fn tangent_certified(&self, b: &Binomials) -> Result<bool> {
+        if self.q1.f.min_coefficient() - self.q1.err < 0.0 {
+            return Ok(false);
+        }
+        if self.middle() <= self.q0.err {
+            return Ok(false);
+        }
+        let ((pu, pv), (xu, xv)) = (self.q1.f.degrees(), self.x2.f.degrees());
+        if pu + xu > MAX_DEGREE || pv + xv > MAX_DEGREE {
+            return Ok(false);
+        }
+        let c = self.x2.f.eval(0.5, 0.5).sqrt();
+        if !positive(c) || !c.is_finite() {
+            return Ok(false);
+        }
+        let c2 = c * c;
+        let scale = 0.5 / c;
+        let up = self
+            .x2
+            .add_scaled(&Bounded::exact(Bernstein2::constant(1.0)), c2, b)?;
+        let t = self.q1.mul(&up, b)?;
+        let r = self.q0.add_scaled(&t, -scale, b)?;
+        let finite = r.f.coefficients().iter().all(|x| x.is_finite()) && r.err.is_finite();
+        if !finite {
+            return Ok(false);
+        }
+        let slack = gamma(2) * scale * (t.f.max_abs_coefficient() + t.err);
+        let least = r.f.min_coefficient();
+        Ok(least - r.err - slack > gamma(4) * (least.abs() + r.err + slack) + f64::MIN_POSITIVE)
     }
 
     /// `Q` at the middle of the patch.
     fn middle(&self) -> f64 {
-        let x = self.x2.eval(0.5, 0.5).max(0.0).sqrt();
-        self.q0.eval(0.5, 0.5) - x * self.q1.eval(0.5, 0.5)
+        let x = self.x2.f.eval(0.5, 0.5).max(0.0).sqrt();
+        self.q0.f.eval(0.5, 0.5) - x * self.q1.f.eval(0.5, 0.5)
     }
 
     fn quarters(&self) -> [Self; 4] {
-        let r = |u0: f64, u1: f64, v0: f64, v1: f64| Self {
-            q0: self.q0.restrict(u0, u1, v0, v1),
-            q1: self.q1.restrict(u0, u1, v0, v1),
-            x2: self.x2.restrict(u0, u1, v0, v1),
+        let r = |upper_u: bool, upper_v: bool| Self {
+            q0: self.q0.quarter(upper_u, upper_v),
+            q1: self.q1.quarter(upper_u, upper_v),
+            x2: self.x2.quarter(upper_u, upper_v),
         };
         [
-            r(0.0, 0.5, 0.0, 0.5),
-            r(0.5, 1.0, 0.0, 0.5),
-            r(0.0, 0.5, 0.5, 1.0),
-            r(0.5, 1.0, 0.5, 1.0),
+            r(false, false),
+            r(true, false),
+            r(false, true),
+            r(true, true),
         ]
     }
 }
@@ -973,16 +1179,17 @@ impl RegularityForms {
 pub enum Regularity {
     /// The offset is regular on the whole region (`(1 - k1 d)(1 - k2 d) > 0`).
     Regular,
-    /// The offset folds (a point with `(1 - k1 d)(1 - k2 d) < 0` was found) or is not
-    /// certified regular within the budget; `largest` is the largest distance on that
-    /// side that works (the smallest radius of curvature on the displaced side), finite.
+    /// The offset folds: a point with `(1 - k1 d)(1 - k2 d) < 0` was proved; `largest` is
+    /// the largest distance on that side that works (the smallest radius of curvature on
+    /// the displaced side), finite.
     Folds {
         /// The largest offset distance (magnitude) whose offset does not fold.
         largest: f64,
     },
-    /// Not certified, and the sizing found no curvature towards that side, so no distance
-    /// is named: `Q` stays non-negative but will not separate from zero, where the
-    /// reduced normal vanishes, or the budget ran out.
+    /// Not certified regular and no fold proved: the budget ran out (`Q` will not separate
+    /// from zero, where the reduced normal vanishes or the offset collapses, or a fold
+    /// point is not proved), or a fold was proved but the sizing found no curvature
+    /// towards that side, so no distance is named.
     NotCertified,
 }
 
@@ -1022,35 +1229,75 @@ pub fn certify_regular(
     d: f64,
     uv_box: Option<[f64; 4]>,
 ) -> Result<Regularity> {
+    certify_regular_knowing(k, s, d, uv_box, None)
+}
+
+/// [`certify_regular`], given what [`least_wall`] found for the same `s`, `d` and
+/// `uv_box` (`None`: not looked for). A fold names that radius instead of searching for it
+/// again, so a caller that has run [`proved_singular`] on the face does not pay for the
+/// search twice.
+///
+/// # Errors
+///
+/// Those of [`certify_regular`].
+pub fn certify_regular_knowing(
+    k: &Kernel,
+    s: &Nurb,
+    d: f64,
+    uv_box: Option<[f64; 4]>,
+    least: Option<f64>,
+) -> Result<Regularity> {
     let b = Binomials::new();
     let region = patches_in(s, uv_box)?;
-    let mut stack: Vec<RegularityForms> = Vec::new();
+    // the face's net, for the fold witness (none: no fold is proved)
+    let net = witness_net(s).ok();
+    let mut stack: Vec<(f64, RegularityForms, [f64; 4])> = Vec::new();
     for patch in &region {
-        stack.push(RegularityForms::new(patch, d, &b)?);
+        let forms = RegularityForms::new(patch, d, &b)?;
+        stack.push((forms.middle(), forms, patch.range));
     }
     let mut examined = 0usize;
     let mut folds = false;
-    while let Some(forms) = stack.pop() {
+    while let Some((middle, forms, range)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
-        if forms.certified() {
+        if forms.certified(&b)? {
             continue;
         }
-        if forms.middle() < 0.0 {
-            // a point where the offset folds
+        let [u0, u1, v0, v1] = range;
+        let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        if middle < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
+            // a point where the offset folds, proved
             folds = true;
             break;
         }
         if examined > MAX_REGULARITY_PATCHES {
-            folds = true;
-            break;
+            // the budget spent: not certified, and no fold proved
+            return Ok(Regularity::NotCertified);
         }
-        stack.extend(forms.quarters());
+        let ranges = [
+            [u0, um, v0, vm],
+            [um, u1, v0, vm],
+            [u0, um, vm, v1],
+            [um, u1, vm, v1],
+        ];
+        let mut quarters: Vec<(f64, RegularityForms, [f64; 4])> = forms
+            .quarters()
+            .into_iter()
+            .zip(ranges)
+            .map(|(q, r)| (q.middle(), q, r))
+            .collect();
+        // the least middle first: a fold is found before the budget runs out along Q = 0
+        quarters.sort_by(|a, b| b.0.total_cmp(&a.0));
+        stack.extend(quarters);
     }
     if !folds {
         return Ok(Regularity::Regular);
     }
-    let largest = largest_wall(&region, d.signum())?;
+    let largest = match least {
+        Some(largest) => largest,
+        None => largest_wall(&region, d.signum())?,
+    };
     Ok(if largest.is_finite() {
         Regularity::Folds { largest }
     } else {
@@ -1067,6 +1314,76 @@ pub struct Singular {
     /// Whether the offset collapses there (the radius is the distance, within the
     /// resolution) rather than folds (the distance is the larger by more).
     pub collapses: bool,
+}
+
+/// The face's net in the form its interval partials take ([`nurbs_partials_over_box`]):
+/// degrees, full knot vectors and homogeneous control points `(x w, y w, z w, w)`, u-major.
+pub(crate) fn witness_net(s: &Nurb) -> Result<Nurbs> {
+    let (p, q) = s.degrees();
+    let (n, m) = (s.n(), s.m());
+    let u = s.u_knots().to_vec();
+    let v = s.v_knots().to_vec();
+    let (nu, nv) = (n + 1, m + 1);
+    if u.len() != nu + p + 1 || v.len() != nv + q + 1 {
+        return Err(invalid("a net whose knots do not match it"));
+    }
+    let rational = s.is_rational();
+    let mut pw = Vec::new();
+    for i in 0..=n {
+        for j in 0..=m {
+            let (h, w) = coordinates(s.cpt(i, j)?, rational)?;
+            if !positive(w) {
+                return Err(invalid("a weight that is not positive"));
+            }
+            pw.extend_from_slice(&[h.x, h.y, h.z, w]);
+        }
+    }
+    Ok(Nurbs {
+        p,
+        q,
+        nu,
+        nv,
+        u,
+        v,
+        pw,
+    })
+}
+
+fn ivl_dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn ivl_cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// Whether the offset of the face `net` by `d` is proved to fold at `(u, v)`: its point and
+/// partials there enclosed from the net, `|N|^2` proved positive and
+/// `det(I - d W) |N|^4 = |N|^4 - d |N| H + d^2 K` proved negative (module docs). An
+/// enclosure that fails proves nothing.
+fn proved_fold(net: &Nurbs, d: f64, u: f64, v: f64) -> bool {
+    let Ok(p) = nurbs_partials_over_box(net, u, u, v, v, 2, 0) else {
+        return false;
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let n = ivl_cross(su, sv);
+    let x2 = ivl_dot(n, n);
+    if !x2.is_positive() {
+        return false;
+    }
+    let (e, f, g) = (ivl_dot(su, su), ivl_dot(su, sv), ivl_dot(sv, sv));
+    let l = ivl_dot(p.at(2, 0), n);
+    let m = ivl_dot(p.at(1, 1), n);
+    let nn = ivl_dot(p.at(0, 2), n);
+    let h = e * nn + g * l - Ivl::from(2.0) * f * m;
+    let k = l * nn - m * m;
+    let di = Ivl::from(d);
+    let q = x2 * x2 - di * x2.sqrt() * h + di * di * k;
+    q.hi < 0.0
 }
 
 /// A proof that the offset of `s` by `d` (along its NURB normal) over the parameter box
@@ -1089,82 +1406,151 @@ pub fn proved_singular(
     uv_box: Option<[f64; 4]>,
     resolution: f64,
 ) -> Result<Option<Singular>> {
+    check_reach(d, resolution)?;
+    let Some(radius) = least_wall(s, d, uv_box)? else {
+        return Ok(None);
+    };
+    Ok(singular_at(radius, d, resolution))
+}
+
+/// [`proved_singular`]'s refusal of its inputs: a distance or resolution that is not
+/// finite, or a negative resolution.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for those.
+pub fn check_reach(d: f64, resolution: f64) -> Result<()> {
     if !d.is_finite() || !resolution.is_finite() || resolution < 0.0 {
+        return Err(invalid("a distance or resolution that is not finite"));
+    }
+    Ok(())
+}
+
+/// The least radius of curvature [`proved_singular`] samples on the side of `s` that `d`
+/// displaces it to, over `uv_box`: the radius it and [`certify_regular_knowing`] name.
+/// `None` for an empty region or a distance of zero, where neither looks for one.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a distance that is not finite; those of the Bezier
+/// decomposition.
+pub fn least_wall(s: &Nurb, d: f64, uv_box: Option<[f64; 4]>) -> Result<Option<f64>> {
+    if !d.is_finite() {
         return Err(invalid("a distance or resolution that is not finite"));
     }
     let region = patches_in(s, uv_box)?;
     if region.is_empty() || !positive(d.abs()) {
         return Ok(None);
     }
-    let radius = largest_wall(&region, d.signum())?;
+    largest_wall(&region, d.signum()).map(Some)
+}
+
+/// [`proved_singular`]'s verdict for the least radius `radius` on the displaced side:
+/// `None` when the offset by `d` keeps more than `resolution` of it.
+#[must_use]
+pub fn singular_at(radius: f64, d: f64, resolution: f64) -> Option<Singular> {
     let reach = d.abs();
     if radius - reach > resolution {
-        return Ok(None);
-    }
-    Ok(Some(Singular {
-        radius,
-        collapses: radius - reach >= -resolution,
-    }))
-}
-
-/// The principal curvatures (signed along the NURB normal) of a patch at `(s, t)`.
-fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
-    let p = eval3(&patch.p, s, t);
-    let pu = eval3(&deriv_u3(&patch.p), s, t);
-    let pv = eval3(&deriv_v3(&patch.p), s, t);
-    let puu = eval3(&deriv_u3(&deriv_u3(&patch.p)), s, t);
-    let puv = eval3(&deriv_v3(&deriv_u3(&patch.p)), s, t);
-    let pvv = eval3(&deriv_v3(&deriv_v3(&patch.p)), s, t);
-    let (w, au, av, l2, m2, n2) = match &patch.w {
-        None => (1.0, pu, pv, puu, puv, pvv),
-        Some(w) => {
-            let wv = w.eval(s, t);
-            let (wu, wvd) = (w.deriv_u().eval(s, t), w.deriv_v().eval(s, t));
-            let wuu = w.deriv_u().deriv_u().eval(s, t);
-            let wuv = w.deriv_u().deriv_v().eval(s, t);
-            let wvv = w.deriv_v().deriv_v().eval(s, t);
-            (
-                wv,
-                pu * wv - p * wu,
-                pv * wv - p * wvd,
-                puu * wv - p * wuu,
-                puv * wv - p * wuv,
-                pvv * wv - p * wvv,
-            )
-        }
-    };
-    let ax = au.cross(av);
-    let x = ax.length();
-    if !positive(x) {
         return None;
     }
-    let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
-    let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
-    // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
-    let h = e * n + g * l - 2.0 * f * m;
-    let k = l * n - m * m;
-    let a = x * x;
-    let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
-    let scale = w * w / x;
-    Some((
-        scale * (h - disc) / (2.0 * a),
-        scale * (h + disc) / (2.0 * a),
-    ))
+    Some(Singular {
+        radius,
+        collapses: radius - reach >= -resolution,
+    })
 }
 
-/// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
-/// distance) of the patch at `(s, t)`; infinite where it bends away or the normal vanishes.
-fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
-    match principal_curvatures(patch, s, t) {
-        Some((k1, k2)) => {
-            let k = (k1 * side).max(k2 * side);
-            if k > 0.0 {
-                1.0 / k
-            } else {
-                f64::INFINITY
-            }
+/// A patch's derivative nets up to second order, built once and evaluated at many
+/// `(s, t)`: the wall search samples each patch at 81 points, and one at up to 240 more.
+struct Derivatives {
+    p: Bernstein3,
+    pu: Bernstein3,
+    pv: Bernstein3,
+    puu: Bernstein3,
+    puv: Bernstein3,
+    pvv: Bernstein3,
+    /// `w` and its partials `wu, wv, wuu, wuv, wvv`; `None` for a non-rational patch.
+    w: Option<[Bernstein2; 6]>,
+}
+
+impl Derivatives {
+    fn of(patch: &Patch) -> Self {
+        let pu = deriv_u3(&patch.p);
+        let pv = deriv_v3(&patch.p);
+        Self {
+            p: patch.p.clone(),
+            puu: deriv_u3(&pu),
+            puv: deriv_v3(&pu),
+            pvv: deriv_v3(&pv),
+            pu,
+            pv,
+            w: patch.w.as_ref().map(|w| {
+                let wu = w.deriv_u();
+                let wv = w.deriv_v();
+                let (wuu, wuv, wvv) = (wu.deriv_u(), wu.deriv_v(), wv.deriv_v());
+                [w.clone(), wu, wv, wuu, wuv, wvv]
+            }),
         }
-        None => f64::INFINITY,
+    }
+
+    /// The principal curvatures (signed along the NURB normal) of the patch at `(s, t)`.
+    fn principal_curvatures(&self, s: f64, t: f64) -> Option<(f64, f64)> {
+        let p = eval3(&self.p, s, t);
+        let pu = eval3(&self.pu, s, t);
+        let pv = eval3(&self.pv, s, t);
+        let puu = eval3(&self.puu, s, t);
+        let puv = eval3(&self.puv, s, t);
+        let pvv = eval3(&self.pvv, s, t);
+        let (w, au, av, l2, m2, n2) = match &self.w {
+            None => (1.0, pu, pv, puu, puv, pvv),
+            Some([w, wu_net, wv_net, wuu_net, wuv_net, wvv_net]) => {
+                let wv = w.eval(s, t);
+                let (wu, wvd) = (wu_net.eval(s, t), wv_net.eval(s, t));
+                let wuu = wuu_net.eval(s, t);
+                let wuv = wuv_net.eval(s, t);
+                let wvv = wvv_net.eval(s, t);
+                (
+                    wv,
+                    pu * wv - p * wu,
+                    pv * wv - p * wvd,
+                    puu * wv - p * wuu,
+                    puv * wv - p * wuv,
+                    pvv * wv - p * wvv,
+                )
+            }
+        };
+        let ax = au.cross(av);
+        let x = ax.length();
+        if !positive(x) {
+            return None;
+        }
+        let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
+        let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
+        // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
+        let h = e * n + g * l - 2.0 * f * m;
+        let k = l * n - m * m;
+        let a = x * x;
+        let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
+        let scale = w * w / x;
+        Some((
+            scale * (h - disc) / (2.0 * a),
+            scale * (h + disc) / (2.0 * a),
+        ))
+    }
+
+    /// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
+    /// distance) at `(s, t)`; infinite where it bends away or the normal vanishes.
+    fn wall(&self, side: f64, s: f64, t: f64) -> f64 {
+        match self.principal_curvatures(s, t) {
+            Some((k1, k2)) => {
+                let k = (k1 * side).max(k2 * side);
+                if k > 0.0 {
+                    1.0 / k
+                } else {
+                    f64::INFINITY
+                }
+            }
+            None => f64::INFINITY,
+        }
     }
 }
 
@@ -1172,26 +1558,31 @@ fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
 /// grid per patch, then a pattern search about the smallest sample. A point where the
 /// normal vanishes says nothing of the curvature; infinite where no sample bends that way.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
-    let mut best = (f64::INFINITY, 0usize, 0.5, 0.5);
-    for (i, patch) in region.iter().enumerate() {
+    let mut best: Option<(f64, Derivatives, f64, f64)> = None;
+    for patch in region {
+        let nets = Derivatives::of(patch);
+        let mut here = (f64::INFINITY, 0.5, 0.5);
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
-                let r = wall(patch, side, s, t);
-                if r < best.0 {
-                    best = (r, i, s, t);
+                let r = nets.wall(side, s, t);
+                if r < here.0 {
+                    here = (r, s, t);
                 }
             }
         }
+        let smallest = best.as_ref().map_or(f64::INFINITY, |b| b.0);
+        if best.is_none() || here.0 < smallest {
+            best = Some((here.0, nets, here.1, here.2));
+        }
     }
-    let (mut r, i, mut s, mut t) = best;
-    let patch = region.get(i).ok_or_else(|| invalid("no patch"))?;
+    let (mut r, nets, mut s, mut t) = best.ok_or_else(|| invalid("no patch"))?;
     let mut step = 1.0 / 16.0;
     for _ in 0..60 {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
-            let r2 = wall(patch, side, s2, t2);
+            let r2 = nets.wall(side, s2, t2);
             if r2 < r {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }
@@ -1231,10 +1622,16 @@ mod tests {
     /// The rational quarter cylinder r10 about z, 20 high, normal outward (u around,
     /// v up: `S_u x S_v` points away from the axis).
     fn quarter_cylinder() -> Nurb {
+        quarter_cylinder_at(0.0, 0.0)
+    }
+
+    /// [`quarter_cylinder`] about the vertical line through `(ox, oy)`.
+    fn quarter_cylinder_at(ox: f64, oy: f64) -> Nurb {
         let c = core::f64::consts::FRAC_1_SQRT_2;
         let net = [(10.0, 0.0, 1.0), (10.0, 10.0, c), (0.0, 10.0, 1.0)]
             .iter()
             .map(|&(x, y, w)| {
+                let (x, y) = (x + ox, y + oy);
                 vec![
                     CPoint::new(x * w, y * w, 0.0, w),
                     CPoint::new(x * w, y * w, 20.0 * w, w),
@@ -1491,6 +1888,34 @@ mod tests {
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     }
 
+    /// #13685: inset by exactly its radius the cylinder's offset collapses onto its axis,
+    /// `Q = 0` everywhere, and its patches' middles evaluate `Q` a few ulps either side of 0.
+    /// A middle below 0 by rounding is no fold: no fold is proved, the budget runs out, and
+    /// the answer is not certified, never a fold naming a size (goldens
+    /// `member_cylinder_extend_inset_at_radius` measured `Q = -1.1e-13` there).
+    #[test]
+    fn a_cylinder_inset_by_its_radius_is_not_certified_never_a_fold() {
+        let s = quarter_cylinder();
+        assert_eq!(
+            certify_regular(&Kernel::default(), &s, -10.0, None).unwrap(),
+            Regularity::NotCertified
+        );
+    }
+
+    /// The fold witness: on the quarter cylinder (radius 10, its NURB normal outward), an
+    /// inset past the radius is proved to fold at any point, one by exactly the radius
+    /// (`det(I - d W) = 0`) is not, nor is one short of it.
+    #[test]
+    fn a_fold_is_proved_only_past_the_radius() {
+        let net = witness_net(&quarter_cylinder()).unwrap();
+        for (u, v) in [(0.5, 0.5), (0.1, 0.9), (0.9, 0.2)] {
+            assert!(proved_fold(&net, -10.5, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, -10.0, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, -9.5, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, 10.5, u, v), "{u} {v}");
+        }
+    }
+
     /// The quarter cylinder's homogeneous net degree-elevated to (`p`, `q`) (each step
     /// `Q_i = i/(n+1) P_(i-1) + (1 - i/(n+1)) P_i` on the weighted points): the same
     /// surface, of a G2 round's degrees.
@@ -1555,6 +1980,243 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// A patch whose margin lies inside its forms' counted rounding is not certified, and
+    /// one whose margin is past it is: `q0` and `q1` constant 1 and `X` just below 1, so
+    /// `Q = 1 - X` is positive as computed in both. A form with a NaN coefficient (an
+    /// overflow, which the coefficients' extremes pass over) or an infinite bound
+    /// certifies nothing.
+    #[test]
+    fn a_margin_inside_the_counted_rounding_is_not_certified() {
+        let b = Binomials::new();
+        let form = |x: f64, err: f64| Bounded {
+            f: Bernstein2::constant(x),
+            err,
+        };
+        let forms = |margin: f64, err: f64| RegularityForms {
+            q0: form(1.0, err),
+            q1: form(1.0, 0.0),
+            x2: form((1.0 - margin) * (1.0 - margin), 0.0),
+        };
+        assert!(!forms(1e-12, 1e-10).certified(&b).unwrap());
+        assert!(forms(1e-8, 1e-10).certified(&b).unwrap());
+        assert!(!forms(1e-8, f64::INFINITY).certified(&b).unwrap());
+        let mut overflowed = forms(1e-8, 0.0);
+        overflowed.q0 = Bounded {
+            f: Bernstein2::new(1, 0, vec![1.0, f64::NAN]).unwrap(),
+            err: 0.0,
+        };
+        assert!(!overflowed.certified(&b).unwrap());
+    }
+
+    /// The regularity forms are built in the patch's own frame, so their counted rounding
+    /// follows the patch's size, not its distance from the origin: the quarter cylinder
+    /// (radius 10) moved 10^12 from the origin certifies as it does at the origin, regular
+    /// inset to 9.5 and outset, not certified inset by its radius (`Q = 0` everywhere), a
+    /// fold past it.
+    #[test]
+    fn a_cylinder_far_from_the_origin_is_certified_as_at_the_origin() {
+        let k = Kernel::default();
+        for (s, far) in [
+            (quarter_cylinder(), false),
+            (quarter_cylinder_at(1e12, -1e12), true),
+        ] {
+            for d in [-5.0, -9.0, -9.5, 5.0] {
+                assert_eq!(
+                    certify_regular(&k, &s, d, None).unwrap(),
+                    Regularity::Regular,
+                    "{d} {far}"
+                );
+            }
+            assert_eq!(
+                certify_regular(&k, &s, -10.0, None).unwrap(),
+                Regularity::NotCertified,
+                "{far}"
+            );
+            let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap()
+            else {
+                panic!("an inset past the radius folds ({far})");
+            };
+            assert!((largest - 10.0).abs() < 1e-3, "{largest} {far}");
+        }
+    }
+
+    /// 32 of the 472 spans of the round from #18557: a 0.28 round along the top edge of an
+    /// extruded spline outline, rational of degree 3 along the edge and 2 across, written
+    /// out as its Bezier patches (`tests/data/issue_18557_spline_round_spans.json`).
+    fn spline_round_spans() -> Nurb {
+        let data: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_18557_spline_round_spans.json"
+        )))
+        .unwrap();
+        let floats = |v: &serde_json::Value| -> Vec<f64> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect()
+        };
+        let net = data["net"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                row.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| match floats(c)[..] {
+                        [x, y, z, w] => CPoint::new(x, y, z, w),
+                        _ => panic!("a control point is x, y, z, w"),
+                    })
+                    .collect()
+            })
+            .collect();
+        let degree = |key: &str| usize::try_from(data[key].as_u64().unwrap()).unwrap();
+        Nurb::new(
+            net,
+            degree("p"),
+            degree("q"),
+            floats(&data["u"]),
+            floats(&data["v"]),
+        )
+        .unwrap()
+    }
+
+    /// #18557: a shell 0.24 thick insets the 0.28 round by 86 % of its radius. The offset
+    /// is regular, `det(I - d W)` about 1 - 0.24 / 0.28 = 0.14 across the round, and is
+    /// certified within the patch budget; bounding `q0` and `X q1` apart took about 790
+    /// patches for each of these 32 and ran out of it. Inset by its radius it is not
+    /// certified (the offset collapses onto the round's spine), and past it the offset
+    /// folds, naming the round's radius 0.28, to the net's approximation of the round.
+    #[test]
+    fn a_round_inset_close_to_its_radius_is_certified_within_the_budget() {
+        let s = spline_round_spans();
+        let k = Kernel::default();
+        for d in [-0.24, -0.2, -0.1] {
+            assert_eq!(
+                certify_regular(&k, &s, d, None).unwrap(),
+                Regularity::Regular,
+                "{d}"
+            );
+        }
+        assert_ne!(
+            certify_regular(&k, &s, -0.28, None).unwrap(),
+            Regularity::Regular
+        );
+        let Regularity::Folds { largest } = certify_regular(&k, &s, -0.3, None).unwrap() else {
+            panic!("an inset past the round's radius folds");
+        };
+        assert!((largest - 0.28).abs() < 1e-5, "{largest}");
+    }
+
+    /// The quarter cylinder (radius 10) inset close to its radius, `det(I - d W) =
+    /// 1 - |d| / 10`, is certified regular: the tangent bound closes on the thin margin where
+    /// the coefficients' ranges ran out of the budget. Moved 10^4 from the origin the forms
+    /// are built in the patch's own frame, so the same insets certify and the inset by the
+    /// radius (`Q = 0` everywhere) still does not; past the radius it folds.
+    #[test]
+    fn a_cylinder_inset_close_to_its_radius_is_certified() {
+        let k = Kernel::default();
+        for (s, far) in [
+            (quarter_cylinder(), false),
+            (quarter_cylinder_at(1e4, -1e4), true),
+        ] {
+            for d in [-9.9, -9.99] {
+                assert_eq!(
+                    certify_regular(&k, &s, d, None).unwrap(),
+                    Regularity::Regular,
+                    "{d} {far}"
+                );
+            }
+            assert_eq!(
+                certify_regular(&k, &s, -10.0, None).unwrap(),
+                Regularity::NotCertified,
+                "{far}"
+            );
+            let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap()
+            else {
+                panic!("an inset past the radius folds ({far})");
+            };
+            assert!((largest - 10.0).abs() < 1e-9, "{largest} {far}");
+        }
+    }
+
+    /// #2487's G2 round patch (the quarter cylinder raised to septic across, cubic along)
+    /// inset close to its radius: the tangent bound's product `q1 (x2 + c^2)` is of degree
+    /// 100 across, within the Bernstein forms' cap, and certifies it.
+    #[test]
+    fn a_septic_rational_patch_inset_close_to_its_radius_is_certified() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        assert_eq!(
+            certify_regular(&k, &s, -9.9, None).unwrap(),
+            Regularity::Regular
+        );
+    }
+
+    /// The tangent bound on patches written out as forms. Figure 2's patch (`q0` from 1 to
+    /// 1.3, `X q1` from 0.86 to 1.12, `q1 = 1`): the ranges overlap, the tangent certifies
+    /// it; with `q1` written at the forms' cap the product would pass [`MAX_DEGREE`], so it
+    /// is not formed and the patch is left to subdivision, not an error. Where `q1 < 0` the
+    /// tangent is an upper bound of `Q` and is not used: here `Q = -0.5 + X` is -0.4 at
+    /// `u = 0`, where the tangent line would give `R > 0` on the whole patch.
+    #[test]
+    fn the_tangent_bound_certifies_only_where_it_bounds_from_below() {
+        let b = Binomials::new();
+        let along_u =
+            |c0: f64, c1: f64| Bounded::exact(Bernstein2::new(1, 0, vec![c0, c1]).unwrap());
+        let one = |du: usize| Bounded::exact(Bernstein2::new(du, 0, vec![1.0; du + 1]).unwrap());
+        let figure = |q1: Bounded| RegularityForms {
+            q0: along_u(1.0, 1.3),
+            q1,
+            x2: along_u(0.86 * 0.86, 1.12 * 1.12),
+        };
+        assert!(figure(one(0)).tangent_certified(&b).unwrap());
+        assert!(figure(one(0)).certified(&b).unwrap());
+        assert!(!figure(one(MAX_DEGREE)).certified(&b).unwrap());
+        let saddle = RegularityForms {
+            q0: along_u(-0.5, -0.5),
+            q1: along_u(-1.0, -1.0),
+            x2: along_u(0.01, 4.0),
+        };
+        assert!(!saddle.certified(&b).unwrap());
+    }
+
+    /// The shell searches a face's least radius on the displaced side once
+    /// ([`least_wall`]) and both of its checks use it: given that radius,
+    /// [`certify_regular_knowing`] answers what [`certify_regular`] answers by searching, and
+    /// [`singular_at`] what [`proved_singular`] does, bit for bit.
+    #[test]
+    fn the_least_radius_found_once_serves_both_checks() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        let res = 1e-6;
+        // the distances `a_septic_rational_patch_is_certified_as_its_cylinder` certifies
+        for d in [-10.5, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            let searched = certify_regular(&k, &s, d, None).unwrap();
+            assert_eq!(
+                certify_regular_knowing(&k, &s, d, None, least).unwrap(),
+                searched,
+                "{d}"
+            );
+            if let Regularity::Folds { largest } = searched {
+                assert_eq!(least.map(f64::to_bits), Some(largest.to_bits()), "{d}");
+            }
+        }
+        // the collapse test at, short of and past the radius, and outwards
+        for d in [-10.5, -10.0, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            assert_eq!(
+                least.and_then(|r| singular_at(r, d, res)),
+                proved_singular(&s, d, None, res).unwrap(),
+                "{d}"
+            );
+        }
+        assert_eq!(least_wall(&s, 0.0, None).unwrap(), None);
+        assert!(least_wall(&s, f64::NAN, None).is_err());
     }
 
     /// A cylinder of radius 10 offset towards its axis: by 10 the offset collapses onto

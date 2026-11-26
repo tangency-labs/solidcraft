@@ -936,7 +936,7 @@ fn a_hole_on_a_cones_side_drills_along_its_normal() {
     run(&mut s, "solid.hole", json!({"position": [7.5, 0, 10], "diameter": 4, "depth": 4, "name": "H"})).unwrap();
     let f = s.doc.find_feature("H").unwrap();
     let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("not a hole") };
-    let d = direction.0;
+    let d = solidcraft_doc::literal_dir(direction).unwrap();
     assert!((d.x + 0.8).abs() < 1e-6 && d.y.abs() < 1e-6 && (d.z + 0.6).abs() < 1e-6, "{d:?}");
 }
 
@@ -1036,13 +1036,18 @@ fn a_refused_hole_names_the_value_at_fault() {
     // A counterbore for a screw's head: the standard, the size in it, the screw size, the type
     // and the gap are each named when they are at fault.
     let e = refused(json!({"clearance": "M4", "head": "DIN 912"}));
-    assert!(e.contains("no head standard `DIN 912`") && e.contains("ISO 4762") && e.contains("ISO 7380-1"), "{e}");
-    let e = refused(json!({"clearance": "M2.5", "head": "ISO 7380-1"}));
-    assert!(e.contains("no ISO 7380-1 head for `M2.5`") && e.contains("M3 to M16"), "{e}");
+    assert!(e.contains("no head standard `DIN 912`") && e.contains("ISO 4762") && e.contains("ISO 7380-1") && e.contains("ISO 10642"), "{e}");
+    let e = refused(json!({"clearance": "M14", "head": "ISO 7380-1"}));
+    assert!(e.contains("no ISO 7380-1 head for `M14`") && e.contains("M2 to M16"), "{e}");
     let e = refused(json!({"diameter": 4.5, "head": "ISO 4762"}));
     assert!(e.contains("`head` needs `clearance`"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "type": "countersink", "cs_diameter": 9}));
     assert!(e.contains("`head` needs `type: counterbore`"), "{e}");
+    // A countersunk head sits in a countersink, and its table starts at M3 (#17728).
+    let e = refused(json!({"clearance": "M6", "head": "ISO 10642", "type": "counterbore", "cb_diameter": 14, "cb_depth": 4}));
+    assert!(e.contains("`head` needs `type: countersink`"), "{e}");
+    let e = refused(json!({"clearance": "M1.6", "head": "ISO 10642"}));
+    assert!(e.contains("no ISO 10642 head for `M1.6`") && e.contains("M2 to M20"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": -1}));
     assert!(e.contains("`head_gap` must be 0 to 7 mm") && e.contains("not -1"), "{e}");
     let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": "width"}));
@@ -1180,4 +1185,48 @@ fn a_counterbore_on_a_round_bar_drills_its_whole_rim() {
     assert!(!solid_at(&s, Vec3::new(99.95, 0.0, 20.0)), "the counterbore is not cut");
     // Beside the counterbore (radius 2.5), under the surface (x 99.964 at y 2.7).
     assert!(solid_at(&s, Vec3::new(99.95, 2.7, 20.0)), "the bar beside the counterbore is cut");
+}
+
+/// A Ø0.29 × 1 blind hole drilled down beside the edge of a 2 mm extrusion of a spline outline,
+/// its side 0.00004 mm to 0 inside the outline's point at X = 2. 0.43.0 refused the 0.00002 wall
+/// with "it would remove all of `Base`" and the 0.00001 wall with SMLib's check (#18293). Each
+/// builds one closed valid solid, the hole stops at its depth, and the material taken is the
+/// bore within the outline: a hair short of the whole bore, because the outline leans across the
+/// hole's outer side, and a hair less with each step out.
+/// The probes stand off the plane y = 0: at the 0.00002 wall the point classification reads the
+/// bore's axis there as material, though the hole is cut (a classification bug of its own).
+#[test]
+fn a_hole_a_hair_inside_a_spline_extrusions_edge_is_cut() {
+    let outline = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"})).unwrap();
+        let points = json!([[2, 0], [1.51, 1.14], [0, 1.35], [-1.51, 1.14], [-2, 0], [-1.31, -0.986], [0, -1.65], [1.31, -0.986]]);
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true})).unwrap();
+        run(&mut s, "sketch.finish", json!({})).unwrap();
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 2, "operation": "new", "body_name": "Base"})).unwrap();
+        s
+    };
+    let r = 0.145;
+    let bore = cyl(r, 1.0);
+    let mut last = f64::INFINITY;
+    for wall in [4e-5, 3e-5, 2e-5, 1e-5, 0.0] {
+        let x = 2.0 - wall - r;
+        let mut s = outline();
+        let (start, _) = measure(&mut s).unwrap();
+        run(&mut s, "solid.hole", json!({"position": [x, 0, 2], "diameter": 0.29, "depth": 1, "targets": ["Base"]}))
+            .unwrap_or_else(|e| panic!("wall {wall}: {e}"));
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1, "wall {wall}: one body");
+        for b in bodies {
+            let bad = b.body.validity();
+            assert!(bad.is_empty() && b.body.shell_count() == 1, "wall {wall}: {bad:?}, {} shells", b.body.shell_count());
+        }
+        assert!(!solid_at(&s, Vec3::new(x, 0.05, 1.5)), "wall {wall}: the bore is drilled");
+        assert!(solid_at(&s, Vec3::new(x, 0.05, 0.5)), "wall {wall}: the blind hole stops at 1 mm");
+        let (after, _) = measure(&mut s).unwrap();
+        let removed = start - after;
+        assert!(removed <= bore && removed > bore - 1e-4, "wall {wall}: removed {removed}, the bore is {bore}");
+        assert!(removed < last, "wall {wall}: moved out, the hole takes less ({removed} after {last})");
+        last = removed;
+    }
 }

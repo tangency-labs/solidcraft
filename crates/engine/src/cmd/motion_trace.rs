@@ -172,12 +172,14 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
         let mut definition = j.clone();
         definition.name.clear();
         definition.values = seeds.get(&j.id).map(|q| (*q).clone()).unwrap_or_default();
-        let (offset, angle, q) = joints::expressed(&params, &definition)?;
+        let (offset_xy, offset, angle, q) = joints::expressed(&params, &definition)?;
+        definition.offset_xy = offset_xy;
         definition.offset = offset;
         definition.angle = angle;
         definition.values = q;
+        definition.limits = joints::expressed_limits(&params, &definition)?;
         definition.exprs = Default::default();
-        let fa = joints::resolve_origin(&s.doc, &st, &j.a)?;
+        let fa = definition.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
         let fb = joints::resolve_origin(&s.doc, &st, &j.b)?;
         joints.push(json!([definition, fa, fb]));
     }
@@ -272,7 +274,7 @@ fn same_points(a: &[Vec3], b: &[Vec3]) -> bool {
 fn sample(s: &Session, t: &MotionTrace) -> Result<Vec<Vec3>> {
     let at = local(s, t)?;
     let mut scratch = seeded(s, t);
-    scratch.pending_moves.clear();
+    scratch.clear_pending_moves();
     let world = placed_world(&scratch, &t.occurrence)?;
     let p = params(t, apply_point(&world, at));
     let (mut points, _) = super::sample_trace(&scratch, &p, CMD)?;
@@ -357,6 +359,8 @@ pub(crate) fn refresh(s: &mut Session) {
                     {
                         wire.pts = solidcraft_sketch::fit_polyline(&points);
                         wire.fit = points;
+                        // Its points are new: 3D constraints on the old ones go (#10608).
+                        sk.drop_wire_constraints_on(&t.wire);
                         changed = true;
                     }
                     None

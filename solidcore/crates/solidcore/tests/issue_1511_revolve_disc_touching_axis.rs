@@ -4,12 +4,12 @@
 //! point and the curve's trim merged away) and crashed; fork tangency-labs/smlib 80d307d
 //! checks the curve against the face's trims first. The port holds the face's curves by
 //! index (`built.curve_edges`), so a curve the face creator dropped is a missing edge,
-//! never a stale read: the sweep returns an error or a sound body, and never panics.
+//! never a stale read: the sweep builds a sound body and never panics.
 //!
 //! The same quarter horn torus through the whole-body check gates WR-505 (#1515, the
-//! fork's smlib#41, `Kernel::fixes.internal_pole_row_through_knot`) at operation level
-//! (#1954): upstream's `HasInternalPole` takes the corner rows on the axis for an internal
-//! pole and the check fails; the fork's finds none.
+//! fork's smlib#41) at operation level (#1954): upstream's `HasInternalPole` takes the
+//! corner rows on the axis for an internal pole and the check fails; the port's (the
+//! fork's) finds none.
 
 #![allow(
     clippy::unwrap_used,
@@ -24,7 +24,6 @@ use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::sweep::api_brep::create_rotational_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Kernel, Point3, Vec3};
@@ -62,27 +61,21 @@ fn revolve_disc(k: &mut Kernel, axis_x: f64) -> solidcore::Result<solidcore::Bre
 }
 
 #[test]
-fn issue_1511_disc_touching_the_axis_errs_or_builds_a_sound_body() {
-    // a quarter of the horn torus: (pi / 2) * (pi 5^2) * 5 (Pappus)
+fn issue_1511_disc_touching_the_axis_builds_a_sound_body() {
+    // a quarter of the horn torus: (pi / 2) * (pi 5^2) * 5 (Pappus). The sweep has one
+    // path since WR-448's flag retired, and it builds this body, so a refusal is a
+    // regression (valid input never becomes a refusal).
     let want = PI / 2.0 * PI * 25.0 * 5.0;
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = fix;
-        match revolve_touching_disc(&mut k) {
-            Err(e) => eprintln!("fix {fix}: no body: {e}"),
-            Ok(mut b) => {
-                // a sound body: intact topology and the quarter horn torus's volume (to a
-                // coarse integration tolerance, which keeps the test cheap)
-                solidcore::topology::integrity::check(&b).unwrap();
-                let got = volume(&k, &mut b);
-                eprintln!("fix {fix}: body, volume {got} (horn torus quarter {want})");
-                assert!(
-                    (got - want).abs() <= 1e-2 * want,
-                    "fix {fix}: unsound body, volume {got}, want {want}"
-                );
-            }
-        }
-    }
+    let mut k = Kernel::default();
+    let mut b = revolve_touching_disc(&mut k).expect("the quarter horn torus builds");
+    // a sound body: intact topology and the quarter horn torus's volume (to a coarse
+    // integration tolerance, which keeps the test cheap)
+    solidcore::topology::integrity::check(&b).unwrap();
+    let got = volume(&k, &mut b);
+    assert!(
+        (got - want).abs() <= 1e-2 * want,
+        "unsound body, volume {got}, want {want}"
+    );
 }
 
 /// The body's volume, to a coarse integration tolerance (cheap, and far tighter than the
@@ -96,56 +89,40 @@ fn volume(k: &Kernel, b: &mut solidcore::Brep) -> f64 {
     brep_volume(k, b, 1e-3, &attrs).unwrap()
 }
 
-/// WR-505 (#1515) through a revolve and the whole-body check (#1954). The quarter horn
-/// torus is built the same with the flag off or on (its volume is the closed form either
-/// way); only the check's answer changes. Off (pinned upstream), `HasInternalPole` tests a
-/// corner row at the circle's double knots, finds the rows on the axis beside the NURB's
-/// boundary pole coincident and reports B-spline surface test 2, an internal pole; on (the
-/// fork), it tests the row through the knot and the body is valid. Control: the same disc
-/// revolved about an axis 8 from its centre (a ring torus, no pole) is valid either way.
+/// WR-505 (#1515) through a revolve and the whole-body check (#1954). Pinned upstream's
+/// `HasInternalPole` tests a corner row at the circle's double knots, finds the rows on
+/// the axis beside the NURB's boundary pole coincident and reports B-spline surface test
+/// 2, an internal pole; the port tests the row through the knot and the body is valid,
+/// its volume the closed form. Control: the same disc revolved about an axis 8 from its
+/// centre (a ring torus, no pole) is valid too.
 #[test]
-fn wr_505_quarter_horn_torus_passes_the_body_check_only_with_the_fix() {
+fn wr_505_quarter_horn_torus_passes_the_body_check() {
     // Pappus: the disc's area times the quarter turn of its centre
     let horn = PI / 2.0 * PI * 25.0 * 5.0;
     let ring = PI / 2.0 * PI * 25.0 * 8.0;
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.internal_pole_row_through_knot = fix;
+    let mut k = Kernel::default();
 
-        let mut b = revolve_disc(&mut k, 5.0).unwrap();
-        assert_eq!(b.face_list().len(), 3, "fix {fix}");
-        let got = volume(&k, &mut b);
-        eprintln!("fix {fix}: quarter horn torus, volume {got} (closed form {horn})");
-        assert!(
-            (got - horn).abs() <= 1e-2 * horn,
-            "fix {fix}: {got}, want {horn}"
-        );
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert!(check.pointer_reports.is_empty(), "fix {fix}: {check:?}");
-        let failures: Vec<_> = check
-            .failures()
-            .map(|r| (r.reporting_type, r.test_index))
-            .collect();
-        if fix {
-            assert!(check.is_valid(), "{check:?}");
-            assert_eq!(check.assert_valid, Some(true));
-            assert!(failures.is_empty(), "{failures:?}");
-        } else {
-            assert!(!check.is_valid(), "{check:?}");
-            assert_eq!(check.assert_valid, Some(false));
-            assert_eq!(failures, [(BSplineSurface::TYPE, 2)], "{check:?}");
-        }
+    let mut b = revolve_disc(&mut k, 5.0).unwrap();
+    assert_eq!(b.face_list().len(), 3);
+    let got = volume(&k, &mut b);
+    eprintln!("quarter horn torus, volume {got} (closed form {horn})");
+    assert!((got - horn).abs() <= 1e-2 * horn, "{got}, want {horn}");
+    let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(check.pointer_reports.is_empty(), "{check:?}");
+    let failures: Vec<_> = check
+        .failures()
+        .map(|r| (r.reporting_type, r.test_index))
+        .collect();
+    assert!(check.is_valid(), "{check:?}");
+    assert_eq!(check.assert_valid, Some(true));
+    assert!(failures.is_empty(), "{failures:?}");
 
-        let mut b = revolve_disc(&mut k, 8.0).unwrap();
-        assert_eq!(b.face_list().len(), 3, "fix {fix}");
-        let got = volume(&k, &mut b);
-        eprintln!("fix {fix}: quarter ring torus, volume {got} (closed form {ring})");
-        assert!(
-            (got - ring).abs() <= 1e-2 * ring,
-            "fix {fix}: {got}, want {ring}"
-        );
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert!(check.is_valid(), "fix {fix}: {check:?}");
-        assert_eq!(check.failure_count(), 0, "fix {fix}");
-    }
+    let mut b = revolve_disc(&mut k, 8.0).unwrap();
+    assert_eq!(b.face_list().len(), 3);
+    let got = volume(&k, &mut b);
+    eprintln!("quarter ring torus, volume {got} (closed form {ring})");
+    assert!((got - ring).abs() <= 1e-2 * ring, "{got}, want {ring}");
+    let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{check:?}");
+    assert_eq!(check.failure_count(), 0);
 }

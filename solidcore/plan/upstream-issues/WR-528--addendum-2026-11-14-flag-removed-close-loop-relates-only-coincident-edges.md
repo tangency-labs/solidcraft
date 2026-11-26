@@ -1,0 +1,9 @@
+Updates: WR-528
+
+#### WR-528 (update, 2026-11-14). `close_loop_relates_only_coincident_edges` is removed
+
+`TopologyIntersector::close_intersection_loop` (`boolean/topology_intersector/p2.rs`) relates the target edge with the sole other edge between the mated vertices only when the target's midpoint drops onto it within `max(2 * dMaxDist, the two edge tolerances)`; otherwise it goes on to the coincidence intersection. That is the only path now, and the flag is gone. SolidCraft already ran with it on. Removed: the field `UpstreamFixes::close_loop_relates_only_coincident_edges`, SolidCraft's preset line, its entry in `fixes.json`, its name in the SolidCraft profile list of `issue_2260_gn_pipe_refined_range_end.rs` and every test setting of it.
+
+- **Which path went:** the upstream one, which relates the two edges whenever the closest-point drop succeeds (it always does).
+- **Results:** 10 golden rows move, each attributed to this flag alone. `boolean.api_brep` `issue2177_crescent_on_top_of_rim_{checked,measured}`: the union now checks clean and its volume is the closed form (`tests/issue_2177_crescent_on_top_of_rim.rs`). `boolean.topology_intersector_p2` `close_loop_far_drop_quarter_arc_{common,shifted}_ends`: the far edge is no longer related. `boolean.api_brep` `issue1036_coincident_skins_{difference,intersection,union}` and their `_measured` rows (WR-473): difference and intersection returned wrong bodies as successes (empty, and all of A, where about 14051.84 and 12084.49 are expected) and the union failed with 1001; all three now fail with 1007. That 1007 is an internal handle error (`InvalidInput`, "topology handle is unknown", from `tol_of` in `topology_intersector/p2.rs`), not a refusal of bad input. It is recorded in the 2026-11-15 WR-473 addendum. WR-473 itself stays open.
+- **Tests:** `issue_2177_crescent_on_top_of_rim.rs` loses its flag-off half.

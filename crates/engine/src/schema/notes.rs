@@ -3,14 +3,18 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::types::Point3;
+use super::types::{Point3, present};
 
 /// Anchor a new note to a point in model space.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct NoteAddParams {
-    /// The point the note is anchored to: `[x, y, z]` (mm).
-    pub anchor: Point3,
+    /// The point the note is anchored to: `[x, y, z]` (mm). Without it the note lands where
+    /// the selection points (the picked point, a body, a construction point or a sketch point),
+    /// or at the origin when nothing is selected.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub anchor: Option<Point3>,
     /// The note's text (may span lines).
     pub text: String,
     /// Save the note hidden: kept with the design but not drawn.

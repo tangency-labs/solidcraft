@@ -93,6 +93,32 @@ fn tab_into_a_text_or_number_box_selects_its_text_and_a_click_does_not() {
     assert_eq!(f.value, "12 mm0", "a click keeps the caret where it lands");
 }
 
+/// A text editor owns the Escape that blurs it, not the next idle Escape.
+#[test]
+fn escape_that_blurs_a_text_editor_keeps_keyboard_ownership() {
+    let ctx = context();
+    install_keyboard_focus(&ctx);
+    let mut text = String::from("12 mm");
+    let id = egui::Id::unique("escape owner");
+    raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id)).request_focus();
+    });
+    raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+    assert!(ctx.text_edit_focused());
+    raw_frame(&ctx, egui::RawInput { events: key(egui::Key::Escape, false), ..Default::default() }, |ui| {
+        assert!(!ctx.egui_wants_keyboard_input());
+        assert_eq!(text_edit_escape_owner(&ctx), Some(id));
+        assert!(text_edit_owned_escape(&ctx));
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+    raw_frame(&ctx, egui::RawInput { events: key(egui::Key::Escape, false), ..Default::default() }, |ui| {
+        assert!(!text_edit_owned_escape(&ctx));
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+}
+
 /// Enter or Shift+Enter in a table cell reports the move; a held key, a Ctrl+Enter or another
 /// cell's key does not.
 #[test]
@@ -114,4 +140,55 @@ fn a_cell_reads_enter_down_shift_enter_up_and_tab_along() {
         raw_frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| seen.push(cell_key(ui, focused)));
     }
     assert_eq!(seen, [Some(CellKey::Down), Some(CellKey::Up), Some(CellKey::Next), Some(CellKey::Previous), None, None, None]);
+}
+
+/// File cards must reveal keyboard focus while their enclosing scroll area is still open.
+#[test]
+fn file_cards_scroll_into_view_with_tab_and_shift_tab() {
+    let ctx = context();
+    let mut time = 0.0;
+    let mut draw = |events| {
+        let mut cards = Vec::new();
+        let mut viewport = egui::Rect::NOTHING;
+        time += 1.0;
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 260.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let scroll = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+                    for index in 0..8 {
+                        cards.push(FileView::action_tile(
+                            ui,
+                            &format!("file-card-{index}"),
+                            ui.available_width(),
+                            "",
+                            &format!("Design {index}"),
+                            "Sample design",
+                            false,
+                        ));
+                    }
+                });
+                viewport = scroll.inner_rect;
+            },
+        );
+        (cards, viewport)
+    };
+    draw(Vec::new());
+    draw(Vec::new());
+    for shift in [false, true] {
+        let order: Vec<usize> = if shift { (0..7).rev().collect() } else { (0..8).collect() };
+        for index in order {
+            draw(key(egui::Key::Tab, shift));
+            draw(Vec::new());
+            let (cards, viewport) = draw(Vec::new());
+            let card = &cards[index];
+            assert!(card.has_focus(), "card {index}, reverse={shift} must have focus");
+            assert!(viewport.contains_rect(card.rect), "card {index}, reverse={shift}: {:?} outside {viewport:?}", card.rect);
+        }
+    }
 }

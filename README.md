@@ -16,7 +16,7 @@
 [![Download for Windows][badge-windows]][windows-msi]
 [![Download for macOS][badge-macos]][macos-dmg]
 [![Download for Linux][badge-linux]][linux-appimage]
-[![Get it from the Snap Store][badge-snap]][snap-store]
+[![Download Snap package][badge-snap]][snap-install]
 [![Try it in your browser][badge-web]][web-app]
 
 </div>
@@ -54,14 +54,14 @@
 
 - **Windows:** the [installer][windows-msi].
 - **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel).
-- **Linux:** the [AppImage][linux-appimage], or `sudo snap install solidcraft` ([Snap Store][snap-store]).
+- **Linux:** the [AppImage][linux-appimage], or a [Snap package][linux-snap]
+  ([installation instructions][snap-install], including ARM64).
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
 [downloads page](docs/downloads.md). The macOS app is signed with a Developer ID and notarized by
-Apple. Windows signing: free code signing provided by SignPath.io, certificate by SignPath
-Foundation ([code signing policy](https://docs.solidcraft.io/code-signing-policy.html)). Until the
-production certificate is in place, SmartScreen may warn: choose **More info**, then **Run anyway**. On SolidCraft 0.11 to 0.14, download once by hand; see
+Apple. The Windows files are unsigned for now ([code signing and privacy](https://docs.solidcraft.io/code-signing-policy.html)),
+so SmartScreen may warn: choose **More info**, then **Run anyway**. On SolidCraft 0.11 to 0.14, download once by hand; see
 [updating](https://docs.solidcraft.io/guide/updates.html#updating-from-011-to-014).
 
 ## What works
@@ -113,7 +113,7 @@ Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven
 Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
 The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
 installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
-The interface is experimental: WIT package `craft:plugin@0.1.0`, capability `commands@0.1`. While
+The interface is experimental: WIT package `craft:plugin@0.2.0`, capability `commands@0.2` (plugins built for 0.1 still run). While
 it is 0.x a minor version may break the one before it; the host refuses a plugin that needs a
 capability it does not have, in plain words. Review a plugin again after an update. The desktop app and headless CLI use the same commands. Browser
 execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature
@@ -219,6 +219,14 @@ A changed manifest budget requires a fresh approval hash. Keep the selected ceil
 machine's available resources; they are limits on guest execution, not total SolidCraft memory
 or native CAD work. The independent maximum execution deadline stays 30 seconds.
 
+Standalone CLI runs and headless MCP use the plugins installed for the desktop app; approvals
+given there last for the run. Add `--keep-plugin-approvals` to keep them between runs, shared
+with the desktop app, so a plugin is installed and approved once, and `--plugins-dir DIR` to use
+a separate set of plugins and approvals, for example in CI. List kept approvals with
+`solidcraft-cli --keep-plugin-approvals exec plugin.grants` and take one back with
+`solidcraft-cli --keep-plugin-approvals exec plugin.revoke '{"id":"PLUGIN_ID"}'`
+([Headless use](docs/plugins.md#headless-use)).
+
 ### Permissions, results and saved designs
 
 A plugin can call any command in the MCP catalog whose exact id its manifest lists. Commands that
@@ -297,11 +305,12 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [badge-windows]: https://img.shields.io/badge/Windows-Download-0078D6?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0yIDJoOS41djkuNUgyek0xMi41IDJIMjJ2OS41aC05LjV6TTIgMTIuNWg5LjVWMjJIMnpNMTIuNSAxMi41SDIyVjIyaC05LjV6Ii8%2BPC9zdmc%2B
 [badge-macos]: https://img.shields.io/badge/macOS-Download-333333?style=for-the-badge&logo=apple&logoColor=white
 [badge-linux]: https://img.shields.io/badge/Linux-AppImage-E95420?style=for-the-badge&logo=linux&logoColor=white
-[badge-snap]: https://img.shields.io/badge/Snap-Snap_Store-82BEA0?style=for-the-badge&logo=snapcraft&logoColor=white
+[badge-snap]: https://img.shields.io/badge/Snap-Download-82BEA0?style=for-the-badge&logo=snapcraft&logoColor=white
 [badge-web]: https://img.shields.io/badge/Web-Try_in_browser-2EA44F?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwYXRoIGQ9Ik0yIDEyaDIwTTEyIDJhMTUgMTUgMCAwIDEgMCAyME0xMiAyYTE1IDE1IDAgMCAwIDAgMjAiLz48L3N2Zz4%3D
 [windows-msi]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-windows-x64.msi
 [macos-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-universal.dmg
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
-[snap-store]: https://snapcraft.io/solidcraft
+[linux-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap
+[snap-install]: https://docs.solidcraft.io/guide/getting-started.html#linux-snap
 [web-app]: https://solidcraft.io/app
 

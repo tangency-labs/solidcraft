@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, MAX_SET_TARGETS, TextPlace};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::Point2;
 use super::drawing_view::ViewIdParam;
@@ -292,6 +292,19 @@ impl JsonSchema for DimensionIdParam {
     }
 }
 
+/// Which of a view's two directions an overall dimension measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OverallAxis {
+    Horizontal,
+    Vertical,
+}
+
+/// An occurrence path as `path` reads it.
+fn deserialize_path<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u64>, D::Error> {
+    path(Some(&Value::deserialize(d)?)).map_err(D::Error::custom)
+}
+
 /// What a dimension measures, as `drawing.dimension.add` takes it: the saved record's kinds, with
 /// picks for its names.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -311,7 +324,7 @@ pub enum KindParam {
         #[schemars(with = "String")]
         reading: Option<Reading>,
     },
-    /// A straight edge's length.
+    /// A straight edge's length, or the length of the line a round edge the view sees edge-on draws.
     Length {
         edge: EdgeParam,
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -377,6 +390,21 @@ pub enum KindParam {
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
     },
+    /// A body's overall width or height in the view, rounded corners included: between the two
+    /// flat faces that bound it along the view's horizontal or vertical (saved as a `faces`
+    /// dimension).
+    Overall {
+        /// The body's name.
+        body: String,
+        /// The ids of the occurrences its body is placed through, from the top.
+        #[serde(default, deserialize_with = "deserialize_path", skip_serializing_if = "Vec::is_empty")]
+        #[schemars(with = "Vec<u64>")]
+        path: Vec<u64>,
+        /// `horizontal` (its width, the default) or `vertical` (its height).
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "OverallAxis")]
+        direction: Option<OverallAxis>,
+    },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain {
         /// 3 to 64 corners.
@@ -437,6 +465,17 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub override_text: Option<String>,
+    /// Where its text's centre goes, in paper mm from the sheet's lower-left corner, as edit's drag
+    /// takes it: it sets `offset_mm` and `text`, so the Dimension tool places a new one where the
+    /// pointer is.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A point its dimension line, arc or leader passes through, as `text_to_mm` and as edit's drag
+    /// takes it: it sets `offset_mm`, or a radial one's `text`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
     /// True to answer what it would add, adding nothing: no id is taken and no undo step made.
     /// Default: false.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -606,10 +645,14 @@ pub struct DimensionResult {
     /// Whether a measured line leaves the view's plane, so the view shows it shorter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foreshortened: Option<bool>,
-    /// What it shows: the text given, else the number in the drawing's units; none for a chain or a
-    /// set, which show their members'.
+    /// What it shows: its text with `{value}` filled in, else the number in the drawing's units;
+    /// none for a chain or a set, which show their members'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own, whenever it is measured: what a
+    /// dimension whose text hides it would show again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_text: Option<String>,
     /// A chain's members, from its first point to its last, or a set's, one for each target in its order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<MemberResult>,

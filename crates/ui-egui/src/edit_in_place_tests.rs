@@ -85,6 +85,45 @@ fn context(app: &SolveApp) -> PartContext {
 }
 
 #[test]
+fn a_selected_configuration_refuses_edit_in_place_without_opening_another_row() {
+    let mut f = assembly("configuration");
+    let mut source = Session::default();
+    for (command, params) in [
+        ("parameters.add", json!({"name": "L", "expression": "10 mm"})),
+        ("solid.box", json!({"length": "L", "width": 20, "height": 30})),
+        ("config.configure", json!({"params": ["L"]})),
+        ("config.row", json!({"name": "Default", "rename": "Short"})),
+        ("config.row", json!({"name": "Long", "values": {"L": "15 mm"}})),
+        ("config.activate", json!({"row": "Short"})),
+        ("file.save", json!({"path": f.plate_file, "overwrite": true})),
+    ] {
+        source.execute(command, &params).unwrap();
+    }
+    f.app.run("component.relink", json!({"component": f.plate, "path": f.plate_file, "configuration": "Long"})).unwrap();
+    assert!((volume(&f.app) - 10_000.0).abs() < 1e-6, "the assembly shows Long while the file stores Short");
+    let before = f.app.session.doc.clone();
+    let source_bytes = std::fs::read(&f.plate_file).unwrap();
+    let tabs = f.app.docs.count();
+    let undo = f.app.session.undo.len();
+    let message = "Edit this configuration in the source design, then update the links.";
+    for ask in [false, true] {
+        assert_eq!(enter(&mut f.app, f.plate, None, ask).unwrap_err(), message);
+    }
+    assert!(f.app.run("component.edit_in_place", json!({"component": f.plate})).is_err());
+    double_click_component(&mut f.app, json!({"component": f.plate}));
+    settle(&mut f.app);
+    let expected_status = format!("Edit in Place: {message}");
+    assert_eq!(f.app.status.as_ref().map(|status| status.0.as_str()), Some(expected_status.as_str()));
+    assert!(showing(&f.app, &f.folder.join("case.solidcraft")));
+    assert_eq!(f.app.docs.count(), tabs);
+    assert_eq!(f.app.session.doc, before);
+    assert_eq!(f.app.session.undo.len(), undo);
+    assert!(f.app.edit_in_place.active.is_none() && f.app.edit_in_place.pending.is_none());
+    assert!(f.app.file_load.idle());
+    assert_eq!(std::fs::read(&f.plate_file).unwrap(), source_bytes);
+}
+
+#[test]
 fn a_linked_component_is_edited_in_place_and_finish_editing_updates_the_assembly() {
     let mut f = assembly("finish");
     double_click_component(&mut f.app, json!({"component": f.plate}));
@@ -155,7 +194,7 @@ fn update_links_run_as_a_command_in_the_part_refreshes_the_assembly_too() {
     settle(&mut f.app);
     save_box(&f.post_file, [10.0, 10.0, 10.0], true);
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     // In any spelling the engine takes; the call may take the refresh up before it answers
     h.call("engine.execute", json!({"command": "Component.Update_Links"}));
     f.app = std::mem::replace(&mut h.app, SolveApp::new(Session::default(), Default::default()));
@@ -393,7 +432,7 @@ fn activate_only_activates_and_edit_in_place_opens_the_placement_right_clicked()
 fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     let mut f = assembly("ribbon");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     h.frames(3);
     assert!(crate::scenario::rect_of("panel:MODEL:FINISH EDITING").is_none(), "no edit in place, no button");
@@ -417,6 +456,59 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     assert!(h.app.edit_in_place.active.is_none());
     assert_eq!(h.app.docs.count(), 1);
     assert!(crate::scenario::rect_of("panel:MODEL:FINISH EDITING").is_none());
+}
+
+#[test]
+fn finish_editing_stays_reachable_with_plugins_at_every_window_width() {
+    use crate::plugin_menu::tests::{entry, listed};
+
+    let mut f = assembly("ribbon-plugins");
+    let mut h = crate::scenario::Harness::new();
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    h.app.home.open = false;
+    h.app.plugin_menu.loaded = true;
+    let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
+    gears.name = "Gears".into();
+    h.app.plugin_menu.listed = vec![gears];
+    double_click_component(&mut h.app, json!({"component": f.plate}));
+    settle(&mut h.app);
+    for enabled in [false, true] {
+        h.app.preferences.disabled_plugins.clear();
+        if !enabled {
+            h.app.preferences.disabled_plugins.insert("gears".into());
+        }
+        for width in [1600, 1280, 1000, 700] {
+            h.call("ui.resize", json!({"width":width, "height":720}));
+            h.frames(3);
+            let exit = crate::scenario::rect_of("panel:MODEL:FINISH EDITING").expect("Finish Editing stays on the ribbon");
+            let button = crate::scenario::rect_of("button:component.finish_edit").expect("Finish Edit stays reachable");
+            assert!(exit.contains_rect(button), "width {width}, plugin enabled {enabled}: {exit:?}, {button:?}");
+            let plugins = crate::scenario::rect_of("panel:MODEL:PLUGINS");
+            if enabled && width >= 1000 {
+                assert!(plugins.is_some(), "the enabled plugin is on the wide ribbon");
+            } else if !enabled {
+                assert!(plugins.is_none(), "a disabled plugin has no ribbon group");
+            }
+            if let Some(plugins) = plugins {
+                assert!(plugins.right() < exit.left(), "Plugins must precede Finish Editing at width {width}");
+            }
+        }
+    }
+    // The reordered group still opens its own menu, and Finish Edit still leaves the part.
+    h.call("ui.resize", json!({"width":1600, "height":720}));
+    h.frames(3);
+    let listed = h.app.plugin_menu.listed.clone();
+    h.step(&json!({"click":{"handle":"panel:MODEL:PLUGINS"}})).unwrap();
+    assert!(h.app.plugin_menu.open, "the Plugins label opens the plugin menu after reordering");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // Opening the menu rereads installed packages; keep this test's synthetic plugin.
+    h.app.plugin_menu.listed = listed;
+    h.call("ui.resize", json!({"width":700, "height":720}));
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"button:component.finish_edit"}})).unwrap();
+    settle(&mut h.app);
+    assert!(h.app.edit_in_place.active.is_none());
+    assert_eq!(h.app.docs.count(), 1);
 }
 
 #[test]
@@ -496,7 +588,7 @@ fn finish_editing_as_a_command_opens_nothing_for_a_part_with_changes() {
 fn finish_editing_is_sent_on_its_own_not_in_a_batch_or_script() {
     let mut f = assembly("control");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
     let steps = json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}, {"command": "Component.Finish_Edit"}]);
@@ -517,7 +609,7 @@ fn finish_editing_is_sent_on_its_own_not_in_a_batch_or_script() {
 fn the_mouse_back_button_finishes_the_edit() {
     let mut f = assembly("mouse-back");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
@@ -530,6 +622,26 @@ fn the_mouse_back_button_finishes_the_edit() {
     assert!(h.app.edit_in_place.active.is_none());
     assert!(!showing(&h.app, &f.plate_file));
     assert_eq!(h.app.docs.count(), 1);
+}
+
+#[test]
+fn the_mouse_back_button_still_goes_back_when_it_drags_the_view() {
+    let mut f = assembly("mouse-back-mapped");
+    let mut h = crate::scenario::Harness::new();
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"nav_button_map": {"extra1": "orbit"}}));
+    double_click_component(&mut h.app, json!({"component": f.plate}));
+    settle(&mut h.app);
+    h.frames(2);
+    let pos = egui::pos2(400.0, 300.0);
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Extra1, pressed, modifiers: Default::default() };
+    let cam = h.app.cam;
+    h.frame_with(vec![egui::Event::PointerMoved(pos), button(true)]);
+    h.frame_with(vec![button(false)]);
+    settle(&mut h.app);
+    assert!(h.app.edit_in_place.active.is_none(), "a plain click on the mapped side button still goes Back");
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (cam.yaw, cam.pitch), "and does not turn the view");
 }
 
 #[test]
@@ -623,7 +735,7 @@ fn finish_editing_waits_for_the_parts_agent_to_end_its_turn() {
 fn edit_in_place_is_a_command_the_double_click_runs() {
     let mut f = assembly("command-enter");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     // Not linked, or not a placement of it: refused, nothing opens
     let base = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["component"].as_u64().unwrap();
     h.app.run("component.activate", json!({"component": "root"})).unwrap();

@@ -512,6 +512,15 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     }
     let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
+    // Say how to type several lines: Enter finishes the text, so it is not found by trying (#16738).
+    // The words are only there while the Text box has focus, as #17121's review asked; the line keeps
+    // its height either way, so the rows under it do not move when the Text box loses focus.
+    let new_line_hint = solidcraft_ui_text::tr("sketch_text.new_line_hint");
+    if ui.memory(|m| m.has_focus(id)) {
+        ui_kit::text(ui, new_line_hint, ui_kit::Text::Hint("sketch_text_new_line"));
+    } else {
+        ui_kit::hint_space(ui, new_line_hint);
+    }
     if k.focus {
         response.request_focus();
         let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
@@ -1122,11 +1131,12 @@ mod tests {
         h.app.session.selection.push(Sel::SketchCurve { id: other["curves"][0].as_str().unwrap().into(), sketch: None });
         assert!(selected_entity(&h.app).is_none());
         assert!(!crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport).iter().any(|item| item.id == "sketch.edit_text"));
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
         h.app.start("sketch.edit_text");
         assert!(editing(&h.app));
         h.app.start("sketch.line");
         assert!(!editing(&h.app));
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.edit_text");
         assert!(editing(&h.app));
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
@@ -1454,6 +1464,8 @@ mod tests {
         let (mut h, link, _) = setup();
         h.app.start("sketch.edit_text");
         h.frames(3);
+        // The dialog says how (#16738).
+        assert!(h.widget(solidcraft_ui_text::tr("sketch_text.new_line_hint")).is_some(), "the new-line hint under the Text box");
         h.step(&json!({"text":"A"})).unwrap();
         h.step(&json!({"key":"Enter","shift":true})).unwrap();
         h.step(&json!({"text":"B"})).unwrap();
@@ -1465,6 +1477,23 @@ mod tests {
         assert!(!editing(&h.app));
         let sid = h.app.session.active_sketch.unwrap();
         assert!(matches!(&h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source, LinkSource::Text { text, .. } if text == "A\nB"));
+    }
+
+    /// The hint is there while the Text box is being typed in, and gone once the focus is elsewhere
+    /// (#17121 review). The rest of the dialog stays where it is when it goes.
+    #[test]
+    fn the_new_line_hint_shows_only_while_the_text_box_has_focus() {
+        let (mut h, _, _) = setup();
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        let hint = solidcraft_ui_text::tr("sketch_text.new_line_hint");
+        assert!(h.widget(hint).is_some(), "the new-line hint under the Text box");
+        let footer = h.widget("OK").expect("the dialog's OK button");
+        let focused = h.ctx.memory(|memory| memory.focused());
+        h.ctx.memory_mut(|memory| focused.into_iter().for_each(|id| memory.surrender_focus(id)));
+        h.frames(2);
+        assert!(h.widget(hint).is_none(), "no new-line hint while the Text box is not focused");
+        assert_eq!(h.widget("OK"), Some(footer), "the fields under the hint do not move when it goes away");
     }
 
     /// "IO" (10 mm) seen from the top: the profile of the I, and those of the O's ring and its counter.
