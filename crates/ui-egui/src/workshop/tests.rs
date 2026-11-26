@@ -258,6 +258,35 @@ fn revoked_and_delisted_items_are_refused() {
 }
 
 #[test]
+fn a_block_matches_the_version_as_semver_reads_it() {
+    // `v1.2.0` and `1.2.0+build.7` name the version the link asks for as `1.2.0`.
+    for listed in ["v1.2.0", "1.2.0+build.7", " 1.2.0 "] {
+        let mut index = index_json(&test_key().0);
+        index["revoked"] = json!([{"id": "gears", "version": listed, "severity": "block", "reason": "Malware", "sha256": []}]);
+        assert_eq!(
+            run(signed(&index), "solidcraft://workshop/plugin/maker/gears@1.2.0", None),
+            Err(Refusal::Revoked(Some("Malware".into()))),
+            "{listed}"
+        );
+        // Without a version, the blocked one is skipped too: 2.0.0 needs a newer app, so nothing runs.
+        assert_eq!(run(signed(&index), "solidcraft://workshop/plugin/maker/gears", None), Err(Refusal::NeedsNewerApp("99.0.0".into())), "{listed}");
+    }
+    // Another version stays usable, and a record whose version doesn't parse blocks every version.
+    let mut other = index_json(&test_key().0);
+    other["revoked"] = json!([{"id": "k3x9", "version": "1.2.1", "severity": "block", "sha256": []}]);
+    assert_eq!(
+        run(signed(&other), "solidcraft://workshop/model/bherbruck/wall-mount-shelf-bracket@1.2.0", None).unwrap().version,
+        semver::Version::new(1, 2, 0)
+    );
+    let mut garbled = index_json(&test_key().0);
+    garbled["revoked"] = json!([{"id": "k3x9", "version": "1.2.x", "severity": "block", "reason": "Malware", "sha256": []}]);
+    assert_eq!(
+        run(signed(&garbled), "solidcraft://workshop/model/bherbruck/wall-mount-shelf-bracket@1.1.0", None),
+        Err(Refusal::Revoked(Some("Malware".into())))
+    );
+}
+
+#[test]
 fn an_older_or_expired_index_is_refused() {
     let dir = std::env::temp_dir().join(std::format!("sc-workshop-seq-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -336,13 +365,12 @@ fn the_question_shows_what_is_installed() {
 #[test]
 fn a_download_that_does_not_match_is_dropped() {
     let item = run(signed(&index_json(&test_key().0)), "solidcraft://workshop/plugin/maker/gears", None).unwrap();
-    let dir = std::env::temp_dir().join(std::format!("sc-workshop-dl-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = download_dir().unwrap();
     let download: crate::update::install::HttpDownload = Arc::new(|_url: &str, to: &Path, _progress: &dyn Fn(u64, Option<u64>) -> bool| {
         std::fs::write(to, b"not the package").unwrap();
         Ok(())
     });
-    assert_eq!(fetch(&download, &item, &dir), Err(Refusal::Checksum));
+    assert_eq!(fetch(&download, &item, &dir).err(), Some(Refusal::Checksum));
     assert!(!dir.join("gears-1.2.0.zip").exists(), "nothing is kept");
     // Matching bytes are kept under a name made from the item, not the index's file name.
     let bytes = b"the package";
@@ -352,8 +380,44 @@ fn a_download_that_does_not_match_is_dropped() {
         std::fs::write(to, bytes).unwrap();
         Ok(())
     });
-    assert_eq!(fetch(&download, &good, &dir), Ok(dir.join("gears-1.2.0.zip")));
+    let (path, mut file) = fetch(&download, &good, &dir).unwrap();
+    assert_eq!(path, dir.join("gears-1.2.0.zip"));
+    // The handle the check read, rewound for whoever uses it.
+    let mut read = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut read).unwrap();
+    assert_eq!(read, bytes);
+    let checked = seen(&file.metadata().unwrap());
+    assert!(still_checked(&path, &checked));
+    // A file put in its place after the check is not handed on.
+    drop(file);
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(&path, b"swapped in").unwrap();
+    assert!(!still_checked(&path, &checked));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn each_download_gets_a_new_private_folder() {
+    let (a, b) = (download_dir().unwrap(), download_dir().unwrap());
+    assert_ne!(a, b);
+    assert!(a.starts_with(std::env::temp_dir()) && a.is_dir() && !std::fs::symlink_metadata(&a).unwrap().file_type().is_symlink());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+    // A link at the checked file's name is not opened.
+    #[cfg(unix)]
+    {
+        let target = b.join("elsewhere");
+        std::fs::write(&target, b"x").unwrap();
+        let link = a.join("gears-1.2.0.zip");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let sum: String = <sha2::Sha256 as sha2::Digest>::digest(b"x").iter().map(|b| std::format!("{b:02x}")).collect();
+        assert!(matches!(open_checked(&link, &sum), Err(Refusal::Download(_))));
+    }
+    let _ = std::fs::remove_dir_all(&a);
+    let _ = std::fs::remove_dir_all(&b);
 }
 
 fn zip_with(path: &Path, entries: &[(&str, &[u8])], link: Option<&str>) {
@@ -453,4 +517,31 @@ fn the_question_draws_its_rows_and_buttons() {
             assert!(h.app.workshop.ask.is_some(), "the question stays until it is answered");
         }
     }
+}
+
+/// A key pressed just as the question appears (meant for the window) doesn't answer it; the
+/// same key a moment later does.
+#[test]
+fn the_question_ignores_keys_for_its_first_second() {
+    let item = run(signed(&index_json(&test_key().0)), "solidcraft://workshop/plugin/maker/gears", None).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.workshop.ask = Some(item);
+    let ctx = crate::fonts::test_context();
+    crate::ui_kit::set_dialog_mnemonics(true);
+    let enter = || egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let mut frame = |time: f64, events: Vec<egui::Event>| {
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(time), events, ..Default::default() }, |ui| {
+            crate::ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx()));
+        });
+        h.app.workshop.ask.is_some()
+    };
+    assert!(frame(0.0, Vec::new()));
+    assert!(frame(0.1, vec![enter()]), "Enter as the question appears answered it");
+    // "Install"'s first letter, with first-letter buttons on.
+    assert!(frame(0.5, vec![egui::Event::Text("i".into())]), "a letter as the question appears answered it");
+    assert!(frame(0.9, vec![enter(), egui::Event::Text("i".into())]));
+    assert!(!frame(1.1, vec![enter()]), "Enter after the delay answers");
+    crate::ui_kit::set_dialog_mnemonics(false);
+    assert!(h.app.workshop.asked_at.is_none());
 }

@@ -30,6 +30,13 @@ pub fn root() -> Option<PathBuf> {
 /// Unpack `zip` as library `id` at `version` under `root`, and give the folder the panel shows:
 /// the zip's single top folder when it has one. An installed copy of the same version is kept.
 pub fn install(zip: &Path, root: &Path, id: &str, version: &str) -> Result<PathBuf, Refusal> {
+    let file = std::fs::File::open(zip).map_err(|e| Refusal::Download(e.to_string()))?;
+    install_file(file, root, id, version)
+}
+
+/// [`install`] from the open file whose sha256 was checked, so nothing can stand in for it
+/// between the check and the unpacking.
+pub fn install_file(file: std::fs::File, root: &Path, id: &str, version: &str) -> Result<PathBuf, Refusal> {
     if !super::link::segment(id) || !version.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
         return Err(Refusal::BadItem(format!("library id {id} {version}")));
     }
@@ -38,7 +45,6 @@ pub fn install(zip: &Path, root: &Path, id: &str, version: &str) -> Result<PathB
         return Ok(shown_folder(&dest));
     }
     let bad = |e: String| Refusal::LibraryContents(e);
-    let file = std::fs::File::open(zip).map_err(|e| Refusal::Download(e.to_string()))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| bad(e.to_string()))?;
     if archive.len() > MAX_ENTRIES {
         return Err(bad(format!("{} entries", archive.len())));

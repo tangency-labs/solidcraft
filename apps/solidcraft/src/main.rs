@@ -1737,14 +1737,16 @@ fn main() -> eframe::Result {
     let mut read_only = false;
     // `--open-url solidcraft://workshop/…`: a Workshop page's Open in SolidCraft link, which the
     // system hands over (docs/workshop-links.md). Looked up and asked about in the window.
-    let mut links = Vec::new();
-    let mut args = std::env::args().skip(1);
+    // The link is the one argument read then: whatever else the command line holds (text a
+    // crafted link may have split into more arguments) is ignored, never taken as options or files.
+    let open_url = startup::open_url_argument(std::env::args_os().skip(1));
+    let mut links: Vec<String> = open_url.clone().flatten().into_iter().collect();
+    let mut args: Box<dyn Iterator<Item = String>> =
+        if open_url.is_some() { Box::new(std::iter::empty()) } else { Box::new(std::env::args().skip(1)) };
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--open-url" => links.extend(args.next()),
-            s if solidcraft_ui_egui::workshop::link::looks_like_link(s) => links.push(a),
-            // The desktop entry's `%u` passes a local file as a `file:` URL on some desktops.
-            s if s.starts_with("file://") => files.push(startup::file_url_path(s).unwrap_or(a)),
+            // A `file:` URL names a local file; one that doesn't (another host, a bad escape) is dropped.
+            s if s.starts_with("file://") => files.extend(startup::file_url_path(s).map(|p| p.to_string_lossy().into_owned())),
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,

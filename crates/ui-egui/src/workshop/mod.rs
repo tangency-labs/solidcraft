@@ -49,11 +49,35 @@ pub type HttpGet = Arc<dyn Fn(&str) -> Result<Signed, String> + Send + Sync>;
 pub(crate) struct State {
     job: Option<Job>,
     pub(crate) ask: Option<Resolved>,
+    /// When the question first drew (`egui::InputState::time`), for [`KEY_DELAY`].
+    asked_at: Option<f64>,
+}
+
+/// How long, in seconds, the question ignores keys that would answer it (Enter, a button's first
+/// letter): a keypress meant for the window as the question appears must not say yes. A click
+/// counts at once.
+pub(crate) const KEY_DELAY: f64 = 1.0;
+
+/// Drop this frame's keys that could answer the question while it is newer than [`KEY_DELAY`]:
+/// every key and typed text but Escape, which only cancels.
+fn hold_keys(ctx: &egui::Context, shown_for: f64) {
+    if shown_for >= KEY_DELAY {
+        return;
+    }
+    ctx.input_mut(|i| {
+        i.events
+            .retain(|e| matches!(e, egui::Event::Key { key: egui::Key::Escape, .. }) || !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_)))
+    });
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(KEY_DELAY - shown_for));
 }
 
 enum Job {
     Lookup(Receiver<Result<Resolved, Refusal>>),
-    Download { item: Box<Resolved>, done: Receiver<Result<PathBuf, Refusal>> },
+    /// The file to open (with what it looked like when checked), or a library's unpacked folder.
+    Download {
+        item: Box<Resolved>,
+        done: Receiver<Result<(PathBuf, Option<Seen>), Refusal>>,
+    },
 }
 
 /// Whether this build opens Workshop links: the desktop app, with its network services.
@@ -134,17 +158,17 @@ fn download_name(item: &Resolved) -> String {
     std::format!("{id}-{}.{ext}", item.version)
 }
 
-/// Download `item`'s file into `dir` and check its size and sha256; nothing is kept on failure.
-pub(crate) fn fetch(download: &crate::update::install::HttpDownload, item: &Resolved, dir: &Path) -> Result<PathBuf, Refusal> {
-    std::fs::create_dir_all(dir).map_err(|e| Refusal::Download(e.to_string()))?;
+/// Download `item`'s file into `dir` (a fresh folder from [`download_dir`]) and check its size
+/// and sha256 through one open handle; nothing is kept on failure. Gives the path and that handle,
+/// rewound, so a parts library unpacks from the very file that was checked.
+pub(crate) fn fetch(download: &crate::update::install::HttpDownload, item: &Resolved, dir: &Path) -> Result<(PathBuf, std::fs::File), Refusal> {
     let path = dir.join(download_name(item));
     let limit = item.file.size;
     let checked = download(&item.file.url, &path, &|done, _| done <= limit)
         .map_err(|e| Refusal::Download(e.to_string()))
-        .and_then(|()| crate::update::install::sha256_file(&path).map_err(Refusal::Download))
-        .and_then(|sum| if sum.eq_ignore_ascii_case(&item.file.sha256) { Ok(()) } else { Err(Refusal::Checksum) });
+        .and_then(|()| open_checked(&path, &item.file.sha256));
     match checked {
-        Ok(()) => Ok(path),
+        Ok(file) => Ok((path, file)),
         Err(error) => {
             let _ = std::fs::remove_file(&path);
             Err(error)
@@ -152,10 +176,84 @@ pub(crate) fn fetch(download: &crate::update::install::HttpDownload, item: &Reso
     }
 }
 
-/// A folder of its own for one download, in the system's temporary folder.
-fn download_dir() -> PathBuf {
+/// Open the plain file at `path` (not a link) and check its sha256 through that handle; the file
+/// is made read-only and the handle is rewound for its reader.
+fn open_checked(path: &Path, sha256: &str) -> Result<std::fs::File, Refusal> {
+    use std::io::{Read, Seek};
+    let fail = |e: std::io::Error| Refusal::Download(e.to_string());
+    if !std::fs::symlink_metadata(path).map_err(fail)?.file_type().is_file() {
+        return Err(Refusal::Download(std::format!("{} is not a file", path.display())));
+    }
+    let mut file = std::fs::File::open(path).map_err(fail)?;
+    if seen(&file.metadata().map_err(fail)?) != seen(&std::fs::symlink_metadata(path).map_err(fail)?) {
+        return Err(Refusal::Checksum);
+    }
+    let mut hash = <sha2::Sha256 as sha2::Digest>::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = file.read(&mut buf).map_err(fail)?;
+        if n == 0 {
+            break;
+        }
+        sha2::Digest::update(&mut hash, buf.get(..n).unwrap_or_default());
+    }
+    let sum: String = sha2::Digest::finalize(hash).iter().map(|b| std::format!("{b:02x}")).collect();
+    if !sum.eq_ignore_ascii_case(sha256) {
+        return Err(Refusal::Checksum);
+    }
+    // Read-only for its owner too (unix; on Windows a read-only file couldn't be removed after).
+    #[cfg(unix)]
+    let _ = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o400));
+    file.rewind().map_err(fail)?;
+    Ok(file)
+}
+
+/// What a checked file looked like: its size, modification time and (on unix) device and inode.
+/// Another file put in its place, or the same one changed, looks different.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Seen(u64, Option<std::time::SystemTime>, Option<(u64, u64)>);
+
+fn seen(metadata: &std::fs::Metadata) -> Seen {
+    #[cfg(unix)]
+    let id = {
+        use std::os::unix::fs::MetadataExt;
+        Some((metadata.dev(), metadata.ino()))
+    };
+    #[cfg(not(unix))]
+    let id = None;
+    Seen(metadata.len(), metadata.modified().ok(), id)
+}
+
+/// Whether `path` is still the plain file that was checked, right before it is handed on.
+pub(crate) fn still_checked(path: &Path, checked: &Seen) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file() && &seen(&m) == checked)
+}
+
+/// A folder of its own for one download: a new folder with a random name in the system's
+/// temporary folder, readable only by this user (0700 on unix). It is made with one `mkdir`
+/// that fails when the name exists, so nobody can have prepared it or a link in its place.
+pub(crate) fn download_dir() -> Result<PathBuf, Refusal> {
+    use std::hash::{BuildHasher, Hasher};
+    let base = std::env::temp_dir();
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    std::env::temp_dir().join("solidcraft-workshop").join(std::format!("{}-{nanos}", std::process::id()))
+    let mut last = String::new();
+    for attempt in 0..16u32 {
+        // RandomState's keys come from the operating system's random source.
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u128(nanos);
+        hasher.write_u32(std::process::id());
+        hasher.write_u32(attempt);
+        let dir = base.join(std::format!("solidcraft-workshop-{:016x}", hasher.finish()));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = e.to_string(),
+            Err(e) => return Err(Refusal::Download(e.to_string())),
+        }
+    }
+    Err(Refusal::Download(last))
 }
 
 /// The question's text: what is asked, in plain lines, so it can be checked without a window.
@@ -293,13 +391,19 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             Err(TryRecvError::Empty) => app.workshop.job = Some(Job::Download { item, done }),
             Err(TryRecvError::Disconnected) => refuse(app, &Refusal::Download("the download stopped".into())),
             Ok(Err(refusal)) => refuse(app, &refusal),
-            Ok(Ok(path)) => downloaded(app, &item, &path),
+            Ok(Ok((path, checked))) => downloaded(app, &item, &path, checked.as_ref()),
         },
     }
 }
 
-/// Hand the checked download to the path that opens or installs its kind.
-fn downloaded(app: &mut SolveApp, item: &Resolved, path: &Path) {
+/// Hand the checked download to the path that opens or installs its kind, once it is sure to be
+/// the file that was checked.
+fn downloaded(app: &mut SolveApp, item: &Resolved, path: &Path, checked: Option<&Seen>) {
+    if checked.is_some_and(|checked| !still_checked(path, checked)) {
+        let _ = std::fs::remove_file(path);
+        refuse(app, &Refusal::Checksum);
+        return;
+    }
     let shown = path.to_string_lossy().into_owned();
     app.set_status(String::new(), false);
     match item.kind {
@@ -321,15 +425,23 @@ fn start_download(app: &mut SolveApp, ctx: &egui::Context, item: Resolved) {
     let ctx = ctx.clone();
     let worker = item.clone();
     let spawned = std::thread::Builder::new().name("workshop-download".into()).spawn(move || {
-        let dir = download_dir();
-        let result = fetch(&download, &worker, &dir).and_then(|path| match worker.kind {
-            Kind::Part => {
-                let root = library_root.ok_or_else(|| Refusal::Download("no data folder".into()))?;
-                let folder = library::install(&path, &root, &worker.id, &worker.version.to_string());
-                let _ = std::fs::remove_file(&path);
-                folder
+        let result = download_dir().and_then(|dir| {
+            let fetched = fetch(&download, &worker, &dir);
+            let result = fetched.and_then(|(path, file)| match worker.kind {
+                Kind::Part => {
+                    let root = library_root.ok_or_else(|| Refusal::Download("no data folder".into()))?;
+                    let folder = library::install_file(file, &root, &worker.id, &worker.version.to_string());
+                    let _ = std::fs::remove_file(&path);
+                    let _ = std::fs::remove_dir(&dir);
+                    // Unpacked from the checked handle: nothing left to check before use.
+                    folder.map(|folder| (folder, None))
+                }
+                _ => file.metadata().map(|m| (path, Some(seen(&m)))).map_err(|e| Refusal::Download(e.to_string())),
+            });
+            if result.is_err() {
+                let _ = std::fs::remove_dir(&dir);
             }
-            _ => Ok(path),
+            result
         });
         let _ = send.send(result);
         ctx.request_repaint();
@@ -343,7 +455,13 @@ fn start_download(app: &mut SolveApp, ctx: &egui::Context, item: Resolved) {
 
 /// The question, while an item waits for the answer.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(item) = app.workshop.ask.take() else { return };
+    let Some(item) = app.workshop.ask.take() else {
+        app.workshop.asked_at = None;
+        return;
+    };
+    let now = ctx.input(|i| i.time);
+    let asked_at = *app.workshop.asked_at.get_or_insert(now);
+    hold_keys(ctx, now - asked_at);
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let q = question(&item);
     let cancel = tr("workshop.cancel").to_string();
@@ -382,5 +500,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Action::Cancel => {}
         _ if closed => {}
         _ => app.workshop.ask = Some(item),
+    }
+    if app.workshop.ask.is_none() {
+        app.workshop.asked_at = None;
     }
 }

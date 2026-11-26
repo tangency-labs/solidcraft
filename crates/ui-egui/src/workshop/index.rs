@@ -280,9 +280,23 @@ fn runs_on(min: Option<&str>, app: &semver::Version) -> Result<(), Refusal> {
     if release_of(&needed) > release_of(app) { Err(Refusal::NeedsNewerApp(release_of(&needed).to_string())) } else { Ok(()) }
 }
 
-/// The `block` revocation covering `id` at `version` (every version when the record has none).
-fn revocation<'a>(index: &'a Index, id: &str, version: &str, severity: &str) -> Option<&'a Revoked> {
-    index.revoked.iter().find(|r| r.id == id && r.severity == severity && r.version.as_deref().is_none_or(|v| v == version))
+/// The revocation of `severity` covering `id` at `version`: a record without a version covers
+/// every version; one with a version covers the same version as semver reads it (`1.2.0`,
+/// `v1.2.0` and `1.2.0+build` are one version). A record whose version doesn't parse covers every
+/// version, so a mistyped `block` blocks rather than lets through. `version` `None` asks for a
+/// record that covers every version.
+fn revocation<'a>(index: &'a Index, id: &str, version: Option<&semver::Version>, severity: &str) -> Option<&'a Revoked> {
+    index.revoked.iter().find(|r| {
+        r.id == id
+            && r.severity == severity
+            && match (r.version.as_deref().filter(|v| !v.trim().is_empty()), version) {
+                (None, _) => true,
+                (Some(listed), None) => crate::update::parse_version(listed).is_none(),
+                (Some(listed), Some(version)) => {
+                    crate::update::parse_version(listed).is_none_or(|listed| listed.cmp_precedence(version) == std::cmp::Ordering::Equal)
+                }
+            }
+    })
 }
 
 /// Whether the file can come from `url`: the Workshop, or a parts library's GitHub release.
@@ -327,7 +341,7 @@ pub fn resolve(index: &Index, link: &Link, app: &semver::Version) -> Result<Reso
     versions.sort_by(|a, b| b.0.cmp(&a.0));
     let (version, entry) = match &link.version {
         Some(wanted) => {
-            if let Some(revoked) = revocation(index, &item.id, &wanted.to_string(), "block") {
+            if let Some(revoked) = revocation(index, &item.id, Some(wanted), "block") {
                 return Err(Refusal::Revoked(revoked.reason.clone()));
             }
             let (version, entry) = versions.iter().find(|(v, _)| v == wanted).ok_or_else(|| Refusal::NoSuchVersion(wanted.to_string()))?;
@@ -335,9 +349,9 @@ pub fn resolve(index: &Index, link: &Link, app: &semver::Version) -> Result<Reso
             (version.clone(), *entry)
         }
         None => {
-            let usable = versions.iter().filter(|(v, _)| revocation(index, &item.id, &v.to_string(), "block").is_none()).collect::<Vec<_>>();
+            let usable = versions.iter().filter(|(v, _)| revocation(index, &item.id, Some(v), "block").is_none()).collect::<Vec<_>>();
             if usable.is_empty() {
-                return Err(match revocation(index, &item.id, "", "block") {
+                return Err(match revocation(index, &item.id, None, "block") {
                     Some(revoked) => Refusal::Revoked(revoked.reason.clone()),
                     None => Refusal::NoSuchVersion(String::new()),
                 });
@@ -379,7 +393,7 @@ pub fn resolve(index: &Index, link: &Link, app: &semver::Version) -> Result<Reso
     if index.revoked.iter().any(|r| r.severity == "block" && r.sha256.iter().any(|h| h.eq_ignore_ascii_case(&file.sha256))) {
         return Err(Refusal::Revoked(None));
     }
-    let warning = revocation(index, &item.id, &version.to_string(), "warn").map(|r| r.reason.clone().unwrap_or_default());
+    let warning = revocation(index, &item.id, Some(&version), "warn").map(|r| r.reason.clone().unwrap_or_default());
     let author = match item.author.name.as_deref().filter(|n| !n.trim().is_empty()) {
         Some(name) if !item.author.handle.is_empty() => format!("{name} (@{})", item.author.handle),
         Some(name) => name.to_string(),

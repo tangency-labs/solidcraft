@@ -46,8 +46,18 @@ If SolidCraft is already running, a link opened from the browser goes to that wi
 |---|---|
 | Windows (MSI) | `HKLM\Software\Classes\solidcraft`, command `"solidcraft.exe" --open-url "%1"` (`assets/platforms/windows/solidcraft.wxs`) |
 | macOS | `CFBundleURLTypes` in `assets/platforms/macos/Info.plist.in`; AppKit hands the link to `application:openURLs:` |
-| Linux (deb, rpm, Flatpak, Snap, Nix, FreeBSD) | `x-scheme-handler/solidcraft` in `io.tangencylabs.solidcraft.desktop`, `Exec=solidcraft %u` |
-| AppImage | the entry AppRun installs into `~/.local/share/applications` (`Exec="<AppImage>" %U`) |
+| Linux (deb, rpm, Flatpak, Snap, Nix, FreeBSD) | `x-scheme-handler/solidcraft` in a hidden entry of its own, `io.tangencylabs.solidcraft.workshop-links.desktop` (`NoDisplay=true`, `Exec=solidcraft --open-url %u`); the visible `io.tangencylabs.solidcraft.desktop` opens files as before (`%f`) |
+| AppImage | the two entries AppRun installs into `~/.local/share/applications` (`Exec="<AppImage>" %F`, and `Exec="<AppImage>" --open-url %u` for links) |
+
+With `--open-url`, the argument right after it is the link and the app reads nothing else from
+its command line: a link holding quotes or spaces that a command line splits into more arguments
+can't add an option (`--control`, `--theme-file`) or a file. The question that asks before
+anything opens ignores Enter and letter keys for its first second, so a key pressed in the window
+as it appears can't answer it; a click counts at once. Downloads go to a new folder with a random
+name that only you can read (0700). The sha256 is checked through one open handle: a parts library
+unpacks from that handle, and a model or plugin is handed on only while the file is still the one
+checked (same size, time and inode). A `block` revocation matches the version as semver reads it
+(`v1.2.0` and `1.2.0+build` are `1.2.0`).
 
 The portable Windows zip and the plain `.exe` register nothing; links need the MSI. From a
 terminal, `solidcraft --open-url 'solidcraft://workshop/plugin/maker/gears'` does the same as
