@@ -154,6 +154,7 @@ pub use sheet_surface_features::OUTSIDE_BEND_OPEN;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_fusion;
 pub mod weld_seam;
 pub mod weld_spot;
 
