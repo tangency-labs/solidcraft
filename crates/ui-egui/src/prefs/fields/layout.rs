@@ -19,6 +19,9 @@ macro_rules! layout_preferences {
             /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
             /// column at the rows' right end. Off by default.
             browser_eye_left: bool = false, PAGE_LAYOUT;
+            /// With the History in the Browser, each component lists its features straight under its
+            /// row, after its folders, instead of in a History folder. Off by default: the folder.
+            browser_history_without_folder: bool = false, PAGE_LAYOUT;
             /// Folders in the Browser start closed, and placements too whatever "Components start open"
             /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
             /// Browser, which opens just the rows down to its body and closes again the ones the last find

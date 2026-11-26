@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.browser_history_without_folder": "History without a folder",
+    "prefs.browser_history_without_folder_note": "With the History in the Browser, each component lists its features straight under its row, after its folders, as most CAD programs do, instead of in a History folder."
+  },
+  "de": {
+    "prefs.browser_history_without_folder": "Verlauf ohne Ordner",
+    "prefs.browser_history_without_folder_note": "Steht der Verlauf im Browser, listet jede Komponente ihre Features direkt unter ihrer Zeile nach ihren Ordnern auf, wie in den meisten CAD-Programmen, statt in einem Ordner Verlauf."
+  },
+  "ja": {
+    "prefs.browser_history_without_folder": "フォルダーなしの履歴",
+    "prefs.browser_history_without_folder_note": "履歴をブラウザに表示しているとき、各コンポーネントのフィーチャーを履歴フォルダーに入れず、多くの CAD プログラムと同様にフォルダーの後、コンポーネントの行の直下に表示します。"
+  },
+  "zh": {
+    "prefs.browser_history_without_folder": "历史不放在文件夹中",
+    "prefs.browser_history_without_folder_note": "历史显示在浏览器中时，每个组件的特征直接列在其行下、其文件夹之后，与大多数 CAD 程序一样，而不放在历史文件夹中。"
+  },
+  "ko": {
+    "prefs.browser_history_without_folder": "폴더 없는 히스토리",
+    "prefs.browser_history_without_folder_note": "히스토리를 브라우저에 표시할 때 각 구성요소의 피처를 히스토리 폴더 대신 대부분의 CAD 프로그램처럼 해당 행 바로 아래, 폴더 다음에 나열합니다."
+  },
+  "vi": {
+    "prefs.browser_history_without_folder": "Lịch sử không có thư mục",
+    "prefs.browser_history_without_folder_note": "Khi Lịch sử nằm trong Trình duyệt, mỗi thành phần liệt kê các tính năng ngay dưới hàng của nó, sau các thư mục, như hầu hết các chương trình CAD, thay vì trong thư mục Lịch sử."
+  },
+  "ar": {
+    "prefs.browser_history_without_folder": "السجل بدون مجلد",
+    "prefs.browser_history_without_folder_note": "عندما يكون السجل في المستعرض، يُدرج كل مكون ميزاته مباشرة تحت صفه بعد مجلداته، كما في معظم برامج CAD، بدلًا من مجلد السجل."
+  },
+  "he": {
+    "prefs.browser_history_without_folder": "ציר זמן ללא תיקייה",
+    "prefs.browser_history_without_folder_note": "כאשר ציר הזמן מוצג בעץ התכן, כל רכיב מציג את הפיצ׳רים שלו ישירות מתחת לשורה שלו, אחרי התיקיות שלו, כמו ברוב תוכנות ה-CAD, במקום בתיקיית ציר הזמן."
+  }
+}
