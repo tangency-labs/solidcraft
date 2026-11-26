@@ -496,14 +496,14 @@ fn split_at(s: &Seg2, t: f64) -> Option<(Seg2, Seg2)> {
 }
 
 /// A loop's signed area (counter-clockwise positive).
-fn signed_area(segs: &[Seg2]) -> f64 {
+pub(super) fn signed_area(segs: &[Seg2]) -> f64 {
     segs.iter()
         .map(|s| s.area_term().map_or(f64::NAN, |(a, _)| a))
         .sum()
 }
 
 /// A loop's centroid by area; with no area, the mean of its vertices.
-fn centroid(segs: &[Seg2]) -> Point2 {
+pub(super) fn centroid(segs: &[Seg2]) -> Point2 {
     let area = signed_area(segs);
     let (mut sx, mut sy) = (0.0, 0.0);
     for s in segs {

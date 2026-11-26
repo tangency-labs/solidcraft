@@ -1427,6 +1427,49 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
     Ok((body, Some(faces)))
 }
 
+/// A sheet through two closed planar sections with one end tangent along their centre connector.
+/// `tangent_at` selects the section (0 or 1); `crown` scales the derivative at that end only.
+/// With `faced`, orient the walls out of the sectioned region. Face sources index the
+/// original (not split or reordered) input curves, flattened in section order.
+///
+/// # Errors
+/// The kernel's refusals for invalid sections, a degenerate tangent or an invalid sheet.
+pub fn loft_sheet_planar_g1(
+    sections: &[LoftSection; 2],
+    tangent_at: usize,
+    crown: f64,
+    faced: bool,
+) -> Result<(Body, Vec<Vec<usize>>)> {
+    use solidcore::sweep::{loft_sections::LoftSection as Input, skin_planar_g1::skin_planar_g1};
+    let given = sections.each_ref().map(|s| Input {
+        origin: convert::vec3(s.plane.origin),
+        x: convert::vec3(s.plane.x),
+        y: convert::vec3(s.plane.y),
+        segs: s.segs.iter().map(convert::seg2).collect(),
+    });
+    let made = run("loft_sheet_planar_g1", |k| {
+        match skin_planar_g1(k, &given, tangent_at, crown, faced, MAX_CURVES) {
+            Ok(skin) => Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })??;
+    let (brep, sources) = made;
+    let body = Body::new(brep);
+    let report = body.check(crate::CheckLevel::All)?;
+    if !report.is_valid() {
+        return Err(Error::Internal(format!("loft_sheet_planar_g1: {report}")));
+    }
+    let (_, order) = body.to_record()?;
+    let mut sources: BTreeMap<FaceId, Vec<usize>> = sources.into_iter().collect();
+    let faces = order
+        .faces
+        .iter()
+        .map(|f| sources.remove(f))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((body, faces))
+}
+
 /// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.
 fn nurbs_line(c: &Curve) -> Curve {
     match c {
