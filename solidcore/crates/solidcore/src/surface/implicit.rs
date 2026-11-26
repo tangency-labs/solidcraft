@@ -948,7 +948,7 @@ pub fn check_exact_net(k: &Kernel, net: &Surface, check: &ExactNetCheck) -> Resu
             offsets,
             radius,
         } => {
-            if !spine_on_offsets(spine, offsets)? {
+            if !spine_on_offsets(spine, offsets, [0.0; 2])? {
                 return Err(SolidError::invalid_input(
                     OP_EXACT,
                     "the spine is off the faces' offsets",
@@ -1007,16 +1007,21 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
 /// quadric about the spine's first point `O`, homogeneous `(Y, V)`) is within the
 /// rounding of computing it, `gamma_K` times the size of its terms in the spine's
 /// absolute points (the move to `O` is exact algebra; its rounding is theirs), as
-/// [`lies_on`].
+/// [`lies_on`]. Each quadric's constant counts at the larger of its own size and
+/// `constants`, the size of the terms it was computed from.
 ///
 /// # Errors
 ///
 /// `SM_ERR` without NURB data; those of the Bezier decomposition.
-fn spine_on_offsets(spine: &BSplineCurve, offsets: &[QuadricEquation; 2]) -> Result<bool> {
+fn spine_on_offsets(
+    spine: &BSplineCurve,
+    offsets: &[QuadricEquation; 2],
+    constants: [f64; 2],
+) -> Result<bool> {
     let (segs, o) = curve_segments(spine)?;
     let oa = [o.x, o.y, o.z];
     let dot3 = |x: &[f64; 3], y: &[f64; 3]| x.iter().zip(y).map(|(p, q)| p * q).sum::<f64>();
-    for &(a, b, c) in offsets {
+    for (&(a, b, c), c_terms) in offsets.iter().zip(constants) {
         // the quadric about O: A, b' = b + A O, c' = O.A.O + 2 b.O + c
         let ao = a.map(|row| dot3(&row, &oa));
         let b1 = [b[0] + ao[0], b[1] + ao[1], b[2] + ao[2]];
@@ -1039,7 +1044,8 @@ fn spine_on_offsets(spine: &BSplineCurve, offsets: &[QuadricEquation; 2]) -> Res
             // the terms of the quadric in the spine's own (absolute) homogeneous points: the
             // move to O is exact algebra, its rounding that of these terms
             let ya = ys + omax * vs;
-            let scale = amax * ya * ya + 2.0 * bmax * ya * vs + c.abs() * vs * vs;
+            // c is rounded at the size of the terms it was computed from, not at its own size
+            let scale = amax * ya * ya + 2.0 * bmax * ya * vs + c.abs().max(c_terms) * vs * vs;
             let tol = gamma(8 * (p + 1) + 16) * scale;
             if !f.c.iter().all(|x| x.abs() <= tol) {
                 return Ok(false);
@@ -1057,7 +1063,22 @@ fn spine_on_offsets(spine: &BSplineCurve, offsets: &[QuadricEquation; 2]) -> Res
 ///
 /// `SM_ERR` without NURB data; those of the Bezier decomposition.
 pub fn curve_on_quadrics(curve: &BSplineCurve, q: &[QuadricEquation; 2]) -> Result<bool> {
-    spine_on_offsets(curve, q)
+    spine_on_offsets(curve, q, [0.0; 2])
+}
+
+/// As [`curve_on_quadrics`], with each quadric's constant `c` rounded at the size `constants`
+/// of the terms it was computed from: a sphere's `c = |centre|^2 - r^2` cancels to far below
+/// its rounding when the world origin is near the circle (#3384).
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bezier decomposition.
+pub fn curve_on_quadrics_with_constants(
+    curve: &BSplineCurve,
+    q: &[QuadricEquation; 2],
+    constants: [f64; 2],
+) -> Result<bool> {
+    spine_on_offsets(curve, q, constants)
 }
 
 /// How many halvings [`conic_turn`] makes of one Bézier segment before it gives up: a
