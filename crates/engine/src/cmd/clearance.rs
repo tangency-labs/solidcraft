@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
      \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
-     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason, distance_mm?, exact?}] (pairs whose overlap could not be worked out, with non-boolean minimum distance when computable and exact: false when measured on the meshes; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
+     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason, distance_mm?, exact?}] (pairs whose overlap could not be worked out, with non-boolean minimum distance when computable and exact: false when measured on the meshes; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); unchecked_count (length of `unchecked`; non-zero means the check is incomplete); pairs_checked; \
      pairs_reused (of those, measured by an earlier call: neither body changed or moved since); pairs_pruned (ruled out by their boxes); ms. Distances are measured on the exact faces and edges, the meshes only rule pairs out",
 )];
 
@@ -642,11 +642,13 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(err);
     }
 
+    let unchecked_count = unchecked.len();
     let reply = ClearanceReply {
         overlaps: summary.overlaps,
         near: summary.near,
         nearest: summary.nearest,
         unchecked,
+        unchecked_count,
         bodies: subjects.len(),
         pairs_checked: close.len(),
         pairs_reused: reused,
@@ -848,12 +850,13 @@ fn measure_pair(
 }
 
 /// Runs the exact intersection boolean for one pair under `Validation::EachStep`, retrying in
-/// reversed operand order, checking certified disjointness (`interiors_disjoint`), retrying
-/// shifted near the shared region on kernel failure, and falling back to a sanity-checked
-/// `Validation::Off` measurement when SMLib's check alone refused the temporary overlap solid
-/// while both operands passed; verifies an empty boolean result against exact interior point
-/// witnesses so a real overlap is never silently reported as clear; and attaches a non-boolean
-/// fallback distance when a pair still lands in `unchecked`.
+/// reversed operand order, checking certified disjointness (`interiors_disjoint`), retrying in
+/// recentered and rigidly rotated local frames on kernel failure (verifying empty local-frame
+/// results via `overlap_witness`), and falling back to a sanity-checked `Validation::Off`
+/// measurement when SMLib's check alone refused the temporary overlap solid while both operands
+/// passed; verifies an empty boolean result against exact interior point witnesses so a real
+/// overlap is never silently reported as clear; and attaches a non-boolean fallback distance
+/// when a pair still lands in `unchecked`.
 fn intersect_pair(
     (ia, ka, a): (usize, &solidcraft_kernel::Body, &DistanceShape),
     (ib, kb, b): (usize, &solidcraft_kernel::Body, &DistanceShape),
@@ -908,10 +911,10 @@ fn intersect_pair(
                 // recording the pair as unchecked.
                 let recovered = if is_cancelled() {
                     None
-                } else if let Some(m) = intersect_shifted(ka, kb, witness, false) {
+                } else if let Some(m) = intersect_shifted_overlap(ka, kb, witness, false) {
                     Some(m)
                 } else if !is_cancelled() {
-                    intersect_shifted(ka, kb, witness, true)
+                    intersect_shifted_overlap(ka, kb, witness, true)
                 } else {
                     None
                 };
@@ -961,11 +964,20 @@ fn intersect_pair(
                     if solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
                         return;
                     }
-                    if !is_cancelled()
-                        && let Some(m) = retry_shifted_intersect(ka, kb, at, &is_cancelled)
-                    {
-                        record_overlap(m, out);
-                        return;
+                    match retry_reframed_intersect(ka, kb, at, &is_cancelled) {
+                        ReframedIntersect::Overlap(m) => {
+                            record_overlap(m, out);
+                            return;
+                        }
+                        ReframedIntersect::Empty => {
+                            verify_empty(out);
+                            return;
+                        }
+                        ReframedIntersect::Cancelled => {
+                            out.unchecked = Some(first_err.to_string());
+                            return;
+                        }
+                        ReframedIntersect::Failed => {}
                     }
                     match super::interference::fallback_unchecked_overlap(
                         ka,
@@ -998,30 +1010,145 @@ fn run_intersect(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> so
         .0
 }
 
-/// Retries a failed intersection near the origin (when placed away from it) in both operand orders.
-/// Only a validated non-empty solid result replaces the original error.
-fn retry_shifted_intersect(
+/// Outcome of retrying a failed intersection in recentered and/or rigidly rotated local frames.
+#[derive(Debug)]
+pub(super) enum ReframedIntersect {
+    /// A rigid local-frame intersection succeeded and returned empty (no shared solid).
+    Empty,
+    /// A rigid local-frame intersection succeeded with a positive-volume overlap mapped back to
+    /// world space.
+    Overlap(solidcraft_kernel::MassMeasure),
+    /// Cancelled before or during the retry.
+    Cancelled,
+    /// Every rigid local frame failed.
+    Failed,
+}
+
+/// Bit-exact proper rotation matrices in SO(3) (column-major, zero floating-point rounding):
+/// 180° about Z, +120° cyclic axis permutation `(x, y, z) -> (z, x, y)`, and its inverse
+/// `(x, y, z) -> (y, z, x)`.
+const ROT_Z_180: [[f64; 4]; 4] = [[-1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+const CYCLIC_FWD: [[f64; 4]; 4] = [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+const CYCLIC_INV: [[f64; 4]; 4] = [[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+const SKEW_AXIS: solidcore_record::Vec3 = solidcore_record::Vec3::new(1.0, 2.0, 3.0);
+const SKEW_ANGLE_RAD: f64 = 0.73;
+
+/// Retries a failed intersection in rigid local frames around `at`:
+/// 1. Translated by `-at` to the origin (when placed away from it), in both operand orders.
+/// 2. Bit-exact SO(3) axis rotations (180° Z and cyclic axis permutations) around the local origin.
+/// 3. One non-axis-aligned rigid rotation around the local origin to break cardinal-axis and seam
+///    degeneracies.
+///
+/// Returns [`ReframedIntersect::Empty`] when a validated local-frame intersection succeeds empty
+/// (which `inspect.clearance` still verifies via `overlap_witness` before clearing), and
+/// [`ReframedIntersect::Overlap`] when a validated positive-volume solid is recovered and mapped
+/// back to world space.
+pub(super) fn retry_reframed_intersect(
     ka: &solidcraft_kernel::Body,
     kb: &solidcraft_kernel::Body,
     at: solidcore_record::Vec3,
     is_cancelled: &impl Fn() -> bool,
-) -> Option<solidcraft_kernel::MassMeasure> {
-    let far = at.x.abs().max(at.y.abs()).max(at.z.abs()) > 1.0;
-    if !far || is_cancelled() {
-        return None;
-    }
-    if let Some(m) = intersect_shifted(ka, kb, at, false) {
-        return Some(m);
-    }
+) -> ReframedIntersect {
     if is_cancelled() {
-        return None;
+        return ReframedIntersect::Cancelled;
     }
-    intersect_shifted(ka, kb, at, true)
+    if !at.is_finite() {
+        return ReframedIntersect::Failed;
+    }
+    let far = at.x.abs().max(at.y.abs()).max(at.z.abs()) > 1.0;
+    let shift = if far { at } else { solidcore_record::Vec3::ZERO };
+    let shifted_pair = if far {
+        let Ok(ta) = solidcraft_kernel::transform(ka, -shift, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0) else {
+            return ReframedIntersect::Failed;
+        };
+        let Ok(tb) = solidcraft_kernel::transform(kb, -shift, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0) else {
+            return ReframedIntersect::Failed;
+        };
+        match run_local_pair(&ta, &tb, shift, Ok, is_cancelled) {
+            ReframedIntersect::Failed => Some((ta, tb)),
+            done => return done,
+        }
+    } else {
+        None
+    };
+    let (base_a, base_b) = match shifted_pair.as_ref() {
+        Some((ta, tb)) => (ta, tb),
+        None => (ka, kb),
+    };
+
+    for (fwd, inv) in [(ROT_Z_180, ROT_Z_180), (CYCLIC_FWD, CYCLIC_INV), (CYCLIC_INV, CYCLIC_FWD)] {
+        if is_cancelled() {
+            return ReframedIntersect::Cancelled;
+        }
+        let (Ok(ra), Ok(rb)) = (solidcraft_kernel::transform_matrix(base_a, fwd), solidcraft_kernel::transform_matrix(base_b, fwd)) else {
+            continue;
+        };
+        match run_local_pair(&ra, &rb, shift, |o| solidcraft_kernel::transform_matrix(&o, inv), is_cancelled) {
+            ReframedIntersect::Failed => {}
+            done => return done,
+        }
+    }
+
+    if is_cancelled() {
+        return ReframedIntersect::Cancelled;
+    }
+    let (Ok(ra), Ok(rb)) = (
+        solidcraft_kernel::transform(base_a, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, SKEW_AXIS, SKEW_ANGLE_RAD),
+        solidcraft_kernel::transform(base_b, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, SKEW_AXIS, SKEW_ANGLE_RAD),
+    ) else {
+        return ReframedIntersect::Failed;
+    };
+    run_local_pair(
+        &ra,
+        &rb,
+        shift,
+        |o| solidcraft_kernel::transform(&o, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, SKEW_AXIS, -SKEW_ANGLE_RAD),
+        is_cancelled,
+    )
 }
 
-/// Intersects `ka` and `kb` translated by `-at` (so the shared region sits at the origin) and
-/// translates the measured overlap box and centroid back by `+at`.
-fn intersect_shifted(
+/// Runs `run_intersect` in both operand orders on a rigid local-frame pair `(a, b)`, unrotating
+/// any resulting solid via `unrotate` and shifting its measured centroid and bounds back by
+/// `shift`.
+fn run_local_pair(
+    a: &solidcraft_kernel::Body,
+    b: &solidcraft_kernel::Body,
+    shift: solidcore_record::Vec3,
+    unrotate: impl Fn(solidcraft_kernel::Body) -> solidcraft_kernel::Result<solidcraft_kernel::Body>,
+    is_cancelled: &impl Fn() -> bool,
+) -> ReframedIntersect {
+    for (first, second) in [(a, b), (b, a)] {
+        if is_cancelled() {
+            return ReframedIntersect::Cancelled;
+        }
+        match run_intersect(first, second) {
+            Ok(None) => return ReframedIntersect::Empty,
+            Ok(Some(overlap)) => {
+                if is_cancelled() {
+                    return ReframedIntersect::Cancelled;
+                }
+                let Ok(unrotated) = unrotate(overlap) else {
+                    continue;
+                };
+                let Ok(mut m) = solidcraft_kernel::measure_mass(&unrotated) else {
+                    continue;
+                };
+                if !m.volume.is_finite() || m.volume <= 0.0 {
+                    continue;
+                }
+                m.centroid += shift;
+                m.bbox = Aabb3 { min: m.bbox.min + shift, max: m.bbox.max + shift };
+                return ReframedIntersect::Overlap(m);
+            }
+            Err(_) => {}
+        }
+    }
+    ReframedIntersect::Failed
+}
+
+/// Intersects `ka` and `kb` translated by `-at` (so a proven overlap witness sits at the origin)
+/// and translates the measured overlap box and centroid back by `+at`.
+fn intersect_shifted_overlap(
     ka: &solidcraft_kernel::Body,
     kb: &solidcraft_kernel::Body,
     at: solidcore_record::Vec3,

@@ -1416,3 +1416,183 @@ fn nearest_lists_deduplicates_shared_candidates_in_each_round() {
     assert_eq!(lists[&2], vec![(1, 2.0), (3, 3.0)]);
     assert_eq!(lists[&3], vec![(2, 3.0), (1, 6.0)]);
 }
+
+/// Four identical countersunk nuts (Ø7 shank, 90° countersunk head Ø10×1.5, total length 13.5 mm)
+/// seated flush (0 mm contact, zero overlap) in countersunk bores of two mirrored side rails placed
+/// at 0° and 180° Z rotations far from the origin (`x = ±800 mm`). All four mirror-identical pairs
+/// must resolve symmetrically to `near` at 0.0 mm with `unchecked_count == 0`, while a nut seated
+/// 0.2 mm too deep must report its exact interference volume (~7.39 mm³).
+#[test]
+fn mirrored_countersunk_nuts_in_rails_are_contact_and_penetration_is_overlap() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-mirrored-nuts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let rail_path = dir.join("rail.sc");
+    let nuts_path = dir.join("nuts.sc");
+
+    let hole_ys = [2.5_f64, -32.5_f64];
+    let hole_z = -43.5_f64;
+
+    // Rail side wall at x = 800..806 with two through 90° countersunk bores (Ø7 shank, Ø10×1.5 head).
+    let mut rail = Session::default();
+    run(&mut rail, "solid.box", json!({"length": 6, "width": 120, "height": 80, "corner": [800, -60, -80], "operation": "new", "body_name": "Rail"}));
+    for cy in hole_ys {
+        run(
+            &mut rail,
+            "solid.hole",
+            json!({
+                "position": [806, cy, hole_z],
+                "direction": [-1, 0, 0],
+                "diameter": 7,
+                "type": "countersink",
+                "cs_diameter": 10,
+                "cs_angle": 90,
+                "targets": ["Rail"],
+            }),
+        );
+    }
+    run(&mut rail, "file.save", json!({"path": rail_path.to_string_lossy()}));
+
+    // Pair of identical flush countersunk nuts (90° Ø10×1.5 head + Ø7×12 shank, length 13.5 mm).
+    let mut nuts = Session::default();
+    for (idx, cy) in hole_ys.iter().enumerate() {
+        let name = format!("Nut{}", idx + 1);
+        run(
+            &mut nuts,
+            "solid.cone",
+            json!({"base": [806, cy, hole_z], "axis": [-1, 0, 0], "radius": 5.0, "top_radius": 3.5, "height": 1.5, "operation": "new", "body_name": name}),
+        );
+        run(
+            &mut nuts,
+            "solid.cylinder",
+            json!({"base": [804.5, cy, hole_z], "axis": [-1, 0, 0], "radius": 3.5, "height": 12.0, "operation": "join", "targets": [name]}),
+        );
+    }
+    run(&mut nuts, "file.save", json!({"path": nuts_path.to_string_lossy()}));
+
+    // Place both sides in exact 0° and 180° Z symmetry at x = ±800..±806 mm.
+    let identity = json!([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+    let rot_z_180 = json!([-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0]);
+    let mut asm = Session::default();
+    let rail_pos = run(&mut asm, "component.insert_design", json!({"path": rail_path.to_string_lossy(), "name": "RailPos", "matrix": identity}));
+    let rail_neg = run(&mut asm, "component.insert_design", json!({"path": rail_path.to_string_lossy(), "name": "RailNeg", "matrix": rot_z_180}));
+    let nuts_pos = run(&mut asm, "component.insert_design", json!({"path": nuts_path.to_string_lossy(), "name": "NutsPos", "matrix": identity}));
+    let nuts_neg = run(&mut asm, "component.insert_design", json!({"path": nuts_path.to_string_lossy(), "name": "NutsNeg", "matrix": rot_z_180}));
+    let rebuilt = run(&mut asm, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    let mut rail_bodies: Vec<String> = Vec::new();
+    for ins in [&rail_pos, &rail_neg] {
+        rail_bodies.extend(ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)));
+    }
+    let mut nut_bodies: Vec<String> = Vec::new();
+    for ins in [&nuts_pos, &nuts_neg] {
+        nut_bodies.extend(ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)));
+    }
+    assert_eq!((rail_bodies.len(), nut_bodies.len()), (2, 4));
+
+    let r = run(&mut asm, "inspect.clearance", json!({"bodies": nut_bodies, "against": rail_bodies, "clearance": 0.5, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["unchecked_count"], 0, "{r}");
+    assert_eq!(r["overlaps"], json!([]), "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 4, "all 4 mirror-identical nut/rail contact pairs must be near at 0 mm: {r}");
+    for entry in &near {
+        assert_eq!(f(&entry["distance_mm"]), 0.0, "{entry}");
+        assert!(entry.get("exact").is_none(), "distance must be exact on analytic cone/cylinder faces: {entry}");
+    }
+
+    let inter = run(&mut asm, "inspect.interference", json!({}));
+    assert_eq!(inter["count"], 0, "{inter}");
+    assert_eq!(inter["unchecked"], json!([]), "{inter}");
+
+    // Soundness check: a nut seated 0.2 mm too deep penetrates the countersink wall (~7.391 mm³)
+    // and must be reported as an overlap, never cleared as contact.
+    let mut deep = Session::default();
+    run(&mut deep, "solid.box", json!({"length": 6, "width": 120, "height": 80, "corner": [800, -60, -80], "operation": "new", "body_name": "Rail"}));
+    run(
+        &mut deep,
+        "solid.hole",
+        json!({
+            "position": [806, hole_ys[0], hole_z],
+            "direction": [-1, 0, 0],
+            "diameter": 7,
+            "type": "countersink",
+            "cs_diameter": 10,
+            "cs_angle": 90,
+            "targets": ["Rail"],
+        }),
+    );
+    run(
+        &mut deep,
+        "solid.cone",
+        json!({"base": [805.8, hole_ys[0], hole_z], "axis": [-1, 0, 0], "radius": 5.0, "top_radius": 3.5, "height": 1.5, "operation": "new", "body_name": "Bushing"}),
+    );
+    run(
+        &mut deep,
+        "solid.cylinder",
+        json!({"base": [804.3, hole_ys[0], hole_z], "axis": [-1, 0, 0], "radius": 3.5, "height": 12.0, "operation": "join", "targets": ["Bushing"]}),
+    );
+    let r = run(&mut deep, "inspect.clearance", json!({"bodies": ["Bushing"], "against": ["Rail"], "clearance": 0.5, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["unchecked_count"], 0, "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let want_vol = 7.391_120_316;
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.05 * want_vol, "got {got_vol} vs expected {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `retry_reframed_intersect` recovers both empty flush contact and world-mapped overlap volumes
+/// in recentered and rotated SO(3) local frames, respects cancellation, and `inspect.clearance`
+/// surfaces `unchecked_count` matching `unchecked.len()`.
+#[test]
+fn reframed_intersect_recovers_empty_and_overlap_and_tracks_unchecked_count() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
+
+    use super::{ReframedIntersect, retry_reframed_intersect};
+
+    // Far from origin: exercises translation recentering for both flush contact (Empty) and overlap.
+    let far_a = solidcraft_kernel::box_solid(Vec3::new(800.0, -40.0, -40.0), Vec3::new(810.0, -30.0, -30.0)).unwrap();
+    let far_flush = solidcraft_kernel::box_solid(Vec3::new(810.0, -40.0, -40.0), Vec3::new(820.0, -30.0, -30.0)).unwrap();
+    let far_overlap = solidcraft_kernel::box_solid(Vec3::new(808.0, -40.0, -40.0), Vec3::new(818.0, -30.0, -30.0)).unwrap();
+
+    assert!(matches!(retry_reframed_intersect(&far_a, &far_flush, Vec3::new(810.0, -35.0, -35.0), &|| false), ReframedIntersect::Empty));
+    match retry_reframed_intersect(&far_a, &far_overlap, Vec3::new(809.0, -35.0, -35.0), &|| false) {
+        ReframedIntersect::Overlap(m) => {
+            assert!((m.volume - 200.0).abs() < 1e-6, "{m:?}");
+            assert!((m.centroid - Vec3::new(809.0, -35.0, -35.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.min - Vec3::new(808.0, -40.0, -40.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.max - Vec3::new(810.0, -30.0, -30.0)).len() < 1e-6, "{m:?}");
+        }
+        other => panic!("expected far-from-origin overlap, got {other:?}"),
+    }
+    assert!(matches!(retry_reframed_intersect(&far_a, &far_overlap, Vec3::new(809.0, -35.0, -35.0), &|| true), ReframedIntersect::Cancelled));
+
+    // Near origin (`at = ZERO`): exercises SO(3) rotation + inverse rotation back to world space.
+    let near_a = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let near_flush = solidcraft_kernel::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap();
+    let near_overlap = solidcraft_kernel::box_solid(Vec3::new(8.0, 0.0, 0.0), Vec3::new(18.0, 10.0, 10.0)).unwrap();
+
+    assert!(matches!(retry_reframed_intersect(&near_a, &near_flush, Vec3::ZERO, &|| false), ReframedIntersect::Empty));
+    match retry_reframed_intersect(&near_a, &near_overlap, Vec3::ZERO, &|| false) {
+        ReframedIntersect::Overlap(m) => {
+            assert!((m.volume - 200.0).abs() < 1e-6, "{m:?}");
+            assert!((m.centroid - Vec3::new(9.0, 5.0, 5.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.min - Vec3::new(8.0, 0.0, 0.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.max - Vec3::new(10.0, 10.0, 10.0)).len() < 1e-6, "{m:?}");
+        }
+        other => panic!("expected rotated near-origin overlap, got {other:?}"),
+    }
+
+    // `unchecked_count` tracks `unchecked.len()` at the top level of the `inspect.clearance` reply.
+    let mut s = Session::default();
+    let meshes = insert_two_mesh_cubes(&mut s, "unchecked-count");
+    assert_eq!(meshes.len(), 2);
+    let r = run(&mut s, "inspect.clearance", json!({"clearance": 1}));
+    assert_eq!(r["unchecked_count"], 2, "{r}");
+    assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(2), "{r}");
+}

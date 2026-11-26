@@ -332,7 +332,10 @@ struct OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBoun
 /// 2. When both checked orders fail and `check_disjoint` is `true`, certifies whether the bodies'
 ///    interiors are disjoint (`solidcraft_kernel::interiors_disjoint`), returning
 ///    [`OverlapOutcome::Empty`] when certified.
-/// 3. When a checked order failed solely because SMLib's `CheckLevel::All` rejected the temporary
+/// 3. When both checked orders still fail, retries the checked intersection in recentered and
+///    rigidly rotated local frames ([`super::clearance::retry_reframed_intersect`]) to resolve
+///    pose-dependent radial-sector or seam failures.
+/// 4. When a checked order failed solely because SMLib's `CheckLevel::All` rejected the temporary
 ///    overlap solid while both operands passed SMLib's check
 ///    ([`solidcraft_kernel::is_result_only_check_refusal`]), retries that order under
 ///    `Validation::Off` and accepts the temporary measurement only when `accept_unchecked_volume`
@@ -355,18 +358,30 @@ pub(crate) fn measure_overlap(
         let (first, second) = if swapped { (b, a) } else { (a, b) };
         solidcraft_kernel::validating(mode, || solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)).0
     };
-    resolve_overlap_with(OverlapOps {
-        run_checked: |swapped| intersect(solidcraft_kernel::Validation::EachStep, swapped),
-        run_unchecked: |swapped| intersect(solidcraft_kernel::Validation::Off, swapped),
-        measure,
-        check_checked_bounds,
-        check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
-        accept_unchecked_volume,
-        is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
-        is_cancelled: || should_stop() || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()),
-    })
+    let at = match (a.exact_bounds(), b.exact_bounds()) {
+        (Ok(ea), Ok(eb)) => {
+            let exact = ea.intersection(&eb);
+            if exact.is_empty() { solidcore_record::Vec3::ZERO } else { exact.center() }
+        }
+        _ => solidcore_record::Vec3::ZERO,
+    };
+    let is_cancelled = || should_stop() || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+    resolve_overlap_with_reframed(
+        OverlapOps {
+            run_checked: |swapped| intersect(solidcraft_kernel::Validation::EachStep, swapped),
+            run_unchecked: |swapped| intersect(solidcraft_kernel::Validation::Off, swapped),
+            measure,
+            check_checked_bounds,
+            check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
+            accept_unchecked_volume,
+            is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
+            is_cancelled: &is_cancelled,
+        },
+        || super::clearance::retry_reframed_intersect(a, b, at, &is_cancelled),
+    )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn resolve_overlap_with<T, FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>(
     ops: OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>,
 ) -> OverlapOutcome
@@ -379,6 +394,24 @@ where
     FAcceptVol: Fn(f64) -> bool,
     FDisjoint: Fn() -> bool,
     FCancelled: Fn() -> bool,
+{
+    resolve_overlap_with_reframed(ops, || super::clearance::ReframedIntersect::Failed)
+}
+
+fn resolve_overlap_with_reframed<T, FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled, FReframed>(
+    ops: OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>,
+    retry_reframed: FReframed,
+) -> OverlapOutcome
+where
+    FChecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FUnchecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FMeasure: Fn(&T) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    FCheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FUncheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FAcceptVol: Fn(f64) -> bool,
+    FDisjoint: Fn() -> bool,
+    FCancelled: Fn() -> bool,
+    FReframed: FnOnce() -> super::clearance::ReframedIntersect,
 {
     if (ops.is_cancelled)() {
         return OverlapOutcome::Unchecked { reason: "cancelled".into(), measure_distance: false };
@@ -411,6 +444,20 @@ where
     }
     if (ops.is_disjoint)() {
         return OverlapOutcome::Empty;
+    }
+    match retry_reframed() {
+        super::clearance::ReframedIntersect::Empty => return OverlapOutcome::Empty,
+        super::clearance::ReframedIntersect::Overlap(m) => {
+            return if let Some(why) = (ops.check_checked_bounds)(&m) {
+                OverlapOutcome::Unchecked { reason: why, measure_distance: false }
+            } else {
+                OverlapOutcome::Measured(m)
+            };
+        }
+        super::clearance::ReframedIntersect::Cancelled => {
+            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        }
+        super::clearance::ReframedIntersect::Failed => {}
     }
     match try_unchecked_fallback(
         (&first_err, &second_err),
