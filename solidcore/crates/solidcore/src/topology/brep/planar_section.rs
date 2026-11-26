@@ -48,13 +48,15 @@
 //! - **Touch points.** A plane that touches a face at a point gives a degenerate section
 //!   curve, which upstream's trimming (`CreateCurvesByTrimming`) skips, so the section lost
 //!   the point. Here it is kept where the point classifies on the face (`Point3DClassify`,
-//!   as `FaceIntersect` keeps a touch point) and lies on no other section curve.
+//!   as `FaceIntersect` keeps a touch point) and lies on no other section curve. A
+//!   classification that fails fails the section
+//!   ([`TopologyFailure::TouchPointNotClassified`], with its cause).
 //! - **Not ported here.** The `SM_DEBUG_CODE` drawing blocks and
 //!   `SM_VALIDATE_INTERSECTORS`.
 
 use crate::curve::curve::Curve;
 use crate::error::topology::TopologyFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -566,10 +568,18 @@ pub fn create_planar_section_curves(
                 continue;
             }
             let point = curve.evaluate_point(k, curve.natural_interval().min())?;
+            // a classification that fails decides nothing: the touch point is neither kept
+            // nor silently dropped, the section fails with the cause
             let class = match face3::point_3d_classify(k, b, f, point, max2(face_tol, tol)) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => continue,
+                Err(e) => {
+                    return Err(
+                        Failure::new(OP_SECTION, TopologyFailure::TouchPointNotClassified)
+                            .caused_by(e)
+                            .into_error(),
+                    )
+                }
             };
             if matches!(
                 class,
