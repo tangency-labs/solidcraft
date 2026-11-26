@@ -141,7 +141,7 @@ fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Option<FaceuseId>> {
 /// `SmApiShellBrepFull(b, distance, TRUE, TRUE, TRUE, open, r)`: convex edges extended, results
 /// merged, side walls made at a sheet's edges, and (as the fork does, 5448b9a) a thickened
 /// sheet's coplanar side walls one face.
-fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
+pub(super) fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
     let options = ShellOptions {
         offset: OffsetOptions { distance, extend_convex_edges: true, merge_results: true },
         create_offset_solid: true,
