@@ -6646,3 +6646,300 @@ fn parallel_sketch_cache_load_matches_evaluated_sketches() {
     adopted.evaluate(&doc);
     assert_eq!(adopted.last_recomputed, 0);
 }
+
+#[test]
+fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("batch remove preserves joint pose");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    let add_box = |doc: &mut Document, comp: u64, name: &str| {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = comp;
+        f.body_names = vec![name.into()];
+    };
+    add_box(&mut doc, comp_a, "ABox");
+    add_box(&mut doc, comp_b, "BBox");
+
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let pick = Vec3::new(5.0, 5.0, 10.0);
+    let face_b = joints::face_name_at(&doc, &seed.state(), comp_b, pick, false).unwrap();
+
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "RigidAB".into(),
+        kind: JointKind::Rigid,
+        a: JointOrigin::new(occ_a, Snap::Point { point: Vec3::new(50.0, 0.0, 0.0), z: None, x: None }),
+        b: JointOrigin::new(occ_b, Snap::FaceCenter { pick, face: Some(face_b), x: None }),
+        values: Vec::new(),
+        limits: Vec::new(),
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    // Remove the only box in jointed component B without any intervening placement-reading feature.
+    let rem = doc.add_feature(FeatureKind::Remove { bodies: vec!["BBox".into()] }, Some("RemoveB")).unwrap();
+    doc.feature_mut(rem).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let t = model.resolved_occurrences().get(&occ_b).expect("occ_b transform");
+    let landed = apply_point(t, pick);
+    assert!(landed.dist(Vec3::new(50.0, 0.0, 0.0)) < 1e-6, "batched create + remove must preserve the last valid joint pose, landed at {landed:?}");
+
+    let saved = model.saved(&doc).expect("saved model");
+    let adopted = Model::adopt(&doc, &saved).expect("adopt saved model");
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert!(adopted.is_current(&doc));
+}
+
+#[test]
+fn capture_position_resolves_sketch_point_joint_when_sketch_appears() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("sketch point joint");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let comp_c = doc.add_component(Some("C"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    // A placement-reading feature before SkB flushes joints while SkB does not yet exist.
+    let mut sk_flush = Sketch::new();
+    let fp0 = sk_flush.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let fp1 = sk_flush.add_point(Vec2::new(5.0, 0.0), None).unwrap();
+    sk_flush.add_line_pts(fp0, fp1, None).unwrap();
+    sk_flush
+        .add_link(
+            solidcraft_sketch::LinkKind::Project,
+            solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+            &[solidcraft_sketch::LinkGeom::Line(Vec2::new(5.0, -5.0), Vec2::new(5.0, 5.0))],
+        )
+        .unwrap();
+    let flush_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_flush }, Some("SkFlush")).unwrap();
+    doc.feature_mut(flush_id).unwrap().component = comp_c;
+
+    // Create the sketch referenced by Snap::SketchPoint with no bodies added anywhere.
+    let mut sk_b = Sketch::new();
+    let p0 = sk_b.add_point(Vec2::new(20.0, 0.0), None).unwrap();
+    let p0_id = sk_b.points[p0].id.clone();
+    let sk_b_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_b }, Some("SkB")).unwrap();
+    doc.feature_mut(sk_b_id).unwrap().component = comp_b;
+
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "SketchPtAB".into(),
+        kind: JointKind::Rigid,
+        a: JointOrigin::new(occ_a, Snap::Point { point: Vec3::new(100.0, 0.0, 0.0), z: None, x: None }),
+        b: JointOrigin::new(occ_b, Snap::SketchPoint { sketch: sk_b_id, point: p0_id, x: None }),
+        values: Vec::new(),
+        limits: Vec::new(),
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let t = model.resolved_occurrences().get(&occ_b).expect("occ_b transform");
+    let landed = apply_point(t, Vec3::new(20.0, 0.0, 0.0));
+    assert!(landed.dist(Vec3::new(100.0, 0.0, 0.0)) < 1e-6, "Snap::SketchPoint joint must re-solve when its sketch appears, landed at {landed:?}");
+
+    let saved = model.saved(&doc).expect("saved model");
+    let adopted = Model::adopt(&doc, &saved).expect("adopt saved model");
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert!(adopted.is_current(&doc));
+}
+
+#[test]
+fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("foreign revolve axis in adopt");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    let add_box = |doc: &mut Document, comp: u64| {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    };
+    add_box(&mut doc, comp_a);
+    add_box(&mut doc, comp_b);
+
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let pick = Vec3::new(5.0, 5.0, 10.0);
+    let face_b = joints::face_name_at(&doc, &seed.state(), comp_b, pick, false).unwrap();
+
+    // Axis sketch owned by component B (at x = 0 locally; moved to x = 30 by the joint).
+    let mut sk_axis = Sketch::new();
+    let a0 = sk_axis.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let a1 = sk_axis.add_point(Vec2::new(0.0, 20.0), None).unwrap();
+    let axis_idx = sk_axis.add_line_pts(a0, a1, None).unwrap();
+    let axis_curve = sk_axis.curves[axis_idx].id.clone();
+    let sk_axis_id =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_axis }, Some("SkAxisB")).unwrap();
+    doc.feature_mut(sk_axis_id).unwrap().component = comp_b;
+
+    // Profile sketch owned by root (component 0) at x in [40, 50].
+    let mut sk_prof = Sketch::new();
+    let p = [Vec2::new(40.0, 0.0), Vec2::new(50.0, 0.0), Vec2::new(50.0, 10.0), Vec2::new(40.0, 10.0)].map(|q| sk_prof.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk_prof.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sk_prof_id =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_prof }, Some("SkProfRoot")).unwrap();
+
+    // Root-owned Revolve and SurfaceRevolve referencing the foreign sketch axis in component B.
+    let rev = doc
+        .add_feature(
+            FeatureKind::Revolve {
+                sketch: SketchId(sk_prof_id),
+                profiles: ProfileSel::All,
+                axis: AxisRef::SketchLine { curve: axis_curve.clone(), sketch: Some(sk_axis_id) },
+                angle: "180 deg".into(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                angle2: None,
+                symmetric: false,
+                convention: Default::default(),
+                to: None,
+            },
+            Some("RevRoot"),
+        )
+        .unwrap();
+    doc.feature_mut(rev).unwrap().body_names = vec!["RevSolid".into()];
+
+    let srev = doc
+        .add_feature(
+            FeatureKind::SurfaceRevolve {
+                sketch: SketchId(sk_prof_id),
+                profiles: Some(ProfileSel::All),
+                curves: Vec::new(),
+                axis: AxisRef::SketchLine { curve: axis_curve, sketch: Some(sk_axis_id) },
+                angle: "180 deg".into(),
+                angle2: None,
+                symmetric: false,
+                faced: true,
+                stays_surface: true,
+            },
+            Some("SurfRevRoot"),
+        )
+        .unwrap();
+    doc.feature_mut(srev).unwrap().body_names = vec!["RevSurf".into()];
+
+    let mut unjointed = Model::new();
+    unjointed.evaluate(&doc);
+    assert!(unjointed.results.iter().all(|r| r.error.is_none()), "{:?}", unjointed.results);
+
+    // Move component B to +30 mm along X via a joint; no placement-reading feature intervenes
+    // before RevRoot / SurfRevRoot, so both must flush pending joints before reading the axis.
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "ShiftB".into(),
+        kind: JointKind::Rigid,
+        a: JointOrigin::new(occ_a, Snap::Point { point: Vec3::new(35.0, 5.0, 10.0), z: None, x: Some(Vec3::X) }),
+        b: JointOrigin::new(occ_b, Snap::FaceCenter { pick, face: Some(face_b), x: Some(crate::joints::XRef::Dir(Vec3::X)) }),
+        values: Vec::new(),
+        limits: Vec::new(),
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_ne!(
+        model.state().body("RevSolid").unwrap().mesh().positions,
+        unjointed.state().body("RevSolid").unwrap().mesh().positions,
+        "root Revolve must flush pending joints before reading a foreign sketch axis"
+    );
+    assert_ne!(
+        model.state().body("RevSurf").unwrap().mesh().positions,
+        unjointed.state().body("RevSurf").unwrap().mesh().positions,
+        "root SurfaceRevolve must flush pending joints before reading a foreign sketch axis"
+    );
+
+    let saved = model.saved(&doc).expect("saved model");
+    let mut adopted = Model::adopt(&doc, &saved).expect("adopt saved model with foreign revolve axis");
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert!(adopted.is_current(&doc));
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 0);
+}

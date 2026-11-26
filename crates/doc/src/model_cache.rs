@@ -63,6 +63,248 @@ fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
         && numbers(a).iter().zip(numbers(b).iter()).all(|(x, y)| x.to_bits() == y.to_bits())
 }
 
+/// Walks a `Serialize` value without formatting text, recording the ordinal positions of every
+/// `-0.0` float (`to_bits() == (-0.0).to_bits()`). Combined with `PartialEq`, two values with
+/// `a == b` and identical negative-zero positions are identical to the bit (`==` rejects `NaN`
+/// and distinguishes every other float value).
+#[derive(Default)]
+struct NegZeroPositions {
+    seen: usize,
+    neg_zeros: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct NegZeroErr;
+
+impl std::fmt::Display for NegZeroErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("serialize")
+    }
+}
+
+impl std::error::Error for NegZeroErr {}
+
+impl serde::ser::Error for NegZeroErr {
+    fn custom<T: std::fmt::Display>(_msg: T) -> Self {
+        Self
+    }
+}
+
+impl serde::Serializer for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    type SerializeSeq = Self;
+    type SerializeTuple = Self;
+    type SerializeTupleStruct = Self;
+    type SerializeTupleVariant = Self;
+    type SerializeMap = Self;
+    type SerializeStruct = Self;
+    type SerializeStructVariant = Self;
+
+    fn serialize_bool(self, _v: bool) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i8(self, _v: i8) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i16(self, _v: i16) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i32(self, _v: i32) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i64(self, _v: i64) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i128(self, _v: i128) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u8(self, _v: u8) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u16(self, _v: u16) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u32(self, _v: u32) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u64(self, _v: u64) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u128(self, _v: u128) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_f32(self, v: f32) -> std::result::Result<(), NegZeroErr> {
+        if v.to_bits() == (-0.0_f32).to_bits() {
+            self.neg_zeros.push(self.seen);
+        }
+        self.seen += 1;
+        Ok(())
+    }
+    fn serialize_f64(self, v: f64) -> std::result::Result<(), NegZeroErr> {
+        if v.to_bits() == (-0.0_f64).to_bits() {
+            self.neg_zeros.push(self.seen);
+        }
+        self.seen += 1;
+        Ok(())
+    }
+    fn serialize_char(self, _v: char) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_str(self, _v: &str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_bytes(self, _v: &[u8]) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_none(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_some<T: ?Sized + serde::Serialize>(self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_unit(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_unit_struct(self, _name: &'static str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_unit_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_newtype_struct<T: ?Sized + serde::Serialize>(self, _name: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_newtype_variant<T: ?Sized + serde::Serialize>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_seq(self, _len: Option<usize>) -> std::result::Result<Self::SerializeSeq, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple(self, _len: usize) -> std::result::Result<Self::SerializeTuple, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> std::result::Result<Self::SerializeTupleStruct, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTupleVariant, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_map(self, _len: Option<usize>) -> std::result::Result<Self::SerializeMap, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> std::result::Result<Self::SerializeStruct, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeStructVariant, NegZeroErr> {
+        Ok(self)
+    }
+}
+
+impl serde::ser::SerializeSeq for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_element<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTuple for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_element<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTupleStruct for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTupleVariant for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeMap for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_key<T: ?Sized + serde::Serialize>(&mut self, key: &T) -> std::result::Result<(), NegZeroErr> {
+        key.serialize(&mut **self)
+    }
+    fn serialize_value<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeStruct for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, _key: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeStructVariant for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, _key: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+fn neg_zero_positions<T: serde::Serialize>(value: &T) -> Option<Vec<usize>> {
+    let mut visitor = NegZeroPositions::default();
+    value.serialize(&mut visitor).ok()?;
+    Some(visitor.neg_zeros)
+}
+
 fn hex(v: u64) -> String {
     format!("{v:016x}")
 }
@@ -160,6 +402,11 @@ fn runs(indices: &[usize]) -> Vec<[usize; 2]> {
     out
 }
 
+struct CachedSurfaceSheet {
+    index: usize,
+    neg_zeros: Option<Vec<usize>>,
+}
+
 #[derive(Default)]
 struct Writer {
     bodies: Vec<Body>,
@@ -174,9 +421,10 @@ struct Writer {
     /// large to keep).
     surface_sheets: Vec<Json>,
     surface_sheet_index: HashMap<String, usize>,
-    /// The state written last and the places of its surface sheets: a state mostly keeps the
-    /// sheets of the one before it, which are found again without writing them as text.
-    last_surface_sheets: Option<(Arc<ModelState>, Vec<usize>)>,
+    /// The state written last and the places of its surface sheets (with cached `-0.0` float
+    /// positions once compared): a state mostly keeps the sheets of the one before it, which are
+    /// found again without writing them as text.
+    last_surface_sheets: Option<(Arc<ModelState>, Vec<CachedSurfaceSheet>)>,
     /// Tap markings (cosmetic threads) by their record, as the sheets: every state lists the
     /// markings of all the features before it, so writing them with each state grew with the
     /// square of the features (400 marked cylinders: 34 of a 37 MB manifest, past its limit).
@@ -363,20 +611,41 @@ impl Writer {
     }
 
     /// The places of `st`'s surface sheets among the written ones. A sheet at the same place in
-    /// the state written last that compares equal is that one (no text built); any other is keyed
-    /// by its text.
+    /// the state written last that is identical to the bit is that one (no text built); any other
+    /// is keyed by its text.
     fn surface_sheets(&mut self, st: &Arc<ModelState>) -> Option<Vec<usize>> {
         let mut out = Vec::with_capacity(st.surface_sheets.len());
+        let mut next_last = Vec::with_capacity(st.surface_sheets.len());
         for (i, sheet) in st.surface_sheets.iter().enumerate() {
-            let before = self.last_surface_sheets.as_ref().and_then(|(s, at)| Some((s.surface_sheets.get(i)?, *at.get(i)?)));
-            if let Some((_, at)) = before.filter(|(b, _)| *b == sheet) {
+            let mut matched = None;
+            if let Some((prev_state, prev_entries)) = self.last_surface_sheets.as_mut()
+                && let Some(prev_sheet) = prev_state.surface_sheets.get(i)
+                && let Some(prev_entry) = prev_entries.get_mut(i)
+                && prev_sheet == sheet
+            {
+                let b_nz = match &mut prev_entry.neg_zeros {
+                    Some(nz) => Some(nz.as_slice()),
+                    None => {
+                        prev_entry.neg_zeros = neg_zero_positions(prev_sheet);
+                        prev_entry.neg_zeros.as_deref()
+                    }
+                };
+                if let (Some(b_nz), Some(s_nz)) = (b_nz, neg_zero_positions(sheet))
+                    && b_nz == s_nz.as_slice()
+                {
+                    matched = Some((prev_entry.index, s_nz));
+                }
+            }
+            if let Some((at, s_nz)) = matched {
                 out.push(at);
+                next_last.push(CachedSurfaceSheet { index: at, neg_zeros: Some(s_nz) });
                 continue;
             }
             let at = shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)?;
             out.push(at);
+            next_last.push(CachedSurfaceSheet { index: at, neg_zeros: None });
         }
-        self.last_surface_sheets = Some((st.clone(), out.clone()));
+        self.last_surface_sheets = Some((st.clone(), next_last));
         Some(out)
     }
 
@@ -1488,4 +1757,44 @@ fn cache_adopted_result(
         }
     }
     cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::Sketch;
+
+    #[test]
+    fn surface_sheet_writer_distinguishes_signed_zero() {
+        let mut doc = Document::new("signed zero sheet");
+        let mut sk = Sketch::new();
+        let p = [Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)].map(|q| sk.add_point(q, None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        doc.add_feature(FeatureKind::SheetBase { sketch: crate::SketchId(sketch), profiles: ProfileSel::All, rule: None, flip: false }, None)
+            .unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let base_sheet = model.state().surface_sheets.first().cloned().expect("base sheet");
+
+        let mut sheet_pos = base_sheet.clone();
+        sheet_pos.flat.shift.x = 0.0;
+        let mut sheet_neg = base_sheet;
+        sheet_neg.flat.shift.x = -0.0;
+        assert_eq!(sheet_pos, sheet_neg, "PartialEq treats 0.0 and -0.0 as equal");
+        assert_ne!(neg_zero_positions(&sheet_pos), neg_zero_positions(&sheet_neg));
+
+        let st_pos = Arc::new(ModelState { surface_sheets: vec![sheet_pos], ..ModelState::default() });
+        let st_neg = Arc::new(ModelState { surface_sheets: vec![sheet_neg.clone()], ..ModelState::default() });
+        let st_neg_again = Arc::new(ModelState { surface_sheets: vec![sheet_neg], ..ModelState::default() });
+
+        let mut w = Writer::default();
+        assert_eq!(w.surface_sheets(&st_pos), Some(vec![0]));
+        assert_eq!(w.surface_sheets(&st_neg), Some(vec![1]), "-0.0 sheet must not reuse +0.0 index");
+        assert_eq!(w.surface_sheets(&st_neg_again), Some(vec![1]), "bit-identical -0.0 sheet must reuse its index");
+        assert_eq!(w.surface_sheets.len(), 2);
+    }
 }
