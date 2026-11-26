@@ -839,9 +839,10 @@ impl IPoly {
 /// `W₀ > 0`: `|F| ≤ c / W₀^d`. Nothing is sampled.
 ///
 /// A decomposition that fails gives no patch with a bound (an empty list, as a net that is
-/// not finite does), and so does a net of more than [`MAX_SIDE_POINTS`] control points or
-/// whose decomposition would make more: the reading of the net and its decomposition poll
-/// nothing, so their work is bounded before it starts. The token `cancel` is polled before
+/// not finite does), and so does a net of more than [`MAX_SIDE_POINTS`] control points,
+/// one whose decomposition would make more, or one whose knot vectors are not as long as its
+/// points and degrees ask ([`side_points`]): the reading of the net and its decomposition
+/// poll nothing, so their work is bounded before it starts. The token `cancel` is polled before
 /// each patch's residual, so a stop asked for while the patches are composed ends the work
 /// at the next patch.
 ///
@@ -915,35 +916,60 @@ const SIDE_BOUNDS_OP: &str = "surface::implicit::side_bounds";
 pub(crate) const MAX_SIDE_POINTS: usize = 1 << 16;
 
 /// The larger of the control points of `net` and those its Bézier decomposition makes
-/// ([`bezier_points`]); `None` when either does not fit in a `usize` or a degree is above
-/// [`MAX_DEGREE`].
+/// ([`bezier_points`]); `None` when either does not fit in a `usize`, a degree is above
+/// [`MAX_DEGREE`], or a knot vector is not as long as its control points and degree ask
+/// (`n + p + 2` in u, `m + q + 2` in v). The control points are counted first, from the
+/// net's sizes: past [`MAX_SIDE_POINTS`] no knot is read. Below it, each knot vector so
+/// checked is at most [`MAX_SIDE_POINTS`]` + MAX_DEGREE + 1` long, which bounds the scan
+/// of the spans.
 fn side_points(net: &crate::nurbs::srf_basic::Surface) -> Option<usize> {
+    side_points_reading(net, &mut 0)
+}
+
+/// [`side_points`], adding to `reads` the knots it reads.
+fn side_points_reading(net: &crate::nurbs::srf_basic::Surface, reads: &mut usize) -> Option<usize> {
     let (p, q) = net.degrees();
     if p > MAX_DEGREE || q > MAX_DEGREE {
         return None;
     }
-    let held = net
-        .n()
-        .checked_add(1)?
-        .checked_mul(net.m().checked_add(1)?)?;
-    Some(held.max(bezier_points(net)?))
+    let (rows, cols) = (net.n().checked_add(1)?, net.m().checked_add(1)?);
+    let held = rows.checked_mul(cols)?;
+    if held > MAX_SIDE_POINTS {
+        // (past the limit already: no knot is read)
+        return Some(held);
+    }
+    let long_as_asked = |knots: &[f64], points: usize, d: usize| {
+        points
+            .checked_add(d)?
+            .checked_add(1)
+            .map(|len| knots.len() == len)
+    };
+    if long_as_asked(net.u_knots(), rows, p) != Some(true)
+        || long_as_asked(net.v_knots(), cols, q) != Some(true)
+    {
+        return None;
+    }
+    Some(held.max(bezier_points(net, reads)?))
 }
 
 /// The control points the Bézier decomposition of `net` makes: its knot spans of positive
 /// length in u times those in v (counted as the decomposition counts them), times
 /// `(p + 1)(q + 1)`; `None` when that does not fit in a `usize` or the knots are too few.
-fn bezier_points(net: &crate::nurbs::srf_basic::Surface) -> Option<usize> {
+/// The knots it reads are added to `reads`.
+fn bezier_points(net: &crate::nurbs::srf_basic::Surface, reads: &mut usize) -> Option<usize> {
     let (p, q) = net.degrees();
-    let spans = |knots: &[f64], d: usize| {
+    let mut spans = |knots: &[f64], d: usize| {
         let end = knots.len().checked_sub(1)?.checked_sub(d)?;
         knots.get(d..=end).map(|w| {
+            *reads = reads.saturating_add(w.len());
             w.windows(2)
                 .filter(|pair| matches!(pair, [a, b] if a != b))
                 .count()
         })
     };
-    spans(net.u_knots(), p)?
-        .checked_mul(spans(net.v_knots(), q)?)?
+    let su = spans(net.u_knots(), p)?;
+    let sv = spans(net.v_knots(), q)?;
+    su.checked_mul(sv)?
         .checked_mul(p.checked_add(1)?.checked_mul(q.checked_add(1)?)?)
 }
 
@@ -3388,7 +3414,8 @@ mod tests {
     /// (10 × 10 spans) has a bound entry for each of its 100 patches. So for a net of more
     /// points than that, which would make fewer (degree 1, every inner knot of multiplicity
     /// 3: 302 × 302 = 91,204 points, 101 × 101 spans of 4 points = 40,804 made), and for a
-    /// single patch of a degree above `MAX_DEGREE` (19 × 2 points).
+    /// single patch of a degree above `MAX_DEGREE` (19 × 2 points). The points are counted
+    /// before any knot is read, and a knot vector longer than the net asks is refused unread.
     #[test]
     fn the_side_bounds_decompose_a_bounded_net_only() {
         use crate::nurbs::math::{CPoint, NOW};
@@ -3416,11 +3443,11 @@ mod tests {
             radius: 5.0,
         };
         let small = quadratic(10);
-        assert_eq!(bezier_points(&small), Some(900));
+        assert_eq!(bezier_points(&small, &mut 0), Some(900));
         assert_eq!(side_points(&small), Some(900));
         assert_eq!(side_bounds(&small, &sphere, None).unwrap().len(), 100);
         let large = quadratic(100);
-        assert_eq!(bezier_points(&large), Some(90_000));
+        assert_eq!(bezier_points(&large, &mut 0), Some(90_000));
         assert!(side_points(&large).is_some_and(|n| n > MAX_SIDE_POINTS));
         assert!(side_bounds(&large, &sphere, None).unwrap().is_empty());
         // (0, 0, 1, 1, 1, 2, 2, 2, …, 100, 100, 100, 101, 101)
@@ -3430,14 +3457,36 @@ mod tests {
             .chain([101.0, 101.0])
             .collect();
         let dense = grid(1, 1, tripled.clone(), tripled);
-        assert_eq!(bezier_points(&dense), Some(40_804));
+        assert_eq!(bezier_points(&dense, &mut 0), Some(40_804));
         assert_eq!(side_points(&dense), Some(91_204));
         assert!(side_bounds(&dense, &sphere, None).unwrap().is_empty());
         let ends = |d: usize| [vec![0.0; d + 1], vec![1.0; d + 1]].concat();
         let high = grid(MAX_DEGREE + 1, 1, ends(MAX_DEGREE + 1), ends(1));
-        assert_eq!(bezier_points(&high), Some(38));
+        assert_eq!(bezier_points(&high, &mut 0), Some(38));
         assert_eq!(side_points(&high), None);
         assert!(side_bounds(&high, &sphere, None).unwrap().is_empty());
+        // the preflight counted: the small net's spans read 11 knots each way (its 15 less
+        // the degree's 2 at each end); the dense net, past the limit by its points alone,
+        // reads none; a knot vector longer than its points and degree ask is refused, with
+        // none read
+        let mut reads = 0;
+        assert_eq!(side_points_reading(&small, &mut reads), Some(900));
+        assert_eq!(reads, 22);
+        let mut reads = 0;
+        assert_eq!(side_points_reading(&dense, &mut reads), Some(91_204));
+        assert_eq!(reads, 0);
+        let knots: Vec<f64> = [0.0, 0.0]
+            .into_iter()
+            .chain((0..=10).map(f64::from))
+            .chain([10.0; 2])
+            .collect();
+        let long: Vec<f64> = knots.iter().copied().chain([10.0; 1000]).collect();
+        let rows = small.cpts();
+        let padded = crate::nurbs::srf_basic::Surface::new(rows, 2, 2, long, knots).unwrap();
+        let mut reads = 0;
+        assert_eq!(side_points_reading(&padded, &mut reads), None);
+        assert_eq!(reads, 0);
+        assert!(side_bounds(&padded, &sphere, None).unwrap().is_empty());
     }
 
     /// The cone about Z through the origin, radius `radius` there.

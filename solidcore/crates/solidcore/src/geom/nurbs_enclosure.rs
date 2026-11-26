@@ -28,6 +28,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::{v_hull, MAX_K, V3, VZ};
 use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs, Partials};
 use crate::error::blend::{BlendFailure, SectionProof};
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 
 /// The operation the errors name: where these functions were, kept so that no message
@@ -64,7 +65,7 @@ pub(crate) const IZ: Ivl = Ivl::new(0.0, 0.0);
 ///
 /// `SM_ERR` where the weights are not proved positive over the box ("a face's weights are
 /// not positive over a box"); [`SolidError::Unsupported`] for an order `lk` past
-/// [`MAX_K`], the highest a [`Partials`] holds; [`SolidError::InvalidInput`] for a span
+/// [`MAX_K`], the highest a [`Partials`] holds; [`GeomFailure::SpanOutsideNet`] for a span
 /// `ku` outside `p ..= nu − 1` or `kv` outside `q ..= nv − 1` (the box itself may lie past
 /// the span: the piece is continued over it).
 #[allow(clippy::too_many_arguments)]
@@ -145,11 +146,18 @@ pub(crate) fn partials_over_piece(
     // continued over (an end span past the knots' range is the end piece's continuation):
     // one before the first span or past the last is refused before an offset is taken from
     // it (`ku + i − p` would wrap).
-    if ku < cn.p || ku >= cn.nu || kv < cn.q || kv >= cn.nv {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a span index outside the net's spans",
-        ));
+    for (in_v, span, first, count) in [(false, ku, cn.p, cn.nu), (true, kv, cn.q, cn.nv)] {
+        if span < first || span >= count {
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::SpanOutsideNet {
+                    in_v,
+                    span,
+                    first,
+                    last: count.saturating_sub(1),
+                },
+            ));
+        }
     }
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
