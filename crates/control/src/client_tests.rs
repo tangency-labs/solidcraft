@@ -188,3 +188,38 @@ fn a_request_still_running_past_the_wait_is_reported_and_its_end_kept() {
     assert_eq!(end["done"], json!(true), "{end}");
     assert_eq!(end["reply"]["result"]["method"], json!("solid.slow"), "{end}");
 }
+
+/// An attached progress sink receives monotonically increasing `WaitProgress` updates while
+/// polling `control.pending`, and an out-of-band cancel flag stops the wait early.
+#[test]
+fn progress_sink_and_cancel_flag_govern_pending_wait() {
+    use std::sync::Mutex;
+
+    let app = serve(0, Duration::from_millis(250), Duration::from_millis(30));
+    let mut c = Connection::new(APP, &addr(app.port()), Some(TOKEN));
+    c.set_waits(Waits { pending: Duration::from_secs(5), settle: Duration::from_secs(5), poll: Duration::from_millis(10) });
+    c.set_progress_interval(Duration::from_millis(20));
+
+    let updates: Arc<Mutex<Vec<WaitProgress>>> = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&updates);
+    c.set_progress_sink(Some(Arc::new(move |u| {
+        log.lock().unwrap().push(u.clone());
+    })));
+    let r = c.call(Request::new("solid.slow", json!({"n": 1}))).unwrap();
+    assert_eq!(r["method"], "solid.slow");
+    let updates = updates.lock().unwrap();
+    assert!(updates.len() >= 2, "expected multiple progress updates: {updates:?}");
+    for pair in updates.windows(2) {
+        assert!(pair[1].progress > pair[0].progress, "progress must increase: {updates:?}");
+    }
+    assert!(updates.last().unwrap().message.contains("finished"), "{updates:?}");
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::clone(&flag);
+    c.set_cancel_flag(Some(flag));
+    c.set_progress_sink(Some(Arc::new(move |_| {
+        trigger.store(true, Ordering::SeqCst);
+    })));
+    let err = c.call(Request::new("solid.slow", json!({"n": 2}))).unwrap_err();
+    assert!(matches!(err, CallError::Refused(ref m) if m.starts_with("cancelled:")), "{err:?}");
+}
