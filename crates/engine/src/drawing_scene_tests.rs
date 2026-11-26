@@ -1093,6 +1093,63 @@ fn a_title_blocks_text_follows_its_sheet_and_the_model() {
     assert_ne!(shown(&s), with_tower, "the mass read from the model as it is");
 }
 
+#[test]
+fn a_title_block_reads_name_split_properties_through_rename_undo_and_reopen() {
+    use solidcraft_geom::cell::{Content, Format, Part, Source};
+    use solidcraft_geom::title_block::CellKind;
+
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name": "C2600101_Housing"}))["component"].clone();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 35, "height": 8}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "drawing.create", json!({}));
+    let drawing = s.open_drawing.unwrap();
+    let record = s.drawing("test").unwrap();
+    let (sheet, source) = (record.sheets[0].id, record.sources[0].id);
+    let mut block = solidcraft_geom::title_block::default_block();
+    for (cell, property) in [("identification_number", "Num"), ("title", "Name")] {
+        let cell = block.cells.iter_mut().find(|c| c.name == cell).unwrap();
+        let CellKind::Text(text) = &mut cell.kind else { panic!("expected a text cell") };
+        text.content = Content(vec![Part::Field { source: Source::Component, key: format!("properties.{property}"), format: Format::default() }]);
+    }
+    let documents = json!({"source": ids::encode(source), "component": component});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block, "documents": documents}));
+    let shown = |s: &mut Session, expected| {
+        let scene = settled(s, sheet);
+        assert_eq!(bytes(&scene.scene), bytes(&built(s, sheet).scene));
+        let cells = &s.drawing_scenes.last.as_ref().unwrap().cells;
+        let read = |name| cells.iter().find(|cell| cell.name == name).unwrap().text.as_str();
+        assert_eq!([read("identification_number"), read("title")], expected);
+    };
+    shown(&mut s, ["", ""]);
+
+    let rule = json!({"separator": "_", "left_property": "Num", "right_property": "Name"});
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "name_split": rule}));
+    shown(&mut s, ["C2600101", "Housing"]);
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "properties": {"Num": "MANUAL"}}));
+    shown(&mut s, ["MANUAL", "Housing"]);
+
+    let undo_before_rename = s.undo.len();
+    in_the_model(&mut s, "component.rename", json!({"component": component, "name": "C2600102_Lid_Assembly"}));
+    assert_eq!(s.undo.len(), undo_before_rename + 1);
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+    in_the_model(&mut s, "edit.undo", json!({}));
+    shown(&mut s, ["MANUAL", "Housing"]);
+    in_the_model(&mut s, "edit.redo", json!({}));
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+    let mut s = reopened(&mut s, drawing, "derived-title.sc");
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "properties": {"Num": null}}));
+    shown(&mut s, ["C2600102", "Lid_Assembly"]);
+    in_the_model(&mut s, "component.rename", json!({"component": component, "name": "Unsplit"}));
+    shown(&mut s, ["", ""]);
+    in_the_model(&mut s, "edit.undo", json!({}));
+    shown(&mut s, ["C2600102", "Lid_Assembly"]);
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "name_split": null}));
+    shown(&mut s, ["", ""]);
+}
+
 /// The window's sheet never waits for the search for a font to fall back to: a title block text in
 /// a script the drawing's font lacks is off the sheet until the search answers, `step` says there
 /// is more to do though no view is waiting, and the settled sheet is the one `build` gives (which

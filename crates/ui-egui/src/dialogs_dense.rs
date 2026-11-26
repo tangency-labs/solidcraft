@@ -87,10 +87,13 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
+            crate::dialogs_sheet::Sm::ExportDxf { .. } => Some("sheet.export_dxf"),
+            crate::dialogs_sheet::Sm::Hardware { .. } => Some("sheet.hardware"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::CellGrid(_) => Some("solid.cell_grid"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
@@ -587,6 +590,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 *bodies = selected == 1;
                 input.accept = if *bodies { BODIES } else { super::PROJECT_GEOMETRY };
                 input.items.clear();
+                // Geometry offers Tangent chain for edges; bodies have no edges to chain.
+                input.chain = (!*bodies).then_some(false);
+                input.chain_seeds.clear();
+                input.chain_written.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
             ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
@@ -614,6 +621,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             offset_start,
             symmetric_offset,
             all,
+            all2,
+            to_offset2,
             thin,
             wall,
             wall_side,
@@ -675,7 +684,22 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "To Offset", to_offset);
             }
             if two_sided(*direction) {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                // The second side takes the extent types of the first (#18691).
+                let cur2 = if object_on(&d.inputs, TO_OBJECT2) { 1 } else { usize::from(*all2) * 2 };
+                let mut ext2 = cur2;
+                form_row(ui, "ui.extrude_extent_type_2", |ui| {
+                    combo(ui, "ex_ext2", &["Distance", "To Object", "All"], &mut ext2);
+                    *all2 = ext2 == 2;
+                    set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, ext2 == 1);
+                });
+                match ext2 {
+                    0 => enter |= expr_row(ui, "Distance 2", distance2),
+                    1 => enter |= expr_row(ui, "ui.extrude_to_offset_2", to_offset2),
+                    _ => {}
+                }
+            } else {
+                *all2 = false;
+                set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, false);
             }
             // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
             // stops before the next frame makes it.
@@ -1165,7 +1189,7 @@ fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Valu
 
 /// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps
 /// its unit, an expression is left as typed, and `max_deg` stops the step past it.
-fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
+pub(crate) fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
     let text = if text.trim().is_empty() { "0 deg" } else { text };
     let next = crate::dim_view::window::stepped(text, delta as f64, solidcraft_engine::doc::expr::Kind::Angle, "", 0.0, step_deg)?;
     match max_deg {
@@ -1621,6 +1645,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
+        Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),

@@ -655,6 +655,15 @@ fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
     }
 }
 
+/// Whether a face lies in a plane, for a sketch on it ([`Body::sketch_plane_of_face`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SketchPlane {
+    Flat(solidcore_record::Plane),
+    NotFlat,
+    /// The kernel was stopped or re-entered before it decided: not an answer to keep.
+    Undecided,
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -769,10 +778,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
-    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
-        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
+    /// This body with the step `what` (and `operands`) it was decoded from, whose check that step
+    /// left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
@@ -1094,6 +1103,37 @@ impl Body {
         let (body, order) = &*form;
         let normal = body.face_plane_normal(order, index).ok()??;
         solidcore_record::Plane::from_normal(point, v3(normal.value))
+    }
+
+    /// The plane a sketch on face `index` lies in, for New Sketch's picker. A blend or a
+    /// revolution is flat when the kernel finds it so, which [`Body::planar_face`] does not ask,
+    /// so the other callers keep their answers. The other kinds answer as [`Body::planar_face`].
+    pub fn sketch_plane_of_face(&self, index: usize) -> SketchPlane {
+        let Some(face) = self.record.faces.get(index) else { return SketchPlane::NotFlat };
+        if !matches!(face.surface, Surface::Blend { .. } | Surface::PlacedRevolution { .. }) {
+            return self.planar_face(index).map_or(SketchPlane::NotFlat, SketchPlane::Flat);
+        }
+        let Some(form) = self.ops_body() else {
+            // A refusal of the moment says nothing about the face, so the caller must not keep it.
+            return if self.is_mesh() || self.ops.refusal().is_some() { SketchPlane::NotFlat } else { SketchPlane::Undecided };
+        };
+        let (body, order) = &*form;
+        let normal = match body.face_plane_normal(order, index) {
+            Ok(Some(normal)) => normal,
+            Ok(None) => return SketchPlane::NotFlat,
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. }) => {
+                return SketchPlane::Undecided;
+            }
+            Err(_) => return SketchPlane::NotFlat,
+        };
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        });
+        let Some(point) = vertex.and_then(|v| self.record.vertices.get(v as usize)).map(|v| v3(v.point)) else {
+            return SketchPlane::NotFlat;
+        };
+        solidcore_record::Plane::from_normal(point, v3(normal.value)).map_or(SketchPlane::NotFlat, SketchPlane::Flat)
     }
 
     /// The record as solidcore-ops' body and the order of its entities, made on first use and
@@ -2310,6 +2350,36 @@ impl Body {
             solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
             e => KernelError::Failed(format!("classify points with normals: {e}")),
         })
+    }
+
+    /// Which sides of the plane through `p` with normal `normal` immediately enter material of
+    /// `self`: `negative` for `-normal`, `positive` for `+normal`
+    /// ([`solidcore_ops::Body::material_sides_at`]). Decided on exact B-rep classification and
+    /// outward face normals (no display mesh); a mesh body's triangles are its exact shape and
+    /// are probed via [`Self::classify_point`].
+    pub fn material_sides_at(&self, p: Vec3, normal: Vec3) -> Result<solidcore_ops::MaterialSides> {
+        if !p.is_finite() || !normal.is_finite() {
+            return Ok(solidcore_ops::MaterialSides::default());
+        }
+        if self.is_mesh() {
+            let Some(unit) = solidcore_ops::unit_direction([normal.x, normal.y, normal.z]) else {
+                return Ok(solidcore_ops::MaterialSides::default());
+            };
+            let step = (self.size() * 1e-5).max(self.record.tolerance * 4.0).max(1e-5);
+            let in_dir = |s: f64| {
+                solidcore_ops::point_along_line([p.x, p.y, p.z], unit, s)
+                    .map(|q| Vec3::new(q[0], q[1], q[2]))
+                    .is_some_and(|q| matches!(self.classify_point(q), Ok(PointClass::Inside)))
+            };
+            return Ok(solidcore_ops::MaterialSides { negative: in_dir(-step), positive: in_dir(step) });
+        }
+        let Some(form) = self.ops_body() else { return Ok(solidcore_ops::MaterialSides::default()) };
+        let (ops, order) = &*form;
+        match ops.material_sides_at(order, [p.x, p.y, p.z], [normal.x, normal.y, normal.z]) {
+            Ok(sides) => Ok(sides),
+            Err(solidcore_ops::Error::Argument) => Ok(solidcore_ops::MaterialSides::default()),
+            Err(e) => Err(KernelError::Failed(format!("material sides: {e}"))),
+        }
     }
 
     /// Where the line through `through` along `direction` meets face `face_index`, of its

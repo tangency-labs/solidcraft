@@ -53,10 +53,14 @@ entries. Settings writes are external effects and do not add design undo steps.
 
 ## Limits and permissions
 
-Invocation defaults are 10,000,000 fuel, 64 MiB memory and a 5000 ms deadline.
-`HostLimits` defaults to 100,000,000,000 fuel and 128 MiB. Callers must check requested
-budgets against their ceilings before execution. Fuel must be positive, memory is
-1..4096 MiB and the deadline is 1..30000 ms. Manifests are capped at 64 KiB.
+Invocation defaults are 10,000,000 fuel, 64 MiB memory, 256 host calls and a 5000 ms
+guest compute deadline. Existing limits objects may omit `host_calls` to retain 256.
+`HostLimits` defaults to 100,000,000,000 fuel, 128 MiB, 256 host calls and a 30000 ms
+command deadline ceiling. The app retains the 600000 ms default importer ceiling.
+Callers must check requested budgets against their ceilings before execution. Fuel,
+host calls and deadline milliseconds are positive `u64` values; memory is 1..4096 MiB.
+Larger declarations require raised host ceilings and renewed content approval.
+Manifests are capped at 64 KiB.
 
 Commands are exact ids, intersected with the app catalog. A catalog command may carry a
 sensitive `group`; the guest calls it only when `permissions.command_groups` requests the
