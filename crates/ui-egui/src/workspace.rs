@@ -1633,6 +1633,7 @@ mod tests {
                 "solid.scale",
                 "solid.remove",
                 "sheet.convert",
+                "solid.tab_slot",
                 "timeline.delete",
             ]
         );
