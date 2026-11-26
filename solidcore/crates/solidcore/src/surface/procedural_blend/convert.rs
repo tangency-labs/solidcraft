@@ -956,7 +956,7 @@ impl RecertifyMemo {
     /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
     /// left as it was, since emptying it would not make room for that key.
     fn remember(&mut self, key: String, bound: f64, cap: usize) {
-        if key.len() > cap {
+        if key.len() > cap || self.bounds.contains_key(key.as_str()) {
             return;
         }
         if self.bytes + key.len() > cap {

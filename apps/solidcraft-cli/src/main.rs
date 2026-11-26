@@ -228,14 +228,20 @@ fn main() -> ExitCode {
     // kernel's scopes and counted work of this run, as JSON Lines, failing runs included.
     #[cfg(feature = "solidcore-profile")]
     if let Ok(path) = std::env::var("SOLIDCRAFT_KERNEL_PROFILE") {
-        if let Ok(mut file) = std::fs::File::create(&path) {
-            use std::io::Write as _;
-            let _ = solidcraft_engine::kernel::write_kernel_profiles(&mut file);
-            if let Some(calls) = ops_call_profiles {
-                for call in calls {
-                    let _ = writeln!(file, "# ops_call {}", call.call);
-                    let _ = call.profile.write_jsonl(&mut file);
+        match std::fs::File::create(&path) {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                let _ = solidcraft_engine::kernel::write_kernel_profiles(&mut file);
+                if let Some(calls) = ops_call_profiles {
+                    for call in calls {
+                        let marker = serde_json::json!({"type": "ops_call", "name": call.call});
+                        let _ = writeln!(file, "{marker}");
+                        let _ = call.profile.write_jsonl(&mut file);
+                    }
                 }
+            }
+            Err(e) => {
+                solidcraft_engine::note!("warning: SOLIDCRAFT_KERNEL_PROFILE {path}: not written: {e}");
             }
         }
     }
