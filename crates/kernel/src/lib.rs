@@ -513,10 +513,20 @@ pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathR
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+
 /// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
 /// stops with it (a sketch solve).
 pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
+/// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
+/// scopes and counted work of the calls this process made.
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::write_kernel_profiles;
+
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
