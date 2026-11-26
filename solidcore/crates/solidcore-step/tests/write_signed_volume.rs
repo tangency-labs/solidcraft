@@ -1127,6 +1127,45 @@ fn a_cylinder_is_written_right_side_out() {
     assert_right_side_out("cylinder", &mut kernel, &mut brep, 250.0 * std::f64::consts::PI, 1e-9);
 }
 
+/// A 20 x 30 x 40 box with its four vertical edges, then all twelve, rounded R3
+/// (solidcore#3385): each round's face is a cone of no angle in the record, which STEP has no
+/// CONICAL_SURFACE for (its semi-angle must be above 0), so it is written as the cylinder it is.
+/// The four-round box reads back as one solid; the twelve-round box's corner patches are written
+/// as their NURBS, which the reader does not take back yet.
+#[test]
+fn a_rounded_box_is_written_with_cylinders_and_reads_back() {
+    use solidcore_record::brep::Curve as RC;
+    for vertical_only in [true, false] {
+        let body = solidcore_ops::make_box([0.0; 3], [20.0, 30.0, 40.0]).unwrap();
+        let (rec, order) = body.to_record().unwrap();
+        let edges: Vec<usize> = rec
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                !vertical_only
+                    || matches!(&e.curve, RC::Line { start, end }
+                        if (end[0] - start[0]).abs() < 1e-12 && (end[1] - start[1]).abs() < 1e-12)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let rounds = if vertical_only { 4 } else { 12 };
+        assert_eq!(edges.len(), rounds, "the box's edges to round");
+        let options = solidcore_ops::BlendOptions { contract: solidcore_ops::Contract::Proved, ..solidcore_ops::BlendOptions::default() };
+        solidcore_ops::blend_ordered(&body, &order, solidcore_ops::Blend::Round, &edges, &[3.0], &[], solidcore_ops::Corners::Filled, options)
+            .unwrap();
+        let header = solidcore_step::write::product::Header::default();
+        let text = solidcore_step::write::product::solidcore_bodies(&[("rounded box", &body)], &header).unwrap();
+        assert_eq!(text.matches("CYLINDRICAL_SURFACE").count(), rounds, "one cylinder per round");
+        assert!(!text.contains("CONICAL_SURFACE"), "a round written as a cone");
+        if vertical_only {
+            let read = solidcore_step::topology::read_solids(&p21::parse(&text).unwrap());
+            assert!(read.failures.is_empty(), "{:?}", read.failures);
+            assert_eq!(read.solids.len(), 1);
+        }
+    }
+}
+
 /// A sphere, a cone (a frustum) and a torus: their faces' loops run round closed surfaces,
 /// with seams and (the sphere's) poles.
 #[test]

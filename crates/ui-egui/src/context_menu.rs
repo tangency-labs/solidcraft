@@ -1077,6 +1077,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         if one_flat {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
+        v.push(cmd(app, "select.boundary", "Select Boundary"));
         v.push(cmd(app, "inspect.measure", "Measure"));
         // What cannot act on these faces is left out.
         v.retain(|i| i.enabled || i.is_sep());
@@ -1621,8 +1622,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
         own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    } else if id != 0 {
+        // Offered even when the component can't go, greyed out with the reason (#18623).
+        own.push(
+            act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})).off_because(app.session.extract_refusal(id)),
+        );
     }
     own.push(Item::sep());
     own.push(
@@ -2617,6 +2621,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.shortcutKey"
         | "ui.quickAccessAdd"
         | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
+        "ui.setHome" => crate::view_gizmo::set_home(app),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);

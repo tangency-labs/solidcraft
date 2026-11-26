@@ -17,6 +17,8 @@ pub mod cases {
     pub mod topology_entities;
 }
 #[cfg(test)]
+mod bstuv_trim_rows;
+#[cfg(test)]
 pub(crate) mod certify;
 pub mod compare;
 pub mod constructor;
@@ -51,6 +53,8 @@ pub(crate) mod trim_hook;
 #[cfg(test)]
 pub(crate) mod trims_on_edges;
 pub mod util;
+#[cfg(test)]
+mod uvtc_trim_rows;
 #[cfg(test)]
 mod wr459_rows;
 #[cfg(test)]
