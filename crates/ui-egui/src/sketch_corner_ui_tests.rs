@@ -947,9 +947,8 @@ fn centre_circle_clicked_through_a_line_end_stays_on_it() {
     );
 }
 
-/// #7299: the centre arc tool, its centre snapped to a rectangle's corner, ties the arc to the
-/// corner with a Coincident (which the sketch shows as a glyph), not by quietly sharing the corner
-/// as its centre.
+/// The centre arc tool, its centre snapped to a free rectangle corner, merges its centre into
+/// that corner rather than creating a duplicate point tied by a Coincident constraint.
 #[test]
 fn centre_arc_on_an_existing_point_is_tied_by_a_coincident() {
     use solidcraft_engine::sketch::ConstraintKind;
@@ -973,13 +972,13 @@ fn centre_arc_on_an_existing_point_is_tied_by_a_coincident() {
         _ => None,
     });
     let centre = centre.unwrap_or_else(|| panic!("an arc is drawn: {:?}", h.app.status));
-    assert_ne!(centre, corner, "the arc has a centre of its own");
+    assert_eq!(centre, corner, "the arc centre merges into the existing corner");
     assert!(at_corner(sk.point(centre)), "the centre is on the corner");
     let tied = sk
         .constraints
         .iter()
         .any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p, q) == (corner, centre) || (p, q) == (centre, corner)));
-    assert!(tied, "a Coincident ties the centre to the corner: {:?}", sk.constraints);
+    assert!(!tied, "merged centre needs no Coincident constraint: {:?}", sk.constraints);
 }
 
 /// #4691: the Point tool clicked on a line's midpoint makes a point held there (a MidPoint
@@ -1022,9 +1021,8 @@ fn a_point_clicked_on_a_line_crossing_is_held_on_both() {
     }
 }
 
-/// #7299: the centre circle tool, its centre snapped to a rectangle's corner, ties the circle
-/// to the corner with a Coincident (which the sketch shows as a glyph that can be picked and
-/// deleted), not by quietly sharing the corner as its centre.
+/// The centre circle tool, its centre snapped to a free rectangle corner, merges its centre into
+/// that corner rather than creating a duplicate point tied by a Coincident constraint.
 #[test]
 fn centre_circle_on_an_existing_point_is_tied_by_a_coincident() {
     use solidcraft_engine::sketch::ConstraintKind;
@@ -1048,13 +1046,13 @@ fn centre_circle_on_an_existing_point_is_tied_by_a_coincident() {
         _ => None,
     });
     let centre = centre.unwrap_or_else(|| panic!("a circle is drawn: {:?}", h.app.status));
-    assert_ne!(centre, corner, "the circle has a centre of its own");
+    assert_eq!(centre, corner, "the circle centre merges into the existing corner");
     assert!(at_corner(sk.point(centre)), "the centre is on the corner");
     let tied = sk
         .constraints
         .iter()
         .any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p, q) == (corner, centre) || (p, q) == (centre, corner)));
-    assert!(tied, "a Coincident ties the centre to the corner: {:?}", sk.constraints);
+    assert!(!tied, "merged centre needs no Coincident constraint: {:?}", sk.constraints);
 }
 
 #[test]

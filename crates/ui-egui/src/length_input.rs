@@ -159,7 +159,9 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     use crate::dialogs_sheet::Sm;
     use crate::dialogs_surface::Surf;
     match kind {
-        D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
+        D::Extrude { distance, distance2, to_offset, to_offset2, start, wall, wall2, .. } => {
+            vec![distance, distance2, to_offset, to_offset2, start, wall, wall2]
+        }
         D::Fillet { radius, distance2, setback, .. } => {
             // A setback not typed (or emptied) stands for the command's default and stays so.
             let mut lengths = vec![radius, distance2];
@@ -187,6 +189,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Thread { length, .. } => vec![length],
         D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::CellGrid(c) => vec![&mut c.size, &mut c.web, &mut c.depth, &mut c.margin],
         D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
@@ -229,6 +232,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
             Sm::Fold { radius, .. } => vec![radius],
+            Sm::Hardware { length, .. } => vec![length],
             // K factor is the only dimensionless sheet rule value.
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
             _ => vec![],
@@ -308,7 +312,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
 /// direction vectors are already in model coordinates and must not be converted.
 pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut convert: impl FnMut(&str) -> String) {
     use serde_json::{Value, json};
-    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2", "coil_height"] {
+    for key in ["radius2", "start_offset", "to_offset", "to_offset2", "distance2", "thickness", "thickness2", "coil_height"] {
         if let Some(value) = extra.get_mut(key) {
             let text = value.as_str().map(str::to_string).or_else(|| value.as_number().map(ToString::to_string));
             if let Some(text) = text {
