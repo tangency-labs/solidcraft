@@ -63,7 +63,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "point_class_gap_3d_propagates_no_drop_error",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",
-    "uv_trim_corner_end_points_only",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
