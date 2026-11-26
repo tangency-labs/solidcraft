@@ -2365,7 +2365,8 @@ pub fn edge_inward(k: &Kernel, brep: &mut Brep, e: EdgeId, f: FaceId) -> Result<
         }
     }
     let ivl = brep.edge(e)?.interval;
-    let t = 0.5 * (ivl.min() + ivl.max());
+    // halves first: no overflow for a huge finite interval (brett19 on #22066)
+    let t = 0.5 * ivl.min() + 0.5 * ivl.max();
     if !t.is_finite() {
         return Err(SolidError::invalid_input(OP, "edge interval not finite"));
     }

@@ -990,7 +990,8 @@ pub fn face_run(k: &Kernel, b: &Brep, f: FaceId, zone: f64) -> FaceRun {
     let Some((size, definition)) = straying_scale(k, b, f, surface) else {
         return FaceRun::Other;
     };
-    let room = zone - definition;
+    // rounded down: the difference within an ulp of the larger
+    let room = zone - definition - f64::EPSILON * zone.abs().max(definition.abs());
     if let Some((_, normal)) = plane_of(surface).and_then(|(_, n)| n.length_and_unit()) {
         let slope = (room / (2.0 * size) - 3080.0 * f64::EPSILON) / (1.0 + 1e-12);
         return FaceRun::Plane { normal, slope };
@@ -1035,8 +1036,8 @@ pub struct StraightCandidates {
     /// Whether, when no direction in `directions` is inside every plane's and cylinder's band,
     /// it is proved that no direction is one `face_straying` accepts for every plane and
     /// cylinder. `false` when the search for one was not decided: past `LEAN_ROWS`
-    /// constraints, a band that may lie outside the search's reach, or no certificate that
-    /// none exists.
+    /// constraints or `CERT_ROWS` half-planes, a band that may lie outside the search's reach, or
+    /// no certificate that none exists.
     pub complete: bool,
 }
 
@@ -1088,10 +1089,13 @@ pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
                 // a unit e off the exact pair's direction by α has the larger of |n · e| and
                 // |m · e| at least sin α sin(ψ/2), ψ the acute angle between the planes; d is that
                 // direction but for its rounding, which |n · d| and |m · d| bound (brett19 on
-                // #22066)
-                let acute = s.atan2(n.dot(m).abs());
-                let leaning =
-                    accepted(sn, true).max(accepted(sm, true)) + n.dot(d).abs() + m.dot(d).abs();
+                // #22066). The bound takes its own rounding: s and |n · m| each within 4 ulps, the
+                // two dot products within 4 more, so it leans on no slack in `accepted`.
+                let acute = (s - 4.0 * f64::EPSILON).atan2(n.dot(m).abs() + 4.0 * f64::EPSILON);
+                let leaning = accepted(sn, true).max(accepted(sm, true))
+                    + n.dot(d).abs()
+                    + m.dot(d).abs()
+                    + 8.0 * f64::EPSILON;
                 let reach = leaning / (0.5 * acute).sin() * (1.0 + 1e-12);
                 best = Some((s, d, StraightBy::Planes(a, b), reach));
             }
@@ -1177,8 +1181,9 @@ fn accepted(slope: f64, plane: bool) -> f64 {
 /// `|a × v| >= (a · base) |v|` for `v` square to `base`), each with its rounding. A disc is taken
 /// as the 16-gon around it, a larger set, so all are half-planes, and half-planes with no point
 /// in common have two or three with none (Helly, in the plane), which [`no_point`] proves. A
-/// cylinder's axis 60° or more off `base`, a band 45° or less from it (`α` under 45°), proves
-/// it too. Otherwise, or past [`LEAN_ROWS`] constraints, or with `α` past 45°, it is undecided.
+/// cylinder's axis 60° or more off `base` with an accepted band under 0.25 (so under 15° wide)
+/// proves it too: its directions lie more than 45° off `base`, past the chart (`α` under 45°).
+/// Otherwise, or past [`LEAN_ROWS`] constraints, or with `α` past 45°, it is undecided.
 fn lean(base: Vec3, runs: &[FaceRun], reach: f64) -> Lean {
     let Some((u, w)) = square_pair(base) else {
         return Lean::Undecided;
@@ -2154,5 +2159,57 @@ mod straight_tests {
             let got = found(&runs);
             assert!(got.iter().all(|c| !inside(c.0, &runs)), "{off}: {got:?}");
         }
+    }
+
+    /// brett19 on #22066 (review of 39d1970a): bands that meet only inside the widening to what
+    /// `face_straying` accepts are not proved to have none. A plane's strip and a cylinder's disc
+    /// missing each other by 3e-13 at slopes of 2e-7 and 1e-6 (inside `accepted`'s margins), and
+    /// by 5e-5 at slopes of 0.01 and 0.05 (inside the chart's factor `g`): undecided, not
+    /// refused. Without the widening, without `g` and the rounding terms, or without the
+    /// certificate, one of them is decided.
+    #[test]
+    fn bands_that_meet_only_inside_the_widening_are_undecided() {
+        for (slope, t, gap) in [(2e-7, 1e-6, 3e-13), (0.01, 0.05, 5e-5)] {
+            let runs = [
+                FaceRun::Plane {
+                    normal: v(0.0, 1.0, slope + t + gap).unitize().unwrap(),
+                    slope,
+                },
+                FaceRun::Axis {
+                    axis: v(0.0, 0.0, 1.0),
+                    slope: t,
+                },
+            ];
+            let got = straight_candidates(&runs);
+            assert!(!got.complete, "{slope} {t} {gap}: {got:?}");
+            assert!(
+                got.directions.iter().all(|c| !inside(c.0, &runs)),
+                "{got:?}"
+            );
+        }
+    }
+
+    /// brett19 on #22066 (review of 39d1970a): a cylinder whose axis is 70° off the plane pair's
+    /// direction, all three bands narrow, is proved to have no direction inside them all, by the
+    /// axis's angle alone.
+    #[test]
+    fn an_axis_far_off_the_pair_is_proved_to_have_none() {
+        let (sin, cos) = 70.0_f64.to_radians().sin_cos();
+        let runs = [
+            FaceRun::Plane {
+                normal: v(1.0, 0.0, 0.0),
+                slope: 1e-6,
+            },
+            FaceRun::Plane {
+                normal: v(0.0, 1.0, 0.0),
+                slope: 1e-6,
+            },
+            FaceRun::Axis {
+                axis: v(sin, 0.0, cos),
+                slope: 1e-6,
+            },
+        ];
+        let got = found(&runs);
+        assert!(got.iter().all(|c| !inside(c.0, &runs)), "{got:?}");
     }
 }
