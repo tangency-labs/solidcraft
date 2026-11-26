@@ -6978,12 +6978,14 @@ fn named_pieces_of(
         // Each piece stays in the whole's component until the feature ends (#14305).
         let mut piece = ModelBody::new(name, p, made_by).with_lineage(lineage);
         piece.component = mb.component;
+        // Every piece is in the whole's frame. `lineage::order_lumps` may then hand the first
+        // piece's body a later piece's name and mark, so the first carries the frame too.
+        piece.source_transform = mb.source_transform;
         if k > 0 {
             piece.split_from = Some(mb.name.clone());
             // A piece stays with the body, in its component and its frame, as Split Body's pieces
             // do: its feature may be another component's, a root cut into a placed part (#21156).
             piece.transferred = true;
-            piece.source_transform = mb.source_transform;
         }
         out.push(piece);
     }
@@ -17287,6 +17289,21 @@ mod body_name_tests {
         let b = base.remade(crate::lineage::Traced { body: cube_at(1.0), lineage: None, recipe: None });
         assert_eq!((b.name.as_str(), b.feature, b.source_name.as_deref()), ("Base", 3, Some("Def")));
         assert_eq!((b.component, b.transferred, b.source_transform), (5, true, base.source_transform));
+    }
+
+    /// A cut that splits a placed body leaves every piece in the body's frame, the first one too:
+    /// `lineage::order_lumps` can give the first piece's body a later piece's name and its
+    /// `transferred` mark, and that body must then still carry the frame (#21156).
+    #[test]
+    fn every_piece_of_a_split_body_keeps_its_frame() {
+        let base = transferred_base();
+        let mut taken = std::collections::BTreeSet::new();
+        let pieces = named_pieces_of(&base, vec![cube_at(0.0), cube_at(20.0)], &mut taken, 9, &[], &mut 0);
+        let names: Vec<_> = pieces.iter().map(|p| (p.name.as_str(), p.feature, p.transferred)).collect();
+        assert_eq!(names, [("Base", 3, false), ("Base (1)", 9, true)]);
+        for p in &pieces {
+            assert_eq!((p.component, p.source_transform), (5, base.source_transform), "{}", p.name);
+        }
     }
 }
 
