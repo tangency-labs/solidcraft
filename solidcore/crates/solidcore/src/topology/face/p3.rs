@@ -1307,6 +1307,7 @@ fn create_uv_trim_curves_body(
     let mut max_cc_gap = 0.0_f64;
     let mut mean_3d_gap = 0.0;
     let mut max_3d_gap = 0.0_f64;
+    let mut count_3d: u64 = 0;
     let mut total_dropped: u64 = 0;
 
     let PreRescue {
@@ -1467,6 +1468,7 @@ fn create_uv_trim_curves_body(
                 let pnt_3d0 = normalized_evaluate(k, b, eu, 0.0, false, false)?.0;
                 let gap_3d = pnt_3d0.distance(b.vertex(v)?.point);
                 mean_3d_gap += gap_3d;
+                count_3d += 1;
                 max_3d_gap = smos_max(max_3d_gap, gap_3d);
 
                 if adjust_tolerances && b.vertex(v)?.tolerance < 2.0 * gap_3d {
@@ -1480,7 +1482,11 @@ fn create_uv_trim_curves_body(
     Ok(UvTrimCurveGaps {
         mean_curve_surface_gap: mean_cs_gap / n,
         max_curve_surface_gap: max_cs_gap,
-        mean_3d_vertex_gap: mean_3d_gap / n,
+        mean_3d_vertex_gap: if count_3d == 0 {
+            0.0
+        } else {
+            mean_3d_gap / count_3d as f64
+        },
         max_3d_vertex_gap: max_3d_gap,
         mean_ps_curve_curve_gap: mean_cc_gap / n,
         max_ps_curve_curve_gap: max_cc_gap,
