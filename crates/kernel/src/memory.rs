@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(windows_headroom(42 * GB, 0, 16 * GB), 42 * GB);
         // Commit exceeds physical RAM: remaining commit headroom caps available RAM.
         assert_eq!(windows_headroom(42 * GB, 15 * GB, 128 * MB), 128 * MB);
-        assert_eq!(windows_headroom(2 * GB, 1 * GB, 8 * GB), 2 * GB);
+        assert_eq!(windows_headroom(2 * GB, GB, 8 * GB), 2 * GB);
     }
 
     #[test]
