@@ -136,8 +136,10 @@ pub struct NameCell {
     /// What the body's faces came from, when the feature that made it reports it.
     lineage: Option<Arc<Lineage>>,
     names: Arc<OnceLock<Arc<Names>>>,
-    edge_names: Arc<OnceLock<Arc<EdgeNameIndex>>>,
-    vertex_names: Arc<OnceLock<Arc<VertexNameIndex>>>,
+    /// Cached edge names paired with the body shape they were computed from (guards in-place `ModelBody.body` replacement).
+    edge_names: Arc<OnceLock<(solidcraft_kernel::Body, Arc<EdgeNameIndex>)>>,
+    /// Cached vertex names paired with the body shape they were computed from (guards in-place `ModelBody.body` replacement).
+    vertex_names: Arc<OnceLock<(solidcraft_kernel::Body, Arc<VertexNameIndex>)>>,
     /// The body this one is a moved copy of (its names are that body's).
     copy_of: Option<Arc<ModelBody>>,
     /// How deep the chain of features that named it is, for names taken from a saved model
@@ -1333,13 +1335,12 @@ fn polyline_dist(pts: &[Vec2], q: Vec2) -> f64 {
 
 /// Cached names and exact-lookup index of a body's edges (by mesh edge index).
 pub(crate) fn edge_name_index(b: &ModelBody) -> Arc<EdgeNameIndex> {
-    b.names
-        .edge_names
-        .get_or_init(|| {
-            let faces = face_names(b);
-            Arc::new(EdgeNameIndex::from_names(edge_names_from(b, &faces)))
-        })
-        .clone()
+    let build = || {
+        let faces = face_names(b);
+        Arc::new(EdgeNameIndex::from_names(edge_names_from(b, &faces)))
+    };
+    let (body, index) = b.names.edge_names.get_or_init(|| (b.body.clone(), build()));
+    if body.same_shape(&b.body) { index.clone() } else { build() }
 }
 
 /// Names of a body's edges (by mesh edge index): `<face A>|<face B>`, numbered when repeated.
@@ -1395,19 +1396,18 @@ pub(crate) fn vertex_incident_faces(record: &solidcore_record::brep::Brep) -> Ve
 
 /// Cached names, incident faces, and exact-lookup index of a body's vertices. Empty for a mesh body.
 pub(crate) fn vertex_name_index(b: &ModelBody) -> Arc<VertexNameIndex> {
-    b.names
-        .vertex_names
-        .get_or_init(|| {
-            if b.body.is_mesh() {
-                return Arc::new(VertexNameIndex::empty());
-            }
-            let record = b.body.record();
-            let incident = vertex_incident_faces(record);
-            let faces = face_names(b);
-            let names = vertex_names_from_record(record, &incident, &faces);
-            Arc::new(VertexNameIndex::from_parts(names, incident))
-        })
-        .clone()
+    let build = || {
+        if b.body.is_mesh() {
+            return Arc::new(VertexNameIndex::empty());
+        }
+        let record = b.body.record();
+        let incident = vertex_incident_faces(record);
+        let faces = face_names(b);
+        let names = vertex_names_from_record(record, &incident, &faces);
+        Arc::new(VertexNameIndex::from_parts(names, incident))
+    };
+    let (body, index) = b.names.vertex_names.get_or_init(|| (b.body.clone(), build()));
+    if body.same_shape(&b.body) { index.clone() } else { build() }
 }
 
 /// Names of a body's vertices (by B-rep record vertex index): `<face A>|<face B>|…`, numbered
@@ -2279,5 +2279,52 @@ mod tests {
         let mv2 = vertex_name_index(&mesh_body);
         assert!(mv1.names.is_empty());
         assert!(Arc::ptr_eq(&mv1, &mv2));
+    }
+
+    #[test]
+    fn edge_and_vertex_name_caches_guard_in_place_body_replacement() {
+        let mut body = ModelBody::new("Part".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(8., 4., 2.)).unwrap(), 1);
+        let nf = face_count(&body);
+        body.names = NameCell::known(Arc::new(vec!["shared".into(); nf]));
+        let e1 = edge_name_index(&body);
+        let v1 = vertex_name_index(&body);
+        let snapshot = body.clone();
+
+        // Colour-only changes preserve the shape identity, so both caches stay warm.
+        body.body = body.body.clone().with_color(Some([0.2, 0.4, 0.6]));
+        assert!(Arc::ptr_eq(&edge_name_index(&body), &e1));
+        assert!(Arc::ptr_eq(&vertex_name_index(&body), &v1));
+
+        // Replacing `ModelBody.body` in place with a rotated shape bypasses the stale cache
+        // while keeping cloned snapshots intact.
+        let rot_z: crate::Mat = [[0.0, -1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        body.body = solidcraft_kernel::transform_matrix(&body.body, rot_z).unwrap();
+        let e2 = edge_name_index(&body);
+        let v2 = vertex_name_index(&body);
+        assert!(!Arc::ptr_eq(&e2, &e1));
+        assert!(!Arc::ptr_eq(&v2, &v1));
+        assert_eq!(v2.names, naive_vertex_names(&body));
+        assert_eq!(v2.incident.len(), body.body.record().vertices.len());
+        assert!(Arc::ptr_eq(&edge_name_index(&snapshot), &e1));
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1));
+
+        // Replacing a B-rep body in place with a mesh body rebuilds an empty vertex index.
+        let mesh = solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap();
+        body.body = mesh.clone();
+        let v_mesh = vertex_name_index(&body);
+        assert!(v_mesh.names.is_empty());
+        assert!(v_mesh.incident.is_empty());
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1));
+
+        // Replacing a mesh body in place with a B-rep body rebuilds full vertex names.
+        let mut from_mesh = ModelBody::new("FromMesh".into(), mesh, 1);
+        let mv1 = vertex_name_index(&from_mesh);
+        assert!(mv1.names.is_empty());
+        from_mesh.body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(5., 3., 2.)).unwrap();
+        let mv2 = vertex_name_index(&from_mesh);
+        assert!(!Arc::ptr_eq(&mv2, &mv1));
+        assert_eq!(mv2.names, naive_vertex_names(&from_mesh));
+        assert_eq!(mv2.incident.len(), from_mesh.body.record().vertices.len());
+        assert_eq!(locate_vertex(&from_mesh, &mv2.names[0], Vec3::ZERO).unwrap().vertex, 0);
     }
 }
