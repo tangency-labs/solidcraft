@@ -2665,7 +2665,7 @@ fn raise_band_where_an_arc_meets_lines_at_sharp_corners() {
         for outside in [false, true] {
             let lip = raise_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, h, outside).unwrap();
             assert!(lip.validity().is_empty(), "s {s}, outside {outside}: {:?}", lip.validity());
-            let band = if outside { area(0.0) - area(w) } else { area(w) - area(t) };
+            let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
             let v = measure(&lip).unwrap().volume;
             assert!(rel(v, v0 + band * h) < 1e-6, "s {s}, outside {outside}: {v} vs {}", v0 + band * h);
             // The shell's 11 faces less the rim, the rim's rest, 4 walls on each side and the top;
