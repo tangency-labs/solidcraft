@@ -1114,6 +1114,36 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         // removes their volumes, no more and no less
         let removed: f64 = tools.iter().map(volume).sum();
         let expected = volume(&block.body) - removed;
+        // points of the tools' faces halfway along the back arc, each turned there from the
+        // sketch: the middle of each triangle's arc and of its side line, which bound the
+        // result; and a point inside each triangle, which the cut removes
+        let (yc, _, phi_t) = block.back;
+        let beta = (PI - phi_t) / 2.0;
+        let swept = |(a, b): (f64, f64)| {
+            let p = block.sketch_point((a, b));
+            let (y, z) = (p[1] - yc, p[2]);
+            [
+                p[0],
+                yc + y * beta.cos() - z * beta.sin(),
+                y * beta.sin() + z * beta.cos(),
+            ]
+        };
+        let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
+        let (side, top) = (c + (r0 * r0 - w * w).sqrt(), c + r0);
+        let mid_arc = (r0 * r0 - w * w).sqrt().atan2(w) / 2.0 + PI / 4.0;
+        let on_faces: Vec<[f64; 3]> = [1.0, -1.0]
+            .iter()
+            .flat_map(|&sgn: &f64| {
+                [
+                    swept((sgn * r0 * mid_arc.cos(), c + r0 * mid_arc.sin())),
+                    swept((sgn * w, (side + top) / 2.0)),
+                ]
+            })
+            .collect();
+        let removed_points: Vec<[f64; 3]> = [1.0, -1.0]
+            .iter()
+            .map(|&sgn: &f64| swept((sgn * 12.0, top - 0.3)))
+            .collect();
         for order in [[1usize, 0], [0, 1]] {
             let mut body = block.body.copy().unwrap();
             for k in order {
@@ -1132,6 +1162,27 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
                 "seed {seed}, tools {order:?}: {}",
                 report.text
             );
+            let (_, faces_order) = body.to_record().unwrap();
+            let faces: Vec<usize> = (0..8).collect();
+            for &at in &on_faces {
+                let closest = body
+                    .closest_to_point(&faces_order, &faces, &[], at)
+                    .unwrap()
+                    .unwrap();
+                // written to accept: a NaN distance fails
+                assert!(
+                    closest.distance <= 1e-6,
+                    "seed {seed}, tools {order:?}: {at:?} is {} off the result",
+                    closest.distance
+                );
+            }
+            for &at in &removed_points {
+                assert_eq!(
+                    body.classify_point(at).unwrap(),
+                    PointClass::Outside,
+                    "seed {seed}, tools {order:?}: {at:?} is not cut away"
+                );
+            }
             // written to accept: a NaN volume fails
             let v = volume(&body);
             assert!(
