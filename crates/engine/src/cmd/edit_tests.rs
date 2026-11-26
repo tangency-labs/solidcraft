@@ -3662,6 +3662,26 @@ fn reordering_a_later_linked_subassembly_earlier_keeps_body_names_and_pattern_co
     run(&mut rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
     assert_intact(&mut rolled, "rolled-back legacy timeline.reorder");
 
+    // 6. Rolled-back doc where active prefix is already pinned (`names_pinned` warm) while S2 past
+    //    the marker has empty or blank `body_names`: pinning must still evaluate and pin S2 before
+    //    reordering so S2 keeps `Bolt (2)` and S1 keeps `Bolt`.
+    let mut empty_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    empty_rolled_doc.feature_mut(f_s2).unwrap().body_names.clear();
+    empty_rolled_doc.marker = Some(3);
+    let mut empty_rolled = Session::new(empty_rolled_doc);
+    empty_rolled.pin_body_names();
+    assert!(empty_rolled.doc.feature(f_s2).unwrap().body_names.is_empty(), "S2 stays unpinned past marker before reorder");
+    run(&mut empty_rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
+    assert_intact(&mut empty_rolled, "rolled-back unpinned-empty S2 timeline.reorder");
+
+    let mut blank_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    blank_rolled_doc.feature_mut(f_s2).unwrap().body_names = vec!["".into()];
+    blank_rolled_doc.marker = Some(3);
+    let mut blank_rolled = Session::new(blank_rolled_doc);
+    blank_rolled.pin_body_names();
+    run(&mut blank_rolled, "timeline.reorder_many", json!({"features": [f_s2], "position": 0, "active": true}));
+    assert_intact(&mut blank_rolled, "rolled-back blank S2 timeline.reorder_many");
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -3693,4 +3713,41 @@ fn reordering_refuses_when_a_multi_body_pattern_would_silently_drop_a_copy() {
     let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
     let broken = allowed["broken"].as_array().unwrap();
     assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report PatMulti in broken: {allowed}");
+}
+
+/// Single-feature `timeline.reorder` must check the full history past the rollback marker just as
+/// `timeline.reorder_many` and `timeline.move_many` do, so moving a source body past a rolled-back
+/// multi-body pattern is refused unless `allow_errors: true` is passed.
+#[test]
+fn rolled_back_single_feature_reorder_refuses_dropping_a_pattern_copy_past_the_marker() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "name": "BoltBox"}));
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "PlateBox"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt", "Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1", "PAT#2"], "name": "PatMulti"}),
+    );
+
+    // Roll back past `PatMulti`, both with `PatMulti` right behind the marker and with it still
+    // behind the marker after the candidate move (`marker = Some(1)`).
+    for pos in [2, 1] {
+        run(&mut s, "timeline.roll_to", json!({"position": pos}));
+        assert_eq!(s.doc.marker, Some(pos));
+        let before = s.doc.clone();
+        let err = s.execute("timeline.reorder", &json!({"feature": "BoltBox", "position": 2})).unwrap_err().to_string();
+        assert!(err.contains("PatMulti"), "marker={pos}: timeline.reorder must refuse breaking rolled-back PatMulti: {err}");
+        assert_eq!(s.doc, before, "marker={pos}: refused reorder must leave document unchanged");
+    }
+
+    // With `allow_errors: true`, the move proceeds and reports the rolled-back pattern in `broken`.
+    let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
+    let broken = allowed["broken"].as_array().unwrap();
+    assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report rolled-back PatMulti: {allowed}");
+
+    // Undoing and rolling forward restores all four bodies intact.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 4, "all copies stay intact after undo + roll forward: {measured}");
 }

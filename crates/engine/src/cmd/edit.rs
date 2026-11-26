@@ -2784,10 +2784,10 @@ pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     next.features.insert(to, f);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    // Everything that evaluated before must still evaluate.
+    // Everything in the history that evaluated before must still evaluate.
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after, true);
+    let broken = newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true);
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {

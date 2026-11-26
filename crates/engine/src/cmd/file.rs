@@ -2685,7 +2685,7 @@ impl Session {
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
         let dropped = session.has_dropped_link_names();
-        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.has_duplicate_rolled_back_body_names() {
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.needs_rolled_back_body_name_pinning() {
             session.pin_rolled_back_body_names();
         }
         session.follow_design_token();
@@ -2693,17 +2693,22 @@ impl Session {
         session
     }
 
-    /// Whether a rolled-back design has stored body names past the marker that collide with
-    /// earlier stored names (e.g. linked or imported bodies saved before disambiguated names were
-    /// pinned), so [`Self::pin_rolled_back_body_names`] should pin their evaluated names on open.
-    fn has_duplicate_rolled_back_body_names(&self) -> bool {
+    /// Whether a rolled-back design has unpinned or colliding body names past the marker (e.g.
+    /// linked or imported bodies saved with empty or un-disambiguated `body_names`, or
+    /// body-producing features past the marker whose stored names are still empty), so
+    /// [`Self::pin_rolled_back_body_names`] should pin their evaluated names.
+    fn needs_rolled_back_body_name_pinning(&self) -> bool {
         let Some(marker) = self.doc.marker.filter(|&m| m < self.doc.features.len()) else {
             return false;
         };
-        let mut seen = std::collections::HashSet::new();
+        let state = self.model.state();
+        let mut seen: std::collections::HashSet<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
         for (i, f) in self.doc.features.iter().enumerate() {
             if f.suppressed {
                 continue;
+            }
+            if i >= marker && rolled_back_feature_needs_body_names(f) {
+                return true;
             }
             let skip: Option<&[u64]> = match &f.kind {
                 solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty() => Some(skip.as_slice()),
@@ -2778,14 +2783,15 @@ impl Session {
     }
 
     /// Pin evaluated body names across the timeline before a history reorder or move, including
-    /// rolled-back features when any active name needed pinning or duplicate stored names exist
-    /// past the marker. Already-pinned sessions hit the O(1) `names_pinned` fast path.
+    /// rolled-back features when any active name needed pinning or any rolled-back feature past
+    /// the marker has unpinned or colliding stored names. Already-pinned sessions hit the O(1)
+    /// `names_pinned` fast path.
     pub(crate) fn pin_timeline_body_names(&mut self) {
         let unpinned = self.doc.reserved_body_names.is_empty() && self.doc.features.iter().all(|f| f.body_names.is_empty());
         let before = self.doc.clone();
         self.pin_body_names();
         if self.doc.marker.is_some_and(|m| m < self.doc.features.len())
-            && (unpinned || !std::sync::Arc::ptr_eq(&before, &self.doc) || self.has_duplicate_rolled_back_body_names())
+            && (unpinned || !std::sync::Arc::ptr_eq(&before, &self.doc) || self.needs_rolled_back_body_name_pinning())
         {
             self.pin_rolled_back_body_names();
         }
@@ -2971,6 +2977,66 @@ impl Session {
             return None;
         }
         solidcraft_io::read_container_bytes(path)
+    }
+}
+
+/// Whether `nodes` mentions any body slot in the file's product tree.
+fn step_nodes_have_bodies(nodes: &[solidcraft_kernel::StepNode]) -> bool {
+    nodes.iter().any(|node| !node.bodies.is_empty() || step_nodes_have_bodies(&node.children))
+}
+
+/// Whether any non-skipped body slot in `nodes` is missing or blank in `body_names`.
+fn step_node_has_unpinned_body(nodes: &[solidcraft_kernel::StepNode], skip: &[u64], body_names: &[String]) -> bool {
+    nodes.iter().any(|node| {
+        node.bodies.iter().any(|&slot| !skip.contains(&(slot as u64)) && body_names.get(slot).is_none_or(|n| n.trim().is_empty()))
+            || step_node_has_unpinned_body(&node.children, skip, body_names)
+    })
+}
+
+/// Whether a non-suppressed rolled-back feature past the history marker still lacks pinned
+/// `body_names` for bodies it produces (e.g. an import saved with empty `body_names`).
+fn rolled_back_feature_needs_body_names(f: &solidcraft_doc::Feature) -> bool {
+    use solidcraft_doc::{FeatureKind, Operation};
+    let has_no_names = f.body_names.iter().all(|n| n.trim().is_empty());
+    match &f.kind {
+        FeatureKind::Import { step, components, skip, records, .. } => {
+            if step.is_empty() && records.is_none() {
+                return false;
+            }
+            if let Some(records) = records {
+                return (0..records.bodies.len())
+                    .any(|slot| !skip.contains(&(slot as u64)) && f.body_names.get(slot).is_none_or(|n| n.trim().is_empty()));
+            }
+            if f.body_names.iter().enumerate().any(|(slot, n)| !skip.contains(&(slot as u64)) && n.trim().is_empty()) {
+                return true;
+            }
+            if step_nodes_have_bodies(components) {
+                step_node_has_unpinned_body(components, skip, &f.body_names)
+            } else {
+                !f.body_names.iter().enumerate().any(|(slot, n)| !skip.contains(&(slot as u64)) && !n.trim().is_empty())
+            }
+        }
+        FeatureKind::MeshImport { meshes, .. } => (0..meshes.len()).any(|slot| f.body_names.get(slot).is_none_or(|n| n.trim().is_empty())),
+        FeatureKind::Pattern { bodies, join: false, .. } if !bodies.is_empty() => {
+            has_no_names || (f.pins_every_body_name() && f.pattern_names_in_order)
+        }
+        FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => has_no_names,
+        FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => has_no_names,
+        FeatureKind::Extrude { operation: Operation::NewBody, .. }
+        | FeatureKind::Revolve { operation: Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::NewBody, .. }
+        | FeatureKind::Cylinder { operation: Operation::NewBody, .. }
+        | FeatureKind::Sphere { operation: Operation::NewBody, .. }
+        | FeatureKind::Torus { operation: Operation::NewBody, .. }
+        | FeatureKind::Cone { operation: Operation::NewBody, .. }
+        | FeatureKind::Loft { operation: Operation::NewBody, .. }
+        | FeatureKind::Sweep { operation: Operation::NewBody, .. }
+        | FeatureKind::Pipe { operation: Operation::NewBody, .. }
+        | FeatureKind::Coil { operation: Operation::NewBody, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::NewBody, .. }
+        | FeatureKind::Thicken { operation: Operation::NewBody, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::NewBody, .. } => has_no_names,
+        _ => false,
     }
 }
 
