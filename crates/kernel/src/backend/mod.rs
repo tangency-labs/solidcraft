@@ -12,7 +12,9 @@ use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, 
 
 mod cell_grid;
 mod exchange;
+mod frames;
 mod modelling;
+mod projection;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

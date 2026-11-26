@@ -147,6 +147,14 @@ temporary folder's path has a short name (`…\NAME~1.XYZ\AppData\Local\Temp`, a
 gives when the user folder's name is long).
 A refused path is a tool error saying why.
 
+A KiCad board's component models are read from the board's folder (in reach, because the agent
+opened the board there) and from KiCad's own 3D model library on this machine: the installed
+`3dmodels` folder, and the folders the shell's and KiCad's own `KICAD<n>_3DMODEL_DIR` and
+`KISYS3DMOD` variables name. Nothing else outside the agent's folders opens that way: only model
+files (`.wrl`, `.wrz`, `.step`, `.stp`, `.stpz`) inside those folders, with links and `..` resolved
+first. A model in any other folder is refused with the folder named in the board's `warnings`;
+add it with `--allow-path`.
+
 A hard link inside an allowed folder can't be told apart from an ordinary file, so a hard link
 to a file elsewhere is reachable through it; don't keep such links in a folder you allow.
 
@@ -418,7 +426,7 @@ builds it.
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy, also while another call from this client, such as a long `batch`, is still waiting for its reply: bridged, it is then asked on a connection of its own (its `self` marks no request) and its reply comes before that call's. Ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?`, `new_tab?` | Start an empty design. With `new_tab: true` in the desktop app it opens in a tab of its own and becomes the active design, and the design that was open stays open; the reply names it (`document_id`). Every later call acts on the active design. `execute` `document.list` lists the open designs and which is active, and `execute` `document.activate {document_id}` shows one ([design tabs](control-protocol.md#design-tabs-and-the-active-design)). |
 | `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
-| `open` | `path`, `new_tab?` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. With `new_tab: true` in the desktop app the file opens in a tab of its own and the design that was open stays open. Unlike `new_design`, its reply does not name the design: `execute` `document.revision` gives the id of the design that is active, `document.list` shows which design is active (a person busy in a dialog or tool at the window gets the new tab behind the active one), and `execute` `document.activate {document_id}` shows it before you edit. |
+| `open` | `path`, `new_tab?`, `up?`, `names?`, `geometry?`, and for a KiCad board `thickness?`, `components?`, `copper?`, `silkscreen?`, `color?`, `representation?` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), a 3MF/STL file as mesh bodies, or a KiCad board (`.kicad_pcb`, or the project's `.kicad_pro`) with its copper, silkscreen and component models; the KiCad options are `doc.open`'s own, the same as `execute` with `doc.open` takes, and the reply's `warnings` name each component model that could not be read, and why. With `new_tab: true` in the desktop app the file opens in a tab of its own and the design that was open stays open. Unlike `new_design`, its reply does not name the design: `execute` `document.revision` gives the id of the design that is active, `document.list` shows which design is active (a person busy in a dialog or tool at the window gets the new tab behind the active one), and `execute` `document.activate {document_id}` shows it before you edit. |
 | `save` | `path?`, `format?` (container, json), `overwrite?` (default false) | Save the design (to its current file without `path`). A save over a design file that another program or computer changed since it was opened or saved is refused; `overwrite: true` replaces it. |
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
