@@ -1933,6 +1933,65 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#18324: a kernel a boolean copies for its workers shares the
+/// certificates the parent finished. The design there reads its one round again on a kernel
+/// another pool made (a copy, or the session's own), and paid the 4.5 s certificate a second
+/// time for a record an identical key already held. A kernel sharing the parent's
+/// recertify memo certifies nothing the parent certified, and builds the same body; with a
+/// memo of its own it certifies again, as before.
+#[test]
+fn a_kernel_sharing_a_recertify_memo_certifies_nothing_the_parent_did() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    let mut parent = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel| {
+        let before = k.work_counters.blends_recertified();
+        let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+        let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+        (k.work_counters.blends_recertified() - before, again)
+    };
+    // the parent certifies every blend the record holds
+    let (first, once) = certified(&mut parent);
+    assert_eq!(first, blends, "the parent's read certifies each blend");
+    // a kernel sharing the parent's memo (a boolean's copy of it) certifies none of them
+    // again, and builds the same body
+    let mut copy = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        recertify_memo: std::sync::Arc::clone(&parent.recertify_memo),
+        ..Kernel::default()
+    };
+    let (second, twice) = certified(&mut copy);
+    assert_eq!(
+        second, 0,
+        "the copy re-certified what the parent had finished"
+    );
+    assert_eq!(once, twice, "the copy's read built a different body");
+    // a kernel with a memo of its own certifies them again, as a kernel on its own always did
+    let mut own = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let (third, thrice) = certified(&mut own);
+    assert_eq!(third, blends, "an unrelated kernel certifies again");
+    assert_eq!(once, thrice, "an unrelated kernel built a different body");
+}
+
 /// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
 /// boolean in an application gives back a record that the next operation reads again, and each
 /// read gave every blend its definition back and certified its net again (6 s a boolean on a
