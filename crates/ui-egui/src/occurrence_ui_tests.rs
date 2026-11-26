@@ -438,12 +438,15 @@ fn occurrence_isolate_offers_unisolate_beside_it() {
     // The isolated placement: Isolate would change nothing, so Exit Isolation alone, with its key.
     let own = context_menu::items(&h.app, &target);
     assert!(!own.iter().any(|i| i.id == "ui.isolateOccurrence"), "no Isolate that changes nothing");
-    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == "Ctrl+Shift+I"));
+    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")));
     // The hidden placement keeps its own Isolate, then Exit Isolation.
     let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![first] });
     let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on the hidden placement");
     assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([first]), "this placement's own Isolate");
-    assert_eq!((items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()), ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I"));
+    assert_eq!(
+        (items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()),
+        (crate::ui_kit::chord_label("Ctrl+I").as_str(), "ui.unisolate", crate::ui_kit::chord_label("Ctrl+Shift+I").as_str())
+    );
     let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
     context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
     assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
