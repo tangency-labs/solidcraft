@@ -1917,13 +1917,14 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
 /// An edge curve's point at `t` within its domain: a line's, or a spline's (de Boor on the
 /// homogeneous coefficients); none for other kinds, or outside the domain.
 fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
-    let (knots, pts): (&[f64], Vec<[f64; 4]>) = match c {
+    // the homogeneous control point `i`, read in place: a copy of all of them per point was
+    // most of an export's cost on a long curve
+    let (knots, n, at): (&[f64], usize, &dyn Fn(usize) -> Option<[f64; 4]>) = match c {
         b::Curve::Line { start, end } => return Some([0, 1, 2].map(|k| start[k] + t * (end[k] - start[k]))),
-        b::Curve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
-        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        b::Curve::Spline { knots, points } => (knots, points.len(), &|i| points.get(i).map(|p| [p[0], p[1], p[2], 1.0])),
+        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), &|i| homogeneous.get(i).copied()),
         _ => return None,
     };
-    let n = pts.len();
     let p = knots.len().checked_sub(n + 1)?;
     if !(*knots.get(p)? <= t && t <= *knots.get(n)?) {
         return None;
@@ -1932,7 +1933,19 @@ fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
     while s + 1 < n && *knots.get(s + 1)? <= t {
         s += 1;
     }
-    let mut d: Vec<[f64; 4]> = (0..=p).map(|j| pts.get(s + j - p).copied()).collect::<Option<_>>()?;
+    // de Boor's points, on the stack for the degrees records hold
+    let mut stack = [[0.0; 4]; 16];
+    let mut heap: Vec<[f64; 4]>;
+    let d: &mut [[f64; 4]] = if p < stack.len() {
+        let d = stack.get_mut(..=p)?;
+        for (j, x) in d.iter_mut().enumerate() {
+            *x = at(s + j - p)?;
+        }
+        d
+    } else {
+        heap = (0..=p).map(|j| at(s + j - p)).collect::<Option<Vec<_>>>()?;
+        &mut heap
+    };
     for r in 1..=p {
         for j in (r..=p).rev() {
             let i = s + j - p;
@@ -1948,18 +1961,30 @@ fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
 
 /// A pcurve's point at `t` (de Boor on the homogeneous coefficients).
 fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
-    let (knots, pts): (&[f64], Vec<[f64; 3]>) = match c {
-        b::Curve2::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], 1.0]).collect()),
-        b::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+    // the homogeneous control point `i`, read in place (see [`point3`])
+    let (knots, n, at): (&[f64], usize, &dyn Fn(usize) -> Option<[f64; 3]>) = match c {
+        b::Curve2::Spline { knots, points } => (knots, points.len(), &|i| points.get(i).map(|p| [p[0], p[1], 1.0])),
+        b::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), &|i| homogeneous.get(i).copied()),
     };
-    let n = pts.len();
     let p = knots.len().checked_sub(n + 1)?;
     let t = t.clamp(*knots.get(p)?, *knots.get(n)?);
     let mut s = p;
     while s + 1 < n && *knots.get(s + 1)? <= t {
         s += 1;
     }
-    let mut d: Vec<[f64; 3]> = (0..=p).map(|j| pts.get(s + j - p).copied()).collect::<Option<_>>()?;
+    // de Boor's points, on the stack for the degrees records hold
+    let mut stack = [[0.0; 3]; 16];
+    let mut heap: Vec<[f64; 3]>;
+    let d: &mut [[f64; 3]] = if p < stack.len() {
+        let d = stack.get_mut(..=p)?;
+        for (j, x) in d.iter_mut().enumerate() {
+            *x = at(s + j - p)?;
+        }
+        d
+    } else {
+        heap = (0..=p).map(|j| at(s + j - p)).collect::<Option<Vec<_>>>()?;
+        &mut heap
+    };
     for r in 1..=p {
         for j in (r..=p).rev() {
             let i = s + j - p;

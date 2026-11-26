@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed",
+         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
@@ -120,7 +120,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LINKS_CONTRACT)
         .output(output_schema_for::<LinksResult>)
         .params(
-        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step` or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
+        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step`, `kicad` (a board SolidCraft read, with no plugin) or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
          reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
          unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
@@ -296,6 +296,200 @@ type ReadOnce = std::result::Result<
 /// linked design (none for a STEP file).
 type LeftOut = (solidcraft_io::StepFeature, Vec<Vec<String>>, bool, Vec<MeshData>);
 
+/// Cache key for a linked design read during one open ([`Reading::read`]): target path,
+/// configuration selection, allowed folder root, and current nesting depth (`opening.len()`) so a
+/// shallow read is never reused at a depth where nested links would exceed [`OPENING_DEPTH`].
+type ReadKey = (PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>, usize);
+
+/// Single-flight, deadlock-free memoization map shared across parallel branches of one open.
+///
+/// Acyclic diamond dependencies (e.g. `top -> {left, right} -> shared`) wait on the in-flight
+/// reader and share its result so the shared part is evaluated exactly once. Both cache waits
+/// (`waiting_on`) and nested worker join edges (`join_edges`: parent thread waiting on spawned
+/// `map_on_threads` helpers) are tracked under the same lock so any cyclic wait chain—direct or
+/// across nested worker pools—is detected before blocking and bypassed cleanly.
+struct SharedReads {
+    state: Mutex<SharedReadsState>,
+    done: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct SharedReadsState {
+    ready: std::collections::HashMap<ReadKey, ReadOnce>,
+    /// Key -> `(owner_thread, owner_pool_depth_when_claimed)`.
+    in_flight: std::collections::HashMap<ReadKey, (std::thread::ThreadId, usize)>,
+    /// Waiter -> `(owner_thread, owner_claim_depth)`.
+    waiting_on: std::collections::HashMap<std::thread::ThreadId, (std::thread::ThreadId, usize)>,
+    /// Directed wait edges `parent -> (active child worker, parent pool depth)` while `parent` joins
+    /// nested work. A parent claim acquired at depth `d` can only block behind children spawned at
+    /// depth `s > d`; claims made inside the parent's own `map_on_threads` job have `d == s` and
+    /// release before `parent` joins those siblings.
+    join_edges: std::collections::HashMap<std::thread::ThreadId, Vec<(std::thread::ThreadId, usize)>>,
+    /// Nesting depth of active `map_on_threads` pools currently executing on each thread.
+    pool_depth: std::collections::HashMap<std::thread::ThreadId, usize>,
+}
+
+struct PoolDepthGuard {
+    shared: SharedReadCache,
+    tid: std::thread::ThreadId,
+}
+
+impl Drop for PoolDepthGuard {
+    fn drop(&mut self) {
+        let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(depth) = st.pool_depth.get_mut(&self.tid) {
+            *depth = depth.saturating_sub(1);
+            if *depth == 0 {
+                st.pool_depth.remove(&self.tid);
+            }
+        }
+    }
+}
+
+enum ReadAcquire {
+    Ready(Box<ReadOnce>),
+    Claimed(ReadClaim),
+    Bypass,
+}
+
+struct ReadClaim {
+    shared: SharedReadCache,
+    key: Option<ReadKey>,
+}
+
+impl ReadClaim {
+    fn finish(mut self, value: Option<ReadOnce>) {
+        if let Some(key) = self.key.take() {
+            let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.in_flight.remove(&key);
+            if let Some(val) = value {
+                st.ready.insert(key, val);
+            }
+            self.shared.done.notify_all();
+        }
+    }
+}
+
+impl Drop for ReadClaim {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.in_flight.remove(&key);
+            self.shared.done.notify_all();
+        }
+    }
+}
+
+impl SharedReads {
+    fn new() -> SharedReadCache {
+        std::sync::Arc::new(SharedReads { state: Mutex::new(SharedReadsState::default()), done: std::sync::Condvar::new() })
+    }
+
+    fn get_ready(&self, key: &ReadKey) -> Option<ReadOnce> {
+        self.state.lock().ok().and_then(|st| st.ready.get(key).cloned())
+    }
+
+    fn remove_ready(&self, key: &ReadKey) {
+        if let Ok(mut st) = self.state.lock() {
+            st.ready.remove(key);
+        }
+    }
+
+    fn enter_pool(self: &SharedReadCache, parent: std::thread::ThreadId) -> (usize, PoolDepthGuard) {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = st.pool_depth.entry(parent).or_insert(0);
+        *entry += 1;
+        (*entry, PoolDepthGuard { shared: self.clone(), tid: parent })
+    }
+
+    fn register_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
+        if parent != child {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.join_edges.entry(parent).or_default().push((child, pool_depth));
+        }
+    }
+
+    fn unregister_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
+        if parent != child {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(children) = st.join_edges.get_mut(&parent) {
+                if let Some(pos) = children.iter().position(|&e| e == (child, pool_depth)) {
+                    children.swap_remove(pos);
+                }
+                if children.is_empty() {
+                    st.join_edges.remove(&parent);
+                }
+            }
+        }
+    }
+
+    /// Whether `me` is reachable from `(owner, owner_claim_depth)` in the combined wait-for graph
+    /// (`waiting_on` U depth-filtered `join_edges`), meaning waiting on `owner` would form a
+    /// deadlock cycle.
+    fn would_cycle(st: &SharedReadsState, owner: std::thread::ThreadId, owner_claim_depth: usize, me: std::thread::ThreadId) -> bool {
+        let mut stack = vec![(owner, owner_claim_depth)];
+        let mut min_seen: std::collections::HashMap<std::thread::ThreadId, usize> = std::collections::HashMap::new();
+        while let Some((cur, min_depth)) = stack.pop() {
+            if cur == me {
+                return true;
+            }
+            if min_seen.get(&cur).is_some_and(|&prev| prev <= min_depth) {
+                continue;
+            }
+            min_seen.insert(cur, min_depth);
+            if let Some(&(next, next_depth)) = st.waiting_on.get(&cur) {
+                stack.push((next, next_depth));
+            }
+            if let Some(children) = st.join_edges.get(&cur) {
+                for &(child, spawn_depth) in children {
+                    if spawn_depth > min_depth {
+                        stack.push((child, 0));
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn acquire(self: &SharedReadCache, key: &ReadKey) -> ReadAcquire {
+        let me = std::thread::current().id();
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(val) = st.ready.get(key) {
+                return ReadAcquire::Ready(Box::new(val.clone()));
+            }
+            if let Some(&(owner, owner_depth)) = st.in_flight.get(key) {
+                if Self::would_cycle(&st, owner, owner_depth, me) {
+                    return ReadAcquire::Bypass;
+                }
+                st.waiting_on.insert(me, (owner, owner_depth));
+                st = self.done.wait(st).unwrap_or_else(|e| e.into_inner());
+                st.waiting_on.remove(&me);
+                continue;
+            }
+            let my_depth = st.pool_depth.get(&me).copied().unwrap_or(0);
+            st.in_flight.insert(key.clone(), (me, my_depth));
+            return ReadAcquire::Claimed(ReadClaim { shared: self.clone(), key: Some(key.clone()) });
+        }
+    }
+}
+
+type SharedReadCache = std::sync::Arc<SharedReads>;
+
+/// Maximum worker threads used when evaluating independent linked files concurrently.
+const MAX_LINK_WORKERS: usize = 16;
+
+fn link_cores() -> usize {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::available_parallelism().map(usize::from).unwrap_or(1).min(MAX_LINK_WORKERS)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        1
+    }
+}
+
 /// The reads of linked designs saved without bodies that one open, or one Update Links, makes
 /// on this thread.
 struct Reading {
@@ -317,22 +511,114 @@ struct Reading {
     /// How many reads were not kept in `read` because of a refusal below them. Each may be made
     /// again by another chain of links, so past [`READ_AGAIN`] no further design is read.
     again: usize,
+    /// Worker thread budget for parallelizing links at or below this level, preventing nested
+    /// thread explosion across sub-assembly hierarchies.
+    budget: usize,
     /// What each linked design gave, by its file and configuration, so that a design many links
     /// lead to is read once: without it the reads grow with the number of ways to reach it. With
     /// [`LinkedRead::Folder`] a design below a link of the outermost design is kept for that link
     /// (the key's last part), whose folder decides what it may read.
-    read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), ReadOnce>,
+    read: Option<SharedReadCache>,
+}
+
+impl Reading {
+    fn empty() -> Self {
+        Reading { opening: Vec::new(), which: LinkedRead::All, refused: 0, outside: 0, again: 0, budget: 1, read: None }
+    }
 }
 
 thread_local! {
-    static READING: std::cell::RefCell<Reading> = std::cell::RefCell::new(Reading {
-        opening: Vec::new(),
-        which: LinkedRead::All,
-        refused: 0,
-        outside: 0,
-        again: 0,
-        read: std::collections::HashMap::new(),
-    });
+    static READING: std::cell::RefCell<Reading> = std::cell::RefCell::new(Reading::empty());
+}
+
+fn reading_read_get(key: &ReadKey) -> Option<ReadOnce> {
+    READING.with(|reading| reading.borrow().read.clone())?.get_ready(key)
+}
+
+fn reading_read_acquire(key: &ReadKey) -> ReadAcquire {
+    match READING.with(|reading| reading.borrow().read.clone()) {
+        Some(cache) => cache.acquire(key),
+        None => ReadAcquire::Bypass,
+    }
+}
+
+/// Temporarily installs a branch [`Reading`] snapshot on a worker thread (preserving `opening`,
+/// `which`, shared memoization cache, and bounded `budget`), records the parent-to-child join
+/// wait edge in [`SharedReads`] for deadlock detection, and restores the thread's prior
+/// [`Reading`] state on drop — essential because `map_on_threads` also executes work on the
+/// calling thread.
+struct BranchReading {
+    saved: Option<Reading>,
+    join_edge: Option<(SharedReadCache, std::thread::ThreadId, std::thread::ThreadId, usize)>,
+}
+
+impl BranchReading {
+    fn enter(
+        opening: Vec<Option<PathBuf>>,
+        which: LinkedRead,
+        budget: usize,
+        read: Option<SharedReadCache>,
+        parent_tid: std::thread::ThreadId,
+        pool_depth: usize,
+    ) -> Self {
+        let me = std::thread::current().id();
+        let join_edge = read.as_ref().filter(|_| me != parent_tid && pool_depth > 0).map(|cache| {
+            cache.register_join(parent_tid, me, pool_depth);
+            (cache.clone(), parent_tid, me, pool_depth)
+        });
+        let branch = Reading { opening, which, refused: 0, outside: 0, again: 0, budget, read };
+        let saved = READING.with(|r| r.replace(branch));
+        BranchReading { saved: Some(saved), join_edge }
+    }
+
+    fn finish(mut self) -> (usize, usize, usize) {
+        let stats = READING.with(|r| {
+            let b = r.borrow();
+            (b.refused, b.outside, b.again)
+        });
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
+        }
+        if let Some(saved) = self.saved.take() {
+            READING.with(|r| *r.borrow_mut() = saved);
+        }
+        stats
+    }
+}
+
+impl Drop for BranchReading {
+    fn drop(&mut self) {
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
+        }
+        if let Some(saved) = self.saved.take() {
+            READING.with(|r| *r.borrow_mut() = saved);
+        }
+    }
+}
+
+#[cfg(test)]
+fn measure_eval_counts<R>(f: impl FnOnce() -> R) -> (R, usize, usize) {
+    let saved_e = EVALUATED.with(|n| n.replace(0));
+    let saved_r = REUSED.with(|n| n.replace(0));
+    struct Restore(usize, usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            EVALUATED.with(|n| n.set(self.0));
+            REUSED.with(|n| n.set(self.1));
+        }
+    }
+    let _restore = Restore(saved_e, saved_r);
+    let out = f();
+    let e = EVALUATED.with(std::cell::Cell::get);
+    let r = REUSED.with(std::cell::Cell::get);
+    (out, e, r)
+}
+
+#[cfg(test)]
+fn add_eval_counts(evaluated: usize, reused: usize) {
+    EVALUATED.with(|n| n.set(n.get() + evaluated));
+    REUSED.with(|n| n.set(n.get() + reused));
 }
 
 /// How many designs deep [`read_left_out_bodies`] follows links saved without bodies.
@@ -358,7 +644,8 @@ impl Opening {
                 reading.refused = 0;
                 reading.outside = 0;
                 reading.again = 0;
-                reading.read.clear();
+                reading.budget = link_cores();
+                reading.read = Some(SharedReads::new());
             }
             reading.opening.push(file.map(|file| absolute(Path::new(file))));
         });
@@ -372,7 +659,8 @@ impl Drop for Opening {
             let mut reading = reading.borrow_mut();
             reading.opening.pop();
             if reading.opening.is_empty() {
-                reading.read.clear();
+                reading.read = None;
+                reading.budget = 1;
             }
         });
     }
@@ -435,8 +723,222 @@ pub(super) fn read_left_out_bodies(
         return Vec::new();
     }
     let _opening = Opening::enter(from, which);
+    let mut prefetched_steps: std::collections::HashMap<usize, Result<LeftOut>> = std::collections::HashMap::new();
+    let mut prefetched_designs: std::collections::HashMap<usize, ReadOnce> = std::collections::HashMap::new();
+    let (budget, parent_opening, parent_which, parent_refused, parent_again, shared_read) = READING.with(|reading| {
+        let r = reading.borrow();
+        (r.budget, r.opening.clone(), r.which, r.refused, r.again, r.read.clone())
+    });
+    if links.len() > 1 && budget > 1 && parent_refused == 0 && parent_again == 0 && !solidcraft_doc::progress::cancelled() {
+        enum LeftOutJob {
+            Step { link_idx: usize, link: DesignLink, file: PathBuf, flat: bool },
+            Design { link_indices: Vec<usize>, key: ReadKey, file: PathBuf, configuration: Option<SelectedConfiguration> },
+        }
+        enum LeftOutJobOut {
+            Cancelled,
+            Step {
+                link_idx: usize,
+                result: Result<LeftOut>,
+                #[cfg(test)]
+                evals: usize,
+                #[cfg(test)]
+                reuses: usize,
+            },
+            Design {
+                link_indices: Vec<usize>,
+                key: ReadKey,
+                read: ReadOnce,
+                refused: usize,
+                outside: usize,
+                again: usize,
+                #[cfg(test)]
+                evals: usize,
+                #[cfg(test)]
+                reuses: usize,
+            },
+        }
+        let allowed_by = (parent_which == LinkedRead::Folder).then(|| parent_opening.get(1).cloned().flatten()).flatten();
+        let depth = parent_opening.len();
+        let mut jobs: Vec<LeftOutJob> = Vec::new();
+        let mut design_job_by_key: std::collections::HashMap<ReadKey, usize> = std::collections::HashMap::new();
+        for (link_idx, (_comp, link)) in links.iter().enumerate() {
+            let file = resolve(from, &link.path);
+            if !may_read(&file) || link_refused(from, &link.path).is_err() {
+                continue;
+            }
+            if link.step_names.is_some() {
+                jobs.push(LeftOutJob::Step { link_idx, link: link.clone(), file, flat: step_import_flat(doc, link) });
+                continue;
+            }
+            let target = absolute(&file);
+            let is_cycle = parent_opening.iter().flatten().any(|open| *open == target || same_file(open, &target));
+            if is_cycle || depth >= OPENING_DEPTH {
+                continue;
+            }
+            let configuration = selected_configuration(link);
+            let key: ReadKey = (target, configuration.map(|c| (c.row, c.identity)), allowed_by.clone(), depth);
+            if reading_read_get(&key).is_some() {
+                continue;
+            }
+            if let Some(&job_idx) = design_job_by_key.get(&key) {
+                if let LeftOutJob::Design { link_indices, .. } = &mut jobs[job_idx] {
+                    link_indices.push(link_idx);
+                }
+            } else {
+                let job_idx = jobs.len();
+                design_job_by_key.insert(key.clone(), job_idx);
+                jobs.push(LeftOutJob::Design { link_indices: vec![link_idx], key, file, configuration });
+            }
+        }
+        if jobs.len() > 1 {
+            let workers = budget.min(jobs.len());
+            let child_budget = (budget / workers).max(1);
+            let progress = solidcraft_doc::progress::current();
+            let parent_tid = std::thread::current().id();
+            let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+            let scope = solidcraft_io::vfs::current_scope();
+            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+                let (d, g) = c.enter_pool(parent_tid);
+                (d, Some(g))
+            });
+            let done = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> LeftOutJobOut {
+                solidcraft_io::vfs::scoped(scope.clone(), || {
+                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                                return LeftOutJobOut::Cancelled;
+                            }
+                            match job {
+                                LeftOutJob::Step { link_idx, link, file, flat } => {
+                                    let run = || left_out_step(link, file, from, *flat, validation);
+                                    #[cfg(test)]
+                                    let (result, evals, reuses) = measure_eval_counts(run);
+                                    #[cfg(not(test))]
+                                    let result = run();
+                                    LeftOutJobOut::Step {
+                                        link_idx: *link_idx,
+                                        result,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                    }
+                                }
+                                LeftOutJob::Design { link_indices, key, file, configuration } => {
+                                    let branch = BranchReading::enter(
+                                        parent_opening.clone(),
+                                        parent_which,
+                                        child_budget,
+                                        shared_read.clone(),
+                                        parent_tid,
+                                        pool_depth,
+                                    );
+                                    let (read, evals, reuses) = match reading_read_acquire(key) {
+                                        ReadAcquire::Ready(read) => (*read, 0usize, 0usize),
+                                        ReadAcquire::Claimed(claim) => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
+                                            let refused_here = READING.with(|r| r.borrow().refused);
+                                            claim.finish((refused_here == 0).then(|| read.clone()));
+                                            (read, evals, reuses)
+                                        }
+                                        ReadAcquire::Bypass => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses) = (run(), 0usize, 0usize);
+                                            (read, evals, reuses)
+                                        }
+                                    };
+                                    #[cfg(not(test))]
+                                    let _ = (evals, reuses);
+                                    let (refused, outside, again) = branch.finish();
+                                    LeftOutJobOut::Design {
+                                        link_indices: link_indices.clone(),
+                                        key: key.clone(),
+                                        read,
+                                        refused,
+                                        outside,
+                                        again,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                    }
+                                }
+                            }
+                        })
+                    })
+                })
+            });
+            // Merge branch outcomes in deterministic link order.
+            for out in done.into_iter().flatten() {
+                match out {
+                    LeftOutJobOut::Cancelled => {}
+                    LeftOutJobOut::Step {
+                        link_idx,
+                        result,
+                        #[cfg(test)]
+                        evals,
+                        #[cfg(test)]
+                        reuses,
+                    } => {
+                        #[cfg(test)]
+                        add_eval_counts(evals, reuses);
+                        prefetched_steps.insert(link_idx, result);
+                    }
+                    LeftOutJobOut::Design {
+                        link_indices,
+                        key,
+                        read,
+                        refused,
+                        outside,
+                        again,
+                        #[cfg(test)]
+                        evals,
+                        #[cfg(test)]
+                        reuses,
+                    } => {
+                        #[cfg(test)]
+                        add_eval_counts(evals, reuses);
+                        let within_limit = READING.with(|reading| {
+                            let mut r = reading.borrow_mut();
+                            if r.again >= READ_AGAIN {
+                                // Evict speculative worker entries past the sequential retry
+                                // cutoff so fallback calls enforce `READ_AGAIN` identically.
+                                if let Some(cache) = &r.read {
+                                    cache.remove_ready(&key);
+                                }
+                                return false;
+                            }
+                            r.refused += refused;
+                            r.outside += outside;
+                            r.again += again;
+                            if refused != 0 {
+                                r.again += 1;
+                            }
+                            true
+                        });
+                        if within_limit {
+                            for idx in link_indices {
+                                prefetched_designs.insert(idx, read.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut warnings = Vec::new();
-    for (comp, link) in links {
+    for (link_idx, (comp, link)) in links.into_iter().enumerate() {
+        if solidcraft_doc::progress::cancelled() {
+            break;
+        }
         let name = doc.components.iter().find(|c| c.id == comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
         if !may_read(&resolve(from, &link.path)) {
             READING.with(|reading| reading.borrow_mut().outside += 1);
@@ -444,7 +946,17 @@ pub(super) fn read_left_out_bodies(
             warnings.push(format!("{name} has no bodies yet: its linked {what} is in another folder, and Update Links reads it"));
             continue;
         }
-        let (feature, faces, changed, meshes) = match left_out_bodies(&link, from, step_import_flat(doc, &link), validation) {
+        let read_result = if let Some(step_res) = prefetched_steps.remove(&link_idx) {
+            step_res
+        } else if let Some(design_res) = prefetched_designs.remove(&link_idx) {
+            design_res.map_err(EngineError::Other).map(|(n, kind, body_names, invisible, w, import, faces, digest, meshes)| {
+                let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+                (solidcraft_io::StepFeature { name: n, kind, body_names, invisible, warnings: w, import }, faces, changed, meshes)
+            })
+        } else {
+            left_out_bodies(&link, from, step_import_flat(doc, &link), validation)
+        };
+        let (feature, faces, changed, meshes) = match read_result {
             Ok(read) => read,
             Err(e) => {
                 warnings.push(format!("{name} has no bodies: {e}"));
@@ -464,6 +976,13 @@ pub(super) fn read_left_out_bodies(
             });
         }
         let mut realigned = None;
+        let other_bodies: std::collections::HashSet<String> = doc
+            .features
+            .iter()
+            .filter(|other| other.id != link.feature)
+            .flat_map(|other| other.body_names.iter().filter(|n| !n.is_empty()).cloned())
+            .collect();
+        let mut unpinned_inherited = if !step_file { realign_unpinned_inherited(doc, &link.inherited, &feature.body_names) } else { None };
         if let Some(f) = doc.feature_mut(link.feature) {
             match (&mut f.kind, feature.kind) {
                 // An unchanged STEP file gives back the text it was saved without; the tree,
@@ -474,6 +993,9 @@ pub(super) fn read_left_out_bodies(
                     if f.body_names.len() != feature.body_names.len() {
                         if f.body_names.is_empty() {
                             f.body_names = feature.body_names;
+                            if let Some(next_inherited) = unpinned_inherited.take() {
+                                realigned = Some((next_inherited, Vec::new()));
+                            }
                         } else {
                             let (next_names, next_inherited, removed) = realign_changed_body_count(
                                 "",
@@ -482,6 +1004,7 @@ pub(super) fn read_left_out_bodies(
                                 &f.body_names,
                                 &link.inherited,
                                 &feature.body_names,
+                                &other_bodies,
                             );
                             f.body_names = next_names;
                             realigned = Some((next_inherited, removed));
@@ -496,7 +1019,7 @@ pub(super) fn read_left_out_bodies(
             if !step_file && let Some(kept) = doc.links.get_mut(&comp) {
                 kept.inherited = next_inherited;
             }
-            remove_stale_body_properties(doc, link.feature, &removed);
+            remove_stale_body_properties(doc, link.feature, &removed, &other_bodies);
         }
         // The mesh bodies a linked design brings, left out with its solids. A design that has
         // mesh bodies only since this one was saved has no Mesh Import feature here: the link
@@ -547,16 +1070,16 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
         let reading = reading.borrow();
         (reading.which == LinkedRead::Folder).then(|| reading.opening.get(1).cloned().flatten()).flatten()
     });
-    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by);
-    let known = READING.with(|reading| reading.borrow().read.get(&key).cloned());
-    let read = match known {
-        Some(read) => read,
-        None => {
+    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by, depth);
+    let read = match reading_read_acquire(&key) {
+        ReadAcquire::Ready(read) => *read,
+        acquired => {
             let (refused, again) = READING.with(|reading| {
                 let reading = reading.borrow();
                 (reading.refused, reading.again)
             });
             if again >= READ_AGAIN {
+                drop(acquired);
                 return refuse(format!(
                     "{}: the linked designs saved without bodies link each other in too many ways to read them all; Update Links reads it once the loop is gone",
                     file.display()
@@ -565,14 +1088,18 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
             let read = read_once(&file, from, configuration, validation);
             // What a design gives after a link below it was refused for its place in this chain
             // is not what another chain gets.
-            READING.with(|reading| {
+            let cacheable = READING.with(|reading| {
                 let mut reading = reading.borrow_mut();
                 if reading.refused == refused {
-                    reading.read.insert(key, read.clone());
+                    true
                 } else {
                     reading.again += 1;
+                    false
                 }
             });
+            if let ReadAcquire::Claimed(claim) = acquired {
+                claim.finish(cacheable.then(|| read.clone()));
+            }
             read
         }
     };
@@ -867,6 +1394,43 @@ fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Resu
         let what = needs.unwrap_or_else(|| format!("the importer `{}` is not offered by plugin `{plugin}`", importer.format));
         EngineError::Other(format!("{what}; the component keeps its last bodies"))
     })
+}
+
+/// The caller named `file` for a link: Update Links may read it again in this session, wherever it is.
+pub(super) fn allow_linked_file(s: &mut Session, file: &Path) {
+    s.plugin_state.linked_files.insert(link_target(&absolute(file)));
+}
+
+/// Read the KiCad board a link names again, when its file changed. Whether the component's
+/// bodies were replaced (`true`) or the board is the one the link read (`false`). Nothing
+/// changes when the board can't be read.
+fn update_kicad_link(
+    s: &mut Session,
+    comp: u64,
+    link: &DesignLink,
+    importer: &solidcraft_doc::LinkImporter,
+) -> std::result::Result<(bool, Vec<String>), String> {
+    link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
+    let file = resolve(s.path.as_deref(), &link.path);
+    // The board the import reads: a `.kicad_pro` stands for its same-stem `.kicad_pcb`. That file,
+    // not the one the link names, is judged (its place and every link in its path) and read, once,
+    // and the import builds from those bytes.
+    let board = solidcraft_io::kicad_board_path(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let shown = board.to_string_lossy().into_owned();
+    solidcraft_io::vfs::check_design_path(&shown, s.path.as_deref()).map_err(|e| e.to_string())?;
+    if let Some(why) = importer_file_refusal(s, &file).or_else(|| importer_file_refusal(s, &board)) {
+        return Err(why);
+    }
+    let bytes = read_link(&board, s.path.as_deref(), true).map_err(|e| e.to_string())?;
+    let read = DesignLink::file_digest(&bytes);
+    if link.file_sha256.as_deref() == Some(read.as_str()) {
+        return Ok((false, Vec::new()));
+    }
+    let done = super::file::replace_kicad(s, comp, &shown, bytes, &importer.options).map_err(|e| e.to_string())?;
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+        kept.file_sha256 = Some(done.digest);
+    }
+    Ok((true, done.warnings))
 }
 
 /// Why an importer plugin may not read `file` for a link now, judged from its place alone: it is
@@ -1495,9 +2059,19 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     let mut changed = consolidate_and_prune_linked_materials(s.doc_mut(), &prune_candidates)?;
     prune_candidates.extend(link_inherited_linked_copies(&s.doc));
     let Some(link) = s.doc.links.get(&component).cloned() else { return Ok(false) };
-    let state = s.model.state();
-    let names: Vec<String> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
-    let slots = s.doc.feature(link.feature).map(|f| f.body_name_slots(names.len())).unwrap_or_default();
+    let body_slots: Vec<(String, usize)> = {
+        let state = s.model.state();
+        let alive: std::collections::HashSet<&str> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.as_str()).collect();
+        if let Some(r) = s.model.result(link.feature).filter(|r| r.error.is_none() && !r.skipped && !r.stale) {
+            let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
+            let slots = s.doc.feature(link.feature).map(|f| f.body_name_slots(made.len())).unwrap_or_default();
+            made.into_iter().zip(slots).filter(|(name, _)| alive.contains(name.as_str())).collect()
+        } else {
+            let names: Vec<String> = state.bodies.iter().filter(|b| b.feature == link.feature).map(|b| b.name.clone()).collect();
+            let slots = s.doc.feature(link.feature).map(|f| f.body_name_slots(names.len())).unwrap_or_default();
+            names.into_iter().zip(slots).collect()
+        }
+    };
     let mut inherited = link.inherited.clone();
     inherited.resize(sources.len(), LinkedBodyProperties::default());
     let threads = if sources.iter().any(|source| !source.threads.is_empty()) {
@@ -1511,7 +2085,8 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
         feature.link_threads = threads;
         changed = true;
     }
-    for (name, slot) in names.iter().zip(slots) {
+    for (name, slot) in &body_slots {
+        let slot = *slot;
         let Some(source) = sources.get(slot) else { continue };
         let old = link.inherited.get(slot);
         let old_material = old.filter(|old| !old.material.is_empty());
@@ -1918,6 +2493,26 @@ fn add_design_images(s: &mut Session, comp: u64, component: &str, images: Vec<so
     Ok(())
 }
 
+/// Clone [`Linked`] when multiple linked components share the same updated source file.
+fn clone_linked(linked: &Linked) -> Linked {
+    let (name, sf, faces, metadata, properties, meshes) = linked;
+    (
+        name.clone(),
+        solidcraft_io::StepFeature {
+            name: sf.name.clone(),
+            kind: sf.kind.clone(),
+            body_names: sf.body_names.clone(),
+            invisible: sf.invisible.clone(),
+            warnings: sf.warnings.clone(),
+            import: sf.import.clone(),
+        },
+        faces.clone(),
+        metadata.clone(),
+        properties.clone(),
+        meshes.clone(),
+    )
+}
+
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.update_links";
     let only = match (p.get("component"), p.get("components")) {
@@ -1944,7 +2539,176 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let mut failed: Vec<LinkFailure> = Vec::new();
     let mut read_components = Vec::new();
     let count = links.len();
+    // Pre-read and evaluate distinct changed linked sources in parallel when updating multiple
+    // links at once, then apply every update to `s` in exact deterministic link order. Raw file
+    // bytes are dropped immediately for unchanged and prefetched links and capped so large
+    // assemblies stream excess links sequentially instead of retaining gigabytes in memory.
+    const MAX_UPDATE_PREFETCH_BYTES: usize = 128 << 20;
+    enum PrereadLink {
+        Err(String),
+        Meta { old: ImportSource, file: PathBuf, file_sha256: String, bytes_digest: u64 },
+        Bytes { old: ImportSource, file: PathBuf, file_sha256: String, bytes_digest: u64, bytes: std::sync::Arc<[u8]> },
+    }
+    let mut preread_files: std::collections::HashMap<usize, PrereadLink> = std::collections::HashMap::new();
+    let mut prefetched_sources: std::collections::HashMap<usize, std::result::Result<Linked, String>> = std::collections::HashMap::new();
+    let cores = link_cores();
+    if count > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
+        type SourceKey = (PathBuf, u64, Option<(u64, Option<u64>)>, Option<String>, bool);
+        struct SourceJob {
+            file: PathBuf,
+            bytes: std::sync::Arc<[u8]>,
+            link: DesignLink,
+            flat: bool,
+            link_indices: Vec<usize>,
+        }
+        struct SourceJobOut {
+            link_indices: Vec<usize>,
+            result: Option<std::result::Result<Linked, String>>,
+            #[cfg(test)]
+            evals: usize,
+            #[cfg(test)]
+            reuses: usize,
+        }
+        let mut jobs: Vec<SourceJob> = Vec::new();
+        let mut job_by_key: std::collections::HashMap<SourceKey, usize> = std::collections::HashMap::new();
+        let mut retained_bytes: usize = 0;
+        for (index, (comp, link)) in links.iter().enumerate() {
+            if solidcraft_doc::progress::cancelled() {
+                break;
+            }
+            let Some(cname) = s.doc.components.iter().find(|c| c.id == *comp).map(|c| c.name.as_str()) else {
+                continue;
+            };
+            solidcraft_doc::progress::item(Some((cname, index, count)));
+            if link.path.is_empty() || link.importer.is_some() {
+                continue;
+            }
+            let (old, file, bytes) = match read_linked(s, *comp, link) {
+                Ok(read) => read,
+                Err(e) => {
+                    preread_files.insert(index, PrereadLink::Err(e));
+                    continue;
+                }
+            };
+            let file_sha256 = DesignLink::file_digest(&bytes);
+            let bytes_digest = digest(bytes.as_slice());
+            let kept_faces = s
+                .doc
+                .feature(link.feature)
+                .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
+                .map(|f| digest(f.link_faces.as_slice()));
+            let is_unchanged = kept_faces
+                .and_then(|faces| {
+                    let meshes = link_meshes(s, *comp, link.feature);
+                    unchanged_read(&file, selected_configuration(link), bytes_digest, digest(old.0.as_bytes()), faces, meshes)
+                })
+                .is_some();
+            if is_unchanged {
+                // Drop raw bytes immediately; only the digests are needed in the apply loop.
+                preread_files.insert(index, PrereadLink::Meta { old, file, file_sha256, bytes_digest });
+                continue;
+            }
+            let flat = step_import_flat(&s.doc, link);
+            let key: SourceKey =
+                (absolute(&file), bytes_digest, selected_configuration(link).map(|c| (c.row, c.identity)), link.step_names.clone(), flat);
+            if let Some(&job_idx) = job_by_key.get(&key) {
+                jobs[job_idx].link_indices.push(index);
+                preread_files.insert(index, PrereadLink::Meta { old, file, file_sha256, bytes_digest });
+            } else if retained_bytes.saturating_add(bytes.len()) <= MAX_UPDATE_PREFETCH_BYTES || jobs.is_empty() {
+                let bytes: std::sync::Arc<[u8]> = bytes.into();
+                retained_bytes = retained_bytes.saturating_add(bytes.len());
+                let job_idx = jobs.len();
+                job_by_key.insert(key, job_idx);
+                jobs.push(SourceJob { file: file.clone(), bytes: bytes.clone(), link: link.clone(), flat, link_indices: vec![index] });
+                preread_files.insert(index, PrereadLink::Bytes { old, file, file_sha256, bytes_digest, bytes });
+            }
+        }
+        if jobs.len() > 1 || jobs.iter().any(|j| j.link_indices.len() > 1) {
+            let validation = s.validation();
+            let (parent_opening, parent_which, shared_read) = READING.with(|r| {
+                let r = r.borrow();
+                (r.opening.clone(), r.which, r.read.clone())
+            });
+            let workers = cores.min(jobs.len());
+            let child_budget = (cores / workers.max(1)).max(1);
+            let progress = solidcraft_doc::progress::current();
+            let parent_tid = std::thread::current().id();
+            let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+            let scope = solidcraft_io::vfs::current_scope();
+            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+                let (d, g) = c.enter_pool(parent_tid);
+                (d, Some(g))
+            });
+            let evaluated = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> SourceJobOut {
+                solidcraft_io::vfs::scoped(scope.clone(), || {
+                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                                return SourceJobOut {
+                                    link_indices: job.link_indices.clone(),
+                                    result: None,
+                                    #[cfg(test)]
+                                    evals: 0,
+                                    #[cfg(test)]
+                                    reuses: 0,
+                                };
+                            }
+                            let branch =
+                                BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
+                            let run = || {
+                                source_bodies(&job.file, &job.bytes, &job.link, job.flat, validation).map(|(read, _)| read).map_err(|e| e.to_string())
+                            };
+                            #[cfg(test)]
+                            let (result, evals, reuses) = measure_eval_counts(run);
+                            #[cfg(not(test))]
+                            let result = run();
+                            let _ = branch.finish();
+                            SourceJobOut {
+                                link_indices: job.link_indices.clone(),
+                                result: Some(result),
+                                #[cfg(test)]
+                                evals,
+                                #[cfg(test)]
+                                reuses,
+                            }
+                        })
+                    })
+                })
+            });
+            for out in evaluated.into_iter().flatten() {
+                #[cfg(test)]
+                add_eval_counts(out.evals, out.reuses);
+                let Some(res) = out.result else { continue };
+                // Drop retained raw bytes for every link whose evaluated source is ready.
+                for &idx in &out.link_indices {
+                    if let Some(entry) = preread_files.remove(&idx) {
+                        let downgraded = match entry {
+                            PrereadLink::Bytes { old, file, file_sha256, bytes_digest, .. } => {
+                                PrereadLink::Meta { old, file, file_sha256, bytes_digest }
+                            }
+                            other => other,
+                        };
+                        preread_files.insert(idx, downgraded);
+                    }
+                }
+                if let Some((&first, rest)) = out.link_indices.split_first() {
+                    for &idx in rest {
+                        let cloned = match &res {
+                            Ok(linked) => Ok(clone_linked(linked)),
+                            Err(e) => Err(e.clone()),
+                        };
+                        prefetched_sources.insert(idx, cloned);
+                    }
+                    prefetched_sources.insert(first, res);
+                }
+            }
+        }
+    }
     for (index, (comp, link)) in links.into_iter().enumerate() {
+        if solidcraft_doc::progress::cancelled() {
+            break;
+        }
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
         let Some(cname) = cname else {
             // The component was deleted: the link goes with it.
@@ -1959,18 +2723,53 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             warnings.push(format!("{cname} keeps its bodies: its design came from this session and has no file yet"));
             continue;
         }
-        let (old, file, bytes) = match read_linked(s, comp, &link) {
-            Ok(read) => read,
-            Err(e) if go_on => {
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
-                warnings.push(format!("{cname} keeps its bodies: {e}"));
-                continue;
+        // A KiCad board is read by SolidCraft itself, with the options it was opened with.
+        if let Some(importer) = link.importer.as_ref().filter(|i| i.is_kicad()) {
+            match update_kicad_link(s, comp, &link, importer) {
+                Ok((true, notes)) => {
+                    warnings.extend(notes);
+                    updated.push(cname);
+                    read_components.push(comp);
+                }
+                Ok((false, _)) => {
+                    unchanged.push(cname);
+                    read_components.push(comp);
+                }
+                Err(e) if go_on => {
+                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                    warnings.push(format!("{cname} keeps its bodies: {e}"));
+                }
+                Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
             }
-            Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+            continue;
+        }
+        let (old, file, read, bytes_digest, raw_bytes) = match preread_files.remove(&index) {
+            Some(PrereadLink::Meta { old, file, file_sha256, bytes_digest }) => (old, file, file_sha256, bytes_digest, None),
+            Some(PrereadLink::Bytes { old, file, file_sha256, bytes_digest, bytes }) => (old, file, file_sha256, bytes_digest, Some(bytes)),
+            Some(PrereadLink::Err(e)) => {
+                if go_on {
+                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                    warnings.push(format!("{cname} keeps its bodies: {e}"));
+                    continue;
+                }
+                return Err(bad(cmd, format!("{cname}: {e}")));
+            }
+            None => match read_linked(s, comp, &link) {
+                Ok((old, file, bytes)) => {
+                    let read = DesignLink::file_digest(&bytes);
+                    let bytes_digest = digest(bytes.as_slice());
+                    (old, file, read, bytes_digest, Some(std::sync::Arc::from(bytes)))
+                }
+                Err(e) if go_on => {
+                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                    warnings.push(format!("{cname} keeps its bodies: {e}"));
+                    continue;
+                }
+                Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+            },
         };
         // The link keeps what it read, so opening this design again knows whether the file
         // changed while it was closed (#9739).
-        let read = DesignLink::file_digest(&bytes);
         let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
         if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
             kept.file_sha256 = Some(read);
@@ -1990,7 +2789,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
             let meshes = link_meshes(s, comp, link.feature);
-            unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces, meshes)
+            unchanged_read(&file, selected_configuration(&link), bytes_digest, digest(old.0.as_bytes()), faces, meshes)
         }) {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
@@ -2005,14 +2804,22 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match linked_bodies(s, comp, &file, &bytes, &link) {
-            Ok((read, _)) => read,
+        let source_res = match prefetched_sources.remove(&index) {
+            Some(res) => res,
+            None => match raw_bytes {
+                Some(bytes) => linked_bodies(s, comp, &file, &bytes, &link).map(|(read, _)| read).map_err(|e| e.to_string()),
+                None => read_linked(s, comp, &link)
+                    .and_then(|(_, file, bytes)| linked_bodies(s, comp, &file, &bytes, &link).map(|(read, _)| read).map_err(|e| e.to_string())),
+            },
+        };
+        let (_, sf, faces, metadata, properties, meshes) = match source_res {
+            Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                     kept.file_sha256.clone_from(&link.file_sha256);
                 }
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.to_string() });
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
                 warnings.push(format!("{cname} keeps its bodies: {e}"));
                 continue;
             }
@@ -2036,10 +2843,18 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The same bodies, their faces named for the first time (a link made before names were
         // kept): nothing a reference finds changes. Names the design gave other faces since do.
         let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
+        // Joints on faces told apart only by a positional tie number, and where they were, so a
+        // shift this update gives them is said instead of passing unnoticed.
+        let tie_before = if same { Vec::new() } else { snapshot_tie_numbered_joints(s, comp, link.feature) };
         if !same {
             for name in numbered_references(s, comp, link.feature) {
                 warnings.push(format!(
                     "{name} refers to faces of {cname} by their place in the linked file, which this update can change: check it, and pick its faces again so it follows them by name"
+                ));
+            }
+            for name in tie_numbered_origin_references(s, comp, link.feature) {
+                warnings.push(format!(
+                    "{name} refers to a positional tie-numbered face of {cname}, which can shift when sibling faces are added or removed: check it, and pick its face again"
                 ));
             }
         }
@@ -2048,22 +2863,40 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
         let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
         let before = s.model.result(link.feature).map(|r| r.state.clone());
+        let (old_names, other_bodies) = feature_body_context(s, link.feature);
+        let mut unpinned_inherited = if old_names.is_empty() && link.step_names.is_none() {
+            realign_unpinned_inherited(&s.doc, &link.inherited, &sf.body_names)
+        } else {
+            None
+        };
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
                 // Bodies keep their names where the design still has as many, also when it lists
                 // them in another order (#21371).
-                if f.body_names.len() != sf.body_names.len() {
-                    if f.body_names.is_empty() {
+                if old_names.len() != sf.body_names.len() {
+                    if old_names.is_empty() {
                         f.body_names = sf.body_names;
+                        if let Some(next_inherited) = unpinned_inherited.take() {
+                            realigned = Some((next_inherited, Vec::new()));
+                        }
                     } else {
-                        let (next_names, next_inherited, removed) =
-                            realign_changed_body_count(&old.0, &file.display().to_string(), naming, &f.body_names, &link.inherited, &sf.body_names);
+                        let (next_names, next_inherited, removed) = realign_changed_body_count(
+                            &old.0,
+                            &file.display().to_string(),
+                            naming,
+                            &old_names,
+                            &link.inherited,
+                            &sf.body_names,
+                            &other_bodies,
+                        );
                         f.body_names = next_names;
                         realigned = Some((next_inherited, removed));
                     }
                 } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &sf.body_names) {
-                    f.body_names = reordered(&f.body_names, &order);
+                    f.body_names = reordered(&old_names, &order);
                     moved = Some(order);
+                } else if f.body_names.is_empty() && !old_names.is_empty() {
+                    f.body_names = old_names;
                 }
                 f.kind = sf.kind;
             }
@@ -2077,10 +2910,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             {
                 kept.inherited = next_inherited;
             }
-            remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
+            remove_stale_body_properties(s.doc_mut(), link.feature, &removed, &other_bodies);
         } else if let Some(order) = moved
             && let Some(kept) = s.doc_mut().links.get_mut(&comp)
-            && kept.inherited.len() == order.len()
+            && !kept.inherited.is_empty()
         {
             kept.inherited = reordered(&kept.inherited, &order);
         }
@@ -2088,6 +2921,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         if !same && let (Some(before), Some(after)) = (before, s.model.result(link.feature).map(|r| r.state.clone())) {
             warnings.extend(s.doc_mut().rebind_linked_faces(link.feature, &before, &after));
             s.refresh();
+        }
+        if !tie_before.is_empty() {
+            warnings.extend(tie_numbered_joint_warnings(s, &cname, &tie_before));
         }
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed {
@@ -2202,6 +3038,93 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     joints.chain(origins).collect()
 }
 
+/// A joint side on a linked component referencing a positional tie-numbered linked face
+/// (`F<feature>:link:<digest>#<k>`), captured before `component.update_links` replaces the bodies.
+struct TieNumberedJointSide {
+    joint_id: u64,
+    joint_name: String,
+    is_a: bool,
+    face_name: String,
+    before: Option<solidcraft_doc::Mat>,
+}
+
+/// Snapshot every joint side on occurrences of `comp` that references a positional tie-numbered
+/// linked face of `feature`, together with its resolved origin frame before the update.
+fn snapshot_tie_numbered_joints(s: &Session, comp: u64, feature: u64) -> Vec<TieNumberedJointSide> {
+    let st = s.model.state();
+    let tie_face = |o: &solidcraft_doc::joints::JointOrigin| -> Option<String> {
+        if !s.doc.occurrences.iter().any(|x| x.id == o.part() && s.doc.component_within(x.component, comp)) {
+            return None;
+        }
+        o.snap.face_names().into_iter().find(|n| solidcraft_doc::naming::has_tie_numbered_link_face(n.as_str(), feature)).cloned()
+    };
+    let mut out = Vec::new();
+    for j in &s.doc.assembly.joints {
+        for (is_a, side) in [(true, &j.a), (false, &j.b)] {
+            if let Some(face_name) = tie_face(side) {
+                let before = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side).ok();
+                out.push(TieNumberedJointSide { joint_id: j.id, joint_name: j.name.clone(), is_a, face_name, before });
+            }
+        }
+    }
+    out
+}
+
+/// Named joint origins on occurrences of `comp` that reference a positional tie-numbered linked
+/// face of `feature`.
+fn tie_numbered_origin_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
+    s.doc
+        .assembly
+        .origins
+        .iter()
+        .filter(|o| {
+            s.doc.occurrences.iter().any(|x| x.id == o.origin.part() && s.doc.component_within(x.component, comp))
+                && o.origin.snap.face_names().iter().any(|n| solidcraft_doc::naming::has_tie_numbered_link_face(n.as_str(), feature))
+        })
+        .map(|o| format!("joint origin {}", o.name))
+        .collect()
+}
+
+/// Warnings for joints that still resolve through a positional tie-numbered linked face after
+/// `component.update_links` (missing faces are reported as joint errors instead). Reports the
+/// exact shift distance and/or tilt angle whenever the resolved origin moved or tilted.
+fn tie_numbered_joint_warnings(s: &Session, cname: &str, sides: &[TieNumberedJointSide]) -> Vec<String> {
+    let st = s.model.state();
+    let mut out = Vec::new();
+    for entry in sides {
+        let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == entry.joint_id) else { continue };
+        let side = if entry.is_a { &j.a } else { &j.b };
+        let Ok(after) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side) else { continue };
+        let moved = entry.before.and_then(|before| {
+            let (dx, dy, dz) = (after[3][0] - before[3][0], after[3][1] - before[3][1], after[3][2] - before[3][2]);
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            let dot = before[2][0] * after[2][0] + before[2][1] * after[2][1] + before[2][2] * after[2][2];
+            let shifted = dist > 1e-3;
+            let tilted = dot < 1.0 - 1e-4;
+            (shifted || tilted).then(|| (shifted.then_some(dist), tilted.then(|| dot.clamp(-1.0, 1.0).acos().to_degrees())))
+        });
+        match moved {
+            Some((Some(dist), Some(deg))) => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`) that shifted by {dist:.2} mm and tilted by {deg:.1}° in this update: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+            Some((Some(dist), None)) => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`) that shifted by {dist:.2} mm in this update: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+            Some((None, Some(deg))) => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`) that tilted by {deg:.1}° in this update: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+            _ => out.push(format!(
+                "joint {} refers to a positional tie-numbered face of {cname} (`{}`), which can shift when sibling faces are added or removed: check it, and pick its face again",
+                entry.joint_name, entry.face_name
+            )),
+        }
+    }
+    out
+}
+
 /// Where each body of a link's design was when the link last read it, for a design that kept
 /// its number of bodies but lists them in another order (#21371): `order[j]` is the place the
 /// design's body `j` had then. `step` is the STEP the link keeps from that read, which names the
@@ -2244,6 +3167,58 @@ fn unique_name_slots(names: &[String]) -> std::collections::HashMap<&str, usize>
     names.iter().enumerate().filter(|(_, name)| counts.get(name.as_str()) == Some(&1)).map(|(k, name)| (name.as_str(), k)).collect()
 }
 
+/// Effective per-slot body names produced by `feature` in the current evaluated model (falling
+/// back to stored `f.body_names` for skipped or unevaluated slots), plus all body names currently
+/// owned by other features.
+fn feature_body_context(s: &Session, feature: u64) -> (Vec<String>, std::collections::HashSet<String>) {
+    let mut effective = s.doc.feature(feature).map(|f| f.body_names.clone()).unwrap_or_default();
+    if let Some(f) = s.doc.feature(feature)
+        && let Some(r) = s.model.result(feature).filter(|r| r.error.is_none() && !r.skipped && !r.stale)
+    {
+        let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == feature).map(|b| b.name.clone()).collect();
+        let slots = f.body_name_slots(made.len());
+        if let Some(last) = slots.last().copied()
+            && effective.len() <= last
+        {
+            effective.resize(last + 1, String::new());
+        }
+        for (slot, name) in slots.into_iter().zip(made) {
+            if let Some(entry) = effective.get_mut(slot) {
+                *entry = name;
+            }
+        }
+    }
+    let mut other_bodies: std::collections::HashSet<String> =
+        s.model.state().bodies.iter().filter(|b| b.feature != feature).map(|b| b.name.clone()).collect();
+    for f in &s.doc.features {
+        if f.id != feature {
+            other_bodies.extend(f.body_names.iter().filter(|n| !n.is_empty()).cloned());
+        }
+    }
+    (effective, other_bodies)
+}
+
+/// When a link has no stored or evaluated body names yet (e.g. a file saved without linked bodies
+/// and empty `body_names`), keep its existing `inherited` baseline when the body count still
+/// matches; if the count changed, keep baselines only for slots whose names already exist in
+/// `doc.materials` and give brand-new body names a fresh baseline so they inherit from the source.
+fn realign_unpinned_inherited(doc: &Document, old_inherited: &[LinkedBodyProperties], new_names: &[String]) -> Option<Vec<LinkedBodyProperties>> {
+    if old_inherited.is_empty() || old_inherited.len() == new_names.len() {
+        return None;
+    }
+    Some(
+        new_names
+            .iter()
+            .enumerate()
+            .map(
+                |(i, name)| {
+                    if doc.materials.contains_key(name) { old_inherited.get(i).cloned().unwrap_or_default() } else { LinkedBodyProperties::default() }
+                },
+            )
+            .collect(),
+    )
+}
+
 /// Match each body of a linked design whose body count changed to its prior slot, if any.
 /// Surviving bodies keep their assembly name and inherited baseline (preserving local overrides);
 /// new bodies get a fresh baseline (`LinkedBodyProperties::default()`) so [`inherit_properties`]
@@ -2256,6 +3231,7 @@ fn realign_changed_body_count(
     old_names: &[String],
     old_inherited: &[LinkedBodyProperties],
     new_names: &[String],
+    other_bodies: &std::collections::HashSet<String>,
 ) -> (Vec<String>, Vec<LinkedBodyProperties>, Vec<String>) {
     let old_source: Option<Vec<String>> = (!old_step.is_empty())
         .then(|| solidcraft_io::step_import_feature_named(old_step.as_bytes(), file, naming).ok().map(|f| f.body_names))
@@ -2285,9 +3261,11 @@ fn realign_changed_body_count(
         }
     }
 
-    // Pass 2: assign surviving bodies their stored names and baselines; give unmatched new bodies
-    // a fresh baseline and a name that cannot collide with any surviving body's stored name.
+    // Pass 2: assign surviving bodies their effective names and baselines; give unmatched new
+    // bodies a fresh baseline and a name that cannot collide with any surviving body or another
+    // feature's body.
     let mut reserved = claimed_names.clone();
+    reserved.extend(other_bodies.iter().cloned());
     let mut next_names = Vec::with_capacity(new_names.len());
     let mut next_inherited = Vec::with_capacity(new_names.len());
     for (name, matched) in new_names.iter().zip(matches) {
@@ -2327,7 +3305,7 @@ fn realign_changed_body_count(
 
 /// Remove per-body material, appearance and metadata entries for bodies that a linked feature no
 /// longer builds, leaving any name still owned by another feature or `body_components` alone.
-fn remove_stale_body_properties(doc: &mut Document, feature: u64, removed: &[String]) {
+fn remove_stale_body_properties(doc: &mut Document, feature: u64, removed: &[String], other_bodies: &std::collections::HashSet<String>) {
     if removed.is_empty() {
         return;
     }
@@ -2337,6 +3315,7 @@ fn remove_stale_body_properties(doc: &mut Document, feature: u64, removed: &[Str
             .iter()
             .filter(|f| f.id != feature)
             .flat_map(|f| f.body_names.iter().map(String::as_str))
+            .chain(other_bodies.iter().map(String::as_str))
             .chain(doc.body_components.keys().map(String::as_str))
             .collect();
         removed.iter().map(String::as_str).filter(|name| !still_used.contains(name)).collect()
@@ -2417,11 +3396,16 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut inherited = link.inherited.clone();
     let mut removed = Vec::new();
+    let (old_names, other_bodies) = feature_body_context(s, link.feature);
+    let mut unpinned_inherited = if old_names.is_empty() { realign_unpinned_inherited(&s.doc, &inherited, &sf.body_names) } else { None };
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
         // Both modes start as Relink always did; `sync` renames the bodies below.
-        if f.body_names.len() != sf.body_names.len() {
-            if f.body_names.is_empty() {
+        if old_names.len() != sf.body_names.len() {
+            if old_names.is_empty() {
                 f.body_names = sf.body_names;
+                if let Some(next_inherited) = unpinned_inherited.take() {
+                    inherited = next_inherited;
+                }
             } else {
                 let old_step = match &f.kind {
                     FeatureKind::Import { step, .. } => step.as_ref(),
@@ -2431,9 +3415,10 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
                     old_step,
                     &file.display().to_string(),
                     solidcraft_io::StepNames::default(),
-                    &f.body_names,
+                    &old_names,
                     &inherited,
                     &sf.body_names,
+                    &other_bodies,
                 );
                 f.body_names = next_names;
                 inherited = next_inherited;
@@ -2444,15 +3429,17 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
         {
             // The names, and what the link last took from each body, stay with their bodies (#21371).
-            f.body_names = reordered(&f.body_names, &order);
-            if inherited.len() == order.len() {
+            f.body_names = reordered(&old_names, &order);
+            if !inherited.is_empty() {
                 inherited = reordered(&inherited, &order);
             }
+        } else if f.body_names.is_empty() && !old_names.is_empty() {
+            f.body_names = old_names;
         }
         f.kind = sf.kind;
         f.link_faces = faces;
     }
-    remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
+    remove_stale_body_properties(s.doc_mut(), link.feature, &removed, &other_bodies);
     let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
     set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)?;
     s.doc_mut().links.insert(
@@ -2653,6 +3640,7 @@ fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
     let plain =
         |format: &str| LinkSource { format: format.into(), plugin: None, version: None, available: None, installed_version: None, needs: None };
     match (&link.importer, &link.step_names) {
+        (Some(i), _) if i.is_kicad() => Some(plain(&i.format)),
         (Some(i), _) => {
             let Some(plugin) = &i.plugin else {
                 return Some(LinkSource {
@@ -3796,6 +4784,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A joint referencing a positional tie-numbered linked face (`F<id>:link:<hash>#<k>`) must
+    /// warn with the shift distance when `component.update_links` moves that face, never silently
+    /// sliding onto another location.
+    #[test]
+    fn tie_numbered_linked_face_shift_emits_warning_with_distance() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-tie-warn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft");
+        let mut part = plate(&path);
+        let mut s = pinned(&path, false);
+        let (&comp, link) = s.doc.links.iter().next().unwrap();
+        let feature = link.feature;
+
+        // Simulate a positional tie-numbered carried face (`#2`) on the linked plate's bore wall.
+        let mut carried = s.doc.feature(feature).unwrap().link_faces.clone();
+        for body in &mut carried {
+            for face in body {
+                if face.contains(":side") && !face.contains('#') {
+                    face.push_str("#2");
+                }
+            }
+        }
+        s.doc_mut().feature_mut(feature).unwrap().link_faces = carried;
+        s.refresh();
+        let tie_name = {
+            let st = s.model.state();
+            let b = st.bodies.iter().find(|b| b.feature == feature).unwrap();
+            solidcraft_doc::naming::face_names(b)
+                .iter()
+                .find(|n| solidcraft_doc::naming::is_tie_numbered_link_face(n.as_str(), feature))
+                .cloned()
+                .unwrap()
+        };
+        if let solidcraft_doc::joints::Snap::CircleCenter { face, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+            *face = Some(tie_name);
+        }
+        s.refresh();
+
+        let before = snapshot_tie_numbered_joints(&s, comp, feature);
+        assert_eq!(before.len(), 1);
+        assert!(before[0].before.is_some());
+
+        // Move the hole by 30 mm (`hx: 10 mm -> -20 mm`) while keeping the same tie-numbered name.
+        run(&mut part, "parameters.change", json!({"name": "hx", "expression": "-20 mm"}));
+        run(&mut part, "file.save", json!({"path": path}));
+        let update = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(update["updated"], json!(["Plate"]), "{update}");
+        // Re-apply the tie-numbered carried name on the updated import and check the shift warning.
+        let mut after_carried = s.doc.feature(feature).unwrap().link_faces.clone();
+        for body in &mut after_carried {
+            for face in body {
+                if face.contains(":side") && !face.contains('#') {
+                    face.push_str("#2");
+                }
+            }
+        }
+        s.doc_mut().feature_mut(feature).unwrap().link_faces = after_carried;
+        s.refresh();
+        let warnings = tie_numbered_joint_warnings(&s, "Plate", &before);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("joint PinInHole") && warnings[0].contains("shifted by 30.00 mm"), "{warnings:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A part holding one pin, a cylinder beside the Z axis, saved as `path`.
     fn save_pin(path: &Path) {
         let mut part = Session::default();
@@ -4231,5 +5284,399 @@ mod tests {
         s.doc_mut().body_components.insert("Shared".into(), comp);
         run(&mut s, "component.delete", json!({"component": comp}));
         assert_eq!(s.doc.body_material("Shared"), "Brass");
+    }
+
+    #[test]
+    fn parallel_left_out_open_and_update_links_are_deterministic_and_deduplicate_shared_parts() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let shared = dir.join("shared.sc");
+        save_box(&shared, 10.0);
+
+        // Create 4 distinct sub-assemblies saved without linked bodies, each linking `shared.sc`
+        // plus its own unique box, forming a 4-way diamond dependency tree.
+        let mut subs = Vec::new();
+        for k in 0..4 {
+            let sub_path = dir.join(format!("sub_{k}.sc"));
+            let mut sub = Session::default();
+            run(&mut sub, "solid.box", json!({"length": 10 + k * 2, "width": 10, "height": 10, "body_name": format!("SubBox{k}")}));
+            run(&mut sub, "component.insert_design", json!({"path": shared, "name": "Shared", "translate": [30, 0, 0]}));
+            run(&mut sub, "file.save", json!({"path": sub_path, "linked_bodies": false}));
+            subs.push(sub_path);
+        }
+
+        // Top-level assembly linking all 4 sub-assemblies (plus a duplicate link to sub_0), saved
+        // with `linked_bodies: false`.
+        let top_path = dir.join("top.sc");
+        let mut top = Session::default();
+        for (k, sub) in subs.iter().enumerate() {
+            run(&mut top, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+        }
+        run(&mut top, "component.insert_design", json!({"path": &subs[0], "name": "Sub0Dup", "translate": [0, 300, 0]}));
+        run(&mut top, "file.save", json!({"path": top_path, "linked_bodies": false}));
+
+        // Opening the top assembly in parallel must evaluate each distinct sub-assembly once and
+        // the shared diamond part once (4 subs + 1 shared = 5), matching an inline reference build.
+        let reset_evals = || EVALUATED.with(|n| n.replace(0));
+        reset_evals();
+        let mut opened = Session::default();
+        let open_reply = run(&mut opened, "doc.open", json!({"path": top_path}));
+        assert_eq!(open_reply["errors"], 0, "{open_reply}");
+        assert_eq!(reset_evals(), 5, "4 distinct sub-assemblies + 1 shared diamond part must be evaluated exactly once");
+
+        let snapshot = |s: &Session| -> Vec<(String, u64, u64, Vec<String>)> {
+            s.model
+                .state()
+                .bodies
+                .iter()
+                .map(|b| {
+                    let m = solidcraft_kernel::measure(&b.body).unwrap();
+                    (b.name.clone(), m.volume.to_bits(), m.area.to_bits(), (*solidcraft_doc::naming::face_names(b)).clone())
+                })
+                .collect()
+        };
+        assert_eq!(snapshot(&opened), snapshot(&top), "parallel left-out open must match reference bit-for-bit");
+
+        // Now modify 3 of the 4 leaf part designs in a direct multi-link assembly and verify
+        // parallel `component.update_links` updates them deterministically, deduplicates shared
+        // links, and reports failures in exact link order.
+        let mut leaves = Vec::new();
+        for k in 0..4 {
+            let p = dir.join(format!("leaf_{k}.sc"));
+            save_box(&p, 10.0 + k as f64 * 5.0);
+            leaves.push(p);
+        }
+        let mut multi = Session::default();
+        for (k, leaf) in leaves.iter().enumerate() {
+            run(&mut multi, "component.insert_design", json!({"path": leaf, "name": format!("Leaf{k}"), "translate": [k * 50, 0, 0]}));
+        }
+        // Second component pointing at leaf_0 (must be deduplicated during update_links).
+        run(&mut multi, "component.insert_design", json!({"path": &leaves[0], "name": "Leaf0Copy", "translate": [250, 0, 0]}));
+
+        // Edit leaf_0, leaf_1, and leaf_2; leave leaf_3 unchanged.
+        save_box(&leaves[0], 20.0);
+        save_box(&leaves[1], 25.0);
+        save_box(&leaves[2], 30.0);
+
+        reset_evals();
+        let upd = run(&mut multi, "component.update_links", json!({}));
+        assert_eq!(upd["updated"], json!(["Leaf0", "Leaf1", "Leaf2", "Leaf0Copy"]), "{upd}");
+        assert_eq!(upd["unchanged"], json!(["Leaf3"]), "{upd}");
+        assert_eq!(reset_evals(), 3, "3 distinct edited leaves must be evaluated once each (Leaf0Copy deduplicated)");
+
+        // Expected total volume: 20*20*10 + 25*20*10 + 30*20*10 + 25*20*10 + 20*20*10 (wait: save_box is L x 20 x 10).
+        let mut seq = Session::default();
+        for (k, leaf) in leaves.iter().enumerate() {
+            run(&mut seq, "component.insert_design", json!({"path": leaf, "name": format!("Leaf{k}"), "translate": [k * 50, 0, 0]}));
+        }
+        run(&mut seq, "component.insert_design", json!({"path": &leaves[0], "name": "Leaf0Copy", "translate": [250, 0, 0]}));
+        assert!((volume(&mut multi) - volume(&mut seq)).abs() < 1e-6, "multi={} seq={}", volume(&mut multi), volume(&mut seq));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two sub-assemblies in `dir/subs`, saved without linked bodies, each linking its own part
+    /// in `dir/leaves` (`length` sizes the sub-assembly's own box).
+    fn save_scoped_subs(dir: &Path, length: f64) -> Vec<std::path::PathBuf> {
+        std::fs::create_dir_all(dir.join("subs")).unwrap();
+        std::fs::create_dir_all(dir.join("leaves")).unwrap();
+        (0..2)
+            .map(|k| {
+                let leaf = dir.join(format!("leaves/leaf_{k}.sc"));
+                if !leaf.exists() {
+                    save_box(&leaf, 10.0);
+                }
+                let mut sub = Session::default();
+                run(&mut sub, "solid.box", json!({"length": length, "width": 10, "height": 10, "body_name": format!("SubBox{k}")}));
+                run(&mut sub, "component.insert_design", json!({"path": leaf, "name": "Leaf", "translate": [30, 0, 0]}));
+                let path = dir.join(format!("subs/sub_{k}.sc"));
+                run(&mut sub, "file.save", json!({"path": path, "linked_bodies": false}));
+                path
+            })
+            .collect()
+    }
+
+    #[test]
+    fn opening_without_linked_bodies_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let mut top = Session::default();
+        for (k, sub) in subs.iter().enumerate() {
+            run(&mut top, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+        }
+        let top_path = dir.join("top.sc");
+        run(&mut top, "file.save", json!({"path": top_path, "linked_bodies": false}));
+        let bytes = std::fs::read(&top_path).unwrap();
+        let path = top_path.to_string_lossy().into_owned();
+        let open = || {
+            let doc = solidcraft_io::read_design(&bytes).unwrap();
+            Session::opened_at_validating(doc, None, Some(&path), Session::default().validation())
+        };
+        // The two sub-assemblies are read on worker threads, each reading its part there.
+        assert_eq!(open().model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let names: Vec<String> = solidcraft_io::vfs::scoped(Some(scope), open).model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(!names.iter().any(|n| n.starts_with("Plate")), "the parts outside the scope must not be read: {names:?}");
+        // An empty scope refuses both sub-assemblies.
+        assert_eq!(solidcraft_io::vfs::scoped(Some(Default::default()), open).model.state().bodies.len(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_links_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let assembly = || {
+            let mut s = Session::default();
+            for (k, sub) in subs.iter().enumerate() {
+                run(&mut s, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+            }
+            s
+        };
+        let (mut free, mut confined) = (assembly(), assembly());
+        assert_eq!(free.model.state().bodies.len(), 4);
+        save_scoped_subs(&dir, 20.0);
+        // Both changed sub-assemblies are read again on worker threads, each reading its part.
+        assert_eq!(run(&mut free, "component.update_links", json!({}))["updated"], json!(["Sub0", "Sub1"]));
+        assert_eq!(free.model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || confined.execute("component.update_links", &json!({})));
+        let err = refused.expect_err("the parts outside the scope must not be read").to_string();
+        assert!(err.contains("leaf_0.sc"), "{err}");
+        assert_eq!(confined.model.state().bodies.len(), 4, "a refused update keeps what the design had");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relink_nested_subassembly_preserves_materials_across_two_levels() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-nested-relink-mat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let p1 = dir.join("p1.sc");
+        let p2 = dir.join("p2.sc");
+        let sa1 = dir.join("sa1.sc");
+        let sa1_v2 = dir.join("sa1_v2.sc");
+        let sa0 = dir.join("sa0.sc");
+        let sa0_v2 = dir.join("sa0_v2.sc");
+
+        save_material_boxes(&p1, &[("InnerPart", 0.0, "Aluminum")]);
+        save_material_boxes(&p2, &[("InnerA", 0.0, "Steel"), ("InnerB", 20.0, "Copper")]);
+
+        let mut sa1_doc = Session::default();
+        let p1_comp = run(&mut sa1_doc, "component.insert_design", json!({"path": p1}))["component"].as_u64().unwrap();
+        run(&mut sa1_doc, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "SubFrame"}));
+        run(&mut sa1_doc, "material.assign", json!({"bodies": ["SubFrame"], "material": "Brass"}));
+        run(&mut sa1_doc, "file.save", json!({"path": sa1}));
+
+        run(&mut sa1_doc, "component.relink", json!({"component": p1_comp, "path": p2}));
+        run(&mut sa1_doc, "file.save_as", json!({"path": sa1_v2}));
+        assert!(
+            sa1_doc.model.state().bodies.iter().all(|b| sa1_doc.doc.body_material(&b.name) != solidcraft_doc::DEFAULT_MATERIAL),
+            "sa1_v2 must have no Default materials"
+        );
+
+        let mut sa0_doc = Session::default();
+        let sa1_comp = run(&mut sa0_doc, "component.insert_design", json!({"path": sa1}))["component"].as_u64().unwrap();
+        run(&mut sa0_doc, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "body_name": "Housing"}));
+        run(&mut sa0_doc, "material.assign", json!({"bodies": ["Housing"], "material": "Titanium"}));
+        run(&mut sa0_doc, "file.save", json!({"path": sa0}));
+
+        run(&mut sa0_doc, "component.relink", json!({"component": sa1_comp, "path": sa1_v2}));
+        run(&mut sa0_doc, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "body_name": "AddedPart"}));
+        run(&mut sa0_doc, "material.assign", json!({"bodies": ["AddedPart"], "material": "Oak"}));
+        run(&mut sa0_doc, "file.save_as", json!({"path": sa0_v2}));
+        assert!(
+            sa0_doc.model.state().bodies.iter().all(|b| sa0_doc.doc.body_material(&b.name) != solidcraft_doc::DEFAULT_MATERIAL),
+            "sa0_v2 must have no Default materials"
+        );
+
+        let mut top = Session::default();
+        let sa0_comp = run(&mut top, "component.insert_design", json!({"path": sa0}))["component"].as_u64().unwrap();
+        // Local override on a surviving body must survive the nested relink.
+        run(&mut top, "material.assign", json!({"bodies": ["Housing"], "material": "Glass"}));
+
+        run(&mut top, "component.relink", json!({"component": sa0_comp, "path": sa0_v2}));
+        let expected = std::collections::BTreeMap::from([
+            ("AddedPart".into(), "Oak".into()),
+            ("Housing".into(), "Glass".into()),
+            ("InnerA".into(), "Steel".into()),
+            ("InnerB".into(), "Copper".into()),
+            ("SubFrame".into(), "Brass".into()),
+        ]);
+        assert_eq!(component_materials(&top, sa0_comp), expected);
+        assert!(!top.doc.materials.contains_key("InnerPart"), "removed grandchild body material must be pruned");
+
+        let props = run(&mut top, "component.properties", json!({"component": sa0_comp}));
+        let expected_mass: f64 = expected.values().map(|m| solidcraft_doc::material_density(m).unwrap()).sum();
+        assert!(
+            props["bodies"].as_array().unwrap().iter().all(|b| b["material"] != solidcraft_doc::DEFAULT_MATERIAL),
+            "top assembly must have zero Default materials after nested relink: {props}"
+        );
+        assert!((props["total"]["mass_g"].as_f64().unwrap() - expected_mass).abs() < 1e-6, "mass mismatch: {props}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relink_nested_subassembly_preserves_materials_with_disambiguated_and_duplicate_names() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-nested-disambig-mat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("v1")).unwrap();
+        std::fs::create_dir_all(dir.join("v2")).unwrap();
+
+        // Case 1: 2-level nested relink where a surviving body was disambiguated in Top ("Plate (2)")
+        // because Top already owns "Plate", and the new grandchild introduces a body named "Plate (2)"
+        // ahead of surviving "Plate".
+        let p1 = dir.join("p1.sc");
+        let p2 = dir.join("p2.sc");
+        let sa1 = dir.join("sa1.sc");
+        let sa1_v2 = dir.join("sa1_v2.sc");
+        let sa0 = dir.join("sa0.sc");
+        let sa0_v2 = dir.join("sa0_v2.sc");
+
+        save_material_boxes(&p1, &[("Plate", 0.0, "Aluminum")]);
+        save_material_boxes(&p2, &[("Plate (2)", 0.0, "Copper"), ("Plate", 20.0, "Aluminum")]);
+
+        let mut sa1_doc = Session::default();
+        let p1_comp = run(&mut sa1_doc, "component.insert_design", json!({"path": p1}))["component"].as_u64().unwrap();
+        run(&mut sa1_doc, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Base"}));
+        run(&mut sa1_doc, "material.assign", json!({"bodies": ["Base"], "material": "Steel"}));
+        run(&mut sa1_doc, "file.save", json!({"path": sa1}));
+
+        run(&mut sa1_doc, "component.relink", json!({"component": p1_comp, "path": p2}));
+        run(&mut sa1_doc, "file.save_as", json!({"path": sa1_v2}));
+
+        let mut sa0_doc = Session::default();
+        let sa1_comp = run(&mut sa0_doc, "component.insert_design", json!({"path": sa1}))["component"].as_u64().unwrap();
+        run(&mut sa0_doc, "file.save", json!({"path": sa0}));
+
+        run(&mut sa0_doc, "component.relink", json!({"component": sa1_comp, "path": sa1_v2}));
+        run(&mut sa0_doc, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "body_name": "Extra"}));
+        run(&mut sa0_doc, "material.assign", json!({"bodies": ["Extra"], "material": "Titanium"}));
+        run(&mut sa0_doc, "file.save_as", json!({"path": sa0_v2}));
+
+        let mut top = Session::default();
+        run(&mut top, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-40, 0, 0], "body_name": "Plate"}));
+        run(&mut top, "material.assign", json!({"bodies": ["Plate"], "material": "Brass"}));
+        let sa0_comp = run(&mut top, "component.insert_design", json!({"path": sa0}))["component"].as_u64().unwrap();
+        assert_eq!(
+            component_materials(&top, sa0_comp),
+            std::collections::BTreeMap::from([("Base".into(), "Steel".into()), ("Plate (2)".into(), "Aluminum".into())])
+        );
+
+        run(&mut top, "component.relink", json!({"component": sa0_comp, "path": sa0_v2}));
+        assert_eq!(top.doc.body_material("Plate"), "Brass");
+        let mats = component_materials(&top, sa0_comp);
+        assert_eq!(
+            mats,
+            std::collections::BTreeMap::from([
+                ("Base".into(), "Steel".into()),
+                ("Extra".into(), "Titanium".into()),
+                ("Plate (2)".into(), "Aluminum".into()),
+                ("Plate (2) (2)".into(), "Copper".into()),
+            ])
+        );
+        let props = run(&mut top, "component.properties", json!({"component": sa0_comp}));
+        let expected_mass: f64 = mats.values().map(|m| solidcraft_doc::material_density(m).unwrap()).sum();
+        assert!((props["total"]["mass_g"].as_f64().unwrap() - expected_mass).abs() < 1e-6, "{props}");
+
+        // Case 2: duplicate generic body names ("Body1", "Body2" -> "dup", "dup (2)") relinked to a
+        // new revision of the same design name with 3 generic bodies in a new material.
+        let dup_v1 = dir.join("v1/dup.sc");
+        let dup_v2 = dir.join("v2/dup.sc");
+        let mut d1 = Session::default();
+        run(&mut d1, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+        run(&mut d1, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+        run(&mut d1, "material.assign", json!({"bodies": ["Body1", "Body2"], "material": "Aluminum"}));
+        run(&mut d1, "file.save", json!({"path": dup_v1}));
+
+        let mut d2 = Session::default();
+        run(&mut d2, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+        run(&mut d2, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+        run(&mut d2, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+        run(&mut d2, "material.assign", json!({"bodies": ["Body1", "Body2", "Body3"], "material": "Steel"}));
+        run(&mut d2, "file.save", json!({"path": dup_v2}));
+
+        let mut asm = Session::default();
+        let dup_comp = run(&mut asm, "component.insert_design", json!({"path": dup_v1}))["component"].as_u64().unwrap();
+        assert_eq!(
+            component_materials(&asm, dup_comp),
+            std::collections::BTreeMap::from([("dup".into(), "Aluminum".into()), ("dup (2)".into(), "Aluminum".into())])
+        );
+        run(&mut asm, "component.relink", json!({"component": dup_comp, "path": dup_v2}));
+        assert_eq!(
+            component_materials(&asm, dup_comp),
+            std::collections::BTreeMap::from([
+                ("dup".into(), "Steel".into()),
+                ("dup (2)".into(), "Steel".into()),
+                ("dup (3)".into(), "Steel".into()),
+            ])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_stored_body_names_keep_inherited_baseline_on_open_update_and_relink() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-empty-names-baseline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inside")).unwrap();
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+
+        let part = dir.join("outside/part.sc");
+        let part_v2 = dir.join("outside/part_v2.sc");
+        let assembly = dir.join("inside/assembly.json");
+
+        save_material_boxes(&part, &[("Plate", 0.0, "Aluminum"), ("Block", 30.0, "Steel")]);
+        save_material_boxes(&part_v2, &[("Plate", 0.0, "Titanium"), ("Block", 30.0, "Brass")]);
+
+        let mut s = Session::default();
+        let comp = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        let feat = s.doc.links[&comp].feature;
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Copper"}));
+        run(&mut s, "file.save", json!({"path": assembly, "linked_bodies": false}));
+
+        // Simulate a saved document whose link kept its inherited baseline but has empty stored `body_names`.
+        let mut disk = solidcraft_io::read_design(&std::fs::read(&assembly).unwrap()).unwrap();
+        disk.feature_mut(feat).unwrap().body_names.clear();
+        std::fs::write(&assembly, solidcraft_io::write_design(&disk).unwrap()).unwrap();
+
+        // Update source material Aluminum -> Steel while Block is locally overridden to Copper.
+        save_material_boxes(&part, &[("Plate", 0.0, "Steel"), ("Block", 30.0, "Oak")]);
+
+        // 1. Opening with `linked_bodies: "all"` runs `read_left_out_bodies` with empty stored `body_names`.
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": assembly}));
+        let updated = run(&mut opened, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&opened, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Steel".into())])
+        );
+
+        // 2. Opening with `linked_bodies: "folder"` leaves the outside link unevaluated with empty `body_names`;
+        //    `update_links` still preserves the baseline so Plate follows Aluminum -> Steel and Block keeps Copper.
+        let mut deferred_update = Session::default();
+        run(&mut deferred_update, "doc.open", json!({"path": assembly, "linked_bodies": "folder"}));
+        let updated = run(&mut deferred_update, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&deferred_update, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Steel".into())])
+        );
+
+        // 3. Relinking from the same unevaluated empty-`body_names` state also preserves the baseline.
+        let mut deferred_relink = Session::default();
+        run(&mut deferred_relink, "doc.open", json!({"path": assembly, "linked_bodies": "folder"}));
+        run(&mut deferred_relink, "component.relink", json!({"component": comp, "path": part_v2}));
+        assert_eq!(
+            component_materials(&deferred_relink, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Titanium".into())])
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

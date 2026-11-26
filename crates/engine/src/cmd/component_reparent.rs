@@ -229,6 +229,9 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(active) = scratch.active_occurrence_path.as_deref().and_then(|path| rebased(path, &old_path, &new_path)) {
         scratch.active_occurrence_path = Some(active);
     }
+    // Hidden placements follow too, or the refresh drops their old paths and accepting reads
+    // that as the move showing them (#22153).
+    follow_visibility(&mut scratch, &old_path, &new_path);
     scratch.refresh();
     for f in &scratch.doc.features {
         let broke = scratch.model.result(f.id).and_then(|r| r.error.as_ref());
@@ -242,8 +245,8 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
 
-/// Hidden placements and folders under `old_path` follow it to `new_path`. `accept_computed` does
-/// not carry them, so whoever accepts a computed move into a session does this after.
+/// Hidden placements and folders under `old_path` follow it to `new_path`: in the computed copy
+/// before its refresh, and in the session after accepting it, for what was hidden meanwhile.
 pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u64]) {
     for hidden in &mut s.visibility.hidden_occurrences {
         if let Some(moved) = rebased(hidden, old_path, new_path) {

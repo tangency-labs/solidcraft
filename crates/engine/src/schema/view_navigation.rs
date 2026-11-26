@@ -1148,3 +1148,35 @@ fn stage_required(schema: &mut Schema) {
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;
+
+/// Select a ground-shadow style, or retain the existing on/off/toggle request.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroundShadowParams {
+    /// A style choice is used instead of the legacy visibility flag.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GroundShadowMode")]
+    pub mode: Option<GroundShadowMode>,
+    /// True shows the stored style, false hides it; omitted toggles visibility.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GroundShadowMode {
+    Off,
+    Ellipse,
+    Projected,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GroundShadowReply {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<GroundShadowMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

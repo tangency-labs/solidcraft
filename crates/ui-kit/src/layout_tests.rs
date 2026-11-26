@@ -587,3 +587,42 @@ fn an_action_row_is_a_button_in_the_control_column_that_says_when_it_is_clicked(
     frame(&ctx, vec![], &mut draw);
     assert_eq!(clicks, [false, false, true, false]);
 }
+
+/// Scrubbing a row's label is pointer-only: a single Tab moves directly from one expression
+/// field to the next without stopping on the scrub drag region, and Shift+Tab moves directly back.
+#[test]
+fn tab_moves_directly_between_adjacent_expr_rows() {
+    let ctx = crate::test_support::context();
+    let mut distance = "10 mm".to_string();
+    let mut distance2 = "20 mm".to_string();
+    let ids = std::cell::Cell::new((None, None));
+    let mut draw = |ui: &mut Ui| {
+        let egui_ctx = ui.ctx().clone();
+        scope(ui, |ui| {
+            let (_, fields) = value_fields(&egui_ctx, || {
+                expr_row(ui, "Distance", &mut distance);
+                expr_row(ui, "Distance 2", &mut distance2);
+                false
+            });
+            if fields.len() == 2 {
+                ids.set((Some(fields[0].0), Some(fields[1].0)));
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let (first, second) = (ids.get().0.expect("first editor id"), ids.get().1.expect("second editor id"));
+    ctx.memory_mut(|m| m.request_focus(first));
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(first));
+
+    // One Tab lands directly on Distance 2, never on its scrub label.
+    frame(&ctx, key(egui::Key::Tab), &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(second), "Tab should move directly to Distance 2");
+
+    // One Shift+Tab moves directly back to Distance (egui applies FocusDirection::Previous on the next pass).
+    let shift_tab =
+        vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::SHIFT }];
+    frame(&ctx, shift_tab, &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(first), "Shift+Tab should move directly back to Distance");
+}

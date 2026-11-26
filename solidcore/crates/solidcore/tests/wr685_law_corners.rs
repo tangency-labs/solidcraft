@@ -1198,3 +1198,131 @@ fn law_peak() {
         assert_eq!(faces, 8);
     }
 }
+
+// ---- the balls' union's volume --------------------------------------------------------------
+
+/// The volume held for a round whose law has a corner is its balls' union's: the peaks and the
+/// dip this file holds, and the laws `solidcore-ops` rounds a slot's and a step's edges with
+/// (#21179). A constant radius leaves (1 - pi/4) r^2 a unit. The values are held to six
+/// decimals, at most 7e-7 of the least of them, so the bound is 1e-6 relative.
+#[test]
+fn the_volumes_held_for_laws_with_a_corner_are_their_balls_union() {
+    let constant = (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 20.0;
+    for (length, corner, radii, held) in [
+        (20.0, 0.5, [2.0, 2.0, 2.0], constant),
+        (20.0, 0.5, [4.0, 2.0, 4.0], 39.542073),
+        (20.0, 0.5, [2.0, 2.5, 2.0], 21.799882),
+        (20.0, 0.5, [2.0, 3.0, 2.0], 27.093683),
+        (20.0, 0.5, [2.0, 3.2, 2.0], 29.389966),
+        (20.0, 0.5, [2.0, 4.0, 2.0], 39.541034),
+        // the slot's and the step's edges
+        (6.0, 0.5, [1.0, 2.0, 1.0], 2.900200),
+        (6.0, 0.5, [1.0, 0.5, 1.0], 0.744330),
+        (6.0, 0.3, [1.0, 2.0, 1.0], 2.883669),
+        (19.0, 0.5, [1.0, 2.0, 1.0], 9.479435),
+        (19.0, 0.5, [1.0, 0.5, 1.0], 2.376334),
+        (19.0, 0.3, [1.0, 2.0, 1.0], 9.472978),
+        (10.0, 0.5, [1.0, 2.0, 1.0], 4.942629),
+        (10.0, 0.5, [1.0, 0.5, 1.0], 1.247737),
+        (10.0, 0.3, [1.0, 2.0, 1.0], 4.931130),
+    ] {
+        let got = balls_union(length, corner, radii);
+        eprintln!("{radii:?} at {corner} of {length}: {got}, held {held}");
+        assert!(
+            (got - held).abs() <= 1e-6 * held,
+            "{radii:?} at {corner} of {length}: {got}, held {held}"
+        );
+    }
+}
+
+/// One linear piece of a law, r(s) = `a` + `m` s over `from` to `to` along the edge.
+struct LinearPiece {
+    from: f64,
+    to: f64,
+    a: f64,
+    m: f64,
+}
+
+/// The volume a round leaves along a right-angled edge of `length`, its law straight from
+/// `radii[0]` to `radii[1]` at the fraction `corner` and on to `radii[2]`, and going on past
+/// the edge's ends along its end pieces: the union of its balls. The ball at s lies r(s) from
+/// both faces. In the plane square to the edge at x, the ray at the angle t from the edge
+/// meets the union first at rho, so the plane's area is the integral of rho^2 / 2 over t. By
+/// Simpson's rule, t = pi/4 (1 - cos(pi u)) making the integrand smooth at the faces.
+fn balls_union(length: f64, corner: f64, radii: [f64; 3]) -> f64 {
+    use std::f64::consts::PI;
+    let turn = corner * length;
+    let (before, after) = (
+        (radii[1] - radii[0]) / turn,
+        (radii[2] - radii[1]) / (length - turn),
+    );
+    let pieces = [
+        LinearPiece {
+            from: f64::NEG_INFINITY,
+            to: turn,
+            a: radii[0],
+            m: before,
+        },
+        LinearPiece {
+            from: turn,
+            to: f64::INFINITY,
+            a: radii[1] - after * turn,
+            m: after,
+        },
+    ];
+    let area = |x: f64| {
+        simpson(
+            |u| {
+                let t = PI / 4.0 * (1.0 - (PI * u).cos());
+                let rho = first_contact(&pieces, x, t.cos() + t.sin());
+                rho.map_or(0.0, |rho| rho * rho * PI * PI / 8.0 * (PI * u).sin())
+            },
+            0.0,
+            1.0,
+            1024,
+        )
+    };
+    simpson(area, 0.0, turn, 1024) + simpson(area, turn, length, 1024)
+}
+
+/// Where the ray whose direction's components off the two faces sum to `q` meets the balls of
+/// `pieces` first in the plane at `x`; `None` where it misses them. The point at rho is in the
+/// ball at s where (x - s)^2 + rho^2 - 2 rho q r + r^2 <= 0, so a piece's whole line of balls
+/// is met where that quadratic in s has a double root, itself a quadratic in rho. Where the
+/// root is off the piece, the piece's end ball is met.
+fn first_contact(pieces: &[LinearPiece], x: f64, q: f64) -> Option<f64> {
+    let mut first: Option<f64> = None;
+    let mut meet = |rho: f64| first = Some(first.map_or(rho, |f| f.min(rho)));
+    for &LinearPiece { from, to, a, m } in pieces {
+        let (lead, along) = (1.0 + m * m, x - a * m);
+        let qa = lead - m * m * q * q;
+        let qb = -2.0 * q * (lead * a + along * m);
+        let qc = lead * (x * x + a * a) - along * along;
+        let disc = qb * qb - 4.0 * qa * qc;
+        if disc >= 0.0 && qa > 0.0 {
+            let rho = (-qb - disc.sqrt()) / (2.0 * qa);
+            let s = (along + rho * m * q) / lead;
+            if (from..=to).contains(&s) && a + m * s > 0.0 && rho > 0.0 {
+                meet(rho);
+            }
+        }
+        for s in [from, to].into_iter().filter(|s| s.is_finite()) {
+            let r = a + m * s;
+            let disc = r * r * q * q - (x - s) * (x - s) - r * r;
+            if r > 0.0 && disc >= 0.0 {
+                meet(r * q - disc.sqrt());
+            }
+        }
+    }
+    first
+}
+
+/// Simpson's rule for `f` over `[a, b]` in `n` (even) steps.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
+    let h = (b - a) / f64::from(n);
+    let mut sum = f(a) + f(b);
+    for i in 1..n {
+        sum += if i % 2 == 1 { 4.0 } else { 2.0 } * f(a + f64::from(i) * h);
+    }
+    sum * h / 3.0
+}

@@ -194,11 +194,13 @@ pub struct OccurrenceDof {
     pub dof: usize,
 }
 
-/// What `joint.edit` returns: the joints that disagree with the solved placement, and those the
-/// solve could not apply. Unless `quiet`, also each occurrence's degrees of freedom and the
-/// occurrences fixed in place.
+/// What `joint.edit` returns: the edited joint, the joints that disagree with the solved
+/// placement, and those the solve could not apply. Unless `quiet`, also each occurrence's degrees
+/// of freedom and the occurrences fixed in place.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditJointResult {
+    /// The edited joint, by id.
+    pub joint: u64,
     pub conflicts: Vec<JointProblem>,
     pub errors: Vec<JointProblem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -511,7 +513,7 @@ impl JsonSchema for JointOriginArg {
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's or sketch's component.", "type": ["number", "string"]},
                         "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
-                        "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
+                        "face": {"description": "The centre of a planar face, or a round end of a round face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
                         "point": {"description": "A point [x, y, z], or with sketch a sketch point id (e.g. \"c1.center\", \"p1\", \"origin\").", "anyOf": [point, {"type": "string", "minLength": 1}]},
@@ -747,8 +749,8 @@ pub struct CreateConstraintParams {
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ConstraintTypeParam")]
     pub kind: Option<ConstraintTypeParam>,
-    /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
-    /// for an axis, a point). A round face given as a face is its axis where the rule needs one.
+    /// Side a's reference: a joint origin, as joint.create takes it (a planar face or datum plane
+    /// for a plane, a round face, circle or axis for an axis, a point).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub a: Option<JointOriginArg>,
@@ -1112,7 +1114,8 @@ pub struct JointAddedResult {
     /// Its name.
     pub name: String,
     /// A value that starts inside its limits, not where it was given: the part moved there as it
-    /// was joined. Left out when there is none.
+    /// was joined; or a joint between two grounded parts that don't meet where it puts them, which
+    /// moves neither (#12867). Left out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -2396,8 +2399,9 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<OccurrencePath>")]
     pub path: Option<Value>,
-    /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
-    /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
+    /// The centre of a planar face, or a round end of a round face: a point on it, or its name.
+    /// The first of `face` and `circle` given by name wins; then the first given as a point of
+    /// `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFace")]
     pub face: Option<Value>,

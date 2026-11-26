@@ -33,4 +33,6 @@ pub mod hcr;
 pub mod identify_fillet;
 pub mod law_corners;
 pub mod round_room;
+pub mod run_out;
+pub mod straight_wedge;
 pub mod weld_bead;

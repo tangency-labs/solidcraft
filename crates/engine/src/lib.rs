@@ -90,6 +90,7 @@ pub use cmd::dimension_roles;
 pub use cmd::drawing_export::print_pdf;
 pub use cmd::extrude_reach;
 pub use cmd::find_command;
+pub use cmd::motion::AutomaticExplode;
 pub use cmd::normalize_command_id;
 pub use cmd::resolve_design_links;
 pub use cmd::settings::MAX_PROFILE_NAME;
@@ -1129,6 +1130,9 @@ pub struct Session {
     pub(crate) drawing_scenes: drawing_scene::Cache,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The visibility when this session was made as a [`Session::scratch`] copy: what
+    /// [`Session::accept_computed`] compares with to keep the copy's own visibility changes.
+    scratch_visibility: Option<Box<Visibility>>,
     /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
     /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
     opened_import: Option<Arc<Document>>,
@@ -1574,6 +1578,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            scratch_visibility: None,
             opened_import: None,
             visibility,
             camera: None,
@@ -1614,6 +1619,9 @@ impl Session {
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
         let mut plugin_state = self.plugin_state.clone();
+        // A file the design that comes in was opened from named for Update Links stays the user's
+        // choice (a KiCad board opened with `doc.open`).
+        plugin_state.linked_files.extend(fresh.plugin_state.linked_files.iter().cloned());
         for package in plugin_state.panels.values_mut() {
             for data in package.data.values_mut() {
                 *data = Default::default();
@@ -2756,7 +2764,7 @@ impl Session {
     /// only where occurrences are and the joints' values; walking every feature's result for it
     /// took 40 ms a frame in a 5,484-feature assembly. The model is compared by allocation: the
     /// weak reference keeps the allocation, so a later model can't be mistaken for it.
-    fn pin_body_names(&mut self) {
+    pub(crate) fn pin_body_names(&mut self) {
         if self.model.is_stale() {
             return;
         }
@@ -2828,15 +2836,43 @@ impl Session {
                 }
                 continue;
             }
-            // Nothing to pin when every slot the bodies take already holds a name.
-            if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
+            // Pin each built body's actual evaluated name in its slot (respecting skipped Import
+            // indices), so disambiguated names like `VIS (3)` stay stable when an earlier
+            // same-named body or component is deleted or suppressed.
+            let has_skip = matches!(&f.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty());
+            if !has_skip {
+                if made.len() <= f.body_names.len() && f.body_names.iter().zip(&made).all(|(slot, &name)| slot == name) {
+                    continue;
+                }
+                let mut names = f.body_names.clone();
+                if names.len() < made.len() {
+                    names.resize(made.len(), String::new());
+                }
+                for (slot, &name) in names.iter_mut().zip(&made) {
+                    if *slot != name {
+                        *slot = name.to_string();
+                    }
+                }
+                if names != f.body_names {
+                    pins.push((f.id, names));
+                }
+                continue;
+            }
+            let slots = f.body_name_slots(made.len());
+            if slots.iter().zip(&made).all(|(&slot, &name)| f.body_names.get(slot).is_some_and(|s| s == name)) {
                 continue;
             }
             let mut names = f.body_names.clone();
-            names.resize(names.len().max(made.len()), String::new());
-            for (slot, name) in names.iter_mut().zip(&made) {
-                if slot.trim().is_empty() {
-                    *slot = name.to_string();
+            if let Some(end) = slots.last().map(|s| s + 1)
+                && names.len() < end
+            {
+                names.resize(end, String::new());
+            }
+            for (&slot, &name) in slots.iter().zip(&made) {
+                if let Some(stored) = names.get_mut(slot)
+                    && *stored != name
+                {
+                    *stored = name.to_string();
                 }
             }
             if names != f.body_names {
@@ -3895,6 +3931,7 @@ impl Session {
             // (`scratch_as_shown`), the many others never read them.
             drawing_scenes: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
+            scratch_visibility: Some(Box::new(self.visibility.clone())),
             dimension_values: self.dimension_values.clone(),
             opened_import: self.opened_import.clone(),
             evaluations: 0,
@@ -4240,6 +4277,9 @@ impl Session {
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
         self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
+        // The files a caller named while the worker ran (Insert Design, opening a KiCad board) stay
+        // its own choice for Update Links in the window's session.
+        self.plugin_state.linked_files.extend(std::mem::take(&mut computed.plugin_state.linked_files));
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -4265,17 +4305,35 @@ impl Session {
         let tracked = computed.redo_watch.as_ref().is_some_and(|watch| watch.values().any(|touched| *touched));
         let implicit_part = (computed.undo.is_empty() && computed.redo.is_empty() && !tracked && !Arc::ptr_eq(&self.doc, &computed.doc))
             .then_some(computed.open_drawing);
-        // The first computed step starts from this document. Its undo must restore the view
-        // at acceptance, including a body hidden while the computation was running.
-        if let Some(before) = computed.undo.first_mut()
-            && Arc::ptr_eq(&before.doc, &self.doc)
-        {
-            before.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
-        }
+        // What the computation itself hid or showed is kept, on top of what this session hid or
+        // showed meanwhile (#22153). A session not made by `scratch` changed nothing to keep.
+        let start = computed.scratch_visibility.take().map(|v| *v).unwrap_or_else(|| computed.visibility.clone());
         let rename = computed.body_rename(&self.doc);
-        computed.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
-        computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+        let rename = rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str()));
+        // Body names in the computation's undo steps are this document's where it renamed no
+        // body or placement.
+        let same_names = rename.is_none() && computed.doc.occurrences == self.doc.occurrences;
+        // Each computed step's undo restores the view at acceptance: what this session hid or
+        // showed meanwhile, and what the computation's earlier steps hid or showed.
+        let live = &self.visibility;
+        for (i, before) in computed.undo.iter_mut().enumerate() {
+            if same_names || (i == 0 && Arc::ptr_eq(&before.doc, &self.doc)) {
+                rebase_hidden(&mut before.visibility.hidden_bodies, &live.hidden_bodies, &start.hidden_bodies);
+            }
+            rebase_hidden(&mut before.visibility.hidden_occurrences, &live.hidden_occurrences, &start.hidden_occurrences);
+            rebase_hidden(&mut before.visibility.hidden_folders, &live.hidden_folders, &start.hidden_folders);
+        }
+        // This session's hidden bodies, and the computation's start, follow its renames; then
+        // what the computation hid or showed is compared in its own names.
+        let ran = std::mem::replace(&mut computed.visibility.hidden_bodies, self.visibility.hidden_bodies.clone());
+        let state = self.model.state();
+        computed.remap_hidden_bodies(&self.doc, &state, rename);
+        let started =
+            if same_names { start.hidden_bodies.clone() } else { computed.remapped_hidden(start.hidden_bodies.clone(), &self.doc, &state, rename) };
+        merge_hidden(&mut computed.visibility.hidden_bodies, &started, &ran);
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
+        merge_hidden(&mut self.visibility.hidden_occurrences, &start.hidden_occurrences, &computed.visibility.hidden_occurrences);
+        merge_hidden(&mut self.visibility.hidden_folders, &start.hidden_folders, &computed.visibility.hidden_folders);
         self.body_renames = computed.body_renames;
         // Only committed source reads cross back from the worker. A no-op read must not
         // replace a disk observation made since this evaluation began; changed source bytes
@@ -4372,6 +4430,18 @@ impl Session {
             self.echo(message);
         }
         Ok(())
+    }
+
+    /// `names` (hidden bodies of `previous`) mapped as [`Session::remap_hidden_bodies`] maps this
+    /// session's hidden bodies, leaving its own hidden bodies, selection and isolation as they are.
+    fn remapped_hidden(&mut self, names: Vec<String>, previous: &Document, state: &ModelState, rename: Option<(&str, &str)>) -> Vec<String> {
+        let hidden = std::mem::replace(&mut self.visibility.hidden_bodies, names);
+        let selection = std::mem::take(&mut self.selection);
+        let isolate = self.visibility.before_isolate.take();
+        self.remap_hidden_bodies(previous, state, rename);
+        self.selection = selection;
+        self.visibility.before_isolate = isolate;
+        std::mem::replace(&mut self.visibility.hidden_bodies, hidden)
     }
 
     /// Read a primary origin for the Joint dialog without modifying the session.
@@ -4652,6 +4722,28 @@ pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections:
 pub(crate) type DimensionValues = std::collections::BTreeMap<(u64, u64), f64>;
 
 /// A design as its file holds it: `doc` with what is hidden in it and what its dimensions last read.
+/// `live` with what a computation that began at `start` and ended at `ran` hid (in `ran`, not
+/// in `start`) or showed (in `start`, not in `ran`). Sets keep this linear in the lists' length.
+fn merge_hidden<T: Eq + std::hash::Hash + Clone>(live: &mut Vec<T>, start: &[T], ran: &[T]) {
+    if start == ran {
+        return;
+    }
+    use std::collections::HashSet;
+    let (started, kept): (HashSet<&T>, HashSet<&T>) = (start.iter().collect(), ran.iter().collect());
+    live.retain(|item| !started.contains(item) || kept.contains(item));
+    let have: HashSet<&T> = live.iter().collect();
+    let hid: Vec<T> = ran.iter().filter(|item| !started.contains(item) && !have.contains(item)).cloned().collect();
+    live.extend(hid);
+}
+
+/// A computation's undo snapshot `step` (which began at `start`) with `live`'s changes since:
+/// `live`, with what the computation had hid or showed by that step.
+fn rebase_hidden<T: Eq + std::hash::Hash + Clone>(step: &mut Vec<T>, live: &[T], start: &[T]) {
+    let mut rebased = live.to_vec();
+    merge_hidden(&mut rebased, start, step);
+    *step = rebased;
+}
+
 pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension_values: &DimensionValues) -> std::borrow::Cow<'a, Document> {
     if visibility.is_empty() && dimension_values.is_empty() {
         return std::borrow::Cow::Borrowed(doc);
