@@ -3384,11 +3384,13 @@ pub(super) fn copy_keeps_appearance_for(
             } else if !same_source {
                 s.doc_mut().appearances.bodies.remove(&copy);
             }
-            if s.doc.edgeless_bodies.contains(source) {
-                s.doc_mut().edgeless_bodies.insert(copy.clone());
-            } else {
-                s.doc_mut().edgeless_bodies.remove(copy);
-            }
+        }
+        // A copy of a body drawn without edge lines is drawn without them too; a copy rebuilt
+        // from the same body keeps what was set on it.
+        if s.doc.edgeless_bodies.contains(&source) {
+            s.doc_mut().edgeless_bodies.insert(copy.clone());
+        } else if !same_source {
+            s.doc_mut().edgeless_bodies.remove(&copy);
         }
         if !same_source && s.doc.materials.contains_key(&copy) {
             s.doc_mut().materials.remove(&copy);
