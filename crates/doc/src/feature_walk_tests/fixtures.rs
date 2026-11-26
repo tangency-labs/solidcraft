@@ -22,7 +22,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     let sk = serde_json::to_value(solidcraft_sketch::Sketch::new()).unwrap();
     let extent = |n: &str| {
         json!({"distance": format!("{n}.distance"), "distance2": format!("{n}.distance2"), "start_offset": format!("{n}.start_offset"),
-            "taper": format!("{n}.taper"), "to_offset": format!("{n}.to_offset")})
+            "taper": format!("{n}.taper"), "taper2": format!("{n}.taper2"), "to_offset": format!("{n}.to_offset")})
     };
     let fillet = |style: Value| json!({"type": "fillet", "edges": [o], "radius": "fillet.radius", "style": style});
     let pattern = |p: Value| json!({"type": "pattern", "features": [7], "pattern": p});

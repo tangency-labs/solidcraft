@@ -369,7 +369,7 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         extent_param(s, p, cmd)?
     };
-    if extent.through_all || extent.taper.is_some() || extent.from.is_some() {
+    if extent.through_all || extent.taper.is_some() || extent.taper2.is_some() || extent.from.is_some() {
         return Err(bad(cmd, "not supported yet: through all, from an object, or a taper"));
     }
     if to_next && extent.direction == solidcraft_doc::Direction::Symmetric {

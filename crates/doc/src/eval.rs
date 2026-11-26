@@ -3414,7 +3414,7 @@ impl Feature {
                 Some(read)
             }
             FeatureKind::Extrude { sketch: s, extent, .. }
-                if extent.to.is_none() && extent.from.is_none() && !extent.through_all && extent.taper.is_none() =>
+                if extent.to.is_none() && extent.from.is_none() && !extent.through_all && extent.taper.is_none() && extent.taper2.is_none() =>
             {
                 Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? })
             }
@@ -6498,6 +6498,30 @@ pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, 
         out.extend(kernel::draft_corners(r, distance, taper)?);
     }
     Ok(out)
+}
+
+/// Region `r` of `ss` drafted by `taper` over `from..to` along `sign` times the normal of
+/// `start_plane` (where `r` is the section), its sharp corners closed by `corner` or, when the
+/// user chose none, by [`draft_corner_for`] over the length `to - from` (noted in `notes`), its
+/// faces named by `roles`.
+#[allow(clippy::too_many_arguments)]
+fn drafted_tool(
+    ss: &SolvedSketch,
+    r: &Region2,
+    start_plane: &Plane,
+    (from, to): (f64, f64),
+    sign: f64,
+    taper: f64,
+    corner: Option<kernel::DraftCorner>,
+    roles: crate::lineage::ProfileRoles<'_>,
+    notes: &mut Vec<String>,
+) -> Result<Traced> {
+    let corner = match corner {
+        Some(c) => c,
+        None => draft_corner_for(ss, r, to - from, taper, notes)?,
+    };
+    let body = kernel::extrude_tapered_between(start_plane, r, from, to, 0.0, sign, taper, corner)?;
+    Ok(roles.tool(body, None))
 }
 
 /// The corner rule a taper takes for profile `r` of `ss` when the user chose none: preserve
@@ -10244,27 +10268,15 @@ enum CapRoles {
     Named([&'static str; 2]),
 }
 
-fn centered_extrude(
-    plane: &Plane,
-    region: &Region2,
-    start: f64,
-    end: f64,
-    sketch: Option<&SolvedSketch>,
-    thin: Option<&crate::lineage::ThinWallRoles>,
+/// The names of an extrude's caps, the low one's then the high one's (`lo` and `hi`: their levels
+/// along the sketch normal), and the second name each answers to. A two-sided extrude and a
+/// symmetric one, straight or tapered, name their caps here, so a taper renames no cap.
+fn extrude_cap_names(
     cap_roles: CapRoles,
+    lo: f64,
+    hi: f64,
     one_sided_direction: Option<crate::Direction>,
-) -> Result<Vec<Traced>> {
-    if !plane.origin.is_finite()
-        || !plane.x.is_finite()
-        || !plane.y.is_finite()
-        || (plane.x.len2() - 1.0).abs() > 1e-8
-        || (plane.y.len2() - 1.0).abs() > 1e-8
-        || plane.x.dot(plane.y).abs() > 1e-8
-    {
-        return Err(DocError::Invalid("extrude frame is not finite and orthonormal".into()));
-    }
-    // The faces' roles: the sketch curve under each side, the caps by where they lie.
-    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+) -> ([Option<String>; 2], [Option<String>; 2]) {
     // A two-sided extrude has no cap on its sketch plane: its two caps close the two ends of
     // the tool, the low one downwards and the high one upwards, so they are named by the end
     // they close. Their height cannot tell them apart: both sides may lie on the same side of
@@ -10288,7 +10300,38 @@ fn centered_extrude(
         Some(crate::Direction::Negative) => [None, start_name()],
         Some(crate::Direction::Symmetric) | None => [None, None],
     };
-    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
+    (caps, cap_synonyms)
+}
+
+fn centered_extrude(
+    plane: &Plane,
+    region: &Region2,
+    start: f64,
+    end: f64,
+    sketch: Option<&SolvedSketch>,
+    thin: Option<&crate::lineage::ThinWallRoles>,
+    cap_roles: CapRoles,
+    one_sided_direction: Option<crate::Direction>,
+) -> Result<Vec<Traced>> {
+    // The faces' roles: the sketch curve under each side, the caps by where they lie.
+    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+    let (caps, cap_synonyms) = extrude_cap_names(cap_roles, lo, hi, one_sided_direction);
+    named_extrude(plane, region, start, end, crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin })
+}
+
+/// [`centered_extrude`] with its faces named by `roles`: `region` extruded straight from `start`
+/// to `end` along `plane`'s normal.
+fn named_extrude(plane: &Plane, region: &Region2, start: f64, end: f64, roles: crate::lineage::ProfileRoles<'_>) -> Result<Vec<Traced>> {
+    if !plane.origin.is_finite()
+        || !plane.x.is_finite()
+        || !plane.y.is_finite()
+        || (plane.x.len2() - 1.0).abs() > 1e-8
+        || (plane.y.len2() - 1.0).abs() > 1e-8
+        || plane.x.dot(plane.y).abs() > 1e-8
+    {
+        return Err(DocError::Invalid("extrude frame is not finite and orthonormal".into()));
+    }
+    let sketch = roles.sketch;
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -10488,6 +10531,9 @@ fn feature_tools_with_constructor(
             let tapered = match &extent.taper {
                 Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
                 None => false,
+            } || match &extent.taper2 {
+                Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
+                None => false,
             };
             // The plane To Object ends on, when it is flat: a face's plane, square to the
             // extrusion or at a slant to it (but not within 5 degrees of running along it), or
@@ -10583,14 +10629,157 @@ fn feature_tools_with_constructor(
                 _ => 0.0,
             };
             // A taper of 0 is a straight extrusion (the dialog stores one, and designs carry it);
-            // the tapered path refuses a profile with holes without a draft (#13188).
-            if let Some(tp) = &extent.taper
-                && val(vals, tp, Kind::Angle)? != 0.0
-            {
-                let taper = val(vals, tp, Kind::Angle)?;
-                if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
-                    return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
+            // the tapered path refuses a profile with holes without a draft (#13188). A second
+            // side's taper (`taper2`, Two Sides only) is the first's when absent, as the two
+            // halves of a symmetric extrude both take `taper`.
+            let taper = extent.taper.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.unwrap_or(0.0);
+            let taper2 = match (&extent.taper2, &extent.distance2) {
+                (Some(_), None) => return Err(DocError::Invalid("`taper2` goes with `distance2` (the second side's taper)".into())),
+                (Some(e), Some(_)) => val(vals, e, Kind::Angle)?,
+                (None, _) => taper,
+            };
+            // Both ways from the start: a second distance, or symmetric (To Object makes a
+            // symmetric extrude one-sided, as on the straight path below).
+            let two_ways = extent.distance2.is_some() || (extent.to.is_none() && extent.direction == crate::Direction::Symmetric);
+            if two_ways && (taper != 0.0 || taper2 != 0.0) {
+                if thin.is_some() {
+                    return Err(DocError::Invalid("not supported yet: a taper on a thin extrude with two sides or symmetric".into()));
                 }
+                let base = from
+                    + match &extent.start_offset {
+                        Some(e) => val(vals, e, Kind::Length)?,
+                        None => 0.0,
+                    };
+                let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
+                // As the straight path tells a symmetric offset (refused there with a second side).
+                if direction == crate::Direction::Symmetric && extent.symmetric_offset && base.abs() > 1e-9 {
+                    return Err(DocError::Invalid("not supported yet: a taper with symmetric offset".into()));
+                }
+                // The second side's reach and the first's, signed along the normal from the start.
+                let (a, b) = extent_sides(vals, extent, d, direction)?;
+                if a == 0.0 && b == 0.0 {
+                    return Err(DocError::Invalid("extrude distance is zero".into()));
+                }
+                if a * b > 0.0 {
+                    return Err(DocError::Invalid("not supported yet: a taper on two sides whose ends lie on one side of the start".into()));
+                }
+                // To a curved face (the first side's end): that side runs past the face, as a
+                // one-sided taper does, and is cut back to it before the sides are joined.
+                let target = curved.and_then(|bi| tst.bodies.get(bi)).zip(to_face).zip(extent.to);
+                let b = match target {
+                    Some(((tb, (_, fi)), p)) if b != 0.0 => {
+                        b.signum() * tapered_reach(&ss, &regions, (tb, fi, p.0, to_offset), base, b.signum(), b.abs(), taper, extent.corner)?
+                    }
+                    _ => b,
+                };
+                let (lo, hi) = (base + a.min(b), base + a.max(b));
+                extrude_within_reach([lo, hi])?;
+                // The caps are named as the straight extrude names them (`extrude_cap_names`), so
+                // a taper renames no cap. The start plane lies inside the tool and has no cap.
+                let cap_roles = if extent.distance2.is_some() { CapRoles::TwoSided } else { CapRoles::ByHeight };
+                let (names, synonyms) = extrude_cap_names(cap_roles, lo, hi, extent.one_sided_direction.filter(|_| extent.distance2.is_none()));
+                let at = |level: f64| -> (Option<String>, Option<String>) {
+                    let k = usize::from(level >= hi);
+                    (names.get(k).cloned().flatten(), synonyms.get(k).cloned().flatten())
+                };
+                let mut notes = Vec::new();
+                let start_plane = ss.plane.offset(base);
+                let growth = (b.abs() * taper.tan().abs()).max(a.abs() * taper2.tan().abs());
+                let mut tools = Vec::new();
+                // `taper2 == -taper` (compared exactly, as evaluated) drafts one plane through
+                // the profile: the second side's walls continue the first side's, so the tool is
+                // one drafted extrusion through the start plane, one wall per curve. (To a curved
+                // face the first side is cut back on its own, below.)
+                if a != 0.0 && b != 0.0 && taper2 == -taper && target.is_none() {
+                    let ((c0, s0), (c1, s1)) = (at(base + a), at(base + b));
+                    for r in &regions {
+                        let roles = crate::lineage::ProfileRoles {
+                            sketch: Some(&ss),
+                            region: Some(r),
+                            caps: [c0.clone(), c1.clone()],
+                            cap_synonyms: [s0.clone(), s1.clone()],
+                            thin: None,
+                        };
+                        tools.push(drafted_tool(&ss, r, &start_plane, (-a.abs(), b.abs()), b.signum(), taper, extent.corner, roles, &mut notes)?);
+                    }
+                } else {
+                    // Each side drafted on its own from the start plane, and the two joined per
+                    // profile: one tool per profile, as on one side.
+                    let side = |reach: f64, other: f64, taper: f64, notes: &mut Vec<String>| -> Result<Vec<Traced>> {
+                        if reach == 0.0 {
+                            return Ok(Vec::new());
+                        }
+                        // The start cap is a cap only when the other side is empty.
+                        let start = if other == 0.0 { at(base) } else { (None, None) };
+                        let far = at(base + reach);
+                        let mut out = Vec::new();
+                        for r in &regions {
+                            if taper == 0.0 {
+                                // An undrafted side is a straight prism, its caps low then high.
+                                let ((c0, s0), (c1, s1)) = if reach > 0.0 { (start.clone(), far.clone()) } else { (far.clone(), start.clone()) };
+                                let roles = crate::lineage::ProfileRoles {
+                                    sketch: Some(&ss),
+                                    region: Some(r),
+                                    caps: [c0, c1],
+                                    cap_synonyms: [s0, s1],
+                                    thin: None,
+                                };
+                                out.extend(named_extrude(&ss.plane, r, base + reach.min(0.0), base + reach.max(0.0), roles)?);
+                            } else {
+                                let roles = crate::lineage::ProfileRoles {
+                                    sketch: Some(&ss),
+                                    region: Some(r),
+                                    caps: [start.0.clone(), far.0.clone()],
+                                    cap_synonyms: [start.1.clone(), far.1.clone()],
+                                    thin: None,
+                                };
+                                out.push(drafted_tool(&ss, r, &start_plane, (0.0, reach.abs()), reach.signum(), taper, extent.corner, roles, notes)?);
+                            }
+                        }
+                        Ok(out)
+                    };
+                    let mut first = side(b, a, taper, &mut notes)?;
+                    if let Some(((tb, (_, fi)), p)) = target
+                        && !first.is_empty()
+                    {
+                        first = trim_to_curved_face(first, tb, fi, p.0, to_offset, &ss.plane, base, base + b)?;
+                    }
+                    let second = side(a, b, taper2, &mut notes)?;
+                    // Two caps named alike (both ends on one side of the sketch plane) are pieces
+                    // of one face, numbered by where they lie as the straight extrude's are; the
+                    // union numbers pieces from different operands in operand order, so the
+                    // halves go in in the order of their far ends' spread.
+                    let swap = crate::naming::along_spread(vec![(0, centre + n * (base + b)), (1, centre + n * (base + a))]).first() == Some(&1);
+                    let (first, second) = if swap { (second, first) } else { (first, second) };
+                    tools = if first.is_empty() || second.is_empty() {
+                        first.into_iter().chain(second).collect()
+                    } else if first.len() == second.len() {
+                        // The two halves of each profile share the profile at the start plane:
+                        // one union joins them there.
+                        first.iter().zip(&second).map(|(f1, f2)| union_all(&[f1, f2])).collect::<Result<_>>()?
+                    } else {
+                        let all: Vec<&Traced> = first.iter().chain(&second).collect();
+                        vec![union_all(&all)?]
+                    };
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                notes.retain(|note| seen.insert(note.clone()));
+                for note in notes {
+                    append_warning(warning, note);
+                }
+                *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo, hi) });
+                let one_target = if targets.is_empty() { st.bodies.len() == 1 } else { targets.len() == 1 };
+                let at_once = match operation {
+                    Operation::Cut => true,
+                    Operation::Join => one_target,
+                    _ => false,
+                };
+                if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
+                    tools = join_apart_tools(tools)?;
+                }
+                return Ok(tools);
+            }
+            if taper != 0.0 {
                 let sign = if extent.to.is_none() && extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
                 let (len, sign) = if d < 0.0 { (-d, -sign) } else { (d, sign) };
                 // Where the extrude starts: the From Object's level and a start offset along the
@@ -10631,12 +10820,7 @@ fn feature_tools_with_constructor(
                             cap_synonyms: [None, None],
                             thin: thin_roles.as_ref(),
                         };
-                        let corner = match extent.corner {
-                            Some(c) => c,
-                            None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
-                        };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, corner)?;
-                        Ok(roles.tool(body, None))
+                        drafted_tool(&ss, r, &start_plane, (0.0, len), sign, taper, extent.corner, roles, &mut notes)
                     })
                     .collect::<Result<_>>()?;
                 for note in notes {
@@ -15541,7 +15725,7 @@ fn eval_feature_kind(
             // stops inside a flat panel's thickness, and an intersect where it changes one. A
             // tapered cut through the sheet goes on to be read as its shadow.
             if matches!(operation, Operation::Cut | Operation::Intersect)
-                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some())
+                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some() || extent.taper2.is_some())
                 && !st.surface_sheets.is_empty()
             {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();

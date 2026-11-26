@@ -138,6 +138,7 @@ fn the_check_takes_what_the_schema_allows() {
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "name": 5}), false),
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "through_all": true}), false),
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "taper": 5}), false),
+        ("surface.extrude", extrude.as_value(), json!({"distance": 5, "distance2": 5, "taper2": 5}), false),
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "to": [0, 0, 1]}), true),
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "corner": "round"}), false),
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "operation": "join"}), false),

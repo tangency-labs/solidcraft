@@ -64,7 +64,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::model_selection::profiles)
         .params(concat!(
             "distance: expr (or through_all: true); ",
-            "taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); ",
+            "taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller; with direction: symmetric it drafts both halves from the start plane, with distance2 the first side); ",
+            "taper2?: angle expr (with distance2: the second side's taper, drafted from the start plane the same way; default: taper); ",
             "corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); ",
             "sketch?: id|name (default: active or last sketch); ",
             "profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); ",
@@ -1821,6 +1822,13 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
     if let Some(d) = &distance2 {
         check_expr(s, d, Kind::Length, cmd, "distance2")?;
     }
+    // The second side's taper, as `thickness2` goes with a two-sided wall.
+    let taper2 = expr(p, "taper2");
+    match (&taper2, &distance2) {
+        (Some(t), Some(_)) => check_expr(s, t, Kind::Angle, cmd, "taper2")?,
+        (Some(_), None) => return Err(bad(cmd, "`taper2` goes with `distance2` (the second side's taper)")),
+        (None, _) => {}
+    }
     let start_offset = expr(p, "start_offset");
     if let Some(d) = &start_offset {
         check_expr(s, d, Kind::Length, cmd, "start_offset")?;
@@ -1849,6 +1857,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         through_all,
         second_follows_first: false,
         taper,
+        taper2,
         corner,
         to: p.get("to").and_then(vec3).map(FacePick),
         to_offset: expr(p, "to_offset"),
