@@ -86,6 +86,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "components?: bool (default true); ",
             "copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); ",
             "silkscreen?: bool (default true: the silk shapes and text); ",
+            "holes?: none|mounting|pads|all (default mounting: the board's mounting holes, every unplated hole and each hole of a MountingHole footprint; pads adds the plated holes of through-hole pads, all adds vias; a hole left out is solid board and closed copper, and a hole that reaches the board's edge or a cutout is always kept); ",
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
@@ -1379,6 +1380,10 @@ fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
                 solidcraft_io::KicadCopper::parse(name).ok_or_else(|| bad(cmd, "`copper` must be \"none\", \"overlay\" or \"mesh\""))?
             }
         };
+    }
+    if let Some(v) = p.get("holes").filter(|v| !v.is_null()) {
+        let refused = || bad(cmd, "`holes` must be \"none\", \"mounting\", \"pads\" or \"all\"");
+        options.holes = solidcraft_io::KicadHoles::parse(v.as_str().ok_or_else(refused)?).ok_or_else(refused)?;
     }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         options.color = Some(parse_kicad_color(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0-255"))?);

@@ -324,6 +324,46 @@ fn arcs_and_cut_outs_shape_the_board() {
     near(volume(&mut s), area * 1.6);
 }
 
+/// #22607: an outline drawn twice, once with each of two tools, as Eagle writes it: a rounded
+/// board whose corners are arcs, with a round cut-out. Each arc and circle drawn twice is one edge,
+/// as a line drawn twice is, also where one tool draws a corner in short steps; the board builds.
+#[test]
+fn an_outline_drawn_twice_with_arcs_at_its_corners_builds_once() {
+    let (w, h, r) = (34.0, 16.0, 1.0);
+    let corners = [(v(w - r, r), -PI / 2.0), (v(w - r, h - r), 0.0), (v(r, h - r), PI / 2.0), (v(r, r), PI)];
+    let at = |c: Vec2, angle: f64| c + v(angle.cos(), angle.sin()) * r;
+    let mut once = Vec::new();
+    let mut stepped = Vec::new();
+    for (k, (c, from)) in corners.into_iter().enumerate() {
+        let (a, b) = (at(c, from), at(c, from + PI / 2.0));
+        once.push(Geom2::Arc { c, a, b });
+        stepped.extend((0..20).map(|n| Geom2::Line(at(c, from + PI / 40.0 * n as f64), at(c, from + PI / 40.0 * (n + 1) as f64))));
+        let (next, next_from) = corners[(k + 1) % 4];
+        let side = Geom2::Line(b, at(next, next_from));
+        once.push(side.clone());
+        stepped.push(side);
+    }
+    let hole = Geom2::Circle(v(10.0, 8.0), 1.5);
+    let area = w * h - (4.0 - PI) * r * r - PI * 1.5 * 1.5;
+    for (name, second) in [("the same arcs", &once), ("corners in steps", &stepped)] {
+        let mut outline = once.clone();
+        outline.push(hole.clone());
+        outline.extend(second.iter().cloned());
+        outline.push(hole.clone());
+        let mut s = Session::default();
+        let b = build(&mut s, &outline, &Drills::default(), 1.6, Origin::File);
+        assert!(b.warnings.iter().any(|w| w.contains("drawn twice were used once")), "{name}: {:?}", b.warnings);
+        near(volume(&mut s), area * 1.6);
+    }
+    // Two half circles between the same two points are a whole circle, not one arc drawn twice.
+    let mut halves = rectangle(Vec2::ZERO, 30.0, 20.0);
+    halves.push(Geom2::Arc { c: v(15.0, 10.0), a: v(17.0, 10.0), b: v(13.0, 10.0) });
+    halves.push(Geom2::Arc { c: v(15.0, 10.0), a: v(13.0, 10.0), b: v(17.0, 10.0) });
+    let mut s = Session::default();
+    let _ = build(&mut s, &halves, &Drills::default(), 1.6, Origin::File);
+    near(volume(&mut s), (600.0 - PI * 4.0) * 1.6);
+}
+
 /// An outline that doesn't close is refused, naming the gap; one with nothing on it too. The
 /// design is not touched.
 #[test]

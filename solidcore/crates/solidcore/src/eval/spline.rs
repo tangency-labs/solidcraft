@@ -333,6 +333,9 @@ pub struct Nurbs {
     /// Whether it closes on itself along each direction ([`uv::closed`]), worked out once
     /// (every evaluation outside the knot interval asks, and the test walks the whole net).
     closed: [bool; 2],
+    /// Whole-surface certified bounds for pole classification ([`super::collapse`]), worked out
+    /// once when the surface is built.
+    collapse_bounds: super::collapse::CollapseBounds,
     /// NLib's surface and its Euclidean net, `None` when the data are malformed (nothing
     /// then evaluates).
     nl: Option<(NlSurface, EuclidNet)>,
@@ -370,6 +373,10 @@ impl Nurbs {
     #[must_use]
     pub fn closed(&self) -> [bool; 2] {
         self.closed
+    }
+    /// Whole-surface certified bounds for pole classification ([`super::collapse`]).
+    pub(super) fn collapse_bounds(&self) -> super::collapse::CollapseBounds {
+        self.collapse_bounds
     }
 }
 
@@ -450,12 +457,14 @@ impl EvalSurface {
                 Some((nl, euclid))
             })
             .flatten();
+        let collapse_bounds = super::collapse::CollapseBounds::of(degree, &knots, count, &ctrl);
         EvalSurface::Nurbs(Box::new(Nurbs {
             degree,
             knots,
             count,
             ctrl,
             closed,
+            collapse_bounds,
             nl,
         }))
     }
