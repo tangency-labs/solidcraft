@@ -4704,6 +4704,38 @@ mod tests {
         }
     }
 
+    /// A span index outside the net's spans is refused with a typed error before an offset
+    /// is taken from it (`ku + i − p` wrapped below the first span); the end spans stay
+    /// usable, also continued over a box past the knots' range.
+    #[test]
+    fn a_span_outside_the_net_is_refused() {
+        let n = cubic_with_knot(1);
+        let (first_u, last_u) = (n.p, n.nu - 1);
+        let (first_v, last_v) = (n.q, n.nv - 1);
+        for (ku, kv) in [
+            (0, first_v),
+            (first_u - 1, first_v),
+            (last_u + 1, first_v),
+            (first_u, last_v + 1),
+            (usize::MAX, first_v),
+        ] {
+            let r = nurbs_partials_over_piece(&n, ku, kv, 0.2, 0.3, 0.2, 0.3, 0);
+            assert!(
+                matches!(r, Err(SolidError::InvalidInput { .. })),
+                "({ku}, {kv}): {r:?}"
+            );
+        }
+        if n.q > 0 {
+            let r = nurbs_partials_over_piece(&n, first_u, 0, 0.2, 0.3, 0.2, 0.3, 0);
+            assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        }
+        for (ku, kv) in [(first_u, first_v), (last_u, last_v)] {
+            assert!(nurbs_partials_over_piece(&n, ku, kv, 0.2, 0.3, 0.2, 0.3, 1).is_ok());
+            // the end piece continued past the knots' range
+            assert!(nurbs_partials_over_piece(&n, ku, kv, -0.5, 2.5, -0.5, 1.5, 1).is_ok());
+        }
+    }
+
     #[test]
     fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
         let n = cubic_with_knot(1);
