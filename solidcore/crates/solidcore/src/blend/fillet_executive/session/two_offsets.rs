@@ -1343,5 +1343,165 @@ mod tests {
                 assert!(on_round >= 9, "{side}: {on_round}");
             }
         }
+
+        /// The station of the enclosure front's round at x > 40 (the cylinder `(x − 40)² +
+        /// (y − 30)² = 100` cut by the slanted plane `z = 0.8 (y − 15)`), a quarter of the way
+        /// along its edge, seeded at the setback circle's other crossing of each support (the
+        /// mirror root, on the far side of the edge), with setbacks 0.8 and 0.8.
+        ///
+        /// The feet in closed form. The edge is the ellipse `C(θ) = (40 + 10 cos θ, 30 + 10 sin
+        /// θ, 12 + 8 sin θ)`, `C′ = (−10 sin θ, 10 cos θ, 8 cos θ)`. A point of the cylinder is
+        /// `S = (40 + 10 cos φ, 30 + 10 sin φ, z)`; with `δ = φ − θ` and `Δz = z − C_z`,
+        /// `(S − C) · C′ = 100 sin δ + 8 cos θ Δz`, so square to the edge `Δz = −12.5 sin δ / cos
+        /// θ`, and `|S − C|² = 200 (1 − cos δ) + 156.25 sin² δ / cos² θ = d²`: with `x = cos δ`,
+        /// `a = 156.25 / cos² θ`, `a x² + 200 x + (d² − 200 − a) = 0`, whose root near 1 gives
+        /// two feet `δ = ±acos x`, mirror images through the edge. The round's own has `z > 0.8
+        /// (y − 15)` (the face's side of the slanted plane, where `20 (y − 15) − 25 z < 0`). On
+        /// the slanted plane the foot is `C ± d u`, `u` the unit of `n × C′` (n its normal
+        /// `(0, 20, −25)`): the plane's own runs into the wedge, towards the cylinder's axis,
+        /// `u · (cos θ, sin θ, 0) < 0`; the other runs off the face beyond the edge.
+        ///
+        /// Seeded at the mirror feet, Newton stays on them; the station must decide the branch
+        /// (each foot on the wedge's side of the other support) and re-seed, ending on the
+        /// round's own feet, never answering the mirror (a trace span that then never passes
+        /// its test, to the 100000-point limit).
+        #[test]
+        fn a_round_station_seeded_at_its_mirror_feet_ends_on_the_round() {
+            use crate::blend::fillet_custom_solver::surface_global_point_solve;
+            use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+            use crate::blend::fillet_standard_solver::p1::SolverRails;
+            use crate::blend::fillet_standard_solver::setback::SetbackFs;
+            use crate::geom::vector2d::Point2;
+            use crate::surface::surface::Surface;
+            let d = [0.8, 0.8];
+            let mut k = fixed_kernel();
+            let mut b = enclosure_front(&mut k);
+            let slant = face_holding(&k, &b, |bx| {
+                bx.min().z.abs() < 1e-6
+                    && (bx.max().z - 20.0).abs() < 1e-6
+                    && (bx.min().y - 15.0).abs() < 1e-6
+                    && (bx.max().y - 40.0).abs() < 1e-6
+            })[0];
+            let round: Vec<EdgeId> = crate::topology::face::p4::edges(&b, slant, None, false, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| {
+                    along_edge(&k, &b, e)
+                        .iter()
+                        .all(|p| p.x > 40.0 && p.y > 30.0)
+                })
+                .collect();
+            assert_eq!(round.len(), 1);
+            // rail 0 on the slanted plane: the edge use on its face
+            let eu = b
+                .edge(round[0])
+                .unwrap()
+                .edgeuses
+                .iter()
+                .copied()
+                .find(|&u| {
+                    let fu = eu1::faceuse(&b, u).unwrap().unwrap();
+                    b.faceuse(fu).unwrap().face == Some(slant)
+                })
+                .unwrap();
+            let mut pseudo = FilletBrep::new();
+            let mut fs = SetbackFs::from_edgeuse(
+                &k,
+                &mut b,
+                &mut pseudo,
+                FilletSolverId(0),
+                1e-5,
+                0.1,
+                0.01,
+                eu,
+                d,
+            )
+            .unwrap();
+            let domains = fs.trace_domains(&k).unwrap();
+            let s = fs.edge_interval.evaluate(0.25);
+            let jet = fs.jet(&k, s).unwrap();
+            let c = jet.point;
+            let theta = (c.y - 30.0).atan2(c.x - 40.0);
+            let (ct, st) = (theta.cos(), theta.sin());
+            // the edge point is on the ellipse
+            let ellipse = Point3::new(40.0 + 10.0 * ct, 30.0 + 10.0 * st, 12.0 + 8.0 * st);
+            assert!(
+                c.distance(ellipse) < 1e-9,
+                "{c:?} off the ellipse {ellipse:?}"
+            );
+            let a = 156.25 / (ct * ct);
+            let x = (-200.0 + (200.0f64.powi(2) - 4.0 * a * (d[1] * d[1] - 200.0 - a)).sqrt())
+                / (2.0 * a);
+            let delta = x.acos();
+            let on_cylinder = |dl: f64| {
+                let phi = theta + dl;
+                Point3::new(
+                    40.0 + 10.0 * phi.cos(),
+                    30.0 + 10.0 * phi.sin(),
+                    c.z - 12.5 * dl.sin() / ct,
+                )
+            };
+            let face_side = |p: Point3| p.z > 0.8 * (p.y - 15.0);
+            let [mut round_foot, mut round_mirror] = [on_cylinder(delta), on_cylinder(-delta)];
+            if !face_side(round_foot) {
+                std::mem::swap(&mut round_foot, &mut round_mirror);
+            }
+            assert!(face_side(round_foot) && !face_side(round_mirror));
+            let tau = Vec3::new(-10.0 * st, 10.0 * ct, 8.0 * ct);
+            let u = Vec3::new(0.0, 20.0, -25.0).cross(tau).unitize().unwrap();
+            let radial = Vec3::new(ct, st, 0.0);
+            let u = if u.dot(radial) < 0.0 { u } else { -u };
+            let want = [c + u * d[0], round_foot];
+            let mirror = [c - u * d[0], round_mirror];
+            let guesses = [0, 1].map(|rail| {
+                let support =
+                    Surface::from(fs.curve_based.solver.rail(rail).unwrap().surface.clone());
+                let uv: Point2 = surface_global_point_solve(
+                    &k,
+                    &support,
+                    None,
+                    &domains[rail],
+                    mirror[rail],
+                    1e-20,
+                )
+                .unwrap()[0];
+                assert!(
+                    support
+                        .evaluate_point(&k, uv)
+                        .unwrap()
+                        .distance(mirror[rail])
+                        < 1e-9,
+                    "rail {rail}: the mirror foot is on its support"
+                );
+                uv
+            });
+            let station = fs
+                .station(&k, s, guesses, &domains)
+                .unwrap()
+                .expect("a station");
+            // the same feet given (never re-solved) are refused as beyond the edge, foot 0
+            // first
+            let err = fs
+                .station_through(&k, s, guesses, &domains)
+                .expect_err("the mirror feet are refused");
+            assert!(
+                matches!(
+                    err.blend_failure(),
+                    Some(&crate::error::blend::BlendFailure::Solver(
+                        crate::error::blend::SolverFailure::SetbackFootMirrored { rail: 0, .. }
+                    ))
+                ),
+                "{err:?}"
+            );
+            for rail in 0..2 {
+                let p = station.feet[rail].point;
+                assert!(
+                    p.distance(want[rail]) < 1e-9,
+                    "rail {rail}: {p:?}, not the round's {:?} (mirror {:?})",
+                    want[rail],
+                    mirror[rail]
+                );
+            }
+        }
     }
 }

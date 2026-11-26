@@ -1594,8 +1594,10 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 /// uv: across a curved edge's span the mean can lie nearer the setback circle's other
 /// crossing of the support (the mirror root, on the far side of the edge: on a round of
 /// radius 10 cut by a slanted plane, foot 1 at z 18.67 where its neighbours stand at 20.2),
-/// which the fold check does not tell apart. The root found is not checked to be the ends'
-/// branch: a mirrored station leaves a span that never passes the span test.
+/// which the fold check does not tell apart. The seed is only a start: the solver decides
+/// each foot's branch at the station itself (a chamfer of setbacks' `SetbackFs::station`:
+/// re-solved from the edge once, else refused `SetbackFootMirrored`), since no bound from a
+/// span's chord and tangents separates the two roots.
 ///
 /// # Errors
 ///

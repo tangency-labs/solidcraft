@@ -153,14 +153,24 @@ pub fn setback_tangent(
         return Ok(None);
     }
     let t = b * (1.0 / length);
-    let side = t.dot(into);
-    Ok(if !side.is_finite() || side == 0.0 {
-        None
-    } else if side > 0.0 {
-        Some(t)
-    } else {
-        Some(-t)
+    Ok(match on_wedge_side(t, into) {
+        None => None,
+        Some(true) => Some(t),
+        Some(false) => Some(-t),
     })
+}
+
+/// Whether `arm` (a direction from the edge, or a foot less the edge point) points to the side
+/// of `into` (a vector from the edge into the wedge across the support, the other support's
+/// normal oriented to the wedge's interior): `arm · into > 0`. `None` where that product is
+/// zero or not finite. The one branch test of a chamfer of setbacks: [`setback_tangent`]
+/// picks the tangent into the face by it, and a station's solved foot must pass it against
+/// that tangent (the setback's circle crosses the extended support twice, once into the face
+/// and once beyond the edge, two setbacks apart).
+#[must_use]
+pub fn on_wedge_side(arm: Vec3, into: Vec3) -> Option<bool> {
+    let side = arm.dot(into);
+    (side.is_finite() && side != 0.0).then_some(side > 0.0)
 }
 
 /// The (u, v) of `C + d t` on the support to first order, Newton's start for the foot at

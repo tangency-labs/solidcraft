@@ -364,6 +364,16 @@ pub enum SolverFailure {
         /// The interval's index.
         index: usize,
     },
+    /// A chamfer of setbacks' foot `rail` at the station at the edge parameter `s` lies on
+    /// the far side of the other support, beyond the edge (the setback circle's other
+    /// crossing of the extended support), from its guess and from the edge's start into the
+    /// face, or as given: no foot on the wedge's side is found ([`ErrorKind::NotFound`]).
+    SetbackFootMirrored {
+        /// The rail whose foot is beyond the edge.
+        rail: usize,
+        /// The edge parameter of the station.
+        s: f64,
+    },
     /// A point given to a chamfer of setbacks' station trace (a rail end) whose foot `rail`
     /// is `moved` from the station's foot at the point's own edge parameter, more than the
     /// trace's 3D tolerance: the given point is not on the chamfer, and a rail end is never
@@ -616,6 +626,7 @@ impl SolverFailure {
             Self::RolloverCornerMissing => ErrorKind::InvalidInput,
             Self::RolloverHasNoFaceBeyond { .. } => ErrorKind::Unsupported,
             Self::RolloverIntervalNotAtEdge { .. } => ErrorKind::Unsupported,
+            Self::SetbackFootMirrored { .. } => ErrorKind::NotFound,
             Self::SetbackFootOffStation { .. } => ErrorKind::NotWithinTolerance,
             Self::SetbackStationNotFound { .. } => ErrorKind::NotFound,
             Self::ShortIntervalsNotRemoved { .. } => ErrorKind::Unsupported,
@@ -714,6 +725,7 @@ impl SolverFailure {
             Self::RolloverCornerMissing => SM_ERR_NULL_POINTER,
             Self::RolloverHasNoFaceBeyond { .. } => SM_ERR_NULL_POINTER,
             Self::RolloverIntervalNotAtEdge { .. } => SM_ERR,
+            Self::SetbackFootMirrored { .. } => SM_ERR,
             Self::SetbackFootOffStation { .. } => SM_ERR,
             Self::SetbackStationNotFound { .. } => SM_ERR,
             Self::ShortIntervalsNotRemoved { .. } => SM_ERR,
@@ -976,6 +988,10 @@ impl core::fmt::Display for SolverFailure {
             Self::RolloverIntervalNotAtEdge { index } => write!(
                 f,
                 "interval {index} of the roll-over rail's classification is not bounded by an edge"
+            ),
+            Self::SetbackFootMirrored { rail, s } => write!(
+                f,
+                "the chamfer of setbacks' foot {rail} at s = {s} lies beyond the edge, not on the wedge's side of the other face"
             ),
             Self::SetbackFootOffStation { rail, moved } => write!(
                 f,

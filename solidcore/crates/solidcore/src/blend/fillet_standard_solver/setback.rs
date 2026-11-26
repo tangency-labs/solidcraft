@@ -39,8 +39,16 @@
 //! each with its motion in s from the implicit function theorem on its own system
 //! (`SetbackFoot::per_s`, no difference quotient). A trace point's uv tangents are each
 //! foot's own per unit length of foot 0's motion ([`SetbackFs::compute_uv_vectors`]), not the
-//! base solver's drop of foot 0's tangent on both surfaces. Every station is checked not to
-//! fold: `∂S_i/∂s · C′ > 0`, else `NoRoom(SetbacksCross)` ([`SetbackFs::check_not_folding`]).
+//! base solver's drop of foot 0's tangent on both surfaces. Every station decides each foot's
+//! branch (the setback's circle crosses the extended support twice, about two setbacks apart,
+//! once beyond the edge): the foot lies on the face's side of the edge, `(S_i − C) · t_i > 0`
+//! with `t_i` the support's tangent into the face that `setback_tangent` picks by the same
+//! test against the other support's oriented normal `n_j` (on the wedge's side of it; tested
+//! against `t_i`, not `n_j`, so that a wedge near flat, where `(S_i − C) · n_j` is small
+//! beside the support's curvature, is not refused); a foot beyond the edge is solved once more
+//! from the edge, else refused `SetbackFootMirrored` ([`SetbackFs::station`]). Every station is
+//! then checked not to fold: `∂S_i/∂s · C′ > 0`, else `NoRoom(SetbacksCross)`
+//! ([`SetbackFs::check_not_folding`]).
 //!
 //! Deviations: not upstream (no counterpart). Every loop has a fixed count
 //! ([`NEWTON_STEPS`]), no recursion.
@@ -56,7 +64,7 @@ use crate::blend::fillet_custom_solver::{
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use crate::blend::fillet_section::setback_station::{
-    foot_at, setback_foot, setback_start, setback_tangent, EdgeJet, SetbackFoot,
+    foot_at, on_wedge_side, setback_foot, setback_start, setback_tangent, EdgeJet, SetbackFoot,
 };
 use crate::blend::fillet_solver::p1::{ExtensionCorners, FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -144,6 +152,19 @@ impl SetbackStation {
         let scale = sign / forward.length();
         self.feet.map(|f| f.uv_per_s * scale)
     }
+}
+
+/// The wedge at a station ([`SetbackFs::wedge`]): the edge point's parameters on each
+/// support, and each support's tangent into its face on the wedge's side (the other
+/// support's oriented normal there).
+#[derive(Debug, Clone, Copy)]
+struct Wedge {
+    /// The edge point's (u, v) on supports 1 and 2.
+    edge_uv: [Point2; 2],
+    /// Support i's unit tangent into its face at the edge point, square to the edge, on the
+    /// side of the other support's normal there times its orientation ([`setback_tangent`]);
+    /// `None` where it has none.
+    tangent: [Option<Vec3>; 2],
 }
 
 fn at(x: &[f64], i: usize, op: &'static str) -> Result<f64> {
@@ -447,50 +468,124 @@ impl SetbackFs {
         guesses: [Point2; 2],
         domains: &[Extent2d; 2],
     ) -> Result<[Option<SetbackFoot>; 2]> {
+        let wedge = self.wedge(k, jet, guesses, domains)?;
+        Ok([
+            self.foot_from_edge(k, jet, &wedge, 0)?,
+            self.foot_from_edge(k, jet, &wedge, 1)?,
+        ])
+    }
+
+    /// The wedge at the edge jet `jet`: the edge point's parameters on each support (its drop
+    /// there from `guesses`, over `domains`, or the guess where the drop finds nothing),
+    /// across each support the other support's normal at its edge point times that
+    /// support's orientation (the side of it the wedge's interior lies on: a round's ball's),
+    /// and each support's tangent into its face on that side ([`setback_tangent`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the drops, the evaluations and the orientations.
+    fn wedge(
+        &self,
+        k: &Kernel,
+        jet: &EdgeJet,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<Wedge> {
         let solver = &self.curve_based.solver;
-        let mut supports: Vec<Surface> = Vec::new();
         let mut edge_uv = guesses;
         let mut normals = [Vec3::ZERO; 2];
-        for rail in 0..2 {
+        for (rail, (slot, normal)) in edge_uv.iter_mut().zip(normals.iter_mut()).enumerate() {
             let offset = solver.rail(rail)?;
-            let support = Surface::from(offset.surface.clone());
-            let guess = guesses.get(rail).copied().unwrap_or(Point2::new(0.0, 0.0));
+            let guess = *slot;
             let domain = domains
                 .get(rail)
                 .copied()
                 .unwrap_or_else(|| offset.surface.natural_uv_domain());
             let uv = offset_local_point_solve(k, offset, &domain, jet.point, guess)?
                 .map_or(guess, |(uv, _)| uv);
-            if let Some(slot) = edge_uv.get_mut(rail) {
-                *slot = uv;
-            }
-            let n = support.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-            if let Some(slot) = normals.get_mut(rail) {
-                *slot = n;
-            }
-            supports.push(support);
+            *slot = uv;
+            *normal = Surface::from(offset.surface.clone()).evaluate_normal(
+                k,
+                uv,
+                Side::Left,
+                Side::Left,
+            )?;
         }
-        let mut feet = [None, None];
-        for (rail, foot) in feet.iter_mut().enumerate() {
+        let mut into = [Vec3::ZERO; 2];
+        for (rail, slot) in into.iter_mut().enumerate() {
             let other = 1 - rail;
-            let (Some(support), Some(&uv), Some(&d)) = (
-                supports.get(rail),
-                edge_uv.get(rail),
-                self.setbacks.get(rail),
-            ) else {
-                continue;
-            };
-            let into =
+            *slot =
                 normals.get(other).copied().unwrap_or(Vec3::ZERO) * solver.orientation(other)?;
-            let Some(t) = setback_tangent(k, support, uv, jet, into)? else {
-                continue;
-            };
-            let Some(start) = setback_start(k, support, uv, t, d)? else {
-                continue;
-            };
-            *foot = setback_foot(k, support, jet, d, start)?;
         }
-        Ok(feet)
+        let mut tangent = [None, None];
+        for (rail, slot) in tangent.iter_mut().enumerate() {
+            let (Some(&uv), Some(&side)) = (edge_uv.get(rail), into.get(rail)) else {
+                continue;
+            };
+            *slot = setback_tangent(k, &self.support(rail)?, uv, jet, side)?;
+        }
+        Ok(Wedge { edge_uv, tangent })
+    }
+
+    /// The foot of rail `rail` from the edge: Newton ([`setback_foot`]) from
+    /// [`setback_start`] off the edge point along [`setback_tangent`]'s tangent into the face,
+    /// on the wedge's side (`wedge`); `None` where a step is not defined or the foot is not
+    /// found.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the solve.
+    fn foot_from_edge(
+        &self,
+        k: &Kernel,
+        jet: &EdgeJet,
+        wedge: &Wedge,
+        rail: usize,
+    ) -> Result<Option<SetbackFoot>> {
+        let support = self.support(rail)?;
+        let (Some(&uv), Some(&Some(t)), Some(&d)) = (
+            wedge.edge_uv.get(rail),
+            wedge.tangent.get(rail),
+            self.setbacks.get(rail),
+        ) else {
+            return Ok(None);
+        };
+        let Some(start) = setback_start(k, &support, uv, t, d)? else {
+            return Ok(None);
+        };
+        setback_foot(k, &support, jet, d, start)
+    }
+
+    /// Refuses foot `rail` at `point` of the station at `s` (edge jet `jet`) unless it lies
+    /// on the face's side of the edge: [`on_wedge_side`] of `point − C(s)` against the
+    /// support's tangent into the face (`wedge`'s, which [`setback_tangent`] picks by the
+    /// same test against the other support's oriented normal, the side the wedge's interior
+    /// lies on). The setback's circle crosses the extended support a second time beyond the
+    /// edge, about two setbacks away, which no bound from a span's chord or tangents tells
+    /// apart; the two crossings lie near `C ± d t`, so the test holds whatever the wedge's
+    /// angle (against the other support's normal itself, `(S − C) · n_j ≈ d sin β`, the
+    /// support's curvature would outweigh it in a wedge near flat).
+    ///
+    /// # Errors
+    ///
+    /// `SetbackFootMirrored` for a foot beyond the edge, or where the support has no tangent
+    /// into its face there.
+    fn check_branch(
+        jet: &EdgeJet,
+        wedge: &Wedge,
+        rail: usize,
+        point: Point3,
+        s: f64,
+    ) -> Result<()> {
+        let into = wedge.tangent.get(rail).copied().flatten();
+        if into.and_then(|t| on_wedge_side(point - jet.point, t)) == Some(true) {
+            Ok(())
+        } else {
+            Err(SolidError::blend_solver(
+                OP,
+                SolverFailure::SetbackFootMirrored { rail, s },
+            ))
+        }
     }
 
     /// Support `rail` as a surface (the offsets are 0: the face's own).
@@ -503,14 +598,20 @@ impl SetbackFs {
     /// The exact station at the edge's parameter `s`: both feet by [`setback_foot`] at the
     /// edge's jet there, each seeded from its guess in `guesses`, or, for a guess on the
     /// edge (nearer `C(s)` than half its setback, as [`Self::load_initial_values`] judges
-    /// it, where `|S − C|` has no derivative), from the station's feet off the edge
-    /// ([`Self::feet_at`]'s). Each foot carries its motion in s from the implicit function
-    /// theorem on its own system ([`SetbackFoot::uv_per_s`], [`SetbackFoot::per_s`]), and
-    /// the stations are checked not to fold there ([`Self::check_not_folding`]). `None`
-    /// where a foot is not found or its motion is not finite.
+    /// it, where `|S − C|` has no derivative), from the station's foot off the edge
+    /// ([`Self::feet_at`]'s). Each foot's branch is decided at its station: it must lie on
+    /// the wedge's side of the other support ([`Self::check_branch`]). A foot found beyond
+    /// the edge from its guess (the setback circle's other crossing, which a guess between
+    /// stations can reach) is solved once again from the edge, [`setback_start`]'s start
+    /// into the face, and refused if that is not on the wedge's side either. Each foot
+    /// carries its motion in s from the implicit function theorem on its own system
+    /// ([`SetbackFoot::uv_per_s`], [`SetbackFoot::per_s`]), and the stations are checked not
+    /// to fold there ([`Self::check_not_folding`]), after the branch. `None` where a foot is
+    /// not found or its motion is not finite.
     ///
     /// # Errors
     ///
+    /// `SetbackFootMirrored` for a foot on the wrong branch from its guess and from the edge;
     /// `NoRoom(SetbacksCross)` for a folding station; those of the evaluations and the
     /// solves.
     pub fn station(
@@ -521,50 +622,69 @@ impl SetbackFs {
         domains: &[Extent2d; 2],
     ) -> Result<Option<SetbackStation>> {
         let jet = self.jet(k, s)?;
-        let mut off_edge: Option<[Option<SetbackFoot>; 2]> = None;
+        let wedge = self.wedge(k, &jet, guesses, domains)?;
         let mut feet: [Option<SetbackFoot>; 2] = [None, None];
         for (rail, foot) in feet.iter_mut().enumerate() {
             let support = self.support(rail)?;
             let d = self.setbacks.get(rail).copied().unwrap_or(0.0);
             let guess = guesses.get(rail).copied().unwrap_or(Point2::new(0.0, 0.0));
             let on_edge = support.evaluate_point(k, guess)?.distance(jet.point) < 0.5 * d;
-            let seed = if on_edge {
-                if off_edge.is_none() {
-                    off_edge = Some(self.feet_from_edge(k, &jet, guesses, domains)?);
-                }
-                match off_edge.and_then(|f| f.get(rail).copied().flatten()) {
-                    Some(f) => f.uv,
-                    None => return Ok(None),
-                }
+            let solved = if on_edge {
+                self.foot_from_edge(k, &jet, &wedge, rail)?
             } else {
-                guess
+                setback_foot(k, &support, &jet, d, guess)?
             };
-            *foot = setback_foot(k, &support, &jet, d, seed)?;
+            let Some(mut found) = solved else {
+                return Ok(None);
+            };
+            if !on_edge && Self::check_branch(&jet, &wedge, rail, found.point, s).is_err() {
+                // the other crossing: once more from the edge, into the face
+                match self.foot_from_edge(k, &jet, &wedge, rail)? {
+                    Some(again) => found = again,
+                    None => {
+                        return Err(SolidError::blend_solver(
+                            OP,
+                            SolverFailure::SetbackFootMirrored { rail, s },
+                        ))
+                    }
+                }
+            }
+            Self::check_branch(&jet, &wedge, rail, found.point, s)?;
+            *foot = Some(found);
         }
         Self::checked_station(s, jet, feet)
     }
 
     /// The station at `s` through the feet `uvs` as they stand (no solve): each foot's
-    /// motion in s at them ([`SetbackFoot::per_s`]), checked not to fold. `None` where a
-    /// foot's system is singular there or its motion is not finite. The feet are taken as
-    /// the station's roots; the motion is the root's only within the solve's tolerance.
+    /// motion in s at them ([`SetbackFoot::per_s`]), each foot's branch checked
+    /// ([`Self::check_branch`], the wedge from the edge point's drops seeded at `uvs` over
+    /// `domains`; feet given are never moved, so a foot beyond the edge is refused, not
+    /// re-solved), then checked not to fold. `None` where a foot's system is singular there
+    /// or its motion is not finite. The feet are taken as the station's roots; the motion is
+    /// the root's only within the solve's tolerance.
     ///
     /// # Errors
     ///
-    /// `NoRoom(SetbacksCross)` for a folding station; those of the evaluations.
+    /// `SetbackFootMirrored` for a foot beyond the edge; `NoRoom(SetbacksCross)` for a
+    /// folding station; those of the evaluations.
     pub fn station_through(
         &mut self,
         k: &Kernel,
         s: f64,
         uvs: [Point2; 2],
+        domains: &[Extent2d; 2],
     ) -> Result<Option<SetbackStation>> {
         let jet = self.jet(k, s)?;
+        let wedge = self.wedge(k, &jet, uvs, domains)?;
         let mut feet: [Option<SetbackFoot>; 2] = [None, None];
         for (rail, foot) in feet.iter_mut().enumerate() {
             let support = self.support(rail)?;
             let d = self.setbacks.get(rail).copied().unwrap_or(0.0);
             let uv = uvs.get(rail).copied().unwrap_or(Point2::new(0.0, 0.0));
             *foot = foot_at(k, &support, &jet, d, uv)?;
+            if let Some(f) = foot {
+                Self::check_branch(&jet, &wedge, rail, f.point, s)?;
+            }
         }
         Self::checked_station(s, jet, feet)
     }
@@ -685,7 +805,8 @@ impl SetbackFs {
     pub fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
         let s = self.station_parameter(k, point)?;
         let uvs = [point.uv_curve_pv[0][0], point.uv_curve_pv[1][0]];
-        let Some(station) = self.station_through(k, s, uvs)? else {
+        let domains = self.trace_domains(k)?;
+        let Some(station) = self.station_through(k, s, uvs, &domains)? else {
             return Err(SolidError::blend(
                 OP,
                 BlendFailure::NoRoom(NoRoomReason::SetbackFootTangent),
@@ -792,9 +913,10 @@ impl SetbackFs {
     ///
     /// # Errors
     ///
-    /// `SetbackFootOffStation` for a foot farther than `tol` from its station;
-    /// `StationNotSolved` where the station is not found; `NoRoom(SetbackFootTangent)`
-    /// where a foot's system is singular at the given feet; those of
+    /// `SetbackFootMirrored` for a given foot beyond the edge; `SetbackFootOffStation` for a
+    /// foot farther than `tol` from its station; `StationNotSolved` where the station is not
+    /// found; `NoRoom(SetbackFootTangent)` where a foot's system is singular at the given
+    /// feet; those of
     /// [`Self::station_parameter`] and [`Self::station`].
     pub fn given_station(
         &mut self,
@@ -807,6 +929,11 @@ impl SetbackFs {
         let mut at = point.clone();
         FilletSolver::compute_surface_values(k, self, uvs, &mut at)?;
         let s = self.station_parameter(k, &at)?;
+        let jet = self.jet(k, s)?;
+        let wedge = self.wedge(k, &jet, uvs, domains)?;
+        for (rail, pv) in at.surface_pv.iter().enumerate() {
+            Self::check_branch(&jet, &wedge, rail, pv[0][0], s)?;
+        }
         let solved = self
             .station(k, s, uvs, domains)?
             .ok_or_else(|| SolidError::blend_solver(OP, SolverFailure::StationNotSolved { s }))?;
@@ -820,7 +947,7 @@ impl SetbackFs {
                 ));
             }
         }
-        let Some(through) = self.station_through(k, s, uvs)? else {
+        let Some(through) = self.station_through(k, s, uvs, domains)? else {
             return Err(SolidError::blend(
                 OP,
                 BlendFailure::NoRoom(NoRoomReason::SetbackFootTangent),
@@ -1991,7 +2118,7 @@ mod tests {
             plate_uv(want[0]),
             Point2::new((1.0 + s) / 3.0, (RIM_Z - d[1]) / RIM_Z),
         ];
-        refused(fs.station_through(&k, s, exact));
+        refused(fs.station_through(&k, s, exact, &domains));
         // the same feet's motion, unchecked: foot 0 runs backwards at r_0 / R of the edge's speed
         let jet = fs.jet(&k, s).unwrap();
         let support = fs.support(0).unwrap();
