@@ -339,9 +339,7 @@ fn export_glb_with_mesh(
     opts: &GlbOptions,
     mut mesh_at: impl FnMut(&solidcraft_kernel::Body, MeshQuality) -> Result<Mesh>,
 ) -> Result<Vec<u8>> {
-    export_glb_with(doc, model, world, bodies, name, opts, |jobs, quality| {
-        jobs.iter().map(|job| run_mesh_job(job, quality, &mut mesh_at)).collect()
-    })
+    export_glb_with(doc, model, world, bodies, name, opts, |jobs, quality| jobs.iter().map(|job| run_mesh_job(job, quality, &mut mesh_at)).collect())
 }
 
 fn export_glb_with(
