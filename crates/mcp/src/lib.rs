@@ -27,6 +27,7 @@ pub use backend::Remote;
 pub use options::COMPACT_ENV;
 pub use options::COMPACT_FLAG;
 pub use options::Options;
+pub use options::STRUCTURED_FLAG;
 pub use server::Server;
 pub use solidcraft_mcp_server::PROTOCOL_VERSION;
 pub use solidcraft_mcp_server::SUPPORTED_VERSIONS;
