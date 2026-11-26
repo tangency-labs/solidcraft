@@ -5588,7 +5588,7 @@ impl Model {
             if let Some(s) = stepper.as_mut() {
                 s.flush_for_feature(f, &before);
             }
-            let eval_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before));
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.fingerprint = prev_fp;
@@ -5656,7 +5656,7 @@ impl Model {
             if let Some(s) = stepper.as_mut() {
                 s.flush_for_feature(f, &state);
             }
-            let eval_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &steps, Some(&state));
             let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(eval_doc, f, Some(&state)));
             if !r.skipped {
@@ -5833,7 +5833,7 @@ impl Model {
                 if let Some(s) = stepper.as_mut() {
                     s.flush_for_feature(f, &state);
                 }
-                let eval_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+                let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
@@ -7002,7 +7002,7 @@ impl Model {
             if let Some(s) = stepper.as_mut() {
                 s.flush_for_feature(f, &before);
             }
-            let eval_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before));
             r.fingerprint = prev;
             let prev_state = before;

@@ -6614,7 +6614,7 @@ fn parallel_sketch_cache_load_matches_evaluated_sketches() {
         FeatureKind::Extrude {
             sketch: crate::SketchId(first_rect.unwrap()),
             profiles: ProfileSel::Indices { indices: vec![0] },
-            extent: Extent { distance: "5 mm".into(), ..Extent::default() },
+            extent: serde_json::from_value(serde_json::json!({"distance": "5 mm"})).unwrap(),
             operation: Operation::NewBody,
             targets: Vec::new(),
             thin: None,
