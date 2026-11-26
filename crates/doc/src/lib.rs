@@ -156,6 +156,7 @@ pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
 pub mod weld_plug;
+pub mod weld_seam;
 pub mod weld_spot;
 
 pub use assembly::BomType;

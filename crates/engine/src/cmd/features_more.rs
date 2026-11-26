@@ -517,7 +517,7 @@ const FLAT_FACE_POINTS_MAX: usize = 20_000;
 /// Only the outlines and holes are sampled, not the area inside them: a profile whose outline
 /// lies on the face while its inside crosses a hole in the face is still taken.
 fn profiles_lie_on_one_flat_face(body: &solidcraft_kernel::Body, plane: &solidcore_record::Plane, regions: &[solidcore_record::Region2]) -> bool {
-    use solidcraft_kernel::services::{ClassifiedPoint, PointNormalFace};
+    use solidcraft_kernel::points::{ClassifiedPoint, PointNormalFace};
     if body.is_mesh() {
         return false;
     }
