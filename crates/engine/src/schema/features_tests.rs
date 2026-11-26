@@ -1252,7 +1252,7 @@ fn ring_with(key: &str, value: Value) -> Value {
 fn circular_pattern_schema_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<PatternCircularParams>(),
-        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "join", "name", "participants", "reversed"],
     );
 }
 
@@ -1389,6 +1389,7 @@ fn pattern_schemas_and_the_key_check_agree() {
             "extent1",
             "extent2",
             "features",
+            "join",
             "name",
             "participants",
             "reversed",
