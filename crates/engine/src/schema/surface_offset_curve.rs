@@ -80,8 +80,9 @@ pub struct OffsetCurveParams {
     /// How far along the face, in mm (more than 0).
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     pub distance: Option<f64>,
-    /// How far (mm, more than 0) a fitted curve may be from the true offset. Default: 0.01. A
-    /// line or circle the offset lies on exactly is that curve, whatever the tolerance.
+    /// How far (mm, more than 0) the fitted cubic B-spline may be from the true offset, measured
+    /// between the points it is made through. Default: 0.01. A straight offset comes out exactly
+    /// straight; a circular one is a spline within the tolerance.
     #[serde(default)]
     pub tolerance: Option<f64>,
 }
