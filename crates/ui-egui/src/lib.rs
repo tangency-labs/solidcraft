@@ -56,6 +56,7 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -2964,6 +2965,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         if id == "doc.open" {
             self.file_load.home_at_start = self.home.open;
         }
@@ -3364,8 +3369,19 @@ impl SolveApp {
     }
 
     /// Does starting `id` open a tool or a dialog?
-    fn interactive(&self, id: &str) -> bool {
+    pub(crate) fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// Does `start` do something of its own with `id`, rather than run it with no values: open a
+    /// tool or a dialog, go to its settings in the Render workspace, or give it its values (a
+    /// toggle's new state, the selection)? Command search lists such a command (#9734).
+    pub(crate) fn starts_its_own_way(&self, id: &str) -> bool {
+        STARTED_WITH_VALUES.contains(&id)
+            || STARTED_BY_PREFIX.iter().any(|prefix| id.starts_with(prefix))
+            || toolbar::file_menu_row(id).is_some()
+            || render_workspace::ribbon_starts(id)
+            || self.interactive(id)
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -3532,6 +3548,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -4349,7 +4366,7 @@ impl SolveApp {
         if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             return animation.around_screen_up(None);
         }
-        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        let angle = solidcraft_kernel::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
         animation.around_screen_up(angle)
     }
 
@@ -4455,6 +4472,12 @@ impl SolveApp {
         // The sheet page: Fit and Home both show the whole sheet.
         if drawing_workspace::active(self) {
             drawing_sheet_page::fit(self);
+            return;
+        }
+        // The design's own Home view: its camera as it was set, not fitted again (#19972).
+        if home && let Some(to) = solidcraft_engine::view::home_view(&self.session) {
+            self.pending_fit = None;
+            self.animate_to(to);
             return;
         }
         if render_workspace::active(self) {
@@ -4670,6 +4693,9 @@ impl SolveApp {
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
@@ -5338,3 +5364,34 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// Commands that `SolveApp::start` runs with values it works out itself (a toggle's new state,
+/// the selected component or body), or offers a menu of (the selection filter's mode), although
+/// their schema requires them. Command search lists
+/// them (#9734); `start_special_cases_stay_in_command_search` keeps this list in step with
+/// `start`.
+const STARTED_WITH_VALUES: &[&str] = &[
+    "body.print_face",
+    "browser.visibility",
+    "component.move_features",
+    "component.relink",
+    "drawing.sketch.create",
+    "occurrence.properties",
+    "select.filter",
+    "select.mode",
+    "sketch.toggle_diameter",
+    "sketch.toggle_driven",
+    "tab.view.move_to_window",
+    "view.ambient_occlusion",
+    "view.angle_readout",
+    "view.layout",
+    "view.origin_axes_across_view",
+    "view.perspective",
+    "view.render_focus",
+    "view.scale_bar",
+    "view.shots_strip",
+];
+
+/// Command id prefixes `SolveApp::start` handles as a group (Settings profiles open Preferences
+/// on their page), so command search lists their commands too (#9734).
+const STARTED_BY_PREFIX: &[&str] = &["settings.profile."];
