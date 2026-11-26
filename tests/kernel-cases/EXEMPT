@@ -234,6 +234,7 @@ inspect.environment_map           display analysis: shading
 inspect.hole_stacks               read-only query: tested in crates/engine/src/cmd/hole_stacks_tests.rs
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
+inspect.socket_reach              read-only clearance query: tested in crates/engine/src/cmd/clearance_tests.rs
 inspect.zebra                     display analysis: shading
 joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
