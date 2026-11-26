@@ -2989,8 +2989,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
-    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
-    /// constant-section part, planar facets for any other closed mesh.
+    /// Rebuild a closed mesh as a solid with analytic faces where certified and planar facets otherwise.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]

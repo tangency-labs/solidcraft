@@ -15845,6 +15845,27 @@ fn chamfer_with(
     })
 }
 
+/// Adapt the one SolidCore converter's record to the document body. Recognition and faceted
+/// construction both live below the record boundary; document replay only restores state.
+fn reconstruct_mesh(positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64) -> Result<(Body, kernel::services::mesh::ReconstructionKind)> {
+    use solidcore_record::brep::envelope;
+    use solidcore_record::native::{self, Runtime, Saved};
+
+    let result = kernel::services::mesh::reconstruct_mesh(positions, triangles, tolerance).map_err(|error| DocError::Invalid(error.to_string()))?;
+    let metadata = envelope::Metadata {
+        version: envelope::VERSION,
+        color: None,
+        paint: None,
+        boundaries: None,
+        face_sources: None,
+        history: None,
+        preserve_boundaries: false,
+    };
+    let runtime = Runtime { size: 0., coarse_missing: None };
+    let bytes = native::encode(&Saved { solid: result.body, metadata, runtime }).map_err(|error| DocError::Invalid(error.to_string()))?;
+    Ok((kernel::decode_native_body(&bytes)?, result.kind))
+}
+
 /// The centre of the exact bounding box of a Scale's bodies, as the features before it leave
 /// them.
 fn bodies_centre(st: &ModelState, bodies: &[crate::BodyName]) -> Result<Vec3> {
@@ -17304,9 +17325,11 @@ fn eval_feature_kind(
             if doc.model_body_component(source) != f.component {
                 return Err(DocError::Invalid("activate the mesh body's component before converting it".into()));
             }
-            let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
+            let (positions, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+            let (converted, kind) = reconstruct_mesh(positions, triangles, tolerance)?;
             let converted = converted.with_color(source.body.color());
-            let result = ModelBody::new(source.name.clone(), converted, f.id);
+            let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance, kind);
+            let result = ModelBody::traced_new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
             Ok(())
