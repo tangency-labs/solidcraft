@@ -14435,7 +14435,7 @@ fn pattern_hole_direction(
     dir: Vec3,
     sketch_side: Option<(Vec3, bool)>,
 ) -> Result<Vec3> {
-    let moved_dir = |n| crate::apply_vector(transform, n).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()));
+    let moved_dir = |n| crate::unit_direction(crate::apply_vector(transform, n)).ok_or_else(|| DocError::Invalid("hole direction".into()));
     let Some((normal, flip)) = sketch_side else { return moved_dir(dir) };
     let moved = spots.iter().map(|p| crate::apply_point(transform, p.at));
     let side = sketch_hole_dir(st, moved, moved_dir(normal)?, hole_scope(src));

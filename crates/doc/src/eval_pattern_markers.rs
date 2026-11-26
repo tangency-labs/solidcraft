@@ -1,13 +1,19 @@
 //! Anchor pattern selection markers on the geometry of each tool.
 
 use solidcore_record::Vec3;
-use solidcraft_geom::Aabb3;
-use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb3, PlaneGeom as _};
+use solidcraft_kernel::{affine::distance_along, points};
 
 use super::{
     Body, DocError, Document, Feature, FeatureKind, ModelState, Operation, Result, constructor_profile_in_frame, hole_drill_scope, hole_on_surface,
     kernel, line_meets_box, miss_scope,
 };
+
+/// Both directions are unit length, so their perpendicular separation is the sine of their tilt.
+fn parallel(a: Vec3, b: Vec3) -> bool {
+    let along = distance_along([0.0; 3], b.into(), a.into());
+    points::points_meet(a.into(), (b * along).into(), 1e-7).unwrap_or(false)
+}
 
 /// The two ends of an extrusion's profile centre, in the feature's frame.
 /// Showing the near one keeps a circular cut's marker at its visible opening.
@@ -22,13 +28,13 @@ pub(super) fn tool_positions(doc: &Document, st: &ModelState, src: &Feature, too
     // keep the bounds centre, even when a rounded corner also has a cylindrical face.
     let axis = (0..tool.face_count()).find_map(|face| {
         let kernel::FaceSurface::Cylinder { origin, axis, .. } = kernel::face_surface(tool, face)? else { return None };
-        let point = origin + direction * (centre - origin).dot(direction);
-        (axis.vec().cross(direction).len() <= 1e-7 && point.dist(centre) <= reach * 1e-7).then_some(point)
+        let point = origin + direction * distance_along(origin.into(), direction.into(), centre.into());
+        (parallel(axis.vec(), direction) && points::points_meet(point.into(), centre.into(), reach * 1e-7).unwrap_or(false)).then_some(point)
     });
     let centre = axis.unwrap_or(centre);
     let mut caps = (0..tool.face_count()).filter_map(|face| {
         let plane = tool.planar_face(face)?;
-        (plane.normal().cross(direction).len() <= 1e-7).then_some((plane.origin - centre).dot(direction))
+        parallel(plane.normal(), direction).then(|| distance_along(centre.into(), direction.into(), plane.origin.into()))
     });
     let cap_range = caps.next().map(|first| caps.fold([first; 2], |[lo, hi], level| [lo.min(level), hi.max(level)]));
     if let Some([lo, hi]) = cap_range.filter(|[lo, hi]| hi > lo) {
@@ -51,9 +57,12 @@ pub(super) fn hole_positions(st: &ModelState, src: &Feature, at: Vec3, dir: Vec3
 pub(super) fn clip_cut_positions(st: &ModelState, src: &Feature, positions: [Vec3; 2]) -> [Vec3; 2] {
     let FeatureKind::Extrude { operation: Operation::Cut, targets, .. } = &src.kind else { return positions };
     let [first, second] = positions;
-    let along = second - first;
-    let Some(dir) = along.normalized() else { return positions };
-    let span = along.len();
+    let Ok(span) = points::point_distance(first.into(), second.into()) else { return positions };
+    let span = span.value;
+    if span <= solidcraft_geom::EPS {
+        return positions;
+    }
+    let Some(dir) = crate::unit_direction(second - first) else { return positions };
     let margin = (span * 1e-10).clamp(1e-7, 1e-4);
     let segment: Aabb3 = positions.into_iter().collect();
     let targets = crate::plain(targets);
@@ -71,7 +80,7 @@ pub(super) fn clip_cut_positions(st: &ModelState, src: &Feature, positions: [Vec
             }
             if let Ok(Some(hit)) = target.body.fire_ray(cap - inward * margin, inward)
                 && (margin..=span + margin).contains(&hit.depth)
-                && hit.normal.dot(inward) < -1e-9
+                && distance_along([0.0; 3], inward.into(), hit.normal.into()) < -1e-9
                 && nearest.is_none_or(|previous| hit.depth < previous.depth)
             {
                 nearest = Some(hit);

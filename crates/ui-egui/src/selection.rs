@@ -9,13 +9,9 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
-/// The screen-space target under the pointer, preferring the nearest centre when they overlap.
-pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
-    glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
-}
-
 pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
 pub(crate) use solidcraft_engine::selection_context::same_item;
+pub(crate) use solidcraft_viewport_egui::nearest_glyph;
 
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).

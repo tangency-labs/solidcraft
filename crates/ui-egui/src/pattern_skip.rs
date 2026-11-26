@@ -10,7 +10,7 @@ use serde_json::Value;
 use solidcraft_engine::doc::{
     PatternAddress, PatternGroupChoice, PatternMarker, PatternMarkerInfo, PatternMember, PatternMemberIdentity, PatternMemberKey,
 };
-use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::affine::distance_along;
 use solidcraft_theme::Tokens;
 
 use crate::{SolveApp, dialogs::Dialog, viewport::Proj};
@@ -230,7 +230,7 @@ pub(crate) fn project(app: &SolveApp, proj: &Proj) -> Vec<(usize, Pos2)> {
         .filter_map(|(index, marker)| {
             let [first, second] = marker.positions;
             let towards_eye = if proj.cam.fov > 0.0 { eye - (first + second) * 0.5 } else { back };
-            let world = if (second - first).dot(towards_eye) > 0.0 { second } else { first };
+            let world = if distance_along(first.into(), towards_eye.into(), second.into()) > 0.0 { second } else { first };
             let point = proj.to_screen(world)?;
             (point.is_finite() && proj.rect.contains(point) && !crate::shell::covered(app, point)).then_some((index + 2, point))
         })
@@ -441,6 +441,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
 
     fn pattern_dialog() -> Result<crate::scenario::Harness, Box<dyn std::error::Error>> {
         let mut h = crate::scenario::Harness::new();
