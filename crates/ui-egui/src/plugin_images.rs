@@ -1,4 +1,4 @@
-//! Vector images a plugin package ships: an entry's icon and pictures for a choice's options.
+//! Vector images a plugin package ships: an entry's icon, ribbon group icons and pictures for a choice's options.
 //!
 //! An entry's `input_schema` names them with [`KEY`]: at its top, the command or importer's icon (its ribbon
 //! button, its menu rows and its dialog's header); on a `oneOf` option, that option's picture in
@@ -33,8 +33,20 @@ const MAX_IMAGES: usize = images::MAX_IMAGES;
 
 /// Every image the entries' schemas name, read from the package at `dir`: each relative path
 /// with the icon name it is drawn by. Paths that are not usable are left out.
+#[cfg(test)]
 pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, String> {
+    load_with_groups(dir, plugin_id, entries, &[])
+}
+
+/// Load entry images and explicit ribbon group icons through the same package and SVG checks.
+pub(crate) fn load_with_groups(
+    dir: &Path,
+    plugin_id: &str,
+    entries: &[solidcraft_engine::plugin::Entry],
+    groups: &[solidcraft_engine::plugin::RibbonGroup],
+) -> BTreeMap<String, String> {
     let mut named = Vec::new();
+    named.extend(groups.iter().filter_map(|group| group.icon.clone()));
     for entry in entries {
         named.extend(referenced(&entry.input_schema));
     }
@@ -53,7 +65,15 @@ pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::pl
 }
 
 /// Shared across the inventory and open dialogs. Files and decoding stay off the window thread.
-pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<BTreeMap<String, Swatch>>>;
+pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<Artwork>>;
+
+/// The decoded package rasters, kept apart by the annotation that named them: a file accepted as
+/// a larger `x-solidcraft-image` picture may still have failed the swatch limits.
+#[derive(Debug, Default)]
+pub(crate) struct Artwork {
+    pub(crate) swatches: BTreeMap<String, Swatch>,
+    pub(crate) pictures: BTreeMap<String, Swatch>,
+}
 
 #[derive(Debug)]
 pub(crate) struct Swatch {
@@ -77,38 +97,32 @@ impl Swatch {
     }
 }
 
-pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, Swatch> {
-    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_file(dir, rel));
+pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Artwork {
+    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_artwork(dir, rel));
     for warning in report.warnings {
         log::warn!("plugin {}: {warning}", dir.display());
     }
-    report
-        .images
-        .into_iter()
-        .map(|(path, image)| {
-            let mut hash = std::collections::hash_map::DefaultHasher::new();
-            image.size.hash(&mut hash);
-            image.rgba.hash(&mut hash);
-            let key = egui::Id::unique(("plugin_swatch", hash.finish()));
-            (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
-        })
-        .collect()
+    let texture = |(path, image): (String, solidcraft_engine::plugin::swatches::Swatch)| {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        image.size.hash(&mut hash);
+        image.rgba.hash(&mut hash);
+        let key = egui::Id::unique(("plugin_swatch", hash.finish()));
+        (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
+    };
+    Artwork { swatches: report.images.into_iter().map(texture).collect(), pictures: report.pictures.into_iter().map(texture).collect() }
 }
 
 pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Swatches {
     let swatches = Swatches::default();
     let referenced = entries.iter().any(|entry| {
         entry.input_schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()).any(|property| {
-            property
-                .get("oneOf")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .any(|option| option.get(solidcraft_engine::plugin::swatches::KEY).is_some())
+            property.get("oneOf").and_then(Value::as_array).into_iter().flatten().any(|option| {
+                option.get(solidcraft_engine::plugin::swatches::KEY).is_some() || option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some()
+            })
         })
     });
     if !referenced {
-        let _ = swatches.set(BTreeMap::new());
+        let _ = swatches.set(Artwork::default());
         return swatches;
     }
     let (dir, entries, result) = (dir.to_path_buf(), entries.to_vec(), swatches.clone());
@@ -116,7 +130,7 @@ pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
         let _ = result.set(read_swatches(&dir, &entries));
     }) {
         log::warn!("could not load plugin swatches: {error}");
-        let _ = swatches.set(BTreeMap::new());
+        let _ = swatches.set(Artwork::default());
     }
     swatches
 }

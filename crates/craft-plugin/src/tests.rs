@@ -66,6 +66,85 @@ fn swatches_validate_package_paths_sizes_types_and_images_without_refusing_the_m
     assert!(check_input(&entries[0].input_schema, &json!({"finish":"0"})).is_ok());
 }
 
+/// Synthetic pixels only: a part picture may be larger than a swatch, but not without limit.
+#[test]
+fn option_images_allow_larger_files_and_refuse_oversized_or_escaping_ones() {
+    let mut value = manifest();
+    let options: Vec<_> = ["parts/elbow.png", "../outside.png", "/abs.png", "huge.png", "wide.png", "heavy.png"]
+        .iter()
+        .enumerate()
+        .map(|(i, path)| json!({"const":i.to_string(),"x-solidcraft-image":path}))
+        .collect();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":options}}}}]);
+    let parsed = parse(&value).expect("bad artwork never refuses a plugin");
+    let entries = &parsed.runtime.unwrap().entries;
+    let encoded = |width, height| {
+        let pixels = image::RgbImage::from_pixel(width, height, image::Rgb([20, 90, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let big = encoded(1024, 1024);
+    let wide = encoded(1025, 4);
+    let mut heavy = encoded(8, 8);
+    heavy.resize(512 * 1024 + 1, 0);
+    let report = swatches::check(entries, |path| {
+        Ok(match path {
+            "parts/elbow.png" => big.clone(),
+            "wide.png" => wide.clone(),
+            "heavy.png" => heavy.clone(),
+            _ => b"bad image".to_vec(),
+        })
+    });
+    assert_eq!(report.pictures.len(), 1, "{:?}", report.warnings);
+    assert!(report.images.is_empty(), "a picture is not a swatch");
+    assert_eq!(report.pictures["parts/elbow.png"].size, [512, 512], "kept at most 512 pixels on a side");
+    assert_eq!(report.warnings.len(), 5, "{:?}", report.warnings);
+    assert!(swatches::decode("big.png", &big).is_err(), "the same file is too big for a swatch");
+    assert!(swatches::decode_image("big.png", &big).is_ok());
+    assert!(swatches::decode_image("wide.png", &wide).is_err());
+}
+
+/// Synthetic pixels only: one file named as a swatch and as a picture is judged by each limit.
+#[test]
+fn a_file_named_as_swatch_and_picture_keeps_a_result_for_each_annotation() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"a","x-solidcraft-swatch":"big.png","x-solidcraft-image":"big.png"}
+    ]}}}}]);
+    let parsed = parse(&value).expect("manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    let pixels = image::RgbImage::from_pixel(1024, 1024, image::Rgb([20, 90, 160]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    let big = out.into_inner();
+    let report = swatches::check(entries, |_| Ok(big.clone()));
+    assert!(report.images.is_empty(), "too large for a swatch");
+    assert_eq!(report.pictures["big.png"].size, [512, 512], "valid under the picture limits");
+    assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    assert!(report.warnings[0].starts_with(swatches::KEY));
+}
+
+#[test]
+fn artwork_files_stay_inside_the_package_up_to_the_picture_size() {
+    let root = std::env::temp_dir().join(format!("solidcraft-image-paths-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("package")).unwrap();
+    let dir = root.join("package");
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    std::fs::write(dir.join("ok.png"), vec![0; 100 * 1024]).unwrap();
+    std::fs::write(dir.join("large.png"), vec![0; 512 * 1024 + 1]).unwrap();
+    assert!(swatches::read_artwork(&dir, "ok.png").is_ok());
+    assert!(swatches::read_file(&dir, "ok.png").is_err(), "over the swatch size");
+    assert!(swatches::read_artwork(&dir, "large.png").is_err());
+    assert!(swatches::read_artwork(&dir, "../outside.png").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("outside.png"), dir.join("linked.png")).unwrap();
+        assert!(swatches::read_artwork(&dir, "linked.png").is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn swatch_files_stay_inside_the_resolved_package() {
     let root = std::env::temp_dir().join(format!("solidcraft-swatch-paths-{}", std::process::id()));
@@ -230,6 +309,74 @@ fn declared_inputs_effects_and_slots_are_readable() {
     assert_eq!(entry.input_schema["properties"]["selection"]["type"], "array");
     value["runtime"]["entries"][0]["input_schema"]["properties"]["selection"]["type"] = json!("string");
     assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("selection")));
+}
+
+#[test]
+fn ribbon_groups_parse_in_declared_order_and_are_opt_in() {
+    let runtime = parse(&manifest()).unwrap().runtime.unwrap();
+    assert!(runtime.ribbon_groups.is_empty());
+    assert!(serde_json::to_value(runtime).unwrap().get("ribbon_groups").is_none(), "old manifests keep their serialized shape");
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!(["make", "inspect", "other"]);
+    value["runtime"]["ribbon_groups"] = json!([
+        {"label":"Gears","icon":"icons/gears.svg","entries":["inspect","make"]},
+        {"label":"Other","entries":["other"]}
+    ]);
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    assert_eq!(runtime.ribbon_groups[0].label, "Gears");
+    assert_eq!(runtime.ribbon_groups[0].icon.as_deref(), Some("icons/gears.svg"));
+    assert_eq!(runtime.ribbon_groups[0].entries, ["inspect", "make"]);
+    assert_eq!(runtime.ribbon_groups[1].icon, None);
+    let serialized = serde_json::to_value(&runtime).unwrap();
+    assert_eq!(serialized["ribbon_groups"], value["runtime"]["ribbon_groups"]);
+    value["runtime"] = serialized;
+    assert_eq!(parse(&value).unwrap().runtime.unwrap().ribbon_groups, runtime.ribbon_groups);
+}
+
+#[test]
+fn ribbon_groups_refuse_unknown_entries_empty_groups_and_duplicates() {
+    for (groups, field, message) in [
+        (json!([{"label":"Gears","entries":["missing"]}]), "0.entries", "unknown entry `missing`"),
+        (json!([{"label":"Gears","entries":[]}]), "0.entries", "1..32 distinct entry names"),
+        (json!([{"label":"Gears","entries":["make","make"]}]), "0.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":"More","entries":["make"]}]), "1.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":" Gears ","entries":["inspect"]}]), "1.label", "ribbon group `Gears` is listed twice"),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!(["make", "inspect"]);
+        value["runtime"]["ribbon_groups"] = groups;
+        let error = parse(&value).unwrap_err();
+        assert!(
+            matches!(&error, HostError::InvalidManifest { field: f, reason } if f == &format!("runtime.ribbon_groups.{field}") && reason.contains(message)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn ribbon_groups_refuse_hostile_labels_icons_and_malformed_fields() {
+    for group in [
+        json!({"label":"","entries":["make"]}),
+        json!({"label":"   ","entries":["make"]}),
+        json!({"label":"Gears\n","entries":["make"]}),
+        json!({"label":"x".repeat(81),"entries":["make"]}),
+        json!({"label":"Gears","icon":"../gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"https://example.org/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"gears.png","entries":["make"]}),
+        json!({"label":"Gears","icon":"","entries":["make"]}),
+        json!({"label":"Gears","icon":42,"entries":["make"]}),
+        json!({"label":"Gears","entries":"make"}),
+        json!({"label":"Gears","entries":["make"],"unknown":true}),
+        json!({"label":"Gears"}),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["ribbon_groups"] = json!([group]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{value}");
+    }
+    let mut value = manifest();
+    value["runtime"]["ribbon_groups"] = json!(vec![json!({"label":"Gears","entries":["make"]}); 33]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.ribbon_groups"));
 }
 
 #[test]
@@ -520,7 +667,7 @@ fn hostile_manifest_fields_return_errors() {
         |value: &mut Value| value["runtime"]["entries"] = json!(["make", "make"]),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":0,"memory_mib":64,"deadline_ms":1}),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":4097,"deadline_ms":1}),
-        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":30001}),
+        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":0}),
         |value: &mut Value| value["runtime"]["entries"] = json!([{"name":"make","input_schema":true}]),
     ] {
         let mut value = manifest();
@@ -582,6 +729,38 @@ fn larger_manifests_fit_without_removing_input_descriptions() {
 }
 
 #[test]
+fn call_and_deadline_requests_are_host_policy() {
+    let mut value = manifest();
+    value["runtime"]["limits"] = json!({"fuel":1000000,"memory_mib":64,"host_calls":300,"deadline_ms":80000});
+    let requested = parse(&value).unwrap().runtime.unwrap().limits;
+    assert_eq!((requested.host_calls, requested.deadline_ms), (300, 80000));
+    let defaults = HostLimits::default();
+    assert_eq!((defaults.max_host_calls, defaults.max_deadline_ms), (256, 30000));
+    assert_eq!(parse(&manifest()).unwrap().runtime.unwrap().limits.host_calls, 256);
+    assert_eq!(defaults.check(&requested), Err(HostError::OverCeiling { limit: "host_calls".into(), requested: 300, allowed: 256 }));
+    let raised_calls = HostLimits { max_host_calls: 300, ..defaults };
+    assert_eq!(raised_calls.check(&requested), Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 80000, allowed: 30000 }));
+    assert!(HostLimits { max_deadline_ms: 80000, ..raised_calls }.check(&requested).is_ok());
+    // Importers keep their existing native-import count and ten-minute ceiling.
+    assert!(defaults.check_importer(&Limits { deadline_ms: 600000, host_calls: 1 << 20, ..Limits::default() }).is_ok());
+    assert_eq!(
+        defaults.check_importer(&Limits { deadline_ms: 600001, ..Limits::default() }),
+        Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 600001, allowed: 600000 })
+    );
+    let maximum = Limits { fuel: u64::MAX, deadline_ms: u64::MAX, host_calls: u64::MAX, ..Limits::default() };
+    assert!(HostLimits { max_fuel: u64::MAX, max_host_calls: u64::MAX, max_deadline_ms: u64::MAX, ..defaults }.check(&maximum).is_ok());
+    for field in ["host_calls", "deadline_ms"] {
+        for invalid in [json!(0), json!(-1), json!(1.5)] {
+            value["runtime"]["limits"][field] = invalid;
+            assert!(parse(&value).is_err(), "{field}");
+            value["runtime"]["limits"][field] = json!(80000);
+        }
+    }
+    assert!(HostLimits { max_host_calls: 0, ..defaults }.validate().is_err());
+    assert!(HostLimits { max_deadline_ms: 0, ..defaults }.validate().is_err());
+}
+
+#[test]
 fn entries_share_field_definitions_through_defs_and_ref() {
     let place = json!({"type":"string","title":"Place","default":"auto","enum":["auto","origin"]});
     let units = json!({"type":"string","enum":["mm","in"]});
@@ -628,6 +807,55 @@ fn entries_share_field_definitions_through_defs_and_ref() {
 }
 
 #[test]
+fn dialog_layout_annotations_are_checked_at_load() {
+    let with = |root: Value, extra: Value| {
+        let mut schema = json!({"type":"object","properties":{
+            "units":{"type":"string","enum":["mm","in"]},
+            "width":{"type":"number"}
+        }});
+        for (key, value) in root.as_object().unwrap() {
+            schema[key] = value.clone();
+        }
+        for (key, value) in extra.as_object().unwrap() {
+            schema["properties"]["width"][key] = value.clone();
+        }
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+        parse(&value)
+    };
+    let ok = json!({"x-solidcraft-section":"Size","x-solidcraft-unit-from":"units","x-solidcraft-help":"https://example.com/size"});
+    let entry = with(json!({"x-solidcraft-sections":"collapsible"}), ok).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(entry.input_schema["properties"]["width"]["x-solidcraft-unit-from"], "units", "annotations reach the dialog unchanged");
+    assert!(with(json!({}), json!({"x-solidcraft-section":""})).is_ok(), "an empty heading is a divider");
+    let refused =
+        |root: Value, extra: Value, key: &str| matches!(with(root, extra), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(key));
+    assert!(refused(json!({"x-solidcraft-sections":"tabs"}), json!({}), "x-solidcraft-sections"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":7}), "x-solidcraft-section"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":"x".repeat(81)}), "x-solidcraft-section"));
+    for source in [json!("missing"), json!("width"), json!(1)] {
+        assert!(refused(json!({}), json!({"x-solidcraft-unit-from":source}), "x-solidcraft-unit-from"), "{source}");
+    }
+    for url in ["https://example.com/docs#x", "https://docs.example.com:8443/a?b=1"] {
+        assert!(layout::help_url(url), "{url}");
+    }
+    // Documentation links name a domain: IP literals are refused by design.
+    for url in [
+        "https://[not-an-ip]/",
+        "https://[::1]/",
+        "https://127.0.0.1/",
+        "https://user@#topic",
+        "https://:443/",
+        "https://#topic",
+        "https://",
+        "http://example.com",
+        "https://example.com/a b",
+        "javascript:alert(1)",
+    ] {
+        assert!(refused(json!({}), json!({"x-solidcraft-help":url}), "x-solidcraft-help"), "{url}");
+    }
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
@@ -652,7 +880,10 @@ fn host_limits_have_typed_failures() {
     let stopped = |limit: &str, allowed| HostError::Exhausted { limit: limit.into(), allowed }.to_string();
     assert_eq!(stopped("fuel", 1000), "used all 1000 fuel it asks for and was stopped");
     assert_eq!(stopped("memory_mib", 64), "needed more than the 64 MiB of memory it asks for and was stopped");
-    assert_eq!(stopped("deadline_ms", 5000), "ran longer than its time limit of 5000 ms and was stopped");
+    assert_eq!(
+        stopped("deadline_ms", 5000),
+        "ran longer than its time limit of 5000 ms and was stopped; raise runtime.limits.deadline_ms and, if needed, Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+    );
     assert_eq!(stopped("design_mib", 256), "made a design larger than 256 MiB, the most an importer may hand over");
     assert_eq!(HostError::Unsupported { reason: "no solids".into() }.to_string(), "not supported: no solids");
 }
@@ -1141,6 +1372,17 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([".f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["f3d", "f3d"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["_xb"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["xb_"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["_"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["X_B"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["x-b"]), "extensions");
+    let mut underscored = importer();
+    underscored["runtime"]["entries"][0]["extensions"] = json!(["x_b", "x_t", "xmt_txt"]);
+    let u_runtime = parse(&underscored).unwrap().runtime.unwrap();
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Part.X_B")).map(|e| e.name.as_str()), Some("convert"));
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Part.x_t")).map(|e| e.name.as_str()), Some("convert"));
+    assert_eq!(u_runtime.importer_for(Path::new("/x/Asm.XMT_TXT")).map(|e| e.name.as_str()), Some("convert"));
     refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("read"), "effect");
     // An importer opens a file as a new design: that is its effect, whether it says so, says
     // nothing, or says `edit` as manifests written before `open` did; a command never opens.
@@ -1158,7 +1400,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     let mut evaluating = importer();
     evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
     assert!(parse(&evaluating).is_ok());
-    // A command claims no extension, reads no input folder and still finishes within 30 s.
+    // A command claims no extension and reads no input folder.
     let command = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = manifest();
         change(&mut value);
@@ -1168,7 +1410,6 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","effect":"open"}]), "effect");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
     command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
-    command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
 fn exporter() -> Value {
@@ -1188,6 +1429,10 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     let slot = &runtime.entries[0];
     assert_eq!((slot.label.as_str(), slot.effect, slot.needs_plugin_data), ("Sample mesh", Effect::Read, true));
     assert!(slot.writes(Path::new("/x/Part.SMP")) && !slot.claims(Path::new("/x/part.smp")));
+    let mut u_export = exporter();
+    u_export["runtime"]["entries"][0]["extensions"] = json!(["x_t"]);
+    let u_exp_runtime = parse(&u_export).unwrap().runtime.unwrap();
+    assert!(u_exp_runtime.entries[0].writes(Path::new("/x/Part.X_T")));
     let refused = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = exporter();
         change(&mut value);
@@ -1333,6 +1578,28 @@ fn a_loss_report_is_bounded_printable_text() {
         ..LossReport::default()
     };
     assert!(empty.validate().is_err());
+}
+
+#[test]
+fn font_annotation_is_a_string_hint_and_does_not_restrict_input() {
+    let property = json!({"type":"string","x-solidcraft-font":true});
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"font":property}}}]);
+    let entry = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(strict_input_schema(&entry.input_schema)["properties"]["font"][FONT_KEY], true);
+    for font in ["Liberation Sans", "Unknown family", "", "/fonts/custom.ttf"] {
+        assert_eq!(check_input(&entry.input_schema, &json!({"font":font})), Ok(()));
+    }
+    assert!(check_input(&entry.input_schema, &json!({"font":17})).is_err());
+    for property in [
+        json!({"type":"number","x-solidcraft-font":true}),
+        json!({"type":"string","x-solidcraft-font":"true"}),
+        json!({"type":"string","x-solidcraft-font":false}),
+        json!({"type":"string","x-solidcraft-font":{}}),
+    ] {
+        value["runtime"]["entries"][0]["input_schema"]["properties"]["font"] = property;
+        assert!(parse(&value).is_err(), "malformed font hint must be rejected");
+    }
 }
 
 #[test]
@@ -1718,6 +1985,30 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         schema[keyword][0]["additionalProperties"] = json!(false);
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
+}
+
+#[test]
+fn slot_declarations_support_custom_labels_and_model_group_flags() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([
+        {
+            "name": "feature",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식"}],
+            "model_group": false
+        },
+        {
+            "name": "height",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": true}]
+        }
+    ]);
+    let parsed = parse(&value).expect("valid manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("형상인식".into()), model_group: None });
+    assert_eq!(entries[0].model_group, Some(false));
+    assert_eq!(entries[1].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("높이측정".into()), model_group: Some(true) });
 }
 
 #[test]

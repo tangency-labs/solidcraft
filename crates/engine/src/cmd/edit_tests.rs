@@ -995,6 +995,86 @@ fn failed_timeline_move_many_keeps_folder_membership_and_order() {
 }
 
 #[test]
+fn timeline_move_many_with_allow_errors_moves_block_into_folder_and_lists_broken() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let error =
+        s.execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1})).unwrap_err().to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": "yes"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`allow_errors` must be true or false"), "{error}");
+    assert_eq!(s.doc, before);
+
+    let r = run(&mut s, "timeline.move_many", json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": true}));
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    let folder = s.doc.timeline_groups.iter().find(|f| f.id == group).unwrap();
+    let expected_ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert_eq!(folder.features, expected_ids, "both moved features join the folder with the box and chamfer");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores both order and folder membership");
+}
+
+#[test]
+fn timeline_move_many_with_active_true_reports_features_broken_after_marker_advances() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    assert_eq!(s.doc.marker, Some(2));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let r = run(
+        &mut s,
+        "timeline.move_many",
+        json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true, "allow_errors": true}),
+    );
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    assert_eq!(s.doc.marker, None, "active: true brings all features before the marker");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores order, folder membership and marker");
+}
+
+#[test]
 fn timeline_folders_can_nest_and_reject_cycles() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
@@ -2976,6 +3056,222 @@ fn feature_and_folder_names_count_characters_not_bytes() {
     assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
 
+/// #18098: the boundary of a face set from the exact topology. The top of a plate with a square
+/// through hole gives its outer square only, the hole's loop with `holes`; the top and a side
+/// give the one loop round both; an open tube's free edges are both its rims; a closed solid has
+/// none, and a bad call is refused with the selection as it was.
+#[test]
+fn select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Plate", "length":20, "width":20, "height":10}));
+    run(&mut s, "solid.box", json!({"corner":[5,5,-1], "length":10, "width":10, "height":12, "operation":"cut"}));
+    assert!(s.execute("select.boundary", &json!({})).is_err(), "nothing selected");
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[2,2,10]}]}));
+    let history = (s.undo.len(), s.redo.len());
+    let on_top = |p: Vec3| (p.z - 10.0).abs() < 1e-6;
+    let outer = |p: Vec3| [p.x, p.y].iter().any(|c| c.abs() < 1e-6 || (c - 20.0).abs() < 1e-6);
+
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(4), Some(1), Some(1)), "{r}");
+    for item in &s.selection {
+        let Sel::Edge { body, point, .. } = item else { panic!("{item:?}") };
+        assert!(body == "Plate" && on_top(*point) && outer(*point), "{item:?}");
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()), "selecting is not an undo step");
+
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[2,2,10]}]}));
+    let top = match s.selection.first() {
+        Some(Sel::Face { index, .. }) => *index,
+        other => panic!("{other:?}"),
+    };
+    let r = run(&mut s, "select.boundary", json!({"holes":true}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(2), Some(0)), "{r}");
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { point, .. } if on_top(*point))), "{:?}", s.selection);
+
+    // The top and the front side: one loop of six round both (their shared edge is inside the set).
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[10,0,5]}]}));
+    let side = match s.selection.first() {
+        Some(Sel::Face { index, .. }) => *index,
+        other => panic!("{other:?}"),
+    };
+    let r = run(&mut s, "select.boundary", json!({"body":"Plate", "faces":[top, side]}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(6), Some(1), Some(1)), "{r}");
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Edge { point, .. } if on_top(*point) && point.y.abs() < 1e-6)), "{:?}", s.selection);
+
+    // `add` keeps what was selected.
+    run(&mut s, "select.boundary", json!({"body":"Plate", "faces":[top], "holes":true, "add":true}));
+    // The top's eight edges, three of them already in the loop of six.
+    assert_eq!(s.selection.len(), 6 + 5, "{:?}", s.selection);
+
+    // An open tube of four walls: its free edges are both rims, on the body or on all its faces.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Tube"}]}));
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["body"].as_str()), (Some(8), Some(2), Some("Tube")), "{r}");
+    let r = run(&mut s, "select.boundary", json!({"body":"Tube", "faces":[0, 1, 2, 3]}));
+    assert_eq!((r["selected"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(0)), "both rims are kept: {r}");
+
+    let selected = s.selection.clone();
+    for params in [
+        json!({"body":"Plate"}),
+        json!({"faces":[top]}),
+        json!({"body":"Missing"}),
+        json!({"body":"Plate", "faces":[]}),
+        json!({"body":"Plate", "faces":[u64::MAX]}),
+        json!({"body":"Plate", "faces":[-1]}),
+        json!({"body":"Plate", "faces":[top], "extra":true}),
+        json!({"body":"Plate", "holes":"yes"}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.boundary", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected, "{params}");
+    }
+}
+
+/// #18094: one rim edge of a pocket selects the pocket's rim, the loop of the flat top face that
+/// holds the edge, from the exact topology; `face` picks another of the edge's faces, and a call
+/// that names no edge, half an edge, a face the edge doesn't bound or an unknown key is refused
+/// with the selection as it was. With `add`, an edge already selected is not added again.
+#[test]
+fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Plate", "length":20, "width":20, "height":10}));
+    run(&mut s, "solid.box", json!({"corner":[5,5,5], "length":10, "width":10, "height":5, "operation":"cut"}));
+    assert!(s.execute("select.edge_loop", &json!({})).is_err(), "nothing selected");
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":[10,5,10]}]}));
+    let Some(Sel::Edge { index: picked, .. }) = s.selection.first().cloned() else { panic!("{:?}", s.selection) };
+    let history = (s.undo.len(), s.redo.len());
+    let selected_edges = |s: &Session| {
+        let mut out: Vec<usize> = s.selection.iter().filter_map(|x| if let Sel::Edge { index, .. } = x { Some(*index) } else { None }).collect();
+        out.sort_unstable();
+        out
+    };
+    let sorted = |r: &Value| {
+        let mut out: Vec<usize> = r["edges"].as_array().unwrap().iter().map(|e| e.as_u64().unwrap() as usize).collect();
+        out.sort_unstable();
+        out
+    };
+
+    // The pocket's rim, read from the B-rep record without the command: the plate's top is the
+    // face with an inner loop (not its first, outer one) through the picked edge, and the rim is
+    // that loop's edges.
+    let (expected_top, mut expected_rim) = {
+        let state = s.world_state().unwrap();
+        let record = state.body("Plate").unwrap().body.record();
+        record
+            .faces
+            .iter()
+            .enumerate()
+            .find_map(|(f, face)| {
+                face.loops.iter().skip(1).find_map(|l| match l {
+                    solidcore_record::brep::Loop::Edges { edges } if edges.iter().any(|u| u.edge as usize == picked) => {
+                        Some((f, edges.iter().map(|u| u.edge as usize).collect::<Vec<usize>>()))
+                    }
+                    _ => None,
+                })
+            })
+            .expect("the picked edge is on the top face's inner loop")
+    };
+    expected_rim.sort_unstable();
+    let r = run(&mut s, "select.edge_loop", json!({}));
+    assert_eq!(r["selected"], 4, "{r}");
+    let rim = sorted(&r);
+    assert_eq!(rim, expected_rim, "by default the loop is the pocket's rim on the top face: {r}");
+    assert_eq!(r["face"].as_u64(), Some(expected_top as u64), "{r}");
+    assert!(rim.contains(&picked), "{r}");
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "Plate")), "{:?}", s.selection);
+    assert_eq!(selected_edges(&s), rim);
+    let top = r["face"].as_u64().unwrap() as usize;
+    assert_eq!(history, (s.undo.len(), s.redo.len()), "selecting is not an undo step");
+
+    // The pocket wall under the picked edge: its own loop of four, the picked edge the only one
+    // it shares with the rim.
+    let state = s.world_state().unwrap();
+    let record = state.body("Plate").unwrap().body.record();
+    let wall = (0..record.faces.len())
+        .find(|&f| {
+            f != top
+                && record.faces[f]
+                    .loops
+                    .iter()
+                    .any(|l| matches!(l, solidcore_record::brep::Loop::Edges { edges } if edges.iter().any(|u| u.edge as usize == picked)))
+        })
+        .unwrap();
+    drop(state);
+    let r = run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "face":wall}));
+    assert_eq!((r["face"].as_u64(), r["selected"].as_u64()), (Some(wall as u64), Some(4)), "{r}");
+    let around_wall = sorted(&r);
+    assert_eq!(selected_edges(&s), around_wall);
+    assert_eq!(around_wall.iter().filter(|e| !rim.contains(e)).count(), 3, "{r}");
+
+    // `add` keeps what was selected: the rim's four and the wall's three others.
+    run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "add":true}));
+    assert_eq!(s.selection.len(), 7, "{:?}", s.selection);
+
+    // An edge picked away from its middle and then grown with `add` stays one item, at the point
+    // it was picked: the loop adds the other three only.
+    let off_middle = Vec3::new(7.0, 5.0, 10.0);
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":off_middle}]}));
+    run(&mut s, "select.edge_loop", json!({"add":true}));
+    assert_eq!(selected_edges(&s), rim, "{:?}", s.selection);
+    assert!(s.selection.contains(&Sel::Edge { body: "Plate".into(), index: picked, point: off_middle }), "{:?}", s.selection);
+
+    let selected = s.selection.clone();
+    for params in [
+        json!({"body":"Plate"}),
+        json!({"edge":picked}),
+        json!({"body":"Missing", "edge":0}),
+        json!({"body":"Plate", "edge":u64::MAX}),
+        json!({"body":"Plate", "edge":-1}),
+        json!({"body":"Plate", "edge":picked, "face":u64::MAX}),
+        json!({"body":"Plate", "edge":picked, "face":(0..20).find(|f| *f != top && *f != wall).unwrap()}),
+        json!({"body":"Plate", "edge":picked, "extra":true}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.edge_loop", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected, "{params}");
+    }
+}
+
+/// #18098 (review): a hole is told from the faces' loops, not from boxes, so a square face that
+/// sits in the box of an L-shaped face, but outside the face, keeps its edges; two loops that only
+/// meet at a vertex are two loops; and `add` keeps an edge the user picked as it was picked.
+#[test]
+fn select_boundary_tells_holes_by_topology_and_walks_each_loop() {
+    // An L-shaped top at z = 2 round a pocket, and a 1 × 1 boss in the pocket up to z = 2.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Part", "length":10, "width":10, "height":2}));
+    run(&mut s, "solid.box", json!({"corner":[2,2,1], "length":8, "width":8, "height":2, "operation":"cut"}));
+    run(&mut s, "solid.box", json!({"corner":[4,4,1], "length":1, "width":1, "height":1, "operation":"join"}));
+    let faces =
+        |s: &Session| s.selection.iter().filter_map(|x| if let Sel::Face { index, .. } = x { Some(*index) } else { None }).collect::<Vec<_>>();
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Part","point":[1,1,2]}, {"type":"face","body":"Part","point":[4.5,4.5,2]}]}));
+    let both = faces(&s);
+    assert_eq!(both.len(), 2, "{:?}", s.selection);
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(10), Some(2), Some(0)), "{r}");
+
+    // A user's pick on the L's edge at y = 0 stays as it was picked when the L's loop is added.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Part","point":[3,0,2]}]}));
+    let picked = s.selection.clone();
+    let r = run(&mut s, "select.boundary", json!({"body":"Part", "faces":[both[0]], "add":true}));
+    assert_eq!((r["selected"].as_u64(), r["edges"].as_array().map(Vec::len)), (Some(6), Some(6)), "{r}");
+    assert!(picked.iter().all(|p| s.selection.contains(p)), "{:?}", s.selection);
+
+    // A top split into four quadrants: two opposite quadrants meet only at the centre.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Quad", "length":10, "width":10, "height":1}));
+    run(&mut s, "solid.split_face", json!({"faces":[[2,2,1]], "plane":{"origin":[5,0,0], "normal":[1,0,0]}}));
+    run(&mut s, "solid.split_face", json!({"faces":[[2,2,1], [8,2,1]], "plane":{"origin":[0,5,0], "normal":[0,1,0]}}));
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Quad","point":[2,2,1]}, {"type":"face","body":"Quad","point":[8,8,1]}]}));
+    assert_eq!(faces(&s).len(), 2, "{:?}", s.selection);
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(2), Some(0)), "{r}");
+}
+
 /// #19632: `solid.hole` takes length expressions as `position`, but the stored hole keeps them in
 /// `at` and `position` is the evaluated point, so editing `position` with an expression failed
 /// with "expected f64". The edit takes it as the creation command does and the hole follows it.
@@ -3213,4 +3509,245 @@ fn remove_history_keeps_what_a_sketch_on_the_body_needs() {
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
     same_body_shape(block, body_shape(&s, "Block"));
     same_body_shape(peg, body_shape(&s, "Peg"));
+}
+
+/// A design file holds at most `MAX_FEATURES` timeline folders, so `timeline.group` stops there
+/// instead of making a design that saves and does not open again.
+#[test]
+fn timeline_folders_stop_at_what_a_design_file_holds() {
+    let mut s = Session::default();
+    let cap = solidcraft_doc::MAX_FEATURES;
+    let folders = (0..cap as u64 - 1).map(|i| solidcraft_doc::TimelineGroup {
+        id: 1_000 + i,
+        name: format!("Folder{i}"),
+        parent: None,
+        features: Vec::new(),
+        joints: Vec::new(),
+    });
+    let doc = s.doc_mut();
+    doc.timeline_groups.extend(folders);
+    doc.next_id = 1_000 + cap as u64;
+    run(&mut s, "timeline.group", json!({"name": "Last"}));
+    assert_eq!(s.doc.timeline_groups.len(), cap);
+    let error = s.execute("timeline.group", &json!({"name": "One too many"})).unwrap_err().to_string();
+    assert!(error.contains("at most"), "{error}");
+    assert_eq!(s.doc.timeline_groups.len(), cap);
+    solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+}
+
+/// Reordering a later linked sub-assembly earlier than an existing same-named linked sub-assembly
+/// must preserve the existing body's name (`Bolt`) and keep the moved sub-assembly's disambiguated
+/// name (`Bolt (2)`), so root body patterns (and chained patterns) seeded on `Bolt` keep every copy
+/// in `inspect.measure` and `assembly.mass_properties` with zero timeline errors or warnings.
+#[test]
+fn reordering_a_later_linked_subassembly_earlier_keeps_body_names_and_pattern_copies() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-reorder-link-pattern-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let save_part = |name: &str| {
+        let path = dir.join(format!("{name}.sc"));
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt"}));
+        run(&mut part, "file.save", json!({"path": path.to_string_lossy()}));
+        path
+    };
+    let (p1, p2) = (save_part("S1"), save_part("S2"));
+
+    let mut s = Session::default();
+    let s1 = run(&mut s, "component.insert_design", json!({"path": p1.to_string_lossy(), "name": "S1"}));
+    let occ_s1 = s1["occurrence"].as_u64().unwrap();
+    let f_s1 = s.doc.find_feature("S1").unwrap().id;
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1"], "name": "Pat1"}),
+    );
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["PAT#1"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 20, "body_names": ["PAT#2"], "name": "Pat2"}),
+    );
+    run(&mut s, "component.insert_design", json!({"path": p2.to_string_lossy(), "name": "S2", "translate": [40, 0, 0]}));
+    let f_s2 = s.doc.find_feature("S2").unwrap().id;
+
+    let pat1 = s.doc.find_feature("Pat1").unwrap();
+    assert!(
+        matches!(&pat1.kind, solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } if bodies.len() == 1 && bodies[0] == "Bolt" && placements == &[vec![occ_s1]]),
+        "{:?}",
+        pat1.kind
+    );
+    assert_eq!(pat1.body_names, ["PAT#1"]);
+
+    // Legacy-style copy where both linked Import features still carry unpinned `["Bolt"]`.
+    let mut legacy_doc = (*s.doc).clone();
+    for f in &mut legacy_doc.features {
+        if matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }) {
+            f.body_names = vec!["Bolt".into()];
+        }
+    }
+    let legacy_json = legacy_doc.to_json();
+
+    let assert_intact = |s: &mut Session, label: &str| {
+        assert_eq!(s.doc.features.first().map(|f| f.id), Some(f_s2), "{label}: S2 moved to rank 0");
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{label}: feature `{}` failed: {:?}", r.name, r.error);
+            assert!(r.warning.is_none(), "{label}: feature `{}` warned: {:?}", r.name, r.warning);
+        }
+        let st = s.model.state();
+        let s1_bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == f_s1).map(|b| b.name.as_str()).collect();
+        let s2_bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == f_s2).map(|b| b.name.as_str()).collect();
+        assert_eq!(s1_bodies, ["Bolt"], "{label}: S1 must keep Bolt");
+        assert_eq!(s2_bodies, ["Bolt (2)"], "{label}: S2 must keep Bolt (2)");
+
+        let measured = run(s, "inspect.measure", json!({}));
+        assert_eq!(measured["body_count"], 4, "{label}: {measured}");
+        let mut measure_names: Vec<String> =
+            measured["bodies"].as_array().unwrap().iter().filter_map(|b| b["name"].as_str().map(str::to_string)).collect();
+        measure_names.sort();
+        assert_eq!(measure_names, ["Bolt", "Bolt (2)", "PAT#1", "PAT#2"], "{label} inspect.measure");
+        let vol = measured["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((vol - 4000.0).abs() < 1e-3, "{label}: expected 4000 mm3, got {vol}");
+
+        let mass = run(s, "assembly.mass_properties", json!({}));
+        let mut mass_names: Vec<String> = mass["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .filter_map(|b| b["name"].as_str().map(str::to_string))
+            .collect();
+        mass_names.sort();
+        assert_eq!(mass_names, ["Bolt", "Bolt (2)", "PAT#1", "PAT#2"], "{label} assembly.mass_properties");
+        let mass_vol: f64 = mass["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .filter_map(|b| b["volume_mm3"].as_f64())
+            .sum();
+        assert!((mass_vol - 4000.0).abs() < 1e-3, "{label}: expected 4000 mm3 in mass_properties, got {mass_vol}");
+    };
+
+    // 1. Live session: timeline.reorder + compute_all + undo/redo.
+    run(&mut s, "timeline.reorder", json!({"feature": f_s2, "position": 0}));
+    assert_intact(&mut s, "live reorder");
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_intact(&mut s, "live reorder compute_all");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features.first().map(|f| f.id), Some(f_s1));
+    run(&mut s, "edit.redo", json!({}));
+    assert_intact(&mut s, "live redo");
+
+    // 2. Unpinned legacy doc in memory: timeline.reorder to rank 0.
+    let mut raw_reorder = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_reorder, "timeline.reorder", json!({"feature": f_s2, "position": 0}));
+    assert_intact(&mut raw_reorder, "legacy timeline.reorder");
+    run(&mut raw_reorder, "timeline.compute_all", json!({}));
+    assert_intact(&mut raw_reorder, "legacy timeline.reorder compute_all");
+
+    // 3. Unpinned legacy doc in memory: timeline.move_many to rank 0.
+    let mut raw_move = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_move, "timeline.move_many", json!({"features": [f_s2], "position": 0}));
+    assert_intact(&mut raw_move, "legacy timeline.move_many");
+
+    // 4. Unpinned legacy doc in memory: timeline.reorder_many to rank 0.
+    let mut raw_many = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_many, "timeline.reorder_many", json!({"features": [f_s2], "position": 0}));
+    assert_intact(&mut raw_many, "legacy timeline.reorder_many");
+
+    // 5. Rolled-back unpinned legacy doc: moving S2 past the marker to rank 0 keeps names intact.
+    let mut rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    rolled_doc.marker = Some(3);
+    let mut rolled = Session::new(rolled_doc);
+    run(&mut rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
+    assert_intact(&mut rolled, "rolled-back legacy timeline.reorder");
+
+    // 6. Rolled-back doc where active prefix is already pinned (`names_pinned` warm) while S2 past
+    //    the marker has empty or blank `body_names`: pinning must still evaluate and pin S2 before
+    //    reordering so S2 keeps `Bolt (2)` and S1 keeps `Bolt`.
+    let mut empty_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    empty_rolled_doc.feature_mut(f_s2).unwrap().body_names.clear();
+    empty_rolled_doc.marker = Some(3);
+    let mut empty_rolled = Session::new(empty_rolled_doc);
+    empty_rolled.pin_body_names();
+    assert!(empty_rolled.doc.feature(f_s2).unwrap().body_names.is_empty(), "S2 stays unpinned past marker before reorder");
+    run(&mut empty_rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
+    assert_intact(&mut empty_rolled, "rolled-back unpinned-empty S2 timeline.reorder");
+
+    let mut blank_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    blank_rolled_doc.feature_mut(f_s2).unwrap().body_names = vec!["".into()];
+    blank_rolled_doc.marker = Some(3);
+    let mut blank_rolled = Session::new(blank_rolled_doc);
+    blank_rolled.pin_body_names();
+    run(&mut blank_rolled, "timeline.reorder_many", json!({"features": [f_s2], "position": 0, "active": true}));
+    assert_intact(&mut blank_rolled, "rolled-back blank S2 timeline.reorder_many");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Moving a feature so a multi-body pattern would newly leave out one of its source bodies must
+/// not silently succeed with zero errors: `timeline.reorder`, `timeline.reorder_many` and
+/// `timeline.move_many` all refuse it unless `allow_errors: true` is passed.
+#[test]
+fn reordering_refuses_when_a_multi_body_pattern_would_silently_drop_a_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "name": "BoltBox"}));
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "PlateBox"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt", "Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1", "PAT#2"], "name": "PatMulti"}),
+    );
+
+    for (cmd, params) in [
+        ("timeline.reorder", json!({"feature": "BoltBox", "position": 2})),
+        ("timeline.reorder_many", json!({"features": ["BoltBox"], "position": 3})),
+        ("timeline.move_many", json!({"features": ["BoltBox"], "position": 3})),
+    ] {
+        let err = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(err.contains("PatMulti"), "{cmd} must refuse dropping a pattern body: {err}");
+    }
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 4, "all copies stay intact after refused reorders: {measured}");
+
+    let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
+    let broken = allowed["broken"].as_array().unwrap();
+    assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report PatMulti in broken: {allowed}");
+}
+
+/// Single-feature `timeline.reorder` must check the full history past the rollback marker just as
+/// `timeline.reorder_many` and `timeline.move_many` do, so moving a source body past a rolled-back
+/// multi-body pattern is refused unless `allow_errors: true` is passed.
+#[test]
+fn rolled_back_single_feature_reorder_refuses_dropping_a_pattern_copy_past_the_marker() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "name": "BoltBox"}));
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "PlateBox"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt", "Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1", "PAT#2"], "name": "PatMulti"}),
+    );
+
+    // Roll back past `PatMulti`, both with `PatMulti` right behind the marker and with it still
+    // behind the marker after the candidate move (`marker = Some(1)`).
+    for pos in [2, 1] {
+        run(&mut s, "timeline.roll_to", json!({"position": pos}));
+        assert_eq!(s.doc.marker, Some(pos));
+        let before = s.doc.clone();
+        let err = s.execute("timeline.reorder", &json!({"feature": "BoltBox", "position": 2})).unwrap_err().to_string();
+        assert!(err.contains("PatMulti"), "marker={pos}: timeline.reorder must refuse breaking rolled-back PatMulti: {err}");
+        assert_eq!(s.doc, before, "marker={pos}: refused reorder must leave document unchanged");
+    }
+
+    // With `allow_errors: true`, the move proceeds and reports the rolled-back pattern in `broken`.
+    let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
+    let broken = allowed["broken"].as_array().unwrap();
+    assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report rolled-back PatMulti: {allowed}");
+
+    // Undoing and rolling forward restores all four bodies intact.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 4, "all copies stay intact after undo + roll forward: {measured}");
 }

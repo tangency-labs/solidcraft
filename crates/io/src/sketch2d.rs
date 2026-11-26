@@ -51,8 +51,12 @@ pub enum Geom2 {
     },
 }
 
-/// Most entities one file may produce.
-pub const MAX_ENTITIES: usize = 200_000;
+/// The most drawn entities a file may have: lines, arcs, circles, splines and texts. A dense
+/// exported drawing (an auto-traced logo) can hold hundreds of thousands of short lines, which
+/// the insert's `simplify` follows with a few thousand curves, so this is well above the largest
+/// sketch: reading one such file peaks at about 80 MB of geometry, on top of the file's own
+/// [`MAX_DRAWING_BYTES`].
+pub const MAX_ENTITIES: usize = 1_000_000;
 /// Largest drawing file we read.
 pub const MAX_DRAWING_BYTES: usize = 64 << 20;
 
