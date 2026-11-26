@@ -796,6 +796,46 @@ fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A slicer that reads STEP is sent the exact bodies as a `.step` file; one that does not (Cura)
+/// is refused before anything is written. A program the user picked counts as the slicer its name
+/// says, so a build of OrcaSlicer added under Custom… takes STEP too.
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_sends_step_to_the_slicers_that_read_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = std::env::temp_dir().join(format!("solidcraft-send-step-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = |name: &str| {
+        let p = dir.join(name);
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+    let (orca, cura) = (program("orca-slicer"), program("cura"));
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "corner": [0, 0, 0], "body_name": "Block"}));
+    crate::slicers::set_chosen_programs(&[orca.clone(), cura.clone()]);
+    let step = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "step"}));
+    let stp = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "STP"}));
+    let refused = s.execute("file.send_to_slicer", &json!({"slicer": cura, "bodies": ["Block"], "format": "step"}));
+    let unknown = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "iges"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let (step, stp) = (step.unwrap(), stp.unwrap());
+    let file = step["path"].as_str().unwrap().to_string();
+    assert!(file.ends_with(".step"), "{file}");
+    assert_eq!(step["format"], "step");
+    assert!(std::fs::read(&file).unwrap().starts_with(b"ISO-10303-21;"));
+    assert_eq!(stp["path"], step["path"], "stp names the same format");
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("does not take step"), "{refused}");
+    assert!(unknown.is_err());
+    // Only this test's file: the slicer folder is shared with the other sends.
+    std::fs::remove_file(&file).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 type Uploads = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A session whose "host" records what it is handed and answers `answer`.
