@@ -237,6 +237,23 @@ pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
     Ok(())
 }
 
+/// Turning with the path (any orientation but parallel), the profile is carried by motions that
+/// take the path's direction where it starts, `t0`, onto its direction farther along, so the
+/// angle between the profile's plane and the path stays what it is at the start, all the way. A
+/// profile whose plane holds `t0` (to 1e-6 rad) therefore lies along the path everywhere and
+/// sweeps no volume (a circle drawn on XZ swept round a coil's end section, a circle in
+/// XZ). `plane` is the profile where the sweep starts.
+pub(crate) fn turning_crossing_check(plane: &Plane, t0: Vec3) -> Result<()> {
+    let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
+    let t = t0.normalized().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+    if n.dot(t).abs() < 1e-6 {
+        return Err(KernelError::Invalid(
+            "the profile lies along the path where the sweep starts (its plane holds the path's direction there), so carried along the path it would sweep no volume: draw the profile across the path".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Stations shaped by sweep options: each maps a world vector at the first station to its image
 /// at its own (twisted and scaled about the path's start tangent through the first station, then
 /// turned by the orientation's frames), optionally stretched across a corner (mitre). Twist and

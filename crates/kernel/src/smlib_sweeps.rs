@@ -1010,6 +1010,8 @@ mod imp {
                 .collect::<Option<Vec<Vec3>>>()
                 .ok_or_else(bad)?;
             crate::sweep_path::crossing_check(plane, &tangents)?;
+        } else {
+            turning_check(plane, path)?;
         }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
@@ -1030,6 +1032,14 @@ mod imp {
             _ => roles(&body, plane, Some(&placed(plane, &last)), &seeds(plane, pieces, |q| q), &inside, false)?,
         };
         with_history(body, &roles, pieces)
+    }
+
+    /// [`crate::sweep_path::turning_crossing_check`] of the profile on `plane`, already where the
+    /// sweep starts, against the path's direction there.
+    fn turning_check(plane: &Plane, path: &[crate::PathSeg]) -> Result<()> {
+        let (t0, _) =
+            path.first().and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        crate::sweep_path::turning_crossing_check(plane, t0)
     }
 
     /// The sweep of the profile on `plane` along `path`, with the rigid motions SMLib reports
@@ -1800,7 +1810,11 @@ mod imp {
         let pieces = pieces(region.loops());
         // A profile drawn away from the path's start is carried there as it is: it is the start
         // section, and the twist and the scale run from there.
-        let plane = &at_path_start(plane, &pieces, path, ctl.orientation == crate::SweepOrientation::Parallel)?;
+        let parallel = ctl.orientation == crate::SweepOrientation::Parallel;
+        let plane = &at_path_start(plane, &pieces, path, parallel)?;
+        if !parallel {
+            turning_check(plane, path)?;
+        }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);

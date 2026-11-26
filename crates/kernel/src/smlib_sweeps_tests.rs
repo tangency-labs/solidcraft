@@ -319,6 +319,32 @@ fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     assert!(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).is_err());
 }
 
+/// Turning with the path, a profile keeps its angle to the path all the way, so one whose
+/// plane holds the path's direction where it starts sweeps no volume, round a circle in its own
+/// plane or with a twist: refused with that reason, before SMLib makes a flat solid. The same
+/// square across the path sweeps A L (an 8 x 8 square round a circle of radius 30).
+#[test]
+fn a_profile_lying_along_the_path_is_refused_when_it_turns_with_it() {
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let square = region(Loop2::polygon(&[Vec2::new(26.0, -4.0), Vec2::new(34.0, -4.0), Vec2::new(34.0, 4.0), Vec2::new(26.0, 4.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    // Round the Y axis: a circle in the XZ plane, the square's own.
+    let flat = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+    ];
+    let along = |e: crate::KernelError| assert!(e.to_string().contains("the profile lies along the path"), "{e}");
+    along(smlib_sweeps::sweep(&xz, &pieces_of(&square), &flat, false).unwrap_err());
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    along(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &flat, &ctl).unwrap_err());
+    // Round the Z axis the path crosses the square's plane square to it.
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    close(volume(&smlib_sweeps::sweep(&xz, &pieces_of(&square), &round, false).unwrap()), 64.0 * TAU * 30.0, 1e-3, "ring");
+}
+
 #[test]
 fn a_sweep_follows_a_free_form_path_as_a_curve() {
     // A 4 x 4 square along a planar S-shaped cubic Bézier (curvature radius above 20): V = A L.
