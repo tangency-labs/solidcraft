@@ -2554,8 +2554,7 @@ fn parallel_dialog_tests_do_not_share_prefix_read_slots() {
 
     // Another test can read while every permit on this thread is occupied.
     let other = std::thread::spawn(|| {
-        start_prefix_read(prefix_reads(), || Ok(7_u8))
-            .and_then(|reply| wait_prefix(&reply, Instant::now() + Duration::from_secs(5)))
+        start_prefix_read(prefix_reads(), || Ok(7_u8)).and_then(|reply| wait_prefix(&reply, Instant::now() + Duration::from_secs(5)))
     })
     .join();
     for (release, reply) in releases.into_iter().zip(replies) {
