@@ -615,7 +615,10 @@ impl PreviewState {
         let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
         // A plugin preview for inputs since changed: its result would only be dropped, and the
         // plugin stops at its next host call (#22297).
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion || self.running_plugin) && self.detached.len() < DETACHED {
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key)
+            && (other_setup || stale_motion || self.running_plugin)
+            && self.detached.len() < DETACHED
+        {
             self.detach();
         }
     }
