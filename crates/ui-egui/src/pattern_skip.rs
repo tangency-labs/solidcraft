@@ -1,4 +1,4 @@
-//! Picking and drawing numbered copies while editing a pattern's skip list.
+//! Draw numbered copies and apply the viewport's selection to the pattern's skip list.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -13,9 +13,9 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_theme::Tokens;
 
-use crate::{SolveApp, dialogs::Dialog, selection::BoxSel, viewport::Proj};
+use crate::{SolveApp, dialogs::Dialog, viewport::Proj};
 
-const MARKER_RADIUS: f32 = 7.0;
+pub(crate) const MARKER_RADIUS: f32 = 7.0;
 
 #[derive(Clone, Debug)]
 struct Key {
@@ -216,7 +216,7 @@ pub(crate) fn active(app: &SolveApp) -> bool {
     app.dialog.as_ref().is_some_and(Dialog::pattern_skip_active)
 }
 
-pub(crate) fn project(app: &mut SolveApp, proj: &Proj) -> Vec<(usize, Pos2)> {
+pub(crate) fn project(app: &SolveApp, proj: &Proj) -> Vec<(usize, Pos2)> {
     if !active(app) {
         return Vec::new();
     }
@@ -346,30 +346,14 @@ pub(crate) fn paint(app: &SolveApp, painter: &egui::Painter, markers: &[(usize, 
     }
 }
 
-pub(crate) fn click(app: &mut SolveApp, markers: &[(usize, Pos2)], at: Pos2, toggle: bool) {
-    let closest =
-        markers.iter().filter(|(_, p)| p.distance(at) <= MARKER_RADIUS + 3.0).min_by(|(_, a), (_, b)| a.distance(at).total_cmp(&b.distance(at)));
-    if let Some(&(number, _)) = closest {
-        select(app, std::iter::once(number), toggle);
-    }
-}
-
-pub(crate) fn window(app: &mut SolveApp, markers: &[(usize, Pos2)], region: BoxSel, toggle: bool) {
-    let enclosed = markers.iter().filter_map(|&(number, p)| {
-        let corners = Rect::from_center_size(p, Vec2::splat(2.0 * MARKER_RADIUS));
-        region.takes(&[corners.left_top(), corners.right_top(), corners.right_bottom(), corners.left_bottom(), corners.left_top()]).then_some(number)
-    });
-    select(app, enclosed, toggle);
-}
-
-fn select(app: &mut SolveApp, numbers: impl Iterator<Item = usize>, toggle: bool) {
+pub(crate) fn apply_picks(app: &mut SolveApp, numbers: impl Iterator<Item = usize>, toggle: bool) {
     // OK has already captured the commands while its result is computing.
     if app.applying.is_some() {
         return;
     }
     let Some(key) = app.dialog.as_ref().and_then(|dialog| key_for_dialog(app, dialog)) else { return };
     let Some(cache) = app.viewport.pattern_skip_cache.as_ref().filter(|cache| cache.key == key) else { return };
-    let Some(dialog) = app.dialog.as_mut() else { return };
+    let Some(dialog) = app.dialog.as_mut().filter(|d| d.pattern_skip_active()) else { return };
     apply_selection(cache, dialog, numbers, if toggle { SkipChange::Toggle } else { SkipChange::Add });
 }
 
@@ -587,8 +571,7 @@ mod tests {
             .unwrap();
         h.call("ui.editFeature", json!({"feature":"Copies"}));
         h.settle();
-        let at = egui::pos2(100.0, 100.0);
-        click(&mut h.app, &[(3, at)], at, true);
+        apply_picks(&mut h.app, [3].into_iter(), true);
         let dialog = h.app.dialog.as_ref().unwrap();
         assert_eq!(dialog.pattern_skipped().0, [instance(2)], "editing copy 3 keeps copy 2 excluded as a whole");
         assert_eq!(

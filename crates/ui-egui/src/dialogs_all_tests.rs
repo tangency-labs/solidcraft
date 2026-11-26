@@ -1974,11 +1974,20 @@ fn pattern_skip_uses_the_viewports_selection_shape_modifiers_and_navigation() {
     h.call("ui.view", json!({"view": "top"}));
     h.call("ui.camera", json!({"target": [36, 5, 0], "distance": 150}));
     h.frames(4);
+    // The new distance rows also take space in the open Direction 2 section.
+    h.step(&json!({"click": {"handle": "dialog:section:Direction 2"}})).unwrap();
     let skipped = |h: &Harness| crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap());
     assert_eq!(skipped(&h), [4]);
 
     let two = json!({"handle": "pattern:instance:2"});
     let three = json!({"handle": "pattern:instance:3"});
+    let [x, y] = h.at(&two).unwrap();
+    let rect = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, rect);
+    assert!(matches!(
+        crate::viewport::pick_cached(&mut h.app, &proj, egui::pos2(x as f32, y as f32)).as_slice(),
+        [crate::viewport::Hit::PatternOpening { handle: 2 }]
+    ));
     h.app.preferences.selection_shift_add_only = true;
     h.step(&json!({"click": two})).unwrap();
     h.step(&json!({"click": two, "shift": true})).unwrap();
@@ -2003,6 +2012,13 @@ fn pattern_skip_uses_the_viewports_selection_shape_modifiers_and_navigation() {
     assert_eq!(skipped(&h), [4], "the same diagonal now draws a box");
     h.step(&json!({"drag": [[right, y - 4.0], [x - 1.0, y + 4.0]]})).unwrap();
     assert_eq!(skipped(&h), [2, 4], "the shared crossing box takes the marker it touches");
+    h.app.preferences.selection_shift_add_only = true;
+    h.step(&json!({"drag": diagonal, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [2, 4], "the add-only modifier also works for a box");
+    h.app.preferences.selection_shift_add_only = false;
+    h.step(&json!({"drag": diagonal, "shift": true})).unwrap();
+    assert_eq!(skipped(&h), [4], "the toggle modifier can restore a boxed marker");
+    h.step(&json!({"click": two})).unwrap();
 
     h.app.preferences.nav = "alias".into();
     let camera = h.app.cam;

@@ -9,6 +9,11 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
+/// The screen-space target under the pointer, preferring the nearest centre when they overlap.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
+    glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+}
+
 pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
 pub(crate) use solidcraft_engine::selection_context::same_item;
 
@@ -384,6 +389,11 @@ impl BoxSel {
             return pts.iter().all(|p| self.rect.contains(*p));
         }
         pts.iter().any(|p| self.rect.contains(*p)) || pts.windows(2).any(|w| segment_hits_rect(w[0], w[1], self.rect))
+    }
+
+    /// Does the marquee take the rectangular footprint of an on-screen selection target?
+    pub(crate) fn takes_rect(&self, rect: Rect) -> bool {
+        self.takes(&[rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()])
     }
 
     /// Every point inside the closed lasso, and no segment crossing its outline (a concave lasso

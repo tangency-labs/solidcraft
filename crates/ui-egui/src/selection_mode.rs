@@ -117,7 +117,7 @@ pub(crate) fn allowed(app: &SolveApp, h: &Hit) -> bool {
         // Sketch geometry is a sketch's curves, points and profiles only.
         Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => mode != PickMode::Sketch,
         Hit::PointCloudPoint { .. } => mode == PickMode::Faces && !off("vertices"),
-        Hit::MemberEnd { .. } | Hit::Centreline { .. } => false,
+        Hit::MemberEnd { .. } | Hit::Centreline { .. } | Hit::PatternOpening { .. } => false,
     }
 }
 

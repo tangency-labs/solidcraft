@@ -120,18 +120,14 @@ fn a_pattern_marker_cannot_change_the_copies_after_ok() {
         Vec::new(),
     );
     h.settle();
-    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
-    let proj = crate::viewport::projection(&h.app, rect);
-    crate::pattern_skip::project(&mut h.app, &proj);
     assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [3]);
 
     let _finish = hold_result(&mut h, false);
-    let at = egui::pos2(100.0, 100.0);
-    crate::pattern_skip::click(&mut h.app, &[(2, at)], at, true);
+    crate::pattern_skip::apply_picks(&mut h.app, [2].into_iter(), true);
     assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [3]);
 
     h.app.applying = None;
-    crate::pattern_skip::click(&mut h.app, &[(2, at)], at, true);
+    crate::pattern_skip::apply_picks(&mut h.app, [2].into_iter(), true);
     assert_eq!(crate::pattern_skip::skipped_handles(&h.app, h.app.dialog.as_ref().unwrap()), [2, 3]);
 }
 

@@ -16,6 +16,7 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
+use crate::selection::nearest_glyph;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
 use crate::tools::{Kind, Tool};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
@@ -1294,13 +1295,6 @@ pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine:
 pub fn glyph_at(pos: Pos2) -> Option<String> {
     let reach = GLYPH_PX.with(Cell::get) * 0.6;
     GLYPHS.with(|g| nearest_glyph(g.borrow().iter().map(|(id, c)| (id.as_str(), *c)), pos, reach).map(|(id, _)| id.to_owned()))
-}
-
-/// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
-/// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
-pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
-    glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
 /// Constraint glyphs drawn last frame: (constraint id, screen centre).
