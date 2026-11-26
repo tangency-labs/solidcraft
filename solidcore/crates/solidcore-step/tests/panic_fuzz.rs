@@ -122,6 +122,7 @@ const ENTITIES: &[&str] = &[
     "EDGE_CURVE",
     "VERTEX_POINT",
     "ORIENTED_EDGE",
+    "SEAM_EDGE",
     "EDGE_LOOP",
     "FACE_BOUND",
     "FACE_OUTER_BOUND",
@@ -373,4 +374,28 @@ fn the_written_bases_read_back_as_solids() {
         assert!(read.failures.is_empty() && read.solids.len() == 1, "base {i}: {:?}", read.failures);
         assert!(solidcore_ops::Body::from_record(&read.solids[0].brep, false).is_ok(), "base {i}");
     }
+}
+
+/// Every solid a base reads back as builds a kernel body whose cached topology is current, so
+/// the integrity check passes as the body comes, healed or not (solidcore#3257: every STEP
+/// import failed it until the caller refreshed the caches).
+#[test]
+fn a_solid_read_back_builds_a_body_that_passes_the_integrity_check() {
+    let mut stale = Vec::new();
+    let mut built = 0;
+    for (i, b) in bases().iter().enumerate() {
+        let ex = p21::parse(std::str::from_utf8(b).unwrap()).unwrap();
+        for (j, s) in solidcore_step::topology::read_solids(&ex).solids.iter().enumerate() {
+            for trusted in [false, true] {
+                let mut k = solidcore::kernel::Kernel::default();
+                let Ok(body) = solidcore_convert::brep::to_kernel_body(&mut k, &s.brep, trusted) else { continue };
+                built += 1;
+                if let Err(e) = solidcore::topology::integrity::check(&body) {
+                    stale.push(format!("base {i} solid {j} trusted {trusted}: {e:?}"));
+                }
+            }
+        }
+    }
+    assert!(built >= 2 * (bases().len() - 2), "only {built} bodies built");
+    assert!(stale.is_empty(), "{stale:#?}");
 }

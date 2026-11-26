@@ -40,6 +40,7 @@ pub mod occurrences;
 pub mod origins;
 pub mod panels;
 pub mod params;
+pub mod pick_pieces;
 pub mod plugin;
 pub mod point_cloud_pick;
 pub mod product_scene;
@@ -50,6 +51,7 @@ pub mod render_preparation;
 pub mod report_issue;
 pub mod sample;
 pub mod schema;
+pub mod selection_context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;
@@ -213,6 +215,12 @@ pub struct FeatureFailure {
     /// The kernel call's stable code.
     pub code: solidcraft_kernel::ErrorCode,
 }
+impl From<serde_json::Error> for EngineError {
+    fn from(e: serde_json::Error) -> Self {
+        EngineError::Other(e.to_string())
+    }
+}
+
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
         EngineError::Other(e.to_string())
@@ -295,7 +303,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,
@@ -311,6 +319,14 @@ pub enum Sel {
     },
     SketchPoint {
         id: String,
+    },
+    /// A point of a component sketch, picked on another copy of its part than the one the sketch
+    /// is edited at: the copy's placement (occurrence ids from the root), as a joint's origin
+    /// takes it.
+    PlacedSketchPoint {
+        sketch: u64,
+        id: String,
+        path: Vec<u64>,
     },
     /// The associative midpoint of a line in the active sketch. Selection alone creates no geometry.
     SketchMidpoint {
@@ -490,6 +506,25 @@ impl SheetSketchEdit {
     }
 }
 
+/// One pending occurrence move recorded before `component.capture_position`, preserving exact
+/// chronological order and parameter expressions alongside `Session::pending_moves`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PendingMoveRecord {
+    pub(crate) occurrence: u64,
+    pub(crate) step: solidcraft_doc::CapturedOccurrenceMove,
+    pub(crate) after: solidcraft_doc::Mat,
+}
+
+pub(crate) const MAX_PENDING_MOVE_RECORDS: usize = 4096;
+
+pub(crate) fn normalize_joint_exprs(raw: &[Option<String>], dofs: usize) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = raw.iter().take(dofs).cloned().collect();
+    while out.last().is_some_and(Option::is_none) {
+        out.pop();
+    }
+    out
+}
+
 /// One undo step.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
@@ -502,6 +537,10 @@ pub struct Snapshot {
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub(crate) pending_move_records: Vec<PendingMoveRecord>,
+    pub(crate) pending_joint_bases: std::collections::BTreeMap<u64, (Vec<f64>, Vec<Option<String>>)>,
+    pub(crate) last_capture_state:
+        Option<(std::collections::BTreeMap<u64, solidcraft_doc::Mat>, std::collections::BTreeMap<u64, solidcraft_doc::CapturedJoint>)>,
     /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
     /// hiding a body is undone and redone like any other change.
     pub visibility: Visibility,
@@ -524,7 +563,29 @@ impl Snapshot {
             sketch_restore_marker: s.sketch_restore_marker(),
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: s.pending_moves.clone(),
+            pending_move_records: s.pending_move_records.clone(),
+            pending_joint_bases: s.pending_joint_bases.clone(),
+            last_capture_state: s.last_capture_state.clone(),
             visibility: s.visibility.clone(),
+            part: None,
+            section: None,
+        }
+    }
+
+    /// Empty snapshot of `doc` (used by callers/tests that construct synthetic undo entries).
+    pub fn with_doc(doc: Arc<Document>) -> Snapshot {
+        Snapshot {
+            label: String::new(),
+            doc,
+            active_sketch: None,
+            sketching_view: None,
+            sketch_restore_marker: None,
+            active_sheet_sketch: None,
+            pending_moves: Default::default(),
+            pending_move_records: Vec::new(),
+            pending_joint_bases: Default::default(),
+            last_capture_state: None,
+            visibility: Default::default(),
             part: None,
             section: None,
         }
@@ -566,6 +627,10 @@ pub(crate) struct SketchEntry {
     /// A temporary editor rollback, restored by the engine even without a window.
     pub(crate) restore_marker: Option<Option<usize>>,
     pub(crate) pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub(crate) pending_move_records: Vec<PendingMoveRecord>,
+    pub(crate) pending_joint_bases: std::collections::BTreeMap<u64, (Vec<f64>, Vec<Option<String>>)>,
+    pub(crate) last_capture_state:
+        Option<(std::collections::BTreeMap<u64, solidcraft_doc::Mat>, std::collections::BTreeMap<u64, solidcraft_doc::CapturedJoint>)>,
     pub(crate) visibility: Visibility,
 }
 
@@ -714,6 +779,19 @@ struct ComputedCommand {
 }
 
 impl ComputedCommands {
+    /// Collapse all undo snapshots produced by this multi-command batch into one undo step
+    /// restoring the source state before the first command (including pending moves/joints).
+    pub fn coalesce_undo(&mut self, label: &str) {
+        if self.computed.undo.is_empty() {
+            return;
+        }
+        let part = self.computed.undo[0].part;
+        self.computed.undo.truncate(1);
+        if let Some(first) = self.computed.undo.first_mut() {
+            *first = Snapshot { part, ..Snapshot::of(&self.source, label) };
+        }
+    }
+
     /// Whether the source design and authoring context still match this result.
     pub fn is_current(&self, session: &Session) -> bool {
         let source = &self.source;
@@ -741,7 +819,7 @@ impl ComputedCommands {
     }
 
     fn selection_is_current(&self, session: &Session) -> bool {
-        if session.selection == self.source.selection {
+        if session.selection == self.source.selection && session.selection_all_bodies == self.source.selection_all_bodies {
             return true;
         }
         // A Model transaction keeps its captured picks when focus moves to the retained
@@ -827,7 +905,16 @@ pub struct Session {
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
     pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
+    /// Every shown body of the design is selected: "select all" in the body scope is a *scope*
+    /// rather than a list of 56,100 names. [`Session::selected_items`] resolves it where an
+    /// operation needs the bodies; code that only asks whether anything is selected reads
+    /// [`Session::has_selection`]. Any explicit select replaces the scope.
+    pub selection_all_bodies: bool,
     pub path: Option<String>,
+    /// The file of the design this session is a scratch copy of ([`Session::scratch`]): the copy's
+    /// own `path` stays `None` so nothing run on it saves over that file. Read only by `doc.info`;
+    /// never saved, never adopted. `None` in a session that is not a copy.
+    pub(crate) source_path: Option<String>,
     /// Where the drawing commands' object ids come from: one source for the session, kept across
     /// a file change, so a session seeded alike and run alike gives the same ids
     /// ([`Session::seed_ids`]). A failed command draws none.
@@ -906,6 +993,12 @@ pub struct Session {
     /// save leaves them out of the file and an opened design starts without them. The user's,
     /// like `param_check`, so it survives opening and starting designs.
     pub keep_print_faces: bool,
+    /// Whether a save keeps the bodies of linked designs in the design's file. On for a new
+    /// design. Off: `file.save` writes each link without its bodies, and opening the file reads
+    /// them from the linked design files again (#8170). The design's own choice, set by
+    /// `file.save`'s `linked_bodies` and carried by its file
+    /// ([`Document::linked_bodies_left_out`]), so it follows the design and not the user.
+    pub linked_bodies: bool,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -916,6 +1009,13 @@ pub struct Session {
     pub active_occurrence_path: Option<Vec<u64>>,
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// Chronological expression-preserving move records matching `pending_moves`.
+    pub(crate) pending_move_records: Vec<PendingMoveRecord>,
+    /// Pre-drive/reach baselines for non-rigid joints before any `CapturePosition` takes ownership.
+    pub(crate) pending_joint_bases: std::collections::BTreeMap<u64, (Vec<f64>, Vec<Option<String>>)>,
+    /// Last synced `CapturePosition` resolved state (`Model::resolved_occurrences/joints`), runtime only.
+    pub(crate) last_capture_state:
+        Option<(std::collections::BTreeMap<u64, solidcraft_doc::Mat>, std::collections::BTreeMap<u64, solidcraft_doc::CapturedJoint>)>,
     /// The placements the exploded view (`explode.show`) put in `pending_moves` to be shown:
     /// display only. An entry of `pending_moves` still equal to its one here is the exploded view's,
     /// not a move of the design's, so the placements the design reports and Capture Position
@@ -937,6 +1037,9 @@ pub struct Session {
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
     is_copy: bool,
+    /// A design's refresh shows its results without waiting for the SMLib checks of its last
+    /// features ([`Session::set_background_checks`]). Never a copy's.
+    background_checks: bool,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -1084,6 +1187,10 @@ pub(crate) struct Checkpoint {
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub open_drawing: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub(crate) pending_move_records: Vec<PendingMoveRecord>,
+    pub(crate) pending_joint_bases: std::collections::BTreeMap<u64, (Vec<f64>, Vec<Option<String>>)>,
+    pub(crate) last_capture_state:
+        Option<(std::collections::BTreeMap<u64, solidcraft_doc::Mat>, std::collections::BTreeMap<u64, solidcraft_doc::CapturedJoint>)>,
     pub visibility: Visibility,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
@@ -1312,6 +1419,8 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // Likewise the choice to save without linked bodies: the session keeps it.
+        let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
         let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
@@ -1327,7 +1436,7 @@ impl Session {
                 model
             }
         };
-        Self::with_model(doc, visibility, model)
+        Session { linked_bodies, ..Self::with_model(doc, visibility, model) }
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -1361,9 +1470,10 @@ impl Session {
         let (doc, model) = Self::with_fold_sides(doc, model);
         let document_id = solidcraft_doc::ids::new_document_id();
         let design_state = Arc::downgrade(&doc);
-        Session {
+        let mut session = Session {
             stop: Default::default(),
             is_copy: false,
+            background_checks: false,
             saved: doc.clone(),
             doc,
             model,
@@ -1388,7 +1498,9 @@ impl Session {
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
+            selection_all_bodies: false,
             path: None,
+            source_path: None,
             ids: solidcraft_doc::ids::IdSource::from_entropy(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
@@ -1415,10 +1527,14 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
+            linked_bodies: true,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
+            pending_move_records: Vec::new(),
+            pending_joint_bases: Default::default(),
+            last_capture_state: None,
             exploded: Default::default(),
             config_baseline: None,
             row_models: Vec::new(),
@@ -1473,7 +1589,10 @@ impl Session {
             crash_journal: false,
             #[cfg(feature = "usage-stats")]
             count_usage: false,
-        }
+        };
+        session.sync_capture_position_state();
+        session.saved = session.doc.clone();
+        session
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
@@ -1494,7 +1613,13 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
-        let plugin_state = self.plugin_state.clone();
+        let mut plugin_state = self.plugin_state.clone();
+        for package in plugin_state.panels.values_mut() {
+            for data in package.data.values_mut() {
+                *data = Default::default();
+            }
+        }
+        plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -1578,7 +1703,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());
@@ -1614,7 +1739,60 @@ impl Session {
     /// A component was moved and its position not captured yet (#9736). The placements of an
     /// exploded view shown are not such a move: they last only while it is shown.
     pub fn moved_uncaptured(&self) -> bool {
-        !self.pending_moves.is_empty() && !cmd::motion::shows_exploded_view(self)
+        !self.uncaptured_moves().is_empty() && !cmd::motion::shows_exploded_view(self)
+    }
+
+    /// Number of non-rigid joints whose current pose/expressions differ from their captured (or
+    /// pre-drive baseline) pose and are not yet captured into the timeline.
+    pub fn uncaptured_joint_count(&self) -> usize {
+        let has_non_rigid = self.doc.assembly.joints.iter().any(|j| j.kind != solidcraft_doc::joints::JointKind::Rigid);
+        if !has_non_rigid && self.pending_joint_bases.is_empty() {
+            return 0;
+        }
+        let current_joints = solidcraft_doc::joints::joint_values(&self.doc.assembly);
+        let resolved_joints = self.doc.has_capture_position_timeline().then(|| self.model.resolved_joints());
+        let mut count = 0usize;
+        for j in self.doc.assembly.joints.iter().filter(|j| j.kind != solidcraft_doc::joints::JointKind::Rigid) {
+            if self.pending_joint_bases.contains_key(&j.id) {
+                count += 1;
+                continue;
+            }
+            let Some(captured) = &j.captured else { continue };
+            let dofs = j.kind.dofs().len();
+            let mut q = current_joints.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+            q.resize(dofs, 0.0);
+            let mut e = normalize_joint_exprs(&j.exprs.values, dofs);
+            for (i, slot) in e.iter_mut().enumerate() {
+                if self.doc.assembly.links.iter().any(|l| (l.b, l.ib) == (j.id, i)) {
+                    *slot = None;
+                }
+            }
+            let exprs = normalize_joint_exprs(&e, dofs);
+            let prev_exprs: Vec<Option<String>> = if let Some(cj) = resolved_joints.and_then(|m| m.get(&j.id)) {
+                normalize_joint_exprs(&cj.exprs, dofs)
+            } else if j.base_values.is_none() {
+                exprs.clone()
+            } else {
+                Vec::new()
+            };
+            if captured != &q || exprs != prev_exprs {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Count of uncaptured component moves (excluding an active exploded view) plus uncaptured
+    /// driven joints.
+    pub fn uncaptured_position_count(&self) -> usize {
+        let moves = if self.moved_uncaptured() { self.uncaptured_moves().len() } else { 0 };
+        moves + self.uncaptured_joint_count()
+    }
+
+    /// Whether any component move or driven joint has not been captured yet (excluding an active
+    /// exploded view).
+    pub fn has_uncaptured_positions(&self) -> bool {
+        self.moved_uncaptured() || self.uncaptured_joint_count() > 0
     }
 
     /// The document is not the one its file holds: compared once per pair of documents and
@@ -2008,6 +2186,47 @@ impl Session {
     }
 
     /// Re-evaluate the model after a document change.
+    /// Whether the whole-body scope is in force: Select All set it, no item has been named since
+    /// and no sketch is open. Anything that names items or clears the selection ends it, so a
+    /// stale flag never outlives the list it stood for.
+    pub fn all_bodies_selected(&self) -> bool {
+        self.selection_all_bodies && self.selection.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// Clear the selection: the named items and the whole-body scope.
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.selection_all_bodies = false;
+    }
+
+    /// Whether anything is selected: a list of items or the whole-body scope.
+    pub fn has_selection(&self) -> bool {
+        !self.selection.is_empty() || self.all_bodies_selected()
+    }
+
+    /// The selection as the items an operation works on: the whole-body scope resolves to the
+    /// name of every shown body, in the world's order.
+    pub fn selected_items(&self) -> Result<Vec<Sel>> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.clone());
+        }
+        Ok(self.shown_body_names()?.into_iter().map(|name| Sel::Body { name }).collect())
+    }
+
+    /// How many things are selected, resolving the whole-body scope against the world.
+    pub fn selected_count(&self) -> Result<usize> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.len());
+        }
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).count())
+    }
+
+    /// The bodies the whole-body scope covers: every body the view shows (not hidden itself, nor
+    /// through its occurrence or folder), in the world's order.
+    pub(crate) fn shown_body_names(&self) -> Result<Vec<String>> {
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    }
+
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
     /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
@@ -2028,18 +2247,19 @@ impl Session {
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
         let drag = self.drag_moves();
-        let w = if drag.is_empty() {
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &self.pending_moves, &mut reuse)
+        // A drag's frame places its occurrences over any move not captured yet.
+        let dragged;
+        let moves = if drag.is_empty() {
+            &self.pending_moves
         } else {
-            // A drag's frame places its occurrences over any move not captured yet.
-            let mut moves = self.pending_moves.clone();
-            moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &moves, &mut reuse)
+            dragged = self.pending_moves.iter().chain(drag).map(|(o, m)| (*o, *m)).collect();
+            &dragged
         };
+        let w = solidcraft_doc::world_state_moved_reusing(&self.doc, &st, moves, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
-        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(w, moves)).map(Arc::new);
         if let Ok(mut c) = self.world_cache.lock() {
             *c = Some(WorldCache {
                 doc: self.doc.clone(),
@@ -2096,6 +2316,57 @@ impl Session {
             }
         }
         Ok(w)
+    }
+
+    /// `w` with the other placements of each component sketch ([`solidcraft_doc::SketchCopy`]):
+    /// each placement of its component under `moves`, but the one it is drawn at
+    /// ([`Session::feature_path`]), as a move from there.
+    fn sketch_copies(
+        &self,
+        mut w: solidcraft_doc::ModelState,
+        moves: &std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    ) -> solidcraft_doc::ModelState {
+        let mut owners: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for sketch in &w.sketches {
+            if let Some(f) = self.doc.feature(sketch.feature)
+                && f.component != 0
+            {
+                owners.entry(f.component).or_default().push(sketch.feature);
+            }
+        }
+        if owners.is_empty() {
+            return w;
+        }
+        let mut of: std::collections::BTreeMap<u64, Vec<(Vec<u64>, solidcraft_doc::Mat)>> = std::collections::BTreeMap::new();
+        for (component, path, m) in self.doc.placements_moved(moves) {
+            if owners.contains_key(&component) {
+                of.entry(component).or_default().push((path, m));
+            }
+        }
+        for (component, sketches) in owners {
+            let placements = of.remove(&component).unwrap_or_default();
+            if placements.len() < 2 {
+                continue;
+            }
+            // Where the sketch is drawn: the placement being authored, at its frame as
+            // `authored_sketches` put it there, else the first, where the world state placed it.
+            let shown = self.feature_path(component);
+            let drawn = if self.active_occurrence_path.is_some() && self.active_component == component {
+                Some(self.active_component_frame())
+            } else {
+                placements.iter().find(|(path, _)| *path == shown).map(|(_, m)| *m)
+            };
+            let Some(inverse) = drawn.and_then(|m| solidcraft_doc::mat_inverse(&m)) else { continue };
+            let copies: Arc<[solidcraft_doc::SketchCopy]> = placements
+                .into_iter()
+                .filter(|(path, _)| *path != shown)
+                .map(|(path, m)| solidcraft_doc::SketchCopy { path, delta: solidcraft_doc::mat_mul(&m, &inverse) })
+                .collect();
+            for sketch in sketches {
+                w.sketch_copies.insert(sketch, copies.clone());
+            }
+        }
+        w
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
@@ -2169,6 +2440,32 @@ impl Session {
         }
     }
 
+    /// Let this design's refreshes show their results without waiting for the SMLib checks of
+    /// the bodies their last features keep ([`solidcraft_doc::Model::set_background_checks`]):
+    /// for a window, which settles them as they end ([`Session::settle_feature_checks`]). Off
+    /// (the default: scripts, the CLI, agents' commands and tests), a refresh waits for them.
+    pub fn set_background_checks(&mut self, on: bool) {
+        self.background_checks = on;
+    }
+
+    /// Whether refreshes leave their last features' checks running ([`Session::set_background_checks`]).
+    pub fn background_checks(&self) -> bool {
+        self.background_checks
+    }
+
+    /// Settle the SMLib checks of features the last refresh left running, once they have ended
+    /// (or after waiting for them, with `wait`), and when one refused a feature's bodies,
+    /// evaluate the design again, which fails that feature with the check's error: except during
+    /// a live edit, which a refresh would end (a later call does it). Returns whether it
+    /// refreshed.
+    pub fn settle_feature_checks(&mut self, wait: bool) -> bool {
+        if self.model.settle_feature_checks(wait) && self.live_links.is_none() {
+            self.refresh();
+            return true;
+        }
+        false
+    }
+
     /// Settle what the imports' background checks found ([`solidcraft_doc::Model::settle_import_checks`]),
     /// and when they healed parts the design does not show yet, evaluate it again: except during
     /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
@@ -2192,12 +2489,125 @@ impl Session {
         }
     }
 
+    /// Synchronizes occurrence transforms and joint snapshots from `Model::resolved_occurrences()`
+    /// and `Model::resolved_joints()` when timeline `CapturePosition` features are active.
+    pub(crate) fn sync_capture_position_state(&mut self) {
+        if !self.doc.has_capture_position_timeline() {
+            self.last_capture_state = None;
+            return;
+        }
+        let resolved_occs = self.model.resolved_occurrences().clone();
+        let resolved_joints = self.model.resolved_joints().clone();
+        let capture_changed = self.last_capture_state.as_ref().is_none_or(|(o, j)| *o != resolved_occs || *j != resolved_joints);
+        if !capture_changed {
+            return;
+        }
+        let need_occ_sync = self.doc.occurrences.iter().any(|o| resolved_occs.get(&o.id).is_some_and(|t| o.transform != *t));
+        let prev_joints = self.last_capture_state.take().map(|(_, j)| j);
+        let need_joint_sync = self.doc.assembly.joints.iter().any(|j| {
+            if j.kind == solidcraft_doc::joints::JointKind::Rigid {
+                return false;
+            }
+            let prev = prev_joints.as_ref().and_then(|m| m.get(&j.id));
+            let next = resolved_joints.get(&j.id);
+            prev != next || (prev.is_none() && next.is_none() && j.base_values.is_some() && j.captured.is_some())
+        });
+        if need_occ_sync || need_joint_sync {
+            let mut pending_bases = std::mem::take(&mut self.pending_joint_bases);
+            let doc = self.doc_mut();
+            if need_occ_sync {
+                let in_capture_moves: std::collections::BTreeSet<u64> = doc
+                    .features
+                    .iter()
+                    .filter_map(|f| match &f.kind {
+                        solidcraft_doc::FeatureKind::CapturePosition { moves, .. } => Some(moves.iter().map(|m| m.occurrence)),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect();
+                for o in &mut doc.occurrences {
+                    if let Some(&t) = resolved_occs.get(&o.id)
+                        && o.transform != t
+                    {
+                        if in_capture_moves.contains(&o.id) {
+                            o.base_transform.get_or_insert(o.transform);
+                        }
+                        o.transform = t;
+                    }
+                }
+            }
+            if need_joint_sync {
+                for j in &mut doc.assembly.joints {
+                    if j.kind == solidcraft_doc::joints::JointKind::Rigid {
+                        continue;
+                    }
+                    let prev_joint = prev_joints.as_ref().and_then(|m| m.get(&j.id));
+                    let next_joint = resolved_joints.get(&j.id);
+                    if prev_joint == next_joint && !(prev_joint.is_none() && next_joint.is_none() && j.base_values.is_some() && j.captured.is_some())
+                    {
+                        continue;
+                    }
+                    let dofs = j.kind.dofs().len();
+                    match next_joint {
+                        Some(cj) => {
+                            let mut q = cj.values.clone();
+                            q.resize(dofs, 0.0);
+                            solidcraft_doc::joints::clamp(j, &mut q);
+                            let exprs_match = (0..dofs).all(|i| j.exprs.value(i) == cj.exprs.get(i).and_then(Option::as_deref));
+                            if prev_joint.is_none() && j.captured.as_ref() == Some(&cj.values) && exprs_match && j.values == q {
+                                continue;
+                            }
+                            if j.base_values.is_none() {
+                                let (base_vals, base_exprs) =
+                                    pending_bases.remove(&j.id).unwrap_or_else(|| (j.values.clone(), normalize_joint_exprs(&j.exprs.values, dofs)));
+                                j.base_values = Some(base_vals);
+                                j.base_exprs = base_exprs;
+                            } else {
+                                pending_bases.remove(&j.id);
+                            }
+                            j.captured = Some(cj.values.clone());
+                            if j.values.len() < dofs {
+                                j.values.resize(dofs, 0.0);
+                            }
+                            for (i, val) in q.into_iter().enumerate() {
+                                if let Some(slot) = j.values.get_mut(i) {
+                                    *slot = val;
+                                }
+                                j.exprs.set_value(i, cj.exprs.get(i).and_then(|e| e.clone()));
+                            }
+                        }
+                        None => {
+                            if prev_joint.is_some() || j.base_values.is_some() {
+                                j.captured = None;
+                                if let Some(base) = &j.base_values {
+                                    let mut q = base.clone();
+                                    q.resize(dofs, 0.0);
+                                    solidcraft_doc::joints::clamp(j, &mut q);
+                                    j.values = q;
+                                    for i in 0..dofs {
+                                        j.exprs.set_value(i, j.base_exprs.get(i).and_then(|e| e.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.pending_joint_bases = pending_bases;
+        }
+        self.last_capture_state = Some((resolved_occs, resolved_joints));
+    }
+
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.
     fn refresh_with_joint_report(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let mut solved = None;
-        if self.model.evaluate_shared(&self.doc) {
+        self.model.set_background_checks(self.background_checks && !self.is_copy);
+        let evaluated = self.model.evaluate_shared(&self.doc);
+        self.model.set_background_checks(false);
+        if evaluated {
             self.evaluations = self.evaluations.saturating_add(1);
         }
+        self.sync_capture_position_state();
         // Component Pattern features keep their count/spacing expressions; place their copies
         // after the model rebuild so a parameter change updates the placements (#12116).
         // Only a design with such a Pattern is touched, and only when the placements change: the
@@ -2228,6 +2638,7 @@ impl Session {
         if cmd::follow_expressed_moves(self) {
             self.model.evaluate(&self.doc);
             self.evaluations = self.evaluations.saturating_add(1);
+            self.sync_capture_position_state();
         }
         self.prune_sheet_sketch_edit();
         // Joints follow the geometry their origins snap to.
@@ -2245,6 +2656,7 @@ impl Session {
                 }
                 self.model.evaluate(&self.doc);
                 self.evaluations = self.evaluations.saturating_add(1);
+                self.sync_capture_position_state();
             }
         }
         cmd::motion::associative::refresh(self);
@@ -2259,14 +2671,16 @@ impl Session {
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
-    /// the model is the one that solve read and the design is as the solve left it, apart from
-    /// its features (the joints read those only through the model). A command that refreshes on
+    /// the model is the one that solve read and the design is as the solve left it, including
+    /// which component patterns are active. A command that refreshes on
     /// its own (a parameter change) is refreshed again after it, and that second solve would
     /// find every occurrence where it is.
     fn solve_joints(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let state = self.model.state();
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
-            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc)
+                    || (same_but_features(doc, &self.doc) && doc.inactive_pattern_occurrences() == self.doc.inactive_pattern_occurrences()))
         });
         if settled {
             return None;
@@ -2285,8 +2699,8 @@ impl Session {
     }
 
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed
-    /// a body or a feature (or undid or redid such a rename) renames it in the model instead,
-    /// which keeps every result and mesh (#3044).
+    /// a body, a feature or a parameter (or undid or redid such a rename) renames it in the model
+    /// instead, which keeps every result and mesh (#3044, #611).
     fn refresh_from(&mut self, previous: &Arc<Document>, visibility_restored: bool) {
         let rename = self.body_rename(previous);
         // Undo/redo restored visibility in the target document's names already. Remapping
@@ -2315,6 +2729,13 @@ impl Session {
         // A feature's name labels it and builds nothing.
         if let Some(id) = self.doc.feature_rename_from(previous)
             && self.model.rename_feature(&self.doc, id)
+        {
+            self.revision += 1;
+            return;
+        }
+        // A parameter's name changes no value (#611).
+        if let Some((old, new)) = self.doc.param_rename_from(previous)
+            && self.model.rename_param(previous, &self.doc, &old, &new)
         {
             self.revision += 1;
             return;
@@ -2568,6 +2989,8 @@ impl Session {
         self.active_sketch == before.active_sketch
             && self.sketching_view == before.sketching_view
             && self.pending_moves == before.pending_moves
+            && self.pending_move_records == before.pending_move_records
+            && self.pending_joint_bases == before.pending_joint_bases
             && (self.doc.differs_only_in_render(&before.doc)
                 || self.doc.differs_only_in_part_properties(&before.doc)
                 || self.doc.differs_only_in_appearance(&before.doc)
@@ -2675,6 +3098,41 @@ impl Session {
             {
                 return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
             }
+            if r.error.is_some()
+                && let Some(before) = solved_before.get(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && (!sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty())
+            {
+                let vals = self.doc.evaluation_values();
+                let mut trial = sk.clone();
+                let applied = self.doc.apply_dimension_values(&vals, &mut trial);
+                let offset_err = if own_values(&trial) == *before {
+                    None
+                } else {
+                    match applied {
+                        Ok(()) => {
+                            let mut solved_trial = sk.clone();
+                            self.doc
+                                .solve_sketch_with_analysis(
+                                    &vals,
+                                    &mut solved_trial,
+                                    &sk.driving_values(),
+                                    Some(sk),
+                                    solidcraft_sketch::Analysis::StatusOnly,
+                                )
+                                .err()
+                                .map(|e| e.to_string())
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            msg.contains("offset dimension").then_some(msg)
+                        }
+                    }
+                };
+                if let Some(e) = offset_err {
+                    return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
+                }
+            }
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
                 continue;
@@ -2768,6 +3226,8 @@ impl Session {
 
     fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
+        // Before an open edit is finished for it: a refused sheet sketch leaves the model's open.
+        cmd::refuse_outside_drawing(self, spec)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
         let prepared = self.take_prepared_edit_source(spec, params);
@@ -2791,6 +3251,23 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        self.execute_spec(spec, params)
+    }
+
+    fn execute_spec(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
+        // Plugin data is transient view state, so it stays out of undo snapshots.
+        // Restore it for every command error, including failures after guest publication.
+        let plugin_panels_before = (spec.id == "plugin.run").then(|| self.plugin_state.panels.clone());
+        let result = self.execute_spec_inner(spec, params);
+        if result.is_err()
+            && let Some(panels) = plugin_panels_before
+        {
+            self.plugin_state.panels = panels;
+        }
+        result
+    }
+
+    fn execute_spec_inner(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
@@ -2816,8 +3293,17 @@ impl Session {
         self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
+            // A command that reads the model reads it checked: the checks the window's last
+            // refresh left running end first, and a refusal among them leaves the model stale,
+            // evaluated just below ([`Session::set_background_checks`]).
+            if reads_model {
+                self.model.settle_feature_checks(true);
+            }
             if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
+                // Evaluated for the command to read: its checks end before it reads.
+                let background = std::mem::replace(&mut self.background_checks, false);
                 self.refresh();
+                self.background_checks = background;
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
@@ -2956,6 +3442,7 @@ impl Session {
                 || self.active_sketch != before.active_sketch
                 || self.active_sheet_sketch != before.active_sheet_sketch
                 || self.pending_moves != before.pending_moves
+                || self.pending_move_records != before.pending_move_records
                 || self.open_drawing != open_drawing
                 || self.active_component != active_before.0
                 || self.active_occurrence_path != active_before.1
@@ -3068,7 +3555,13 @@ impl Session {
                 if let Some(section) = before.section.take() {
                     self.set_section_state(section);
                 }
-                if changed || hidden || self.pending_moves != before.pending_moves {
+                if changed
+                    || hidden
+                    || self.pending_moves != before.pending_moves
+                    || self.pending_move_records != before.pending_move_records
+                    || self.pending_joint_bases != before.pending_joint_bases
+                    || self.last_capture_state != before.last_capture_state
+                {
                     // A refused sheet edit can have published its candidate before a later
                     // constraint-policy check. The same proof used for successful drawing
                     // edits keeps rollback from evaluating or clearing a stale source model.
@@ -3077,6 +3570,9 @@ impl Session {
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
                     self.pending_moves = before.pending_moves;
+                    self.pending_move_records = before.pending_move_records;
+                    self.pending_joint_bases = before.pending_joint_bases;
+                    self.last_capture_state = before.last_capture_state;
                     self.visibility = before.visibility;
                     if render_only {
                         self.refresh_render(&previous_doc);
@@ -3194,6 +3690,9 @@ impl Session {
             open_drawing: self.open_drawing,
             undo: self.undo.clone(),
             pending_moves: self.pending_moves.clone(),
+            pending_move_records: self.pending_move_records.clone(),
+            pending_joint_bases: self.pending_joint_bases.clone(),
+            last_capture_state: self.last_capture_state.clone(),
             visibility: self.visibility.clone(),
             redo: self.redo.clone(),
             redo_watch: self.redo_watch.clone(),
@@ -3237,6 +3736,9 @@ impl Session {
             c.active_sheet_sketch.filter(|entry| self.checked_sheet_sketch_owner(&self.view_context, Some(entry), &self.doc).is_ok());
         self.open_drawing = c.open_drawing;
         self.pending_moves = c.pending_moves;
+        self.pending_move_records = c.pending_move_records;
+        self.pending_joint_bases = c.pending_joint_bases;
+        self.last_capture_state = c.last_capture_state;
         self.visibility = c.visibility;
         self.undo = c.undo;
         self.redo = c.redo;
@@ -3244,13 +3746,18 @@ impl Session {
         if self.section_state() != c.section {
             self.set_section_state(c.section);
         }
-        self.selection.clear();
+        self.clear_selection();
         self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {
             self.refresh_display();
-        } else if !Arc::ptr_eq(&self.doc, &before.doc) || self.active_sketch != before.active_sketch || self.pending_moves != before.pending_moves {
+        } else if !Arc::ptr_eq(&self.doc, &before.doc)
+            || self.active_sketch != before.active_sketch
+            || self.pending_moves != before.pending_moves
+            || self.pending_move_records != before.pending_move_records
+            || self.pending_joint_bases != before.pending_joint_bases
+        {
             self.refresh();
         }
         self.follow_design_token();
@@ -3273,6 +3780,7 @@ impl Session {
         Session {
             stop: self.stop.clone(),
             is_copy: true,
+            background_checks: false,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -3296,7 +3804,9 @@ impl Session {
             sketch_entry: self.sketch_entry.clone(),
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
+            selection_all_bodies: self.selection_all_bodies,
             path: None,
+            source_path: self.path.clone().or_else(|| self.source_path.clone()),
             ids: self.ids.clone(),
             uid: self.uid,
             disk: self.disk,
@@ -3329,10 +3839,14 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
+            linked_bodies: self.linked_bodies,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
+            pending_move_records: self.pending_move_records.clone(),
+            pending_joint_bases: self.pending_joint_bases.clone(),
+            last_capture_state: self.last_capture_state.clone(),
             exploded: self.exploded.clone(),
             config_baseline: self.config_baseline.clone(),
             row_models: self.row_models.clone(),
@@ -3422,6 +3936,7 @@ impl Session {
             for e in &mut expected.occurrences {
                 if let Some(s) = source.doc.occurrences.iter().find(|s| s.id == e.id) {
                     e.transform = s.transform;
+                    e.base_transform = s.base_transform;
                     e.expressed_moves.clone_from(&s.expressed_moves);
                 }
             }
@@ -3431,6 +3946,10 @@ impl Session {
             for e in &mut expected.assembly.joints {
                 if let Some(s) = source.doc.assembly.joints.iter().find(|s| s.id == e.id) {
                     e.values.clone_from(&s.values);
+                    e.captured.clone_from(&s.captured);
+                    e.exprs.values.clone_from(&s.exprs.values);
+                    e.base_values.clone_from(&s.base_values);
+                    e.base_exprs.clone_from(&s.base_exprs);
                     e.offset = s.offset;
                     e.angle = s.angle;
                 }
@@ -3462,13 +3981,17 @@ impl Session {
     }
 
     fn compute_commands_under(
-        self,
+        mut self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        computed.plugin_state.defer_user_settings();
+        // UI consent travels to the worker invocation, never to the source identity that is
+        // compared with the live session when accepting its result.
+        self.plugin_state.user.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();
@@ -3477,15 +4000,19 @@ impl Session {
                 computed.doc = original.doc;
                 computed.model = original.model;
                 computed.world_cache = original.world_cache;
+                computed.pending_joint_bases = original.pending_joint_bases;
+                computed.last_capture_state = original.last_capture_state;
                 serde_json::json!({"marker":marker.unwrap_or(computed.doc.features.len()),"features":computed.doc.features.len()})
             } else {
                 let undo = std::mem::take(&mut computed.undo);
                 let redo = std::mem::take(&mut computed.redo);
                 let selection = computed.selection.clone();
+                let all_bodies = computed.selection_all_bodies;
                 let reply = computed.execute("timeline.roll_to", &params)?;
                 computed.undo = undo;
                 computed.redo = redo;
                 computed.selection = selection;
+                computed.selection_all_bodies = all_bodies;
                 reply
             };
             let changed = !Arc::ptr_eq(&before, &computed.doc);
@@ -3498,6 +4025,8 @@ impl Session {
             let active_sheet_sketch = computed.active_sheet_sketch.clone();
             let open_drawing = computed.open_drawing;
             let pending_moves = computed.pending_moves.clone();
+            let pending_move_records = computed.pending_move_records.clone();
+            let pending_joint_bases = computed.pending_joint_bases.clone();
             let reply = computed.execute(id, params)?;
             let changed = !Arc::ptr_eq(&before, &computed.doc)
                 || active_sketch != computed.active_sketch
@@ -3505,6 +4034,8 @@ impl Session {
                 || active_sheet_sketch != computed.active_sheet_sketch
                 || open_drawing != computed.open_drawing
                 || pending_moves != computed.pending_moves
+                || pending_move_records != computed.pending_move_records
+                || pending_joint_bases != computed.pending_joint_bases
                 || id.starts_with("select.");
             steps.push(ComputedCommand { id: id.clone(), params: params.clone(), before, after: computed.doc.clone(), changed, reply });
         }
@@ -3536,6 +4067,9 @@ impl Session {
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
         }
+        if !self.plugin_state.user.defer_user_settings {
+            prepared.computed.plugin_state.publish_user_settings()?;
+        }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
         }
@@ -3561,6 +4095,11 @@ impl Session {
                     usage::note_compute(spec.id, ms);
                 }
             }
+        }
+        // A model worker that did not update panels must keep newer view state on
+        // the window (including data merged into a frame or a panel the user closed).
+        if prepared.computed.plugin_state.panels != prepared.source.plugin_state.panels {
+            self.plugin_state.panels.clone_from(&prepared.computed.plugin_state.panels);
         }
         // Disk checks and no-op source reads may finish after a newer live observation.
         // Merge only entries whose source observation is still current in the live session.
@@ -3601,6 +4140,8 @@ impl Session {
             && self.active_component == source.active_component
             && self.active_occurrence_path == source.active_occurrence_path
             && self.pending_moves == source.pending_moves
+            && self.pending_move_records == source.pending_move_records
+            && self.pending_joint_bases == source.pending_joint_bases
     }
 
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
@@ -3617,6 +4158,7 @@ impl Session {
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
+        let all_bodies = self.selection_all_bodies;
         let redo_watch = self.redo_watch.clone();
         let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
@@ -3631,6 +4173,7 @@ impl Session {
         self.redo_watch = redo_watch;
         self.ids = ids;
         self.selection = selection;
+        self.selection_all_bodies = all_bodies;
         Ok(())
     }
 
@@ -3696,6 +4239,7 @@ impl Session {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
+        self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -3797,12 +4341,16 @@ impl Session {
         drawing_scene::forget_closed(self);
         if self.model_focus == computed.model_focus {
             self.selection = computed.selection;
+            self.selection_all_bodies = computed.selection_all_bodies;
         }
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
         self.active_component = computed.active_component;
         self.active_occurrence_path = computed.active_occurrence_path;
         self.pending_moves = computed.pending_moves;
+        self.pending_move_records = computed.pending_move_records;
+        self.pending_joint_bases = computed.pending_joint_bases;
+        self.last_capture_state = computed.last_capture_state;
         self.exploded = computed.exploded;
         self.config_baseline = computed.config_baseline;
         self.row_models = computed.row_models;
@@ -3824,6 +4372,17 @@ impl Session {
             self.echo(message);
         }
         Ok(())
+    }
+
+    /// Read a primary origin for the Joint dialog without modifying the session.
+    pub fn joint_origin_for_alignment(&self, params: &serde_json::Value) -> Result<doc::joints::JointOrigin> {
+        cmd::joints::origin_param(self, Some(params), "joint.create")
+    }
+
+    /// Validate a secondary selection through the command resolver without authoring it.
+    pub fn joint_alignment_frame(&self, origin: doc::joints::JointOrigin, alignment: &serde_json::Value) -> Result<doc::Mat> {
+        let origin = cmd::joints::alignment_param(self, origin, Some(alignment), "joint.create")?;
+        doc::joints::resolve_origin(&self.doc, &self.model.state(), &origin).map_err(Into::into)
     }
 
     /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
@@ -3862,6 +4421,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.plugin_state.defer_user_settings();
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }
@@ -4059,6 +4619,8 @@ mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
 #[cfg(test)]
+mod midsurface_samples_tests;
+#[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
 mod pattern_suppress_tests;
@@ -4105,8 +4667,24 @@ pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension
 /// The values of a sketch's driving dimensions that come from parameters: what a value edit
 /// changes in it (as opposed to geometry it projects or links from upstream).
 fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<String, f64> {
-    let mut values: std::collections::BTreeMap<_, _> =
-        sk.constraints.iter().filter(|c| c.param.is_some() && !c.driven).filter_map(|c| Some((c.id.clone(), c.kind.value()?))).collect();
+    let mut values: std::collections::BTreeMap<_, _> = sk
+        .constraints
+        .iter()
+        .filter(|c| c.param.is_some() && !c.driven)
+        .filter_map(|c| {
+            let v = match c.kind {
+                solidcraft_sketch::ConstraintKind::OffsetDistance { value, reverse, .. } => {
+                    if reverse {
+                        -value
+                    } else {
+                        value
+                    }
+                }
+                _ => c.kind.value()?,
+            };
+            Some((c.id.clone(), v))
+        })
+        .collect();
     // 3D dimensions, and 3D points placed by expressions (#10608).
     for c in &sk.wire_constraints {
         match &c.kind {
@@ -4198,6 +4776,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         print_faces,
+        collision_shapes,
         user_materials,
         appearances,
         body_components,
@@ -4206,13 +4785,17 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
         notes,
         visibility,
         drawings,
         next_component_color_index,
+        plane_extents,
         plugin_data,
+        linked_bodies_left_out,
     } = a;
     *plugin_data == b.plugin_data
+        && *linked_bodies_left_out == b.linked_bodies_left_out
         && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending
@@ -4238,6 +4821,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *collision_shapes == b.collision_shapes
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
@@ -4246,10 +4830,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *saved_sections == b.saved_sections
         && *notes == b.notes
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+        && *plane_extents == b.plane_extents
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link

@@ -1362,6 +1362,8 @@ pub struct TabHandles<'a> {
     pub view_new: &'a str,
     pub view_more: &'a str,
     pub switcher: &'a str,
+    /// The mark between the tabs where files dragged over the bar would open.
+    pub file_drop: &'a str,
 }
 
 /// One document tab.
@@ -1564,8 +1566,8 @@ pub struct TabStrip<'a> {
     pub shown_selected: Option<usize>,
     /// Only this design's view controls appear in a pop-out's strip.
     pub pop_out: bool,
-    /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
-    /// down, moves the window, and a double click maximizes it (unless it renames).
+    /// The tabs are part of the window's title bar: a double click maximizes it (unless it
+    /// renames). Dragging a tab never moves the window; only empty bar space does.
     pub title_bar: bool,
     /// A double click on the selected tab renames it.
     pub double_click_renames: bool,
@@ -2154,64 +2156,6 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     for line in glyph_lines(icon) {
         p.add(egui::Shape::line(line.iter().map(|&point| at(point)).collect(), stroke));
     }
-}
-
-/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
-/// The caller supplies a rectangle excluding its menu and window controls.
-pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let painter = painter.with_clip_rect(rect);
-    painter.rect_filled(rect, 0, t.sketch_soft);
-    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let chip_width = (chip.size().x + 16.0).min(rect.width());
-    let leading = (rect.width() - chip_width - 6.0).max(0.0);
-    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
-    if glyph_width > 0.0 {
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
-    }
-    let name_x = rect.left() + glyph_width;
-    let name_width = (leading - glyph_width).max(0.0);
-    let mut after = name_x;
-    if name_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
-        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let name = painter.layout_job(job);
-        after += name.size().x.min(name_width);
-        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
-    }
-    let chip_x = (after + 6.0).min(rect.right() - chip_width);
-    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
-    painter.rect_filled(chip_rect, 9, t.chip);
-    let padding = 8.0_f32.min(chip_width / 2.0);
-    let text_width = (chip_width - 2.0 * padding).max(0.0);
-    if text_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let chip = painter.layout_job(job);
-        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
-    }
-}
-
-/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
-pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
-    let Some(owner) = owner else {
-        paint_sketch_header(painter, rect, name, editing);
-        return;
-    };
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
-    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
-    paint_sketch_header(painter, left, name, editing);
-    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
-    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
-    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
 }
 
 /// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
@@ -3435,6 +3379,40 @@ pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
+/// Where files dragged from outside the window onto the bar would open: the bar's row and the
+/// places between the shown tabs (from the left end of the first to the right end of the last),
+/// each with the place among all the tabs a file dropped there opens at; and the pass it was
+/// drawn in.
+#[derive(Clone, Debug)]
+struct FileDropZone {
+    rect: Rect,
+    gaps: Vec<(f32, usize)>,
+    pass: u64,
+}
+
+impl FileDropZone {
+    /// The place between tabs (or at either end) nearest `p`, when `p` is over the bar.
+    fn place(&self, p: Pos2) -> Option<usize> {
+        if !self.rect.contains(p) {
+            return None;
+        }
+        self.gaps.iter().min_by(|a, b| (a.0 - p.x).abs().total_cmp(&(b.0 - p.x).abs())).map(|(_, at)| *at)
+    }
+}
+
+/// The place among the tabs of the strip that keeps its state at `id` ([`TabStrip::id`]) where
+/// files dropped with the pointer at `pointer` open, as a new tab each (0 before the first tab,
+/// the number of tabs after the last); `None` when the pointer is not over the bar. Read from the
+/// strip as last drawn (this pass or the one before), so an app can take a drop before it draws
+/// the strip, and a strip no longer drawn takes none.
+pub fn file_drop_place(ctx: &egui::Context, id: egui::Id, pointer: Option<Pos2>) -> Option<usize> {
+    let zone = ctx.data(|d| d.get_temp::<FileDropZone>(id.with("file_drop")))?;
+    if zone.pass.saturating_add(1) < ctx.cumulative_pass_nr() {
+        return None;
+    }
+    zone.place(pointer?)
+}
+
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
     tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
 }
@@ -3568,21 +3546,19 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        if (n > 1 || strip.title_bar) && !(active && strip.rename.is_some()) && resp.hovered() {
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
             ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
         }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
-        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
-        // dragging the only tab, or one mostly up or down, moves the window. A double click
-        // renames the tab (the first click selected it), or maximizes the window as the bar's
-        // empty space does.
+        // Dragging a tab along the strip moves it. A double click renames the tab (the first
+        // click selected it), or maximizes the window as the bar's empty space does.
         if resp.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
             let moved = pointer.unwrap_or(origin) - origin;
+            // A drag that starts on a tab never moves the window (only empty bar space does,
+            // `window_chrome::drag_area`), whatever its direction and however many tabs there are.
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
-            } else if strip.title_bar {
-                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {
@@ -3702,6 +3678,31 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         }
         None => d.remove::<ViewDrag>(vdrag_id),
     });
+    // Files dragged over the bar from outside the window open there, each as a tab of its own: a
+    // mark shows the place among the tabs they would open at.
+    let mut gaps = Vec::with_capacity(shown + 1);
+    let mut gap = x0;
+    gaps.push((gap, first));
+    for (k, w) in widths.iter().enumerate() {
+        gap += w;
+        gaps.push((gap, first + k + 1));
+    }
+    let zone = FileDropZone { rect: Rect::from_x_y_ranges(x0..=x1.max(x0), r.y_range()), gaps, pass: ui.ctx().cumulative_pass_nr() };
+    let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+    if let Some(gx) =
+        pointer.filter(|_| hovering).and_then(|p| zone.place(p)).and_then(|at| zone.gaps.iter().find(|(_, i)| *i == at)).map(|(x, _)| *x)
+    {
+        // In the 2-point gap a tab leaves at its right.
+        let x = (gx - 1.0).clamp(x0 + 1.0, x1.max(x0 + 1.0));
+        let mark = Rect::from_center_size(pos2(x, r.center().y), vec2(3.0, (r.height() - 6.0).max(3.0)));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, strip.id.with("file_drop_mark")));
+        painter.rect_filled(mark, 1.5, t.accent);
+        for y in [mark.top(), mark.bottom()] {
+            painter.circle_filled(pos2(x, y), 3.5, t.accent);
+        }
+        solidcraft_ui_registry::publish_handle(h.file_drop, mark.center());
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(strip.id.with("file_drop"), zone));
     // In the order they happened: a later choice this frame (the list's, the menu's) wins.
     actions.extend(shut.map(TabAction::Close));
     actions.extend(pick.map(TabAction::Select));
@@ -3860,7 +3861,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
             }
             FileRow::Separator => {
-                ui.separator();
+                crate::Menu::separator(ui);
             }
         }
     }

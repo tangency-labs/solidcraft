@@ -12,6 +12,8 @@ pub struct InspectParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectResult {
     pub manifest: crate::plugin::Manifest,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    pub granted_capabilities: Vec<String>,
     /// SHA-256 of the exact manifest bytes and component. Review the manifest before using it.
     pub approval: String,
     pub host_limits: crate::plugin::HostLimits,
@@ -31,6 +33,9 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Explicit panel action notification, separate from the entry's ordinary arguments.
+    #[serde(default)]
+    pub ui_event: Option<crate::plugin::ui::UiEvent>,
     /// Refuse an edit unless this is still the design state the caller computed against.
     #[serde(default)]
     pub expected_design: Option<craft_plugin::DesignToken>,
@@ -77,6 +82,12 @@ pub struct FormValidation {
 fn empty_params() -> Value {
     Value::Object(Default::default())
 }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct PluginMessage {
+    pub level: craft_plugin::LogLevel,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -93,6 +104,8 @@ pub struct RunResult {
     pub view: Option<PluginView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PluginMessage>,
 }
 
 /// A view command a plugin called, for the window to apply after the run lands.
@@ -312,6 +325,9 @@ pub struct InstallParams {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// Host-drawn panels declared by the plugin, shown during permission review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panels: Vec<crate::plugin::ui::PanelSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
@@ -322,10 +338,22 @@ pub struct InstallResult {
     pub description: String,
     /// Host capabilities it needs, as `name@major.minor`.
     pub capabilities: Vec<String>,
+    /// Oldest SolidCraft version it supports, when declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
+    /// Capabilities it uses when available, as `name@major.minor`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    pub granted_capabilities: Vec<String>,
+    /// Optional metadata reserved for future hosts; never grants permissions.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: serde_json::Map<String, Value>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
-    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
-    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    /// The fuel, memory and time it asks for. Fuel and memory above `host_limits` can be approved
+    /// at install (`approve.fuel`, up to `MAX_APPROVED_FUEL`, and `approve.memory_mib`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<craft_plugin::Limits>,
     /// The app's ceilings for plugins, before any approval.
@@ -345,6 +373,18 @@ pub struct InstallResult {
     /// For an exporter: the file extensions it writes, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub writes: Vec<String>,
+    /// Its view backgrounds (`shaders@0.1`), as `id/shader`, each checked and compiled at install.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<String>,
+    /// Its tints for the ribbon and panels (`shaders@0.2`), as `id/shader`, checked the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tints: Vec<String>,
+    /// Its panel shaders (`shaders@0.2`), as `id/shader`, checked the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panel_shaders: Vec<String>,
+    /// For a plugin with `themes@0.1`: the colour themes it adds to the theme picker.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<craft_plugin::theme::ThemeDecl>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
@@ -360,6 +400,9 @@ pub struct InstallResult {
 #[serde(deny_unknown_fields)]
 pub struct RemoveParams {
     pub id: String,
+    /// Remove this plugin's per-user settings too. Omitted or false keeps them.
+    #[serde(default)]
+    pub remove_user_data: bool,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RemoveResult {
@@ -395,6 +438,9 @@ pub struct StoredGrant {
     pub package_hash: Option<String>,
     pub command_groups: std::collections::BTreeSet<String>,
     pub folders: Vec<crate::plugin::FileGrant>,
+    /// Fuel approved above Max plugin fuel for this exact package, up to `MAX_APPROVED_FUEL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
     /// Memory in MiB approved above the app's ceiling for plugins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
@@ -431,6 +477,10 @@ pub struct InstallApproval {
     pub command_groups: std::collections::BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<ApprovedFolder>,
+    /// Fuel to allow above Max plugin fuel: exactly the manifest's `runtime.limits.fuel`, at
+    /// most 10,000,000,000,000. Omitted: the plugin runs under the app's default limit.
+    #[serde(default)]
+    pub fuel: Option<u64>,
     /// Memory in MiB to allow above the app's ceiling for plugins: exactly the manifest's
     /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
     #[serde(default)]
@@ -459,6 +509,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
                 .into_iter()
                 .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
                 .collect(),
+            fuel: approve.fuel,
             memory_mib: approve.memory_mib,
             input_folder: approve.input_folder,
         }
@@ -505,6 +556,19 @@ pub struct CheckResult {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Oldest SolidCraft version it supports, when declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
+    /// Capabilities it uses when available, as `name@major.minor`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub granted_capabilities: Vec<String>,
+    /// Optional metadata reserved for future hosts; never grants permissions.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: serde_json::Map<String, Value>,
     /// `command`, `importer`, or `metadata` for a manifest with no runtime.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,

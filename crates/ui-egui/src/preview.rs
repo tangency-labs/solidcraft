@@ -17,6 +17,7 @@
 //! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
 use solidcraft_engine::geom::prelude::*;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -62,6 +63,10 @@ pub struct Colors {
     /// are left out altogether, so they are fully transparent and only outlines are drawn. A
     /// combine's ghosts always show.
     pub cut_tint: bool,
+    /// Whether the old shape of a body the preview replaces is drawn as a ghost, and a body that
+    /// lost volume shows its new faces in the cut colour. Off (Scale): only the new body shows,
+    /// in its own colour, so a smaller result is never hidden inside or tinted by its old self.
+    pub replaced_ghost: bool,
     /// Whether bodies the preview creates are drawn see-through, in `new_body` and its alpha
     /// (Ghost Frame Members: this Frame Member's own new members, #15705).
     pub glass_new: bool,
@@ -88,6 +93,7 @@ impl Colors {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
             glass_new: false,
         }
     }
@@ -112,6 +118,7 @@ pub struct SketchPreview {
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
+    pub interaction: Option<JointInteraction>,
     pub scene: GpuScene,
     pub sketches: Vec<SketchPreview>,
     pub replaced: Vec<String>,
@@ -192,8 +199,27 @@ const DETACHED: usize = 2;
 /// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
 const STALE_MOTION_MS: f64 = 500.0;
 
+/// Picking and feedback use the same placed geometry as the joint preview. The inverse
+/// placement maps a primary re-pick back to the unchanged document's coordinates.
+pub struct JointInteraction {
+    pub source_revision: u64,
+    /// The solver's actual fixed roots, including its implicit root for a floating assembly.
+    pub fixed_occurrences: Vec<u64>,
+    pub document: std::sync::Arc<solidcraft_engine::doc::Document>,
+    pub state: std::sync::Arc<ModelState>,
+    pub to_document: std::collections::HashMap<String, solidcraft_engine::doc::Mat>,
+}
+
+#[derive(Default)]
+struct PreviewWork {
+    progress: Arc<Progress>,
+    fallback: Option<Vec<(String, Value)>>,
+}
+
 #[derive(Default)]
 pub struct PreviewState {
+    pub interaction: Option<JointInteraction>,
+    retain_joint_pose: bool,
     /// Key of the commands whose result (or error) is shown.
     shown_key: Option<u64>,
     running: Option<(u64, Receiver<Job>)>,
@@ -276,6 +302,23 @@ pub struct PreviewState {
 }
 
 impl PreviewState {
+    /// Tests: wait until the running preview worker has answered, and leave its result for the
+    /// next frame's poll, as a frame drawn once the worker is done would find it. Whether a
+    /// result then shows is decided by that poll, as in the app. False when nothing runs.
+    #[cfg(test)]
+    pub(crate) fn wait_for_worker(&mut self) -> bool {
+        let Some((key, rx)) = self.running.take() else { return false };
+        let job = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(job) => job,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the preview failed".into()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("the preview worker did not answer in 60 s"),
+        };
+        let (tx, done) = std::sync::mpsc::channel();
+        let _ = tx.send(job);
+        self.running = Some((key, done));
+        true
+    }
+
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
@@ -344,6 +387,7 @@ impl PreviewState {
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
         self.drop_layer();
+        self.interaction = None;
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -354,6 +398,7 @@ impl PreviewState {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.retain_joint_pose = false;
         self.straight.clear();
         self.moving.clear();
         self.detach();
@@ -445,6 +490,7 @@ impl PreviewState {
         self.ms = crate::now_ms() - self.started;
         match job {
             Ok(b) => {
+                self.interaction = b.interaction;
                 self.sketches = b.sketches;
                 self.replaced = b.replaced;
                 self.outlines = b.outlines;
@@ -487,7 +533,9 @@ impl PreviewState {
             // The current inputs make no feature: the last good geometry would contradict
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
             Err(e) => {
-                self.hide_scene();
+                if !self.retain_joint_pose || self.interaction.is_none() {
+                    self.hide_scene();
+                }
                 self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
@@ -587,6 +635,7 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.as_built"
                     | "joint.edit"
                     | "joint.limits"
+                    | "joint.dynamics"
                     | "joint.gear"
                     | "joint.rack_pinion"
                     | "joint.screw"
@@ -642,6 +691,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
             "solid.chamfer" => &["distance", "distance2", "angle"],
+            // Every value is its own setup: a count, spacing or extent typed on the way to
+            // another (a spacing of 1 on the way to 15 over an 80 mm extent makes 81 copies) is
+            // left behind as soon as the next is typed, not waited for (#8523).
+            "solid.pattern.rectangular" => &[],
             _ => return None,
         };
         let params = params.as_object_mut()?;
@@ -669,6 +722,11 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
         colors.new_body[3] = crate::viewport::frame_ghost_alpha();
         colors.glass_new = true;
     }
+    // Scale shows only its result, in the body's own colour: every face of a scaled body is new.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
+        colors.replaced_ghost = false;
+        colors.tint_new = false;
+    }
     colors
 }
 
@@ -679,6 +737,8 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
         return;
     }
+    crate::dialogs_assembly::update_alignment_order(app);
+    app.preview.retain_joint_pose = app.dialog.as_ref().is_some_and(|d| d.preview_enabled && crate::dialogs_assembly::alignment_dialog(d));
     // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
     // overlaps or touches its body, New Body when none does. It is set once for each pick of
     // bodies and plane, so an operation picked by hand afterwards stays until they change.
@@ -691,7 +751,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // A plugin command's dialog: its run, on a scratch session without the plugin's grants.
     let plugin = crate::plugin_menu::preview_commands(app);
-    let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
+    let mut cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if plugin.is_some() => plugin.as_ref().map(|(_, _, c)| c.clone()).unwrap_or_default(),
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
@@ -702,13 +762,29 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         // No dialog, or inputs still missing: nothing to preview, and a pick waiting for one is
         // not checked (`settle_pick` drops it).
         _ => {
+            if app.preview.retain_joint_pose && app.preview.interaction.is_some() {
+                app.preview.detach();
+                app.preview.running_stream_key = None;
+                app.preview.shown_key = None;
+                app.preview.busy = false;
+                app.preview.error = app.dialog.as_ref().and_then(|d| crate::dialogs::apply_commands(app, d).err());
+                return;
+            }
             app.preview.clear();
             crate::dialogs_frame::settle_pick(app);
             return;
         }
     };
     let colors = colors(app);
-    let mut key = job_key(&cmds, app.session.revision, colors);
+    // A hover is transient: evaluate it off the UI thread and use authored commands as
+    // its fallback. Neither rejection nor leaving the candidate can author a reference.
+    let candidate = app.dialog.as_ref().and_then(|d| crate::dialogs_assembly::alignment_hover_commands(app, d));
+    let fallback = candidate.filter(|candidate| candidate != &cmds).map(|candidate| std::mem::replace(&mut cmds, candidate));
+    let mut key = if let Some(base) = &fallback {
+        job_key(&[cmds.clone(), base.clone()].concat(), app.session.revision, colors)
+    } else {
+        job_key(&cmds, app.session.revision, colors)
+    };
     // A reopened dialog must not inherit a result (or an in-flight run) from the old dialog.
     if let Some((id, _, _)) = &plugin {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -731,6 +807,8 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let pv = &mut app.preview;
     pv.set_source(source, revision);
     pv.poll(key, stream_key);
+    crate::dialogs_assembly::update_alignment_order(app);
+    let pv = &mut app.preview;
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
@@ -752,7 +830,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some((_, id, _)) = &plugin {
             crate::plugin_menu::dry_run(&mut scratch, id);
         }
-        spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
+        spawn(&mut app.preview, key, scratch, cmds, colors, tool, PreviewWork { fallback, ..PreviewWork::default() });
     }
     app.preview.busy = app.preview.running.is_some();
     // Both worker results and the web's synchronous results are ready before their first draw.
@@ -782,16 +860,15 @@ fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> u64 {
 
 /// Start computing the preview of `cmds`: for a tool feature (`tool`), only its tool.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, progress: Arc<Progress>) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, work: PreviewWork) {
+    let PreviewWork { progress, fallback } = work;
     let (tx, rx) = std::sync::mpsc::channel();
     // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
     let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let job = scratch.stop_token().within(|| {
-            solidcraft_engine::doc::progress::watch(watched, || {
-                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
-            })
-        });
+        let job = scratch
+            .stop_token()
+            .within(|| solidcraft_engine::doc::progress::watch(watched, || compute_candidate(&scratch, &cmds, colors, tool, fallback.as_deref())));
         let _ = tx.send(job);
     });
     match spawned {
@@ -806,8 +883,19 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 
 /// No threads on the web: compute right away.
 #[cfg(target_arch = "wasm32")]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, _progress: Arc<Progress>) {
-    pv.apply(key, if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, work: PreviewWork) {
+    let PreviewWork { progress: _progress, fallback } = work;
+    pv.apply(key, compute_candidate(&scratch, &cmds, colors, tool, fallback.as_deref()));
+}
+
+fn compute_candidate(scratch: &Session, cmds: &[(String, Value)], colors: Colors, tool: bool, fallback: Option<&[(String, Value)]>) -> Job {
+    let result = if tool { compute_tool(scratch, cmds, colors) } else { compute(scratch, cmds, colors) };
+    if result.is_err()
+        && let Some(base) = fallback
+    {
+        return compute(scratch, base, colors);
+    }
+    result
 }
 
 /// Evaluate the commands on the scratch session and build the preview scene.
@@ -861,7 +949,10 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
             let combine = combine_of(cmds);
-            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
+            // A plugin run's new bodies in the colours Run gives them (#19707).
+            let plugin = cmds.iter().all(|(command, _)| command == "plugin.run");
+            let looks = if plugin { new_body_looks(&p) } else { HashMap::new() };
+            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref(), &looks))?;
             b.bounds = state_bounds(&p.after);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
@@ -1046,6 +1137,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         }
     }
     Built {
+        interaction: None,
         scene: sc,
         sketches: Vec::new(),
         replaced: Vec::new(),
@@ -1101,6 +1193,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         }
     }
     Built {
+        interaction: None,
         scene: sc,
         sketches: Vec::new(),
         replaced: Vec::new(),
@@ -1172,15 +1265,45 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 
 /// The preview scene: changed and new bodies (new surface tinted) and, as a ghost, the old
 /// version of changed or removed bodies.
+pub(crate) fn build_motion(before: &ModelState, after: &ModelState, mut colors: Colors) -> Built {
+    colors.tint_new = false;
+    colors.cut_tint = false;
+    build_scene(before, after, colors, None, true, &HashMap::new())
+}
+
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
-    build_as(before, after, c, None)
+    build_as(before, after, c, None, &HashMap::new())
 }
 
 /// [`build`], or as a combine shows its result: in the selected colour (with any piece a cut or
 /// intersect splits off its target), never tinted, and nothing drawn through the bodies. A join
 /// shows the joined body alone; a cut, its tools whole as red ghosts (a kept tool too, the
 /// preview standing in for it); an intersect, the tools' material it drops as yellow ghosts.
-fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>) -> Built {
+fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>, looks: &HashMap<String, [u8; 4]>) -> Built {
+    build_scene(before, after, c, combine, false, looks)
+}
+
+/// The colour each body the previewed commands make has once they are applied (its look,
+/// material or imported colour), by name: a plugin's live preview shows them as Run will
+/// (#19707). Bodies without one keep the New Body colour.
+fn new_body_looks(p: &solidcraft_engine::Preview) -> HashMap<String, [u8; 4]> {
+    let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    p.after
+        .bodies
+        .iter()
+        .filter(|b| p.before.body(&b.name).is_none())
+        .filter_map(|b| p.doc.body_color(b).map(|[r, g, bl]| (b.name.clone(), [to8(r), to8(g), to8(bl), 255])))
+        .collect()
+}
+
+fn build_scene(
+    before: &ModelState,
+    after: &ModelState,
+    c: Colors,
+    combine: Option<&Combine>,
+    motion: bool,
+    looks: &HashMap<String, [u8; 4]>,
+) -> Built {
     let mut sc = GpuScene::default();
     let added_color = sc.color(c.added);
     let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
@@ -1192,7 +1315,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     let tint_new = c.tint_new && combine.is_none();
     // Graphics' Show removed material in red leaves a combine alone: its tools' ghosts are all
     // it shows of what it does, so they always show.
-    let cut_tint = c.cut_tint || combine.is_some();
+    let cut_tint = c.cut_tint || combine.is_some() || (motion && c.ghost);
     let mut replaced = Vec::new();
     let mut outlines = Vec::new();
     let mut points = Vec::new();
@@ -1229,7 +1352,13 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
         // tools instead, as ghosts that bodies in front of them hide.
-        let cut = !moved && c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // Not for a body only resized (Scale): smaller is not cut material, and the tint would
+        // colour the whole result.
+        let cut = !moved
+            && c.cut_tint
+            && c.replaced_ghost
+            && combine.is_none()
+            && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
@@ -1268,6 +1397,8 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
             selected
         } else if old.is_some() {
             body_color
+        } else if let Some(look) = looks.get(&a.name) {
+            sc.color(*look)
         } else {
             new_body
         };
@@ -1340,13 +1471,16 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
                 _ => None,
             },
         };
-        if cut_tint && let Some(colour) = fill {
+        if cut_tint
+            && c.replaced_ghost
+            && let Some(colour) = fill
+        {
             let fill = sc.color(colour);
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
             // boundary moved) the two triangulations cross by up to their chord error, far past the
             // ghost's depth bias, so the ghost showed through the new face in slivers.
-            let own = if gone || combine.is_some() { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
+            let own = if motion || gone || combine.is_some() { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
             for t in &m.triangles {
                 let Some(corners) = m.tri(t) else { continue };
                 if own.iter().chain(&result).any(|k| on_surface(k, corners)) {
@@ -1380,6 +1514,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
     Built {
+        interaction: None,
         scene: sc,
         sketches,
         replaced,
@@ -1664,6 +1799,7 @@ mod tests {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
             glass_new: false,
         }
     }
@@ -1818,6 +1954,7 @@ mod tests {
 
     fn pose() -> Built {
         Built {
+            interaction: None,
             scene: GpuScene::default(),
             sketches: Vec::new(),
             replaced: vec!["Lid".into()],
@@ -2473,6 +2610,25 @@ mod tests {
         assert!(!b.scene.overlay.is_empty(), "the tool's outline still shows where the cut goes");
     }
 
+    #[test]
+    fn assembly_motion_keeps_the_real_part_solid_and_only_the_original_pose_red() {
+        let mut a = Session::default();
+        let mut b = Session::default();
+        a.execute("solid.box", &json!({"length":100,"width":80,"height":10})).unwrap();
+        // Stand in for the small volume drift of a moved display mesh. The caller knows
+        // these are two placements, not a material-removing feature.
+        b.execute("solid.box", &json!({"length":100,"width":80,"height":9.99999999,"corner":[150,0,0]})).unwrap();
+        let (before, after) = (a.model.state(), b.model.state());
+        let c = colors();
+        let generic = build(&before, &after, c);
+        assert!(count(&generic.scene, &generic.scene.xray, 28, c.removed) > 0, "reproduce the cut heuristic's false positive");
+        let motion = build_motion(&before, &after, Colors { added: c.body, new_body: c.body, ..c });
+        assert_eq!(count(&motion.scene, &motion.scene.xray, 28, c.removed), 0);
+        assert!(count(&motion.scene, &motion.scene.tris, crate::gpu::TRI_SIZE, c.body) > 0);
+        assert!(count(&motion.scene, &motion.scene.ghost, 28, c.removed) > 0);
+        assert_eq!(motion.replaced, ["Body1"]);
+    }
+
     fn plate() -> Session {
         let mut s = Session::default();
         for (id, p) in [
@@ -2569,6 +2725,21 @@ mod tests {
         assert_eq!(s.undo.len(), undo);
     }
 
+    /// Scale's preview hides the old body and draws no ghost of it, so a body scaled down is not
+    /// covered by its old self; the new body is still drawn and still stands in for the old one.
+    #[test]
+    fn scale_preview_draws_no_ghost_of_the_old_body() {
+        let s = plate();
+        let cmds = [("solid.scale".to_string(), json!({"bodies": ["Body1"], "factor": 0.5}))];
+        let b = compute(&s, &cmds, Colors { replaced_ghost: false, ..colors() }).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        assert!(!b.scene.tris.is_empty(), "the scaled body is drawn");
+        assert!(b.scene.ghost.is_empty(), "no ghost of the old body");
+        assert!(b.scene.xray.is_empty(), "the smaller body is not shown as cut material");
+        let ghosted = compute(&s, &cmds, colors()).unwrap();
+        assert!(!ghosted.scene.ghost.is_empty(), "other tools keep the ghost");
+    }
+
     /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed
     /// anew (the fillet's end moves its boundary), so the ghost leaves it out. Drawn as ghost it
     /// crossed the new triangulation and showed through the face in slivers.
@@ -2657,6 +2828,29 @@ mod tests {
         assert!(b.scene.ghost.is_empty());
         assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
+    }
+
+    /// A plugin's live preview shows the bodies it makes in the colours Run gives them (#19707):
+    /// a new body with a look is drawn in it, one without keeps the New Body colour, and other
+    /// commands' new bodies keep it whatever their look.
+    #[test]
+    fn new_bodies_are_drawn_in_the_colour_they_are_given() {
+        let s = Session::default();
+        let cmds = [
+            ("solid.box".to_owned(), json!({"length": 10, "width": 10, "height": 2, "body_name": "Plate"})),
+            ("solid.box".to_owned(), json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0], "body_name": "Text"})),
+            ("appearance.assign".to_owned(), json!({"bodies": ["Plate"], "color": "#228b22", "name": "Forest"})),
+        ];
+        let p = s.preview(&cmds).unwrap();
+        let looks = new_body_looks(&p);
+        let green = *looks.get("Plate").expect("the plate has its look");
+        assert!(green[1] > green[0] && green[1] > green[2] && green[3] == 255, "{green:?}");
+        assert!(!looks.contains_key("Text"), "{looks:?}");
+        let b = build_as(&p.before, &p.after, colors(), None, &looks);
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green) > 0, "the plate in its colour");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0, "the text in the New Body colour");
+        let b = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green), 0, "not a plugin run: the New Body colour");
     }
 
     fn session_of(cmds: &[(&str, Value)]) -> Session {

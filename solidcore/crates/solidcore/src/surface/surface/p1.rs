@@ -57,6 +57,25 @@
 //! | [`CsIntersectEnfo`], [`CsNormalizeEnfo`], [`FindPsNormalEnfo`], [`SspIntersectEnfo`], [`SsiNormalizeEnfo`], [`SsNormalizeEnfo`], [`SssIntersectEnfo`] | the constructors of `SmCSIntersectENFO`, `SmCSNormalizeENFO`, `SmFindPSNormalENFO`, `SmSSPIntersectENFO`, `SmSSINormalizeENFO`, `SmSSNormalizeENFO`, `SmSSSIntersectENFO` |
 //!
 //! Deviations:
+//! - **Zero tests far from the origin (#18634).** [`base_is_degenerate_curve`] calls a
+//!   derivative zero within the caller's tolerance (at least `SM_EFF_ZERO`), or within
+//!   `SM_EFF_ZERO (1 + max |P|)` only when the length it spans across the domain side is
+//!   too, not whenever it is within `max(tol, SM_EFF_ZERO (1 + max |P|))` (every zero
+//!   here is one upstream finds too). [`base_is_degenerate_point`] floors its
+//!   tolerance with `max(1000 SM_EFF_ZERO, SM_EFF_ZERO (1 + max(|P0|, |P1|)))`, not
+//!   upstream's `1000 SM_EFF_ZERO (1 + |P0| + |P1|)`; the scaled part is the Level 2
+//!   check's own coincidence resolution (`SmBSplineCurve` tests 3 and 4,
+//!   `SM_EFF_ZERO (1 + max |coord|)`). The floor is never above upstream's, equals it at
+//!   `P = 0`, and near the origin the callers' `tol_3d` (at least 1e-6) dominates both.
+//!   [`Surface::is_periodic`] keeps upstream's seam gap test; when the squared gap
+//!   exceeds `SM_EFF_ZERO` (the allowance at the origin) it also needs the squared chord
+//!   from the seam to the middle of the domain to exceed the scaled allowance at some
+//!   sample, so a surface nowhere wider than the gap it allows far from the origin is
+//!   not closed (every periodic answer here is one upstream gives too, and every surface
+//!   whose gap is within `SM_EFF_ZERO` keeps upstream's answer). A wide surface far
+//!   out with a seam gap under upstream's allowance is still called periodic, as
+//!   upstream. Upstream refused, or mis-seamed, faces far from the origin (a box 1e-3
+//!   wide at 1e6, 2e-4 wide at 1e5).
 //! - **Nesting.** `StepSurface::new` returns `InvalidInput` when the base surface would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -93,6 +112,13 @@
 //!   [`get_surface_cache_with_face`], giving `GetFace()` as a
 //!   [`CacheFace`]; without it a face-owned surface's trimmed cache stops at
 //!   `GetFace` ([`SolidError::Unported`]).
+//! - **End-knot clamp.** `GetDomainWithContinuity` decides whether to clamp the domain at
+//!   the first or last knot from the start point's parameter (`crUV.x < dKnots[0]`,
+//!   `crUV.x > dKnots[n-1]`, and the same in v). Upstream compares the direction's
+//!   component (`sVec.x`) with the knot, so off the domain its answer depends on the
+//!   direction's length (WR-20239). On and near the domain both tests set the bound to
+//!   the end knot, so only start points off the domain change: they get the span next
+//!   to them.
 //! - **Silhouettes.** `CreateSilhouetteCurves` always computes both the 3D and the
 //!   UV curves (upstream's output arrays are optional) and returns them. It does not
 //!   copy the surface's `SM_AI_COLOR` attribute onto the traced curves: a free
@@ -1914,6 +1940,12 @@ impl Surface {
     /// which are empty until that cache's tree is built, so its answer off the natural
     /// domain depends on what ran before. No cache is made here.
     ///
+    /// Off the natural domain in a direction (not upstream, #20239), the answer in that
+    /// direction is the span next to `uv`: from the end knot on `uv`'s side to the
+    /// nearest knot of lower continuity (or the other end knot). Upstream picked the
+    /// end from `uv_vector`'s component, so its answer changed with the vector's length
+    /// and could collapse to zero width.
+    ///
     /// A curve-bounded surface answers for its basis (not upstream, whose
     /// `SmCurveBoundedSurface` does not override `GetKnots` and so leaves an
     /// uninitialised domain, WR-663). That is exact: the kind holds only its basis, its
@@ -2013,9 +2045,11 @@ impl Surface {
             for (i, &cont) in u_conts.iter().enumerate() {
                 if (cont as i32) < (min_continuity as i32) {
                     let ki = knot_at(&knots, i)?;
-                    if i == 0 && vec.x < ki {
+                    // (WR-20239: upstream compares `sVec.x`, a direction component,
+                    // with the knot; the start point's parameter is compared here)
+                    if i == 0 && uv.x < ki {
                         min.x = ki;
-                    } else if i == n - 1 && vec.x > ki {
+                    } else if i == n - 1 && uv.x > ki {
                         max.x = ki;
                     } else if (ki - uv.x).abs() < EFF_ZERO_SQRT {
                         if vec.x <= 0.0 && i > 0 {
@@ -2048,9 +2082,10 @@ impl Surface {
             for (j, &cont) in v_conts.iter().enumerate() {
                 if (cont as i32) < (min_continuity as i32) {
                     let kj = knot_at(&knots, j)?;
-                    if j == 0 && vec.y < kj {
+                    // (WR-20239: as for u, the start point's parameter, not `sVec.y`)
+                    if j == 0 && uv.y < kj {
                         min.y = kj;
-                    } else if j == n - 1 && vec.y > kj {
+                    } else if j == n - 1 && uv.y > kj {
                         max.y = kj;
                     } else if (kj - uv.y).abs() < EFF_ZERO_SQRT {
                         // (upstream tests the unfiltered vector here)
@@ -3071,9 +3106,12 @@ impl Surface {
     // ---- shape tests ----------------------------------------------------------------
 
     /// Whether the surface is periodic across its `surf_param` boundaries of
-    /// `uv_domain` (`IsPeriodic`): at six interior samples, equal positions (to the
-    /// scaled zero) and tangent directions on both sides of the possible seam (to the
-    /// angle tolerance, checked again unitised).
+    /// `uv_domain` (`IsPeriodic`): at six interior samples, positions on both sides of
+    /// the possible seam whose squared gap is within the scaled zero, and equal tangent
+    /// directions (to the angle tolerance, checked again unitised). A surface whose
+    /// squared gap exceeds `SM_EFF_ZERO` (the allowance at the origin) must also reach
+    /// farther than the scaled zero from the seam somewhere (its squared chord to the
+    /// middle of the domain across it exceeds it at some sample, #18634).
     ///
     /// Upstream ignores the evaluation statuses and goes on with what a failed
     /// evaluation left; here, as the fork (WR-663, tangency-labs/smlib 21dcf69), a
@@ -3093,6 +3131,8 @@ impl Surface {
 
         // locals
         let ang_tol_rad_sq = ANG_TOL_RAD * ANG_TOL_RAD;
+        let mut wide = false;
+        let mut gap_square = 0.0_f64;
 
         // for every internal sample points (don't do end points)
         for ii in 1..NUM_TEST_POINTS {
@@ -3125,8 +3165,25 @@ impl Surface {
             let scaled_zero = p_max[0][0].scaled_zero();
 
             // Check position difference.
-            if (p_min[0][0] - p_max[0][0]).length_squared() > scaled_zero {
+            let gap = (p_min[0][0] - p_max[0][0]).length_squared();
+            if gap > scaled_zero {
                 return Ok(false);
+            }
+            gap_square = gap_square.max(gap);
+
+            // Is the surface wider across the seam here than the gap the test allows?
+            if !wide {
+                let mut uv_mid = uv;
+                if surf_param == SurfParamType::U {
+                    uv_mid.x = uv_domain.evaluate(0.5, 0.5).x;
+                } else {
+                    uv_mid.y = uv_domain.evaluate(0.5, 0.5).y;
+                }
+                // (a middle that cannot be evaluated leaves upstream's answer)
+                wide = match ignored(self.evaluate(k, uv_mid, 0, 0, upper_flags(true)))? {
+                    Some(d) => (first_block(&d)[0][0] - p_min[0][0]).length_squared() > scaled_zero,
+                    None => true,
+                };
             }
 
             // Check tangent-vector directions, in V, then in U.
@@ -3144,8 +3201,15 @@ impl Surface {
             }
         } // end iter every internal sample point
 
-        // all done
-        Ok(true) // passed all tests
+        // A surface nowhere wider across the seam than the gap the test allows, whose
+        // seam gap the same test would see at the origin (squared gap above
+        // `SM_EFF_ZERO`, the allowance at `P = 0`), is not closed: its start, middle and
+        // end are one point to the test only because it lies far from the origin
+        // (#18634: upstream's squared gap of `SM_EFF_ZERO * (1 + max |P|)` admits gaps of
+        // 1e-6 sqrt(1 + max |P|), so a plane 2e-4 wide at 1e5 from the origin was found
+        // periodic and its face reported a crossed or missing seam). A surface whose gap
+        // is within `SM_EFF_ZERO` keeps upstream's answer wherever it lies.
+        Ok(wide || gap_square <= EFF_ZERO) // passed all tests
     }
 
     /// Whether the surface over `uv_domain` (default the natural domain) degenerates
@@ -3521,7 +3585,6 @@ pub fn base_is_degenerate_point(
     // evaluate interval start and end points
     let mut uv2 = Point2::new(uv0.x, uv1.y);
     let mut uv3 = Point2::new(uv1.x, uv0.y);
-    let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
 
     // a surface that cannot be evaluated is not shown degenerate, as the fork
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
@@ -3541,18 +3604,26 @@ pub fn base_is_degenerate_point(
         return Ok(false);
     };
 
-    // select a tolerance - scale it to sP1 location
-    let scaled_zero =
-        1000.0 * EFF_ZERO * (1.0 + pv0[0][0].max_dimension() + pv1[0][0].max_dimension());
-    let tol2 = (tol_3d * tol_3d).max(scaled_zero * scaled_zero);
+    // select a tolerance: the caller's, at least upstream's floor at the origin and the
+    // scaled zero of sP0 and sP1 (#18634: upstream scales the thousandfold floor,
+    // `1000 * SM_EFF_ZERO * (1 + |P0| + |P1|)`, which refused faces far from the origin
+    // that the Level 2 check accepts)
+    let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
+    let scaled_zero = pv0[0][0]
+        .max_dimension()
+        .max(pv1[0][0].max_dimension())
+        .scaled_zero();
+    let tol = tol_3d.max(1000.0 * EFF_ZERO).max(scaled_zero);
+    let tol2 = tol * tol;
+    let near = |a: Vec3, b: Vec3| a.distance_squared(b) < tol2;
     let zero_derivs = |pv: &[[Vec3; 2]; 2]| {
         pv[1][0].length_squared() * uv_size2 < tol2 && pv[0][1].length_squared() * uv_size2 < tol2
     };
 
     // when corner points are close and have zero 1st derivatives
-    if pv0[0][0].distance_squared(pv1[0][0]) < tol2
-        && pv0[0][0].distance_squared(pv2[0][0]) < tol2
-        && pv0[0][0].distance_squared(pv3[0][0]) < tol2
+    if near(pv0[0][0], pv1[0][0])
+        && near(pv0[0][0], pv2[0][0])
+        && near(pv0[0][0], pv3[0][0])
         && zero_derivs(&pv0)
         && zero_derivs(&pv1)
         && zero_derivs(&pv2)
@@ -3580,10 +3651,10 @@ pub fn base_is_degenerate_point(
         };
 
         // when all those points are also degenerate
-        if pt.distance_squared(pv0[0][0]) < tol2
-            && pt.distance_squared(pv1[0][0]) < tol2
-            && pt.distance_squared(pv2[0][0]) < tol2
-            && pt.distance_squared(pv3[0][0]) < tol2
+        if near(pt, pv0[0][0])
+            && near(pt, pv1[0][0])
+            && near(pt, pv2[0][0])
+            && near(pt, pv3[0][0])
             && zero_derivs(&pv0)
             && zero_derivs(&pv1)
             && zero_derivs(&pv2)
@@ -3593,7 +3664,7 @@ pub fn base_is_degenerate_point(
             let Some(pc) = eval(uv_domain.evaluate(0.5, 0.5))? else {
                 return Ok(false);
             };
-            if pt.distance_squared(pc[0][0]) < tol2 && zero_derivs(&pc) {
+            if near(pt, pc[0][0]) && zero_derivs(&pc) {
                 // take a guess and consider this degenerate
                 return Ok(true);
             }
@@ -3607,8 +3678,11 @@ pub fn base_is_degenerate_point(
 
 /// `SmSurface::IsDegenerateCurve` (base body): the domain is an iso-parameter line,
 /// or the corners, four interior points, four diagonal points and the centre all have
-/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`)
-/// to `max(scaled zero, opt_3d_tol)`. A domain that is a point is not a curve.
+/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`):
+/// within `max(opt_3d_tol, SM_EFF_ZERO)`, or within the scaled zero
+/// `SM_EFF_ZERO (1 + max |P|)` only when its length times the domain side is too
+/// (upstream: within `max(scaled zero, opt_3d_tol)`, #18634). A domain that is a point
+/// is not a curve.
 ///
 /// # Errors
 ///
@@ -3720,17 +3794,31 @@ pub fn base_is_degenerate_curve(
         }
     }
 
-    // pick a tangent tolerance
-    let mut tol = EFF_ZERO * (1.0 + d0[0][0][0].max_dimension().max(d0[2][0][0].max_dimension()));
-    if tol < opt_3d_tol {
-        tol = opt_3d_tol;
-    }
+    // pick a tangent tolerance: a derivative is zero within the caller's tolerance (at
+    // least SM_EFF_ZERO), or within the scaled zero of the two corners when the length
+    // it spans across the domain side, `|S_u| * u-side` or `|S_v| * v-side`, is too
+    // (#18634: upstream takes the derivative alone against `max(tol, SM_EFF_ZERO * (1 +
+    // max |P|))`, which called a unit-speed side 5e3 long at 1e12 from the origin zero;
+    // every derivative zero here is zero upstream too)
+    let tol = opt_3d_tol.max(EFF_ZERO);
     let tol_square = tol * tol;
+    let scaled_zero =
+        EFF_ZERO * (1.0 + d0[0][0][0].max_dimension().max(d0[2][0][0].max_dimension()));
+    let scaled_zero_square = scaled_zero * scaled_zero;
 
     // Surface degenerates to Curve when all Su (then all Sv) values are zero
     for (i, j) in [(1, 0), (0, 1)] {
-        let zero =
-            |d: &[[Vec3; 2]; 2]| is_zero_to_tol(block_at(d, i, j).length_squared(), tol_square);
+        let side = if i == 1 {
+            uv_domain.x_length()
+        } else {
+            uv_domain.y_length()
+        };
+        let zero = |d: &[[Vec3; 2]; 2]| {
+            let speed_square = block_at(d, i, j).length_squared();
+            is_zero_to_tol(speed_square, tol_square)
+                || (is_zero_to_tol(speed_square, scaled_zero_square)
+                    && is_zero_to_tol(speed_square * (side * side), scaled_zero_square))
+        };
         if d0.iter().all(zero) {
             // check sample points
             if d1.is_none() {
@@ -5378,8 +5466,8 @@ mod tests {
     /// `surface.surface_p1` `domhist` cases had (none; a cache made during a Boolean
     /// operation, so without tree; the same with its tree then built; the call itself
     /// during a Boolean operation): the C1 domain around a point left of the crease ends
-    /// at the crease, and the one around a point off the natural domain is empty,
-    /// clamped by the end knots. Upstream answers the whole domain after the second
+    /// at the crease, and the one around a point off the natural domain is the span next
+    /// to it, clamped by the end knot (#20239). Upstream answers the whole domain after the second
     /// history, from the empty arrays of the cache without tree (#20054).
     #[test]
     fn domain_with_continuity_is_the_same_under_every_cache_history() {
@@ -5402,6 +5490,8 @@ mod tests {
         let crease = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.5, 1.0));
         let off = Point2::new(1.4, 0.5);
         let fresh_off = domain(0, off);
+        let right_span = Extent2d::from_points(Point2::new(0.5, 0.0), Point2::new(1.0, 1.0));
+        assert_eq!(fresh_off, Ok(right_span));
         assert_eq!(domain(0, left).unwrap(), crease);
         for history in 1..=3 {
             assert_eq!(domain(history, left).unwrap(), crease, "history {history}");
@@ -5412,6 +5502,76 @@ mod tests {
             );
         }
     }
+    /// #20239: off the natural domain, `GetDomainWithContinuity` clamps at an end knot
+    /// from the side of that knot the start point is on, so the answer is the span next
+    /// to the point and does not depend on the direction's length. Upstream compared the
+    /// direction's component with the knot (WR-20239), so the same request with the
+    /// direction scaled by 1e-3, 1 or 1e3 answered a zero-width box or the span.
+    ///
+    /// The issue's cases: a single-span surface with u knots `[-0.7286 x3, 1.778 x3]`
+    /// and v knots `[0.04241 x2, 1.67 x2]`, started at u = -1.18 with `du = -0.235`
+    /// (`domhist0011`); and the roof (C0 crease at u = 1/2) started off both ends with
+    /// the direction `(0.82, 0.52)` pointing into the domain (the start point and
+    /// direction of `domhist0067`, whose own surface differs), and its mirror past the
+    /// far ends. Every span is worked from the knots: the end knots are
+    /// discontinuities (multiplicity degree + 1), the crease a C0 knot, so the C1 span
+    /// next to a point before the first knot runs to the first discontinuity after it,
+    /// and the one after the last knot from the last discontinuity before it.
+    #[test]
+    fn domain_with_continuity_off_the_domain_is_the_span_next_to_the_point() {
+        use crate::nurbs::math::CPoint;
+        let k = &Kernel::default();
+        let (u0, u1, v0, v1) = (-0.7286, 1.778, 0.04241, 1.67);
+        let row = |x: f64, z: f64| vec![CPoint::new(x, v0, z, 1.0), CPoint::new(x, v1, z, 1.0)];
+        let single_span = Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                2,
+                1,
+                5,
+                3,
+                &[row(u0, 0.0), row(0.5, 0.7), row(u1, 0.1)],
+                &[u0, u0, u0, u1, u1, u1],
+                &[v0, v0, v1, v1],
+            )
+            .unwrap(),
+        );
+        let cases = [
+            (
+                single_span,
+                Point2::new(-1.18, 0.8),
+                Vec2::new(-0.235, 0.3),
+                Extent2d::from_points(Point2::new(u0, v0), Point2::new(u1, v1)),
+            ),
+            (
+                roof(),
+                Point2::new(-0.66, -0.64),
+                Vec2::new(0.82, 0.52),
+                Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.5, 1.0)),
+            ),
+            (
+                roof(),
+                Point2::new(1.66, 1.64),
+                Vec2::new(-0.82, -0.52),
+                Extent2d::from_points(Point2::new(0.5, 0.0), Point2::new(1.0, 1.0)),
+            ),
+        ];
+        for (s, uv, dir, want) in cases {
+            for f in [1e-3, 1.0, 1e3] {
+                let got = s
+                    .domain_with_continuity(k, ContinuityType::C1, uv, dir * f)
+                    .unwrap();
+                assert_eq!(got, want, "start {uv:?}, direction {dir:?} x {f}");
+                // the reverse direction too: the side of the knot decides, not the sign
+                let got = s
+                    .domain_with_continuity(k, ContinuityType::C1, uv, dir * -f)
+                    .unwrap();
+                assert_eq!(got, want, "start {uv:?}, direction {dir:?} x {}", -f);
+            }
+        }
+    }
+
     /// The roof `S(u, v) = (2u, v, 1 - |2u - 1|)`: degree 1 in u with a C0 crease at
     /// u = 1/2, degree 1 in v.
     fn roof() -> Surface {

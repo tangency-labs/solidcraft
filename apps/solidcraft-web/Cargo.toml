@@ -33,6 +33,7 @@ solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 url = "2"
 percent-encoding = "2"
 
@@ -46,7 +47,7 @@ web-sys = { version = "0.3", features = [
     "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemGetDirectoryOptions", "FileSystemWritableFileStream",
     "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage", "StorageEvent",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
-    "Headers", "ReadableStream", "RequestCredentials", "ReadableStreamDefaultReader",
+    "Headers", "ReadableStream", "RequestCredentials", "RequestRedirect", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
     "PointerEvent", "Node", "VisibilityState", "WheelEvent", "MouseEvent", "AddEventListenerOptions", "Touch", "TouchEvent", "TouchList",
 ] }

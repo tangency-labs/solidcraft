@@ -61,7 +61,7 @@ use crate::flat::*;
 use crate::import::Arrays;
 use crate::{Error, Result};
 
-use super::{Body, answer, run, with_body};
+use super::{Body, answer, run, with_body, with_own_body};
 
 // ---- shared ------------------------------------------------------------------------------------
 
@@ -298,8 +298,11 @@ pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
 /// edges by upstream's sampled distance, not a proved one, through
 /// [`solidcore::Kernel::with_sampled_trim_raise`], which restores the proved raise after the
 /// call: proving every trim of every face a file translates cost many times the translation.
+/// The body is a sheet made only for this call ([`crate::pcurves`]), so the token over this
+/// thread's work stops it ([`with_own_body`]): a work limit there stops a trim whose edge never
+/// drops onto its surface within the tolerance (#20575).
 pub(crate) fn to_arrays_sampled_trims(body: &Body) -> Result<Arrays> {
-    with_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
+    with_own_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
 }
 
 /// One NURBS curve's arrays (`smu_AddSmBSplineCurve3d`, `smu_AddSmBSplineCurve2d`): counts and
@@ -805,7 +808,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bd = BrepData::from_brep(b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
+    let bd = BrepData::from_brep(k, b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
     let shell_ids = shells_in_order(b)?;
     let face_ids = bl::faces(b, None).map_err(sc("GetFaces"))?;
     let edge_ids = bl::edges(b, None).map_err(sc("GetEdges"))?;
@@ -2307,8 +2310,14 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_cone += usize::from(ty == SURFACE_CONE_I);
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            analytic_of_nurbs(k, &nurbs, ty, xsect)?
-                .ok_or_else(|| Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface")))?
+            match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+                Some(analytic) => analytic,
+                // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
+                // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
+                // keeps that, on the range and trims it already carries.
+                None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
+            }
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;

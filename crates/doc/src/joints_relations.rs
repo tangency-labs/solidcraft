@@ -95,7 +95,10 @@ mod tests {
             exprs: Default::default(),
             offset_xy: [0.0; 2],
             captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
             constraint: None,
+            dynamics: Vec::new(),
         }
     }
 

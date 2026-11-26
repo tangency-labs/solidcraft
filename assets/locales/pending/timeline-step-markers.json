@@ -1,0 +1,56 @@
+{
+  "ar": {
+    "cmd.timeline_roll_to_end": "نقل مؤشر السجل إلى النهاية",
+    "cmd.timeline_roll_to_start": "نقل مؤشر السجل إلى البداية",
+    "cmd.timeline_step_back": "الرجوع بالسجل خطوة",
+    "cmd.timeline_step_forward": "التقدم بالسجل خطوة"
+  },
+  "de": {
+    "cmd.timeline_roll_to_end": "Verlaufsmarkierung zum Ende",
+    "cmd.timeline_roll_to_start": "Verlaufsmarkierung zum Anfang",
+    "cmd.timeline_step_back": "Verlauf einen Schritt zurück",
+    "cmd.timeline_step_forward": "Verlauf einen Schritt vor"
+  },
+  "en": {
+    "cmd.timeline_roll_to_end": "Roll History to End",
+    "cmd.timeline_roll_to_start": "Roll History to Start",
+    "cmd.timeline_step_back": "Step History Back",
+    "cmd.timeline_step_forward": "Step History Forward"
+  },
+  "he": {
+    "cmd.timeline_roll_to_end": "העברת סמן ציר הזמן לסוף",
+    "cmd.timeline_roll_to_start": "העברת סמן ציר הזמן להתחלה",
+    "cmd.timeline_step_back": "צעד אחד אחורה בציר הזמן",
+    "cmd.timeline_step_forward": "צעד אחד קדימה בציר הזמן"
+  },
+  "ja": {
+    "cmd.timeline_roll_to_end": "履歴マーカーを末尾に移動",
+    "cmd.timeline_roll_to_start": "履歴マーカーを先頭に移動",
+    "cmd.timeline_step_back": "履歴を1ステップ戻る",
+    "cmd.timeline_step_forward": "履歴を1ステップ進む"
+  },
+  "ko": {
+    "cmd.timeline_roll_to_end": "이력 마커를 끝으로 이동",
+    "cmd.timeline_roll_to_start": "이력 마커를 처음으로 이동",
+    "cmd.timeline_step_back": "기록을 한 단계 뒤로",
+    "cmd.timeline_step_forward": "기록을 한 단계 앞으로"
+  },
+  "vi": {
+    "cmd.timeline_roll_to_end": "Cuộn mốc lịch sử đến cuối",
+    "cmd.timeline_roll_to_start": "Cuộn mốc lịch sử về đầu",
+    "cmd.timeline_step_back": "Lùi lịch sử một bước",
+    "cmd.timeline_step_forward": "Tiến lịch sử một bước"
+  },
+  "zh": {
+    "cmd.timeline_roll_to_end": "将历史标记滚动到末尾",
+    "cmd.timeline_roll_to_start": "将历史标记滚动到开头",
+    "cmd.timeline_step_back": "历史后退一步",
+    "cmd.timeline_step_forward": "历史前进一步"
+  },
+  "fr": {
+    "cmd.timeline_roll_to_end": "Avancer l’historique jusqu’à la fin",
+    "cmd.timeline_roll_to_start": "Revenir au début de l’historique",
+    "cmd.timeline_step_back": "Reculer d’une étape dans l’historique",
+    "cmd.timeline_step_forward": "Avancer d’une étape dans l’historique"
+  }
+}

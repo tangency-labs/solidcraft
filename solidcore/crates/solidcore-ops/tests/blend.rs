@@ -25,6 +25,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
+use solidcore::surface::ball_patch::{BallPatch, ON_SPHERE_REL_TOL};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::api_files::write_brep_to_file;
@@ -46,6 +47,121 @@ use solidcore_ops::{
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
 fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
+}
+
+#[test]
+fn unequal_upright_and_bottom_rounds_close_all_four_corners() {
+    use solidcore_ops::continuity::ContinuityTolerances;
+    use solidcore_ops::PointClass::{Inside, Outside};
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let picks = [
+        ([25.0, 0.0, 0.0], 0.5),
+        ([50.0, 25.0, 0.0], 0.5),
+        ([25.0, 50.0, 0.0], 0.5),
+        ([0.0, 25.0, 0.0], 0.5),
+        ([0.0, 0.0, 7.5], 2.0),
+        ([0.0, 50.0, 7.5], 2.0),
+        ([50.0, 0.0, 7.5], 2.0),
+        ([50.0, 50.0, 7.5], 2.0),
+    ];
+    let round = |picks: &[([f64; 3], f64)]| {
+        let body = make_box([0.0; 3], [50.0, 50.0, 15.0]).unwrap();
+        let (edges, radii): (Vec<_>, Vec<_>) = picks
+            .iter()
+            .map(|&(point, radius)| (edge_at(&body, point), radius))
+            .unzip();
+        blend(&body, Blend::Round, &edges, &radii, &[], Corners::Filled).unwrap();
+        body.check_solid().unwrap();
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        // The diagonal of an R2 upright crosses at 2 - sqrt(2) from both walls.
+        let upright = 2.0 - 2.0_f64.sqrt();
+        for (x, y) in [(0.0, 0.0), (0.0, 50.0), (50.0, 0.0), (50.0, 50.0)] {
+            let inward = |d: f64| [(x - d).abs(), (y - d).abs(), 7.5];
+            assert_eq!(
+                body.classify_point(inward(upright - 0.001)).unwrap(),
+                Outside
+            );
+            assert_eq!(
+                body.classify_point(inward(upright + 0.001)).unwrap(),
+                Inside
+            );
+        }
+        // Away from the corner, the R0.5 rim crosses at 0.5 - 0.5 / sqrt(2).
+        let rim = 0.5 - 0.5 / 2.0_f64.sqrt();
+        for (d, side) in [(rim - 0.001, Outside), (rim + 0.001, Inside)] {
+            for point in [
+                [25.0, d, d],
+                [25.0, 50.0 - d, d],
+                [d, 25.0, d],
+                [50.0 - d, 25.0, d],
+            ] {
+                assert_eq!(body.classify_point(point).unwrap(), side);
+            }
+        }
+        let (record, order) = body.to_record().unwrap();
+        let patches: Vec<_> = record
+            .faces
+            .iter()
+            .map(|face| {
+                matches!(
+                    face.surface,
+                    Surface::Spline { .. } | Surface::RationalSpline { .. }
+                )
+            })
+            .collect();
+        // Each of four three-round corners has three outer and three inner fill patches.
+        assert_eq!(patches.iter().filter(|&&is_patch| is_patch).count(), 4 * 6);
+        let seams: Vec<_> = record
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(index, edge)| {
+                edge.uses
+                    .iter()
+                    .any(|u| patches[u.face as usize])
+                    .then_some(index)
+            })
+            .collect();
+        // Nine seams are between patches. Nine meet the rounds or the three support planes.
+        assert_eq!(seams.len(), 4 * 18);
+        let vertices: std::collections::BTreeSet<_> = seams
+            .iter()
+            .flat_map(|&edge| record.edges[edge].vertices)
+            .collect();
+        // Each set of six patches is a disk, so V = E - F + 1.
+        assert_eq!(vertices.len(), 4 * (18 - 6 + 1));
+        let report = body
+            .continuity_report(
+                &order,
+                &seams,
+                9,
+                ContinuityTolerances {
+                    gap_mm: 1e-3,
+                    angle_rad: 1.0_f64.to_radians(),
+                    curvature_per_mm: 0.0,
+                    curvature_change_per_mm2: 0.0,
+                    curvature_change_rate_per_mm3: 0.0,
+                },
+            )
+            .unwrap();
+        assert!(report.unmeasured.is_empty(), "{:?}", report.unmeasured);
+        assert_eq!(report.seams.len(), seams.len());
+        for seam in report.seams {
+            assert_eq!(seam.stations.len(), 9, "edge {}", seam.edge);
+            assert!(
+                seam.order_at_stations.is_some_and(|order| order >= 1),
+                "{seam:?}"
+            );
+        }
+        body.volume(1e-10).unwrap()
+    };
+    let forward = round(&picks);
+    let mut reversed = picks;
+    reversed.reverse();
+    let backward = round(&reversed);
+    assert!(rel(forward, backward) < 1e-9, "{forward} vs {backward}");
 }
 
 /// Closed forms recorded in
@@ -176,6 +292,470 @@ fn rounds_and_chamfers_take_their_closed_forms() {
     )
     .unwrap();
     assert!(rel(volume(&b), ABC - (1.0 - PI / 4.0) * 4.0 * 30.0) < 1e-6);
+}
+
+/// A post on a plate. The aperture starts exactly at the shared endpoint of the foot edges.
+fn post_foot(cutout: bool) -> Body {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    let plate = make_box([0.0; 3], [50.0, 50.0, 4.0]).unwrap();
+    let post = make_box([0.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
+    let joined = boolean(plate, post, BooleanOp::Union).unwrap().unwrap();
+    if cutout {
+        let aperture = make_box([10.0, 10.0, -1.0], [5.0, 5.0, 6.0]).unwrap();
+        boolean(joined, aperture, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    } else {
+        joined
+    }
+}
+
+fn post_foot_edges(body: &Body) -> [usize; 2] {
+    [
+        edge_at(body, [10.0, 5.0, 4.0]),
+        edge_at(body, [5.0, 10.0, 4.0]),
+    ]
+}
+
+#[test]
+fn post_foot_blends_stop_at_a_through_cut_corner() {
+    use solidcore_ops::PointClass;
+    all_fixes();
+    let chamfer = 5.0_f64;
+    let round = 2.0_f64;
+    for (kind, size, section, diagonal) in [
+        (
+            Blend::Chamfer,
+            chamfer,
+            chamfer.powi(2) / 2.0,
+            chamfer / 2.0,
+        ),
+        (
+            Blend::Round,
+            round,
+            round.powi(2) * (1.0 - PI / 4.0),
+            round * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
+        ),
+    ] {
+        for reverse in [false, true] {
+            let body = post_foot(true);
+            let mut edges = post_foot_edges(&body);
+            if reverse {
+                edges.reverse();
+            }
+            let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+            assert_eq!(made.dropped, [false, false]);
+            assert!(made.holes.is_empty());
+            assert_eq!(body.solid_count().unwrap(), 1);
+            assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+
+            // The two ten-unit extrusions occupy disjoint plan strips at the aperture.
+            let base = 50.0 * 50.0 * 4.0 + 10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0;
+            let expected = base + 20.0 * section;
+            let actual = volume(&body);
+            assert!(
+                rel(actual, expected) < 1e-9,
+                "{kind:?}: {actual} != {expected}"
+            );
+
+            // The aperture corner below the blend transition and the post corner above it
+            // remain distinct edges. Both blends end at the vertex on that vertical line.
+            let _ = vertex_at(&body, [10.0, 10.0, 4.0 + size]);
+            assert_ne!(
+                edge_at(&body, [10.0, 10.0, 2.0]),
+                edge_at(&body, [10.0, 10.0, 5.0 + size])
+            );
+            for (offset, expected) in [
+                (diagonal / 2.0, PointClass::Inside),
+                (diagonal, PointClass::OnBoundary),
+                (diagonal * 1.5, PointClass::Outside),
+            ] {
+                for point in [
+                    [10.0 + offset, 9.5, 4.0 + offset],
+                    [9.5, 10.0 + offset, 4.0 + offset],
+                ] {
+                    assert_eq!(
+                        body.classify_point(point).unwrap(),
+                        expected,
+                        "{kind:?} at {point:?}"
+                    );
+                }
+            }
+            for z in [2.0, 4.25] {
+                let point = [10.25, 10.25, z];
+                assert_eq!(
+                    body.classify_point(point).unwrap(),
+                    PointClass::Outside,
+                    "{kind:?} at {point:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
+    all_fixes();
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 25.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 25.0 * (1.0 - PI / 4.0)),
+    ] {
+        let body = post_foot(true);
+        let counts = body.counts().unwrap();
+        let edges = post_foot_edges(&body);
+        let result = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
+        let Err(Error::TooLarge {
+            size,
+            kind: reported,
+            at: Some(at),
+            ..
+        }) = result
+        else {
+            panic!("{result:?}");
+        };
+        assert_eq!(size, 5.0);
+        assert_eq!(reported, fit_kind);
+        assert!([[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].contains(&at));
+        assert_eq!(body.counts().unwrap(), counts);
+        assert!(rel(volume(&body), 12_900.0) < 1e-9);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(rel(volume(&body), 12_900.0 + 20.0 * section) < 1e-9);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn post_foot_blends_certify_the_limit_with_a_rounded_vertex() {
+    all_fixes();
+    let (mut record, _) = post_foot(true).to_record().unwrap();
+    let exact = [10.0_f64, 0.0, 4.0];
+    let displaced = [exact[0].next_down(), exact[1], exact[2]];
+    // The application fixture's glued vertex is one ulp off the three exact planes.
+    // Only the vertex is changed. The plane supports and line carriers stay exact.
+    let vertex = record
+        .vertices
+        .iter_mut()
+        .find(|vertex| vertex.point == exact)
+        .unwrap();
+    vertex.point = displaced;
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 25.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 25.0 * (1.0 - PI / 4.0)),
+    ] {
+        let (input, _) = Body::from_record(&record, true).unwrap();
+        let (before, _) = input.to_record().unwrap();
+        assert!(before
+            .vertices
+            .iter()
+            .any(|vertex| vertex.point == displaced));
+        let refused = blend(
+            &input,
+            kind,
+            &post_foot_edges(&input),
+            &[6.0],
+            &[],
+            Corners::Filled,
+        );
+        assert!(
+            matches!(refused, Err(Error::TooLarge { size, kind: reported, at: Some(_), .. })
+                if size == 5.0 && reported == fit_kind),
+            "{kind:?}: {refused:?}",
+        );
+        assert_eq!(input.to_record().unwrap().0, before);
+        assert!(rel(volume(&input), 12_900.0) < 1e-9);
+        assert!(input.check(CheckLevel::All).unwrap().is_valid());
+
+        // The independently reopened input builds exactly at the advertised limit.
+        let (body, _) = Body::from_record(&record, true).unwrap();
+        let made = blend(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[5.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(made.holes.is_empty());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert!(rel(volume(&body), 12_900.0 + 20.0 * section) < 1e-9);
+    }
+}
+
+#[test]
+fn post_foot_blends_do_not_report_a_limit_with_an_obstructed_sweep() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 1.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 1.0 - PI / 4.0),
+    ] {
+        for (point, obstructs) in [([10.5, 4.0, 4.0], true), ([20.0, 20.0, 4.0], false)] {
+            for asked in [0.25, 4.75, 5.0, 6.0] {
+                let boss = make_box(point, [1.0, 2.0, 2.0]).unwrap();
+                let body = boolean(post_foot(true), boss, BooleanOp::Union)
+                    .unwrap()
+                    .unwrap();
+                let edges = post_foot_edges(&body);
+                let before = body.to_record().unwrap().0;
+                let result = blend(&body, kind, &edges, &[asked], &[], Corners::Filled);
+                if obstructs && asked >= 4.75 {
+                    assert!(
+                        result.is_err() && !matches!(result, Err(Error::TooLarge { .. })),
+                        "{kind:?} at {point:?}, {asked} mm: {result:?}",
+                    );
+                } else if asked == 6.0 {
+                    assert!(
+                        matches!(result, Err(Error::TooLarge { size: 5.0, kind, .. }) if kind == fit_kind),
+                        "{kind:?} at {point:?}, {asked} mm: {result:?}",
+                    );
+                } else {
+                    let made = result.unwrap();
+                    assert_eq!(made.dropped, [false, false]);
+                    assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+                    // This boss stays separate from the two strips and contributes 4 mm³.
+                    assert!(rel(volume(&body), 12_904.0 + 20.0 * section * asked * asked) < 1e-9);
+                    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+                    continue;
+                }
+                assert_eq!(body.to_record().unwrap().0, before);
+                assert!(rel(volume(&body), 12_904.0) < 1e-9);
+                assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_do_not_report_a_fit_below_section_resolution() {
+    all_fixes();
+    for (kind, zone) in [(Blend::Chamfer, 1.0), (Blend::Round, 3.0)] {
+        // The plate still has exact supports. Its coarse B-rep zone puts the
+        // 5 mm cross section below the preparation's resolution for this kind.
+        let body = post_foot(true);
+        body.kernel().set_tolerance(zone);
+        let picks = post_foot_edges(&body);
+        let before = body.to_record().unwrap().0;
+        for asked in [6.0, 9.0] {
+            let result = blend(&body, kind, &picks, &[asked], &[], Corners::Filled);
+            assert!(
+                result.is_err() && !matches!(result, Err(Error::TooLarge { .. })),
+                "{kind:?} with zone {zone}, {asked} mm: {result:?}",
+            );
+            assert_eq!(body.to_record().unwrap().0, before);
+            assert_eq!(body.kernel().tolerance(), zone);
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_report_the_shortest_support_across_independent_pairs() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    for (kind, fit_kind, area) in [
+        (Blend::Chamfer, FitKind::Distance, 9.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 9.0 * (1.0 - PI / 4.0)),
+    ] {
+        let post = make_box([40.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
+        let aperture = make_box([37.0, 10.0, -1.0], [3.0, 5.0, 6.0]).unwrap();
+        let joined = boolean(post_foot(true), post, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let body = boolean(joined, aperture, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let counts = body.counts().unwrap();
+        let before = 15_840.0;
+        let edges = [
+            [10.0, 5.0, 4.0],
+            [40.0, 5.0, 4.0],
+            [5.0, 10.0, 4.0],
+            [45.0, 10.0, 4.0],
+        ]
+        .map(|point| edge_at(&body, point));
+        let result = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
+        let Err(Error::TooLarge {
+            size,
+            kind: reported,
+            at: Some(at),
+            ..
+        }) = result
+        else {
+            panic!("{result:?}");
+        };
+        assert_eq!(size, 3.0);
+        assert_eq!(reported, fit_kind);
+        assert_eq!(at, [40.0, 5.0, 4.0]);
+        assert_eq!(body.counts().unwrap(), counts);
+        assert!(rel(volume(&body), before) < 1e-9);
+
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 4]);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(rel(volume(&body), before + 40.0 * area) < 1e-9);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn post_foot_blends_keep_the_mitre_without_a_through_cut() {
+    use solidcore_ops::PointClass;
+    all_fixes();
+    for (kind, arms, mitre) in [
+        (Blend::Chamfer, 10.0, 1.0 / 3.0),
+        (Blend::Round, 20.0 * (1.0 - PI / 4.0), 5.0 / 3.0 - PI / 2.0),
+    ] {
+        let body = post_foot(false);
+        blend(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[1.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        // The ordinary mitre adds a square of the profile width at each height. For size one,
+        // integrating (1 - z)^2 or (1 - sqrt(1 - (z - 1)^2))^2 gives the mitre volume above.
+        let expected = 13_000.0 + arms + mitre;
+        let actual = volume(&body);
+        assert!(
+            rel(actual, expected) < 1e-9,
+            "{kind:?}: {actual} != {expected}"
+        );
+        assert_eq!(
+            body.classify_point([10.25, 10.25, 4.25]).unwrap(),
+            PointClass::Inside
+        );
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
+    use solidcore_ops::PointClass;
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    let chamfer = 5.0_f64;
+    let round = 2.0_f64;
+    for (kind, size, section) in [
+        (Blend::Chamfer, chamfer, chamfer.powi(2) / 2.0),
+        (Blend::Round, round, round.powi(2) * (1.0 - PI / 4.0)),
+    ] {
+        // Reflect the post and aperture across x = 25, leaving both on one plate.
+        let post = make_box([40.0, 0.0, 4.0], [10.0, 10.0, 30.0]).unwrap();
+        let aperture = make_box([35.0, 10.0, -1.0], [5.0, 5.0, 6.0]).unwrap();
+        let joined = boolean(post_foot(true), post, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let body = boolean(joined, aperture, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let edges = [
+            [10.0, 5.0, 4.0],
+            [40.0, 5.0, 4.0],
+            [5.0, 10.0, 4.0],
+            [45.0, 10.0, 4.0],
+        ]
+        .map(|point| edge_at(&body, point));
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 4]);
+        assert!(made.holes.is_empty());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+
+        // Four ten-unit arms have disjoint interiors. The two apertures leave the same void.
+        let base = 50.0 * 50.0 * 4.0 + 2.0 * (10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0);
+        let expected = base + 40.0 * section;
+        let actual = volume(&body);
+        assert!(
+            rel(actual, expected) < 1e-9,
+            "{kind:?}: {actual} != {expected}"
+        );
+        for x in [10.0, 40.0] {
+            let _ = vertex_at(&body, [x, 10.0, 4.0 + size]);
+        }
+        for x in [10.25, 39.75] {
+            let point = [x, 10.25, 4.25];
+            assert_eq!(
+                body.classify_point(point).unwrap(),
+                PointClass::Outside,
+                "{kind:?} at {point:?}"
+            );
+        }
+    }
+}
+
+/// Rounds between planes that end square on a face or meet three at a corner are built in
+/// closed form (`blend::exact_round`): every edge of the block, or one of them, takes exactly the
+/// volume and area of the rounded block, and the result is a valid solid with the faces the
+/// sessions make: a cylinder per edge, a ball patch per corner.
+#[test]
+fn a_block_s_rounds_between_planes_take_their_closed_forms() {
+    all_fixes();
+    let r: f64 = 2.0;
+    let (a, b, c) = (30.0, 20.0, 10.0);
+    let corner = 1.0 - PI / 6.0;
+    let edge = 1.0 - PI / 4.0;
+    // one edge, ending square on the two end faces
+    let body = block();
+    let e = top_front(&body);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), ABC - edge * r * r * a) < 1e-9);
+    assert_eq!(body.counts().unwrap(), [7, 15, 10]);
+    // every edge: twelve cylinders, eight ball corners
+    let body = block();
+    let mut picks = Vec::new();
+    for y in [0.0, b] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [a / 2.0, y, z]));
+        }
+    }
+    for x in [0.0, a] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [x, b / 2.0, z]));
+        }
+        for y in [0.0, b] {
+            picks.push(edge_at(&body, [x, y, c / 2.0]));
+        }
+    }
+    blend(&body, Blend::Round, &picks, &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let lengths = 4.0 * (a + b + c - 6.0 * r);
+    let want = ABC - edge * r * r * lengths - 8.0 * corner * r * r * r;
+    assert!(
+        rel(volume(&body), want) < 1e-9,
+        "{} against {want}",
+        volume(&body)
+    );
+    assert_eq!(body.counts().unwrap(), [26, 48, 24]);
+    // the concave edge inside an L, ending square on the top and the bottom: material added
+    let ell = || {
+        let block = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+        let notch = make_box([20.0, 15.0, -1.0], [21.0, 16.0, 22.0]).unwrap();
+        solidcore_ops::boolean::boolean(block, notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let body = ell();
+    let e = edge_at(&body, [20.0, 15.0, 10.0]);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), 18000.0 + edge * r * r * 20.0) < 1e-9);
 }
 
 #[test]
@@ -780,6 +1360,90 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
 }
 
+/// [`Turn::Auto`] on the bodies of [`rounds_turn_round_a_boss_edge_mitred_or_swept`]: each turn
+/// swept where the kernel builds it, mitred where not, and never refused for its turn. The
+/// boss base's concave rounds turn round its convex upright edges, so they are swept, the
+/// swept closed form 12500 + 40 A + 2 pi M with four horn tori. The pocket floor's concave
+/// rounds meet concave upright edges, where no ball turns, so they are mitred, 11000 + 60 A -
+/// 8 M, where every turn swept is refused. Chamfers have no swept turn: Auto mitres them,
+/// 12500 + 40 A + 8 M with the chamfer's A = d^2 / 2 and M = d^3 / 6.
+#[test]
+fn auto_turns_are_swept_where_built_and_mitred_where_not() {
+    all_fixes();
+    let bx = |k: &mut Kernel, lo: [f64; 3], size: [f64; 3]| {
+        create_box(k, Vec3::new(lo[0], lo[1], lo[2]), size[0], size[1], size[2])
+    };
+    let auto = |b: &Body, order: &Order, kind, edges: &[usize]| {
+        blend_ordered(
+            b,
+            order,
+            kind,
+            edges,
+            &[1.0],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn: Turn::Auto,
+                ..BlendOptions::default()
+            },
+        )
+    };
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let boss = || {
+        built(|k| {
+            let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+            let boss = bx(k, [15.0, 10.0, 10.0], [10.0, 10.0, 5.0])?;
+            boolean_union(k, plate, boss)
+        })
+    };
+    let b = boss();
+    let (order, edges) = loop_edges(
+        &b,
+        [[15.0, 10.0], [25.0, 10.0], [25.0, 20.0], [15.0, 20.0]],
+        10.0,
+    );
+    auto(&b, &order, Blend::Round, &edges).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert_eq!(b.counts().unwrap()[0], 19);
+    let v = b.volume(1e-10).unwrap();
+    assert!(rel(v, 12500.0 + 40.0 * a + 2.0 * PI * m) < 1e-9, "{v}");
+    let p = built(|k| {
+        let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+        let cut = bx(k, [10.0, 10.0, 5.0], [20.0, 10.0, 6.0])?;
+        boolean_difference(k, plate, cut)
+    });
+    let (order, edges) = loop_edges(
+        &p,
+        [[10.0, 10.0], [30.0, 10.0], [30.0, 20.0], [10.0, 20.0]],
+        5.0,
+    );
+    auto(&p, &order, Blend::Round, &edges).unwrap();
+    assert!(p.check(CheckLevel::All).unwrap().is_valid());
+    let v = p.volume(1e-10).unwrap();
+    assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
+    let c = boss();
+    let (order, edges) = loop_edges(
+        &c,
+        [[15.0, 10.0], [25.0, 10.0], [25.0, 20.0], [15.0, 20.0]],
+        10.0,
+    );
+    auto(&c, &order, Blend::Chamfer, &edges).unwrap();
+    assert!(c.check(CheckLevel::All).unwrap().is_valid());
+    // the chamfers mitred: each base edge gains the chamfer's triangle, A = d^2 / 2, along its
+    // 10, and each upright edge the two chamfers' parts past both walls, whose section's first
+    // moment about the upright edge is M = d^3 / 6 each (at s from the wall the triangle stands
+    // d - s high and runs on s past each end: the integral of (d - s) (10 + 2 s) over 0..d is
+    // 10 A + 2 M), so 12500 + 40 A + 8 M. Topology: the boss base's 11 faces, 24 edges and 16
+    // vertices; each base edge becomes a chamfer face (15 faces) with its two edges on the wall
+    // and on the plate, each base corner a foot on the upright edge and one on the plate (20
+    // vertices), joined by the mitre's edge: 24 - 4 + 8 + 4 = 32 edges (20 - 32 + 15 = 3, the
+    // plate's top keeping its inner loop round the boss)
+    let (a, m) = (0.5, 1.0 / 6.0);
+    let v = c.volume(1e-10).unwrap();
+    assert!(rel(v, 12500.0 + 40.0 * a + 8.0 * m) < 1e-9, "{v}");
+    assert_eq!(c.counts().unwrap(), [15, 32, 20]);
+}
+
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
 /// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
 /// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
@@ -1081,6 +1745,46 @@ fn a_variable_round_runs_from_the_end_nearest_a_point() {
     );
 }
 
+/// A variable round of a closed edge, a cylinder's top or bottom rim: a smooth law from 2 at
+/// its seam, rising halfway round and back to 2, and 2 all round, builds a valid body whose
+/// volume lies between the constant rounds' of 2 and 4 (the same as 2's for 2 all round). The
+/// station closing the loop used to take t at the rim's start, not its end, and the round
+/// failed with status 1001 (#18542).
+#[test]
+fn a_variable_round_of_a_closed_rim_builds() {
+    all_fixes();
+    let cylinder = || make_cylinder([0.0; 3], 20.0, 60.0).unwrap();
+    let constant = |e: usize, r: f64| {
+        let b = cylinder();
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+        volume(&b)
+    };
+    for e in [1, 2] {
+        let (v2, v4) = (constant(e, 2.0), constant(e, 4.0));
+        for (knots, radii) in [
+            (
+                &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0][..],
+                &[2.0, 2.0, 4.0, 2.0, 2.0][..],
+            ),
+            (&[0.0, 0.0, 1.0, 1.0][..], &[2.0, 2.0][..]),
+        ] {
+            let b = cylinder();
+            let degree = knots.len() - radii.len() - 1;
+            fillet_variable_from(&b, e, [20.0, 0.0, 60.0], degree, knots, radii).unwrap();
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "edge {e}, {radii:?}"
+            );
+            let v = volume(&b);
+            if radii.len() == 2 {
+                assert!(rel(v, v2) < 1e-6, "edge {e}: {v} against {v2}");
+            } else {
+                assert!(v4 < v && v < v2, "edge {e}: {v} not between {v4} and {v2}");
+            }
+        }
+    }
+}
+
 #[test]
 fn chamfers_by_sides_take_the_face_asked() {
     all_fixes();
@@ -1234,7 +1938,7 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
 /// read gave every blend its definition back and certified its net again (6 s a boolean on a
 /// part of 60 such rounds). Read on one kernel twice, the variable round's record certifies its
 /// blend the first time only, and builds the same body both times; with the memo off
-/// (`memoize_curve_caches`, as `curve-memo-off` builds every kernel) each read certifies it.
+/// (`memoize_curve_caches` false) each read certifies it.
 #[test]
 fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
     all_fixes();
@@ -1323,6 +2027,9 @@ fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
 /// numerically (SolidCraft's `variable_radius_with_a_corner_through_a_middle_point` for the
 /// peak, the fork's capi cases for the others, as `wr685_law_corners` holds them), to that
 /// test's 1e-4 relative; each keeps the law's radius at its start and is one sound body.
+/// Each case runs on the box as made and on the box read back from its record, as SolidCraft
+/// hands its bodies to the kernel (#22021): there the pieces' nets lie near their definitions
+/// but not on them, and a dip's zone is still the corner ball's sphere.
 #[test]
 fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     // box size, the edge's middle, its start, the start's rail ends, knots, radii, removed, faces
@@ -1339,7 +2046,7 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     all_fixes();
     let peak = [0.0, 0.0, 0.5, 1.0, 1.0];
     let dip_then_peak = [0.0, 0.0, 0.25, 0.75, 1.0, 1.0];
-    let cases: [Case<'_>; 4] = [
+    let cases: [Case<'_>; 5] = [
         // 2 -> 4 -> 2 on the 10 x 20 x 30 box's top edge x = 10, z = 30, from y = 0
         (
             [10.0, 20.0, 30.0],
@@ -1357,6 +2064,18 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
             [10.0, 20.0, 20.0],
             [0.0, 20.0, 20.0],
             [[0.0, 16.0, 20.0], [0.0, 20.0, 16.0]],
+            &peak,
+            &[4.0, 2.0, 4.0],
+            39.542073,
+            9,
+        ),
+        // the same law on the cube's upright edge x = 20, y = 0, from z = 0 (#22021): the
+        // edge above turned onto it by the cube's symmetry
+        (
+            [20.0; 3],
+            [20.0, 0.0, 10.0],
+            [20.0, 0.0, 0.0],
+            [[16.0, 0.0, 0.0], [20.0, 4.0, 0.0]],
             &peak,
             &[4.0, 2.0, 4.0],
             39.542073,
@@ -1384,21 +2103,53 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
             10,
         ),
     ];
-    for (size, middle, from, rails, knots, radii, want, faces) in cases {
-        let b = make_box([0.0; 3], size).unwrap();
+    let runs = cases
+        .into_iter()
+        .flat_map(|case| [(case, false), (case, true)]);
+    for ((size, middle, from, rails, knots, radii, want, faces), read_back) in runs {
+        let cube = make_box([0.0; 3], size).unwrap();
+        let b = if read_back {
+            Body::from_record(&cube.to_record().unwrap().0, true)
+                .unwrap()
+                .0
+        } else {
+            cube
+        };
         let e = edge_at(&b, middle);
         let start = vertex_at(&b, from);
-        fillet_variable(&b, e, start, 1, knots, radii).unwrap();
+        fillet_variable(&b, e, start, 1, knots, radii)
+            .unwrap_or_else(|e| panic!("{radii:?} from {from:?}, read back {read_back}: {e:?}"));
         let removed = size[0] * size[1] * size[2] - volume(&b);
-        eprintln!("{radii:?} from {from:?}: removed {removed}, want {want}");
+        eprintln!("{radii:?} from {from:?}, read back {read_back}: removed {removed}, want {want}");
         assert!(
             (removed - want).abs() <= 1e-4 * want,
             "{radii:?} from {from:?}: removed {removed}, want {want}"
         );
         assert_eq!(b.counts().unwrap()[0], faces, "{radii:?} from {from:?}");
-        // the round's end at its start is a section of the law's first radius
+        // the round's end at its start is a section of the law's first radius (read back, the
+        // round's nets lie near its definitions: a vertex there within its own tolerance)
         for p in rails {
-            vertex_at(&b, p);
+            if !read_back {
+                vertex_at(&b, p);
+                continue;
+            }
+            let (_, brep) = kernel_copy(&b);
+            let q = Vec3::new(p[0], p[1], p[2]);
+            let (off, tol) = brep
+                .vertex_list()
+                .iter()
+                .map(|&v| {
+                    use solidcore::topology::vertex::{point, tolerance};
+                    let at = point(&brep, v).unwrap();
+                    (at.distance(q), tolerance(&brep, v).unwrap())
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .unwrap();
+            eprintln!("{radii:?} from {from:?}: rail end {p:?} {off:e} off, tolerance {tol:e}");
+            assert!(
+                off <= tol,
+                "{radii:?} from {from:?}: rail end {p:?} {off:e} off, tolerance {tol:e}"
+            );
         }
         assert!(b.check(CheckLevel::All).unwrap().is_valid());
         // every face the split makes is the round's definition, not a trace of it: each piece
@@ -1433,8 +2184,33 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
                     });
                     pieces.push(law);
                 }
-                // (the copy keeps the zone's ball patch, not the corner definition beside it)
-                None if surface_kind_name(s) == "ball-patch" => zones += 1,
+                // (the copy keeps the zone's ball patch, not the corner definition beside it):
+                // the ball of one of the law's dips, its net on that ball's sphere
+                None if surface_kind_name(s) == "ball-patch" => {
+                    let SurfaceKind::BallPatch(bp) = s.kind() else {
+                        panic!("{radii:?} from {from:?}: a ball patch named so is one");
+                    };
+                    let (centre, radius) = (bp.centre(), bp.radius());
+                    let dip_ball = (1..radii.len() - 1).any(|i| {
+                        let ball = piece_round.from
+                            + piece_round.along * corners[i]
+                            + piece_round.inward * radii[i];
+                        radii[i] < radii[i - 1]
+                            && radii[i] < radii[i + 1]
+                            && centre.distance(ball) < 1e-6
+                            && (radius - radii[i]).abs() < 1e-6
+                    });
+                    assert!(
+                        dip_ball,
+                        "{radii:?} from {from:?}: a zone on ({centre:?}, {radius})"
+                    );
+                    assert!(
+                        BallPatch::is_on_sphere(bp.net(), centre, radius, ON_SPHERE_REL_TOL)
+                            .unwrap(),
+                        "{radii:?} from {from:?}: a zone's net off its sphere"
+                    );
+                    zones += 1;
+                }
                 _ => panic!("{radii:?} from {from:?}: {:?}", surface_kind_name(s)),
             }
         }
@@ -2043,6 +2819,87 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     let b = crease();
     blend(&b, Blend::Round, &[e], &[0.5], &[], Corners::Filled).unwrap();
     assert!(volume(&b) < before);
+}
+
+/// #3351: on a square edge of a body of tolerance 1e-5, a round narrower across its faces
+/// than eight tolerances (its chord, r*sqrt(2), below 8e-5) is refused as too small, naming
+/// the smallest that builds, 8e-5/sqrt(2) and one part in a million: 2e-5 lies within
+/// tolerance of the edge, 2.5e-5 failed with no fillet faces made and 4e-5 failed matching
+/// its edges, untyped. A round of the smallest named builds exact, and so do rounds just
+/// above it. So on a 120 degree turn, where a chord of exactly eight tolerances fails.
+#[test]
+fn a_round_narrower_than_eight_tolerances_is_refused_naming_one_that_builds() {
+    all_fixes();
+    let floor = 8e-5 / std::f64::consts::SQRT_2 * (1.0 + 1e-6);
+    let mut smallest = 0.0;
+    for r in [2e-5, 2.5e-5, 4e-5, 5.5e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::RoundTooSmall {
+                edge, smallest: s, ..
+            }) => {
+                assert_eq!(edge, e);
+                assert!((s - floor).abs() < 1e-9 * floor, "{r} {s}");
+                smallest = s;
+            }
+            other => panic!("{r}: {other:?}"),
+        }
+        assert!(rel(volume(&b), ABC) < 1e-12, "{r}");
+    }
+    for r in [smallest, 5.7e-5, 6e-5] {
+        let b = block();
+        let e = edge_at(&b, [15.0, 0.0, 0.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} builds: {err}"));
+        let removed = 30.0 * r * r * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!(
+            ((ABC - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r} {}",
+            volume(&b)
+        );
+        assert_eq!(b.counts().unwrap(), [7, 15, 10], "{r}");
+    }
+    // a prism whose edge at the origin turns its faces by 120 degrees
+    let a = 10.0 / 60f64.to_radians().tan();
+    let prism = || {
+        swept(
+            &[
+                segment((0.0, 0.0), (20.0, 0.0)),
+                segment((20.0, 0.0), (20.0, 10.0)),
+                segment((20.0, 10.0), (a, 10.0)),
+                segment((a, 10.0), (0.0, 0.0)),
+            ],
+            10.0,
+        )
+    };
+    let turn = 120f64.to_radians();
+    let floor = 8e-5 / (2.0 * (0.5 * turn).sin()) * (1.0 + 1e-6);
+    let b = prism();
+    let before = volume(&b);
+    let e = edge_at(&b, [0.0, 0.0, 5.0]);
+    match blend(&b, Blend::Round, &[e], &[4.5e-5], &[], Corners::Filled) {
+        Err(Error::RoundTooSmall {
+            edge, smallest: s, ..
+        }) => {
+            assert_eq!(edge, e);
+            assert!((s - floor).abs() < 1e-9 * floor, "{s}");
+            smallest = s;
+        }
+        other => panic!("4.5e-5 at 120 degrees: {other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    for r in [smallest, 4.7e-5] {
+        let b = prism();
+        let e = edge_at(&b, [0.0, 0.0, 5.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("a round of {r} at 120 degrees builds: {err}"));
+        let removed = 10.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+        assert!(
+            ((before - volume(&b)) - removed).abs() < 1e-3 * removed,
+            "{r}"
+        );
+    }
 }
 
 /// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
@@ -2856,6 +3713,53 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
             "{which}: S, the seam edge and the rib's two pieces"
         );
     }
+}
+
+/// #18671: the ledge's operand asked 2.5e-4 wide, below the 7.4e-4 its strips settle at
+/// ([`the_ledge_corner_rolls_over_across_the_bores_tangent_seam`]), ends at its floor: the
+/// enclosure's least width (the strips' least widths however they are cut) is past 2.5e-4, so no
+/// refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so no refinement
+/// narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
+/// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`] (131,375
+/// cells, 129,094 of them strip cells) for 7.43e-4. A looser ask on the other side of the least
+/// width is still reached, and its answer bounds how much wider the Floor answer can be.
+#[test]
+fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
+    use solidcore::mass::enclosure::{enclose_volume, EnclosureStop, CELL_BUDGET};
+    rig_fixes();
+    let b = ledge();
+    let v0 = ledge_operand_volume();
+    let (k, mut brep) = kernel_copy(&b);
+    let e = enclose_volume(&k, &mut brep, 2.5e-4).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Floor, "{e:?}");
+    assert!(e.least > 2.5e-4, "{e:?}");
+    assert!(
+        e.least <= e.width() && e.width() - e.least <= 2.5e-4,
+        "{e:?}"
+    );
+    // and no wider than the 1e-3 the ledge's own test asks and reaches
+    assert!(e.width() <= 1e-3, "{e:?}");
+    assert!(e.lo <= v0 && v0 <= e.hi, "{e:?} {v0}");
+    assert!(e.counts.cells < CELL_BUDGET / 4, "{e:?}");
+
+    // #21588 review: asked just below the Floor answer (7.456e-4, against 7.4638e-4 at least
+    // 5.09e-4), past that least width, refinement goes on and reaches it (in 23,191 cells), so
+    // the looser ask is answered narrower. That is the contract ([`enclose_volume`]): a rule that
+    // kept the answers monotone would have to end this reachable ask unreached as well, or refine
+    // 2.5e-4 on to the whole budget. The last two asserts hold by construction whatever the cells
+    // become: the looser answer, as every answer, is at least the Floor answer's least width wide,
+    // so the Floor answer is at most the width it asked wider. The Floor stop above and the reach
+    // here depend on the measured numbers (the Floor answer is 2.37e-4 off its least width against
+    // the 2.5e-4 asked, and the strips settle at 7.43e-4 given the whole budget).
+    let a = e.width() * (1.0 - 1e-3);
+    assert!(e.least <= a && a < e.width(), "{e:?}");
+    let (k, mut brep) = kernel_copy(&b);
+    let loose = enclose_volume(&k, &mut brep, a).unwrap();
+    assert_eq!(loose.stop, EnclosureStop::Reached, "{loose:?}");
+    assert!(loose.width() <= a, "{loose:?}");
+    assert!(loose.lo <= v0 && v0 <= loose.hi, "{loose:?} {v0}");
+    assert!(loose.width() >= e.least, "{loose:?} {e:?}");
+    assert!(e.width() - loose.width() <= 2.5e-4, "{loose:?} {e:?}");
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
@@ -5722,6 +6626,118 @@ fn a_round_on_a_rim_through_a_spheres_poles_joins_at_the_poles() {
     );
 }
 
+/// acid-9's tower: the loft with straight rulings from the 40 x 40 square at z = 0 to the
+/// same square turned 45 degrees at z = 100 (each corner to the corner 45 degrees further
+/// round, so its four sides are twisted ruled faces), bored through by a cylinder of radius
+/// 18.47 and kept inside the sphere of radius 55 about (0, 0, 50), which trims its eight
+/// corners. The sphere is first turned `turn` degrees about z: its seam, the meridian at
+/// azimuth `turn`, crosses the top corner at azimuth 0 when `turn` is 0 and no corner when
+/// it is 22.5. That is no geometry: only how the sphere's face is named.
+fn twisted_tower(turn: f64) -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::{loft, Curve as C};
+    use solidcore_ops::{make_sphere, BooleanOp};
+    let square = |z: f64, from: f64| {
+        let corner = |i: usize| {
+            let a = (from + 90.0 * i as f64).to_radians();
+            [
+                20.0 * 2.0_f64.sqrt() * a.cos(),
+                20.0 * 2.0_f64.sqrt() * a.sin(),
+                z,
+            ]
+        };
+        (0..4)
+            .map(|i| C::Line {
+                start: corner(i),
+                end: corner(i + 1),
+            })
+            .collect::<Vec<_>>()
+    };
+    let tower = loft(&[square(0.0, 45.0), square(100.0, 90.0)], 1, true).unwrap();
+    let bore = make_cylinder([0.0, 0.0, -1.0], 18.47, 102.0).unwrap();
+    let tower = boolean(tower, bore, BooleanOp::Subtract).unwrap().unwrap();
+    let sphere = make_sphere([0.0, 0.0, 50.0], 55.0).unwrap();
+    sphere.transform(&turn_about(2, turn)).unwrap();
+    boolean(tower, sphere, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-9's picks: a point on each edge where the sphere meets a twisted face, near both ends
+/// of each face's bottom and top edges (the points of `cad-acid-tests`' `solidcraft/acid.py`,
+/// found there by bisection along the rulings).
+const TOWER_PICKS: [[f64; 3]; 16] = [
+    [18.727901831, 20.184356381, 2.388473554],
+    [-0.093587256, 27.534229441, 97.611526446],
+    [-19.40346417, 19.535816536, 2.388473554],
+    [-27.515121653, 1.029868889, 97.611526446],
+    [-20.184356381, 18.727901831, 2.388473554],
+    [-27.534229441, -0.093587256, 97.611526446],
+    [-19.535816536, -19.40346417, 2.388473554],
+    [-1.029868889, -27.515121653, 97.611526446],
+    [-18.727901831, -20.184356381, 2.388473554],
+    [0.093587256, -27.534229441, 97.611526446],
+    [19.40346417, -19.535816536, 2.388473554],
+    [27.515121653, -1.029868889, 97.611526446],
+    [20.184356381, -18.727901831, 2.388473554],
+    [27.534229441, 0.093587256, 97.611526446],
+    [19.535816536, 19.40346417, 2.388473554],
+    [1.029868889, 27.515121653, 97.611526446],
+];
+
+/// acid-9 (the twisted tower's R 1 rounds where its sphere meets its ruled faces): the
+/// sphere's seam crosses the top corner at azimuth 0, splitting the edge with the face on
+/// its one side, so the tangent chain takes 17 edges. The rounds of the two edges at that
+/// corner are mitred at the loft's corner ruling, and their rails cross on the sphere just
+/// past the seam: the corner solved that point with the name its own solve landed on, a
+/// period away from the other edge's edge use, the trace sorted it past that edge's far end
+/// and, running along the edge use's parameters, never reached it ("Fillet Surface
+/// Computation Failure", the trace touching its domain's boundary again). A rail end now
+/// takes the name nearest its edge use's trim curve at the rail's end. Turning the sphere
+/// 22.5 degrees moves its seam off every corner (16 edges) and changes no geometry, so both
+/// build a valid solid and take the same volume off: each body's faces lie within the
+/// body's tolerance (1e-5) of the same exact surfaces, so the volumes differ by at most
+/// that tolerance times the rounds' area, under pi r L with L the edges' length, each of
+/// the 16 under 30 long (an edge runs on its face from the corner ruling to the cap or
+/// base), 0.0151.
+#[test]
+fn rounds_mitred_beside_a_sphere_seam_take_what_they_take_off_it() {
+    all_fixes();
+    let r = 1.0;
+    let bound = 1e-5 * PI * r * 16.0 * 30.0;
+    let mut taken = Vec::new();
+    for (turn, count) in [(0.0, 17), (22.5, 16)] {
+        let case = format!("the sphere turned {turn} degrees");
+        let b = twisted_tower(turn);
+        let picks: Vec<usize> = TOWER_PICKS.iter().map(|&p| nearest_edge(&b, p)).collect();
+        let chain = tangent_chain(&b, None, &picks, &[], HALF_DEGREE).unwrap();
+        assert!(chain.undecided.is_empty(), "{case}: {chain:?}");
+        assert_eq!(chain.members.len(), count, "{case}: the rounded edges");
+        let before = b.volume(1e-10).unwrap();
+        blend(
+            &b,
+            Blend::Round,
+            &chain.members,
+            &vec![r; chain.members.len()],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("{case}: the rounds do not build: {e:?}"));
+        assert!(b.is_manifold_solid().unwrap(), "{case}");
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{case}: {report}");
+        let after = b.volume(1e-10).unwrap();
+        assert!(after < before, "{case}: the rounds took nothing off");
+        taken.push(before - after);
+    }
+    assert!(
+        (taken[0] - taken[1]).abs() <= bound,
+        "the rounds took {} off with the seam at the corner, {} with it clear",
+        taken[0],
+        taken[1]
+    );
+}
+
 /// The poles' rounding noise grows with the square of the radius (|du x dv| at an exact pole
 /// is 6e-11 at radius 0.975 and 1.3e-8 at 20), so a test of the parameterisation's singularity
 /// against a fixed limit lets the first-order step back in from radius 17 or so up. The foot
@@ -6304,4 +7320,451 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
     assert_eq!(b.counts().unwrap(), [8, 18, 12]);
     let off = before - b.volume(1e-10).unwrap();
     assert!((0.264..=0.445).contains(&off), "the chamfer took off {off}");
+}
+
+/// #19724, the case #19789 did not cover. Rounding the 15° root together with a rib-end
+/// edge splits that round. The rib's cone is one 12° span. Read off its tangent leg, the
+/// centre misses the axis by more than the reload allows, the support was stored without
+/// its cone label, and the split round's net would not certify: the body could not be
+/// measured, and a later fillet of the unrelated rim was refused. The chord and the
+/// weight keep the cone label, so the body reads back and the rim fillet builds.
+#[test]
+fn a_round_meeting_a_short_rib_s_end_reads_back() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let read_back = |body: Body, step: &str| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true)
+            .unwrap_or_else(|e| panic!("{step} does not read back: {e}"))
+            .0
+    };
+    // The frustum (radius 24 at x = 0, 36 at x = 48) and the 12° rib. Each revolve is
+    // read back before the join, as a feature's result is.
+    let cone = read_back(
+        revolve(
+            &[
+                line([0.0, 0.0, 0.0], [0.0, 0.0, -24.0]),
+                line([0.0, 0.0, -24.0], [48.0, 0.0, -36.0]),
+                line([48.0, 0.0, -36.0], [48.0, 0.0, 0.0]),
+                line([48.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            2.0 * PI,
+            true,
+        )
+        .unwrap(),
+        "the frustum",
+    );
+    // The rib profile turned −6° about X, so a 12° revolve is centred on the seam.
+    let tri = [
+        [18.0, 28.343_874_018, -2.979_061_203],
+        [26.743_129, 33.170_913_336, -3.486_403_479],
+        [27.370_857, 30.673_754_386, -3.223_941_497],
+    ];
+    let rib = read_back(
+        revolve(
+            &[
+                line(tri[0], tri[1]),
+                line(tri[1], tri[2]),
+                line(tri[2], tri[0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            12.0_f64.to_radians(),
+            true,
+        )
+        .unwrap(),
+        "the rib",
+    );
+    let b = read_back(
+        boolean(cone, rib, BooleanOp::Union).unwrap().unwrap(),
+        "the join",
+    );
+    // The 15° root, and the two edges where the rib's ends meet the cone (their mids).
+    let root = nearest_edge(&b, [18.0, 28.5, 0.0]);
+    let end_a = nearest_edge(&b, [22.685_428_5, 29.508_814, -3.101_501]);
+    let end_b = nearest_edge(&b, [22.685_428_5, 29.508_814, 3.101_501]);
+    assert!(root != end_a && root != end_b && end_a != end_b);
+    blend(
+        &b,
+        Blend::Round,
+        &[root, end_a, end_b],
+        &[2.0, 2.0, 2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|e| panic!("the fillet builds: {e}"));
+    let (record, _) = b.to_record().unwrap();
+    for face in &record.faces {
+        let solidcore_record::brep::Surface::Blend { definition } = &face.surface else {
+            continue;
+        };
+        let solidcore_record::brep::blend::BlendDefinition::ExactRound(round) = definition.as_ref()
+        else {
+            continue;
+        };
+        for support in &round.supports {
+            let solidcore_record::brep::blend::SupportRecord::Nurbs { kind, .. } = support else {
+                continue;
+            };
+            assert!(
+                !matches!(kind, solidcore_record::brep::blend::SupportKindRecord::Free),
+                "a round support was stored without its cone label: {kind:?}"
+            );
+        }
+    }
+    let b = read_back(b, "the meeting fillet");
+    // (0, 0, −24) is also the cone's seam. A quarter turn away is only the sharp rim.
+    let rim = edge_at(&b, [0.0, 24.0, 0.0]);
+    blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rim fillet builds: {e}"));
+    read_back(b, "the rim fillet");
+}
+
+/// The cylinder of radius 9.5 about +z, 30 high, its seam at `seam` radians from +x (SolidCraft's
+/// `solid.cylinder` extrudes one arc starting at 0.6131), less the notch 20 x 8 x 6 across its top
+/// on the side of `sign` y: the box x -10..10, |y| 5..13, z 26..32.
+fn seamed_notched_cylinder(seam: f64, sign: f64) -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+    let cylinder = extrude(
+        &[Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 9.5,
+            start: seam,
+            end: seam + 2.0 * PI,
+        }],
+        [0.0, 0.0, 1.0],
+        30.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let y = if sign > 0.0 { 5.0 } else { -13.0 };
+    let notch = make_box([-10.0, y, 26.0], [20.0, 8.0, 6.0]).unwrap();
+    boolean(cylinder, notch, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// tangency-labs/solidcraft#21416: the notch's inside edge (y = 5, z = 26) rounded or chamfered
+/// 1 builds wherever the cylinder's seam lies. The blend adds material in the notch's corner and
+/// ends on the cylinder at both ends; near x > 0 its end curve runs from the wall's rail, at
+/// atan(5 / 8.078) = 31.76 degrees, to the floor's, at atan(6 / 7.365) = 39.17 degrees. Where
+/// the seam lies between them (SolidCraft's at 35.13 degrees), the end curve crosses it; the
+/// intersections traced the curve within the cylinder's domain, which ends at its seam, so none
+/// ran from one end to the other, and the blend failed ("failure to calculate intersection of
+/// fillet surface with side face"); traced across the seam, the cut of its UV curve beyond the
+/// seam lay a period outside the face's domain. The seams tried lie beside each end of the end
+/// curve, in its middle, and away from it (near the notch's far end, on the -x side, and a
+/// quarter turn off), on the notch at +y and at -y (the mirror image, which built before).
+///
+/// Expected: a valid, closed solid, whose volume is the closed form: the cylinder, less the
+/// notch's circular segment R^2 acos(d/R) - d sqrt(R^2 - d^2) (d = 5) over its 4 mm depth, plus
+/// the blend's section at the height and depth (s, t) from the edge times the cylinder's chord
+/// there, 2 sqrt(R^2 - (d + s)^2): for the round the section is the square [0, 1]^2 less the
+/// ball's quarter disc, so with s = 1 - sin(a) its depth is 1 - cos(a); for the chamfer it is
+/// the triangle t < 1 - s. The integrals are smooth and taken by Simpson's rule on 2000 panels,
+/// far below the 1e-10 compared (the round's is 8303.852506129, the issue's).
+#[test]
+fn a_notch_s_round_and_chamfer_end_across_the_cylinder_s_seam() {
+    rig_fixes();
+    let (big_r, d, r) = (9.5_f64, 5.0_f64, 1.0_f64);
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 2000;
+        let h = (b - a) / f64::from(n);
+        let mut s = f(a) + f(b);
+        for i in 1..n {
+            s += f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        s * h / 3.0
+    };
+    let chord = |y: f64| 2.0 * (big_r * big_r - y * y).sqrt();
+    let notched = PI * big_r * big_r * 30.0
+        - 4.0 * (big_r * big_r * (d / big_r).acos() - d * (big_r * big_r - d * d).sqrt());
+    let round = notched
+        + simpson(
+            &|a: f64| chord(d + r - r * a.sin()) * (r - r * a.cos()) * r * a.cos(),
+            0.0,
+            PI / 2.0,
+        );
+    let chamfer = notched + simpson(&|y: f64| chord(y) * (d + r - y), d, d + r);
+    assert!(rel(round, 8_303.852_506_129) < 1e-12, "{round}");
+    let degrees: [f64; 8] = [35.13, 31.9, 32.5, 38.5, 39.0, 120.0, 200.0, 305.0];
+    for seam in degrees {
+        for sign in [1.0, -1.0] {
+            for (kind, want) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let case = format!("seam {seam} degrees, notch at {sign} y, {kind:?}");
+                // the -y notch at the seam's mirror image: the same part mirrored in y = 0
+                let at = if sign > 0.0 { seam } else { -seam };
+                let b = seamed_notched_cylinder(at.to_radians(), sign);
+                let edge = edge_at(&b, [0.0, d * sign, 26.0]);
+                blend(&b, kind, &[edge], &[r], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{case}: {}", report.text);
+                b.check_solid().unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let v = b.volume(1e-11).unwrap();
+                assert!(rel(v, want) < 1e-10, "{case}: {v} {want}");
+            }
+        }
+    }
+}
+
+/// SolidCraft #21938 helper: verify that blending `base` at `p` with `asked` is refused as
+/// `Error::TooLarge` of `want_kind`, matching `want_exact_peak - FitMargin` when given (never
+/// near zero), leaves `base` untouched, and optionally verifies that retrying at the named
+/// `fit` builds a valid solid.
+#[allow(clippy::too_many_arguments)]
+fn assert_open_end_refusal_and_fit(
+    label: &str,
+    base: &Body,
+    p: [f64; 3],
+    kind: Blend,
+    asked: f64,
+    want_kind: FitKind,
+    want_exact_peak: Option<f64>,
+    verify_retry: bool,
+) -> f64 {
+    let b = base.copy().unwrap();
+    let before = b.volume(1e-9).unwrap();
+    let e = solidcore_ops::pick::edges(&b, &[p], 0.05)
+        .unwrap()
+        .expect("pick");
+    let margin = {
+        let (_, brep) = kernel_copy(&b);
+        1000.0 * edge::tolerance(&brep, brep.edge_list()[e[0]]).unwrap()
+    };
+    let fit = match blend(&b, kind, &e, &[asked], &[], Corners::Filled) {
+        Err(Error::TooLarge {
+            size,
+            kind: got_kind,
+            ..
+        }) => {
+            assert_eq!(got_kind, want_kind, "{label} {kind:?} {asked}");
+            assert!(
+                size > 0.5,
+                "{label} {kind:?} {asked}: fit {size} is near zero"
+            );
+            if let Some(peak) = want_exact_peak {
+                let expected = peak - margin;
+                assert!(
+                    (size - expected).abs() < 1e-5,
+                    "{label} {kind:?} {asked}: got {size}, expected {expected} (peak {peak}, margin {margin})"
+                );
+            }
+            size
+        }
+        other => panic!("{label} {kind:?} {asked}: expected TooLarge, got {other:?}"),
+    };
+    assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
+    if verify_retry {
+        let retry = base.copy().unwrap();
+        let e2 = solidcore_ops::pick::edges(&retry, &[p], 0.05)
+            .unwrap()
+            .expect("pick retry");
+        blend(&retry, kind, &e2, &[fit], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("{label} {kind:?} retry at fit {fit}: {err:?}"));
+        let report = retry.check(CheckLevel::All).unwrap();
+        assert!(
+            report.is_valid(),
+            "{label} {kind:?} fit {fit}: {}",
+            report.text
+        );
+        retry
+            .check_solid()
+            .unwrap_or_else(|err| panic!("{label} {kind:?} fit {fit}: {err:?}"));
+        assert!(retry.volume(1e-9).unwrap() < before);
+    }
+    fit
+}
+
+/// SolidCraft #21938: r=5 shaft with a flat cut by the plane x = 3 + z tan 8°. Both ends of
+/// the open arc lie on the bottom cap, so each side edge's far vertex lies back on the
+/// fillet's other face G. Rounds of 4 and 5.05 name the cylinder-rim interior peak
+/// `8 cos 8° / (1 + cos 8°) - FitMargin` (~3.970 mm) and chamfers of 1 and 2 name ~0.977 mm
+/// instead of ~1e-12 mm or a bare corner edge error; every named size builds a valid solid.
+#[test]
+fn open_shaft_flat_end_refusals_name_the_interior_peak_that_fits() {
+    rig_fixes();
+    let c = make_cylinder([0.0; 3], 5.0, 30.0).unwrap();
+    let cut = make_box([3.0, -20.0, -20.0], [20.0, 40.0, 80.0]).unwrap();
+    cut.transform(
+        &solidcore_ops::affine::rotation([3.0, 0.0, 0.0], [0.0, 1.0, 0.0], 8_f64.to_radians())
+            .unwrap(),
+    )
+    .unwrap();
+    let base = solidcore_ops::boolean::boolean(c, cut, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let x = 5.0 * 30_f64.to_radians().cos();
+    let p = [x, 2.5, (x - 3.0) / 8_f64.to_radians().tan()];
+    let cos8 = 8_f64.to_radians().cos();
+    let dflat_peak = 8.0 * cos8 / (1.0 + cos8);
+
+    let ok_body = base.copy().unwrap();
+    let e = solidcore_ops::pick::edges(&ok_body, &[p], 0.05)
+        .unwrap()
+        .expect("pick");
+    blend(&ok_body, Blend::Round, &e, &[3.0], &[], Corners::Filled).unwrap();
+    assert!(ok_body.check(CheckLevel::All).unwrap().is_valid());
+
+    assert_open_end_refusal_and_fit(
+        "dflat",
+        &base,
+        p,
+        Blend::Round,
+        4.0,
+        FitKind::Radius,
+        Some(dflat_peak),
+        true,
+    );
+    assert_open_end_refusal_and_fit(
+        "dflat",
+        &base,
+        p,
+        Blend::Round,
+        5.05,
+        FitKind::Radius,
+        Some(dflat_peak),
+        false,
+    );
+    let c1 = assert_open_end_refusal_and_fit(
+        "dflat",
+        &base,
+        p,
+        Blend::Chamfer,
+        1.0,
+        FitKind::Distance,
+        None,
+        true,
+    );
+    let c2 = assert_open_end_refusal_and_fit(
+        "dflat",
+        &base,
+        p,
+        Blend::Chamfer,
+        2.0,
+        FitKind::Distance,
+        None,
+        false,
+    );
+    assert!((c1 - c2).abs() < 1e-6, "chamfer fits {c1} vs {c2}");
+}
+
+/// SolidCraft #21938: r=3 boss with a 30° sloped top and a side slot x in [s0, s1]. The side
+/// edge across the sloped top connects the two endpoints of the open rim arc (both on the
+/// cylinder), so its interior peak is `3 - s0`. Rounds of 2, 2.5 and 3.05 name `3 - s0 -
+/// FitMargin` (1.49 and 0.99 mm) and the 2..2.6 chamfer of 1 names ~0.832 mm instead of
+/// ~1e-12 mm; every named size builds a valid solid.
+#[test]
+fn open_sloped_boss_end_refusals_name_the_interior_peak_that_fits() {
+    rig_fixes();
+    for (s0, s1, peak) in [(1.5, 2.0, 1.5), (2.0, 2.6, 1.0)] {
+        let label = format!("boss {s0}..{s1}");
+        let c = make_cylinder([0.0; 3], 3.0, 20.0).unwrap();
+        let top = make_box([-20.0, -20.0, 8.0], [40.0, 40.0, 32.0]).unwrap();
+        top.transform(
+            &solidcore_ops::affine::rotation([0.0, 0.0, 8.0], [1.0, 0.0, 0.0], 30_f64.to_radians())
+                .unwrap(),
+        )
+        .unwrap();
+        let cut_top = solidcore_ops::boolean::boolean(c, top, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let slot = make_box([s0, -10.0, 4.0], [s1 - s0, 20.0, 36.0]).unwrap();
+        let base =
+            solidcore_ops::boolean::boolean(cut_top, slot, solidcore_ops::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        let p = [-3.0, 0.0, 8.0];
+
+        let ok_body = base.copy().unwrap();
+        let e = solidcore_ops::pick::edges(&ok_body, &[p], 0.05)
+            .unwrap()
+            .expect("pick");
+        blend(&ok_body, Blend::Round, &e, &[1.0], &[], Corners::Filled).unwrap();
+        assert!(ok_body.check(CheckLevel::All).unwrap().is_valid());
+
+        for (i, r) in [2.0, 2.5, 3.05].into_iter().enumerate() {
+            assert_open_end_refusal_and_fit(
+                &label,
+                &base,
+                p,
+                Blend::Round,
+                r,
+                FitKind::Radius,
+                Some(peak),
+                i == 0,
+            );
+        }
+        if s0 < 1.8 {
+            let ch = base.copy().unwrap();
+            let e = solidcore_ops::pick::edges(&ch, &[p], 0.05)
+                .unwrap()
+                .expect("pick");
+            blend(&ch, Blend::Chamfer, &e, &[1.0], &[], Corners::Filled).unwrap();
+            assert!(ch.check(CheckLevel::All).unwrap().is_valid());
+        } else {
+            assert_open_end_refusal_and_fit(
+                &label,
+                &base,
+                p,
+                Blend::Chamfer,
+                1.0,
+                FitKind::Distance,
+                None,
+                true,
+            );
+        }
+    }
+}
+
+/// SolidCraft #21938: frustum (r=6 to r=1, height 10) with a 25° sloped top at z = 9 and slot
+/// x in [0.5, 1]. Round 1.5 builds; round 2.0 names the interior peak (~1.78 mm) instead of
+/// ~9e-13 mm, and retrying at that radius builds a valid solid.
+#[test]
+fn open_frustum_end_refusal_names_the_interior_peak_that_fits() {
+    rig_fixes();
+    let zc = 9.0;
+    let c = make_cone([0.0; 3], 6.0, 1.0, 10.0).unwrap();
+    let top = make_box([-20.0, -20.0, zc], [40.0, 40.0, 40.0 - zc]).unwrap();
+    top.transform(
+        &solidcore_ops::affine::rotation([0.0, 0.0, zc], [1.0, 0.0, 0.0], 25_f64.to_radians())
+            .unwrap(),
+    )
+    .unwrap();
+    let cut_top = solidcore_ops::boolean::boolean(c, top, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let slot = make_box([0.5, -10.0, zc - 3.0], [0.5, 20.0, 43.0 - zc]).unwrap();
+    let base = solidcore_ops::boolean::boolean(cut_top, slot, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let p = [-(6.0 - 0.5 * zc), 0.0, zc];
+
+    let ok_body = base.copy().unwrap();
+    let e = solidcore_ops::pick::edges(&ok_body, &[p], 0.05)
+        .unwrap()
+        .expect("pick");
+    blend(&ok_body, Blend::Round, &e, &[1.5], &[], Corners::Filled).unwrap();
+    assert!(ok_body.check(CheckLevel::All).unwrap().is_valid());
+
+    assert_open_end_refusal_and_fit(
+        "cone_top",
+        &base,
+        p,
+        Blend::Round,
+        2.0,
+        FitKind::Radius,
+        None,
+        true,
+    );
 }

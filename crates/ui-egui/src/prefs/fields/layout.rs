@@ -29,6 +29,9 @@ macro_rules! layout_preferences {
             browser_rows_start_closed: bool = false, PAGE_LAYOUT;
             /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
             clear_view_tabs: bool = true, PAGE_LAYOUT;
+            /// Search commands opens centred over the view instead of in the ribbon's top-right corner
+            /// (#18309); the shortcut, results and keys are the same. Off by default: it opens in place.
+            command_search_centred: bool = false, PAGE_LAYOUT;
             /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
             construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
             /// A design opens with the views it had when it was last closed.
@@ -49,6 +52,11 @@ macro_rules! layout_preferences {
             drawing_panel_width: f32 = 320.0, PAGE_LAYOUT, accept(240.0..=560.0);
             /// Drawing sheet strip placement; independent of Design's feature history.
             drawing_sheet_dock: String = "top".into(), PAGE_LAYOUT;
+            /// With several features selected, an entry of a feature's menu (History bar, vertical
+            /// History, Browser) acts on all of them or cannot be used. Off: the menus as they were, where
+            /// Edit, Rename, Suppress, Roll back, Find and Copy Message act on the right-clicked feature
+            /// alone.
+            feature_menus_act_on_selection: bool = true, PAGE_LAYOUT;
             /// While a file opens, is inserted or its links are read again, the design waits for it
             /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
             /// operation is a row of the operations panel and the design stays usable meanwhile.
@@ -69,6 +77,10 @@ macro_rules! layout_preferences {
             /// Compact history: the browser lists each component's features in history order with the
             /// marker, and neither timeline is shown.
             history_in_browser: bool = false, PAGE_LAYOUT;
+            /// With "History steps by component" on, Last (and Forward onto the last slot) stop just after
+            /// the active component's last feature, as they did before #15974, leaving later features of
+            /// other components rolled back. Off, the default: they go to the end of the design.
+            history_last_stops_at_component: bool = false, PAGE_LAYOUT;
             /// A Play History button in the History controls, between Previous and Next (#3688). Off
             /// gives the four controls History had before; right-clicking the controls toggles it too.
             history_play_button: bool = true, PAGE_LAYOUT;
@@ -84,8 +96,16 @@ macro_rules! layout_preferences {
             keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
             /// Shared workspace composition; system windows and popups retain their purpose.
             layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
-            /// Preview card density in the document browser; Large preserves the existing layout.
-            library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
+            /// Restore the former Surface Create and Convert sections.
+            legacy_surface_toolbar: bool = false, PAGE_LAYOUT => check_id("prefs.legacy_surface_toolbar");
+            /// The parts library panel (`library`, shown and hidden by the app bar's documents button):
+            /// its folder (a local folder or a server share; empty: none chosen), whether it shows, the
+            /// card size and the subfolder last browsed into
+            /// (relative to the folder).
+            library_folder: String = String::new(), PAGE_LAYOUT;
+            library_open: bool = false, PAGE_LAYOUT;
+            library_size: LibrarySize = LibrarySize::default(), PAGE_LAYOUT;
+            library_subfolder: String = String::new(), PAGE_LAYOUT;
             /// Preview panel placement and reflow while dragging. Off shows the drop outline.
             live_panel_drag_preview: bool = true, PAGE_LAYOUT;
             /// Ordered view controls and their appearance.
@@ -128,8 +148,10 @@ macro_rules! layout_preferences {
             /// and entering Render opens a view of its own, as in 0.43.0. Off: the tab looks as
             /// it did before design views, with no switcher until the user opens a second view.
             show_design_view_switcher: bool = false, PAGE_LAYOUT;
-            /// Show the optional document browser beside the design.
-            show_document_browser: bool = false, PAGE_LAYOUT;
+            /// Minimize, Maximize and Close at the right end of SolidCraft's own title bar (Windows, and
+            /// Linux without the system's title bar). Off for a tiling window manager, which handles the
+            /// window itself (#20385); the bar still moves the window. On by default, as before.
+            show_window_controls: bool = true, PAGE_LAYOUT;
             /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
             /// tools then start a sketch first (#7904).
             sketch_tab_always: bool = false, PAGE_LAYOUT;
@@ -139,6 +161,15 @@ macro_rules! layout_preferences {
             /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
             /// as the rest of the title bar does, as before.
             tab_double_click_renames: bool = true, PAGE_LAYOUT;
+            /// Two-dimensional (2D) Timeline with multi-track component layout,
+            /// two-tier header, movable corridor brackets, and feature grouping.
+            timeline_2d: bool = false, PAGE_LAYOUT;
+            /// Whether unoccupied cells in the 2D timeline grid display subtle alignment dots (·).
+            timeline_2d_cell_dots: bool = true, PAGE_LAYOUT;
+            /// Allow activating components directly by clicking component tracks or radio indicators in the 2D timeline.
+            timeline_2d_component_activation: bool = true, PAGE_LAYOUT;
+            /// How unsuppressing an upstream feature affects downstream dependents in the 2D timeline DAG.
+            timeline_2d_unsuppress_mode: Timeline2dUnsuppressMode = Default::default(), PAGE_LAYOUT;
             /// Vertical History starts with the active component's Bodies folder and the Origin (#6490).
             timeline_origin_bodies: bool = false, PAGE_LAYOUT;
             /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom

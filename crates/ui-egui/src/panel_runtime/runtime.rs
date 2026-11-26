@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
 
-use super::*;
+use super::host::{ContentSlot, LocalScope, Motion, NativeHostAdapter, PanelContext, PanelHost, PanelLocalServices, PanelPresentation};
+use super::interaction::{HostProposalSnapshot, PreparedHostLayout, prepare_host_layout_with_snapshot};
+use super::layout::{HostContentMetrics, HostIdentityReservations, HostLayout};
+use super::workspace::runtime_scope;
 
 /// A floating rectangle changes geometry, not the controller's presentation
 /// host. Keep its keyboard/overlay ownership while retaining ordinary reparent
@@ -15,7 +18,7 @@ fn same_presentation_host(before: Option<(&SectionId, &SectionLocation)>, after:
 }
 
 /// Retention spans every open document, independently of the active layout.
-pub const MAX_RETAINED_DOCUMENT_OWNERS: usize = crate::documents::MAX_OPEN;
+pub const MAX_RETAINED_DOCUMENT_OWNERS: usize = 32;
 /// Application, workspace and window owners share a separate bounded budget.
 pub const MAX_RETAINED_OTHER_OWNERS: usize = MAX_INSTANCES;
 /// Total retained owners; also bounds the separate destroyed-owner tombstone set.
@@ -386,6 +389,15 @@ impl PanelRuntime {
         }
         self.bindings.insert(kind, binding);
         Ok(())
+    }
+    pub(super) fn register_panel(&mut self, spec: PanelSpec, binding: ControllerBinding) -> PanelResult<()> {
+        self.require_live()?;
+        if self.bindings.contains_key(&spec.kind) || self.bindings.len() >= MAX_INSTANCES {
+            return Err(error(Rule::CollectionLimit, "panel controller registration unavailable"));
+        }
+        let kind = spec.kind.clone();
+        self.layout.register_panel(spec)?;
+        self.register(kind, binding)
     }
     pub fn layout(&self) -> &LayoutService {
         &self.layout
