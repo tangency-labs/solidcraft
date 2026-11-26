@@ -2549,6 +2549,33 @@ fn polar_guess_basis(g: &PolarBox) -> Vec3 {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The NURB is written when
+/// present. Whether it is borrowed decides no evaluation, and the two out-of-bounds flags
+/// are a solve's scope on a shared surface, not the surface: they are left out.
+impl crate::geom::content::Content for BSplineSurface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            nurb,
+            nurb_is_borrowed: _,
+            out_of_bounds_enabled: _,
+            continues_past_domain: _,
+            knot_type,
+            form,
+        } = self;
+        d.tag(0xB55);
+        match nurb.as_ref() {
+            Some(n) => {
+                d.bool(true);
+                n.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.hashed(knot_type);
+        d.hashed(form);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

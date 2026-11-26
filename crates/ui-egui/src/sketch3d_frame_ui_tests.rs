@@ -485,6 +485,95 @@ fn point3d_tool_places_points_and_stays() {
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
 }
 
+/// 3D Sketch (#19426), in the menu of the Model tab's Sketch panel, asks for no plane. A 3D sketch
+/// opens with 3D Line running in it, as one undo step, and the view stays where it was.
+#[test]
+fn create3d_in_the_sketch_panel_menu_opens_a_3d_sketch_with_3d_line_and_no_plane_to_pick() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"Create3d"})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    let before = h.app.settled_cam();
+    let undo = h.app.session.undo.len();
+    // New Sketch stays the panel's only button: 3D Sketch is in the panel's menu.
+    assert!(crate::scenario::handle_at("button:sketch.create").is_some());
+    assert!(crate::scenario::handle_at("button:sketch.create3d").is_none(), "the default buttons are unchanged");
+    h.step(&json!({"click": {"handle": "panel:MODEL:SKETCH"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dropdown:sketch.create3d"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none(), "3D Sketch asks for no plane");
+    let sketch = h.app.session.active_sketch.expect("3D Sketch opens a sketch");
+    assert!(crate::sketch3d::active(&h.app), "with 3D Sketch already on");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "and 3D Line running: {:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "as one undo step");
+    assert_eq!(h.app.settled_cam(), before, "the view does not turn: there is no plane to face");
+    let hint = h.app.tr("sketch.hint.create3d").to_owned();
+    assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()), "the hint says how to leave the plane");
+    // The box's top-face vertices are off the plane the sketch rests on: the line keeps them.
+    for p in OFF_PLANE {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let wires = crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().sketch.wires.clone();
+    assert_eq!(wires.len(), 2, "three clicks draw two joined 3D segments");
+    let expected = [[Vec3::new(10.0, 0.0, 10.0), Vec3::new(20.0, 10.0, 10.0)], [Vec3::new(20.0, 10.0, 10.0), Vec3::new(10.0, 10.0, 10.0)]];
+    for (w, pair) in wires.iter().zip(expected) {
+        assert!(w.fit[0].dist(pair[0]) < 1e-6 && w.fit[1].dist(pair[1]) < 1e-6, "{:?}", w.fit);
+    }
+    // Escape ends the tool as in any sketch, and Finish Sketch keeps what was drawn.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Escape ends 3D Line");
+    h.app.start("sketch.finish");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none());
+    assert_eq!(h.app.session.doc.sketch(sketch).unwrap().wires.len(), 2);
+}
+
+/// 3D Sketch started and finished with nothing drawn leaves no empty sketch behind, as Create
+/// Sketch does; and Undo takes back a 3D sketch that was started by mistake.
+#[test]
+fn create3d_left_empty_goes_when_it_finishes_and_undo_takes_it_back() {
+    let mut h = crate::scenario::Harness::new();
+    h.frames(2);
+    h.app.start("sketch.create3d");
+    h.frames(2);
+    let sketch = h.app.session.active_sketch.expect("3D Sketch opens a sketch");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.start("sketch.finish");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.doc.feature(sketch).is_none(), "an empty 3D sketch is not kept");
+
+    let empty = h.app.session.doc.to_json();
+    h.app.start("sketch.create3d");
+    h.frames(2);
+    assert!(h.app.session.active_sketch.is_some());
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert!(h.app.session.active_sketch.is_none(), "Undo leaves the sketch");
+    assert_eq!(h.app.session.doc.to_json(), empty);
+}
+
+/// With a sketch already open, 3D Sketch finishes it first, as New Sketch does.
+#[test]
+fn create3d_from_inside_a_sketch_finishes_that_sketch_first() {
+    let mut h = crate::scenario::Harness::new();
+    let first = h.app.run("sketch.create", json!({"plane":"XY","name":"Flat"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+    h.frames(2);
+    h.app.start("sketch.create3d");
+    h.frames(3);
+    let second = h.app.session.active_sketch.expect("the 3D sketch is open");
+    assert_ne!(second, first);
+    assert!(crate::sketch3d::active(&h.app));
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.sketch(first).unwrap().curves.len(), 4, "the rectangle is kept");
+}
+
 /// Snap points in 3D sketches (#11229): hovering a box's top edge wakes its middle, and the 3D
 /// Point tool takes the middle itself from just beside it on the edge (a woken point beats the
 /// edge it lies on within `snap_wake::ON`).
@@ -590,4 +679,149 @@ fn move_copy_triad_sits_where_the_turned_point_lands() {
     }
     let c = move_triad_centre(&h);
     assert!((c.x + 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6, "{c:?}");
+}
+
+/// Click `points` in turn, each a world point the 3D tools must take as given, within `tol` (a
+/// snapped vertex is exact; a point on the sketch plane is as exact as the pixel under it).
+fn click_world(h: &mut crate::scenario::Harness, points: &[[f64; 3]], tol: f64) {
+    for p in points {
+        let [x, y] = h.at(&json!({"world": p})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let screen = egui::pos2(x as f32, y as f32);
+        assert!(h.app.viewport.rect.unwrap().shrink(4.0).contains(screen), "p={p:?} is outside the view at {screen:?}");
+        let picked = crate::sketch3d::point_at(&h.app, &proj, screen);
+        assert!(picked.is_some_and(|(q, _)| q.dist(Vec3::new(p[0], p[1], p[2])) < tol), "p={p:?}, picked={picked:?}");
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+}
+
+#[test]
+fn control_spline3d_tool_draws_a_curve_over_its_control_points() {
+    let (mut h, sketch) = box_and_3d_sketch("ControlSpline3dPicks");
+    h.app.start("sketch.spline3d.control_point");
+    assert!(
+        h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline3d.control_point"),
+        "the 3D Control Point Spline entry starts a tool: {:?}",
+        h.app.status
+    );
+    h.frames(2);
+    h.app.status = None;
+    // Two control points are a line, not this curve: finishing there draws nothing and says so.
+    click_world(&mut h, &OFF_PLANE[..2], 1e-5);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().sketch.wires.is_empty());
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("needs 3 to 500 points")), "{:?}", h.app.status.as_ref().map(|s| &s.0));
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline3d.control_point"), "the tool stays for the next curve");
+    h.app.status = None;
+    click_world(&mut h, &OFF_PLANE, 1e-5);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three off-plane clicks finish as one 3D control point spline: {:?}", h.app.status.as_ref().map(|s| &s.0));
+    let w = &wires[0];
+    assert_eq!(w.control.map(|c| c.degree), Some(3));
+    let c: Vec<Vec3> = OFF_PLANE.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+    for (fit, p) in w.fit.iter().zip(&c) {
+        assert!(fit.dist(*p) < 1e-6, "{:?}", w.fit);
+    }
+    // Over three control points the curve is their quadratic Bézier: its middle is
+    // (P0 + 2 P1 + P2) / 4, a quarter of the way from the chord's middle to the control point.
+    let mid = w.pts[(w.pts.len() - 1) / 2];
+    assert!(mid.dist((c[0] + c[1] * 2.0 + c[2]) * 0.25) < 1e-6, "{mid:?}");
+    // Its control polygon is shown: the control point in the middle is off the curve.
+    assert_eq!(crate::sketch3d::control_polygons(&h.app), vec![w.fit.clone()]);
+}
+
+#[test]
+fn control_point_spline_tool_leaves_the_plane_in_a_3d_sketch() {
+    let (mut h, sketch) = box_and_3d_sketch("ControlSplinePlaneOrSpace");
+    // Further out than the fitted box, so the plane beside it is in the view.
+    h.call("ui.camera", json!({"target":[0,0,5],"distance":200}));
+    h.frames(3);
+    h.app.start("sketch.spline.control_point");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline.control_point"), "{:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    // Clicks that stay on the plane are the planar tool's: the planar control point spline, as
+    // in any sketch.
+    let on_plane = [[-30.0, -10.0, 0.0], [-20.0, -25.0, 0.0], [-10.0, -10.0, 0.0]];
+    click_world(&mut h, &on_plane, 1e-3);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(3), "the planar tool took the clicks");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let planar_curves = {
+        use solidcraft_engine::sketch::CurveKind;
+
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        assert!(sk.wires.is_empty(), "no 3D curve from clicks on the plane");
+        let (polygon, curves): (Vec<_>, Vec<_>) = sk.curves.iter().partition(|curve| curve.spline_control_polygon_of.is_some());
+        let [spline] = curves.as_slice() else {
+            panic!("expected one planar spline, got {curves:?}");
+        };
+        let CurveKind::Spline { control: true, degree: 3, pts, .. } = &spline.kind else {
+            panic!("expected a cubic control point spline, got {:?}", spline.kind);
+        };
+        assert_eq!(pts.len(), on_plane.len());
+        assert_eq!(polygon.len(), pts.len() - 1);
+        assert!(polygon.iter().all(|side| side.construction && side.spline_control_polygon_of.as_deref() == Some(spline.id.as_str())));
+        for pair in pts.windows(2) {
+            assert!(
+                polygon.iter().any(|side| matches!(side.kind, CurveKind::Line { a, b } if [a, b] == pair || [b, a] == pair)),
+                "missing control polygon side joining {pair:?}"
+            );
+        }
+        sk.curves.clone()
+    };
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline.control_point"), "the tool stays for the next curve");
+    h.app.status = None;
+    // Two clicks on the plane, then one on a box vertex above it: the curve leaves the plane, and
+    // the points already clicked are its first control points.
+    let lifted = [[-30.0, 10.0, 0.0], [-20.0, 25.0, 0.0], OFF_PLANE[2], OFF_PLANE[0]];
+    click_world(&mut h, &lifted, 1e-3);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(0), "the planar tool handed its points over");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert_eq!(sk.curves, planar_curves, "the off-plane spline leaves the planar curves unchanged");
+    assert_eq!(sk.wires.len(), 1, "{:?}", h.app.status.as_ref().map(|s| &s.0));
+    let w = &sk.wires[0];
+    assert_eq!(w.control.map(|c| c.degree), Some(3));
+    assert_eq!(w.fit.len(), 4);
+    // The two points from the plane are where their pixels were; the two vertices are exact.
+    for (k, (fit, p)) in w.fit.iter().zip(lifted).enumerate() {
+        assert!(fit.dist(Vec3::new(p[0], p[1], p[2])) < if k < 2 { 1e-3 } else { 1e-6 }, "{:?}", w.fit);
+    }
+    assert!(w.fit[0].z.abs() < 1e-9 && w.fit[1].z.abs() < 1e-9, "{:?}", w.fit);
+}
+
+#[test]
+fn a_3d_control_point_drags_parallel_to_the_sketch_plane_in_one_undo_step() {
+    let (mut h, sketch) = box_and_3d_sketch("ControlSplineDrag");
+    let id =
+        h.app.run("sketch.spline3d.control_point", json!({"points": [[10, 0, 10], [20, 10, 10], [10, 10, 10], [10, 10, 20]]})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.status = None;
+    // The control point off the curve drags as any drawn 3D point does: parallel to the sketch
+    // plane, so it keeps its height.
+    let before = h.at(&json!({"world":[20,10,10]})).unwrap();
+    let after = h.at(&json!({"world":[24,13,10]})).unwrap();
+    let history = h.app.session.undo.len();
+    h.call("ui.drag", json!({"x0":before[0],"y0":before[1],"x1":after[0],"y1":after[1],"steps":8}));
+    let wire = |h: &crate::scenario::Harness| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        sk.wires[sk.wire_index(&id).unwrap()].clone()
+    };
+    let moved = wire(&h);
+    assert!(moved.fit[1].dist(Vec3::new(24.0, 13.0, 10.0)) < 1e-5, "{:?}", moved.fit);
+    assert!(moved.fit[0].dist(Vec3::new(10.0, 0.0, 10.0)) < 1e-9 && moved.fit[3].dist(Vec3::new(10.0, 10.0, 20.0)) < 1e-9, "{:?}", moved.fit);
+    assert_eq!(moved.control.map(|c| c.degree), Some(3));
+    assert_eq!(moved.pts, solidcraft_engine::sketch::control_polyline(&moved.fit, 3));
+    assert_eq!(h.app.session.undo.len(), history + 1, "the drag is one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(wire(&h).fit[1].dist(Vec3::new(20.0, 10.0, 10.0)) < 1e-9);
 }

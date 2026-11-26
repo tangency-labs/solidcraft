@@ -104,13 +104,24 @@ pub fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
 
 /// Render a scene with the camera into an RGBA canvas of `w × h` pixels.
 pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    let background = scene.background.unwrap_or((Rgb(236, 240, 245), Rgb(205, 212, 222)));
+    render_over(scene, cam, w, h, background, scene.background_middle)
+}
+
+/// [`render`] over the `(top, bottom)` gradient, through `middle` if given, instead of the
+/// scene's own background.
+fn render_over(scene: &Scene, cam: &Camera, w: usize, h: usize, (top, bot): (Rgb, Rgb), middle: Option<Rgb>) -> Canvas {
     let (w, h) = (w.clamp(1, MAX_DIM), h.clamp(1, MAX_DIM));
     let (sw, sh) = (w * SS, h * SS);
     let mut c = Canvas::new(sw, sh);
-    let (top, bot) = scene.background.unwrap_or((Rgb(236, 240, 245), Rgb(205, 212, 222)));
     for y in 0..sh {
         let t = y as f64 / sh.max(1) as f64;
-        let (a, b) = (top.f(), bot.f());
+        // With a middle colour (#9230) two bands: top → middle, middle → bottom.
+        let ((a, b), t) = match middle {
+            Some(mid) if t < 0.5 => ((top.f(), mid.f()), t * 2.0),
+            Some(mid) => ((mid.f(), bot.f()), t * 2.0 - 1.0),
+            None => ((top.f(), bot.f()), t),
+        };
         let col = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
         for x in 0..sw {
             c.put(x, y, col, 1.0);
@@ -510,13 +521,9 @@ pub fn render_png(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Option<Vec
 
 /// Render on a transparent background: the scene drawn over black and over white, and the
 /// alpha recovered from the difference (exact for the anti-aliased edges).
-pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
-    let keep = scene.background;
-    scene.background = Some((Rgb(0, 0, 0), Rgb(0, 0, 0)));
-    let black = render(scene, cam, w, h);
-    scene.background = Some((Rgb(255, 255, 255), Rgb(255, 255, 255)));
-    let mut out = render(scene, cam, w, h);
-    scene.background = keep;
+pub fn render_transparent(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    let black = render_over(scene, cam, w, h, (Rgb(0, 0, 0), Rgb(0, 0, 0)), None);
+    let mut out = render_over(scene, cam, w, h, (Rgb(255, 255, 255), Rgb(255, 255, 255)), None);
     unblend(&mut out.rgba, &black.rgba);
     out
 }
@@ -533,6 +540,23 @@ pub fn unblend(over_white: &mut [u8], over_black: &[u8]) {
         }
         o[3] = a.round().clamp(0.0, 255.0) as u8;
     }
+}
+
+/// A picture as the GPU draws it: [`render`], or for a scene with no backdrop
+/// ([`Scene::transparent`]) [`render_transparent`] with its colours premultiplied by their alpha,
+/// as a GPU picture drawn over transparent black comes back.
+pub fn render_picture(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    if !scene.transparent {
+        return render(scene, cam, w, h);
+    }
+    let mut canvas = render_transparent(scene, cam, w, h);
+    for px in canvas.rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(px[3]);
+        for v in &mut px[..3] {
+            *v = ((u32::from(*v) * a + 127) / 255) as u8;
+        }
+    }
+    canvas
 }
 
 #[cfg(test)]
@@ -594,6 +618,42 @@ mod tests {
         assert!(render_png(&scene, &cam, 16, 16).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
         // Hostile sizes are clamped.
         assert_eq!(render(&scene, &cam, 0, usize::MAX).w, 1);
+        // With no backdrop: clear around the triangle, opaque on it.
+        let t = render_transparent(&scene, &cam, 64, 64);
+        assert_eq!(t.rgba[3], 0, "a corner is clear");
+        assert_eq!(t.rgba[i + 3], 255, "the centre is opaque");
+        assert!(t.rgba[i] > t.rgba[i + 1] + 50, "and red: {:?}", &t.rgba[i..i + 4]);
+        // As a picture: the same, premultiplied (clear pixels are all zero); with a backdrop, `render`.
+        let mut clear = scene;
+        clear.transparent = true;
+        let p = render_picture(&clear, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a clear corner is transparent black");
+        assert_eq!(&p.rgba[i..i + 4], &t.rgba[i..i + 4], "an opaque pixel is unchanged");
+        clear.transparent = false;
+        assert_eq!(render_picture(&clear, &cam, 64, 64).rgba, render(&clear, &cam, 64, 64).rgba);
+    }
+
+    /// A middle colour (#9230) makes the background two bands: top → middle → bottom, the middle
+    /// colour itself halfway down. A transparent picture has no background, middle colour or not.
+    #[test]
+    fn the_background_passes_through_its_middle_colour() {
+        let (top, middle, bottom) = (Rgb(240, 0, 0), Rgb(0, 240, 0), Rgb(0, 0, 240));
+        let scene = Scene { background: Some((top, bottom)), background_middle: Some(middle), radius: 10.0, ..Default::default() };
+        let cam = Camera::default();
+        let c = render(&scene, &cam, 4, 64);
+        let px = |row: usize| -> [i32; 3] { std::array::from_fn(|k| i32::from(c.rgba[(row * 4 + 2) * 4 + k])) };
+        let near = |row: usize, want: [i32; 3]| {
+            let got = px(row);
+            assert!((0..3).all(|k| (got[k] - want[k]).abs() <= 12), "row {row}: {got:?}, want about {want:?}");
+        };
+        near(0, [240, 0, 0]);
+        near(16, [120, 120, 0]);
+        near(32, [0, 240, 0]);
+        near(48, [0, 120, 120]);
+        near(63, [0, 0, 240]);
+
+        let t = render_transparent(&scene, &cam, 4, 64);
+        assert!(t.rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 0), "no band shows through a transparent picture");
     }
 
     /// A square panel facing the front camera (which looks along +Y), 20 × 20 about the origin

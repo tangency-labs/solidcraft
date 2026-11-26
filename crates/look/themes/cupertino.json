@@ -2,6 +2,7 @@
   "order": 90,
   "provenance": "Original SolidCraft theme",
   "base": "light",
+  "accepts_accent": true,
   "colors": {
     "accent": "#007aff",
     "accent_soft": "#dcecff",

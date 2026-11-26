@@ -47,6 +47,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.dimension", json!({"entities": vec!["l1"; 1001]})),
         ("sketch.dimension", json!({"entities": [{"edge": 5}]})),
         ("sketch.dimension", json!({"entities": [{"vertex": [1, 2]}]})),
+        // A planar model face is a 3D sketch's plane (#10616): the 3D handler reads it.
+        ("sketch.dimension", json!({"entities": ["w1.start", {"face": [0, 0, 10], "body": "Body1"}]})),
         // The handler looks the sketch up before it reads a model reference's form.
         ("sketch.dimension", json!({"entities": [{"edge": 5}], "sketch": true})),
         ("sketch.dimension", json!({"entities": ["l1"], "half_axes": "no"})),
@@ -202,10 +204,13 @@ fn the_types_read_each_key_like_the_handler() {
         json!([{"vertex": [1, 2, 3]}, {"edge": {"x": 1, "y": 2, "z": 3}}]),
         // Forms the handler passes on to the design: a body, a sketch or a plane in place of a point.
         json!([{"edge": 5, "body": "B"}]),
+        // A 3D dimension takes a model face as its plane; the handler checks the sketch context.
+        json!([{"face": [1, 2, 3]}]),
+        json!(["w1.start", {"face": [1, 2, 3], "body": "Flange"}]),
     ] {
         assert!(parses(json!({"entities": entities})), "{entities}");
     }
-    for entities in [json!(5), json!([5]), json!([null]), json!([{"face": [1, 2, 3]}]), json!([{}]), json!({"edge": [1, 2, 3]}), json!([["a"]])] {
+    for entities in [json!(5), json!([5]), json!([null]), json!([{}]), json!({"edge": [1, 2, 3]}), json!([["a"]])] {
         assert!(!parses(json!({"entities": entities})), "{entities}");
     }
     // The count is the handler's: one or two.

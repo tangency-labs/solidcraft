@@ -10,9 +10,9 @@
   },
   "ar": {
     "prefs.designs_folder": "مجلد التصاميم",
-    "prefs.designs_folder_help": "يفتح الحفظ والحفظ باسم في هذا المجلد للتصميم الذي لم يُحفظ من قبل. أما الحفظ باسم لتصميم محفوظ فيفتح بجانبه. اتركه فارغاً للفتح في آخر مجلد مستخدم.",
+    "prefs.designs_folder_help": "يفتح الحفظ والحفظ باسم في هذا المجلد للتصميم الذي لم يُحفظ من قبل. أما الحفظ باسم لتصميم محفوظ فيفتح بجانبه. اتركه فارغًا للفتح في آخر مجلد مستخدم.",
     "prefs.exports_folder": "مجلد التصدير",
-    "prefs.exports_folder_help": "تفتح نوافذ التصدير (STEP وSTL و3MF والرسومات وغيرها من الملفات المحفوظة) في هذا المجلد، حتى تختار مجلداً آخر في إحداها. اتركه فارغاً للفتح في آخر مجلد مستخدم.",
+    "prefs.exports_folder_help": "تفتح نوافذ التصدير (STEP وSTL و3MF والرسومات وغيرها من الملفات المحفوظة) في هذا المجلد، حتى تختار مجلدًا آخر في إحداها. اتركه فارغًا للفتح في آخر مجلد مستخدم.",
     "prefs.folder_browse": "استعراض…",
     "prefs.folder_hint": "آخر مجلد مستخدم",
     "prefs.folders": "المجلدات"
@@ -70,5 +70,14 @@
     "prefs.folder_browse": "浏览…",
     "prefs.folder_hint": "上次使用的文件夹",
     "prefs.folders": "文件夹"
+  },
+  "fr": {
+    "prefs.designs_folder": "Dossier des conceptions",
+    "prefs.designs_folder_help": "Pour une conception qui n’a jamais été enregistrée, les commandes Enregistrer et Enregistrer sous ouvrent ce dossier. Pour une conception déjà enregistrée, Enregistrer sous ouvre le dossier qui la contient. Laissez vide pour ouvrir le dernier dossier utilisé.",
+    "prefs.exports_folder": "Dossier des exportations",
+    "prefs.exports_folder_help": "Les boîtes de dialogue d’exportation (STEP, STL, 3MF, dessins et autres fichiers enregistrés) s’ouvrent dans ce dossier, jusqu’à ce que vous en choisissiez un autre dans l’une d’elles. Laissez vide pour ouvrir le dernier dossier utilisé.",
+    "prefs.folder_browse": "Parcourir…",
+    "prefs.folder_hint": "Dernier dossier utilisé",
+    "prefs.folders": "Dossiers"
   }
 }

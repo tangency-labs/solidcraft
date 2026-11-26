@@ -331,7 +331,7 @@ impl Document {
                     .bodies
                     .iter()
                     .filter(|b| owner(b) == id)
-                    .map(|b| self.materials.get(b.definition_name()).and_then(|m| self.material_look(m)));
+                    .map(|b| self.resolved_body_material(b.definition_name()).and_then(|m| self.material_look(m)));
                 let material = materials.next().flatten().filter(|first| materials.all(|look| look.as_ref() == Some(first)));
                 Ok(AppearanceChain { face: None, body: None, component: self.appearances.components.get(&id).cloned(), material })
             }
@@ -343,7 +343,7 @@ impl Document {
             face: None,
             body: self.appearances.bodies.get(name).cloned(),
             component: (component != 0).then(|| self.appearances.components.get(&component).cloned()).flatten(),
-            material: self.materials.get(name).and_then(|material| self.material_look(material)),
+            material: self.resolved_body_material(name).and_then(|material| self.material_look(material)),
         }
     }
 
@@ -460,7 +460,8 @@ impl Document {
                 let target = crate::config::ConfigFaceTarget {
                     body: f.body.clone(),
                     origin_feature,
-                    name: crate::naming::strip_piece(name).into(),
+                    // A Split Face piece by its own name is that piece; any other name, the face.
+                    name: if crate::history_names::names_split_piece(name) { name.clone() } else { crate::naming::strip_piece(name).into() },
                     point: f.point,
                     certificate: f.certificate.clone(),
                 };
@@ -471,9 +472,14 @@ impl Document {
                 }
                 continue;
             }
-            // By name (every piece of a split face), else by the point.
+            // By name (every piece of a split face; a Split Face piece by its own name, that piece
+            // alone), else by the point.
             if let Some(n) = &f.name {
-                let hits = crate::naming::faces_with_stem(b, n);
+                let hits = if crate::history_names::names_split_piece(n) {
+                    (0..b.body.face_count()).filter(|i| crate::name_lookup::face_has_name(b, *i, n)).collect()
+                } else {
+                    crate::naming::faces_with_stem(b, n)
+                };
                 if !hits.is_empty() {
                     for i in hits {
                         out.retain(|(j, _)| *j != i);

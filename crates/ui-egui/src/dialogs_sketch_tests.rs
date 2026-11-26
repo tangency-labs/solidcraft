@@ -129,7 +129,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     h.settle();
     let Some(Kind::SketchModify(Mod::Equation { form, y, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no equation window") };
     *form = 1;
-    *y = "10 + 2 * sin(x / 4)".into();
+    *y = "sin(90)".into();
     h.settle();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
@@ -137,7 +137,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.doc.sketch(sid).unwrap().clone();
     let eq = sk.equations.first().cloned().expect("an equation curve");
-    assert_eq!((eq.x.as_deref(), eq.y.as_str(), eq.end.as_str()), (None, "10 + 2 * sin(x / 4)", "2 * pi"));
+    assert_eq!((eq.x.as_deref(), eq.y.as_str(), eq.end.as_str()), (None, "sin(90)", "360"));
     h.app.session.selection = vec![Sel::SketchCurve { id: eq.curve.clone(), sketch: None }];
     assert!(crate::sketch_modify_ui::selected_equation(&h.app).is_some());
     assert!(crate::sketch_modify_ui::edit_equation(&mut h.app, &eq.curve));
@@ -145,7 +145,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     let Some(Kind::SketchModify(Mod::Equation { form, y, end, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
         panic!("no equation window")
     };
-    assert_eq!((*form, y.as_str()), (1, "10 + 2 * sin(x / 4)"));
+    assert_eq!((*form, y.as_str()), (1, "sin(90)"));
     *end = "20".into();
     let curves = sk.curves.len();
     h.settle();
@@ -224,7 +224,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
     h.frames(4);
 
     let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
-    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: true, projection_link: true }));
+    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: true, projection_link: true, construction: false }));
     assert_eq!(d.inputs[0].accept, super::BODIES);
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Post".into() }]);
     assert!(scenario::rect_of("dialog:row:ui.sketch_intersect_geometry").is_some());
@@ -246,12 +246,24 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
         d.inputs[0].items = vec![Sel::Body { name: "Post".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":false,"construction":false})
+        )]
+    );
     // A model edge is cut with the plane too (#10484).
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
     let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        cmds,
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false,"construction":false})
+        )]
+    );
 }
 
 /// Intersect takes the lines of another sketch (#10484): a rectangle on XY, a sketch on a plane
@@ -276,7 +288,13 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     let [Sel::ExternalSketchCurve { sketch, id }] = d.inputs[0].items.as_slice() else { panic!("the side is picked: {:?}", d.inputs[0].items) };
     assert_eq!(*sketch, rectangle);
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true}))]);
+    assert_eq!(
+        cmds,
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true,"construction":false})
+        )]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -322,7 +340,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.frames(4);
 
     let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
-    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true }));
+    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true, construction: false }));
     assert_eq!(d.inputs[0].accept, super::BODIES);
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Plate".into() }]);
     assert!(scenario::handle_at("dialog:Selection Filter").is_some());
@@ -343,7 +361,13 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
         d.inputs[0].items = vec![Sel::Body { name: "Plate".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![(
+            "sketch.project".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":false,"construction":false})
+        )]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -356,11 +380,12 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
 
 /// Project takes a point of another sketch (#13246): a point on XY, a sketch on a plane above
 /// it, and a click on the point in the Project dialog picks it, where it used to do nothing.
+/// The point sits where the Project panel does not cover it.
 #[test]
 fn project_dialog_takes_a_point_of_another_sketch_13246() {
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-    h.app.run("sketch.point", json!({"point":[30,20],"id":"pt"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[30,-20],"id":"pt"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let first = h.app.session.doc.features.last().unwrap().id;
     h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap();
@@ -372,18 +397,24 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
     // The sketch's own point is not something Project takes.
     h.step(&json!({"click":{"world":[-30,10,20]}})).unwrap();
     assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
-    h.step(&json!({"click":{"world":[30,20,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[30,-20,0]}})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::ExternalSketchPoint { sketch: first, id: "pt".into() }], "the point is picked");
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.project".into(), json!({"refs":[{"sketch":first,"point":"pt"}],"projection_link":true}))]);
+    assert_eq!(
+        cmds,
+        vec![(
+            "sketch.project".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"sketch":first,"point":"pt"}],"projection_link":true,"construction":false})
+        )]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
     let state = h.app.session.world_state().unwrap();
     let sk = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(
-        sk.sketch.points.iter().any(|p| p.id != "origin" && (p.pos.x - 30.0).abs() < 1e-6 && (p.pos.y - 20.0).abs() < 1e-6),
+        sk.sketch.points.iter().any(|p| p.id != "origin" && (p.pos.x - 30.0).abs() < 1e-6 && (p.pos.y + 20.0).abs() < 1e-6),
         "the point is projected"
     );
 }
@@ -404,7 +435,13 @@ fn project_dialog_takes_a_construction_point() {
         d.inputs[0].items = vec![point];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![(
+            "sketch.project".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"point":"Point1"}],"projection_link":true,"construction":false})
+        )]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
@@ -1079,4 +1116,241 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
     h.call("ui.camera", json!({"target":[65,35,0],"distance":180}));
     h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
     assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// Dialog previews and deferred submissions carry the same explicit policy and displayed path.
+/// Execute their JSON directly on the engine to prove it does not need UI session state.
+#[test]
+fn projection_dialog_preview_and_apply_keep_explicit_policy_and_displayed_copy() {
+    for enhanced in [false, true] {
+        for command in ["sketch.project", "sketch.intersect"] {
+            let mut h = Harness::new();
+            h.app.ui.project_link_tools = enhanced;
+            let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
+            let source =
+                h.app.run("sketch.create", json!({"plane":if command == "sketch.intersect" {"XZ"} else {"XY"}})).unwrap()["sketch"].as_u64().unwrap();
+            h.app.run("sketch.line", json!({"points":[[2,-5],[2,5]],"ids":["source"]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
+            h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
+            h.app.run("component.activate", json!({"component":0})).unwrap();
+            h.app.run("component.create", json!({"name":"B"})).unwrap();
+            let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+            let mut d = Dialog::for_command(&h.app, command).unwrap();
+            d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: source, id: "source".into() }];
+            let commands = apply_commands(&h.app, &d).unwrap();
+            assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+            assert_eq!(commands.len(), 1);
+            assert_eq!(commands[0].0, command);
+            assert_eq!(commands[0].1["strict_occurrence_references"], enhanced);
+            if enhanced {
+                assert_eq!(commands[0].1["refs"][0]["path"], json!([a1]));
+            } else {
+                assert!(commands[0].1["refs"][0].get("path").is_none());
+            }
+            let reply = h.app.session.execute(&commands[0].0, &commands[0].1).unwrap();
+            let link = reply["links"][0]["link"].as_str().unwrap();
+            let expected = enhanced.then_some(vec![a1]);
+            assert_eq!(h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap().placement.as_ref().map(|p| p.source.clone()), expected);
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let mut reopened = solidcraft_engine::Session::default();
+            reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
+            reopened.refresh();
+            let st = reopened.model.state();
+            let stored = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
+            assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
+            assert!(!stored.lost);
+        }
+    }
+}
+
+/// Project owns this opt-in; neither saving preferences nor an older preference enables it.
+#[test]
+fn project_link_tools_are_a_session_option_in_the_project_panel() {
+    let mut h = fixture();
+    assert!(!h.app.ui.project_link_tools);
+    let before = h.app.session.doc.to_json();
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { .. }));
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before, "choosing a UI policy edits no design");
+    assert_eq!(h.call("ui.set", json!({"showGrid":false}))["ok"], true);
+    assert!(h.app.ui.project_link_tools, "other UI changes retain the session option");
+    assert_eq!(h.call("ui.set", json!({"projectLinkTools":"yes"}))["ok"], false);
+    assert!(h.app.ui.project_link_tools, "a malformed update keeps the previous option");
+    assert_eq!(h.call("ui.prefs", json!({"projection_workflow_ui":true}))["ok"], false);
+
+    let exported = h.app.prefs();
+    let prefs: Value = serde_json::from_str(&exported).unwrap();
+    assert!(prefs["preferences"].get("projection_workflow_ui").is_none());
+    assert!(prefs.get("projectLinkTools").is_none());
+    assert!(prefs["preferences"].get("project_link_tools").is_none());
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&exported);
+    assert!(!restored.ui.project_link_tools);
+    restored.load_prefs(r#"{"preferences":{"projection_workflow_ui":true}}"#);
+    assert!(!restored.ui.project_link_tools, "the removed preference cannot enable Project's option");
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.ui.project_link_tools, "the choice lasts for the session after closing Project");
+    h.app.start("sketch.project");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(!h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before);
+}
+
+/// The Project dialog provides a Construction option to project references as construction geometry.
+#[test]
+fn project_dialog_has_construction_option_to_project_as_construction() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.start("sketch.project");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true, construction: false }));
+    assert!(scenario::rect_of("dialog:row:Construction").is_some(), "Construction row exists");
+
+    // Toggle Construction on
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { construction: true, .. }));
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![(
+            "sketch.project".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":true,"construction":true})
+        )]
+    );
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty(), "projected curves exist");
+    assert!(sk.curves.iter().all(|c| c.construction), "all projected curves are construction");
+
+    // Because all projected curves are construction, no profiles are formed for extrusion.
+    let inspect = h.app.session.execute("sketch.inspect", &json!({"sketch": sketch})).unwrap();
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(0), "no profile created from construction lines");
+}
+
+/// If the project_construction preference is on, the Project dialog defaults Construction to on,
+/// and toggling it off projects as normal geometry.
+#[test]
+fn project_dialog_respects_session_construction_and_allows_toggling_off() {
+    let mut h = Harness::new();
+    h.app.session.project_construction = true;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.start("sketch.project");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchProject { construction: true, .. }), "starts with construction true");
+
+    // Toggle Construction off
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { construction: false, .. }));
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty());
+    assert!(sk.curves.iter().all(|c| !c.construction), "curves are normal geometry");
+    let inspect = h.app.session.execute("sketch.inspect", &json!({"sketch": sketch})).unwrap();
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(1), "normal geometry forms a profile");
+}
+
+/// The Intersect dialog also provides a Construction option.
+#[test]
+fn intersect_dialog_has_construction_option() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Post".into() }];
+    h.app.start("sketch.intersect");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchIntersect { construction: false, .. }));
+    assert!(scenario::rect_of("dialog:row:Construction").is_some());
+
+    h.step(&json!({"click":{"handle":"dialog:Construction"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchIntersect { construction: true, .. }));
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":true,"construction":true})
+        )]
+    );
+
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+
+    let sketch = h.app.session.active_sketch.expect("Intersect leaves sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    assert!(!sk.curves.is_empty());
+    assert!(sk.curves.iter().all(|c| c.construction));
+}
+
+/// Project's Geometry filter offers Tangent chain: ticked, one pick of a rounded block's top edge
+/// brings its whole smooth outline, and OK projects all of it. The Bodies filter has no edges to
+/// chain, so it shows no switch, and going back to Geometry starts unticked.
+#[test]
+fn project_tangent_chain_projects_the_smooth_outline() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "B"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false})).unwrap();
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let b = world.body("B").unwrap();
+    // The straight top front edge: every point of it at y = 0, z = 10.
+    let index = b.mesh().edges.iter().position(|e| e.len() > 1 && e.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6)).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 30})).unwrap();
+    h.settle();
+    h.app.start("sketch.project");
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, Some(false), "Geometry offers the switch, off");
+    let pick = Sel::Edge { body: "B".into(), index, point: solidcore_record::Vec3::new(20.0, 0.0, 10.0) };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 8, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    // Bodies: no switch; back to Geometry: the switch again, unticked and empty.
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Bodies"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, None);
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Geometry"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, Some(false));
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    // Ticked again, one pick, OK: the sketch gets the whole outline.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 8);
+    h.app.status = None;
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    let (text, _, error) = h.app.status.clone().expect("Project says what it added");
+    assert!(!error && text.contains("8 curves"), "{text}");
 }
