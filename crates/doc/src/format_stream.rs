@@ -3244,7 +3244,7 @@ fn validate_sketch_offsets_str(s: &str, total_roles: &mut usize) -> Result<()> {
             let topo = parse_topology(topo_raw.get()).map_err(|_| de::Error::custom("invalid topology"))?;
             if !state.groups.insert(topo.id.clone())
                 || topo.version != 1
-                || !closed.is_some_and(|raw| serde_json::from_str::<bool>(raw.get()) == Ok(true))
+                || !closed.is_some_and(|raw| matches!(serde_json::from_str::<bool>(raw.get()), Ok(true)))
             {
                 return Err(de::Error::custom("invalid topology header"));
             }
