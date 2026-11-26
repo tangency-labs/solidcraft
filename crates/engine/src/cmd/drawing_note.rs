@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "anchor: {sheet: id or name}, {view: id}, {edge: {view, edge}} or {corner: {view, corner}} (an edge or a corner as drawing.dimension.add \
              takes it; its leader ends there); at: [x, y] on paper in mm, from the sheet's lower-left corner or the view's centre; content: text, \
-             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; branches?: [{edge} or \
+             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; at_edge?: middle (default) or picked, where an edge anchor's leader ends: on the edge's middle, or at its `point`, kept as a part of the edge's length; branches?: [{edge} or\
              {corner}], more leaders of a note on a view, 16 leaders in all, its anchor's included → what drawing.note.inspect answers \
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
@@ -101,10 +101,11 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let anchor = match request.anchor {
         AnchorParam::Sheet(named) => Anchor::Sheet(crate::drawing_scene::sheet_id(&record, &named, ADD)?),
         AnchorParam::View(view) => Anchor::View(on_view(view.0)?),
-        AnchorParam::Edge { view, edge } => Anchor::Edge {
-            view: on_view(view.0)?,
-            edge: s.doc.edge_reference(&s.model, &edge.pick, &edge.path).map_err(|why| bad(ADD, why.to_string()))?,
-        },
+        AnchorParam::Edge { view, edge: picked } => {
+            let edge = s.doc.edge_reference(&s.model, &picked.pick, &picked.path).map_err(|why| bad(ADD, why.to_string()))?;
+            let along = super::drawing_balloon::leader_along(s, &edge, &picked.pick, request.at_edge, ADD)?;
+            Anchor::Edge { view: on_view(view.0)?, edge, along }
+        }
         AnchorParam::Corner { view, corner } => Anchor::Corner {
             view: on_view(view.0)?,
             point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
