@@ -1,8 +1,5 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
-
 #[path = "file_easyprint.rs"]
 mod easyprint;
 
@@ -2806,7 +2803,7 @@ impl Session {
         let cache = cache && !(design.linked_bodies_left_out && !design.links.is_empty());
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
-        let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
+        let thumbnail = cache.then(|| crate::thumbnail::png(self)).flatten();
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -3076,7 +3073,7 @@ fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
 
 /// A picture of the part, drawn only for a format that has a place for it.
 fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
-    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| crate::thumbnail::exported(s, bodies)).flatten()
 }
 
 /// `physics` as `file.export` reads it: true writes the joints, grounding and each component's
@@ -5602,8 +5599,10 @@ mod tests {
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
-        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(saved_geometry(&session, &session.doc).is_some());
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
+        // The save as a whole also draws the design's picture, which does mesh.
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(solidcraft_io::read_design_geometry(&bytes).is_some());
         assert!(
             solidcraft_io::read_design_geometry(&session.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap()).is_none()
