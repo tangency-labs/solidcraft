@@ -83,7 +83,7 @@ pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
     body_from_record, curve, curve_tolerance, cylinder, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_many_rails,
     loft_to_point, loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections,
-    sphere, sweep, sweep_controlled,
+    sphere, sweep, sweep_controlled, torus,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -124,8 +124,8 @@ mod imp {
 
     use solidcore_ops::sweep::Curve as SkinCurve;
     use solidcore_ops::sweep::railed::{RailFit as SkinFit, RailLoft, RailSection as SkinSection};
+    use solidcraft_smlib::Brep;
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
-    use solidcraft_smlib::{Brep, CheckLevel};
 
     use solidcore_record::{Loop2, Vec2};
 
@@ -366,16 +366,16 @@ mod imp {
     /// checks each step, left with the body for the feature's end when it checks each feature,
     /// and not checked otherwise (`crate::validation`).
     fn body_of(brep: Brep, what: &str) -> Result<Body> {
-        use crate::validation::{Checked, Step};
+        use crate::validation::Step;
         let step = crate::validation::step();
-        if step == Step::Check {
-            let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
-            if !check.is_valid() {
-                return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
-            }
-        }
         let body = crate::native::body_from_smlib(&brep)?;
-        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep, &[]) } else { body })
+        drop(brep);
+        if step == Step::Check
+            && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), body.record())?
+        {
+            return Err(failed(what, format!("SMLib's check refuses the result: {detail}")));
+        }
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), &[]) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
@@ -524,6 +524,15 @@ mod imp {
     pub(crate) fn sphere(center: Vec3, radius: f64) -> Result<Body> {
         let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
         let body = body_of(brep, "sphere")?;
+        let faces = body.face_count();
+        Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
+    }
+
+    /// SMLib's torus about the Z axis through `center`, each face swept from the circle
+    /// (segment 0) a torus revolves.
+    pub(crate) fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
+        let brep = Brep::make_torus(p(center), major, minor).map_err(|e| failed("torus", e))?;
+        let body = body_of(brep, "torus")?;
         let faces = body.face_count();
         Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
     }

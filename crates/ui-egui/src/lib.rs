@@ -57,6 +57,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -778,6 +779,11 @@ pub struct SolveApp {
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
     drawing_job: Option<drawing_jobs::Drawing>,
+    /// A drawing being read for the Insert SVG/DXF window, on a worker (see
+    /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
+    pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1203,6 +1209,8 @@ impl SolveApp {
             host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
+            insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -3019,7 +3027,7 @@ impl SolveApp {
             let command = id.to_string();
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_drawing::open(app, &command, path);
+                    dialogs_insert_drawing::start(app, &command, path);
                 }
             });
             return;
@@ -4637,6 +4645,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         parts_library::tick(self, ctx);
         file_load::tick(self, ctx);
+        dialogs_insert_drawing::tick(self);
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
@@ -4647,7 +4656,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() || self.insert_read.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
