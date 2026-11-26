@@ -9,7 +9,7 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
     () => {
-        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
+        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, or an expression, line_spacing?: times the font's line distance (default 1), or an expression, path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
     };
 }
 
@@ -23,10 +23,10 @@ use crate::params::{bad, num, req_vec2, str_, string_list, vec2_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
-    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult,
-    SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams,
-    SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult,
-    ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineControlPolygonParams, SplineHandlesParams,
+    SplineHandlesResult, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult,
+    SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions,
+    TextResult, ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -60,6 +60,7 @@ const EDIT_TEXT_CONTRACT: TypedContract<EditTextParams> = TypedContract::new();
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
 const SPLINE_INSERT_POINT_CONTRACT: TypedContract<SplineInsertPointParams> = TypedContract::new();
+const SPLINE_CONTROL_POLYGON_CONTRACT: TypedContract<SplineControlPolygonParams> = TypedContract::new();
 const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
 const SPLINE_RESET_HANDLES_CONTRACT: TypedContract<SplineResetHandlesParams> = TypedContract::new();
 
@@ -162,7 +163,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -170,7 +171,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_knots", "Control Point Spline with Knots", crate::checked!("sketch.spline.control_knots", spline_knots))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -191,6 +192,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_REMOVE_POINT_CONTRACT)
         .output(output_schema_for::<SplineRemovePointResult>)
         .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
+    CommandSpec::new(
+        "sketch.spline.control_polygon",
+        "Add Control Polygon",
+        crate::checked!("sketch.spline.control_polygon", spline_control_polygon),
+    )
+    .icon("spline_cv")
+    .enabled(in_sketch)
+    .contract(&SPLINE_CONTROL_POLYGON_CONTRACT)
+    .output(output_schema_for::<DrawResult>)
+    .params("curve: an editable control point spline id. Add finite construction segments between its own control points for sketch constraints and dimensions. Returns the segment ids in order."),
     CommandSpec::new("sketch.spline.handles", "Add Tangent Handles", crate::checked!("sketch.spline.handles", spline_handles))
         .icon("spline")
         .enabled(in_sketch)
@@ -320,13 +331,19 @@ fn text_style(p: &Value, cmd: &str, old: TextStyle) -> Result<TextStyle> {
         }
         Some(_) => return Err(bad(cmd, VERTICAL_MUST)),
     }
-    if p.get("letter_spacing").is_some_and(|v| !v.is_null()) {
-        style.letter_spacing =
-            num(p, "letter_spacing").filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`letter_spacing` must be a length in mm"))?;
+    // An expression (a string) is `text_source`'s to read.
+    if p.get("letter_spacing").is_some_and(|v| !v.is_null() && !v.is_string()) {
+        style.letter_spacing = num(p, "letter_spacing")
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| bad(cmd, "`letter_spacing` must be a length in mm, or an expression"))?;
     }
-    if p.get("line_spacing").is_some_and(|v| !v.is_null()) {
-        style.line_spacing =
-            num(p, "line_spacing").filter(|v| v.is_finite() && *v > 0.0).ok_or_else(|| bad(cmd, "`line_spacing` must be a positive factor"))?;
+    if p.get("line_spacing").is_some_and(|v| !v.is_null() && !v.is_string()) {
+        let s =
+            num(p, "line_spacing").filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`line_spacing` must be a positive factor, or an expression"))?;
+        if s <= 0.0 {
+            return Err(bad(cmd, "`line_spacing` must be a positive factor"));
+        }
+        style.line_spacing = s;
     }
     match p.get("path") {
         None | Some(Value::Null) => {}
@@ -347,7 +364,8 @@ pub(crate) const AT_MUST: &str = "`at` must be the baseline start [x, y], each a
 /// to. Returns the value (mm or radians) and the expression kept. Anything else is refused with
 /// `must`.
 pub(super) fn text_number(doc: &solidcraft_doc::Document, v: &Value, cmd: &str, key: &str, must: &str, angle: bool) -> Result<(f64, Option<String>)> {
-    text_number_in(doc, v, cmd, key, must, angle, false)
+    use solidcraft_doc::expr::Kind;
+    text_number_in(doc, v, cmd, key, must, if angle { Kind::Angle } else { Kind::Length }, false)
 }
 
 /// Shared numeric parsing with explicit paper defaults. The source parameter
@@ -358,11 +376,11 @@ pub(super) fn text_number_in(
     cmd: &str,
     key: &str,
     must: &str,
-    angle: bool,
+    kind: solidcraft_doc::expr::Kind,
     paper: bool,
 ) -> Result<(f64, Option<String>)> {
     use solidcraft_doc::expr::{self, Kind};
-    let kind = if angle { Kind::Angle } else { Kind::Length };
+    let angle = kind == Kind::Angle;
     match v {
         Value::Number(n) => {
             let x = n.as_f64().and_then(crate::params::finite).ok_or_else(|| bad(cmd, must))?;
@@ -381,6 +399,24 @@ pub(super) fn text_number_in(
         }
         _ => Err(bad(cmd, must)),
     }
+}
+
+/// A text field's number and expression: [`text_number_in`], and a value typed as a definition
+/// (`gap = 2 mm`, #4071) is kept too, so the design stores that parameter and the text follows it.
+fn text_value(
+    doc: &solidcraft_doc::Document,
+    v: &Value,
+    cmd: &str,
+    key: &str,
+    must: &str,
+    kind: solidcraft_doc::expr::Kind,
+) -> Result<(f64, Option<String>)> {
+    let (x, e) = text_number_in(doc, v, cmd, key, must, kind, false)?;
+    let defined = match v {
+        Value::String(t) if solidcraft_doc::expr::definition(t.trim()).is_some() => Some(doc.with_design_unit(t.trim(), kind)),
+        _ => None,
+    };
+    Ok((x, e.or(defined)))
 }
 
 /// A text's values as `text_source` works on them: text, place, height, angle (radians), font,
@@ -418,8 +454,8 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         None | Some(Value::Null) => {}
         Some(Value::Array(a)) => {
             let [x, y] = a.as_slice() else { return Err(bad(cmd, AT_MUST)) };
-            (at.x, exprs.x) = text_number(doc, x, cmd, "`at` x", AT_MUST, false)?;
-            (at.y, exprs.y) = text_number(doc, y, cmd, "`at` y", AT_MUST, false)?;
+            (at.x, exprs.x) = text_value(doc, x, cmd, "`at` x", AT_MUST, solidcraft_doc::expr::Kind::Length)?;
+            (at.y, exprs.y) = text_value(doc, y, cmd, "`at` y", AT_MUST, solidcraft_doc::expr::Kind::Length)?;
         }
         Some(v) => {
             at = crate::params::vec2(v).ok_or_else(|| bad(cmd, AT_MUST))?;
@@ -427,13 +463,15 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         }
     }
     if let Some(v) = p.get("height").filter(|v| !v.is_null()) {
-        (height, exprs.height) = text_number(doc, v, cmd, "`height`", "`height` must be a length in mm, or an expression", false)?;
+        (height, exprs.height) =
+            text_value(doc, v, cmd, "`height`", "`height` must be a length in mm, or an expression", solidcraft_doc::expr::Kind::Length)?;
     }
     if !(height > 1e-6 && height < 1e5) {
         return Err(bad(cmd, "`height` must be positive"));
     }
     if let Some(v) = p.get("angle").filter(|v| !v.is_null()) {
-        (angle, exprs.angle) = text_number(doc, v, cmd, "`angle`", "`angle` must be an angle in degrees, or an expression", true)?;
+        (angle, exprs.angle) =
+            text_value(doc, v, cmd, "`angle`", "`angle` must be an angle in degrees, or an expression", solidcraft_doc::expr::Kind::Angle)?;
     }
     let font = match p.get("font") {
         None | Some(Value::Null) => f0,
@@ -442,11 +480,44 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         Some(Value::String(f)) => Some(super::design_link::whole_font(design, f).unwrap_or_else(|| f.trim().to_string())),
         Some(_) => return Err(bad(cmd, "`font` must be a font family name or a font file path")),
     };
-    let style = text_style(p, cmd, s0)?;
+    let mut style = text_style(p, cmd, s0)?;
+    // The spacing: a number replaces an expression, a string is one (in the design's units for
+    // the letter spacing; the line spacing is a factor).
+    match p.get("letter_spacing") {
+        None | Some(Value::Null) => {}
+        Some(v @ Value::String(_)) => {
+            (style.letter_spacing, exprs.letter_spacing) = text_value(
+                doc,
+                v,
+                cmd,
+                "`letter_spacing`",
+                "`letter_spacing` must be a length in mm, or an expression",
+                solidcraft_doc::expr::Kind::Length,
+            )?;
+        }
+        Some(_) => exprs.letter_spacing = None,
+    }
+    match p.get("line_spacing") {
+        None | Some(Value::Null) => {}
+        Some(v @ Value::String(_)) => {
+            (style.line_spacing, exprs.line_spacing) = text_value(
+                doc,
+                v,
+                cmd,
+                "`line_spacing`",
+                "`line_spacing` must be a positive factor, or an expression",
+                solidcraft_doc::expr::Kind::Unitless,
+            )?;
+            if style.line_spacing <= 0.0 {
+                return Err(bad(cmd, "`line_spacing` must be a positive factor"));
+            }
+        }
+        Some(_) => exprs.line_spacing = None,
+    }
     // An unknown font, an unreadable file or a style the font lacks is an error now, not a lost
     // link later; so is a font file outside an agent's folders (the font reader asks `vfs`).
     solidcraft_sketch::font_data_styled(font.as_deref(), style.bold, style.italic).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(LinkSource::Text { text, at, height, angle, font, style, exprs })
+    Ok(LinkSource::Text { text, at, height, angle, font, style, exprs: Box::new(exprs) })
 }
 
 /// The expressions behind a text's numbers, for a command's reply (`{"height": "plate_h / 10"}`).
@@ -457,9 +528,11 @@ fn text_exprs(src: &LinkSource) -> Option<TextExpressions> {
         y: exprs.y.clone(),
         height: exprs.height.clone(),
         angle: exprs.angle.clone(),
+        letter_spacing: exprs.letter_spacing.clone(),
+        line_spacing: exprs.line_spacing.clone(),
         text: exprs.text.clone(),
     };
-    let any = [&out.x, &out.y, &out.height, &out.angle, &out.text].iter().any(|e| e.is_some());
+    let any = [&out.x, &out.y, &out.height, &out.angle, &out.letter_spacing, &out.line_spacing, &out.text].iter().any(|e| e.is_some());
     any.then_some(out)
 }
 
@@ -603,7 +676,7 @@ fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Opt
     match p.get("edits") {
         None | Some(Value::Null) => {
             let change = apply_text_edit(sk, doc, design, p)?;
-            Ok(EditTextResult::One(TextResult { change, created: None, param_warnings: Vec::new() }))
+            Ok(EditTextResult::One(Box::new(TextResult { change, created: None, param_warnings: Vec::new() })))
         }
         Some(Value::Array(edits)) => {
             if edits.is_empty() || edits.len() > MAX_TEXT_EDITS {
@@ -626,7 +699,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Opti
         _ => return Err(bad(cmd, "give `link` or `entity`")),
     };
     let old = match sk.link(&l).map(|x| (x.kind, x.source.clone())) {
-        Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, exprs),
+        Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, *exprs),
         _ => return Err(bad(cmd, format!("`{l}` is not text"))),
     };
     let src = text_source(doc, design, p, cmd, Some(old))?;
@@ -765,6 +838,9 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+            if sk.is_control_polygon_segment(c) {
+                return Err(bad(cmd, "control polygon segments stay finite construction lines"));
+            }
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
@@ -790,6 +866,9 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+            if sk.is_control_polygon_segment(c) {
+                return Err(bad(cmd, "control polygon segments stay finite construction lines"));
+            }
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
@@ -923,6 +1002,9 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurb
             .add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, None)
             .map_err(|e| if knotted { bad(cmd, e.to_string()) } else { EngineError::from(e) })?;
         mark_construction(sk, &[c], p);
+        if control && p.get("control_polygon").and_then(Value::as_bool) == Some(true) {
+            sk.add_spline_control_polygon(c)?;
+        }
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
     drawn(out, info)
@@ -1064,6 +1146,17 @@ fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_control_polygon(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.control_polygon";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let curve = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let sides = sk.add_spline_control_polygon(curve).map_err(|error| bad(cmd, error.to_string()))?;
+        Ok((ids_of(sk, &sides), Vec::new()))
+    })?;
+    drawn(out, info)
 }
 
 fn spline_handles(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1599,6 +1692,68 @@ mod blend_tests {
     fn sketch(s: &Session) -> solidcraft_sketch::Sketch {
         let id = s.active_sketch.unwrap();
         s.model.state().sketch(id).unwrap().sketch.clone()
+    }
+
+    #[test]
+    fn spline_control_polygon_constraints_move_the_real_control_points() {
+        let mut s = new_sketch();
+        let sketch_id = s.active_sketch.unwrap();
+        run(&mut s, "parameters.add", json!({"name":"leg","expression":"20 mm"}));
+        let spline = ids(&run(&mut s, "sketch.spline.control_point", json!({"points":["origin",[10,2],[20,15],[30,10]]}))["curves"])[0].clone();
+        let sides = ids(&run(&mut s, "sketch.spline.control_polygon", json!({"curve":spline}))["curves"]);
+        assert_eq!(sides.len(), 3);
+        let sk = sketch(&s);
+        let point = sk.points[sk.resolve_point(&format!("{}.end", sides[0])).unwrap()].id.clone();
+        run(&mut s, "sketch.construction", json!({"points":[point],"value":true}));
+        assert!(sketch(&s).points.iter().any(|p| p.id == point && p.construction));
+        let before = s.doc.to_json();
+        assert!(s.execute("sketch.spline.control_polygon", &json!({"curve":spline})).is_err());
+        assert!(s.execute("sketch.construction", &json!({"curves":[sides[0]],"points":[point],"value":false})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":sides[0],"mode":"horizontal"}));
+        run(&mut s, "sketch.dimension", json!({"entities":[sides[0]],"type":"length","value":"leg"}));
+        let check = |s: &Session, length: f64| {
+            let st = s.model.state();
+            let solved = st.sketch(sketch_id).unwrap();
+            let sk = &solved.sketch;
+            let CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&spline).unwrap()].kind else { panic!("expected a spline") };
+            let guide = &sk.curves[sk.curve_index(&sides[0]).unwrap()];
+            assert!(guide.construction && matches!(guide.kind, CurveKind::Line { a, b } if a == pts[0] && b == pts[1]));
+            let point = sk.point(pts[1]).unwrap();
+            assert!((point.x.abs() - length).abs() < 1e-6 && point.y.abs() < 1e-6, "{point:?}");
+            assert!(solved.profiles.is_empty(), "construction lines never form profiles");
+        };
+        check(&s, 20.0);
+        run(&mut s, "sketch.finish", json!({}));
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        run(&mut reopened, "parameters.change", json!({"name":"leg","expression":"25 mm"}));
+        check(&reopened, 25.0);
+        run(&mut reopened, "sketch.edit", json!({"sketch":sketch_id}));
+        run(&mut reopened, "sketch.delete", json!({"entities":[spline]}));
+        assert!(reopened.model.state().sketch(sketch_id).unwrap().sketch.curves.is_empty());
+    }
+
+    #[test]
+    fn control_polygon_visibility_keeps_its_dimension_and_shape() {
+        let mut s = new_sketch();
+        let spline =
+            ids(&run(&mut s, "sketch.spline.control_point", json!({"points":[[0,0],[0,20],[30,20],[30,0]],"control_polygon":true}))["curves"])[0]
+                .clone();
+        let sk = sketch(&s);
+        let (index, side) =
+            sk.curves.iter().enumerate().find(|(_, curve)| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str())).unwrap();
+        let side = side.id.clone();
+        assert!(crate::view::sketch_curve_visible(&sk, index));
+        run(&mut s, "sketch.dimension", json!({"entities":[side],"type":"length","value":"25 mm"}));
+        let visible = sketch(&s);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":false}));
+        let hidden = sketch(&s);
+        assert!(!crate::view::sketch_curve_visible(&hidden, index));
+        assert_eq!(visible.points, hidden.points);
+        assert_eq!(visible.curves, hidden.curves);
+        assert_eq!(visible.constraints, hidden.constraints);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":true}));
+        assert!(crate::view::sketch_curve_visible(&sketch(&s), index));
     }
 
     /// #6502: Reset Tangent Handles takes a spline's handles, their construction lines and the

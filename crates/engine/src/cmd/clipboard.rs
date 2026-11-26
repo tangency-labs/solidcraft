@@ -5,7 +5,8 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use solidcraft_doc::{FeatureKind, PlaneRef};
+use solidcraft_doc::construct::GeoRef;
+use solidcraft_doc::{AxisRef, FeatureKind, PlaneRef};
 
 use super::CommandSpec;
 use crate::params::{bad, name_or_id_values, vec3};
@@ -210,6 +211,19 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let moved = m.iter().enumerate().any(|(i, row)| row.iter().enumerate().any(|(j, v)| (v - if i == j { 1.0 } else { 0.0 }).abs() > 1e-12));
         // A body made by an earlier copy is the one this copy acts on (#613).
         kind.remap_bodies(&bodies);
+        if let FeatureKind::Coil { axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { body, .. } }), .. } = &f.kind
+            && let FeatureKind::Coil {
+                axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { path, author_path: author, at, name, .. } }), ..
+            } = &mut kind
+        {
+            if bodies.contains_key(body.as_ref()) {
+                let source_frame = s.model.state().body(body.as_ref()).and_then(|source| copied_frames.get(&source.feature)).unwrap_or(&m);
+                *at = solidcraft_doc::apply_point(source_frame, *at);
+                *name = solidcraft_doc::remap_topology(name, &sketches, &bodies);
+                path.clone_from(&author_path);
+            }
+            author.clone_from(&author_path);
+        }
         if let FeatureKind::Sketch { plane, sketch } = &mut kind {
             // Same-design pasted sketch links keep referring to their original definitions.
             solidcraft_doc::project::reframe_link_sketch_placements(sketch, &m, |_| solidcraft_doc::IDENTITY)?;
@@ -1041,6 +1055,26 @@ mod tests {
         // (one moved 50 mm), which the boolean and the measure each round in their own way:
         // a few 1e-6 mm³ on 5000.
         assert!((v("Plate") - v("Plate (2)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (2)"));
+    }
+
+    #[test]
+    fn a_pasted_coil_follows_the_pasted_edge_into_a_component() {
+        let mut s = Session::default();
+        let base = run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"name":"Base","body_name":"Block"}));
+        let name = format!("F{}:-x|F{}:-y", base["feature"], base["feature"]);
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"axis":{"type":"placed_edge","body":"Block","path":[],"at":[0,0,5],"name":name},
+                   "diameter":20,"pitch":6,"revolutions":2,"section_size":2,"body_name":"Spring","name":"Wind"}),
+        );
+        let component = run(&mut s, "component.create", json!({"name":"Copy Part","activate":false}));
+        run(&mut s, "timeline.copy", json!({"features":["Base","Wind"]}));
+        let pasted = run(&mut s, "timeline.paste", json!({"translate":[50,0,0],"component":component["component"]}));
+        assert_eq!(pasted["errors"].as_array().map(Vec::len), Some(0), "{pasted}");
+        let state = s.world_state().unwrap();
+        let bounds = |name: &str| state.body(name).unwrap().body.exact_bounds().unwrap();
+        assert!((bounds("Spring (2)").min.x - bounds("Spring").min.x - 50.).abs() < 1e-6);
     }
 
     /// A copied body transfer is left out of a paste: the copies go into the component they are
