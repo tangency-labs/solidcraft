@@ -588,6 +588,47 @@ fn finite3(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
 
+/// The sine of the angle to a plane's normal below which [`plane_onto_line`] takes a line as
+/// square to the plane: nearer than that, which way the plane tilts would come from rounding in
+/// the line's direction.
+pub const PLANE_ONTO_LINE_SQUARE_SIN: f64 = 1e-6;
+
+/// Not upstream: the plane through `origin` with the unit, square axes `x` and `y` brought onto
+/// the line through `at` along the unit direction `dir`, as a plane at an angle through an axis
+/// starts from its base: tilted by the least turn that makes it parallel to the line (about the
+/// axis square to both its normal `x × y` and the line), then moved along its normal until it
+/// holds the line. A plane that already holds the line comes back unchanged. Returns the new
+/// origin and axes; `None` for a number not finite or a line within
+/// [`PLANE_ONTO_LINE_SQUARE_SIN`] of the normal, which no tilt makes the plane hold.
+#[must_use]
+pub fn plane_onto_line(
+    origin: Point3,
+    x: Vec3,
+    y: Vec3,
+    at: Point3,
+    dir: Vec3,
+) -> Option<(Point3, Vec3, Vec3)> {
+    if ![origin, x, y, at, dir].into_iter().all(finite3) {
+        return None;
+    }
+    let n = x.cross(y);
+    let along = n - dir * dir.dot(n);
+    if along.length() <= PLANE_ONTO_LINE_SQUARE_SIN {
+        return None;
+    }
+    let to = along.unitize().ok()?;
+    let k = n.cross(to);
+    let (sin, cos) = (k.length(), n.dot(to));
+    let (x, y) = match k.unitize() {
+        Ok(k) if sin > 1e-12 => {
+            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
+            (tilt(x), tilt(y))
+        }
+        _ => (x, y),
+    };
+    Some((origin - to * to.dot(origin - at), x, y))
+}
+
 /// Not upstream: the corners of a parallelogram on a plane, such as a reference image pinned to
 /// points of a sketch. Its bottom edge runs from `bl` to `br`; its top-left corner is
 /// `top_left` when the shape may stretch, and otherwise lies `aspect` (height over
@@ -659,47 +700,6 @@ pub fn offset_quad(corners: [Point3; 4], lift: f64) -> Option<(Vec3, [Point3; 4]
 #[must_use]
 pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> Point3 {
     corner + u * s + v * t
-}
-
-/// The sine of the angle to a plane's normal below which [`plane_onto_line`] takes a line as
-/// square to the plane: nearer than that, which way the plane tilts would come from rounding in
-/// the line's direction.
-pub const PLANE_ONTO_LINE_SQUARE_SIN: f64 = 1e-6;
-
-/// Not upstream: the plane through `origin` with the unit, square axes `x` and `y` brought onto
-/// the line through `at` along the unit direction `dir`, as a plane at an angle through an axis
-/// starts from its base: tilted by the least turn that makes it parallel to the line (about the
-/// axis square to both its normal `x × y` and the line), then moved along its normal until it
-/// holds the line. A plane that already holds the line comes back unchanged. Returns the new
-/// origin and axes; `None` for a number not finite or a line within
-/// [`PLANE_ONTO_LINE_SQUARE_SIN`] of the normal, which no tilt makes the plane hold.
-#[must_use]
-pub fn plane_onto_line(
-    origin: Point3,
-    x: Vec3,
-    y: Vec3,
-    at: Point3,
-    dir: Vec3,
-) -> Option<(Point3, Vec3, Vec3)> {
-    if ![origin, x, y, at, dir].into_iter().all(finite3) {
-        return None;
-    }
-    let n = x.cross(y);
-    let along = n - dir * dir.dot(n);
-    if along.length() <= PLANE_ONTO_LINE_SQUARE_SIN {
-        return None;
-    }
-    let to = along.unitize().ok()?;
-    let k = n.cross(to);
-    let (sin, cos) = (k.length(), n.dot(to));
-    let (x, y) = match k.unitize() {
-        Ok(k) if sin > 1e-12 => {
-            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
-            (tilt(x), tilt(y))
-        }
-        _ => (x, y),
-    };
-    Some((origin - to * to.dot(origin - at), x, y))
 }
 
 /// The operation name of the refusals of [`centroid_and_mean_radius`].
