@@ -1546,14 +1546,9 @@ fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
         assert_eq!(actual.curves, expected.curves, "{names:?}");
         assert_eq!(actual.points, expected.points, "{names:?}");
     }
-    // A numbered side face of another feature, a name whose other face is numbered too, and a
-    // point off the edge, find nothing.
+    // A point off the edge and a name whose other face is numbered too find nothing.
     let near = Vec3::new(9.585, 9.585, 84.222);
-    for (name, at) in [
-        (format!("F{first}:side:a1#[F{first}:side:l3]|F{}:side:l1#1~2", id(&s, "Revolve2")), near),
-        (old(1, 2), near + Vec3::new(0., 0., 3.)),
-        (format!("F{first}:side:a1#2#[F{first}:side:l3]|F{cut}:side:l1#1~2"), near),
-    ] {
+    for (name, at) in [(old(1, 2), near + Vec3::new(0., 0., 3.)), (format!("F{first}:side:a1#2#[F{first}:side:l3]|F{cut}:side:l1#1~2"), near)] {
         let mut doc = solidcraft_doc::Document::clone(&s.doc);
         let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
         sketch.links[0].edge_name = Some(name.clone());

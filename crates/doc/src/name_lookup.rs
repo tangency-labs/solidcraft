@@ -349,6 +349,13 @@ fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Optio
     if numbered(first) == numbered(second) || (carries_number(first) && carries_number(second)) {
         return None;
     }
+    // The numbered face is a cut's flank and the other the face it cut, made earlier: a name
+    // whose faces one feature made (a numbered piece of a side beside its own top) is a split
+    // face's piece, which the saved number alone can't pick out.
+    let (flank, other) = if numbered(first) { (first, second) } else { (second, first) };
+    if other.made_by().is_none_or(|other| Some(other) == flank.made_by()) {
+        return None;
+    }
     let record = b.body.record();
     let reach = pick_reach(b);
     let mut on = record
