@@ -6,6 +6,7 @@ use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_engine::geom::{Seg2Geom as _, Similarity2};
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row};
@@ -65,19 +66,102 @@ pub struct Place {
     pub align: Align,
 }
 
-/// Open the placement for `path`, picked for `command` (`sketch.insert_svg` / `_dxf`).
+/// A drawing being read for the placement window, on a worker thread: the file's size, the box
+/// around it and its edge count, which is quick for a drawing of a few hundred segments and not
+/// for one of half a million. It shows in the operations panel while it runs, and the window opens
+/// when it is done (`tick`). Read-only: it changes nothing in the design.
+pub struct InsertRead {
+    /// The file's name, for the operations row.
+    pub name: String,
+    /// Its place in the operations panel's keys.
+    pub serial: u64,
+    command: String,
+    path: String,
+    done: Receiver<Result<Value, String>>,
+    /// Cancelled from the operations panel: the answer is dropped and no window opens.
+    pub cancelled: bool,
+    progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+}
+
+impl InsertRead {
+    /// Ask the read to stop: its answer is dropped, the window does not open. The thread itself
+    /// cannot cut a file read short, so it finishes and its result goes.
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+        self.progress.cancel();
+    }
+}
+
+/// The name the operations panel shows for a drawing being read.
+pub fn reading_label(name: &str) -> String {
+    solidcraft_ui_text::format("operations.reading_drawing", &[("name", name)])
+}
+
+/// Open the placement for `path`, picking it for `command` (`sketch.insert_svg` / `_dxf`), with
+/// the drawing read beside the window: the operations panel shows it while it takes, and the
+/// window opens when it is done. With no thread to read on (the browser), the file is read here.
+pub fn start(app: &mut SolveApp, command: &str, path: String) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut copy = app.session.scratch();
+        let given = json!({"path": path.clone(), "format": if command.ends_with("dxf") { "dxf" } else { "svg" }});
+        let (tx, done) = std::sync::mpsc::channel();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        let watching = progress.clone();
+        let worker = std::thread::Builder::new().name("drawing bounds".into()).spawn(move || {
+            let r = solidcraft_engine::doc::progress::watch(watching, || copy.execute("sketch.drawing_bounds", &given));
+            let _ = tx.send(r.map_err(|e| e.to_string()));
+        });
+        if worker.is_ok() {
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+            app.insert_read =
+                Some(InsertRead { name, serial: crate::operations::serial(), command: command.to_string(), path, done, cancelled: false, progress });
+            return;
+        }
+    }
+    open(app, command, path);
+}
+
+/// Takes up a read that finished: opens the window on the file's size, or drops the answer when
+/// the read was cancelled. Called once a frame.
+pub fn tick(app: &mut SolveApp) {
+    let Some(read) = &app.insert_read else { return };
+    let job = match read.done.try_recv() {
+        Ok(job) => job,
+        Err(TryRecvError::Empty) => {
+            // Keeps the frame clock running so the row's stripe moves.
+            return;
+        }
+        // The worker stopped without an answer (it panicked): open on what the command can read
+        // here, which is the slow path this change removes, or nothing for a lost file.
+        Err(TryRecvError::Disconnected) => Err(String::new()),
+    };
+    let Some(read) = app.insert_read.take() else { return };
+    if read.cancelled {
+        return;
+    }
+    let bounds = job.ok();
+    open_with_bounds(app, &read.command, read.path, bounds.as_ref());
+}
+
+/// Open the placement for `path`, read here on the window's thread: the tests' path, and the
+/// browser's. The picker calls [`start`] instead.
 pub fn open(app: &mut SolveApp, command: &str, path: String) {
     let bounds =
         app.session.execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }})).ok();
+    open_with_bounds(app, command, path, bounds.as_ref());
+}
+
+/// The placement window for `path`, with what `sketch.drawing_bounds` answered (`None`: the file
+/// could not be read, and the window opens without a size).
+fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Option<&Value>) {
     let natural = bounds
-        .as_ref()
         .and_then(|b| Some((b.get("width")?.as_f64()?, b.get("height")?.as_f64()?)))
         .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9);
-    let edges = bounds.as_ref().and_then(|b| b.get("edges")?.as_u64()).unwrap_or(0);
+    let edges = bounds.and_then(|b| b.get("edges")?.as_u64()).unwrap_or(0);
     let simplify = suggested_simplify(edges, solidcraft_engine::sketch::limits::max_points(), natural);
     let corner = |b: &Value, key: &str| -> Option<(f64, f64)> { Some((b.get(key)?.get(0)?.as_f64()?, b.get(key)?.get(1)?.as_f64()?)) };
     let middle = bounds
-        .as_ref()
         .and_then(|b| Some((corner(b, "min")?, corner(b, "max")?)))
         .map(|(lo, hi)| ((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0))
         .filter(|(x, y)| x.is_finite() && y.is_finite());
@@ -413,6 +497,46 @@ mod tests {
 
     fn dense_arc_svg(name: &str) -> String {
         dense_arc_svg_n(name, 800)
+    }
+
+    /// The drawing is read beside the window: the operations panel shows it, and the placement
+    /// window opens on the file's size when it is done.
+    #[test]
+    fn the_drawing_is_read_beside_the_window() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-beside.svg"));
+        assert!(h.app.dialog.is_none(), "the window waits for the read");
+        let read = h.app.insert_read.as_ref().expect("the read is under way");
+        let key = format!("insert_read:{}", read.serial);
+        let rows = crate::operations::current(&h.app);
+        assert!(rows.iter().any(|r| r.key == key && r.label.contains("read-beside.svg")), "the operations panel shows it: {rows:?}");
+        for _ in 0..900 {
+            h.frame();
+            if h.app.dialog.is_some() {
+                break;
+            }
+        }
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
+        assert_eq!(p.natural, Some((20.0, 10.0)), "the window opens on the file's size");
+        assert!(h.app.insert_read.is_none(), "the row is gone once the window opens");
+    }
+
+    /// A read cancelled from the operations panel only drops its answer: no window opens.
+    #[test]
+    fn a_cancelled_read_opens_no_window() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-cancel.svg"));
+        let key = format!("insert_read:{}", h.app.insert_read.as_ref().expect("under way").serial);
+        let reply = h.call("ui.operations", json!({"cancel": key}));
+        assert_eq!(reply["result"]["cancelled"], json!(key), "{reply}");
+        // `call` settles the app: the worker finished meanwhile, and its answer must have been
+        // dropped rather than opening the window.
+        assert!(h.app.insert_read.is_none(), "the read finished and left");
+        assert!(h.app.dialog.is_none(), "a cancelled read opens no window");
     }
 
     /// A drawing with more edges than the largest sketch takes opens with a Simplify distance
