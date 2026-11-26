@@ -1674,6 +1674,195 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Use the engine's original component, including its existing unsupported, invalid-input and
+/// trap cases: the refusal requires no new WIT variant or importer rebuild.
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_window(tag: &str, input: &[u8], message: &str) -> (crate::scenario::Harness, String) {
+    let mut h = crate::scenario::Harness::new();
+    let dir = h.dir.join(tag);
+    let plugin = dir.join("plugins/sample");
+    std::fs::create_dir_all(&plugin).unwrap();
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let fixture = include_str!("../../engine/src/plugin/importer_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("the model has no solids", message)
+        .replace("i32.const 3104", "i32.const 4096")
+        .replace("i32.const 23", &format!("i32.const {}", message.len()));
+    std::fs::write(plugin.join("importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+    std::fs::write(
+        plugin.join("plugin.json"),
+        json!({
+            "id":"sample", "name":"Sample Importer", "version":"1", "capabilities":["formats@0.1"],
+            "runtime":{"module":"importer.wasm", "commands":[],
+                "entries":[{"name":"convert", "kind":"importer", "extensions":["smp"]}],
+                "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":5000}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    let path = dir.join("refused.smp");
+    std::fs::write(&path, input).unwrap();
+    (h, path.to_string_lossy().into_owned())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn finish_import(h: &mut crate::scenario::Harness) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !h.app.file_load.idle() || h.app.file_picker_busy() {
+        assert!(std::time::Instant::now() < deadline, "import finished");
+        h.frames(1);
+        std::thread::yield_now();
+    }
+    h.frames(4);
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusal_from_file_open_and_drop_shows_an_acknowledgeable_dialog() {
+    for dropped in [false, true] {
+        let (mut h, path) = importer_window(if dropped { "drop" } else { "open" }, b"U", "the model has no solids");
+        let before = h.app.session.doc.to_json();
+        if dropped {
+            h.app.drop_path(&path);
+        } else {
+            h.step(&json!({"choose_file":path})).unwrap();
+            h.app.start("doc.open");
+        }
+        finish_import(&mut h);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.widget("Sample Importer").is_some(), "the refusal names the plugin in the dialog");
+        assert!(h.widget("the model has no solids").is_some(), "the plugin's message is visible");
+        if !dropped {
+            let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-import-refusal");
+            h.ctx = crate::fonts::test_context();
+            h.ctx.enable_accesskit();
+            solidcraft_theme::apply(&h.ctx);
+            let mut textures = std::collections::HashMap::new();
+            let mut output = egui::FullOutput::default();
+            let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0));
+            for _ in 0..8 {
+                output = h.ctx.run_ui(RawInput { screen_rect: Some(bounds), focused: true, ..Default::default() }, |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                });
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+            }
+            std::fs::create_dir_all(&dir).unwrap();
+            crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures).save(dir.join("dialog.png")).unwrap();
+        }
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        h.frames(3);
+        assert!(h.widget("the model has no solids").is_none(), "OK dismisses the refusal");
+    }
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn programmatic_importer_refusals_open_no_dialog() {
+    let (mut h, path) = importer_window("quiet-programmatic", b"U", "the model has no solids");
+    let before = h.app.session.doc.to_json();
+    let (reply, _) = h.call_queued("engine.execute", json!({"command":"doc.open","params":{"path":path}}));
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
+    h.frames(3);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.widget("the model has no solids").is_none(), "no dialog shows the refusal");
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusal_from_home_can_be_acknowledged_without_leaving_home() {
+    let (mut h, path) = importer_window("home-refusal", b"U", "the model has no solids");
+    h.app.home.open = true;
+    h.step(&json!({"choose_file":path})).unwrap();
+    h.app.start("doc.open");
+    finish_import(&mut h);
+    assert!(h.app.home.open);
+    assert!(h.widget("Sample Importer").is_some());
+    assert!(h.widget("the model has no solids").is_some());
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.home.open);
+    assert!(h.widget("the model has no solids").is_none());
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn queued_importer_refusals_each_wait_for_acknowledgement() {
+    let (mut h, first) = importer_window("queued-refusals", b"U", "the model has no solids");
+    h.app.home.open = false;
+    let second = h.dir.join("second.smp");
+    std::fs::write(&second, b"U").unwrap();
+    h.app.open_path_async(&first);
+    h.app.open_path_async(&second.to_string_lossy());
+    finish_import(&mut h);
+    assert!(h.widget("the model has no solids").is_some());
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("the model has no solids").is_some(), "the second refusal still needs acknowledgement");
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("the model has no solids").is_none());
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_traps_and_plain_failures_stay_in_the_status_line() {
+    for (tag, input, message) in [("trap", b"T", "it stopped on an error inside the plugin"), ("plain", b"I", "the model has no solids")] {
+        let (mut h, path) = importer_window(tag, input, "the model has no solids");
+        h.app.open_path_async(&path);
+        finish_import(&mut h);
+        let status = h.app.status.as_ref().unwrap();
+        assert!(status.0.contains("Sample Importer could not open refused.smp"), "{status:?}");
+        assert!(status.0.contains(message), "{status:?}");
+        assert!(status.2);
+        assert!(crate::scenario::handle_at("dialog:OK").is_none());
+    }
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusal_from_a_programmatic_open_never_opens_a_dialog() {
+    let (mut h, path) = importer_window("programmatic", b"U", "the model has no solids");
+    let reply = h.app.open_path_answered(&path);
+    finish_import(&mut h);
+    let reply = reply.try_recv().unwrap();
+    assert_eq!(reply["ok"], false);
+    assert!(reply["error"].as_str().unwrap().contains("the model has no solids"));
+    assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+    let (reply, _) = h.call_queued("engine.execute", json!({"command":"doc.open","params":{"path":path}}));
+    assert_eq!(reply["ok"], false);
+    assert!(reply["error"].as_str().unwrap().contains("the model has no solids"));
+    assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+    assert!(h.app.run("doc.open", json!({"path":path})).unwrap_err().contains("the model has no solids"));
+    h.frames(3);
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusal_renders_the_plugins_message_as_plain_text() {
+    let message = "Open in [the plugin](https://example.test/help); {plugin} <b>details</b>";
+    let (mut h, path) = importer_window("plain-text", b"U", message);
+    h.app.home.open = false;
+    h.app.open_path_async(&path);
+    finish_import(&mut h);
+    assert!(h.widget(message).is_some(), "markup and placeholders are kept verbatim");
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    assert!(!tree.nodes.iter().any(|(_, node)| node.role() == egui::accesskit::Role::Link), "the message never becomes a link");
+    assert!(crate::scenario::handle_at("dialog:OK").is_some());
+    assert!(crate::scenario::handle_at("dialog:Cancel").is_none());
+}
+
 /// The existing original importer fixture copies the input file into a design. Check the exact
 /// options bytes at the guest boundary so accidental memory injection fails the open.
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
