@@ -14,7 +14,7 @@
 //! the result valid and facing out, refuses a result it cannot prove, and keeps the proof on
 //! the result for the next proved operation that takes it (#14830).
 
-use solidcore::boolean::apart::{proved_apart, union_apart};
+use solidcore::boolean::apart::{union_if_apart, Apart};
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::boolean::operand_tolerances::matched_tolerances;
@@ -301,8 +301,7 @@ fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
 /// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
 /// carried to the next level as it is), with solids touching along edges or at vertices
 /// allowed. Each union ([`union_step`]) is `SmApiBoolean`'s, except that two solids the kernel
-/// proves apart ([`proved_apart`]) are put side by side with no intersection work
-/// ([`union_apart`]): a plate and pegs that each stand in it but meet no other peg take one
+/// proves apart are put side by side with no intersection work ([`union_if_apart`]): a plate and pegs that each stand in it but meet no other peg take one
 /// boolean per level, the plate's, where each union of pegs was one (#21438). No tolerance is
 /// updated between the pairwise unions or after the last; a single body makes no union and is
 /// untouched.
@@ -351,18 +350,16 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
 }
 
 /// One union of [`union_all_with`]'s levels. The two operands' tolerances are matched first
-/// ([`matched_tolerances`]). Two solids the kernel then proves apart ([`proved_apart`]: every
-/// shell's certified box farther from the other's than their intersection tolerance) are put
-/// side by side ([`union_apart`]), which is what a boolean of them gives, without the
-/// intersection work; any other pair is `SmApiBoolean`'s union. Either result gets
-/// [`after_boolean`]'s update under [`Contract::Proved`] alone, so both routes leave the same
-/// tolerances for the next level.
+/// ([`matched_tolerances`]). Two solids the kernel then proves apart (every shell's certified box
+/// farther from the other's than their intersection tolerance) are put side by side
+/// ([`union_if_apart`]), which is what a boolean of them gives, without the intersection work;
+/// any other pair is `SmApiBoolean`'s union. Either result gets [`after_boolean`]'s update under
+/// [`Contract::Proved`] alone, so both routes leave the same tolerances for the next level.
 fn union_step(k: &mut Kernel, mut a: Brep, mut b: Brep, contract: Contract) -> KernelResult<Brep> {
     matched_tolerances(k, &mut a, &mut b)?;
-    let mut r = if proved_apart(k, &a, &b)? {
-        union_apart(k, a, b)?
-    } else {
-        sm::boolean(k, a, b, BooleanOperation::Union)?.result
+    let mut r = match union_if_apart(k, a, b)? {
+        Apart::United(r) => *r,
+        Apart::NotProved(a, b) => sm::boolean(k, *a, *b, BooleanOperation::Union)?.result,
     };
     if contract == Contract::Proved {
         after_boolean(k, &mut r)?;
@@ -703,19 +700,22 @@ mod tests {
     }
 
     /// Copies of `a` and `b`: whether the kernel proves them apart, and, when it does, their
-    /// union by each route, side by side ([`union_apart`]) and by `SmApiBoolean`, each with
-    /// its record.
+    /// union by each route, side by side ([`union_if_apart`]) and by `SmApiBoolean` on fresh
+    /// copies, each with its record.
     fn both_routes(a: &Body, b: &Body) -> Option<[(Body, Record); 2]> {
         let route = |beside: bool| {
             let d = run_on("both_routes", &[("a", a), ("b", b)], |k| {
                 let ca = read_locked(a, |a| brep_copy(k, a))?;
                 let cb = read_locked(b, |b| brep_copy(k, b))?;
-                if !proved_apart(k, &ca, &cb)? {
-                    return Ok(Done::Empty);
-                }
+                let united = match union_if_apart(k, ca, cb)? {
+                    Apart::United(r) => *r,
+                    Apart::NotProved(..) => return Ok(Done::Empty),
+                };
                 let r = if beside {
-                    union_apart(k, ca, cb)?
+                    united
                 } else {
+                    let ca = read_locked(a, |a| brep_copy(k, a))?;
+                    let cb = read_locked(b, |b| brep_copy(k, b))?;
                     sm::boolean(k, ca, cb, BooleanOperation::Union)?.result
                 };
                 Ok(Done::Body(Box::new(r), None))
@@ -777,8 +777,8 @@ mod tests {
     /// same vertices bit for bit near the origin (more than 1000 from it the boolean works on
     /// the operands moved near the origin and back, so to the rounding of that move), the same
     /// volume and area, and a body the full check passes. Boxes, a cylinder and a sphere, a
-    /// cone and a torus, two swept parts of B-spline faces, and a hollow cube (its cavity's
-    /// shell set void again by nesting).
+    /// cone and a torus, two swept parts of B-spline faces, and a hollow cube first and second
+    /// (its cavity's shell copied, and set void again by nesting).
     #[test]
     fn solids_apart_united_side_by_side_are_what_a_boolean_gives() {
         all_fixes();
@@ -897,7 +897,8 @@ mod tests {
 
     /// A 10 mm cube with the three edges at its origin corner rounded r 2: the corner is a ball
     /// patch, a surface with no certified box here, so the cube is proved apart from nothing,
-    /// not even a cube 20 mm away, and their union is a boolean, as before.
+    /// not even a cube 20 mm away, and their union is a boolean, as before; the same cube
+    /// unrounded is proved apart from it.
     #[test]
     fn a_solid_with_a_face_without_a_certified_box_is_proved_apart_from_nothing() {
         use solidcore::geom::vector3d::Point3;
@@ -941,6 +942,9 @@ mod tests {
             record.faces.iter().map(|f| &f.surface).collect::<Vec<_>>()
         );
         assert!(both_routes(&block, &cube([30.0, 0.0, 0.0])).is_none());
+        // the same cube unrounded is proved apart from it: the ball patch is the reason
+        let plain = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
+        assert!(both_routes(&plain, &cube([30.0, 0.0, 0.0])).is_some());
     }
 
     /// A boolean that fails hands the failure callback its operands as they came in, not the

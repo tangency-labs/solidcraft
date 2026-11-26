@@ -1,13 +1,14 @@
-//! Solids a union joins without intersecting them: whether two B-reps are proved apart
-//! ([`proved_apart`]), and the union of two so proved, side by side ([`union_apart`]) (not
-//! upstream).
+//! Solids a union joins without intersecting them: two B-reps proved apart united side by side
+//! ([`union_if_apart`]) (not upstream).
 //!
 //! The union of two solids that lie apart is the two solids as they are: no point of either is
 //! inside the other or within a tolerance of it, so no face is cut or dropped and nothing merges.
 //! A boolean of them finds nothing in whatever face pairs it tries, imprints nothing, classifies
 //! every face outside, and its clean-up, which visits only the intersection's edges and
 //! vertices, does nothing. What it gives is the second operand's topology copied into the first,
-//! then the union's whole-body tail. [`union_apart`] builds that without the intersection work.
+//! then the union's whole-body tail. [`union_if_apart`] builds that without the intersection
+//! work, after the same operand preparation as the boolean: both operands' self-touching edge
+//! copies glued, then the manifold test the boolean takes its manifold path by.
 //!
 //! **The proof.** Each shell of a solid region of a B-rep gets a box that holds every face of the
 //! shell within its tolerances ([`face_box`]): for a face on a plane, the vertices and the
@@ -18,7 +19,8 @@
 //! certified bound of the definition the net approximates, if it keeps one. Each box is grown by
 //! the zone tolerance of twice the largest tolerance of the face, its edges and its vertices. A
 //! B-rep with a face that has no such box (a curve on a surface, an offset, a blend patch), or
-//! with a face no solid region's shell uses, is proved apart from nothing. Two B-reps are proved
+//! with a face no solid region's shell uses, is proved apart from nothing, and so is one whose
+//! walk fails anywhere: a failed proof only sends the pair to the boolean. Two B-reps are proved
 //! apart when every shell box of one lies farther than the larger of the two B-reps'
 //! intersection tolerances from every shell box of the other. A solid region's material lies
 //! within its outer shell's box, so neither solid then holds a point of the other, and the margin
@@ -29,8 +31,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`proved_apart`] | (none) |
-//! | [`union_apart`] | `SmBrep::MergeBrep` (as `SmMerge::BooleanLists` merges a list operand), with `SmApiBooleanUnion`'s operand preparation and tail |
+//! | [`union_if_apart`] | `SmBrep::MergeBrep` (as `SmMerge::BooleanLists` merges a list operand), with `SmApiBooleanUnion`'s operand preparation and tail |
 //!
 //! Deviations: not upstream.
 
@@ -38,7 +39,7 @@ use crate::error::Result;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::{brep_xsect_tol_3d, zone_tol3d, SmallTopoType};
 use crate::kernel::Kernel;
-use crate::query::face::p1::proved_bounding_box;
+use crate::query::face::p1::{probe, proved_bounding_box};
 use crate::surface::surface::SurfaceKind;
 use crate::topology::face::p2 as fp2;
 use crate::topology::shell::ShellType;
@@ -46,40 +47,79 @@ use crate::topology::{edge, topology_traverser, vertex, Brep, FaceId};
 
 const OP: &str = "boolean::apart";
 
-/// Whether solids `a` and `b` are proved apart (the module's proof), so that their union is
-/// [`union_apart`]'s: both at the same B-rep tolerance, both closed manifold solids (what a
-/// boolean takes its manifold path for), and every shell box of each farther from every shell
-/// box of the other than the larger of their intersection tolerances. Read from the B-reps as
-/// they stand; nothing is written on them (missing UV trims are made on copies).
+/// The union of solids `a` and `b` (consumed), or both handed back (boxed: a B-rep is large).
+#[derive(Debug)]
+pub enum Apart {
+    /// They were proved apart: their union, side by side.
+    United(Box<Brep>),
+    /// They were not: the operands, their self-touching edge copies glued (as the boolean glues
+    /// them first, so the boolean finds nothing more to glue).
+    NotProved(Box<Brep>, Box<Brep>),
+}
+
+/// The union of `a` and `b` side by side when they are proved apart (the module's proof), else
+/// both back. As a boolean union does first, each operand's self-touching edge copies are glued;
+/// then the two must be at the same B-rep tolerance (the side by side union keeps the first's,
+/// which an entity of a finer second operand would sit below, where a boolean reconciles them),
+/// both closed manifold solids (the test a boolean takes its manifold path by, on the operands
+/// glued, as the boolean makes it), and every shell box of each farther from every shell box of
+/// the other than the larger of their intersection tolerances. Then `b`'s topology is copied
+/// into `a` (`MergeBrep`, as a list boolean merges its list operand: its regions but the infinite
+/// one, which becomes `a`'s, its shells, faces, edges and vertices with their geometry and
+/// attributes), and the union's tail runs: solid and void regions set again by nesting, each
+/// region's outer shell first, then the zero-area inner loops where solids touch and the faces
+/// of no area between coinciding edges removed, the attributes kept on the objects left. The
+/// proof reads the glued B-reps and writes nothing on them (missing UV trims are made on
+/// copies). A union made is counted in [`crate::kernel::WorkCounters::apart_unions`], not as a
+/// boolean.
 ///
 /// # Errors
-/// A cancellation; those of the manifold test.
-pub fn proved_apart(k: &Kernel, a: &Brep, b: &Brep) -> Result<bool> {
-    let manifold = crate::topology::brep::p2::is_manifold_solid;
-    // one B-rep tolerance for the two: the side by side union keeps the first's, which an
-    // entity of a finer second operand would sit below (a boolean reconciles them)
+/// A cancellation; those of the gluing, the merge and the tail. A failure of the proof itself
+/// gives [`Apart::NotProved`].
+pub fn union_if_apart(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Apart> {
+    k.check_cancelled(OP)?;
+    crate::boolean::api_brep::glue_self_touching_edges(k, &mut a)?;
+    crate::boolean::api_brep::glue_self_touching_edges(k, &mut b)?;
+    if !proved_apart(k, &a, &b)? {
+        return Ok(Apart::NotProved(Box::new(a), Box::new(b)));
+    }
+    k.work_counters.add_apart_union();
+    side_by_side(k, &mut a, &b)?;
+    Ok(Apart::United(Box::new(a)))
+}
+
+/// Whether solids `a` and `b` are proved apart ([`union_if_apart`]'s conditions after the
+/// gluing). Any failure of the proof gives `false`.
+///
+/// # Errors
+/// A cancellation.
+fn proved_apart(k: &Kernel, a: &Brep, b: &Brep) -> Result<bool> {
+    let manifold = |x: &Brep| probe(crate::topology::brep::p2::is_manifold_solid(x));
     if a.tolerance().partial_cmp(&b.tolerance()) != Some(core::cmp::Ordering::Equal)
-        || !manifold(a)?
-        || !manifold(b)?
+        || manifold(a)? != Some(true)
+        || manifold(b)? != Some(true)
     {
         return Ok(false);
     }
+    let (Some(ours), Some(theirs)) = (solid_shell_faces(k, a)?, solid_shell_faces(k, b)?) else {
+        return Ok(false);
+    };
     let margin = brep_xsect_tol_3d(k, a, SmallTopoType::NormalSize).max(brep_xsect_tol_3d(
         k,
         b,
         SmallTopoType::NormalSize,
     ));
     // every vertex lies in its shell's box: vertex boxes within the margin rule it out cheaply
-    let (Some(ours), Some(theirs)) = (shell_vertex_boxes(k, a)?, shell_vertex_boxes(k, b)?) else {
+    let (Some(near), Some(far)) = (vertex_boxes(a, &ours)?, vertex_boxes(b, &theirs)?) else {
         return Ok(false);
     };
-    if !all_apart(&ours, &theirs, margin) {
+    if !all_apart(&near, &far, margin) {
         return Ok(false);
     }
-    let (Some(ours), Some(theirs)) = (shell_boxes(k, a)?, shell_boxes(k, b)?) else {
+    let (Some(near), Some(far)) = (shell_boxes(k, a, &ours)?, shell_boxes(k, b, &theirs)?) else {
         return Ok(false);
     };
-    Ok(all_apart(&ours, &theirs, margin))
+    Ok(all_apart(&near, &far, margin))
 }
 
 /// Whether every box of `ours` lies farther than `margin` from every box of `theirs`: the boxes
@@ -109,11 +149,11 @@ fn all_apart(ours: &[Extent3d], theirs: &[Extent3d], margin: f64) -> bool {
 /// The faces of each face shell of every solid region of `b`, by shell (the infinite region's
 /// shells hold the same faces from outside, all lumps at once, so they are left out). `None`
 /// when a solid region has a shell of another kind or a face use without face, a shell has no
-/// face, or some face of `b` is in none of these shells (a closed shell whose inside is no
-/// region).
+/// face, some face of `b` is in none of these shells (a closed shell whose inside is no region),
+/// or the walk fails.
 ///
 /// # Errors
-/// A cancellation; those of the topology walk.
+/// A cancellation.
 fn solid_shell_faces(k: &Kernel, b: &Brep) -> Result<Option<Vec<Vec<FaceId>>>> {
     let infinite = b.infinite_region();
     let mut shells = Vec::new();
@@ -122,15 +162,23 @@ fn solid_shell_faces(k: &Kernel, b: &Brep) -> Result<Option<Vec<Vec<FaceId>>>> {
         if Some(id) == infinite {
             continue;
         }
-        for s in region.get_shells(None, |_, _| Ok(false))? {
+        let Some(ids) = probe(region.get_shells(None, |_, _| Ok(false)))? else {
+            return Ok(None);
+        };
+        for s in ids {
             k.check_cancelled(OP)?;
-            let shell = b.shell(s)?;
+            let Some(shell) = probe(b.shell(s))? else {
+                return Ok(None);
+            };
             if !matches!(shell.shell_type, ShellType::Faceuse) {
                 return Ok(None);
             }
+            let Some(uses) = probe(shell.get_faceuses())? else {
+                return Ok(None);
+            };
             let mut faces = Vec::new();
-            for fu in shell.get_faceuses()? {
-                let Some(f) = b.faceuse(fu)?.face else {
+            for fu in uses {
+                let Some(Some(f)) = probe(b.faceuse(fu))?.map(|u| u.face) else {
                     return Ok(None);
                 };
                 seen.insert(f);
@@ -146,49 +194,52 @@ fn solid_shell_faces(k: &Kernel, b: &Brep) -> Result<Option<Vec<Vec<FaceId>>>> {
     Ok((!shells.is_empty() && seen.len() == all).then_some(shells))
 }
 
-/// The box of each solid region shell's vertices ([`solid_shell_faces`]), grown by its
+/// The box of each of `shells`' vertices (faces of `b`, [`solid_shell_faces`]), grown by the
 /// vertices' tolerances, for the shells that have vertices; it lies inside that shell's box
-/// ([`shell_boxes`]). `None` where [`solid_shell_faces`] gives none.
+/// ([`shell_boxes`]). `None` when the walk fails.
 ///
 /// # Errors
-/// A cancellation; those of the topology walk.
-fn shell_vertex_boxes(k: &Kernel, b: &Brep) -> Result<Option<Vec<Extent3d>>> {
-    let Some(shells) = solid_shell_faces(k, b)? else {
-        return Ok(None);
-    };
+/// A cancellation.
+fn vertex_boxes(b: &Brep, shells: &[Vec<FaceId>]) -> Result<Option<Vec<Extent3d>>> {
     let mut boxes = Vec::new();
     for faces in shells {
         let mut held = Extent3d::new();
-        for f in faces {
-            for v in crate::query::face::p2::face_vertices(b, f, false, None)? {
-                let mut at = Extent3d::from_point(vertex::point(b, v)?);
-                at.expand_absolute(vertex::tolerance(b, v)?);
+        for &f in faces {
+            let Some(vertices) = probe(crate::query::face::p2::face_vertices(b, f, false, None))?
+            else {
+                return Ok(None);
+            };
+            for v in vertices {
+                let (Some(p), Some(t)) =
+                    (probe(vertex::point(b, v))?, probe(vertex::tolerance(b, v))?)
+                else {
+                    return Ok(None);
+                };
+                let mut at = Extent3d::from_point(p);
+                at.expand_absolute(t);
                 held = held.union(&at);
             }
         }
-        // a shell without vertices (a whole sphere) gives no box here, and no early answer
-        if held.is_defined() {
+        // a shell without vertices (a whole sphere) leaves the box as it began, inside out:
+        // it gives no vertex box, and no early answer
+        if !held.has_negative_volume() {
             boxes.push(held);
         }
     }
     Ok(Some(boxes))
 }
 
-/// The box of each face shell of every solid region of `b` ([`solid_shell_faces`]): the
-/// union of its faces' boxes ([`face_box`]). `None` when a face has no box, or the shells
-/// leave a face out.
+/// The box of each of `shells` (faces of `b`, [`solid_shell_faces`]): the union of its faces'
+/// boxes ([`face_box`]). `None` when a face has no box.
 ///
 /// # Errors
-/// A cancellation; those of the topology walk.
-fn shell_boxes(k: &Kernel, b: &Brep) -> Result<Option<Vec<Extent3d>>> {
-    let Some(shells) = solid_shell_faces(k, b)? else {
-        return Ok(None);
-    };
+/// A cancellation.
+fn shell_boxes(k: &Kernel, b: &Brep, shells: &[Vec<FaceId>]) -> Result<Option<Vec<Extent3d>>> {
     let mut scratch = None;
     let mut boxes = Vec::new();
     for faces in shells {
         let mut held = Extent3d::new();
-        for f in faces {
+        for &f in faces {
             k.check_cancelled(OP)?;
             let Some(x) = face_box(k, b, f, &mut scratch)? else {
                 return Ok(None);
@@ -216,13 +267,6 @@ fn face_box(
     f: FaceId,
     scratch: &mut Option<Brep>,
 ) -> Result<Option<Extent3d>> {
-    fn probe<T>(r: Result<T>) -> Result<Option<T>> {
-        match r {
-            Ok(v) => Ok(Some(v)),
-            Err(e) if e.is_cancelled() => Err(e),
-            Err(_) => Ok(None),
-        }
-    }
     let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
         return Ok(None);
     };
@@ -273,54 +317,42 @@ fn face_box(
         held = held.union(&x);
         tol = tol.max(t);
     }
-    if !held.is_defined() {
+    // a face with no vertex and no edge leaves the box as it began, inside out: no proof
+    if held.has_negative_volume() {
         return Ok(None);
     }
     held.expand_absolute(zone_tol3d(k, 2.0 * tol));
     Ok(Some(held))
 }
 
-/// The union of solids `a` and `b` that [`proved_apart`] proved apart, as a boolean union gives
-/// it, without the intersection work: each operand's self-touching edge copies glued as the
-/// boolean glues them first, `b`'s topology copied into `a` (`MergeBrep`, as a list boolean
-/// merges its list operand: its regions but the infinite one, which becomes `a`'s, its shells,
-/// faces, edges and vertices with their geometry and attributes), then the union's tail: solid
-/// and void regions set again by nesting, each region's outer shell first, then the zero-area
-/// inner loops where solids touch and the faces of no area between coinciding edges removed,
-/// the attributes kept on the objects left. `b` is consumed. Counted in [`crate::kernel::WorkCounters::apart_unions`], not as a
-/// boolean.
+/// `b`'s topology copied into `a` and the union's tail run ([`union_if_apart`]).
 ///
 /// # Errors
-/// Those of the gluing, the merge and the tail.
-pub fn union_apart(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Brep> {
-    k.check_cancelled(OP)?;
-    k.work_counters.add_apart_union();
-    crate::boolean::api_brep::glue_self_touching_edges(k, &mut a)?;
-    crate::boolean::api_brep::glue_self_touching_edges(k, &mut b)?;
-    crate::boolean::merge::p3::combine_brep(k, &mut a, &b, None, None, true)?;
+/// Those of the merge and the tail.
+fn side_by_side(k: &mut Kernel, a: &mut Brep, b: &Brep) -> Result<()> {
+    crate::boolean::merge::p3::combine_brep(k, a, b, None, None, true)?;
     // as a union's merge ends (`put_outer_shells_first`): solid and void regions set again by
     // nesting, each region's outer shell first
-    let regions = crate::topology::brep::p1::regions(&a, None)?;
+    let regions = crate::topology::brep::p1::regions(a, None)?;
     if regions.len() > 2
         && regions.first() == a.infinite_region().as_ref()
-        && crate::topology::brep::p2::is_manifold_solid(&a)?
+        && crate::topology::brep::p2::is_manifold_solid(a)?
     {
-        crate::topology::brep::p1::set_region_is_void_flags_for_nested_solids(k, &mut a)?;
+        crate::topology::brep::p1::set_region_is_void_flags_for_nested_solids(k, a)?;
     }
     let editing = a.editing_enabled();
     a.set_editing_enabled(true);
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(&mut a);
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(a);
     let tail = {
         let mut env = state.env(None);
-        crate::topology::brep::p3::remove_slit_loops_where_solids_touch(k, &mut a, &mut env)
-            .and_then(|_| {
-                crate::topology::brep::p3::collapse_zero_area_two_edge_faces(k, &mut a, &mut env)
-            })
+        crate::topology::brep::p3::remove_slit_loops_where_solids_touch(k, a, &mut env).and_then(
+            |_| crate::topology::brep::p3::collapse_zero_area_two_edge_faces(k, a, &mut env),
+        )
     };
-    let restored = state.restore_attributes(&mut a);
+    let restored = state.restore_attributes(a);
     a.set_editing_enabled(editing);
     tail?;
     restored?;
     a.refresh_cached_topology();
-    Ok(a)
+    Ok(())
 }
