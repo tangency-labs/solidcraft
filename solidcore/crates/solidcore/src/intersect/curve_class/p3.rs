@@ -2643,9 +2643,8 @@ fn drop_uv_on_domain(
         Ok(d) if d.success && d.result_uv.x.is_finite() && d.result_uv.y.is_finite() => {
             Ok(Some(d.result_uv))
         }
-        Ok(_) => Ok(None),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(None),
+        Ok(_) | Err(_) => Ok(None),
     }
 }
 
