@@ -14,9 +14,9 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use solidcraft_doc::BomType;
 use solidcraft_doc::bom::View;
 use solidcraft_doc::metadata::MAX_KEYS;
+use solidcraft_doc::{BomType, ComponentNameSplit};
 
 use super::check::whole;
 use super::motion::require;
@@ -162,8 +162,12 @@ pub struct ComponentMetadataResult {
     pub r#virtual: Option<bool>,
     /// The metadata object as saved, other tools' keys included.
     pub metadata: Map<String, Value>,
-    /// The free properties, `{name: text}`. Empty for the design.
+    /// The authored free properties, `{name: text}`. Empty for the design.
     pub properties: BTreeMap<String, String>,
+    /// The optional component name split used by drawing fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "name_split_schema")]
+    pub name_split: Option<ComponentNameSplit>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -205,6 +209,20 @@ fn properties_schema(_: &mut SchemaGenerator) -> Schema {
         "type": "object",
         "maxProperties": MAX_KEYS,
         "additionalProperties": {"type": ["string", "number", "boolean", "null"]}
+    })
+}
+
+fn name_split_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Derive two drawing properties from the component name, split at the first literal separator. An authored property takes precedence. Null clears the rule.",
+        "type": ["object", "null"],
+        "properties": {
+            "separator": {"type": "string", "minLength": 1, "maxLength": 128},
+            "left_property": {"type": "string", "minLength": 1, "maxLength": 128},
+            "right_property": {"type": "string", "minLength": 1, "maxLength": 128}
+        },
+        "required": ["separator", "left_property", "right_property"],
+        "additionalProperties": false
     })
 }
 
@@ -265,6 +283,10 @@ pub struct ComponentMetadataSetParams {
     #[serde(default, deserialize_with = "free_properties", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "properties_schema")]
     pub properties: Option<Entries>,
+    /// Derive properties for drawing fields from the name. Null removes the rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "name_split_schema")]
+    pub name_split: Option<Option<ComponentNameSplit>>,
 }
 
 impl<'de> Deserialize<'de> for ComponentMetadataSetParams {
@@ -299,6 +321,7 @@ fn set_form(p: &Map<String, Value>) -> Result<ComponentMetadataSetParams, serde_
         r#virtual: None,
         values: None,
         properties: None,
+        name_split: None,
     };
     if form.component.as_deref().is_some_and(|c| c == "0" || c.eq_ignore_ascii_case("root")) {
         return Ok(form);
@@ -313,6 +336,7 @@ fn set_form(p: &Map<String, Value>) -> Result<ComponentMetadataSetParams, serde_
     form.bom_quantity = p.get("bom_quantity").cloned();
     form.r#virtual = p.get("virtual").cloned();
     form.properties = key_with(p, "properties", free_properties)?;
+    form.name_split = p.get("name_split").cloned().map(serde_json::from_value).transpose()?;
     Ok(form)
 }
 
@@ -323,8 +347,12 @@ pub struct ComponentMetadataSetResult {
     pub component: u64,
     /// Its metadata object after the change.
     pub metadata: Map<String, Value>,
-    /// Its free properties after the change.
+    /// Its authored free properties after the change.
     pub properties: BTreeMap<String, String>,
+    /// The optional component name split after the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "name_split_schema")]
+    pub name_split: Option<ComponentNameSplit>,
     /// What changed: the keys whose value changed, and `properties.<name>` for each free
     /// property. Empty when nothing did (and then nothing was added to undo).
     pub changed: Vec<String>,
