@@ -1622,12 +1622,19 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// threads, and what it finds is in [`ImportReport::current`] once every check has ended
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
+    step_import_shared_with_workers(text, parallel::workers())
+}
+
+/// [`step_import_shared`] with at most `workers` inner worker threads for solid conversion and
+/// background checks, used when a caller decodes multiple independent imports in parallel so
+/// nested parallelism stays bounded while preserving background check semantics on native targets.
+pub fn step_import_shared_with_workers(text: &str, workers: usize) -> Result<std::sync::Arc<StepImport>> {
     let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
     if let Some(imp) = recent(key, heal) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
-    StepReading::new(text)?.finish_shared()
+    StepReading::with_workers_mode(text, workers.max(1), cfg!(target_arch = "wasm32"))?.finish_shared()
 }
 
 /// The import the recent imports still hold for `key`, read healing its parts or not (`heal`).
@@ -1757,6 +1764,10 @@ impl StepReading {
     }
 
     fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+        Self::with_workers_mode(text, workers, workers <= 1)
+    }
+
+    fn with_workers_mode(text: &str, workers: usize, single: bool) -> Result<StepReading> {
         let _span = solidcraft_profile::span("import", "step.read_structure");
         let key = text_key(text);
         let watch = crate::watch::current();
@@ -1829,7 +1840,6 @@ impl StepReading {
                 });
             }
         }
-        let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single, heal: crate::heals_tolerance_defects() })
     }
 
