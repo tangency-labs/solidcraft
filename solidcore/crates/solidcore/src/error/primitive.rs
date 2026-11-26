@@ -265,7 +265,8 @@ pub enum PrimitiveFailure {
     SweepAngleTooSmall {
         /// The caller's sweep angle, in degrees.
         angle: f64,
-        /// The smallest angle that passes (`SM_EFF_ZERO`).
+        /// The smallest angle that passes (`SM_EFF_ZERO`; for a partial revolve, the
+        /// circle builder's `CONIC_ANGLE_TOL_DEG`, below which its arcs are full turns).
         minimum: f64,
     },
     /// The sweep of the caller's closed profile meant as a solid does not close, for

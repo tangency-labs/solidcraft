@@ -1132,3 +1132,61 @@ fn construction_features_keep_their_labels_and_styling() {
     // The design's own origin keeps its bare name: not a placement's item, feature or not.
     assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
 }
+
+#[test]
+fn nested_component_move_with_capture_false_preserves_world_expression_and_rebuilds() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    let outer = h.app.run("component.create", json!({"name": "Outer", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "InnerBox"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": outer, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![outer, inner], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("capture".into(), json!(false));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.contains_key(&inner));
+    let bounds = |h: &Harness| h.app.session.world_state().unwrap().body("InnerBox").unwrap().mesh().bounds();
+    let b1 = bounds(&h);
+    assert!((b1.min.x - 5.0).abs() < 1e-5 && (b1.max.x - 15.0).abs() < 1e-5, "moved along world +X: {b1:?}");
+
+    let cap = h.app.run("component.capture_position", json!({})).unwrap();
+    let cp_id = cap["feature"].as_u64().unwrap();
+    let solidcraft_engine::doc::FeatureKind::CapturePosition { moves, .. } = &h.app.session.doc.feature(cp_id).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    assert_eq!(moves[0].space, solidcraft_engine::doc::MoveSpace::World);
+    assert_eq!(moves[0].translate[0], "dx");
+
+    h.app.run("parameters.change", json!({"name": "dx", "expression": "30 mm"})).unwrap();
+    let b2 = bounds(&h);
+    assert!((b2.min.x - 20.0).abs() < 1e-5 && (b2.max.x - 30.0).abs() < 1e-5, "rebuilt along world +X: {b2:?}");
+}
+
+#[test]
+fn create_copy_on_component_with_expression_uses_solid_move() {
+    let (mut h, _, first, _) = fixture();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "20 mm"})).unwrap();
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![first], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("copy".into(), json!(true));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    let cmds = crate::dialogs_move::commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "solid.move");
+    assert_eq!(cmds[0].1["copy"], json!(true));
+    assert_eq!(cmds[0].1["translate"], json!(["dx", "0 mm", "0 mm"]));
+}

@@ -11,6 +11,8 @@
 //! - [`thicken`]: a sheet thickened, or moved back by half first.
 //! - [`offset_sheet`]: every face of a sheet moved onto its surface's offset
 //!   (`SmApiOffsetBrepFull`).
+//! - [`certified_offset_net`]: the certified B-spline that stands in for an implicit offset
+//!   surface where the offset cannot be kept (an export).
 //! - [`draft`]: the faces named turned about their line or circle on a neutral plane
 //!   ([`solidcore::offset::draft::draft_surface`]), the faces around them extended or trimmed to
 //!   meet them (`SmBrep::LocalOperation`).
@@ -22,12 +24,14 @@ use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
+use solidcore::offset::offset_executive::p1::certified_offset_surface;
 use solidcore::offset::offset_executive::p2::{
     local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 
@@ -98,6 +102,29 @@ impl Body {
     /// The kernel's error; [`Error::Internal`] for a body a panic left unfinished.
     pub fn outline_touch(&self) -> Result<Option<[f64; 3]>> {
         read_body("outline_touch", self, |k, b| outline_touch(k, b))
+    }
+}
+
+/// The B-spline that stands in for the implicit offset surface `surface` where it cannot be kept
+/// (an export to a form with no offset kind, #21926): the kernel's certified net of the offset of
+/// its extended, else its own, base, within `tolerance` of the offset at every parameter in the
+/// base's parametrisation, with the certified bound of that distance
+/// ([`solidcore::offset::offset_executive::p1::certified_offset_surface`]; the net a shell or a
+/// thicken puts in an offset face's place). `None` for a surface that is not an implicit offset.
+///
+/// # Errors
+/// The kernel's: a base with no B-spline form (an offset of an offset), a net not certified within
+/// `tolerance` in its budget (a pole, a fold), a tolerance that is not positive, a cancellation.
+pub fn certified_offset_net(
+    k: &Kernel,
+    surface: &Surface,
+    tolerance: f64,
+) -> solidcore::Result<Option<(Surface, f64)>> {
+    match surface.kind() {
+        SurfaceKind::OffsetSurface(offset) => {
+            certified_offset_surface(k, offset, tolerance).map(Some)
+        }
+        _ => Ok(None),
     }
 }
 

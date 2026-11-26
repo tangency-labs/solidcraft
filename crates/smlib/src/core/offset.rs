@@ -138,7 +138,7 @@ fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Option<FaceuseId>> {
 /// `SmApiShellBrepFull(b, distance, TRUE, TRUE, TRUE, open, r)`: convex edges extended, results
 /// merged, side walls made at a sheet's edges, and (as the fork does, 5448b9a) a thickened
 /// sheet's coplanar side walls one face.
-fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
+pub(super) fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
     let options = ShellOptions {
         offset: OffsetOptions { distance, extend_convex_edges: true, merge_results: true },
         create_offset_solid: true,
@@ -148,9 +148,10 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
     solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
-/// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
-fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64) -> solidcore::Result<Brep> {
-    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: true, merge_results: true })
+/// `SmApiOffsetBrepFull(b, distance, extend, TRUE, r)`: the convex edges extended until the
+/// moved faces meet (`extend`, as the capi always does), or rounded by the distance.
+fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64, extend: bool) -> solidcore::Result<Brep> {
+    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: extend, merge_results: true })
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
@@ -286,7 +287,7 @@ pub(crate) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Bo
             return Ok(Err(Error::Argument));
         }
         if symmetric {
-            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness))? {
+            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness, true))? {
                 Ok(moved) => moved,
                 Err(e) => return Ok(Err(e)),
             };
@@ -309,6 +310,26 @@ pub(crate) fn offset_sheet(body: &Body, distance: f64) -> Result<Body> {
     let w = working_copy(CALL, body)?;
     ops_as(CALL, &[("brep", body)], offset_error, || solidcore_ops::offset::offset_sheet(&w, distance))?;
     Ok(w)
+}
+
+/// The closed solid `body` grown by `distance` along its faces' outward normals (negative: shrunk):
+/// the convex edges extended until the moved faces meet, or (`round`) rounded with `distance` as
+/// the radius, so every point of the result's surface is `distance` from the body's. A body that is
+/// not a closed manifold solid is [`Error::Argument`]; a result that is not one is
+/// [`Error::NotSolid`].
+pub(crate) fn offset_solid(body: &Body, distance: f64, round: bool) -> Result<Body> {
+    if !distance_ok(distance) {
+        return Err(Error::Argument);
+    }
+    on_copy("smlib_offset_solid", body, |k, mut w| {
+        if !brep_p2::is_manifold_solid(&w)? {
+            return Ok(Err(Error::Argument));
+        }
+        match called(offset_brep_full(k, &mut w, distance, !round))? {
+            Ok(r) => finish(r, true),
+            Err(e) => Ok(Err(e)),
+        }
+    })
 }
 
 /// A unit vector from `v`, as `smlib_draft`'s `unit`; `None` for a vector too short or not
