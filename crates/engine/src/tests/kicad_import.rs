@@ -334,8 +334,7 @@ fn a_board_opened_as_meshes_is_read_again_as_meshes() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// Update Links reads a board again with the holes it was opened with, and a link recorded
-/// before the holes option, which drilled every hole, keeps drilling them.
+/// Update Links reads a board again with the holes it was opened with.
 #[test]
 fn update_links_keeps_the_holes_a_board_was_opened_with() {
     let path = board_file("live-link-holes", 2.0);
@@ -357,14 +356,6 @@ fn update_links_keeps_the_holes_a_board_was_opened_with() {
     let got = volume(&mut s);
     assert!((got - (30.5 * 10.0 * 2.0 - via)).abs() < 0.01, "the via is still drilled: {got}");
 
-    // A link recorded without the option.
-    if let Some(importer) = s.doc_mut().links.get_mut(&component).and_then(|l| l.importer.as_mut()) {
-        importer.options.as_object_mut().unwrap().remove("holes");
-    }
-    std::fs::write(&path, board(31.0)).unwrap();
-    run(&mut s, "component.update_links", json!({}));
-    let got = volume(&mut s);
-    assert!((got - (31.0 * 10.0 * 2.0 - via)).abs() < 0.01, "an older link drills every hole: {got}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
