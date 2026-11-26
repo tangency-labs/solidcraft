@@ -406,9 +406,9 @@ fn finished_ends(n: usize, ends: &[[Option<CutEnd>; 2]], coped: &HashSet<(usize,
         .map(|m| {
             let at = |k: usize| match ends.get(m).and_then(|e| e.get(k)).copied().flatten() {
                 None => EndCut::Square,
-                Some((Some(cut), _, _)) => EndCut::Plane { origin: cut.origin, normal: cut.normal },
-                Some((None, _, _)) if coped.contains(&(m, k == 0)) => EndCut::Coped,
-                Some((None, _, _)) => EndCut::Fitted,
+                Some((Some(cut), ..)) => EndCut::Plane { origin: cut.origin, normal: cut.normal },
+                Some((None, ..)) if coped.contains(&(m, k == 0)) => EndCut::Coped,
+                Some((None, ..)) => EndCut::Fitted,
             };
             [at(0), at(1)]
         })
