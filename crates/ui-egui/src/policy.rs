@@ -76,6 +76,10 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
 ];
 
+/// Features that send data outside the organization and that its policy can turn off: the
+/// policy's value name (`REG_DWORD`, 0 turns the feature off, 1 leaves it on) and the feature.
+pub const ALLOWS: &[(&str, &str)] = &[("AllowEasyPrint", "easyprint"), ("AllowProblemReports", "problem_reports")];
+
 /// A preference's value, as a policy sets it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
@@ -123,6 +127,8 @@ pub enum Value {
 pub struct Layer {
     /// The valid values of [`LOCKS`], by the preference they set.
     pub settings: BTreeMap<&'static str, Setting>,
+    /// The valid values of [`ALLOWS`], by feature: false turns it off.
+    pub allowed: BTreeMap<&'static str, bool>,
     /// [`USAGE_STATISTICS`]: 0 turns them off and locks the preference; 1 leaves the choice.
     pub usage_statistics: Option<bool>,
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
@@ -151,6 +157,19 @@ impl Layer {
                 Some((lock.pref, setting?))
             })
             .collect();
+        let allowed = ALLOWS
+            .iter()
+            .filter_map(|(policy, feature)| {
+                let value = get(policy)?;
+                match parse(Kind::Switch, &value) {
+                    Some(Setting::Switch(on)) => Some((*feature, on)),
+                    _ => {
+                        log::warn!("policy: {policy} is {value:?}, expected 0 or 1; ignored");
+                        None
+                    }
+                }
+            })
+            .collect();
         let usage_statistics = match get(USAGE_STATISTICS) {
             None => None,
             Some(value) => {
@@ -164,7 +183,7 @@ impl Layer {
                 on
             }
         };
-        Layer { settings, usage_statistics, organization: text(ORGANIZATION_NAME) }
+        Layer { settings, allowed, usage_statistics, organization: text(ORGANIZATION_NAME) }
     }
 
     /// [`CHECK_FOR_UPDATES`]: whether update checks run.
@@ -177,7 +196,7 @@ impl Layer {
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        !self.settings.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
+        !self.settings.is_empty() || !self.allowed.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
@@ -185,8 +204,12 @@ impl Layer {
         for (pref, setting) in under.settings {
             self.settings.entry(pref).or_insert(setting);
         }
+        for (feature, on) in under.allowed {
+            self.allowed.entry(feature).or_insert(on);
+        }
         Layer {
             settings: self.settings,
+            allowed: self.allowed,
             usage_statistics: self.usage_statistics.or(under.usage_statistics),
             organization: self.organization.or(under.organization),
         }
@@ -271,6 +294,17 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Whether the feature (one of [`ALLOWS`]) may run: false only when a mandatory value turns
+    /// it off.
+    pub fn allows(&self, feature: &str) -> bool {
+        self.mandatory.allowed.get(feature) != Some(&false)
+    }
+
+    /// The features a mandatory value turns off.
+    pub fn turned_off(&self) -> Vec<&'static str> {
+        self.mandatory.allowed.iter().filter(|(_, on)| !**on).map(|(feature, _)| *feature).collect()
+    }
+
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
         // UsageStatistics allowed (1) leaves the choice to the person; only off locks it.
@@ -341,6 +375,7 @@ pub fn check_updates(app: &SolveApp) -> bool {
 /// person's own choice (from the saved file, a reload or a shortcut such as the Donate pill's
 /// Hide): it is kept in [`Policy::own`] for when the policy goes. Cheap; runs every frame.
 pub fn enforce(app: &mut SolveApp) {
+    crate::easyprint_ui::block(app, !app.policy.allows("easyprint"));
     enforce_keeping(app, false);
 }
 
@@ -707,6 +742,24 @@ mod tests {
     }
 
     #[test]
+    fn a_feature_is_turned_off_only_by_a_mandatory_zero() {
+        for (policy, feature) in ALLOWS {
+            let off = Policy::from_json(&format!(r#"{{"{policy}": 0}}"#));
+            assert!(!off.allows(feature) && off.managed(), "{policy}");
+            assert_eq!(off.turned_off(), [*feature]);
+            assert!(off.locked().is_empty(), "{policy} locks no preference");
+            assert!(Policy::from_json(&format!(r#"{{"{policy}": 1}}"#)).allows(feature), "{policy}");
+            for hostile in [r#"2"#, r#""0""#, r#"-1"#, r#"null"#] {
+                let policy = Policy::from_json(&format!(r#"{{"{policy}": {hostile}}}"#));
+                assert!(policy.allows(feature) && !policy.managed(), "{hostile}");
+            }
+            let recommended = Policy::from_json(&format!(r#"{{"Recommended": {{"{policy}": 0}}}}"#));
+            assert!(recommended.allows(feature), "a recommended value turns nothing off");
+            assert!(Policy::default().allows(feature));
+        }
+    }
+
+    #[test]
     fn a_mandatory_value_locks_its_preference_and_a_recommended_one_does_not() {
         let policy = Policy::from_json(r#"{"CheckForUpdates": 0, "ShowDonateButton": 0, "Recommended": {"CheckForUpdates": 1}}"#);
         assert_eq!(policy.mandatory.check_for_updates(), Some(false));
@@ -896,7 +949,8 @@ mod tests {
     fn the_templates_offer_every_policy_the_app_reads() {
         let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
         let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
-        for name in LOCKS.iter().map(|lock| lock.policy).chain([ORGANIZATION_NAME, USAGE_STATISTICS]) {
+        for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([ORGANIZATION_NAME, USAGE_STATISTICS])
+        {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
         }

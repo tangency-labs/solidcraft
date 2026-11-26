@@ -52,6 +52,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.construction_line.tangent_two", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.construction_line.bisector", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.repair_link", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.fit_curves_to_section", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -105,11 +106,16 @@ thread_local! {
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
-    /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
-    /// click takes the tool out of the app while it runs, and must place what the hover showed.
-    static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
+    /// The drawing tool's points so far, whether it is the Line tool, and whether it is the
+    /// 3-Point Arc waiting for its third point, from the last hover: a click takes the tool out of
+    /// the app while it runs, and must place what the hover showed.
+    static TOOL: RefCell<(Vec<Vec2>, bool, bool)> = const { RefCell::new((Vec::new(), true, false)) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The link the Repair Link tool gives a new source.
+    static REPAIR: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The tool finished its job with this click and ends.
+    static ENDED: Cell<bool> = const { Cell::new(false) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
@@ -788,16 +794,19 @@ pub fn refine_snap(
     let tol = 7.0 * px;
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
-    let (own, line_tool) = match app.tool.as_ref() {
+    let (own, line_tool, arc_tool) = match app.tool.as_ref() {
         Some(t) => {
-            let own: (Vec<Vec2>, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line");
+            let own: (Vec<Vec2>, bool, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line", t.cmd == "sketch.arc.three_point");
             TOOL.with(|c| *c.borrow_mut() = own.clone());
             own
         }
         None => TOOL.with(|c| c.borrow().clone()),
     };
     // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
+    // The 3-Point Arc takes none of them, on hover or on click, when its tangent snap is on (#20719).
+    let arc_snap = arc_tool && app.preferences.sketch_arc_tangent_snap;
     let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
+    let line_tool = line_tool && !arc_snap;
     let prev = own.last().copied();
     let mid_only = crate::tool_modifiers::target_midpoint();
     // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
@@ -904,6 +913,30 @@ pub fn refine_snap(
             }
         }
     }
+    // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
+    // on (#20719), exact: the point of that tangent circle nearest the cursor. It and the centre
+    // snap below win over an earlier snap when their point is nearer the cursor.
+    let mut arc_locked = false;
+    if !mid_only
+        && arc_snap
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
+    // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
+    if !mid_only
+        && arc_snap
+        && !(arc_locked && locked.as_ref().is_some_and(|l| l.1 == "T"))
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
     if let Some((p, label, arg, lock_targets, inf)) = locked {
         let mut state = SnapState::new(p);
         state.push_label(label);
@@ -936,7 +969,18 @@ pub fn refine_snap(
             }
         }
         let allow_lined = !matches!(label, "End" | "Pt");
-        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points && !has_crossing, allow_lined, p, &mut state, &mut lined);
+        add_constraints_at_point(
+            sk,
+            prev,
+            &targets,
+            line_tool,
+            mid_only,
+            align_points && !has_crossing && !arc_locked,
+            allow_lined,
+            p,
+            &mut state,
+            &mut lined,
+        );
         return finish(state, lined, arg);
     }
 
@@ -1254,8 +1298,8 @@ pub fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule.
-fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
@@ -1274,7 +1318,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
             _ => None,
         })
         .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities }));
+    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
     true
 }
 
@@ -1319,6 +1363,7 @@ fn mode(id: &str) -> Option<Mode> {
     }
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.repair_link" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -1364,6 +1409,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         chain: Default::default(),
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
+        arc_modes: false,
         preselected: false,
         finished: false,
     })
@@ -1381,6 +1427,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
+            "sketch.repair_link" => "Repair Link: click the edge, face, vertex or sketch curve the projection should follow now",
             "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
@@ -1470,6 +1517,73 @@ fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value
 }
 
 /// A model reference for a hit (for Project and friends).
+/// Did the last click end its tool (the job is done)? Reading it resets it.
+pub(crate) fn take_ended() -> bool {
+    ENDED.with(|e| e.replace(false))
+}
+
+/// Start Repair Link for `link` of the sketch being edited: the next model reference clicked
+/// becomes its source.
+pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
+    REPAIR.with(|l| *l.borrow_mut() = Some(link.to_string()));
+    app.start("sketch.repair_link");
+}
+
+/// Translate Project's default-off session choice into explicit command inputs. Shared by dialog preview,
+/// deferred requests and immediate commands; an explicit caller's choice is kept.
+pub(crate) fn projection_policy(app: &SolveApp, command: &str, params: &mut Value) {
+    if matches!(command, "sketch.project" | "sketch.intersect" | "sketch.include_3d") {
+        if let Some(object) = params.as_object_mut() {
+            object.entry("strict_occurrence_references").or_insert(json!(app.ui.project_link_tools));
+        }
+        if app.ui.project_link_tools && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
+            projection_paths(app, params);
+        }
+    }
+    if matches!(command, "sketch.delete" | "selection.delete")
+        && let Some(object) = params.as_object_mut()
+    {
+        object.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+    }
+}
+
+/// Put the placement actually displayed by the viewport into opt-in projection requests.
+/// Model bodies carry a world instance name; sketches are displayed at their first placement
+/// (`world_state`), so a repeated sketch pick must name that path rather than become ambiguous.
+pub(crate) fn projection_paths(app: &SolveApp, params: &mut Value) {
+    let doc = &app.session.doc;
+    let state = app.session.model.state();
+    let bodies = doc.body_frames_with_source(&state);
+    let one = |value: &mut Value| {
+        let Some(reference) = value.as_object_mut() else { return };
+        if reference.contains_key("path") {
+            return;
+        }
+        let path = if let Some(body) = reference.get("body").and_then(Value::as_str) {
+            bodies.iter().find(|(world, ..)| world == body).map(|(_, _, _, path, _)| path.clone())
+        } else if let Some(sketch) = reference.get("sketch") {
+            let key = sketch.as_str().map(str::to_string).or_else(|| sketch.as_u64().map(|id| id.to_string()));
+            key.and_then(|key| doc.find_feature(&key)).map(|feature| doc.first_path(feature.component))
+        } else {
+            None
+        };
+        if let Some(path) = path {
+            reference.insert("path".into(), json!(path));
+        }
+    };
+    if let Some(refs) = params.get_mut("refs") {
+        if let Some(refs) = refs.as_array_mut() {
+            for reference in refs.iter_mut().take(1000) {
+                one(reference);
+            }
+        } else {
+            one(refs);
+        }
+    } else if let Some(reference) = params.get_mut("ref") {
+        one(reference);
+    }
+}
+
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
     Some(match h {
@@ -1748,6 +1862,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     if r.get("face").is_some() {
                         let along = SHIFT.with(Cell::get);
                         let _ = app.run(cmd, json!({"face": r["face"], "body": r["body"], "direction": if along { "v" } else { "u" }}));
+                    }
+                }
+                "sketch.repair_link" => {
+                    let Some(link) = REPAIR.with(|l| l.borrow().clone()) else { return };
+                    if app.run(cmd, json!({"link": link, "ref": r})).is_ok() {
+                        REPAIR.with(|l| *l.borrow_mut() = None);
+                        app.set_status(solidcraft_ui_text::tr("sketch.projection_repaired"), false);
+                        ENDED.with(|e| e.set(true));
                     }
                 }
                 _ => {

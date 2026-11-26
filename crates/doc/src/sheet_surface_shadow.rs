@@ -18,9 +18,9 @@
 //! A cut whose walls cross a joint is read the same way in the sheet as a whole ([`Folded`]):
 //! each point in whichever piece of the flat holds its fiber (a panel, a tab, or a bend's zone,
 //! unwrapped round its axis), its outline drawn in the flat, one curve across tangent lines and
-//! seams. Refused: walls that don't run through the thickness from face to face (a countersink, a
-//! rounded or chamfered face edge, a recess, a cut that stops inside a bend), walls that reach the
-//! sheet's outline, and walls whose shapes in the flat overlap.
+//! seams. Refused: walls that don't run through the thickness from face to face (a rounded or
+//! chamfered face edge, a drill point, a recess, a cut that stops inside a bend), walls that reach
+//! the sheet's outline, and walls whose shapes in the flat overlap.
 
 use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
@@ -808,7 +808,7 @@ pub(crate) fn shadow(
                 format!("leaves a recess in {name}: not supported yet at a slant, on a roll or in a bend")
             } else {
                 format!(
-                    "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a countersink, a rounded or chamfered face edge)"
+                    "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a rounded or chamfered face edge, a drill point)"
                 )
             });
         }

@@ -413,6 +413,48 @@ fn a_copy_keeps_the_provenance_on_its_faces_and_edges() {
     }
 }
 
+/// Attached by record index through the body, read back per face and edge; a copy carries it.
+#[test]
+fn attached_provenance_reads_back_by_record_index() {
+    use crate::provenance::{CarriedBy, Carrier};
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let o = b.own_order();
+    let data = vec![
+        (Carrier::Face(2), Origin(vec![7])),
+        (Carrier::Edge(5), Origin(vec![105])),
+        // attaching again replaces
+        (Carrier::Face(2), Origin(vec![2])),
+    ];
+    b.attach(&o, data).unwrap();
+    let want = |faces: usize, edges: usize| CarriedBy {
+        faces: (0..faces)
+            .map(|i| (i == 2).then(|| Origin(vec![2])))
+            .collect(),
+        edges: (0..edges)
+            .map(|i| (i == 5).then(|| Origin(vec![105])))
+            .collect(),
+    };
+    assert_eq!(b.carried::<Origin>(&o), Ok(want(6, 12)));
+    assert!(b.tolerance().unwrap() > 0.0);
+    let c = b.copy().unwrap();
+    assert_eq!(c.carried::<Origin>(&c.own_order()), Ok(want(6, 12)));
+    // an index past the lists is refused before anything is attached
+    let past = vec![
+        (Carrier::Face(0), Origin(vec![0])),
+        (Carrier::Edge(12), Origin(vec![1])),
+    ];
+    assert_eq!(b.attach(&o, past), Err(Error::Argument));
+    assert_eq!(b.carried::<Origin>(&o), Ok(want(6, 12)));
+    // another type under the same ID is refused, and reads as none
+    assert_eq!(
+        b.attach(&o, vec![(Carrier::Face(0), Impostor)]),
+        Err(Error::Argument)
+    );
+    let none = b.carried::<Impostor>(&o).unwrap();
+    assert!(none.faces.iter().chain(&none.edges).all(Option::is_none));
+}
+
 #[test]
 fn a_copy_maps_record_order_through_renumbered_entities() {
     all_fixes();

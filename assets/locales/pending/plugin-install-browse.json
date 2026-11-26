@@ -25,5 +25,8 @@
   },
   "zh": {
     "plugin_install.browse": "浏览…"
+  },
+  "fr": {
+    "plugin_install.browse": "Parcourir…"
   }
 }

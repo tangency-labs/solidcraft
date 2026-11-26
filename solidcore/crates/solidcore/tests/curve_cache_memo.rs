@@ -54,7 +54,7 @@ fn skin(k: &mut Kernel, a: f64, b: f64, z0: f64, z1: f64, count: usize) -> solid
     create_skin_primitive(k, &counts, &refs, 1, true).map(|s| s.brep)
 }
 
-/// A kernel with the memo on or off (whatever the `curve-memo-off` feature says).
+/// A kernel with the memo on or off.
 fn kernel(memo: bool) -> Kernel {
     Kernel {
         memoize_curve_caches: memo,
