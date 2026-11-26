@@ -1691,7 +1691,8 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) | Kind::LivingHinge(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::FrameTrim(_) | Kind::Gusset(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::FrameTrim(_) | Kind::Gusset(_) => return true,
+            Kind::LivingHinge(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             Kind::Pulley(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
