@@ -883,3 +883,65 @@ fn aligned_to_frame_turns_coaxial_surfaces_onto_one_quarter_grid() {
     let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
     assert!(form::aligned_to_frame(&plane, &ref_frame, 1e-6).is_none());
 }
+
+/// A cylinder written as a revolution of a line parallel to its axis is curved: not a sketch plane.
+#[test]
+fn a_curved_revolution_face_is_not_a_sketch_plane() {
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let mut b = tube();
+    b.faces[0].surface = Surface::PlacedRevolution {
+        profile: Box::new(Curve::Line { start: [2., 0., 0.], end: [2., 0., 1.] }),
+        origin: [1., 2., 3.],
+        axis: [0., 0., 1.],
+        matrix: identity,
+        forward: true,
+    };
+    b.faces[0].nurbs = None;
+    on_forms(&mut b);
+    let body = crate::Body::from_record(b).expect("a cylinder written as a revolution is a valid record");
+    assert!(body.ops_body().is_some(), "the kernel decides the record, so NotFlat is an answer");
+    assert_eq!(body.sketch_plane_of_face(0), crate::SketchPlane::NotFlat);
+}
+
+/// A disc written as a revolution about its axis, in both senses of `forward`. The picker's
+/// normal is the kernel's own oriented normal for the face, `forward` turns it over, and one
+/// sense is the disc's plane's normal: the convention, not a guessed direction.
+#[test]
+fn a_disc_written_as_a_flat_revolution_takes_its_sense_from_forward() {
+    use solidcore_record::Vec3;
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let disc = |surface| {
+        one_face(
+            surface,
+            [[-3., 3.], [-3., 3.]],
+            vec![(Curve::Circle { frame: a_frame(), radius: 2. }, [0., TAU], [0, 0])],
+            &[[3., 2., 3.]],
+            &[(0, true)],
+        )
+    };
+    let plane = crate::Body::from_record(disc(Surface::Plane { origin: [1., 2., 3.], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] })).unwrap();
+    let want = plane.planar_face(0).expect("the disc is a plane").normal();
+    let revolved = |forward| {
+        crate::Body::from_record(disc(Surface::PlacedRevolution {
+            profile: Box::new(Curve::Line { start: [1., 2., 3.], end: [3., 2., 3.] }),
+            origin: [1., 2., 3.],
+            axis: [0., 0., 1.],
+            matrix: identity,
+            forward,
+        }))
+        .expect("a disc written as a revolution is a valid record")
+    };
+    let mut normals = Vec::new();
+    for body in [revolved(true), revolved(false)] {
+        assert!(body.ops_body().is_some(), "the kernel decides the record");
+        let crate::SketchPlane::Flat(got) = body.sketch_plane_of_face(0) else { panic!("a flat revolution") };
+        let form = body.ops_body().expect("the kernel decides the record");
+        let (ops, order) = &*form;
+        let oriented = Vec3::from(ops.face_plane_normal(order, 0).unwrap().unwrap().value);
+        assert!(got.normal().dot(oriented) > 1. - 1e-9, "the picker's normal is the oriented one: {:?} vs {oriented:?}", got.normal());
+        assert!((got.origin.z - 3.).abs() < 1e-9, "the origin is on the disc's plane: {:?}", got.origin);
+        normals.push(got.normal());
+    }
+    assert!(normals[0].dot(normals[1]) < -1. + 1e-9, "forward turns the normal over: {normals:?}");
+    assert!(normals.iter().any(|n| n.dot(want) > 1. - 1e-9), "one sense is the plane's normal {want:?}: {normals:?}");
+}
