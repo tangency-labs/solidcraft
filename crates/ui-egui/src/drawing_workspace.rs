@@ -2546,8 +2546,9 @@ mod tests {
         h.frames(2);
         assert_eq!(open_drawing_settings(&h), None, "a command run by a program opens no window");
 
-        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
-        h.step(&json!({"widget":"Drawing Settings…"})).unwrap();
+        // The row's own action, as the other File-row tests run it: the menu scrolls once its rows
+        // outgrow the window, so a click by its text can land on a row scrolled out of view.
+        crate::toolbar::run_file_row(&mut h.app, "drawing.set");
         h.frames(3);
         assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, the_drawing(&h).id)));
 
