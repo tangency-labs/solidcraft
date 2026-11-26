@@ -74,6 +74,9 @@ macro_rules! unpaged_preferences {
             save_mesh_format: String = "stl".into();
             /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
             save_mesh_quality: String = "standard".into();
+            /// Send to Slicer: the format last sent to each slicer, by its key in the slicer list (`3mf`,
+            /// `stl` or `step`). A slicer that is not in it starts from its own default, 3MF for most.
+            send_formats: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
             /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends, or to the arc

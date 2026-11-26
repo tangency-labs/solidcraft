@@ -397,6 +397,48 @@ fn mjcf_writes_saved_damping_and_friction() {
     assert_eq!((j.get("damping"), j.get("frictionloss")), ("0.1", "0.02"));
 }
 
+/// Each hinge and slide gets a motor on it, limited to its saved effort; without one, unlimited.
+#[test]
+fn mjcf_gives_each_moving_joint_a_motor_within_its_effort() {
+    let mut s = fan(&["revolute", "slider"]);
+    run(&mut s, "joint.dynamics", json!({"joint": "J0", "effort": 12.5}));
+    let m = Model::of(&s);
+    let motors = m.within("actuator", "motor");
+    assert_eq!(motors.iter().map(|a| (a.get("name"), a.get("joint"))).collect::<Vec<_>>(), [("J0", "J0"), ("J1", "J1")]);
+    assert_near(&motors[0].numbers("ctrlrange"), &[-12.5, 12.5], "ctrlrange");
+    assert_eq!(motors[1].get("ctrlrange"), "", "no effort saved: no limit");
+}
+
+/// A joint that follows another, one held at a single value and a ball joint get no motor: the
+/// first two would fight the constraint that moves or holds them.
+#[test]
+fn mjcf_gives_no_motor_to_a_follower_a_held_joint_or_a_ball() {
+    let mut s = fan(&["revolute", "revolute"]);
+    run(&mut s, "joint.gear", json!({"a": "J0", "b": "J1", "ra": 10, "rb": 20}));
+    assert_eq!(Model::of(&s).names("motor"), ["J0"]);
+
+    let mut s = two_cubes();
+    joint(&mut s, "revolute", "Turn", json!([[-30, 45]]));
+    s.doc_mut().assembly.joints[0].limits = vec![Some((0.3, 0.3))];
+    assert!(Model::of(&s).names("motor").is_empty());
+
+    let mut s = two_cubes();
+    joint(&mut s, "ball", "Ball", Value::Null);
+    let p = package(&s);
+    assert!(!p.xml.contains("<actuator>"), "{}", p.xml);
+}
+
+/// A link driven by a ball joint is left out, so the joint it would drive keeps its motor: without
+/// the link it moves on its own.
+#[test]
+fn mjcf_keeps_the_motor_of_a_joint_whose_link_is_left_out() {
+    let mut s = fan(&["ball", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let p = package(&s);
+    assert!(!p.xml.contains("<equality>"), "{}", p.xml);
+    assert_eq!(Model::read(&p.xml).names("motor"), ["J1"]);
+}
+
 /// A 10 mm cube that collides as a box is drawn by its mesh and collides as its half sizes, 5 mm.
 #[test]
 fn mjcf_writes_collision_shapes() {
