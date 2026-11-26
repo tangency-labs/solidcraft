@@ -502,6 +502,7 @@ mod tests {
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
             hover_tint: [0.0; 3],
+            hover_body: None,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             sky: [0.0; 4],
