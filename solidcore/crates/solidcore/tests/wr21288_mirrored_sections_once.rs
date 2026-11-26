@@ -9,6 +9,12 @@
 //! section again, so the end sections, which the first pass had mirrored and the second
 //! keeps, went back to the circle about x = 3, z = 2, and the skin left the cylinder by up
 //! to 13.8.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)] // test
 
 use solidcore::blend::fillet_executive::api::{surface_surface_fillet, FilletSurfaceArg};
 use solidcore::math::{Point2, Vec3};
@@ -58,10 +64,17 @@ fn wr21288_mirrored_complement_round_is_its_cylinder() {
             worst = worst.max((rho - 2.0).abs());
             if j == 8 {
                 // the section's middle is the 270 degree arc's far point
-                let far = ((p.x - (5.0 + 2f64.sqrt())).powi(2) + (p.z + 2f64.sqrt()).powi(2)).sqrt();
-                assert!(far <= tolerance, "middle of the section at {uv:?}: {far:e} off");
+                let far =
+                    ((p.x - (5.0 + 2f64.sqrt())).powi(2) + (p.z + 2f64.sqrt()).powi(2)).sqrt();
+                assert!(
+                    far <= tolerance,
+                    "middle of the section at {uv:?}: {far:e} off"
+                );
             }
         }
     }
-    assert!(worst <= tolerance, "{worst:e} off the cylinder about x = 5, z = 0");
+    assert!(
+        worst <= tolerance,
+        "{worst:e} off the cylinder about x = 5, z = 0"
+    );
 }

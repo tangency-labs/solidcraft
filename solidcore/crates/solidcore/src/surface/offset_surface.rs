@@ -1325,9 +1325,13 @@ impl OffsetSurface {
         if !self.allow_extension {
             return Ok(None);
         }
-        let Ok((base, _)) = self.nested_base(OP_EVAL) else {
-            return Ok(None);
-        };
+        // an offset of an offset of an offset has no base to extend: the generic body answers it
+        if let SurfaceKind::OffsetSurface(off) = self.surface.kind() {
+            if matches!(off.surface.kind(), SurfaceKind::OffsetSurface(_)) {
+                return Ok(None);
+            }
+        }
+        let (base, _) = self.nested_base(OP_EVAL)?;
         if !extends_as_itself(k, base) {
             return Ok(None);
         }

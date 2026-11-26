@@ -4228,7 +4228,7 @@ mod wr459_sphere_rows {
         );
         assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not the row's");
         // and the round is its definition, its net re-certified within its bound of it
-        super::round_definition_proof::certified_blends(&Kernel::default(), &mut body, name);
+        round_definition_proof::certified_blends(&Kernel::default(), &mut body, name);
 
         // the round's vertex near the seam is main's, bit for bit, within its bound of the
         // seam and inside its own tolerance
