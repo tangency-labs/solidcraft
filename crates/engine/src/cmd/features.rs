@@ -4387,7 +4387,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         None => {
             let face = match line.as_deref() {
                 Some(edge @ solidcraft_doc::construct::GeoRef::Edge { .. }) => {
-                    solidcraft_doc::construct::flat_face_at_edge(&s.model.state(), edge, axis_dir).map_err(|e| bad(cmd, e.to_string()))?
+                    solidcraft_doc::construct::flat_face_at_edge(&s.model.state(), edge).map_err(|e| bad(cmd, e.to_string()))?
                 }
                 _ => return Err(bad(cmd, "`base` is required unless `axis` is a body edge: give the plane the angle is measured from")),
             };

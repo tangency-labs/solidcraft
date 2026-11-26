@@ -817,39 +817,39 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
-/// A flat face that meets the body edge `g` picks and runs along `axis` (its plane holds that
-/// direction), as its body's name, its index and a point on it: what a plane at an angle about the edge is
-/// measured from when no reference plane is given (#20233). The first such face in the body's
-/// face order; `None` when there is none (a circular edge's flat cap is square to its axis) or `g`
-/// is not a body edge.
-pub fn flat_face_at_edge(st: &ModelState, g: &GeoRef, axis: Vec3) -> Result<Option<(String, usize, Vec3)>> {
+/// A flat face that meets the straight body edge `g` picks, as its body's name, its index and a
+/// point inside it: what a plane at an angle about the edge is measured from when no reference
+/// plane is given (#20233). A flat face along a straight edge holds the edge's direction, so the
+/// plane goes through the edge. The first such face in the body's face order; `None` when there
+/// is none, when the edge is not straight (a circular edge's flat cap is square to its axis) or
+/// when `g` is not a body edge.
+pub fn flat_face_at_edge(st: &ModelState, g: &GeoRef) -> Result<Option<(String, usize, Vec3)>> {
     let GeoRef::Edge { at, name } = g else { return Ok(None) };
     let (b, edge, points) = edge_pick(st, *at, name)?;
-    if b.body.is_mesh() || points.len() < 2 {
+    if b.body.is_mesh() || points.len() != 2 || kernel::edge_circle(&b.body, edge).is_some() {
         return Ok(None);
     }
-    // The middle of the edge and its direction there.
-    let i = points.len() / 2;
-    let (from, to) = (points[i.saturating_sub(1).min(points.len() - 2)], points[i.max(1)]);
-    let (mid, Some(along)) = ((from + to) * 0.5, (to - from).normalized()) else { return Ok(None) };
-    let step = (b.body.size() * 1e-3).max(1e-3);
+    let mid = (points[0] + points[1]) * 0.5;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let Ok(lines) = b.body.edges(tol) else { return Ok(None) };
     let record = b.body.record();
     let Some(e) = record.edges.get(edge) else { return Ok(None) };
     let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
     faces.sort_unstable();
     faces.dedup();
     for face in faces {
-        let Some(FaceSurface::Plane { normal, .. }) = kernel::face_surface(&b.body, face) else { continue };
-        if axis.normalized().is_none_or(|axis| normal.vec().dot(axis).abs() > 1e-6) {
+        if !matches!(kernel::face_surface(&b.body, face), Some(FaceSurface::Plane { .. })) {
             continue;
         }
-        let Some(across) = normal.vec().cross(along).normalized() else { continue };
-        // A point a step off the edge inside the face: on the face's side of the edge it is its
-        // own closest point on the face (#20233). Exact geometry, no mesh.
-        for side in [1.0, -1.0] {
-            let p = mid + across * (side * step);
+        // A point a little way from the edge's middle towards the middle of another edge of the
+        // face, kept only when it lies on the face, so the pick is inside the face and not on the
+        // edge it shares with its neighbour.
+        for other in kernel::face_edge_indices(&b.body, face) {
+            let Some(q) = lines.get(other).filter(|_| other != edge).and_then(|l| l.points.get(l.points.len() / 2)) else { continue };
+            let p = mid + (*q - mid) * 1e-3;
             if let Ok(Some(nearest)) = kernel::point_closest(p, &b.body, kernel::Members::Faces(&[face]))
-                && nearest.to.dist(p) < step * 1e-3
+                && nearest.to.dist(p) < tol * 1e-3
+                && nearest.to.dist(mid) > tol * 1e-6
             {
                 return Ok(Some((b.name.clone(), face, nearest.to)));
             }
