@@ -2879,7 +2879,8 @@ fn a_symmetric_taper_drafts_both_halves_from_the_start() {
 /// Two Sides with a taper on each (#22419): the first side 12 mm up drafted 6 deg, the second
 /// 5 mm down drafted `taper2`, each from the start plane, so V = frustum_12(tan 6) +
 /// frustum_5(tan t2). Without `taper2` the second side takes the first's taper, as a symmetric
-/// extrude's halves do. With `taper2` = -6 deg the second side's walls continue the first's
+/// extrude's halves do. With `taper2` = 0 the second side is the straight prism, w d 5. With
+/// `taper2` = -6 deg the second side's walls continue the first's
 /// through the profile: one drafted solid over s in -5..12, whose walls are one plane each.
 #[test]
 fn a_two_sided_taper_drafts_each_side_by_its_own_taper() {
@@ -2890,6 +2891,8 @@ fn a_two_sided_taper_drafts_each_side_by_its_own_taper() {
     for (taper2, walls, v_want) in [
         (Some("-3 deg"), 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, -3.0)),
         (None, 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, 6.0)),
+        // An undrafted second side is the straight prism over the profile: w d 5.
+        (Some("0 deg"), 8, f(0.0, 12.0, 6.0) + w * d * 5.0),
         // One plane through the profile: the section at s along the first side is grown by
         // s tan 6, for s from -5 to 12.
         (Some("-6 deg"), 4, f(-5.0, 12.0, 6.0)),
@@ -2929,17 +2932,25 @@ fn a_two_sided_drafted_cut_removes_both_frusta() {
 }
 
 /// A taper renames no cap (#22419): a symmetric extrude started 8 mm up, 10 mm in total (both
-/// caps above the sketch plane, at z = 3 and 13), and a two-sided one, 12 up and 5 down, give
-/// their caps the names the straight extrude gives them.
+/// caps above the sketch plane, at 3 and 13 along its normal), a two-sided one, 12 up and 5 down,
+/// and that one with an undrafted second side (`taper2` 0) give their caps the names the
+/// straight extrude gives them. The symmetric one again on a sketch whose normal is -Z (x along
+/// X, y along -Y), where its caps lie at z = -3 and -13: two caps named alike are numbered by
+/// where they lie, whichever way the sketch faces.
 #[test]
 fn a_taper_on_two_sides_keeps_the_straight_cap_names() {
     let (w, d) = (30.0, 20.0);
-    for (p, (z0, z1)) in
-        [(json!({"distance":10,"direction":"symmetric","start_offset":8}), (3.0, 13.0)), (json!({"distance":12,"distance2":5}), (-5.0, 12.0))]
-    {
+    let xy = json!("XY");
+    let down = json!({"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,-1,0]});
+    for (plane, p, y, (z0, z1)) in [
+        (&xy, json!({"distance":10,"direction":"symmetric","start_offset":8}), d / 2.0, (3.0, 13.0)),
+        (&xy, json!({"distance":12,"distance2":5}), d / 2.0, (-5.0, 12.0)),
+        (&xy, json!({"distance":12,"distance2":5,"taper2":"0 deg"}), d / 2.0, (-5.0, 12.0)),
+        (&down, json!({"distance":10,"direction":"symmetric","start_offset":8}), -d / 2.0, (-3.0, -13.0)),
+    ] {
         let caps = |taper: Option<&str>| {
             let mut s = Session::default();
-            run(&mut s, "sketch.create", json!({"plane":"XY"}));
+            run(&mut s, "sketch.create", json!({"plane":plane}));
             run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
             run(&mut s, "sketch.finish", json!({}));
             let mut p = p.clone();
@@ -2947,13 +2958,13 @@ fn a_taper_on_two_sides_keeps_the_straight_cap_names() {
                 p["taper"] = json!(t);
             }
             run(&mut s, "solid.extrude", p);
-            let pts = [solidcore_record::Vec3::new(w / 2.0, d / 2.0, z0), solidcore_record::Vec3::new(w / 2.0, d / 2.0, z1)];
+            let pts = [solidcore_record::Vec3::new(w / 2.0, y, z0), solidcore_record::Vec3::new(w / 2.0, y, z1)];
             solidcraft_doc::naming::face_names_at(&s.model.state(), &pts)
         };
         let straight = caps(None);
-        assert!(straight.iter().all(|n| !n.is_empty()), "{p}: {straight:?}");
+        assert!(straight.iter().all(|n| !n.is_empty()), "{plane} {p}: {straight:?}");
         let tapered = caps(Some("6 deg"));
-        assert_eq!(tapered, straight, "{p}: tapered {tapered:?}, straight {straight:?}");
+        assert_eq!(tapered, straight, "{plane} {p}: tapered {tapered:?}, straight {straight:?}");
     }
 }
 
