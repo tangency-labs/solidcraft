@@ -214,4 +214,20 @@ mod tests {
         assert_eq!(seen.len(), 16);
         assert!(seen.iter().all(|r| *r == Some((true, false))), "{seen:?}");
     }
+
+    #[test]
+    fn map_on_threads_propagates_watch_cancellation() {
+        struct Flag(bool);
+        impl crate::watch::Watch for Flag {
+            fn cancelled(&self) -> bool {
+                self.0
+            }
+            fn progress(&self, _stage: &'static str, _done: usize, _total: usize) {}
+        }
+        let items: Vec<u32> = (0..16).collect();
+        let active = crate::watch::watching(std::sync::Arc::new(Flag(false)), || map_on_threads(&items, 4, |_| crate::watch::cancelled()));
+        assert!(active.iter().all(|r| *r == Some(false)));
+        let cancelled = crate::watch::watching(std::sync::Arc::new(Flag(true)), || map_on_threads(&items, 4, |_| crate::watch::cancelled()));
+        assert!(cancelled.iter().all(|r| *r == Some(true)));
+    }
 }

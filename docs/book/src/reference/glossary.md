@@ -272,6 +272,23 @@ and circular bends.
 - **For translators:** a member group can contain several separate stock pieces; selecting a
   group does not join those pieces into one length of stock.
 
+### cope
+
+A shaped member end that fits against the outside of one or more mating members.
+
+- **In SolidCraft:** `frame.cope` saves the round-tube member, mating members and original path
+  end in a `FrameCope` feature. The mating bores do not leave material inside the joint.
+- **Elsewhere:** fishmouth, saddle cut, tube notch.
+- **For translators:** a physical end treatment, rather than a drawing of nominal uncut stock.
+
+### cope template
+
+A full-size development of a member's actual end-cut profile onto its outer cylindrical surface.
+
+- **In SolidCraft:** `frame.export_cope_dxf` writes a millimetre DXF with an explicit seam,
+  axial datum, inward direction and scale check.
+- **For translators:** a printable cutting guide; it does not flatten the tube's bends.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.
@@ -865,6 +882,26 @@ The space left between frame members where they meet, for a weld to fill.
 - **Don't use:** clearance; gap on its own where it could mean a hem gap.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
+
+### weld symbol
+
+A mark identifying the type of weld required at a joint.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Kind` and the elementary strokes drawn by
+  `Weld::draw`.
+- **For translators:** ISO calls this an elementary symbol; it forms part of a *welding symbol*.
+
+### welding symbol
+
+A drawing annotation giving the location and requirements for joining parts by welding.
+
+The arrow side and other side describe joint requirements; the selected convention controls
+their placement. The backend record needs no modelled weld bead. A leader and sheet/view
+placement complete the annotation later.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Weld` backend records; see the
+  [supported subset and limits](../../../weld-symbols.md).
+- **For translators:** the whole annotation, including its reference line and any elementary marks.
 
 ## Words with more than one meaning
 

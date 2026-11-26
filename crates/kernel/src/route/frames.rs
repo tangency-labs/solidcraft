@@ -74,6 +74,13 @@ pub fn stock_section_plane(first: &PieceData, at: Vec2, turn: f64) -> Result<Pla
     }
 }
 
+/// The section planes at both ends of `path`, using the sweep's transported frame.
+pub fn stock_terminal_planes(path: &[PieceData], at: Vec2, turn: f64) -> Result<[Plane; 2], PathFailure> {
+    match which(OpKind::Frames) {
+        Which::Solidcore => Solidcore.stock_terminal_planes(path, at, turn),
+    }
+}
+
 /// Whether `region`, anchored at `at` and turned by `turn`, clears every bend of `path`.
 pub fn check_bend_clearance(path: &[PieceData], region: &Region2, at: Vec2, turn: f64) -> Result<(), PathFailure> {
     match which(OpKind::Frames) {

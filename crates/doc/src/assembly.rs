@@ -405,8 +405,7 @@ impl ExpressedMove {
         // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
         // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
         // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
-        let kept = solidcraft_kernel::services::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z])
-            .map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        let kept = solidcraft_kernel::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
         apply_vector(&self.frame, d(now.translate, self.at) + kept)
     }
 
@@ -618,6 +617,42 @@ impl Document {
             .flatten()
             .copied()
             .collect()
+    }
+
+    /// Active component-pattern copies mapped to their seed occurrence id.
+    /// Each copy's placement is owned by its active `FeatureKind::Pattern` feature relative to
+    /// the first placement of its component (`reconcile_component_patterns`).
+    pub fn pattern_occurrence_seeds(&self) -> std::collections::BTreeMap<u64, u64> {
+        if self.occurrences.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+        let marker = self.marker.unwrap_or(self.features.len());
+        let mut by_id = std::collections::HashMap::with_capacity(self.occurrences.len());
+        let mut first_of = std::collections::HashMap::new();
+        for o in &self.occurrences {
+            by_id.insert(o.id, o.component);
+            first_of.entry(o.component).or_insert(o.id);
+        }
+        let mut out = std::collections::BTreeMap::new();
+        for (index, feature) in self.features.iter().enumerate() {
+            if index >= marker || feature.suppressed {
+                continue;
+            }
+            let crate::FeatureKind::Pattern { components, occurrences, .. } = &feature.kind else {
+                continue;
+            };
+            if components.is_empty() {
+                continue;
+            }
+            for &copy_id in occurrences {
+                let Some(&comp) = by_id.get(&copy_id) else { continue };
+                let Some(&seed_id) = first_of.get(&comp) else { continue };
+                if seed_id != copy_id {
+                    out.entry(copy_id).or_insert(seed_id);
+                }
+            }
+        }
+        out
     }
 
     /// Occurrences available at the current history position, in document order.

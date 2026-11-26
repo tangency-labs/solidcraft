@@ -3382,6 +3382,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief_shape: None,
         corner_relief: None,
         height_from: None,
+        bend_relief_shape: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -3861,6 +3862,51 @@ fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
     let drilled = serde_json::json!({"depth": "1", "hole": {"type": "drilled", "tip_angle": "118 deg"}});
     let (_, _, work) = plate_with_hole_grid(drilled);
     assert_eq!(work.hole_tools, 90, "{work:?}");
+}
+
+/// A 200 x 100 x 1 plate with a 2 mm through hole at (4, 4) in a `count1` x `count2` grid on a
+/// 6 mm pitch: the plate's volume, the holes' and the work.
+fn plate_with_hole_pattern(count1: usize, count2: usize) -> (f64, f64, Counts) {
+    let mut doc = Document::new("vents");
+    let plate: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "200", "width": "100", "height": "1",
+    }))
+    .unwrap();
+    doc.add_feature(plate, Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [4, 4, 1], "direction": [0, 0, -1], "diameter": "2",
+    }))
+    .unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": count1.to_string(), "spacing1": "6",
+            "dir2": [0, 1, 0], "count2": count2.to_string(), "spacing2": "6"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, Some("Vents")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), std::f64::consts::PI, work)
+}
+
+/// 512 identical through holes from a feature pattern of one hole (#261): each copy was cut into
+/// an ever more complex plate, so 128 took 30 s and 512 did not finish in 150 s. The copies are
+/// apart, so they are joined into tools of at most [`super::MAX_JOINED_TOOLS`] pieces and the
+/// plate is cut once for each tool: the 127 copies of a 16 x 8 grid in 4 cuts and the 511 of a
+/// 32 x 16 grid in 16, four times the cuts for four times the copies (a cut for each copy would
+/// be 127 and 511). Counted, not timed (#14587): each of those cuts still works on the whole
+/// plate, so their time grows with the holes cut before them, and a load on the machine moves
+/// the ratio of two times past any limit that still tells a cut a copy from a cut a tool.
+#[test]
+fn a_pattern_of_512_holes_cuts_the_plate_once_for_each_joined_tool() {
+    for (count1, count2, cuts) in [(16, 8, 4), (32, 16, 16)] {
+        let (v, hole, work) = plate_with_hole_pattern(count1, count2);
+        let n = (count1 * count2) as f64;
+        assert!((v - (20_000.0 - n * hole)).abs() < 1e-6 * n * hole, "{n} holes: {v}");
+        assert_eq!((work.cut_tools, work.miss_intersects), (cuts, 0), "{n} holes: {work:?}");
+    }
 }
 
 /// A copy of a hole with material just above its spot, which is cut out of its tools there, has
@@ -5188,4 +5234,224 @@ fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() 
     assert_eq!(model.state().bodies.len(), 2);
     assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
     assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
+}
+
+/// A hollow rectangular tube (outer `w` x `h`, wall thickness `wall`, length `len`, centred on X
+/// and Y, standing on Z = 0..`h`), open at both X ends.
+fn hollow_tube(doc: &mut Document, len: f64, w: f64, h: f64, wall: f64) {
+    let outer = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0, -w / 2.0, 0.0)),
+        length: len.to_string().into(),
+        width: w.to_string().into(),
+        height: h.to_string().into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(outer, Some("Tube")).unwrap();
+    let cavity = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0 - 1.0, -w / 2.0 + wall, wall)),
+        length: (len + 2.0).to_string().into(),
+        width: (w - 2.0 * wall).to_string().into(),
+        height: (h - 2.0 * wall).to_string().into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    doc.add_feature(cavity, Some("Cavity")).unwrap();
+}
+
+/// A multi-point hole with 2..7 apart sketch points cuts all of them in one boolean without
+/// tessellating the body's display mesh, and leaves the same volume, faces and names as cutting
+/// them one by one.
+#[test]
+fn a_multi_point_hole_with_fewer_than_eight_points_cuts_at_once() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("six holes");
+        block(&mut doc, "Plate", Vec3::new(0.0, 0.0, 0.0), [100.0, 40.0, 4.0]);
+        let mut sk = Sketch::new();
+        let ids: Vec<String> = (0..6)
+            .map(|i| {
+                let idx = sk.add_point(Vec2::new(10.0 + 15.0 * i as f64, 20.0), None).unwrap();
+                sk.points[idx].id.clone()
+            })
+            .collect();
+        let top = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "4 mm".into() };
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: top, sketch: sk }, Some("Points")).unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let hole_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "hole", "position": [0, 0, 0], "direction": [0, 0, -1], "diameter": "5",
+            "points": {"sketch": sketch, "ids": ids},
+        }))
+        .unwrap();
+        doc.add_feature(hole_kind, Some("Holes")).unwrap();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools), (1, 1), "{w_batch:?}");
+    assert!(!meshed, "multi-point hole on a planar face should not tessellate the display mesh");
+    let expected = 100.0 * 40.0 * 4.0 - 6.0 * std::f64::consts::PI * 2.5 * 2.5 * 4.0;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring many disjoint hole features onto the other half of a hollow tube batches all their
+/// mirrored cuts into one `apply_traced` call (one boolean for <= 32 tools) with zero display mesh
+/// tessellation and identical geometry and face names to cutting each hole one by one.
+#[test]
+fn mirroring_many_hole_features_batches_disjoint_cuts_and_keeps_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("mirrored tube holes");
+        hollow_tube(&mut doc, 300.0, 80.0, 100.0, 3.0);
+        let mut holes = Vec::new();
+        for i in 0..12 {
+            let x = 15.0 + 10.0 * i as f64;
+            let y = if i % 2 == 0 { -20.0 } else { 20.0 };
+            holes.push(doc.add_feature(hole(Vec3::new(x, y, 100.0), Vec3::new(0.0, 0.0, -1.0), 5.0), Some(&format!("H{i}"))).unwrap());
+        }
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        assert!(model.state().bodies[0].mesh.get().is_none(), "single holes on planar faces should not tessellate the display mesh");
+        let mirror = mirror_of(&mut doc, &holes, PlaneRef::Origin { name: "YZ".into() });
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (mirror, disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (_, v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (_, v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools, w_batch.miss_intersects), (1, 1, 0), "{w_batch:?}");
+    assert!(!meshed, "mirroring planar holes should not tessellate the display mesh");
+    let tube_v = 300.0 * (80.0 * 100.0 - 74.0 * 94.0);
+    let holes_v = 24.0 * std::f64::consts::PI * 2.5 * 2.5 * 6.0;
+    let expected = tube_v - holes_v;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring overlapping hole features flushes the pending cut batch before any overlapping hole
+/// so the geometry and face names stay identical to sequential execution.
+#[test]
+fn mirroring_overlapping_holes_flushes_and_matches_sequential_cut() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("overlapping mirror");
+        block(&mut doc, "Plate", Vec3::new(-60.0, -20.0, 0.0), [120.0, 40.0, 6.0]);
+        let h1 = doc.add_feature(hole(Vec3::new(20.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H1")).unwrap();
+        // Overlaps H1 (centres 4 mm apart, radii 4 mm each).
+        let h2 = doc.add_feature(hole(Vec3::new(24.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H2")).unwrap();
+        // Disjoint from both H1 and H2.
+        let h3 = doc.add_feature(hole(Vec3::new(45.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 6.0), Some("H3")).unwrap();
+        mirror_of(&mut doc, &[h1, h2, h3], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let body = &model.state().bodies[0];
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names)
+    };
+    let (v_batch, f_batch, n_batch) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq) = run(1);
+    assert!((v_batch - v_seq).abs() < 1e-6 * v_seq.max(1.0), "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring disjoint cuts where one splits the target body falls back to sequential replay so
+/// split body names, piece order, volumes and face names match sequential execution identically.
+#[test]
+fn mirroring_cuts_that_split_a_body_matches_sequential_pieces_and_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("split mirror");
+        block(&mut doc, "Bar", Vec3::new(-60.0, 0.0, 0.0), [120.0, 10.0, 10.0]);
+        let slice = FeatureKind::Box {
+            corner: point_expr(Vec3::new(18.0, -1.0, -1.0)),
+            length: "4".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(slice, Some("Slice")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let bodies: Vec<(String, f64, usize, Vec<String>)> = model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let mut names = crate::naming::face_names(b).to_vec();
+                names.sort();
+                (b.name.clone(), kernel::measure(&b.body).unwrap().volume, b.body.face_count(), names)
+            })
+            .collect();
+        bodies
+    };
+    let batch = run(super::MAX_JOINED_TOOLS);
+    let seq = run(1);
+    assert_eq!(batch.len(), 3, "{batch:?}");
+    assert_eq!(batch.len(), seq.len());
+    for (a, b) in batch.iter().zip(&seq) {
+        assert_eq!(a.0, b.0);
+        assert!((a.1 - b.1).abs() < 1e-6 * b.1.max(1.0), "{} vs {}", a.1, b.1);
+        assert_eq!(a.2, b.2);
+        assert_eq!(a.3, b.3);
+    }
+}
+
+/// Mirroring disjoint cuts where the first consumes the only target body falls back to sequential
+/// replay so the second cut reports the same "no body to cut or intersect" refusal as sequential.
+#[test]
+fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("consume mirror");
+        block(&mut doc, "Stub", Vec3::new(-25.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+        let cover = FeatureKind::Box {
+            corner: point_expr(Vec3::new(4.0, -1.0, -1.0)),
+            length: "22".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(cover, Some("Cover")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        let mirror = mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        model.result(mirror).and_then(|r| r.error.clone())
+    };
+    let err_batch = run(super::MAX_JOINED_TOOLS);
+    let err_seq = run(1);
+    assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
+    assert_eq!(err_batch, err_seq);
 }
