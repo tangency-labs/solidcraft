@@ -66,6 +66,26 @@ impl std::error::Error for PeriodicSeamError {
 pub fn complete_periodic_seams(
     record: &solidcore_record::brep::Brep,
 ) -> std::result::Result<Option<(solidcore_record::brep::Brep, Vec<usize>)>, PeriodicSeamError> {
+    complete_periodic_seams_noted(record).map(|(completed, _)| completed)
+}
+
+/// [`complete_periodic_seams`], and where a completion was made but left unused, why: the
+/// second value says in a sentence which step refused the completed body (it could not be made
+/// a record, or the record failed a check the import makes of every record). It is `None` where
+/// the record needed no completion or the completion was used.
+///
+/// # Errors
+/// As [`complete_periodic_seams`].
+#[allow(clippy::type_complexity)]
+pub fn complete_periodic_seams_noted(
+    record: &solidcore_record::brep::Brep,
+) -> std::result::Result<
+    (
+        Option<(solidcore_record::brep::Brep, Vec<usize>)>,
+        Option<String>,
+    ),
+    PeriodicSeamError,
+> {
     use solidcore_convert::brep::{to_kernel, to_record};
     use solidcore_record::brep::Loop;
     use std::collections::{BTreeMap, BTreeSet};
@@ -99,7 +119,7 @@ pub fn complete_periodic_seams(
         }
     }
     if targets.is_empty() {
-        return Ok(None);
+        return Ok((None, None));
     }
     let mut kernel = solidcore::Kernel::default();
     let (mut body, order) =
@@ -128,7 +148,7 @@ pub fn complete_periodic_seams(
         }
     }
     if !changed {
-        return Ok(None);
+        return Ok((None, None));
     }
     // The edit deletes the trims of the uses at the seams' vertices and builds them again by
     // sampling their edges. Where an edge lies off its surface by more than its tolerance, which
@@ -140,11 +160,21 @@ pub fn complete_periodic_seams(
     // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
     // on the cut), the pieces end a whole period apart and the record no longer agrees with
     // itself: the same checks refuse that completion too.
-    let Ok((completed, order)) = to_record(&mut kernel, &mut body) else {
-        return Ok(None);
+    let (mut completed, order) = match to_record(&mut kernel, &mut body) {
+        Ok(made) => made,
+        Err(e) => {
+            return Ok((
+                None,
+                Some(format!(
+                    "the completed body could not be made a record: {}",
+                    PeriodicSeamError::Conversion(e)
+                )),
+            ));
+        }
     };
-    if !passes_import_checks(&completed) {
-        return Ok(None);
+    snap_trim_ends(&mut completed);
+    if let Some(why) = import_check_failure(&completed) {
+        return Ok((None, Some(why)));
     }
     let faces = order
         .faces
@@ -156,14 +186,45 @@ pub fn complete_periodic_seams(
                 .ok_or(PeriodicSeamError::OutputFaceLost(f))
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(Some((completed, faces)))
+    Ok((Some((completed, faces)), None))
 }
 
-/// Whether `record` passes the structural and geometric checks the import makes of every
-/// record before it publishes it ([`crate::record_check::validate`] and
-/// [`crate::record_check::agreement`]).
-pub(crate) fn passes_import_checks(record: &solidcore_record::brep::Brep) -> bool {
-    crate::record_check::validate(record).is_ok() && crate::record_check::agreement(record).is_ok()
+/// Moves the end knots of each trim that lies within rounding of its edge's interval onto the
+/// interval's ends. A trim built over an edge whose parameter range starts a rounding error
+/// off the record's (a seam's cut leaves `5.6e-17` where the record says `0`) passes the
+/// record's checks, which allow a millionth, yet a reader that asks for the trim over exactly
+/// the edge's interval finds it starts after it.
+pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
+    use solidcore_record::brep::{Curve2, Loop};
+    const ROUNDING: f64 = 1e-9;
+    let intervals: Vec<[f64; 2]> = record.edges.iter().map(|e| e.interval).collect();
+    for face in &mut record.faces {
+        for l in &mut face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let Some(&[lo, hi]) = intervals.get(u.edge as usize) else {
+                    continue;
+                };
+                let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+                    &mut u.pcurve;
+                solidcore::eval::pcurve::snap_end_knots(knots, [lo, hi], ROUNDING);
+            }
+        }
+    }
+}
+
+/// The first of the import's record checks `record` fails, in a sentence, or `None` where it
+/// passes them all.
+pub(crate) fn import_check_failure(record: &solidcore_record::brep::Brep) -> Option<String> {
+    if let Err(e) = crate::record_check::validate(record) {
+        return Some(format!("the completed record is invalid: {e}"));
+    }
+    if let Err(e) = crate::record_check::agreement(record) {
+        return Some(format!(
+            "the completed record disagrees with its own geometry: {e:?}"
+        ));
+    }
+    None
 }
 
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
