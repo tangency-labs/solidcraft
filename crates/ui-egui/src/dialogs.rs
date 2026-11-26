@@ -8013,7 +8013,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     };
                     let mut p = json!({"body": body, "sketch": sketch, "line": id});
                     if let Some(chain) = d.extra.get("tool_curves").filter(|c| c["sketch"] == json!(sketch) && c["line"] == json!(id)) {
-                        p["curves"] = chain["curves"].clone();
+                        if chain["curves"].as_array().is_some_and(|c| !c.is_empty()) {
+                            p["curves"] = chain["curves"].clone();
+                        }
+                        if chain["extend"] == json!(false) {
+                            p["extend"] = json!(false);
+                        }
                     }
                     p
                 }
@@ -10653,15 +10658,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line, curves } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line, curves, extend } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
             }
             if let (Some(k), Some(id)) = (sketch, line) {
                 d.extra.insert("tool_sketch".into(), json!(k.0));
-                if !curves.is_empty() {
-                    d.extra.insert("tool_curves".into(), json!({"sketch": k.0, "line": id, "curves": curves}));
+                if !curves.is_empty() || !extend {
+                    d.extra.insert("tool_curves".into(), json!({"sketch": k.0, "line": id, "curves": curves, "extend": extend}));
                 }
                 if let Some(inp) = d.inputs.get_mut(1) {
                     inp.items = vec![crate::selection::curve_pick(id, k.0, s.active_sketch)];

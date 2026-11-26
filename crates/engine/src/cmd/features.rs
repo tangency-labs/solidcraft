@@ -452,7 +452,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
             "body: name; ",
-            "plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line?: curve id, curves?: [curve ids] (sketch curves joined end to end into one chain, swept along the sketch's normal through the body, open ends continued along their tangents past it; one straight line splits as its plane)",
+            "plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line?: curve id, curves?: [curve ids] (sketch curves joined end to end into one chain, swept along the sketch's normal through the body, open ends continued along their tangents past it; one straight line splits as its plane), extend?: bool (default true; false cuts with the curves as drawn, refused where they do not cut through)",
         )),
     CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull)).begins_edit()
         .contract(&PRESS_PULL_CONTRACT)
@@ -4486,6 +4486,10 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
         if line.is_none() && curves.is_empty() {
             return Err(bad(cmd, "`line` must name a curve of the sketch"));
         }
+        let extend = match p.get("extend").filter(|v| !v.is_null()) {
+            None => true,
+            Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`extend` must be true or false"))?,
+        };
         let st = s.model.state();
         let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?;
         for id in line.iter().chain(&curves) {
@@ -4507,6 +4511,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line,
                 curves,
+                extend,
             },
         );
     }
@@ -4606,6 +4611,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch: None,
                 line: None,
                 curves: Vec::new(),
+                extend: true,
             },
         );
     }
@@ -4624,6 +4630,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
             sketch: None,
             line: None,
             curves: Vec::new(),
+            extend: true,
         },
     )
 }

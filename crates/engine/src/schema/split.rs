@@ -60,6 +60,11 @@ pub struct SplitBodyParams {
     /// that splits the body as the sheet it sweeps, as for a single curve.
     #[serde(default, deserialize_with = "curves")]
     pub curves: Option<Vec<String>>,
+    /// With `sketch`: true (the default) continues an open chain's ends along their tangents past
+    /// the body; false cuts with the curves exactly as drawn, refused where they do not cut the
+    /// body through.
+    #[serde(default, deserialize_with = "extend")]
+    pub extend: Option<bool>,
     /// The plane to split across. Read when none of `tool`, `sketch`, `line` and `curves` is given;
     /// then it is required.
     #[serde(default)]
@@ -127,6 +132,16 @@ fn line<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
         Value::Null => Ok(None),
         Value::String(s) => Ok(Some(s)),
         _ => Err(D::Error::custom(whole("`line` must name a curve of the sketch"))),
+    }
+}
+
+/// Split Body's `extend`, with the handler's message for anything that isn't true or false. `null`
+/// is the default, as the handler reads it.
+fn extend<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole("`extend` must be true or false"))),
     }
 }
 

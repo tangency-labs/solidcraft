@@ -4248,6 +4248,10 @@ fn split_body_by_sketch_curves() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": id}));
     check(volumes_of(&s, "Block"), [under, 24000.0 - under]);
+    // As drawn it crosses the box as well: the same pieces.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": id, "extend": false}));
+    check(volumes_of(&s, "Block"), [under, 24000.0 - under]);
     // The same through `curves`; the design keeps them.
     let mut t = Session::default();
     block(&mut t, 40.0, 0.0);
@@ -4266,6 +4270,9 @@ fn split_body_by_sketch_curves() {
     let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
     let id = run(&mut s, "sketch.spline.control_point", spline.clone())["created"]["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
+    // As drawn (`extend: false`) it stops inside the box: refused, the box left whole.
+    assert!(s.execute("solid.split_body", &json!({"body": "Block", "sketch": sk, "line": id, "extend": false})).is_err());
+    assert_eq!(volumes_of(&s, "Block").len(), 1);
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": id}));
     check(volumes_of(&s, "Block"), [22750.0, 48000.0 - 22750.0]);
 
@@ -4328,6 +4335,17 @@ fn split_body_by_sketch_curves() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "curves": ["cut"]}));
     check(volumes_of(&s, "Block"), [2400.0, 3600.0]);
+    // As drawn it crosses the box too: the same pieces, cut by the line's own strip.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[4, -5], [4, 25]], "ids": ["cut"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": "cut", "extend": false}));
+    check(volumes_of(&s, "Block"), [2400.0, 3600.0]);
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
+    assert_eq!(split["extend"], json!(false), "{split}");
 }
 
 /// A 10 mm block in a new component, then the design's root active again.

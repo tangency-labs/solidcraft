@@ -17355,7 +17355,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line, curves } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line, curves, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -17370,11 +17370,11 @@ fn eval_feature_kind(
                     let ids: Vec<String> = line.iter().chain(curves).cloned().collect();
                     match ids.as_slice() {
                         [] => return Err(DocError::Invalid("a sketch tool needs its line or its curves".into())),
-                        [one] if sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
+                        [one] if *extend && sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
                         _ => {
                             let raw = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
                             let ss = sketch_in_feature_frame(doc, raw, f.component)?;
-                            let sheet = sketch_curve_sheet(&ss, &ids, &mb.body)?;
+                            let sheet = sketch_curve_sheet(&ss, &ids, &mb.body, *extend)?;
                             let parts = kernel::split_body_by_sheet_where_it_cuts(&mb.body, &sheet, 0)?
                                 .ok_or_else(|| DocError::Invalid(format!("the sketch curves do not cut `{body}` through")))?;
                             parts
@@ -20417,10 +20417,10 @@ fn sketch_curve_is_line(st: &ModelState, sketch: u64, id: &str) -> Result<bool> 
 
 /// The sheet Split Body cuts with for sketch curves that are not one straight line (#1552): the
 /// curves `ids` of `ss` joined end to end into one chain, an open chain's ends continued along
-/// their tangents by straight lines until they are past `body`, swept along the sketch's normal
-/// from below the body to above it. The sheet is the sketch's own geometry (lines, arcs and
+/// their tangents by straight lines until they are past `body` (with `extend`; else the chain as
+/// drawn), swept along the sketch's normal from below the body to above it. The sheet is the sketch's own geometry (lines, arcs and
 /// Bézier pieces exactly), so the cut is exact; it stops nowhere inside the body.
-fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body) -> Result<Body> {
+fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body, extend: bool) -> Result<Body> {
     let mut chains = surface::curve_chains(ss, ids)?.into_iter();
     let (Some(mut chain), None) = (chains.next(), chains.next()) else {
         return Err(DocError::Invalid("the sketch curves must join end to end into one chain".into()));
@@ -20450,7 +20450,7 @@ fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body) -> Result<
         return Err(DocError::Invalid("the sketch curves have no length".into()));
     };
     let closed = first.start().dist(last.end()) <= 1e-6;
-    if !closed {
+    if extend && !closed {
         // Far enough that a line from anywhere in the box (padded) leaves it.
         let reach = |p: Vec2| {
             let centre = (lo + hi) * 0.5;

@@ -2875,6 +2875,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 sketch: None,
                 line: None,
                 curves: Vec::new(),
+                extend: true,
             },
             None,
         )
