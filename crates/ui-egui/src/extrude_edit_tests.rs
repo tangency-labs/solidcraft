@@ -1760,3 +1760,50 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
     assert!(h.app.dialog.is_none());
     assert!(extent(&h).symmetric_offset);
 }
+
+#[test]
+fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
+    use crate::dialogs::{Kind, apply_commands};
+    let shows = |h: &Harness| {
+        let label = solidcraft_ui_text::tr("ui.body_name");
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+    };
+    let sent = |h: &Harness| {
+        // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+        // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+        let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+        params.get("body_name").and_then(Value::as_str).map(str::to_string)
+    };
+    let mut h = make(json!({}));
+    // Editing shows the name the body has, and keeps it.
+    open(&mut h);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Main"));
+    // Join and Cut hide the row and send no name.
+    for operation in [1, 2] {
+        if let Some(Kind::Extrude { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *op = operation;
+        }
+        h.frames(2);
+        assert!(!shows(&h), "operation {operation}");
+        assert_eq!(sent(&h), None, "operation {operation}");
+    }
+    // A cleared name sends none, as before; a typed one is sent trimmed.
+    if let Some(Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *operation = 0;
+    }
+    let dialog = h.app.dialog.as_mut().unwrap();
+    dialog.extra.insert("body_name".into(), json!(""));
+    assert_eq!(sent(&h), None);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!(" Slab "));
+    h.frames(2);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Slab"));
+}
