@@ -465,12 +465,11 @@ fn a_radial_dimension_reads_where_a_countersink_meets_its_bore() {
     run(&mut s, "solid.hole", hole);
     let (mut s, view) = drawn_from(s, NamedView::Top);
     // The countersink's 90° cone meets the 2.25 mm bore 2.25 mm below the 4.5 mm rim.
-    let centre = Vec3::new(15.0, 20.0, 7.75);
-    // Its pieces are marched curves: their mesh points lie a few micrometres off the circle.
+    // Its two pieces, by their name: the edge between the bore's side and the countersink's.
     let pieces: Vec<usize> = {
         let state = s.model.state();
-        let mesh = state.body("Box").unwrap().mesh();
-        mesh.edges.iter().enumerate().filter(|(_, line)| line.iter().all(|p| (p.dist(centre) - 2.25).abs() < 1e-4)).map(|(i, _)| i).collect()
+        let names = solidcraft_doc::naming::edge_names(state.body("Box").unwrap());
+        names.iter().enumerate().filter(|(_, name)| name.starts_with("F2:bore:side:0|F2:csink:side:0")).map(|(i, _)| i).collect()
     };
     assert_eq!(pieces.len(), 2, "{pieces:?}");
     let mut named = BTreeSet::new();
