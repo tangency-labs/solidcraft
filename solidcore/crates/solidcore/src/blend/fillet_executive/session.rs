@@ -2537,6 +2537,7 @@ impl<'target> FilletSession<'target> {
                                     FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))
                                 }),
                                 fit: refusal.fit,
+                                refusal: None,
                             });
                         }
                         ChamferClass::MixedConvexity => {
@@ -2668,6 +2669,7 @@ impl<'target> FilletSession<'target> {
                         comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT.to_owned(),
                         fit_edge: None,
                         fit: None,
+                        refusal: None,
                     });
                 }
                 // The fork's (WR-697, e647dac): with GetSweptTurns() a blend corner's
@@ -2705,6 +2707,7 @@ impl<'target> FilletSession<'target> {
                                 FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))
                             }),
                             fit: None,
+                            refusal: refusal.refusal,
                         });
                     }
                     }
