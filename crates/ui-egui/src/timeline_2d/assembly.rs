@@ -524,10 +524,8 @@ pub fn paint_assembly_section(
     // Right side: Active summary and quick transport buttons
     if banner_rect.width() > 320.0 {
         let active_joints = app.session.doc.assembly.joints.iter().take(marker_step.min(num_joints)).filter(|j| !j.suppressed).count();
-        let active_summary = solidcraft_ui_text::format(
-            "timeline.2d_active",
-            &[("active", &active_joints.to_string()), ("total", &num_joints.to_string())],
-        );
+        let active_summary =
+            solidcraft_ui_text::format("timeline.2d_active", &[("active", &active_joints.to_string()), ("total", &num_joints.to_string())]);
         p.text(
             pos2(banner_rect.right() - 85.0, banner_rect.center().y),
             Align2::RIGHT_CENTER,
@@ -999,9 +997,5 @@ pub fn paint_collapsed_strip(
         state.modeling_split_ratio = if is_modeling { 0.65 } else { 0.5 };
         ui.ctx().request_repaint();
     }
-    resp.on_hover_text(solidcraft_ui_text::tr(if is_modeling {
-        "timeline.2d_modeling_collapsed"
-    } else {
-        "timeline.2d_assembly_collapsed"
-    }));
+    resp.on_hover_text(solidcraft_ui_text::tr(if is_modeling { "timeline.2d_modeling_collapsed" } else { "timeline.2d_assembly_collapsed" }));
 }
