@@ -1,7 +1,7 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{joint_turn, paper_gaps, section_corners, sketch_arc};
+use solidcore_ops::{board_drill, joint_turn, paper_gaps, section_corners, sketch_arc};
 use solidcore_record::{Loop2, Plane, Vec3};
 use solidcraft_kernel_api::planar::{Planar, PlanarRefused};
 
@@ -62,5 +62,13 @@ impl Planar for Solidcore {
 
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool {
         paper_gaps::projected_endpoints_are_distinct(basis, ends)
+    }
+
+    fn direction_angle(&self, from: [f64; 2], to: [f64; 2]) -> f64 {
+        board_drill::direction_angle(from, to)
+    }
+
+    fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool {
+        board_drill::hole_reaches_loops(center, size, angle, loops)
     }
 }

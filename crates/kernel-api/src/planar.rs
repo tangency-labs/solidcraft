@@ -1,6 +1,6 @@
 //! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the turn between
-//! two path directions, a frame section's corners, and paper strokes. Plain numbers and the
-//! record's values in, plain numbers out.
+//! two path directions, a frame section's corners, paper strokes, and where a board's drilled
+//! hole reaches. Plain numbers and the record's values in, plain numbers out.
 
 use solidcore_record::{Loop2, Plane, Vec3};
 
@@ -54,4 +54,11 @@ pub trait Planar: Backend {
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64;
     /// Whether a line's endpoints project to distinct points in the view plane `basis`.
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool;
+    /// The direction from `from` to `to`, in radians anticlockwise from +X; `0` where the points
+    /// coincide or a coordinate is not finite.
+    fn direction_angle(&self, from: [f64; 2], to: [f64; 2]) -> f64;
+    /// Whether a drilled hole touches or crosses any of the closed `loops`: a stadium centred at
+    /// `center`, `size[0]` wide along `angle` (radians anticlockwise from +X) and `size[1]`
+    /// across; a non-finite or negative input reaches nothing.
+    fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool;
 }
