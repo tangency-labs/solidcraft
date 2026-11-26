@@ -409,9 +409,10 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
 }
 
 /// The letters of the texts `links` among the profiles of `ss`, in profile order: each profile
-/// whose outer loop is made of those texts' curves alone, less the letters' counters. A profile
-/// whose outer loop mixes a picked text's curves with other curves (a line drawn across a letter)
-/// is refused: which of its pieces the text meant cannot be told.
+/// whose outer loop is made of one of those texts' curves alone, less the letters' counters. A
+/// profile whose outer loop mixes a picked text's curves with other curves (a line drawn across a
+/// letter, or another picked text that new words run into) is refused: which of its pieces the
+/// text meant cannot be told.
 fn text_region_indices(ss: &SolvedSketch, links: &[String]) -> Result<Vec<usize>> {
     use solidcraft_sketch::LinkKind;
     if links.is_empty() || links.len() > MAX_SELECTIONS || links.iter().collect::<BTreeSet<_>>().len() != links.len() {
@@ -425,15 +426,14 @@ fn text_region_indices(ss: &SolvedSketch, links: &[String]) -> Result<Vec<usize>
     }
     let wanted: BTreeSet<&str> = links.iter().map(String::as_str).collect();
     let link_of: std::collections::HashMap<&str, Option<&str>> = sk.curves.iter().map(|curve| (curve.id.as_str(), curve.link.as_deref())).collect();
-    let ours = |id: &String| link_of.get(id.as_str()).copied().flatten().is_some_and(|link| wanted.contains(link));
+    let owner = |id: &String| link_of.get(id.as_str()).copied().flatten().filter(|link| wanted.contains(link));
     let counters = solidcraft_sketch::text_counters(sk, &ss.profiles);
     let mut indices = Vec::new();
     for (index, profile) in ss.profiles.iter().enumerate() {
-        let picked = profile.outer_curves.iter().filter(|id| ours(id)).count();
-        if picked == 0 {
+        let Some(text) = profile.outer_curves.iter().find_map(owner) else {
             continue;
-        }
-        if picked != profile.outer_curves.len() {
+        };
+        if !profile.outer_curves.iter().all(|id| owner(id) == Some(text)) {
             return Err(DocError::Invalid(format!("other curves of {} now cut into a picked text's letters; pick its profiles again", ss.name)));
         }
         if !counters.get(index).copied().unwrap_or(false) {

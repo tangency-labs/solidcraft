@@ -539,6 +539,30 @@ fn a_cut_of_a_texts_regions_picked_by_index_follows_its_new_words() {
     assert!(half > 0.0 && (half - (30000.0 - first) / 2.0).abs() < 1e-6, "one 2 of 22 cuts half of what both do: {half}");
 }
 
+/// #727: a cut of two whole texts picked by index is saved as both texts. When new words run
+/// one text into the other, the letters they cut apart are an error, not a pick of their pieces.
+#[test]
+fn a_cut_of_two_texts_that_new_words_run_together_is_an_error() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "1", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let first = run(&mut s, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    let second = run(&mut s, "sketch.text", json!({"text": "7", "at": [40, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "profiles": [0, 1], "distance": -1, "operation": "cut"}));
+    no_trouble(&s);
+    let saved = serde_json::to_value(&s.doc.find_feature("Extrude2").unwrap().kind).unwrap().to_string();
+    assert!(saved.contains(r#""text_regions""#) && saved.contains(&first) && saved.contains(&second), "{saved}");
+
+    run(&mut s, "parameters.change", json!({"name": "Label", "expression": "1111111111111"}));
+    let cut = s.model.results.iter().find(|r| r.name == "Extrude2").unwrap();
+    assert!(cut.error.as_deref().is_some_and(|e| e.contains("cut into")), "{:?}", cut.error);
+}
+
 /// #9281: a number parameter in a text's words shows its value in the design's units
 /// (`number()` without the unit, with chosen decimals); a parameter edit rewrites the words
 /// and the cut follows in the same rebuild, also after a save; a rename reaches the words and
