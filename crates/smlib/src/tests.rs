@@ -163,6 +163,7 @@ const ANSWERING: &[&str] = &[
     "counts",
     "boolean",
     "boolean_tagged",
+    "boolean_tagged_owned",
     "union_all",
     "union_all_tagged",
     "boolean2d",
@@ -303,6 +304,7 @@ fn every_entry_point_answers() {
     says("counts", a.counts());
     says("boolean", a.boolean(&t, BooleanOp::Union));
     says("boolean_tagged", a.boolean_tagged(&t, BooleanOp::Union));
+    says("boolean_tagged_owned", a.try_clone().and_then(|x| Brep::boolean_tagged_owned(Err(x), Ok(&t), BooleanOp::Union)));
     says("union_all", Brep::union_all(&[&a, &t]));
     says("union_all_tagged", Brep::union_all_tagged(&[&a, &t]));
     says("boolean2d", a.boolean2d(&t, BooleanOp::Union));
