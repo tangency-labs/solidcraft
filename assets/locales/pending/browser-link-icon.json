@@ -54,5 +54,12 @@
     "ui.link_not_checked": "未检查：未查看此路径。",
     "ui.link_not_checked_network": "未检查：不允许访问网络位置。可在 首选项 › 常规 中允许。",
     "ui.link_source": "链接到："
+  },
+  "fr": {
+    "ui.link_changed": "Le fichier a été modifié depuis sa dernière lecture par cette conception.",
+    "ui.link_missing": "Le fichier est introuvable.",
+    "ui.link_not_checked": "Non vérifié : ce chemin n’a pas été examiné.",
+    "ui.link_not_checked_network": "Non vérifié : l’emplacement réseau n’est pas autorisé. Vous pouvez l’autoriser dans Préférences › Général.",
+    "ui.link_source": "Lié à :"
   }
 }

@@ -1,6 +1,6 @@
 //! Insert SVG / Insert DXF: once the file is picked, the drawing is placed on the sketch (where
-//! its middle goes, its size in millimetres or as a factor, and an angle) with a live preview,
-//! and OK adds it (#2605, #3443).
+//! its middle or the file's origin goes, its size in millimetres or as a factor, and an angle)
+//! with a live preview, and OK adds it (#2605, #3443, #22057).
 
 use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
@@ -16,8 +16,29 @@ pub(crate) const MAX_SCALE: f64 = 1e5;
 /// this too).
 pub(crate) const MAX_SIMPLIFY_MM: f64 = 100.0;
 
+/// What X and Y place, and what the drawing scales and turns about (#22057).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    /// The drawing's middle, as it always was.
+    #[default]
+    Middle,
+    /// The file's own origin: at X 0, Y 0, scale 1 and angle 0 the drawing keeps its coordinates.
+    Origin,
+}
+
+impl Align {
+    /// The insert command's `align` value.
+    fn word(self) -> &'static str {
+        match self {
+            Align::Middle => "center",
+            Align::Origin => "origin",
+        }
+    }
+}
+
 /// The drawing being placed: the insert command, its file, and where, how big and how turned
-/// it goes. `x` and `y` are where the drawing's middle lands; it scales and turns about it.
+/// it goes. `x` and `y` are where the drawing's middle lands, or the file's origin with
+/// [`Align::Origin`]; it scales and turns about that point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Place {
     pub command: String,
@@ -34,6 +55,9 @@ pub struct Place {
     /// drawn. A drawing with more edges than the largest sketch takes starts at a small distance
     /// it can be lowered to 0 from.
     pub simplify: f64,
+    /// The middle of the drawing's box in the file's own coordinates, when it could be read.
+    pub middle: Option<(f64, f64)>,
+    pub align: Align,
 }
 
 /// Open the placement for `path`, picked for `command` (`sketch.insert_svg` / `_dxf`).
@@ -46,10 +70,14 @@ pub fn open(app: &mut SolveApp, command: &str, path: String) {
         .filter(|(w, h)| w.is_finite() && h.is_finite() && *w > 1e-9 && *h > 1e-9);
     let edges = bounds.as_ref().and_then(|b| b.get("edges")?.as_u64()).unwrap_or(0);
     let simplify = suggested_simplify(edges, solidcraft_engine::sketch::limits::max_points(), natural);
-    app.dialog = Some(Dialog::new(
-        Kind::InsertDrawing(Place { command: command.to_string(), path, x: 0.0, y: 0.0, scale: 1.0, angle: 0.0, natural, simplify }),
-        Vec::new(),
-    ));
+    let corner = |b: &Value, key: &str| -> Option<(f64, f64)> { Some((b.get(key)?.get(0)?.as_f64()?, b.get(key)?.get(1)?.as_f64()?)) };
+    let middle = bounds
+        .as_ref()
+        .and_then(|b| Some((corner(b, "min")?, corner(b, "max")?)))
+        .map(|(lo, hi)| ((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0))
+        .filter(|(x, y)| x.is_finite() && y.is_finite());
+    let place = Place { command: command.to_string(), path, x: 0.0, y: 0.0, scale: 1.0, angle: 0.0, natural, middle, align: Align::Middle, simplify };
+    app.dialog = Some(Dialog::new(Kind::InsertDrawing(place), Vec::new()));
 }
 
 /// A starting Simplify distance (mm) for a drawing with `edges` entities: none while the largest
@@ -76,6 +104,16 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
     let name = std::path::Path::new(&p.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.path.clone());
     form_row(ui, "File", |ui| {
         ui.label(name).backing_on_hover_text(&p.path);
+    });
+    // What X and Y place: the drawing's middle, or the file's own origin so the drawing keeps the
+    // coordinates it was drawn at (#22057).
+    form_row(ui, solidcraft_ui_text::tr("ui.insert_drawing.place_by"), |ui| {
+        let mut selected = usize::from(p.align == Align::Origin);
+        let labels = [solidcraft_ui_text::tr("ui.insert_drawing.middle"), solidcraft_ui_text::tr("ui.insert_drawing.file_origin")];
+        let targets = ["dialog:insert:middle", "dialog:insert:origin"];
+        if crate::ui_kit::segmented(ui, &mut selected, &labels, crate::ui_kit::Segments { targets: &targets, ..Default::default() }) {
+            p.align = if selected == 1 { Align::Origin } else { Align::Middle };
+        }
     });
     for (label, v, handle) in [("X", &mut p.x, "dialog:insert:x"), ("Y", &mut p.y, "dialog:insert:y")] {
         form_row(ui, label, |ui| {
@@ -168,7 +206,7 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
     }
     Ok(vec![(
         p.command.clone(),
-        json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": "center", "simplify": p.simplify}),
+        json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": p.align.word(), "simplify": p.simplify}),
     )])
 }
 
@@ -305,6 +343,8 @@ mod tests {
             scale: 2.0,
             angle: 90.0,
             natural: Some((20.0, 10.0)),
+            middle: Some((10.0, 5.0)),
+            align: Align::Middle,
             simplify: 0.0,
         };
         let mut p = p;
@@ -339,6 +379,8 @@ mod tests {
             scale: 2.0,
             angle: 90.0,
             natural: None,
+            middle: None,
+            align: Align::Middle,
             simplify: 0.0,
         };
         let q = placed(solidcore_record::Vec2::new(10.0, 5.0), &p);
@@ -411,6 +453,36 @@ mod tests {
         assert!(n > 1 && n < 100, "the dense arc comes in with far fewer edges: {n}");
     }
 
+    /// #22057: placed by its file origin, a drawing keeps the coordinates it was drawn at: a
+    /// rectangle drawn at x 30 to 50 lands at x 30 to 50, not centred on the sketch origin.
+    #[test]
+    fn placed_by_the_file_origin_a_drawing_keeps_its_coordinates() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-insert-origin-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("offset.svg");
+        std::fs::write(&path, r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="30" y="20" width="20" height="10"/></svg>"#)
+            .unwrap();
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", path.to_string_lossy().to_string());
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the placement is open") };
+        assert_eq!(p.align, Align::Middle, "it opens on the middle, as before");
+        assert_eq!(commands(p).unwrap()[0].1["align"], "center");
+        h.step(&json!({"click": {"handle": "dialog:insert:origin"}})).unwrap();
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("still open") };
+        assert_eq!(p.align, Align::Origin);
+        assert_eq!(commands(p).unwrap()[0].1["align"], "origin");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let pts: Vec<_> = lines(&h).into_iter().flat_map(|(a, b)| [a, b]).collect();
+        let (lo_x, hi_x) = pts.iter().fold((f64::MAX, f64::MIN), |(l, u), p| (l.min(p.x), u.max(p.x)));
+        assert!((lo_x - 30.0).abs() < 1e-6 && (hi_x - 50.0).abs() < 1e-6, "where it was drawn: {lo_x}..{hi_x}");
+    }
+
     /// The width in millimetres sets the scale, and the angle turns the drawing about its middle.
     #[test]
     fn a_width_and_an_angle_size_and_turn_the_drawing_about_its_middle() {
@@ -476,8 +548,18 @@ mod tests {
         h.settle();
         open(&mut h.app, "sketch.insert_svg", svg_file("cancel.svg"));
         h.frames(2);
-        let bad =
-            Place { command: "sketch.insert_svg".into(), path: "x.svg".into(), x: 0.0, y: 0.0, scale: 0.0, angle: 0.0, natural: None, simplify: 0.0 };
+        let bad = Place {
+            command: "sketch.insert_svg".into(),
+            path: "x.svg".into(),
+            x: 0.0,
+            y: 0.0,
+            scale: 0.0,
+            angle: 0.0,
+            natural: None,
+            middle: None,
+            align: Align::Middle,
+            simplify: 0.0,
+        };
         assert!(commands(&bad).is_err());
         h.step(&json!({"key": "Escape"})).unwrap();
         h.settle();

@@ -1015,17 +1015,59 @@ fn normalize_pointer_pressure(pressure: u32) -> Option<Force> {
     }
 }
 
+/// SolidCraft: resolve effective modifiers from synchronous (`GetKeyState`) and live
+/// (`GetAsyncKeyState`) state (#20352).
+///
+/// While unfocused, the thread's synchronous keyboard table has not seen keys pressed in another
+/// application, so live state is authoritative. When focus returns, any modifier already held is
+/// kept in `inherited` until it is either observed synchronously or physically released.
+fn effective_modifiers(
+    focused: bool,
+    sync: ModifiersState,
+    async_mods: Option<ModifiersState>,
+    inherited: &mut ModifiersState,
+) -> ModifiersState {
+    if !focused {
+        *inherited = ModifiersState::empty();
+        return async_mods.unwrap_or(sync);
+    }
+    if let Some(live) = async_mods {
+        *inherited = inherited.intersection(live).difference(sync);
+    }
+    sync.union(*inherited)
+}
+
 /// Emit a `ModifiersChanged` event whenever modifiers have changed.
 /// Returns the current modifier state
 fn update_modifiers(window: HWND, userdata: &WindowData) {
+    update_modifiers_inner(window, userdata, false);
+}
+
+fn update_modifiers_inner(window: HWND, userdata: &WindowData, gaining_focus: bool) {
     use crate::event::WindowEvent::ModifiersChanged;
 
-    let modifiers = {
+    let (focused, has_inherited) = {
+        let window_state = userdata.window_state.lock().unwrap();
+        (window_state.has_active_focus(), !window_state.inherited_modifiers.is_empty())
+    };
+
+    let (sync, async_mods) = {
         let mut layouts = LAYOUT_CACHE.lock().unwrap();
-        layouts.get_agnostic_mods()
+        if !focused {
+            (ModifiersState::empty(), Some(layouts.get_agnostic_mods_async()))
+        } else if gaining_focus || has_inherited {
+            (layouts.get_agnostic_mods(), Some(layouts.get_agnostic_mods_async()))
+        } else {
+            (layouts.get_agnostic_mods(), None)
+        }
     };
 
     let mut window_state = userdata.window_state.lock().unwrap();
+    if gaining_focus {
+        window_state.inherited_modifiers = async_mods.unwrap_or(sync);
+    }
+    let modifiers =
+        effective_modifiers(focused, sync, async_mods, &mut window_state.inherited_modifiers);
     if window_state.modifiers_state != modifiers {
         window_state.modifiers_state = modifiers;
 
@@ -1042,7 +1084,7 @@ fn update_modifiers(window: HWND, userdata: &WindowData) {
 unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::Focused;
 
-    update_modifiers(window, userdata);
+    update_modifiers_inner(window, userdata, true);
 
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
@@ -1053,7 +1095,11 @@ unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
 unsafe fn lose_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::{Focused, ModifiersChanged};
 
-    userdata.window_state_lock().modifiers_state = ModifiersState::empty();
+    {
+        let mut window_state = userdata.window_state_lock();
+        window_state.modifiers_state = ModifiersState::empty();
+        window_state.inherited_modifiers = ModifiersState::empty();
+    }
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
         event: ModifiersChanged(ModifiersState::empty().into()),
@@ -2971,5 +3017,38 @@ mod tests {
             MouseScrollDelta::PixelDelta(p) => assert!(p.x.is_finite() && p.y.is_finite()),
             other => panic!("expected pixels, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn effective_modifiers_tracks_unfocused_and_inherited_keys() {
+        let ctrl = ModifiersState::CONTROL;
+        let shift = ModifiersState::SHIFT;
+        let empty = ModifiersState::empty();
+        let mut inherited = empty;
+
+        // Unfocused: live async state wins even when synchronous state is empty.
+        assert_eq!(effective_modifiers(false, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Focus gained with Ctrl held before focus: stays active while GetKeyState is still empty.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, ctrl);
+
+        // Subsequent mouse message before GetKeyState catches up still sees Ctrl, plus Shift if pressed.
+        assert_eq!(effective_modifiers(true, shift, Some(ctrl | shift), &mut inherited), ctrl | shift);
+        assert_eq!(inherited, ctrl);
+
+        // Releasing Ctrl physically clears it from inherited and effective modifiers.
+        assert_eq!(effective_modifiers(true, shift, Some(shift), &mut inherited), shift);
+        assert_eq!(inherited, empty);
+
+        // Once GetKeyState catches up on focus, inherited clears immediately.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, ctrl, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Normal focused path uses synchronous state alone.
+        assert_eq!(effective_modifiers(true, shift, None, &mut inherited), shift);
     }
 }

@@ -529,6 +529,14 @@ pub fn faceuse_shell_replacement(
 /// face that `shell` joins to `start`. Not upstream: each vertex of `asked` is taken
 /// out as it is marked, and the walk ends when that takes out the last of them. With
 /// none asked it covers everything joined to `start`.
+///
+/// Not upstream: with vertices asked, the walk goes breadth first, so the vertices near
+/// `start` are marked before the far side of the shell. Which of `asked` the walk
+/// reaches does not depend on the order, and nothing else is read from such a walk, but
+/// depth first it often crossed most of a large shell to reach a vertex one face away:
+/// deleting the faces inside a union of a body of 10,000 faces walked it again for each
+/// face. With none asked the order is upstream's, which the lists of edge and face
+/// uses it fills keep.
 fn shell_connectivity(
     k: &Kernel,
     b: &Brep,
@@ -541,8 +549,13 @@ fn shell_connectivity(
     asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     marks.mark(k, Entity::Vertexuse(start), mark);
-    let mut stack = vec![start];
-    while let Some(vu) = stack.pop() {
+    let breadth_first = !asked.is_empty();
+    let mut stack = std::collections::VecDeque::from([start]);
+    while let Some(vu) = if breadth_first {
+        stack.pop_front()
+    } else {
+        stack.pop_back()
+    } {
         let mut propagate = Vec::new();
         let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
             let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
@@ -554,7 +567,7 @@ fn shell_connectivity(
                 let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
                 if !marks.is_marked(k, Entity::Vertexuse(mate_vu), mark) {
                     marks.mark(k, Entity::Vertexuse(mate_vu), mark);
-                    stack.push(mate_vu);
+                    stack.push_back(mate_vu);
                 }
             }
             if eu::is_loop_edgeuse(b, e)? {
@@ -592,7 +605,7 @@ fn shell_connectivity(
                     && vertexuse::shell(b, next)? == Some(shell)
                 {
                     marks.mark(k, Entity::Vertexuse(next), mark);
-                    stack.push(next);
+                    stack.push_back(next);
                 }
             }
         }
@@ -604,7 +617,7 @@ fn shell_connectivity(
                         && vertexuse::shell(b, next)? == Some(shell)
                     {
                         marks.mark(k, Entity::Vertexuse(next), mark);
-                        stack.push(next);
+                        stack.push_back(next);
                     }
                 }
             }
