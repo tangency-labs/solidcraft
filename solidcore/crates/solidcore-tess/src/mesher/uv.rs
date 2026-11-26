@@ -53,7 +53,7 @@ fn split(starts: &[f64], flat: &dyn Fn(f64, f64) -> bool, max_lines: usize) -> V
 /// their middle), the side length `h` and the facet angle: no point is needed between them.
 pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], b: [f64; 2]) -> bool {
     let at = |q: [f64; 2]| s.derivs(q[0], q[1]);
-    let (Some((pa, _, _)), Some((pb, _, _))) = (at(a), at(b)) else { return true };
+    let (Some((pa, sua, sva)), Some((pb, sub, svb))) = (at(a), at(b)) else { return true };
     if pa.dist(pb) > h * (1.0 + 1e-9) {
         return false;
     }
@@ -62,13 +62,16 @@ pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], 
     if sag > rules.tol {
         return false;
     }
+    let Some(t) = rules.turn else { return true };
     // At a pole the normal is undefined: take it from just inside the segment.
-    let normal = |q: [f64; 2], toward: [f64; 2]| {
-        let n = |q: [f64; 2]| at(q).and_then(|(_, su, sv)| su.cross(sv).normalized());
-        n(q).or_else(|| n([q[0] + 1e-4 * (toward[0] - q[0]), q[1] + 1e-4 * (toward[1] - q[1])]))
+    let normal = |q: [f64; 2], toward: [f64; 2], su: solidcore::Vec3, sv: solidcore::Vec3| {
+        su.cross(sv).normalized().or_else(|| {
+            at([q[0] + 1e-4 * (toward[0] - q[0]), q[1] + 1e-4 * (toward[1] - q[1])])
+                .and_then(|(_, su, sv)| su.cross(sv).normalized())
+        })
     };
-    match (rules.turn, normal(a, b), normal(b, a)) {
-        (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+    match (normal(a, b, sua, sva), normal(b, a, sub, svb)) {
+        (Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
         _ => true,
     }
 }
@@ -84,40 +87,42 @@ const POINT: f64 = 1e-6;
 fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules, h: f64) -> impl Fn(f64, f64) -> bool + 'a {
     let tol = rules.tol;
     let uv = move |x: f64, y: f64| if d == 0 { (x, y) } else { (y, x) };
-    let at = move |x: f64, y: f64| {
+    let derivs = move |x: f64, y: f64| {
         let (u, v) = uv(x, y);
-        s.derivs(u, v).map(|(p, _, _)| p)
+        s.derivs(u, v)
     };
-    let normal = move |x: f64, y: f64| {
-        let (u, v) = uv(x, y);
-        s.derivs(u, v).and_then(|(_, su, sv)| su.cross(sv).normalized())
-    };
+    let at = move |x: f64, y: f64| derivs(x, y).map(|(p, _, _)| p);
+    let normal = move |x: f64, y: f64| derivs(x, y).and_then(|(_, su, sv)| su.cross(sv).normalized());
     const ACROSS: usize = 5;
     let ys: Vec<f64> = (0..ACROSS).map(|k| across.0 + (across.1 - across.0) * k as f64 / (ACROSS - 1) as f64).collect();
     move |a: f64, b: f64| {
         ys.iter().all(|&y| {
-            let (Some(pa), Some(pb)) = (at(a, y), at(b, y)) else { return true };
+            let (Some((pa, sua, sva)), Some((pb, sub, svb))) = (derivs(a, y), derivs(b, y)) else { return true };
             if pa.dist(pb) > h * (1.0 + 1e-9) {
                 return false;
             }
-            let sag = [0.25, 0.5, 0.75].iter().filter_map(|f| at(a + (b - a) * f, y)).map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
+            let pq1 = at(a + (b - a) * 0.25, y);
+            let pm = at(a + (b - a) * 0.5, y);
+            let pq3 = at(a + (b - a) * 0.75, y);
+            let sag = [pq1, pm, pq3].into_iter().flatten().map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
             if sag > tol {
                 return false;
             }
             // The two half chords of an arc turning θ differ by θ/2; a closed iso-line's by π.
             // An iso-line within a millionth of the tolerance of one point (a pole) turns no
             // amount: its directions are rounding.
-            if let Some(pm) = at(0.5 * (a + b), y)
+            if let Some(pm) = pm
                 && pa.dist(pm).max(pm.dist(pb)) > POINT * tol
                 && 2.0 * turn(pm - pa, pb - pm) > QUARTER_TURN
             {
                 return false;
             }
+            let Some(t) = rules.turn else { return true };
             // At a pole the normal is undefined: take it from just inside the segment.
-            let na = normal(a, y).or_else(|| normal(a + 1e-4 * (b - a), y));
-            let nb = normal(b, y).or_else(|| normal(b - 1e-4 * (b - a), y));
-            match (rules.turn, na, nb) {
-                (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+            let na = sua.cross(sva).normalized().or_else(|| normal(a + 1e-4 * (b - a), y));
+            let nb = sub.cross(svb).normalized().or_else(|| normal(b - 1e-4 * (b - a), y));
+            match (na, nb) {
+                (Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
                 _ => true,
             }
         })

@@ -604,7 +604,13 @@ fn refine_sag(
     slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
 ) -> (usize, bool) {
     let mut added = 0;
-    let mut cache: HashMap<FixedVertexHandle, Option<(Vec3, Option<Vec3>)>> = HashMap::new();
+    let mut cache: crate::hash::BitsMap<usize, Option<(Vec3, Option<Vec3>)>> = crate::hash::BitsMap::default();
+    // Triangles that already passed all sag/turn/length checks in an earlier round need not be
+    // re-evaluated while unchanged (spade keeps vertex handles and constraint edges fixed).
+    let mut passed: crate::hash::BitsSet<[usize; 3]> = crate::hash::BitsSet::default();
+    // Non-constraint edge midpoint split decisions cached by sorted vertex handle pair, so each
+    // shared interior edge is evaluated once across both adjacent triangles and across rounds.
+    let mut edge_split: crate::hash::BitsMap<(usize, usize), bool> = crate::hash::BitsMap::default();
     // The widest turn between two corner normals.
     let spread = |n: [Option<Vec3>; 3]| match n {
         [Some(a), Some(b), Some(c)] => [(a, b), (b, c), (c, a)].iter().map(|(x, y)| x.dot(*y).clamp(-1.0, 1.0).acos()).fold(0.0, f64::max),
@@ -613,7 +619,7 @@ fn refine_sag(
     for _ in 0..SAG_ROUNDS {
         let mut todo: Vec<Point2<f64>> = Vec::new();
         let mut at = |h: FixedVertexHandle, p: Point2<f64>| {
-            *cache.entry(h).or_insert_with(|| {
+            *cache.entry(h.index()).or_insert_with(|| {
                 let q = from(p);
                 (sag.eval)(q[0], q[1])
             })
@@ -624,9 +630,15 @@ fn refine_sag(
                 continue;
             }
             let vs = face.vertices();
+            let mut key = [vs[0].fix().index(), vs[1].fix().index(), vs[2].fix().index()];
+            key.sort_unstable();
+            if passed.contains(&key) {
+                continue;
+            }
             let ps = vs.map(|v| v.position());
             let c = Point2::new((ps[0].x + ps[1].x + ps[2].x) / 3.0, (ps[0].y + ps[1].y + ps[2].y) / 3.0);
             let (Some((a, na)), Some((b, nb)), Some((d, nd))) = (at(vs[0].fix(), ps[0]), at(vs[1].fix(), ps[1]), at(vs[2].fix(), ps[2])) else {
+                passed.insert(key);
                 continue;
             };
             // How far the surface lies from the triangle at `q`.
@@ -655,15 +667,25 @@ fn refine_sag(
                 }
                 continue;
             }
+            let mut any_edge_split = false;
             for (e, (pa, pb)) in face.adjacent_edges().into_iter().zip([(a, b), (b, d), (d, a)]) {
                 if e.is_constraint_edge() {
                     continue;
                 }
+                let [u, v] = e.vertices().map(|x| x.fix().index());
+                let ekey = (u.min(v), u.max(v));
                 let [p, q] = e.positions();
                 let m = Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
-                if pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5) {
+                let needs = *edge_split
+                    .entry(ekey)
+                    .or_insert_with(|| pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5));
+                if needs {
                     todo.push(m);
+                    any_edge_split = true;
                 }
+            }
+            if !any_edge_split {
+                passed.insert(key);
             }
         }
         if todo.is_empty() {

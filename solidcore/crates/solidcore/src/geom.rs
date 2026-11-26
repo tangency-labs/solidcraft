@@ -11,6 +11,7 @@ pub mod assert_array;
 pub mod attribute;
 pub mod axial_section;
 pub mod axis2_placement;
+pub mod board_drill;
 pub mod certified;
 pub mod check_memo;
 pub mod content;
