@@ -154,7 +154,11 @@ fn base(root: &Path, base_ref: Option<&str>) -> Result<(String, BTreeSet<String>
             .or_else(|| git(&["rev-parse", "--verify", "-q", "HEAD~1^{commit}"]).map(|r| (r, "HEAD~1".to_string())))
             .ok_or("neither `git merge-base HEAD origin/main` nor HEAD~1 is available")?,
     };
-    let dir = std::env::temp_dir().join(format!("xtask-app-geometry-{}", std::process::id()));
+    // One directory per call: tests in one process call this side by side, and a shared directory
+    // would be emptied under the other call.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("xtask-app-geometry-{}-{call}", std::process::id()));
     let sites = sites_at(root, &rev, &dir);
     let _ = std::fs::remove_dir_all(&dir);
     Ok((format!("{} ({how})", &rev[..rev.len().min(10)]), sites?))
