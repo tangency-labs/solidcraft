@@ -3,7 +3,7 @@
 //! the named looks a weld tool offers ([`SpotLook`]).
 //!
 //! SolidCraft's own: solidcore and solidcore-ops hold no weld (jyviko and bherbruck on #18409,
-//! #21393). Every measurement and every body here is an ops call; what this module adds is the
+//! #21393). Every measurement and every body here is a kernel call; what this module adds is the
 //! weld's rules and sizes. The `weld.spot` command and its storage come with #15131.
 //!
 //! | Rust                       | What it is                                                  |
@@ -46,11 +46,10 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::brep::Curve as RecordCurve;
-use solidcraft_kernel::affine;
+use solidcraft_kernel::api::FaceHit;
+use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
+use solidcraft_kernel::{Body, KernelError, affine};
 use solidcraft_kernel::curves as curve;
-use solidcraft_kernel::services::measure::FaceHit;
-use solidcraft_kernel::services::sweep::{self, Curve};
-use solidcraft_kernel::services::{ExactBody as Body, Order, make_sphere};
 
 /// Why a spot is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -94,9 +93,12 @@ pub enum SpotRefusal {
     /// so the footprint cannot be checked.
     #[error("how far the edges of face {face} of sheet {sheet} lie from the spot was not found")]
     EdgeNotMeasured { sheet: usize, face: usize },
-    /// An ops call failed.
+    /// The kernel refused a profile's body, in its words.
     #[error(transparent)]
-    Ops(#[from] solidcraft_kernel::services::Error),
+    Profile(#[from] profiles::ProfileRefused),
+    /// A kernel call on a body failed.
+    #[error(transparent)]
+    Kernel(#[from] KernelError),
     /// A placement call refused its numbers, in the kernel's words.
     #[error(transparent)]
     Placement(#[from] affine::AffineRefused),
@@ -297,7 +299,7 @@ pub(crate) fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
 /// sheets, a thickness or diameter that is not finite and positive, a style with no piece or a
 /// fraction out of its range (see [`SpotStyle`]), a ball on more than two sheets, a pin whose dished
 /// ends meet, and sizes the model cannot hold: a piece thinner than the zone tolerance, or a spot
-/// past [`sweep::MAX_COORD`]. The errors of the ops calls otherwise.
+/// past [`profiles::MAX_COORD`]. The errors of the kernel calls otherwise.
 pub fn spot_weld(spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
     let (first, last) = check_sheets(&spot.thicknesses)?;
     if !positive(spot.diameter) {
@@ -314,12 +316,12 @@ pub fn spot_weld(spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
         return bad("a spot ball on more than two sheets");
     }
     let layout = Layout::of(spot, first, last);
-    let tol = sweep::zone_tolerance()?;
+    let tol = profiles::zone_tolerance()?;
     check_sizes(spot, &layout, tol)?;
     let placement = placement(spot.at, spot.normal)?;
-    let pieces = local_pieces(&layout, tol)?;
-    for piece in &pieces {
-        piece.body.transform(&placement)?;
+    let mut pieces = local_pieces(&layout, tol)?;
+    for piece in &mut pieces {
+        piece.body = solidcraft_kernel::transform_matrix(&piece.body, placement)?;
     }
     Ok(pieces)
 }
@@ -428,13 +430,13 @@ impl Layout {
     }
 }
 
-/// Refuses sizes the model cannot hold, before any piece is built (an ops call would refuse them
+/// Refuses sizes the model cannot hold, before any piece is built (a kernel call would refuse them
 /// with its own, misleading reason).
 fn check_sizes(spot: &SpotWeld, layout: &Layout, tol: f64) -> Result<()> {
     let lengths = layout.lengths();
     let largest = lengths.iter().fold(0.0_f64, |m, &l| m.max(l));
     let reach = spot.at.iter().fold(0.0_f64, |m, &c| m.max(c.abs())) + largest;
-    if lengths.iter().any(|l| !l.is_finite()) || reach > sweep::MAX_COORD {
+    if lengths.iter().any(|l| !l.is_finite()) || reach > profiles::MAX_COORD {
         return bad("a spot diameter or sheet so large that the spot passes the model's size limit");
     }
     if let Some((_, [upper, lower])) = layout.pin {
@@ -463,7 +465,7 @@ fn local_pieces(layout: &Layout, tol: f64) -> Result<Vec<SpotPiece>> {
     let mut pieces = Vec::new();
     let inside = |body| SpotPiece { body, zone: SpotZone::Inside, side: SpotSide::Through };
     if let Some(r) = layout.ball {
-        pieces.push(inside(make_sphere([0.0; 3], r)?));
+        pieces.push(inside(profiles::ball([0.0; 3], r)?));
     }
     if let Some((r, [upper, lower])) = layout.pin {
         pieces.push(inside(pin(r, t_u, t_l, upper, lower, tol)?));
@@ -484,7 +486,7 @@ fn local_pieces(layout: &Layout, tol: f64) -> Result<Vec<SpotPiece>> {
                 match &dish {
                     Some(dish) => {
                         curves.push(line((outer, face), (outer, dish.heights[i + 1])));
-                        curves.extend(Curve::from_record(&dish.arc, [dish.at[i], dish.at[i + 1]])?);
+                        curves.extend(profiles::curve_pieces(&dish.arc, [dish.at[i], dish.at[i + 1]])?);
                         curves.push(line((inner, dish.heights[i]), (inner, face)));
                     }
                     None => {
@@ -540,7 +542,7 @@ fn line((ra, za): (f64, f64), (rb, zb): (f64, f64)) -> Curve {
 
 /// The body swept by revolving the closed profile `curves` once about the local Z axis.
 fn revolve(curves: &[Curve]) -> Result<Body> {
-    Ok(sweep::revolve(curves, [0.0; 3], [0.0, 0.0, 1.0], TAU, true)?)
+    Ok(profiles::revolve_curves(curves, [0.0; 3], [0.0, 0.0, 1.0], TAU, true)?)
 }
 
 /// The pin of radius `r` from `z = -t_l` to `z = t_u`, each end flat or dished by the depth given.
@@ -549,7 +551,7 @@ fn pin(r: f64, t_u: f64, t_l: f64, upper: Option<f64>, lower: Option<f64>, tol: 
     let dished = |face: f64, sense: f64, c: f64| -> Result<Vec<Curve>> {
         let arc = curve::arc_through([[-r, 0.0, face], [0.0, 0.0, face - sense * c], [r, 0.0, face]])?;
         let (t, _) = where_at(&arc, 0.0, face, -sense, tol)?;
-        Ok(Curve::from_record(&arc, [t, 1.0])?)
+        Ok(profiles::curve_pieces(&arc, [t, 1.0])?)
     };
     let mut curves = vec![line((r, -t_l), (r, t_u))];
     match upper {
@@ -589,20 +591,20 @@ pub struct SpotSite {
 }
 
 /// The site of a spot of `diameter` picked at `point` on record face `face` of sheet `picked`, the
-/// sheets of the stack listed in `sheets` with their record orders (any order, at least two).
+/// sheets of the stack listed in `sheets` (any order, at least two).
 ///
 /// The spot's line runs from the point along the picked face's inward normal, through the stack.
 /// Each listed sheet must be crossed exactly once, the sheets must follow one another along the
 /// line without a gap or an overlap, every face crossed must be flat and square to the line, and
-/// the spot's footprint must lie inside every such face. The sheets are read, never changed: every
-/// solve runs on a copy.
+/// the spot's footprint must lie inside every such face. The sheets are read, never changed: the
+/// solves run on each body's kernel form, never on its record.
 ///
 /// # Errors
 /// [`SpotRefusal::Invalid`] for fewer than two sheets, a picked sheet not in the list, a face the
 /// picked sheet does not have, a point that is not finite or a diameter that is not finite and
 /// positive. The other [`SpotRefusal`]s where the stack does not take the spot. The errors of the
-/// ops calls otherwise.
-pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: [f64; 3], diameter: f64) -> Result<SpotSite> {
+/// kernel calls otherwise.
+pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64) -> Result<SpotSite> {
     if sheets.len() < 2 {
         return bad("fewer than two sheets");
     }
@@ -615,30 +617,29 @@ pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: 
     if !positive(diameter) {
         return bad("a spot diameter that is not finite and positive");
     }
-    let copies = sheets.iter().map(|(b, o)| b.copy_with_order(o)).collect::<solidcraft_kernel::services::Result<Vec<_>>>()?;
-    let Some((body, order)) = copies.get(picked) else {
+    let Some(body) = sheets.get(picked) else {
         return bad("a picked sheet not in the list");
     };
-    if face >= order.faces.len() {
+    if face >= body.face_count() {
         return bad("a picked face the picked sheet does not have");
     }
-    let tol = sweep::zone_tolerance()?;
-    let out = flat_normal(body, order, picked, face)?;
+    let tol = profiles::zone_tolerance()?;
+    let out = flat_normal(body, picked, face)?;
     let normal = out.map(|v| -v);
 
     // the point on the picked face first, then every sheet crossed once
-    let on_face = body.face_hits_by_ray(order, point, normal)?.first().is_some_and(|h| h.face == face && h.distance <= tol);
+    let on_face = body.face_hits_by_ray(point, normal)?.first().is_some_and(|h| h.face == face && h.distance <= tol);
     if !on_face {
         return Err(SpotRefusal::PointOffFace);
     }
     let mut crossed: Vec<(usize, FaceHit, FaceHit)> = Vec::new();
-    for (sheet, (b, o)) in copies.iter().enumerate() {
+    for (sheet, b) in sheets.iter().enumerate() {
         // shortcut: a line through an edge meets both its faces at one distance and is refused as
         // crossed again, not as past the face's edge; merge hits at one distance if the app needs
         // the right name
-        match b.face_hits_by_ray(o, point, normal)?.as_slice() {
+        match b.face_hits_by_ray(point, normal)?.as_slice() {
             [near, far] => crossed.push((sheet, *near, *far)),
-            [] if b.face_hits_by_ray(o, point, out)?.is_empty() => return Err(SpotRefusal::SheetMissed { sheet }),
+            [] if b.face_hits_by_ray(point, out)?.is_empty() => return Err(SpotRefusal::SheetMissed { sheet }),
             [] => return Err(SpotRefusal::FaceNotOuter { sheet }),
             // one hit: the point lies inside that sheet
             [_] => return Err(SpotRefusal::SheetsOverlap { sheet }),
@@ -662,19 +663,19 @@ pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: 
     // every face crossed flat and square, and the footprint inside it
     let mut tightest: Option<(f64, usize, usize)> = None;
     for &(sheet, near, far) in &crossed {
-        let Some((b, o)) = copies.get(sheet) else {
+        let Some(b) = sheets.get(sheet) else {
             continue;
         };
         for hit in [near, far] {
-            flat_normal(b, o, sheet, hit.face)?;
-            if b.face_square_level(o, hit.face, normal, point)?.is_none() {
+            flat_normal(b, sheet, hit.face)?;
+            if b.face_square_level(hit.face, v3(normal), v3(point))?.is_none() {
                 return Err(SpotRefusal::FaceNotSquare { sheet, face: hit.face });
             }
-            let edges = b.rim_edges(o, &[hit.face])?;
+            let edges = b.rim_edges(&[hit.face])?;
             if edges.is_empty() {
                 continue;
             }
-            let Some(c) = b.closest_to_point(o, &[], &edges, hit.point)? else {
+            let Some(c) = b.closest_to_point(&[], &edges, hit.point)? else {
                 return Err(SpotRefusal::EdgeNotMeasured { sheet, face: hit.face });
             };
             if tightest.is_none_or(|(room, ..)| c.distance < room) {
@@ -698,11 +699,15 @@ pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: 
 }
 
 /// The outward unit normal of flat record face `face` of sheet `sheet`.
-fn flat_normal(b: &Body, o: &Order, sheet: usize, face: usize) -> Result<[f64; 3]> {
-    match b.face_plane_normal(o, face)? {
+fn flat_normal(b: &Body, sheet: usize, face: usize) -> Result<[f64; 3]> {
+    match b.face_plane_normal(face)? {
         Some(n) => Ok(n.value),
         None => Err(SpotRefusal::FaceNotFlat { sheet, face }),
     }
+}
+
+fn v3(p: [f64; 3]) -> solidcore_record::Vec3 {
+    p.into()
 }
 
 #[cfg(test)]

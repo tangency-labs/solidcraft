@@ -488,6 +488,7 @@ pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::sections;
+pub use route::profiles;
 pub use route::runtime;
 pub use route::shaft_spline;
 pub use route::shell;
