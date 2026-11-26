@@ -306,3 +306,27 @@ SolidCraft changes:
   message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
   factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
   `LineDelta`. The registration is undone when the event loop drops.
+- `src/platform_impl/windows/keyboard_layout.rs`, `window_state.rs`, `event_loop.rs`
+  (`get_agnostic_mods_async`, `effective_modifiers`): while unfocused or gaining focus, read
+  modifier keys with `GetAsyncKeyState` (keeping AltGr filtering) and hold any pre-focus
+  modifiers in `WindowState::inherited_modifiers` until the thread's synchronous `GetKeyState`
+  observes them or the key is physically released. Clicking into an unfocused window while holding
+  Ctrl/Shift/Alt from another application otherwise saw stale `GetKeyState == 0` until the
+  modifier was released and pressed again (#20352). Test:
+  `effective_modifiers_tracks_unfocused_and_inherited_keys` (Windows).
+- `src/window.rs` (`WindowAttributes::with_owned_by`), `src/platform_impl/windows/window.rs`,
+  `linux/x11/window.rs`, `linux/wayland/window/mod.rs`, `macos/window_delegate.rs`, `macos/window.rs`:
+  a top-level window can name a live owner (#20252). Windows gives it a Win32 owner, X11 a
+  transient hint and Wayland an XDG toplevel parent. On macOS the owner keeps a list of the windows
+  it owns and puts them right above itself whenever it becomes the key window
+  (`raise_owned_windows`), which is what an owner does there: they come forward with it. When
+  it is minimized it takes them off the screen, and it brings those back when it is restored
+  (`hide_owned_windows`, `show_owned_windows`). When it moves, they move by what its top left
+  corner moved, as a child window does (`move_owned_windows`). While it is full screen they are
+  full-screen auxiliary windows that move to the active space, so they show in its space above
+  it and raising them does not leave that space; one on another screen stays there
+  (`owned_windows_join_full_screen`, undone by `owned_windows_leave_full_screen`). They are not AppKit child
+  windows. A child window is kept on its parent's screen, so one dragged to another screen
+  jumped back when the drag ended, and one opened on another screen did not come forward with
+  its parent (#22313). A window with an explicit parent
+  (`WindowAttributes::with_parent_window`) is a child window as in winit.

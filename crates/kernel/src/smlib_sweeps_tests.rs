@@ -807,3 +807,107 @@ fn fast_cylinder_supports_booleans_fillet_display_plan_and_validation() {
         crate::check_kept(&body).unwrap();
     }
 }
+
+/// A loft through sections whose spline spans are joined into one curve is the body the spans
+/// alone give (#22319): the same faces, volume, area and centre of mass, through two sections
+/// (ruled), three and four. Each section is one arch, a cubic from (20, 0) to (-20, 0) closed by
+/// the line back, 30 mm above the one before, in two pieces: the first quarter of its parameter
+/// and the rest, which meet at speeds of 1 to 3 whatever the arch's shape, so the loft joins
+/// them. In the first family the arch (control points (20, 30) and (-20, 30) between) is at 1,
+/// 0.8, 0.6 and 0.4 of its size: one outline at different sizes. In the second its control
+/// points lean further over from one section to the next: sections of different shapes that
+/// divide their curves alike, which the loft joins as well.
+#[test]
+fn a_loft_through_joined_spans_is_the_body_its_spans_alone_give() {
+    let section = |k: usize, arch: [Vec2; 4]| {
+        let [p0, p1, p2, p3] = arch;
+        let (head, tail) = Seg2::Cubic { p0, p1, p2, p3 }.split_at(0.25);
+        (Plane::XY.offset(30.0 * k as f64), pieces_of(&region(Loop2 { segs: vec![head, tail, Seg2::Line { a: p3, b: p0 }] })))
+    };
+    let scaled = |k: usize| {
+        let p = |x: f64, y: f64| Vec2::new(x, y) * (1.0 - 0.2 * k as f64);
+        section(k, [p(20.0, 0.0), p(20.0, 30.0), p(-20.0, 30.0), p(-20.0, 0.0)])
+    };
+    let leaning = |k: usize| {
+        let lean = 4.0 * k as f64;
+        section(k, [Vec2::new(20.0, 0.0), Vec2::new(20.0 + lean, 30.0 - lean), Vec2::new(-20.0 + lean, 30.0), Vec2::new(-20.0, 0.0)])
+    };
+    let families: [(&str, &dyn Fn(usize) -> (Plane, Vec<Piece>)); 2] = [("one outline at different sizes", &scaled), ("different shapes", &leaning)];
+    for (family, at) in families {
+        for count in 2..=4 {
+            let what = format!("{family}, {count} sections");
+            let sections: Vec<(Plane, Vec<Piece>)> = (0..count).map(at).collect();
+            let joined = smlib_sweeps::loft(&sections, 0).unwrap();
+            let alone = smlib_sweeps::loft_piece_by_piece(&sections, 0).unwrap();
+            assert_eq!(joined.face_count(), alone.face_count(), "{what}");
+            let (a, b) = (crate::measure(&joined).unwrap(), crate::measure(&alone).unwrap());
+            close(a.volume, b.volume, 1e-9, &format!("volume: {what}"));
+            close(a.area, b.area, 1e-9, &format!("area: {what}"));
+            assert!(a.centroid.dist(b.centroid) < 1e-9 * 30.0, "{what}: {:?} against {:?}", a.centroid, b.centroid);
+        }
+    }
+}
+
+#[test]
+fn fast_torus_matches_revolve_geometry_and_history() {
+    for (name, center, major, minor) in
+        [("origin", Vec3::ZERO, 20.0, 4.0), ("offset", Vec3::new(12.5, -7.25, 3.5), 15.0, 3.0), ("thin", Vec3::new(-4.0, 2.0, 9.0), 30.0, 1.5)]
+    {
+        let fast = crate::torus(center, major, minor).unwrap();
+        let plane = Plane { origin: center, ..Plane::XZ };
+        let r = Region2 { outer: Loop2::circle(Vec2::new(major, 0.0), minor), holes: vec![] };
+        let rev = crate::revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+
+        assert_eq!(fast.validity(), Vec::<String>::new(), "{name}: valid");
+        let expected_vol = 2.0 * PI * PI * major * minor * minor;
+        let expected_area = 4.0 * PI * PI * major * minor;
+        let fm = crate::measure(&fast).unwrap();
+        let rm = crate::measure(&rev).unwrap();
+        close(fm.volume, expected_vol, 1e-6, &format!("{name}: analytic volume"));
+        close(fm.volume, rm.volume, 1e-6, &format!("{name}: revolve volume parity"));
+        close(fm.area, expected_area, 1e-5, &format!("{name}: analytic area"));
+        close(fm.area, rm.area, 1e-5, &format!("{name}: revolve area parity"));
+        assert!(fm.centroid.dist(center) < 1e-6, "{name}: centroid {:?}", fm.centroid);
+        let fb = fast.exact_bounds().unwrap();
+        let rb = rev.exact_bounds().unwrap();
+        assert!(fb.min.dist(rb.min) < 1e-6 && fb.max.dist(rb.max) < 1e-6, "{name}: bounds {fb:?} vs {rb:?}");
+
+        let h = fast.history().expect("torus history");
+        crate::history::BodyHistory::check(h, &fast, &[]).unwrap();
+        assert_eq!(fast.face_count(), 1, "{name}: single torus face");
+        assert_eq!(origins(&fast), vec![profile(0)], "{name}: profile origin");
+    }
+}
+
+#[test]
+fn fast_torus_rejects_invalid_inputs() {
+    assert!(crate::torus(Vec3::ZERO, 10.0, 0.0).is_err());
+    assert!(crate::torus(Vec3::ZERO, 10.0, -1.0).is_err());
+    assert!(crate::torus(Vec3::ZERO, 5.0, 5.0).is_err());
+    assert!(crate::torus(Vec3::ZERO, 4.0, 5.0).is_err());
+    assert!(crate::torus(Vec3::ZERO, f64::NAN, 1.0).is_err());
+    assert!(crate::torus(Vec3::ZERO, 10.0, f64::INFINITY).is_err());
+    assert!(crate::torus(Vec3::new(f64::NAN, 0.0, 0.0), 10.0, 2.0).is_err());
+}
+
+#[test]
+fn fast_torus_supports_booleans_and_display_plan() {
+    let ring = crate::torus(Vec3::ZERO, 20.0, 4.0).unwrap();
+    let cutter = crate::box_solid(Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 20.0)).unwrap();
+    let half = crate::boolean(&ring, &cutter, crate::BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(half.validity(), Vec::<String>::new());
+    close(volume(&half), PI * PI * 20.0 * 16.0, 1e-5, "half torus volume");
+
+    let plan = ring.mesh_plan(&crate::display_tolerance(ring.size())).unwrap();
+    let mesh = ring.mesh_of(&plan).unwrap();
+    assert!(!mesh.triangles.is_empty(), "torus display plan produces triangles");
+
+    let (res, deferred) = crate::validating(crate::Validation::EachStep, || crate::torus(Vec3::ZERO, 15.0, 3.0));
+    assert!(!deferred);
+    assert!(res.is_ok());
+
+    let (res, deferred) = crate::validating(crate::Validation::EachFeature, || crate::torus(Vec3::ZERO, 15.0, 3.0));
+    assert!(deferred);
+    let body = res.unwrap();
+    crate::check_kept(&body).unwrap();
+}
