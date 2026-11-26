@@ -1117,6 +1117,11 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(l) => a.bodies.insert(b.clone(), l.clone()),
             None => a.bodies.remove(b),
         };
+        // A mesh body has one face, the whole body: a look on that face would hide every body
+        // look from then on, so the body's look replaces it (#22573).
+        if st.body(b).is_some_and(|mb| mb.body.is_mesh()) {
+            a.faces.retain(|f| f.body != *b);
+        }
     }
     for (body, pt) in &faces {
         // One entry per face: a new one replaces any at the same spot.
