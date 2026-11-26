@@ -296,3 +296,35 @@ fn repeated_occurrences_report_world_body_names_matching_measure() {
     assert!(names.contains(&"Bolt (2)"), "{names:?}");
     assert!(names.contains(&"Bolt (2) (Part:2)"), "{names:?}");
 }
+
+#[test]
+fn nested_repeated_subassembly_reports_canonical_paths_warnings_and_mass() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "grounded": false}));
+    let (sub_comp, occ_sub1) = (sub["component"].as_u64().unwrap(), sub["occurrence"].as_u64().unwrap());
+    let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+    let occ_inner = inner["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
+    run(&mut s, "material.assign", json!({"bodies": [body], "material": "Steel"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ_inner, "translate": [0, 20, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ_sub1, "translate": [10, 0, 0]}));
+    let occ_sub2 = run(&mut s, "occurrence.copy", json!({"component": sub_comp, "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+
+    let r = run(&mut s, "assembly.mass_properties", json!({}));
+    let warnings: Vec<&str> = r["warnings"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
+    assert!(warnings.iter().any(|w| w.contains("`Sub` is placed 2 times")), "{warnings:?}");
+    let o_sub1 = occurrence(&r, occ_sub1);
+    let o_sub2 = occurrence(&r, occ_sub2);
+    let o_inner = occurrence(&r, occ_inner);
+    assert_eq!(o_inner["path"], json!([occ_sub1, occ_inner]));
+    assert_eq!(o_sub2["path"], json!([occ_sub2]));
+    assert_eq!(o_sub1["group"], o_inner["group"]);
+    assert_ne!(o_sub1["group"], o_sub2["group"]);
+    near(num(&o_inner["mass"]["center_of_mass_mm"][0]), 15.0, 1e-9);
+    near(num(&o_inner["mass"]["center_of_mass_mm"][1]), 25.0, 1e-9);
+    near(num(&o_inner["mass"]["center_of_mass_mm"][2]), 5.0, 1e-9);
+    let g = &r["groups"][o_sub1["group"].as_u64().unwrap() as usize];
+    near(num(&g["mass"]["mass_kg"]), 1000.0 * s.doc.density(&body) * 1e-6, 1e-9);
+}

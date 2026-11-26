@@ -2369,4 +2369,31 @@ fn current_version_drawing_direct_path_matches_round_trip_and_errors() {
     let huge = format!(r#"{{"format":"{current}","annotations":1e10}}"#);
     let why = Drawing::from_json(&huge).unwrap_err().to_string();
     assert!(why.starts_with("damaged drawing: the number ") && why.ends_with(" is out of range"), "{why}");
+
+    // `"images": null` without `image_files` is rejected (matching `from_value`), while
+    // set-aside `image_files` + `placed_images` still restore cleanly when `"images": null` is present.
+    let mut null_images: Value = serde_json::from_str(&text).unwrap();
+    null_images["images"] = Value::Null;
+    assert!(Drawing::from_json(&null_images.to_string()).is_err());
+
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(16u32.to_be_bytes());
+    png.extend(16u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0]);
+    let mut with_image = plate();
+    let mut id_source = IdSource::seeded(SEED + 99);
+    let img_id = with_image.allocate_id(&mut id_source).unwrap();
+    let placed_id = with_image.allocate_id(&mut id_source).unwrap();
+    with_image.images.add([Arc::new(image::ImageFile::from_file(img_id, &png).unwrap())]);
+    with_image.sheet_images.add([Arc::new(image::SheetImage {
+        id: placed_id,
+        sheet: with_image.sheets[0].id,
+        rect_mm: [10.0, 20.0, 40.0, 50.0],
+        image: img_id,
+    })]);
+    let (saved, parts) = crate::blob::collecting_parts(|| with_image.to_json());
+    let mut with_null_legacy: Value = serde_json::from_str(&saved.unwrap()).unwrap();
+    with_null_legacy["images"] = Value::Null;
+    let restored = crate::blob::with_parts(parts.into_iter().collect(), || Drawing::from_json(&with_null_legacy.to_string())).unwrap();
+    assert_eq!(restored, with_image);
 }

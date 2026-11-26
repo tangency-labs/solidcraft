@@ -738,6 +738,7 @@ pub(crate) struct Header<'de> {
     pub version: u32,
     pub applied: Option<Vec<String>>,
     pub drawings: Option<&'de RawValue>,
+    pub has_unit_word_params: bool,
 }
 
 enum FormatField {
@@ -760,6 +761,7 @@ pub(crate) fn peek_header<'de>(family: &Family<'_>, s: &'de str, capture_drawing
         format: FormatField,
         pending: PendingField,
         drawings: Option<&'de RawValue>,
+        has_unit_word_params: bool,
     }
     struct FormatSeed;
     impl<'de> DeserializeSeed<'de> for FormatSeed {
@@ -871,45 +873,98 @@ pub(crate) fn peek_header<'de>(family: &Family<'_>, s: &'de str, capture_drawing
             f.write_str("any valid JSON value")
         }
         fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_unit<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_none<E: de::Error>(self) -> std::result::Result<Self::Value, E> {
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
             while seq.next_element::<IgnoredAny>()?.is_some() {}
-            Ok(RawHeader { is_object: false, format: FormatField::Absent, pending: PendingField::Absent, drawings: None })
+            Ok(RawHeader {
+                is_object: false,
+                format: FormatField::Absent,
+                pending: PendingField::Absent,
+                drawings: None,
+                has_unit_word_params: false,
+            })
         }
         fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
             let mut format = FormatField::Absent;
             let mut pending = PendingField::Absent;
             let mut drawings = None;
+            let mut has_unit_word_params = false;
             while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
                 match key.0.as_ref() {
                     "format" => format = map.next_value_seed(FormatSeed)?,
                     "format_pending" => pending = map.next_value_seed(PendingSeed)?,
                     "drawings" if self.capture_drawings => drawings = Some(map.next_value::<&'de RawValue>()?),
+                    "unit_word_params" => {
+                        has_unit_word_params = true;
+                        map.next_value::<IgnoredAny>()?;
+                    }
                     _ => {
                         map.next_value::<IgnoredAny>()?;
                     }
                 }
             }
-            Ok(RawHeader { is_object: true, format, pending, drawings })
+            Ok(RawHeader { is_object: true, format, pending, drawings, has_unit_word_params })
         }
     }
 
@@ -936,7 +991,7 @@ pub(crate) fn peek_header<'de>(family: &Family<'_>, s: &'de str, capture_drawing
     if version == 0 {
         return Err(not_ours("format 0".into()));
     }
-    Ok(Header { version, applied, drawings: raw.drawings })
+    Ok(Header { version, applied, drawings: raw.drawings, has_unit_word_params: raw.has_unit_word_params })
 }
 
 /// Zero-allocation streaming visitor that enforces the same depth (`<= 64`) and float range

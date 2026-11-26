@@ -1148,6 +1148,12 @@ fn is_language_tag(tag: &str) -> bool {
         && subtags.all(|s| (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
+/// Capture a present JSON field as `&RawValue` even when its value is `null`, while allowing
+/// `#[serde(default)]` to leave an absent field as `None`.
+fn deserialize_present_raw<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<&'de serde_json::value::RawValue>, D::Error> {
+    <&'de serde_json::value::RawValue as Deserialize>::deserialize(d).map(Some)
+}
+
 /// Direct wire representation of a current-version [`Drawing`], accepting the set-aside image
 /// fields (`image_files`, `placed_images`, `logo_cells`) without constructing a full `Value` tree.
 #[derive(Deserialize)]
@@ -1182,9 +1188,9 @@ struct DrawingWire<'a> {
     dimensions: Vec<Arc<Dimension>>,
     #[serde(default)]
     balloons: ById<Balloon>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "deserialize_present_raw")]
     images: Option<&'a serde_json::value::RawValue>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "deserialize_present_raw")]
     sheet_images: Option<&'a serde_json::value::RawValue>,
     #[serde(default)]
     tables: ById<SheetTable>,
@@ -1204,11 +1210,11 @@ struct DrawingWire<'a> {
     fills: Vec<Arc<SketchFill>>,
     #[serde(default)]
     patterns: Vec<Arc<PatternSnapshot>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "deserialize_present_raw")]
     image_files: Option<&'a serde_json::value::RawValue>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "deserialize_present_raw")]
     placed_images: Option<&'a serde_json::value::RawValue>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "deserialize_present_raw")]
     logo_cells: Option<&'a serde_json::value::RawValue>,
 }
 
