@@ -9045,8 +9045,8 @@ pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Ve
         let at: Vec<Vec3> = idx.iter().filter_map(|i| pts.get(*i).copied()).collect();
         let names = match kernel::blend_edges(&b.body, &at) {
             Ok(edges) => {
-                let all = crate::naming::edge_names(b);
-                edges.iter().map(|e| all.get(*e).cloned().unwrap_or_default()).collect()
+                let all = crate::naming::edge_name_index(b);
+                edges.iter().map(|e| all.names.get(*e).cloned().unwrap_or_default()).collect()
             }
             Err(_) => crate::naming::edge_names_at(b, &at),
         };
