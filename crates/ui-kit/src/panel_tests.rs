@@ -208,7 +208,16 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
                         rtl: false,
                     },
                 );
-                let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours", true, bounds.height());
+                let resize = panel_host_sash(
+                    ui,
+                    egui::Id::unique("synthetic-sash"),
+                    sash,
+                    sash,
+                    "Resize synthetic neighbours",
+                    crate::panel_host::SashAxis::Horizontal,
+                    bounds.height(),
+                    true,
+                );
                 assert!(title.sense.is_focusable());
                 assert!(resize.sense.is_focusable());
                 assert_eq!(title.rect, header);
@@ -227,7 +236,16 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
     assert_eq!(separator.numeric_value(), Some(f64::from(bounds.height())));
     let translated = sash.translate(egui::vec2(35.0, 27.0));
     let moved = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-        let response = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), translated, "Resize synthetic neighbours", true, bounds.height());
+        let response = panel_host_sash(
+            ui,
+            egui::Id::unique("synthetic-sash"),
+            translated,
+            translated,
+            "Resize synthetic neighbours",
+            crate::panel_host::SashAxis::Horizontal,
+            bounds.height(),
+            true,
+        );
         assert_eq!(response.rect, translated);
     });
     let moved_separator = &moved
@@ -2152,4 +2170,78 @@ fn stacked_cards_degrade_to_finite_rects_and_never_overlap() {
     for slot in Panel::stack_bounds(column, &nonsense) {
         assert!(slot.rect.top().is_finite() && slot.rect.height().is_finite(), "a nonsense measurement still draws somewhere finite");
     }
+}
+
+/// A dialog body running on past its viewport fades out at the end that has more, so a field cut
+/// by the header or the footer reads as scrollable; a body that fits has no fade.
+#[test]
+fn feature_body_fades_out_only_where_content_runs_on() {
+    /// (fade at the top, fade at the bottom) after `wheel` points of scrolling down.
+    fn fades(rows: usize, wheel: f32) -> (bool, bool) {
+        fn walk(shape: &egui::Shape, found: &mut (bool, bool)) {
+            match shape {
+                egui::Shape::Vec(all) => all.iter().for_each(|shape| walk(shape, found)),
+                egui::Shape::Mesh(mesh) => {
+                    let clear = |want: bool| mesh.vertices.iter().filter(move |v| (v.color == egui::Color32::TRANSPARENT) == want).map(|v| v.pos.y);
+                    if let (Some(clear_y), Some(fill_y)) = (clear(true).reduce(f32::min), clear(false).reduce(f32::min)) {
+                        // A bottom fade runs from clear at its top to the card colour below.
+                        if clear_y < fill_y { found.1 = true } else { found.0 = true }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = crate::test_support::context();
+        let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 300.0));
+        let over = egui::pos2(vp.right() - 80.0, vp.center().y);
+        let mut output = None;
+        for frame in 0..12 {
+            registry::clear_handles();
+            let events = if frame >= 3 && wheel > 0.0 {
+                vec![
+                    egui::Event::PointerMoved(over),
+                    egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -wheel / 9.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    },
+                ]
+            } else {
+                Vec::new()
+            };
+            let input = egui::RawInput { screen_rect: Some(vp), time: Some(f64::from(frame) * 0.1), events, ..Default::default() };
+            output = Some(crate::test_support::raw_frame(&ctx, input, |_| {
+                DialogButtons::Bottom.publish(&ctx);
+                let side = crate::frame::Side::Right;
+                let anchor = egui::pos2(vp.right() - crate::SHELL_GAP, vp.top());
+                let panel =
+                    Panel::new("Hole", egui::Id::unique("fade"), anchor, vp, side, Panel::feature_frame(&ctx, crate::LayoutMode::Floating, side));
+                panel.window(&ctx).show(&ctx, |ui| {
+                    let heading = FeatureOptions {
+                        icon: "fillet",
+                        title: "Hole",
+                        drag_key: "fade",
+                        moved: egui::Vec2::ZERO,
+                        docked: anchor,
+                        apply_label: None,
+                    };
+                    panel.feature(ui, heading, true, true, |ui| {
+                        for _ in 0..rows {
+                            text(ui, "Input", Text::Note("row"));
+                        }
+                        ComputeStatus { text: None, busy: false, applying: false }
+                    });
+                });
+            }));
+        }
+        let mut found = (false, false);
+        output.unwrap().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+        found
+    }
+    assert_eq!(fades(1, 0.0), (false, false), "short content has no fade");
+    assert_eq!(fades(40, 0.0), (false, true), "at the top, long content fades out above the footer only");
+    assert_eq!(fades(40, 200.0), (true, true), "scrolled part way, it fades out at both ends");
+    assert_eq!(fades(40, 10_000.0), (true, false), "at the end, it fades out below the header only");
 }

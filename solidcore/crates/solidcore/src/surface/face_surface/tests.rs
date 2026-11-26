@@ -1,6 +1,7 @@
 use super::*;
 use crate::eval::{Curve, Frame};
 use crate::geom::vector2d::Point2;
+use crate::surface::from_parameters::plane_axes_square;
 use core::f64::consts::PI;
 
 fn k() -> Kernel {
@@ -348,6 +349,76 @@ fn a_plane_goes_back_on_its_axes_with_its_scales() {
     );
 }
 
+/// A plane whose placement keeps its axes off square by 1e-13 (under the 1e-12 a placement
+/// allows), far from the origin and with scales other than 1, goes to the record with its axes
+/// square to the reader's rounding and opens again on the same points (solidcore#3377: the
+/// record copied the skew and the reader refused it).
+#[test]
+fn a_plane_a_little_off_square_goes_back_square() {
+    use crate::geom::vector2d::Vec2;
+    use crate::geom::vector3d::Vec3;
+    use crate::surface::plane::Plane;
+    let k = k();
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let dom = Extent2d::from_bounds(-3.0, -1.0, 4.0, 2.0);
+    let plane = Plane::new(
+        Vec3::new(10010.0, 9997.58, 10.0),
+        Vec3::new(c, s, 0.0),
+        Vec3::new(1e-13 * c, 1e-13 * s, 1.0),
+        Vec2::new(2.0, 0.5),
+        &dom,
+    );
+    let (po, px, py) = plane.position().canonical();
+    assert!(!plane_axes_square(px, py), "the placement keeps the skew");
+    let s = Surface::from(plane);
+    let r = record_face(&k, &s, &dom).unwrap();
+    let Record::Plane {
+        origin,
+        u_axis,
+        v_axis,
+    } = r.surface
+    else {
+        panic!("a plane goes back as a plane: {:?}", r.surface)
+    };
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    assert!(
+        plane_axes_square(v(u_axis), v(v_axis)),
+        "{u_axis:?} {v_axis:?}"
+    );
+    assert_eq!((v(origin), v(u_axis)), (po, px));
+    assert_eq!(r.scale, [2.0, 0.5]);
+    let back = face_surface(&k, &r.surface, None, r.domain, &[]).unwrap();
+    assert_eq!(r.domain, [[-6.0, 8.0], [-0.5, 1.0]]);
+    // the record's axes are unit, so it opens at scale 1 on the box times the scales
+    for (a, b) in [(-3.0, -1.0), (4.0, 2.0), (0.5, 0.25)] {
+        let was = s.evaluate_point(&k, Point2::new(a, b)).unwrap();
+        let now = back
+            .surface
+            .evaluate_point(&k, Point2::new(2.0 * a, 0.5 * b))
+            .unwrap();
+        assert!(
+            (was - now).length() < 1e-11,
+            "({a}, {b}): {was:?} vs {now:?}"
+        );
+    }
+    // a plane already square keeps its axes to the bit
+    let (sn, cs) = 15f64.to_radians().sin_cos();
+    let square = Plane::new(
+        Vec3::new(10010.0, 9997.58, 10.0),
+        Vec3::new(cs, sn, 0.0),
+        Vec3::new(-sn, cs, 0.0),
+        Vec2::new(1.0, 1.0),
+        &dom,
+    );
+    let (_, sx, sy) = square.position().canonical();
+    assert!(plane_axes_square(sx, sy));
+    let r = record_face(&k, &Surface::from(square), &dom).unwrap();
+    let Record::Plane { u_axis, v_axis, .. } = r.surface else {
+        panic!("a plane goes back as a plane: {:?}", r.surface)
+    };
+    assert_eq!((v(u_axis), v(v_axis)), (sx, sy));
+}
+
 /// Owner ruling (item 8, option B): a cone of half angle under 1e-12 and a torus whose tube
 /// reaches its axis keep their analytic label on their form, both ways, with their own numbers.
 #[test]
@@ -393,6 +464,86 @@ fn degenerate_cone_and_torus_faces_go_round_with_their_label() {
         }
         let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain, &[]).unwrap();
         assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
+    }
+}
+
+/// A torus label stands on a form that shows a short arc of its tube: the floor of a tooth
+/// space a round cutter leaves, with the form the revolve that makes it leaves (one rational
+/// quadratic arc of the tube, a degree or less of a tube of radius 13.725 about a circle of
+/// radius 38.725, swept a quarter turn). The face is that torus, with the label's own
+/// numbers, both ways. So short an arc does not fix the tube's circle, so the kernel found no
+/// torus in the form, the label had no parametrisation to stand on, and the face became its
+/// exact NURBS. (The form the kernel itself makes for a label, `form::surface`, lies on the
+/// frame's quarter grid and shows a quarter of the tube at least.)
+#[test]
+fn a_torus_label_stands_on_a_short_arc_of_its_tube() {
+    let k = k();
+    // a frame off the origin and tilted off every axis
+    let axis = Vec3::new(1.0, 2.0, 3.0);
+    let axis = axis * (1.0 / axis.length());
+    let ex = Vec3::new(3.0, -1.0, 0.0);
+    let ex = ex - axis * ex.dot(axis);
+    let ex = ex * (1.0 / ex.length());
+    let ey = axis.cross(ex);
+    let origin = Vec3::new(12.5, -7.25, 40.0);
+    let (major, minor) = (38.725, 13.725);
+    let label = Record::Torus {
+        frame: Frame {
+            origin: [origin.x, origin.y, origin.z],
+            x_axis: [ex.x, ex.y, ex.z],
+            y_axis: [ey.x, ey.y, ey.z],
+        },
+        major_radius: major,
+        minor_radius: minor,
+        tube_start: 0.0,
+    };
+    let quarter = PI / 4.0;
+    for arc_deg in [1.2_f64, 0.3, 0.1, 0.05] {
+        // the tube's arc about its inner equator, the sweep from the frame's x to its y
+        let half = (0.5 * arc_deg).to_radians();
+        let homogeneous: Vec<Vec<[f64; 4]>> = (0..3)
+            .map(|i| {
+                let u = f64::from(i) * quarter;
+                let wu = if i == 1 { quarter.cos() } else { 1.0 };
+                let radial = (ex * u.cos() + ey * u.sin()) * (1.0 / wu);
+                (0..3)
+                    .map(|j| {
+                        let v = PI + (f64::from(j) - 1.0) * half;
+                        let wv = if j == 1 { half.cos() } else { 1.0 };
+                        let p = origin
+                            + radial * (major + minor * v.cos() / wv)
+                            + axis * (minor * v.sin() / wv);
+                        let w = wu * wv;
+                        [p.x * w, p.y * w, p.z * w, w]
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let net = Record::RationalSpline {
+            u_knots: knots.clone(),
+            v_knots: knots,
+            homogeneous,
+        };
+        let d = [[0.0, 1.0], [0.0, 1.0]];
+        let f = face_surface(&k, &label, Some(&net), d, &[]).unwrap();
+        assert!(
+            matches!(f.surface.kind(), SurfaceKind::Torus(_)),
+            "{arc_deg} degrees: {:?}",
+            f.surface.kind()
+        );
+        let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+        assert_eq!(
+            (&r.surface, r.nurbs.as_ref()),
+            (&label, Some(&net)),
+            "{arc_deg} degrees"
+        );
+        let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain, &[]).unwrap();
+        assert_eq!(
+            record_face(&k, &back.surface, &back.uv_domain).unwrap(),
+            r,
+            "{arc_deg} degrees"
+        );
     }
 }
 
@@ -467,4 +618,21 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
             assert_eq!(r.nurbs.as_ref(), Some(&net));
         }
     }
+}
+
+#[test]
+fn plane_axes_that_cannot_be_squared_are_refused() {
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    // parallel axes have nothing left to square; a NaN axis never squares
+    for y in [
+        Vec3::new(3.0, 0.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(f64::NAN, 1.0, 0.0),
+    ] {
+        assert_eq!(square_plane_axis(x, y), None, "{y:?}");
+    }
+    // a skew pair squares to a unit y in the plane of the two
+    let y = square_plane_axis(x, Vec3::new(1e-13, 1.0, 0.0)).unwrap();
+    assert!(plane_axes_square(x, y));
+    assert!((y.length() - 1.0).abs() <= 1e-15 && y.z == 0.0, "{y:?}");
 }

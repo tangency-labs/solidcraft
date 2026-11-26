@@ -425,12 +425,33 @@ struct Shared {
     stop: solidcraft_smlib::stop::Stop,
     settled: Mutex<Option<Settled>>,
     done: Condvar,
+    /// Called once when the run ends ([`Shared::finish`]): a window's request for the frame its
+    /// result needs, instead of polling [`ImportChecks::is_running`] while it runs.
+    wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Shared {
     fn finish(&self, settled: Settled) {
+        // The lock is released before `wake` is taken: `set_wake` locks them in the other order.
         *self.settled.lock().unwrap_or_else(PoisonError::into_inner) = Some(settled);
+        let wake = self.wake.lock().unwrap_or_else(PoisonError::into_inner).take();
         self.done.notify_all();
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
+
+    /// Keep `wake` for [`Shared::finish`], unless the run ended already: `false` then, and the
+    /// caller wakes itself.
+    fn set_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
+        let mut slot = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.settled.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
+            return false;
+        }
+        if slot.is_none() {
+            *slot = Some(wake);
+        }
+        true
     }
 
     fn settled(&self) -> Option<Settled> {
@@ -484,7 +505,12 @@ impl PartialEq for ImportChecks {
 
 impl ImportChecks {
     fn shared(settled: Option<Settled>) -> (ImportChecks, Arc<Shared>) {
-        let shared = Arc::new(Shared { stop: solidcraft_smlib::stop::Stop::new(), settled: Mutex::new(settled), done: Condvar::new() });
+        let shared = Arc::new(Shared {
+            stop: solidcraft_smlib::stop::Stop::new(),
+            settled: Mutex::new(settled),
+            done: Condvar::new(),
+            wake: Mutex::new(None),
+        });
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
 
@@ -550,6 +576,16 @@ impl ImportChecks {
     /// The checks are still running.
     pub fn is_running(&self) -> bool {
         self.issues().is_none()
+    }
+
+    /// Call `wake` once when the checks end, or at once if they have ended: a window asks for the
+    /// one frame the result needs, instead of asking [`Self::is_running`] every frame while they
+    /// run. A report with no run (nothing to check, or read from a saved design) wakes nothing.
+    pub fn on_end(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let Some(handle) = &self.0 else { return };
+        if !handle.0.set_wake(wake.clone()) {
+            wake();
+        }
     }
 
     /// What the checks found, `None` while they run: a `NeedsRepair` issue for each part a check

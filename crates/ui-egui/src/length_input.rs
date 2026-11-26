@@ -168,26 +168,54 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             lengths
         }
+        D::Combine { offset, radius, .. } => {
+            // An offset or radius not typed (or emptied) stays so: the command leaves it out.
+            let mut lengths = Vec::new();
+            if !offset.trim().is_empty() {
+                lengths.push(offset);
+            }
+            if !radius.trim().is_empty() {
+                lengths.push(radius);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
-        D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
+        D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
-        D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
+        D::Thread { length, .. } => vec![length],
+        D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
         D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
+        D::CapturePosition(c) => {
+            let mut values = Vec::new();
+            for m in &mut c.moves {
+                values.extend([&mut m.x, &mut m.y, &mut m.z]);
+                if m.has_origin {
+                    values.extend([&mut m.ox, &mut m.oy, &mut m.oz]);
+                }
+            }
+            for j in &mut c.joints {
+                for (i, v) in j.dofs.iter_mut().enumerate() {
+                    if !j.is_angle.get(i).copied().unwrap_or(false) && j.initial_dofs.get(i).is_some_and(|init| init != v) {
+                        values.push(v);
+                    }
+                }
+            }
+            values
+        }
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
         }
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
-            Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => {
-                vec![distance]
-            }
+            Surf::Extrude { distance, to_offset, .. } => vec![distance, to_offset],
+            Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance, .. } => vec![distance],
             Surf::Thicken { thickness, .. } => vec![thickness],
             Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],
@@ -280,7 +308,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
 /// direction vectors are already in model coordinates and must not be converted.
 pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut convert: impl FnMut(&str) -> String) {
     use serde_json::{Value, json};
-    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2"] {
+    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2", "coil_height"] {
         if let Some(value) = extra.get_mut(key) {
             let text = value.as_str().map(str::to_string).or_else(|| value.as_number().map(ToString::to_string));
             if let Some(text) = text {

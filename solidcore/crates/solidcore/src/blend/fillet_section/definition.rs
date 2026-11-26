@@ -462,6 +462,9 @@ pub fn evaluate_definition(
         }
     }
     let mut r = def.offsets;
+    let equal_setback = def
+        .chamfer
+        .and_then(crate::surface::procedural_blend::chamfer::ChamferDefinition::constant_setback);
     let mut law_ser = Ser::constant(0.0_f64);
     let mut law: Option<&Ser<f64>> = None;
     if let Some(curve) = &def.law {
@@ -564,6 +567,7 @@ pub fn evaluate_definition(
         let pinned = seeded.iter().any(|&q| q != 0);
         let opts = StationOptions {
             law,
+            equal_setback,
             top,
             sides: pinned.then_some(seeded),
             before,
@@ -579,6 +583,7 @@ pub fn evaluate_definition(
         if if pinned { sides != seeded } else { other } {
             let opts = StationOptions {
                 law,
+                equal_setback,
                 top,
                 sides: Some(sides),
                 before,

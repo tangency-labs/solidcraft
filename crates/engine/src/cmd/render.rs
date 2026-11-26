@@ -38,10 +38,31 @@ mod resources;
 mod shots;
 mod staging;
 mod studio_presets;
-mod surface_bindings;
+pub(super) mod surface_bindings;
 mod surface_resources;
 mod textures;
 mod transmission;
+
+/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
+/// each with the first such setup's name and what it gives: what a file without render setups
+/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
+pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+    let mut out = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+        return Ok(out);
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
+        for (target, what) in bound {
+            if let Some(name) = names.get(target) {
+                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+            }
+        }
+    }
+    Ok(out)
+}
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("render.surface.import", "Import Surface Maps", crate::checked!("render.surface.import", surface_resources::import))

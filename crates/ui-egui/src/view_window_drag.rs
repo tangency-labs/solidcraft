@@ -208,6 +208,13 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
             .strips
             .retain(|strip| strip.viewport != viewport && input.raw.viewports.get(&strip.viewport).is_some_and(|info| info.minimized != Some(true)));
     });
+    // A minimised window paints no tab strip, so nothing else would ever clear the highlight it set.
+    if let Some((source, _, _)) = state.hovered
+        && ctx.input(|input| input.raw.viewports.get(&source).is_some_and(|info| info.minimized == Some(true)))
+    {
+        state.hovered = None;
+        repaint_viewports(ctx);
+    }
     let screen = native.unwrap_or(Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 });
     state.strips.extend(zones.into_iter().map(|(tab, count, zone)| Strip { viewport, tab, window, screen, zone, count, name: name.clone() }));
     if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag.header && !drag_continues)
@@ -650,6 +657,18 @@ fn native_preview_scale(ctx: &Context) -> Option<f32> {
     })
 }
 
+fn native_preview_builder(position: Pos2, size: egui::Vec2, visible: bool, owner: egui::ViewportId) -> egui::ViewportBuilder {
+    crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner)
+        .with_title("SolidCraft")
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_active(false)
+        .with_taskbar(false)
+        .with_position(position)
+        .with_inner_size(size)
+        .with_visible(visible)
+}
+
 /// The source retains pointer capture. The preview is a top-level surface with no controls
 /// or focus, sized and positioned from the same desktop rectangle as the drop command.
 pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
@@ -662,16 +681,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
     let position = (window.outline.min.to_vec2() / pixels_per_point).to_pos2();
     let size = window.outline.size() / pixels_per_point;
     let ready = native_scale.is_some();
-    let builder = egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
-        .with_decorations(false)
-        .with_resizable(false)
-        .with_active(false)
-        .with_taskbar(false)
-        .with_always_on_top()
-        .with_position(position)
-        .with_inner_size(size)
-        .with_visible(ready);
+    let builder = native_preview_builder(position, size, ready, drag.viewport);
     if !ready {
         // Negotiate the native surface in a hidden deferred viewport first. Keep
         // the source-window preview if the integration cannot make this window.
@@ -1055,6 +1065,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_view_drag_preview_uses_its_owner_for_stacking() {
+        let owner = egui::ViewportId::from_hash_of("drag owner");
+        let builder = native_preview_builder(Pos2::ZERO, vec2(320.0, 240.0), true, owner);
+        assert_eq!(builder.native_owner, Some(owner));
+        assert_eq!(builder.window_level, None);
+        assert_eq!(builder.active, Some(false));
+    }
+
+    #[test]
     fn starting_a_view_drag_draws_immediately_without_requesting_a_screenshot() {
         for keyboard in [false, true] {
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -1108,6 +1127,33 @@ mod tests {
             "dragging must not read back the viewport image"
         );
         output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_minimised_window_leaves_no_view_highlight() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.active().id;
+        let ctx = Context::default();
+        ctx.set_embed_viewports(true);
+        let child = egui::ViewportId::from_hash_of("minimised window");
+        let frame = |app: &mut SolveApp, minimized: bool| {
+            let mut raw = egui::RawInput::default();
+            raw.viewports.insert(child, egui::ViewportInfo { minimized: Some(minimized), ..Default::default() });
+            let output = ctx.run_ui(raw, |ui| {
+                if !minimized {
+                    let tab = app.docs.current_tab();
+                    app.view_window_drag.hovered = Some((child, tab, view));
+                }
+                record(app, ui.ctx(), vec![], false);
+            });
+            output.drop_without_applying_deltas();
+        };
+        frame(&mut app, false);
+        assert_eq!(hovered_view(&app), Some(view), "a hovered view is highlighted");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "minimising its window clears the highlight");
+        frame(&mut app, true);
+        assert_eq!(hovered_view(&app), None, "it stays cleared until hovered again");
     }
 
     #[test]

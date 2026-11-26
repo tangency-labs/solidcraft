@@ -53,8 +53,24 @@ fn horizontal_vertical_uses_preselected_line_and_preserves_rejection() {
 #[test]
 fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
     use solidcraft_engine::Sel;
+    // A single preselected point seeds H/V point_picks so one more click aligns them.
+    {
+        let mut h = Harness::new();
+        h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+        let undo = h.app.session.undo.len();
+        h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().point_picks, vec![json!("origin")]);
+        assert!(h.app.session.selection.is_empty());
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.run(&json!([{"click":{"sketch":[20,3]}}])).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.tool.is_none());
+    }
     for selection in [
-        vec![Sel::SketchPoint { id: "origin".into() }],
         vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into(), sketch: None }],
         vec![
             Sel::SketchPoint { id: "origin".into() },
@@ -65,12 +81,12 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
         let mut h = Harness::new();
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
         h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
-        h.app.session.selection = selection.clone();
+        h.app.session.selection = selection;
         let undo = h.app.session.undo.len();
         h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
         assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
         assert_eq!(h.app.session.undo.len(), undo);
-        assert_eq!(h.app.session.selection, selection);
+        assert!(h.app.session.selection.is_empty());
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 }
@@ -192,6 +208,67 @@ fn horizontal_vertical_ignores_curves_and_cancels_a_pending_point() {
     let sk = &h.app.session.model.state().sketches[0].sketch;
     let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
     assert!((p.y - 3.0).abs() < 1e-6);
+}
+
+/// #20442: the Horizontal/Vertical tool takes a line's middle as the second pick, the way it
+/// takes the line's ends: the circle's centre is aligned with that middle on the closer axis,
+/// instead of snapping onto the line.
+#[test]
+fn horizontal_vertical_takes_a_line_middle_without_shift() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,16],[20,44]],"infer":false,"connect":false})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[34,32],"radius":7})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.fit_view();
+    h.frames(3);
+    h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
+    // The circle's centre, then the middle of the vertical line, with no Shift held.
+    h.step(&json!({"click":{"sketch":[34,32]}})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1);
+    h.step(&json!({"click":{"sketch":[20,30]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let sk = &h.app.session.model.state().sketches[0].sketch;
+    let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+    let mid = line_midpoint(sk, "l1");
+    // Level with the middle (the closer axis): the centre does not land on the line.
+    assert!((p.y - mid.y).abs() < 1e-6, "centre: {p:?}");
+    assert!((p.x - mid.x).abs() > 1.0, "centre: {p:?}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })));
+}
+
+/// Review pictures of #20442: the circle's centre and the middle of a vertical line, with the
+/// Horizontal/Vertical tool taking that middle as the point it aligns.
+#[test]
+#[ignore = "writes review images; run explicitly for visual verification"]
+fn horizontal_vertical_line_middle_review_images() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/point-alignment-review");
+    std::fs::create_dir_all(&dir).unwrap();
+    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
+        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+    }));
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1100,"height":800}));
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,16],[20,44]],"infer":false,"connect":false})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[34,32],"radius":7})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.fit_view();
+    h.frames(3);
+    h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
+    // The circle's centre, then the middle of the vertical line.
+    h.step(&json!({"click":{"sketch":[34,32]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[20,30]}})).unwrap();
+    h.frames(3);
+    let mut textures = std::collections::HashMap::new();
+    for _ in 0..8 {
+        raster::paint(&mut h, &mut textures, vec![]);
+    }
+    let output = raster::paint(&mut h, &mut textures, vec![]);
+    raster::raster(&mut h, &textures, output).save(dir.join("line-middle.png")).unwrap();
+    std::fs::write(dir.join("line-middle-model.png"), solidcraft_ui_egui::control::view_png(&h.app, 1000, 700).unwrap()).unwrap();
 }
 
 #[test]

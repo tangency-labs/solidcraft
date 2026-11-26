@@ -73,14 +73,17 @@
 //!   leaves them (an edge use outside a loop touches neither; any later failure sets the
 //!   point to `(0,0,0)` and keeps the binormal), and only [`SolidError::Unported`] and
 //!   [`SolidError::InvalidInput`] (a null dereference upstream) propagate.
-//! - **3D-distinct end touches (solidcore-native, #18342).** `GetLoopTouches` types the
+//! - **3D-distinct end touches (solidcore-native, #18342, #18647).** `GetLoopTouches` types the
 //!   first and last touch as on the curve's start or end by comparing the curve parameter
-//!   with the face's zone tolerance mapped to UV. A touch strictly inside the interval
+//!   with the face's zone tolerance mapped to UV. A touch on the interval
 //!   whose point is at least the face's intersection tolerance and more than the curve's
 //!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
-//!   such points off an interval end (part 3). When a point or the scaled zero cannot be
-//!   computed, upstream's type stands (no new error; unported, cancelled and uncertified
-//!   still propagate).
+//!   such points off an interval end (part 3). The same rule applies per end to a touch
+//!   typed as on both ends (`Both`, which upstream drops with every touch as a degenerate
+//!   classification curve): distinct from both ends it is inside, distinct from one it is
+//!   on the other, and only a touch on both ends in 3D stays `Both`. When a point or the
+//!   scaled zero cannot be computed, upstream's type stands (no new error; unported,
+//!   cancelled and uncertified still propagate).
 //! - **Recursion.** None.
 
 use super::p1::{missing_defect, EVAL_1ST};
@@ -215,6 +218,7 @@ const fn is_status(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -547,6 +551,7 @@ fn edgeuse_evaluate_binormal<O: ClassObject, G: ClassGeometry<O>>(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -790,14 +795,17 @@ fn ccw_angle(v: Vec2) -> Result<f64> {
 }
 
 /// solidcore-native: `ty` (a touch's `ClassifyPoint` against the classification interval
-/// with a UV tolerance) with `Start` or `End` turned into `Inside` when `param` is strictly
-/// inside `ivl` and its curve point is 3D-distinct from that end: at least `tol_3d` (the
-/// face's intersection tolerance) and more than the curve's scaled zero away. Upstream
-/// compares the curve parameter with a tolerance mapped into the surface's UV space, which
-/// marks a crossing far from the curve's end as an end touch when the curve parameter is
-/// much finer than the UV one (the loop bisector over the sentinel range). When a point or
-/// the scaled zero cannot be computed, `ty` stands (this extra measurement adds no new
-/// error), except that an unported callee, a cancellation or a certification refusal
+/// with a UV tolerance) with each end it names dropped when `param` lies on `ivl` (its ends
+/// included) and its curve point is 3D-distinct from that end: at least `tol_3d` (the face's
+/// intersection tolerance) and more than the curve's scaled zero away. `Start` or `End`
+/// distinct from its end becomes `Inside`; `Both` becomes `Inside` when distinct from both
+/// ends, and the type of the one end it is not distinct from otherwise. Upstream compares
+/// the curve parameter with a tolerance mapped into the surface's UV space, which marks a
+/// crossing far from the curve's end as an end touch when the curve parameter is much finer
+/// than the UV one (the loop bisector over the sentinel range), and a crossing on a curve
+/// many tolerances long in 3D as on a degenerate one (`Both`). When a point or the scaled
+/// zero cannot be computed, `ty` stands (this extra measurement adds no new error), except
+/// that an unported callee, a cancellation or a certification refusal
 /// (`SolidError::is_unported_or_cancelled`) propagates.
 fn distinct_end_type(
     k: &Kernel,
@@ -807,24 +815,33 @@ fn distinct_end_type(
     ty: ExtentPointType,
     tol_3d: f64,
 ) -> Result<ExtentPointType> {
-    let end = match ty {
-        ExtentPointType::Start => ivl.min(),
-        ExtentPointType::End => ivl.max(),
+    let (at_start, at_end) = match ty {
+        ExtentPointType::Start => (true, false),
+        ExtentPointType::End => (false, true),
+        ExtentPointType::Both => (true, true),
         _ => return Ok(ty),
     };
-    if !(param > ivl.min() && param < ivl.max()) {
+    // A touch on an end parameter is 0 from that end, so it keeps that end; for `Both` the
+    // other end is still measured.
+    if !(param >= ivl.min() && param <= ivl.max()) {
         return Ok(ty);
     }
-    let distinct = || -> Result<bool> {
-        let dist = curve
-            .evaluate_point(k, param)?
-            .distance(curve.evaluate_point(k, end)?);
-        Ok(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?)
+    // Whether each named end is still an end the touch is on: not 3D-distinct from it.
+    let on_ends = || -> Result<(bool, bool)> {
+        let point = curve.evaluate_point(k, param)?;
+        let on = |end: f64| -> Result<bool> {
+            let dist = point.distance(curve.evaluate_point(k, end)?);
+            Ok(!(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?))
+        };
+        Ok((at_start && on(ivl.min())?, at_end && on(ivl.max())?))
     };
-    match distinct() {
-        Ok(true) => Ok(ExtentPointType::Inside),
+    match on_ends() {
+        Ok((true, true)) => Ok(ExtentPointType::Both),
+        Ok((true, false)) => Ok(ExtentPointType::Start),
+        Ok((false, true)) => Ok(ExtentPointType::End),
+        Ok((false, false)) => Ok(ExtentPointType::Inside),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Ok(false) | Err(_) => Ok(ty),
+        Err(_) => Ok(ty),
     }
 }
 
@@ -2487,10 +2504,10 @@ mod tests {
     /// cylinder's ±1234567 axial sentinel range), `distinct_end_type` keeps the `Start` or
     /// `End` type of a genuine end touch (1e-9 in 3D, below the face's intersection
     /// tolerance, or at the end parameter itself) and turns only a touch 3.5e-3 away in 3D
-    /// into `Inside`; other types pass through.
+    /// into `Inside`; `Inside` passes through.
     #[test]
     fn distinct_end_type_keeps_genuine_end_touches() {
-        use ExtentPointType::{Both, End, Inside, Start};
+        use ExtentPointType::{End, Inside, Start};
         let k = Kernel::default();
         let curve = Curve::from(Line::from_points(
             Point3::new(0.0, 0.0, 1_234_567.0),
@@ -2514,7 +2531,38 @@ mod tests {
         assert_eq!(ty(3.538e-3 / len, Start), Inside);
         assert_eq!(ty(1.0 - 3.538e-3 / len, End), Inside);
         // other types are never changed
-        assert_eq!(ty(3.538e-3 / len, Both), Both);
         assert_eq!(ty(0.5, Inside), Inside);
+    }
+
+    /// #18647: `Both` (a touch the UV tolerance puts on both ends of the interval) keeps
+    /// only the ends its point is not 3D-distinct from. On the same line, a point `d` from
+    /// the start lies `len - d` from the end, so each answer follows from the distances.
+    #[test]
+    fn distinct_end_type_splits_both_per_end() {
+        use ExtentPointType::{Both, End, Inside, Start};
+        let k = Kernel::default();
+        let len = 2_469_134.0;
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let ty = |param: f64, tol: f64| {
+            distinct_end_type(&k, &curve, &ivl, param, Both, tol).expect("type")
+        };
+        // 3.5e-3 from the start, 2.47e6 from the end: distinct from both, inside
+        assert_eq!(ty(3.538e-3 / len, 1e-7), Inside);
+        // 1e-9 from the start (below the tolerance): on the start only
+        assert_eq!(ty(1e-9 / len, 1e-7), Start);
+        assert_eq!(ty(1.0 - 1e-9 / len, 1e-7), End);
+        // a tolerance longer than the line: on both ends, still degenerate
+        assert_eq!(ty(0.5, 3e6), Both);
+        // on an end parameter itself: 0 from that end, 2.47e6 from the other
+        assert_eq!(ty(0.0, 1e-7), Start);
+        assert_eq!(ty(1.0, 1e-7), End);
+        // outside the interval: unchanged
+        assert_eq!(ty(-0.5, 1e-7), Both);
+        assert_eq!(ty(1.5, 1e-7), Both);
     }
 }

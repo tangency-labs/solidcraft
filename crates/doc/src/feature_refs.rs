@@ -105,6 +105,11 @@ impl crate::Document {
                 for link in &mut sketch.links {
                     crate::clipboard::remap_link(&mut link.source, &ids, &names, &bodies, 0);
                 }
+                for constraint in &mut sketch.wire_constraints {
+                    if let Some(solidcraft_sketch::PlaneOf::Model(plane)) = constraint.kind.plane_mut() {
+                        crate::clipboard::remap_link(&mut plane.source, &ids, &names, &bodies, 0);
+                    }
+                }
             }
         }
     }

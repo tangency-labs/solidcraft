@@ -664,8 +664,10 @@ fn body1_box(s: &Session) -> (Vec3, Vec3) {
     (b.min, b.max)
 }
 
+/// Whether two boxes have the same corners, coordinate by coordinate within 1e-6 mm.
 fn same_box(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
-    a.0.dist(b.0) < 1e-6 && a.1.dist(b.1) < 1e-6
+    let coordinates = |(min, max): (Vec3, Vec3)| [min.x, min.y, min.z, max.x, max.y, max.z];
+    coordinates(a).iter().zip(coordinates(b)).all(|(x, y)| (x - y).abs() < 1e-6)
 }
 
 /// `Move1`'s error and warning.
@@ -731,13 +733,47 @@ fn a_turn_whose_edge_is_not_found_turns_about_the_saved_line_and_says_so() {
 }
 
 #[test]
-fn a_move_about_an_edge_needs_an_axis_along_it_and_an_angle() {
+fn a_move_about_an_edge_needs_an_axis_and_an_angle() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Body1"}));
     let about = json!({"edge": [40, 15, 10], "body": "Body1"});
-    let across = json!({"bodies": ["Body1"], "origin": [40, 0, 10], "axis": [1, 0, 0], "angle": "10 deg", "about": about});
-    let e = s.execute("solid.move", &across).unwrap_err().to_string();
-    assert!(e.contains("does not lie along `axis`"), "{e}");
     let e = s.execute("solid.move", &json!({"bodies": ["Body1"], "about": about})).unwrap_err().to_string();
     assert!(e.contains("needs `axis` and `angle`"), "{e}");
+    let e = s
+        .execute("solid.move", &json!({"bodies": ["Body1"], "axis": [0, 1, 0], "angle": "10 deg", "about": {"edge": [500, 0, 0]}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("no edge"), "{e}");
+}
+
+#[test]
+fn a_turn_about_an_edge_of_a_body_in_a_turned_component_is_taken() {
+    // A 40 × 30 × 10 mm block in a component turned a quarter about Z and moved 100 mm along X,
+    // turned 10° about a top edge of the block as the world shows it (along X), with the world
+    // line the dialog would send. The move is taken and keeps the edge. With a box of the root
+    // moved too, the move is split into one Move per frame.
+    for with_root_box in [false, true] {
+        let mut s = Session::default();
+        if with_root_box {
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-50, 0, 0], "body_name": "Root box"}));
+        }
+        run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [100, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let before = s.world_state().unwrap().body("Block").unwrap().body.exact_bounds().unwrap();
+        assert!(((before.max.x - before.min.x) - 30.0).abs() < 1e-6, "the block lies along Y in the world: {before:?}");
+        let (x, y, z) = ((before.min.x + before.max.x) / 2.0, before.max.y, before.max.z);
+        let bodies = if with_root_box { json!(["Block", "Root box"]) } else { json!(["Block"]) };
+        let turn = json!({"bodies": bodies, "origin": [before.min.x, y, z], "axis": [1, 0, 0], "angle": "10 deg",
+            "about": {"edge": [x, y, z], "body": "Block"}});
+        let reply = run(&mut s, "solid.move", turn);
+        let id = reply["feature"].as_u64().unwrap();
+        let r = s.model.result(id).unwrap();
+        assert_eq!((r.error.clone(), r.warning.clone()), (None, None), "{with_root_box}");
+        assert!(s.doc.to_json().contains("rotate_about"), "{with_root_box}: the move keeps the picked edge");
+        // Turned 10° about a top edge, the block's top is no longer level.
+        let after = s.world_state().unwrap().body("Block").unwrap().body.exact_bounds().unwrap();
+        assert!(after.max.z > 11.0 || after.min.z < -1.0, "{with_root_box}: {after:?}");
+    }
 }

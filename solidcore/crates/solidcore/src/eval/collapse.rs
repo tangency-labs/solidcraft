@@ -461,6 +461,120 @@ pub fn collapsed_on(
     along(s, uv, d, reach, range)
 }
 
+/// Whether the piece of `s`'s iso-line along `d` (0: u, 1: v) through `uv` over the `d`
+/// parameters `range` lies within `reach` mm of `centre`, certified: a plane's iso-line is a
+/// segment, inside the ball when its ends are; a spline's piece is cut from the line exactly
+/// (knot insertion, [`super::pcurve::segment`]) and lies in its control points' hull where its
+/// weights are positive, so it is inside the ball when they are, by their rounding. `false`
+/// where it is not certified inside (a point outside, a weight not certified positive); a
+/// revolution, a range off the knots or input that is not finite is refused.
+pub fn iso_within(
+    s: &EvalSurface,
+    uv: [f64; 2],
+    d: usize,
+    range: (f64, f64),
+    centre: Vec3,
+    reach: f64,
+) -> Result<bool, EvalError> {
+    check(uv, reach)?;
+    if d > 1 {
+        return Err(past(d));
+    }
+    let (a, b) = (range.0.min(range.1), range.0.max(range.1));
+    if !(a.is_finite() && b.is_finite() && centre.is_finite()) {
+        return Err(malformed("an iso-line piece or centre that is not finite"));
+    }
+    // Whether a point, `e` from where it is computed, is certified within the reach.
+    let inside = |p: Vec3, e: f64| p.dist(centre) * (1.0 + gamma(6)) + e <= reach;
+    match s {
+        EvalSurface::Plane { origin, du, dv } => {
+            let at = |t: f64| {
+                let [u, v] = if d == 0 { [t, uv[1]] } else { [uv[0], t] };
+                *origin + *du * u + *dv * v
+            };
+            let (p, q) = (at(a), at(b));
+            // A plane's point is a few products and sums, within γ₆ of its size.
+            let e = |p: Vec3| gamma(6) * (p.len() + centre.len());
+            Ok(inside(p, e(p)) && inside(q, e(q)))
+        }
+        EvalSurface::Nurbs(n) => {
+            let q = s.wrap(uv);
+            let ctrl = n.ctrl();
+            let (deg, knots, count) = (n.degree(), n.knots(), n.count());
+            let o = usize::from(d == 0);
+            let get = |a: &[usize; 2], k: usize| a.get(k).copied().unwrap_or(0);
+            let (pd, po) = (get(&deg, d), get(&deg, o));
+            let (nd, no, nu) = (get(&count, d), get(&count, o), get(&count, 0));
+            let none: &[f64] = &[];
+            let (kd, ko) = (
+                knots.get(d).map_or(none, Vec::as_slice),
+                knots.get(o).map_or(none, Vec::as_slice),
+            );
+            let t0 = q.get(o).copied().unwrap_or(f64::NAN);
+            let net = |along: usize, across: usize| -> Option<Hom> {
+                let (i, j) = if d == 0 {
+                    (along, across)
+                } else {
+                    (across, along)
+                };
+                ctrl.get(j.checked_mul(nu)?.checked_add(i)?)
+                    .copied()
+                    .map(Hom::exact)
+            };
+            // The iso-line's control points: each column's point at t0, de Boor along o.
+            let mut line = Vec::new();
+            let (mut ex, mut ew) = (0.0f64, 0.0f64);
+            for j in 0..nd {
+                let h = de_boor(po, ko, no, |i| net(j, i), t0).map_err(|e| off_message(e, uv))?;
+                (ex, ew) = (ex.max(h.ex), ew.max(h.ew));
+                line.push(h.h);
+            }
+            let (Some(&lo), Some(&hi)) = (kd.get(pd), kd.get(nd)) else {
+                return Err(malformed("knots that do not fit"));
+            };
+            if !(lo <= a && b <= hi) {
+                return Err(refused("an iso-line piece off the knot range"));
+            }
+            let piece = if a < b {
+                super::pcurve::segment(pd, kd, &line, a, b)
+                    .map_err(|e| malformed(&format!("an iso-line piece: {e}")))?
+                    .1
+            } else {
+                let h = de_boor(pd, kd, nd, |j| line.get(j).copied().map(Hom::exact), a)
+                    .map_err(|e| off_message(e, uv))?;
+                vec![h.h]
+            };
+            // Knot insertion takes at most 2p convex combinations of three operations each, and
+            // a point's de Boor at most γ_(12p+4): within that of the largest coordinate.
+            let g = gamma(18 * pd + 8);
+            let size = |k: usize| {
+                line.iter()
+                    .map(|h| h.get(k).map_or(0.0, |x| x.abs()))
+                    .fold(0.0, f64::max)
+            };
+            let (sx, sw) = (size(0).max(size(1)).max(size(2)), size(3));
+            for h in piece {
+                let r = Hom {
+                    h,
+                    ex: ex + g * sx,
+                    ew: ew + g * sw,
+                };
+                if !(h[3] > r.ew) {
+                    return Ok(false);
+                }
+                let (p, e) = r.euclid()?;
+                if !inside(p, e) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        EvalSurface::Revolved { .. } => Err(refused(
+            "an iso-line piece of a revolution within reach of a point",
+        )),
+    }
+}
+
 /// [`collapsed_on`] after its checks; `d` is 0 or 1.
 fn along(
     s: &EvalSurface,
@@ -1523,20 +1637,34 @@ fn rational_partial_bound(
                 }
                 finite(near + part)
             };
-            let mut top = 0.0f64;
+            // How far the weights move from one Bézier point to the next, over every row.
+            let mut turns = Vec::new();
+            let mut most_turn = 0.0f64;
             for kk in 0..p {
-                let step = apart(kk, kk + 1)?;
                 let mut turn = 0.0f64;
                 for j in 0..rows.len() {
                     let ((_, _, wa, va), (_, _, wb, vb)) =
                         (at(j, kk).ok_or_else(bad)?, at(j, kk + 1).ok_or_else(bad)?);
                     turn = turn.max((wb - wa).abs() * (1.0 + UNIT) + va + vb);
                 }
+                most_turn = most_turn.max(turn);
+                turns.push(turn);
+            }
+            // The factor `ω_(k+1) / Ω` on the first term is at most `ω_max / ω_min` of the iso-line's
+            // weights `ω_k` (Ω is a convex combination of them), and those differ by at most `p`
+            // steps of `most_turn`, so `ω_max ≤ ω_min + p most_turn ≤ low + p most_turn`. Where the
+            // weights do not change along d (a cylinder's arc, straight along its axis) that is
+            // `low` and the first term is the plain Euclidean step, not `ω⁺ / ω⁻` times it. The
+            // smaller of the two bounds is taken.
+            let heavy = high.min((low + p as f64 * most_turn) * (1.0 + gamma(4)));
+            let mut top = 0.0f64;
+            for (kk, turn) in turns.iter().enumerate() {
+                let step = apart(kk, kk + 1)?;
                 let mut far = 0.0f64;
                 for mm in 0..=p {
                     far = far.max(apart(kk, mm)?);
                 }
-                top = top.max(high * step + turn * far);
+                top = top.max(heavy * step + turn * far);
             }
             // The quotient by the piece's length and the least weight, then the bound's sums
             // and products, rounded up. A positive `top` whose bound is zero or below the normal
