@@ -1,10 +1,10 @@
-//! The exact area of a cut sphere's faces (#22556).
+//! The exact area of a cut sphere's faces (#22556): solidcore's per-face area ([`Body::face_area`]).
 
 use std::f64::consts::PI;
 
 use solidcore_record::Vec3;
 
-use crate::{Body, BoolOp, FaceSurface, face_surface, sphere_face_area};
+use crate::{Body, BoolOp, FaceSurface, face_surface};
 
 const R: f64 = 10.0;
 
@@ -34,11 +34,11 @@ fn block(a: [f64; 3], b: [f64; 3]) -> Body {
 fn sphere_area(b: &Body) -> f64 {
     let faces: Vec<usize> = (0..b.record().faces.len()).filter(|&f| matches!(face_surface(b, f), Some(FaceSurface::Sphere { .. }))).collect();
     assert!(!faces.is_empty(), "no face on a sphere");
-    faces.iter().map(|&f| sphere_face_area(b, f).unwrap_or_else(|| panic!("face {f} has no exact area"))).sum()
+    faces.iter().map(|&f| ok(b.face_area(f)).unwrap_or_else(|| panic!("face {f} has no exact area"))).sum()
 }
 
 fn assert_close(got: f64, want: f64) {
-    assert!((got - want).abs() <= want * 1e-5, "area {got}, want {want}");
+    assert!((got - want).abs() <= want * 1e-9, "area {got}, want {want}");
 }
 
 #[test]
@@ -88,3 +88,4 @@ fn a_face_has_the_same_area_on_a_ball_and_on_a_cavity() {
     assert_close(sphere_area(&ball_side), want);
     assert_close(sphere_area(&cavity_side), want);
 }
+

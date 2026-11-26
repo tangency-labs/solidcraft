@@ -146,7 +146,6 @@ mod smlib_sweeps;
 #[cfg(test)]
 mod smlib_sweeps_tests;
 mod smooth_edges;
-mod sphere_area;
 #[cfg(test)]
 mod sphere_area_tests;
 #[cfg(test)]
@@ -517,7 +516,6 @@ pub use solidcraft_smlib::stop::Stop;
 /// stops with it (a sketch solve).
 pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
-pub use sphere_area::sphere_face_area;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
