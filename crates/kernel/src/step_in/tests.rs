@@ -2602,12 +2602,14 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    // The part passes SMLib's check (#17706, fixed by #17856: the check measured the apex
-    // against the far pole).
-    assert_closed_measures(&t, volume, area, &[], false);
-    // The check's verdict is backed by proved gaps: each meridian lies on both torus halves within
-    // a certified 1e-8 (edge tolerance 5e-6), and the apex's exact distance to the torus,
-    // √(major² + minor²) − minor = 3.62e-5, is inside its vertex tolerance.
+    // The part is whole, but SMLib's check now reports its two meridian edges: the apex is
+    // 3.62e-5 above the pole, and each meridian's circle ends 3.62e-5 from it, past the vertex
+    // zone the file's 1e-5 uncertainty leaves (2.72e-5). Before #19593 the check grew that
+    // tolerance over the gap instead of reporting it.
+    assert_closed_measures(&t, volume, area, &[], true);
+    // The check's failure is backed by the measured gaps: each meridian lies on both torus
+    // halves within a certified 1e-8 (edge tolerance 5e-6), and the apex's exact distance to
+    // the torus, √(major² + minor²) − minor = 3.62e-5, is past its vertex zone.
     let imp = step_import(&t).unwrap();
     let body = &imp.bodies[0].body;
     let (rec, sm) = (body.record(), body.smlib().unwrap());
@@ -2624,7 +2626,8 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
         }
     }
     let gap = (major * major + minor * minor).sqrt() - minor; // exact to ~1e-17
-    assert!((gap - 3.62299817e-5).abs() < 1e-12 && rec.vertices[apex].tolerance > gap * (1.0 + 1e-9));
+    let zone = rec.vertices[apex].tolerance / 2.0;
+    assert!((gap - 3.62299817e-5).abs() < 1e-12 && gap > zone, "apex gap {gap}, zone {zone}");
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
