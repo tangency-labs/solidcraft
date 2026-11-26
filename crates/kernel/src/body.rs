@@ -513,7 +513,7 @@ pub struct FaceInfo {
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 /// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
-pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats, ShapeLimit, Unshaped};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -2363,12 +2363,24 @@ impl Body {
     pub fn classify_points_with_normals(
         &self,
         points: &[Vec3],
-        face: Option<solidcore_ops::PointNormalFace>,
-    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        face: Option<crate::points::PointNormalFace>,
+    ) -> Result<Vec<crate::points::ClassifiedPoint>> {
+        use crate::points::{ClassifiedPoint, PointNormalFace, UnitNormal};
         let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
         let (body, order) = &*form;
         let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
-        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+        let face = face.map(|f| match f {
+            PointNormalFace::Index(i) => solidcore_ops::PointNormalFace::Index(i),
+            PointNormalFace::Point(p) => solidcore_ops::PointNormalFace::Point(p),
+        });
+        let class = |c: solidcore_ops::ClassifiedPoint| match c {
+            solidcore_ops::ClassifiedPoint::Inside => ClassifiedPoint::Inside,
+            solidcore_ops::ClassifiedPoint::Outside => ClassifiedPoint::Outside,
+            solidcore_ops::ClassifiedPoint::On { face, normal } => {
+                ClassifiedPoint::On { face, normal: UnitNormal { value: normal.value, bound: normal.bound } }
+            }
+        };
+        body.classify_points_with_normals(order, &points, face).map(|v| v.into_iter().map(class).collect()).map_err(|e| match e {
             solidcore_ops::Error::Argument => {
                 KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
             }
