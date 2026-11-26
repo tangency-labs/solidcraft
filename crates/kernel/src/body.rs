@@ -513,7 +513,7 @@ pub struct FaceInfo {
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 /// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
-pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats, ShapeLimit, Unshaped};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
