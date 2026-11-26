@@ -526,14 +526,8 @@ fn synthetic_plans() -> Vec<GeomPlan> {
     };
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let ctrl = vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]];
-    let nurbs = EvalSurface::Nurbs {
-        degree: [2, 1],
-        knots: [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
-        count: [3, 2],
-        ctrl,
-        closed: [true, false],
-    };
-    let profile = EvalCurve { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[2.0, 0.0, 0.0, 1.0], [3.0, 0.0, 1.5, 1.0]] };
+    let nurbs = EvalSurface::nurbs_closed([2, 1], [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [3, 2], ctrl, [true, false]);
+    let profile = EvalCurve::new(1, vec![0.0, 0.0, 1.0, 1.0], vec![[2.0, 0.0, 0.0, 1.0], [3.0, 0.0, 1.5, 1.0]]);
     let revolved = EvalSurface::Revolved {
         profile,
         origin: to_kernel(Vec3::new(0.0, 0.0, -1.0)),

@@ -138,11 +138,9 @@ impl SurfaceEval {
             Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
                 let profile = match CurveEval::new(profile)? {
                     CurveEval::Spline(c) => c,
-                    CurveEval::Line { start, end } => EvalCurve {
-                        degree: 1,
-                        knots: vec![0.0, 0.0, 1.0, 1.0],
-                        ctrl: vec![[start.x, start.y, start.z, 1.0], [end.x, end.y, end.z, 1.0]],
-                    },
+                    CurveEval::Line { start, end } => {
+                        EvalCurve::new(1, vec![0.0, 0.0, 1.0, 1.0], vec![[start.x, start.y, start.z, 1.0], [end.x, end.y, end.z, 1.0]])
+                    }
                     _ => return Err(unsupported("a revolution of a conic, polyline or intersection profile")),
                 };
                 let axis = v3(*axis).normalized().ok_or_else(|| Error::Invalid("revolution axis".into()))?;
@@ -319,8 +317,25 @@ impl SurfaceEval {
     /// lies at a pole to within a tolerance, where its periodic parameter is free).
     pub fn pole_within(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
         let Some((_, su, sv)) = self.derivs(uv[0], uv[1]) else { return [false; 2] };
-        uv::collapsed([su.len(), sv.len()], &self.domain(), reach)
+        collapsed([su.len(), sv.len()], &self.domain(), reach)
     }
+}
+
+/// Along each direction, whether a point whose parameter speeds (mm per unit) are `speed` is a
+/// pole, or within `reach` mm of one: moving along the direction there not at all (to 1e-9 of
+/// the other's speed), or across half its period (or its whole range) by no more than `reach`.
+fn collapsed(speed: [f64; 2], dom: &Domain, reach: f64) -> [bool; 2] {
+    let [a, b] = speed;
+    let mut out = [a <= 1e-9 * b.max(1e-12), b <= 1e-9 * a.max(1e-12)];
+    for (((flag, period), range), speed) in out.iter_mut().zip(dom.period).zip(dom.range).zip(speed) {
+        let span = match (period, range) {
+            (Some(period), _) => 0.5 * period,
+            (None, Some((lo, hi))) => (hi - lo).abs(),
+            (None, None) => continue,
+        };
+        *flag |= speed * span <= reach;
+    }
+    out
 }
 
 /// A tensor spline's rows (`rows[i][j]`, i along u) as the evaluator's u-fastest array.
@@ -505,7 +520,7 @@ fn spline(knots: &[f64], ctrl: Vec<[f64; 4]>) -> Result<CurveEval, Error> {
     if !(1..=MAX_SPLINE_DEGREE).contains(&degree) {
         return Err(unsupported(format!("a spline curve of degree {degree}")));
     }
-    Ok(CurveEval::Spline(EvalCurve { degree, knots: knots.to_vec(), ctrl }))
+    Ok(CurveEval::Spline(EvalCurve::new(degree, knots.to_vec(), ctrl)))
 }
 
 impl Intersection {
