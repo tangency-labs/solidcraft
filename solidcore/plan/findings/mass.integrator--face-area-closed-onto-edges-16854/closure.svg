@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="330" viewBox="0 0 640 330">
+  <title>closure-16854</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="640" height="330" fill="#ffffff"/>
+    <path id="face" d="M60 136 C220 110 420 114 580 134 L580 255 L60 255 Z" fill="#f0f0f0"/>
+    <path id="tolerance_tube" data-name="tolerance tube" d="M60 120 C220 90 420 90 580 120" fill="none" stroke="#dce9f5" stroke-width="40" stroke-miterlimit="10"/>
+    <line id="ruling" x1="109.1" y1="129.1" x2="109.1" y2="111.9" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-2" data-name="ruling" x1="160.2" y1="123.9" x2="160.2" y2="105.6" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-3" data-name="ruling" x1="212.6" y1="120.3" x2="212.6" y2="101.1" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-4" data-name="ruling" x1="266.1" y1="118.3" x2="266.1" y2="98.4" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-5" data-name="ruling" x1="320" y1="117.8" x2="320" y2="97.5" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-6" data-name="ruling" x1="373.9" y1="118.6" x2="373.9" y2="98.4" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-7" data-name="ruling" x1="427.4" y1="120.7" x2="427.4" y2="101.1" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-8" data-name="ruling" x1="479.8" y1="124" x2="479.8" y2="105.6" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <line id="ruling-9" data-name="ruling" x1="530.9" y1="128.5" x2="530.9" y2="111.9" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <path id="edge_curve_E" data-name="edge curve E" d="M60 120 C220 90 420 90 580 120" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path id="trim_image_P" data-name="trim image P" d="M60 136 C220 110 420 114 580 134" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 38)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">A face closed onto its edges (#16854)</tspan></text>
+    <text transform="matrix(1 0 0 1 200 68)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">edge curve E, in its tolerance tube</tspan></text>
+    <text transform="matrix(1 0 0 1 440 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">trim image P</tspan></text>
+    <line id="leader" x1="186" y1="114" x2="150" y2="182" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 80 198)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">strip ruled from P to E</tspan></text>
+    <text transform="matrix(1 0 0 1 300 232)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">face over its trims</tspan></text>
+    <text transform="matrix(1 0 0 1 30 288)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Over its trims alone a face misses the strip: an area of first order in the gap.</tspan></text>
+    <text transform="matrix(1 0 0 1 30 306)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Each strip adds its area vector along the face&apos;s unit normal at P, as the volume is closed (#16735).</tspan></text>
+  </g>
+</svg>
