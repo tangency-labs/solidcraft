@@ -82,7 +82,7 @@ fn update(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "tab.group.update";
     let request: TabGroupUpdateParams = parse(cmd, p)?;
     let name = checked_name(cmd, request.name.as_deref())?;
-    reply(cmd, TabGroupReply { group: Some(request.group), name, colour: request.colour, ..Default::default() })
+    reply(cmd, TabGroupReply { group: Some(request.group), name, colour: request.colour, collapsed: request.collapsed, ..Default::default() })
 }
 
 fn ungroup(_s: &mut Session, p: &Value) -> Result<Value> {

@@ -118,6 +118,9 @@ pub struct TabGroupReply {
     /// The colour asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colour: Option<TabGroupColour>,
+    /// The folded state asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
     /// Every group, in the order they were made (`tab.group.list`, from the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<TabGroupInfo>>,
