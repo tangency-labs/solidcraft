@@ -667,9 +667,20 @@ fn blend_failure(
 /// classification with swept turns on): [`Error::TurnRefused`] with the kernel's reason, without
 /// the "Fillet Error:" that says only whose it is, and where it is, and, where the corners
 /// step's failure `e` is the kernel's typed refusal of a sharp side edge, that edge's index and
-/// the radius it is rounded at first; `None` for a note of another kind, or one that gives no
-/// reason.
+/// the radius it is rounded at first; `None` for a note of another kind, one that gives no
+/// reason, or a failure `e` that is not the corners step's refusal (a later vertex's own
+/// failure, which an earlier vertex's note does not explain).
 fn turn_refusal(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
+    if !matches!(
+        e,
+        SolidError::BlendRefused {
+            refusal: BlendRefusal::SweptTurnPastSharpEdge { .. },
+            ..
+        }
+    ) && !matches!(e.blend_failure(), Some(BlendFailure::CornerRefused))
+    {
+        return None;
+    }
     let info = s.error_info();
     let room = match info.code {
         c if c == FilletErrorType::NoRoom as i32 => true,

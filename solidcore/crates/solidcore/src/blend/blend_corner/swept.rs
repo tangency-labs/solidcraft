@@ -355,6 +355,9 @@ pub fn classify_swept(
     // variable or non-circular rounds are not swept at any side edge
     let tol = min(fs[0].approx_tol_3d, fs[1].approx_tol_3d);
     let mut radius = -1.0;
+    // the largest of the rounds' radii, equal within the tolerance: a side edge rounded at it
+    // lets each round's ball pass, whichever round comes first
+    let mut largest = 0.0_f64;
     for (f, eu) in fs.iter().zip([eu1_, eu2_]) {
         let fsg = f
             .fsg
@@ -373,24 +376,26 @@ pub fn classify_swept(
             );
         }
         radius = r0;
+        largest = largest.max(r0).max(r1);
     }
     let side_concave = is_concave_edge(k, b, side_edge)?;
     if side_concave == concave[0] {
         // no radius builds a swept turn past the side edge: its size is not the cause (the
-        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge())); the rounds' one radius, checked
-        // above, so the size named does not hang on which round comes first
+        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge())); the rounds' largest radius, so
+        // the size named does not hang on which round comes first. The side edge's other
+        // tests (below: tangent, straight, square, on a plane) are not made first
         let kind = if side_concave { "concave" } else { "convex" };
         return Ok(Some(TurnRefusal {
             error: FilletErrorType::NoRoom,
             comment: format!(
                 "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
-                fmt_g(radius)
+                fmt_g(largest)
             ),
             fit_edge: eu1::edge(b, eu1_)?,
             refusal: Some(BlendRefusal::SweptTurnPastSharpEdge {
                 vertex,
                 side_edge,
-                least_radius: radius,
+                least_radius: largest,
             }),
         }));
     }

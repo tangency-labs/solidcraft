@@ -97,15 +97,17 @@ pub enum BlendRefusal {
     },
     /// A Swept turn at `vertex` that no radius of its rounds builds: its side edge is sharp
     /// and of the rounds' convexity, so their ball cannot circle it
-    /// ([`crate::blend::blend_corner::swept::classify_swept`]). Rounding `side_edge` first
-    /// at a radius of at least `least_radius`, the rounds' one radius, lets it pass
-    /// (`docs/generic-blend.md`, Turn: R >= r).
+    /// ([`crate::blend::blend_corner::swept::classify_swept`]). The ball passes a side edge
+    /// rounded first at a radius of at least `least_radius`, the rounds' radius (the larger
+    /// where they differ within the tolerance; `docs/generic-blend.md`, Turn: R >= r). The
+    /// side edge's other tests for a Swept turn (not tangent, straight and square to both
+    /// rounded edges on a plane) are not made before this refusal.
     SweptTurnPastSharpEdge {
         /// The corner's vertex.
         vertex: VertexId,
         /// The sharp side edge between the rounds.
         side_edge: EdgeId,
-        /// The least radius `side_edge` is rounded at for the turn to pass.
+        /// The least radius `side_edge` is rounded at for the ball to pass it.
         least_radius: f64,
     },
     /// A chamfer's angle to its first face that runs out past the other face instead of

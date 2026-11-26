@@ -1374,7 +1374,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     fit,
                     refusal,
                 } => {
-                    typed = refusal;
+                    // `note_vertex_error` notes nothing for a null vertex
+                    if vertex.is_some() {
+                        typed = refusal;
+                    }
                     // NoteFitRadius(0.0, edge), or the size that builds where one does
                     if let Some(edge) = fit_edge {
                         let (size, kind) =
