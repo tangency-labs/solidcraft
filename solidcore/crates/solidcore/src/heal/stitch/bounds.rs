@@ -1320,14 +1320,24 @@ pub(crate) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Re
 }
 
 /// Bounds the whole curve's distance from a point (the geometry a squeeze removes): the
-/// farthest of [`curve_cover`]'s boxes over the interval. A B-spline span's box is cut to the
-/// box of its control points, so the bound follows the curve's own size: the interval
-/// evaluation of a span alone widens with the distance of its points from the origin
-/// (`(1 - a) p + a q` with `a` in `[0, 1]` spans `[0, |p| + |q|]` even where `p = q`).
+/// farthest of [`curve_cover`]'s boxes over the interval and of the curve's boxes at the
+/// interval's two ends. A B-spline span's box is cut to the box of its control points, so the
+/// bound follows the curve's own size: the interval evaluation of a span alone widens with the
+/// distance of its points from the origin (`(1 - a) p + a q` with `a` in `[0, 1]` spans
+/// `[0, |p| + |q|]` even where `p = q`). The end boxes hold what the evaluation returns at a
+/// natural end, the end control point ([`spline_box`]), which no span holds on an unclamped end.
 pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
     let p = point_box(point)?;
+    let ends = [interval.min(), interval.max()]
+        .into_iter()
+        .map(|t| curve_box(curve, checked_range([t, t])?));
     let mut far = 0.0_f64;
-    for piece in curve_cover(curve, interval.min(), interval.max(), 1)? {
+    for piece in curve_cover(curve, interval.min(), interval.max(), 1)?
+        .into_iter()
+        .map(Ok)
+        .chain(ends)
+    {
+        let piece = piece?;
         let d = norm(difference(piece, p))?;
         if !d.is_finite() {
             return Err(invalid("non-finite curve-to-point bound"));
