@@ -147,6 +147,23 @@ pub fn offset_contour(
     Ok(out)
 }
 
+/// A closed profile `segs` moved `depth` across its plane, as [`offset_contour`] moves an open
+/// one, where the last piece ends where the first starts and meets it there at a corner like any
+/// other: at a sharp one beside an arc, both moved pieces end where the shifted curves cross
+/// nearest the corner. A lip's band edge is its face's loop moved this way.
+///
+/// # Errors
+/// A [`ContourRefusal`] naming why the shifted profile does not hold together.
+pub fn offset_closed_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    offset_contour(segs, depth, thickness, flip, smooth)
+}
+
 /// A drawn arc's radius once its surface lies `depth` from it, away from the material, and
 /// whether the material lies toward its center (the drawn arc is then the roll's outside and the
 /// surface moves outward).
@@ -407,6 +424,142 @@ mod tests {
         assert_eq!(
             offset_contour(&[], 1.0, 2.0, false, SMOOTH),
             Err(ContourRefusal::ZeroLength)
+        );
+    }
+
+    /// A quarter disc of radius 10 run counter-clockwise, its arc first: from (10, 0) round the
+    /// origin to (0, 10), down the y axis, and along the x axis back to (10, 0), where the loop
+    /// closes at a sharp corner beside the arc. Moved 1 to the left of the travel (inside), the
+    /// lines are x = 1 and y = 1 and the arc's circle has radius 9; with s = √80 they cross at
+    /// (1, s), (1, 1) and, where the loop closes, (s, 1). So the arc runs from atan2(1, s) to
+    /// atan2(s, 1), and both lines end at those crossings. Moved 1 to the right (outside), the
+    /// lines are x = −1 and y = −1, the circle has radius 11, and the loop closes at (√120, −1).
+    #[test]
+    fn a_closed_profile_meets_where_its_last_and_first_pieces_cross_beside_an_arc() {
+        let quarter = [
+            Seg2::Arc {
+                center: Vec2::ZERO,
+                radius: 10.0,
+                start: 0.0,
+                sweep: PI / 2.0,
+            },
+            Seg2::Line {
+                a: Vec2::new(0.0, 10.0),
+                b: Vec2::ZERO,
+            },
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: Vec2::new(10.0, 0.0),
+            },
+        ];
+        let near = |p: Vec2, x: f64, y: f64| p.dist(Vec2::new(x, y)) < 1e-12;
+        let out = offset_closed_contour(&quarter, 1.0, 0.0, false, SMOOTH).unwrap();
+        let s = 80f64.sqrt();
+        let [Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        }, Seg2::Line { a: a1, b: b1 }, Seg2::Line { a: a2, b: b2 }] = out[..]
+        else {
+            panic!("{out:?}")
+        };
+        assert_eq!((center, radius), (Vec2::ZERO, 9.0));
+        let begin = 1f64.atan2(s);
+        assert!(
+            (start - begin).abs() < 1e-12 && (sweep - (s.atan2(1.0) - begin)).abs() < 1e-12,
+            "{start} {sweep}"
+        );
+        assert!(near(a1, 1.0, s) && near(b1, 1.0, 1.0), "{a1:?} {b1:?}");
+        assert!(near(a2, 1.0, 1.0) && near(b2, s, 1.0), "{a2:?} {b2:?}");
+        let out = offset_closed_contour(&quarter, 1.0, 0.0, true, SMOOTH).unwrap();
+        let s = 120f64.sqrt();
+        let [Seg2::Arc {
+            radius,
+            start,
+            sweep,
+            ..
+        }, Seg2::Line { a: a1, b: b1 }, Seg2::Line { a: a2, b: b2 }] = out[..]
+        else {
+            panic!("{out:?}")
+        };
+        let begin = (-1f64).atan2(s);
+        assert_eq!(radius, 11.0);
+        assert!(
+            (start - begin).abs() < 1e-12 && (sweep - (s.atan2(-1.0) - begin)).abs() < 1e-12,
+            "{start} {sweep}"
+        );
+        assert!(near(a1, -1.0, s) && near(b1, -1.0, -1.0), "{a1:?} {b1:?}");
+        assert!(near(a2, -1.0, -1.0) && near(b2, s, -1.0), "{a2:?} {b2:?}");
+        // Moved 6 inside, the line y = 6 misses the circle of radius 4.
+        assert_eq!(
+            offset_closed_contour(&quarter, 6.0, 0.0, false, SMOOTH),
+            Err(ContourRefusal::CornersMiss)
+        );
+    }
+
+    /// A lens of two arcs of radius 5 run counter-clockwise: about (0, 3) from (−4, 0) to (4, 0),
+    /// then about (0, −3) back, where the loop closes at a sharp corner. Moved 1 inside, both
+    /// circles have radius 4 and cross at (±√7, 0): each arc runs between those, the lower from
+    /// atan2(−3, −√7) to atan2(−3, √7) and the upper from atan2(3, √7) to atan2(3, −√7). A whole
+    /// circle closes smoothly on itself and stays a whole circle of radius 9.
+    #[test]
+    fn a_closed_lens_of_two_arcs_meets_where_the_shifted_circles_cross() {
+        let k = 3f64.atan2(4.0);
+        let lens = [
+            Seg2::Arc {
+                center: Vec2::new(0.0, 3.0),
+                radius: 5.0,
+                start: -PI + k,
+                sweep: PI - 2.0 * k,
+            },
+            Seg2::Arc {
+                center: Vec2::new(0.0, -3.0),
+                radius: 5.0,
+                start: k,
+                sweep: PI - 2.0 * k,
+            },
+        ];
+        let out = offset_closed_contour(&lens, 1.0, 0.0, false, SMOOTH).unwrap();
+        let r7 = 7f64.sqrt();
+        let [Seg2::Arc {
+            center: c0,
+            radius: r0,
+            start: s0,
+            sweep: w0,
+        }, Seg2::Arc {
+            center: c1,
+            radius: r1,
+            start: s1,
+            sweep: w1,
+        }] = out[..]
+        else {
+            panic!("{out:?}")
+        };
+        assert_eq!((c0, r0, c1, r1), (Vec2::new(0.0, 3.0), 4.0, Vec2::new(0.0, -3.0), 4.0));
+        let (b0, b1) = ((-3f64).atan2(-r7), 3f64.atan2(r7));
+        assert!(
+            (s0 - b0).abs() < 1e-12 && (w0 - ((-3f64).atan2(r7) - b0)).abs() < 1e-12,
+            "{s0} {w0}"
+        );
+        assert!(
+            (s1 - b1).abs() < 1e-12 && (w1 - (3f64.atan2(-r7) - b1)).abs() < 1e-12,
+            "{s1} {w1}"
+        );
+        let circle = [Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 10.0,
+            start: 0.0,
+            sweep: TAU,
+        }];
+        assert_eq!(
+            offset_closed_contour(&circle, 1.0, 0.0, false, SMOOTH),
+            Ok(vec![Seg2::Arc {
+                center: Vec2::ZERO,
+                radius: 9.0,
+                start: 0.0,
+                sweep: TAU,
+            }])
         );
     }
 }
