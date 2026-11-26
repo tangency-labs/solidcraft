@@ -87,6 +87,10 @@ pub struct Plugin {
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
     pub ribbon_groups: Vec<solidcraft_engine::plugin::RibbonGroup>,
+    /// The entries a docked panel of its `runtime.ui` runs (buttons, form changes, list and table
+    /// picks). The Plugins menu and the Model tab's Plugins group leave these out unless the entry
+    /// also declares a `menu` or `ribbon` slot (#22060).
+    pub panel_entries: std::collections::BTreeSet<String>,
     /// The images its entries and ribbon groups name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
@@ -171,6 +175,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         groups: Default::default(),
         entries: Vec::new(),
         ribbon_groups: Vec::new(),
+        panel_entries: Default::default(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
@@ -266,6 +271,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     plugin.themes = themes;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
+        plugin.panel_entries = runtime.ui.as_ref().map(panel_entries).unwrap_or_default();
         plugin.entries = runtime.entries;
         plugin.ribbon_groups = runtime.ribbon_groups;
         plugin.groups = runtime.permissions.command_groups;
@@ -273,6 +279,27 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     plugin.images = crate::plugin_images::load_with_groups(dir, &plugin.id, &plugin.entries, &plugin.ribbon_groups);
     plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
+}
+
+/// The entry names the docked panels of `ui` run: buttons, toolbar buttons, form field changes,
+/// and list, tree and table picks or edits. Workspace hooks are not panel actions.
+pub(crate) fn panel_entries(ui: &solidcraft_engine::plugin::ui::Declarations) -> std::collections::BTreeSet<String> {
+    use solidcraft_engine::plugin::ui::Widget;
+    let mut names = std::collections::BTreeSet::new();
+    for node in ui.panels.iter().flat_map(|panel| &panel.layout.nodes) {
+        match &node.widget {
+            Widget::Button(button) => {
+                names.insert(button.entry.clone());
+            }
+            Widget::Toolbar(buttons) => names.extend(buttons.iter().map(|button| button.entry.clone())),
+            Widget::Form(form) => names.extend(form.fields.iter().filter_map(|field| field.on_change.clone())),
+            Widget::ItemList(list) => names.extend(list.on_select.clone()),
+            Widget::ItemTree(tree) => names.extend(tree.on_select.clone()),
+            Widget::Table(table) => names.extend(table.on_select.iter().chain(&table.on_edit).cloned()),
+            _ => {}
+        }
+    }
+    names
 }
 
 /// The plugins in `dir`, and the folders that were not. A missing directory is an empty list.
@@ -2436,6 +2463,7 @@ mod tests {
             groups: Default::default(),
             entries: Vec::new(),
             ribbon_groups: Vec::new(),
+            panel_entries: Default::default(),
             images: Default::default(),
             swatches: Default::default(),
             shaders: Vec::new(),

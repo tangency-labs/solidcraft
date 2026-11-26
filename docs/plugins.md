@@ -349,7 +349,11 @@ solidcraft-cli --keep-plugin-approvals run import.json                          
 ## Menu and ribbon entries
 
 The **Plugins** group on the Model tab lists every installed plugin entry, including entries without
-slots; its label opens the **Plugins** menu. Manage plugins in **Preferences › Plugins** (File › Plugins… opens it): install, turn on or off, and remove. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
+slots, except entries that only serve a docked panel: an entry that a panel in `runtime.ui` names
+(a button, a toolbar item, a form change, a list or table action) is left out of the group and
+the **Plugins** menu unless it also declares a `menu` or `ribbon` slot. Such an entry stays an
+ordinary `<plugin>.<entry>` command for panels, scripts and MCP. The group's label opens the
+**Plugins** menu. Manage plugins in **Preferences › Plugins** (File › Plugins… opens it): install, turn on or off, and remove. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
 package folders and 8,192 host slot items. Only enabled plugins contribute host menu and ribbon
 items. The host draws each slot item with the plugin's name,
 a plugin badge and the entry name. Plugins declare placement in their manifests and supply no
@@ -1255,6 +1259,9 @@ For example, `runtime.ui` can declare a job table whose row action runs the entr
 
 Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
 table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
+An entry that a panel names stays out of the **Plugins** menu and the Model tab's **Plugins**
+group, unless it also declares a `menu` or `ribbon` slot
+(see [Menu and ribbon entries](#menu-and-ribbon-entries)).
 Panel clicks put the event in the host command envelope's `ui_event` field and pass the same
 event as the entry's `params`. `ui-provider.on-event` receives the typed event in the same
 transaction. For the table above, the event is

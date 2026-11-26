@@ -145,6 +145,7 @@ fn the_command_icon_and_option_pictures_are_drawn_where_the_command_is() {
         groups: Default::default(),
         entries: vec![seat.clone()],
         ribbon_groups: Vec::new(),
+        panel_entries: Default::default(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),

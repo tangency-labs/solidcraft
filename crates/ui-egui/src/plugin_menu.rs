@@ -943,6 +943,13 @@ pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entr
     true
 }
 
+/// Whether the Plugins menu and the Model tab's Plugins group list `entry`. An entry that only a
+/// docked panel of the plugin runs (a panel helper) stays out, unless it also declares a `menu` or
+/// `ribbon` slot (#22060). It remains a `<plugin>.<entry>` command for panels, scripts and MCP.
+fn listed_in_menus(plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> bool {
+    !plugin.panel_entries.contains(&entry.name) || slot_name(entry, "menu").is_some() || slot_name(entry, "ribbon").is_some()
+}
+
 /// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
 /// hides it at once).
 pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
@@ -989,7 +996,7 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
         }
         for entry in &plugin.entries {
             let grouped = plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name));
-            if (grouped || !entry_shows_in_model_group(entry)) && !individually_pinned(app, plugin, entry) {
+            if (grouped || !entry_shows_in_model_group(entry) || !listed_in_menus(plugin, entry)) && !individually_pinned(app, plugin, entry) {
                 continue;
             }
             let title = command_title(plugin, entry);
@@ -1109,11 +1116,14 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
+    // Entries only a docked panel runs are left out (`listed_in_menus`), and so is a plugin that
+    // has no other entry.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
         let entries: Vec<FileRow> = plugin
             .entries
             .iter()
             .enumerate()
+            .filter(|(_, entry)| listed_in_menus(plugin, entry))
             .map(|(e, entry)| {
                 FileRow::Item(FileItem {
                     id: format!("entry:{p}:{e}"),
@@ -1129,6 +1139,9 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
                 })
             })
             .collect();
+        if entries.is_empty() {
+            continue;
+        }
         match <[FileRow; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),
             Err(entries) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: entries }),
