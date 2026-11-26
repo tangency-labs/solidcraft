@@ -461,6 +461,7 @@ pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::develop;
+pub use route::dxf;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::gusset_prepare;

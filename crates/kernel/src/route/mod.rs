@@ -1,5 +1,5 @@
 //! The router: which kernel runs each operation (`docs/design/kernel-layer.md`), one module per
-//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`], [`frames`], [`projection`], [`affine`], [`curves`], [`develop`], [`points`], [`query`], [`holes`], [`planar`], [`hatch`], [`mesh`], [`tube_cope`], [`shaft_spline`]).
+//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`], [`frames`], [`projection`], [`affine`], [`curves`], [`develop`], [`points`], [`query`], [`holes`], [`planar`], [`hatch`], [`mesh`], [`tube_cope`], [`shaft_spline`], [`dxf`]).
 //!
 //! These are the application's entry points for the operations of the kernel interface
 //! ([`OpKind`]). Each asks [`which`] kernel runs it and calls that kernel's adapter. Which kernels
@@ -11,6 +11,7 @@ use solidcraft_kernel_api::OpKind;
 pub mod affine;
 pub mod curves;
 pub mod develop;
+pub mod dxf;
 pub mod hatch;
 pub mod mesh;
 pub mod planar;

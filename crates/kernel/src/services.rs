@@ -20,7 +20,6 @@ pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::board_drill;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::constraint;
-pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
