@@ -197,6 +197,9 @@ fn unchanged_actual_editor_preserves_all_extents_and_parameter_identities() {
         json!({"to":[0,0,10],"to_offset":"3 mm"}),
         json!({"to":[0,0,-10],"to_offset":"-2 mm"}),
         json!({"taper":"0 deg"}),
+        // Tapers on both sides (#22419): the window shows them, so OK keeps them.
+        json!({"distance":"10 mm","distance2":"3 mm","taper":"6 deg","taper2":"-3 deg"}),
+        json!({"direction":"symmetric","distance":"10 mm","taper":"6 deg"}),
     ] {
         let mut h = make(p.clone());
         let original = extent(&h);
@@ -1249,6 +1252,25 @@ fn taper_angle_steps_by_one_degree() {
     assert_eq!(taper(&h), "1 deg");
     h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
     assert_eq!(taper(&h), "0 deg");
+}
+
+/// Taper Angle 2 (#22419) shows with Two Sides only. Empty, it shows the first side's taper
+/// and the second side takes that one; its step arrows start from it.
+#[test]
+fn taper_angle_2_starts_from_the_first_sides_taper() {
+    let mut h = make(json!({"distance":"10 mm","distance2":"3 mm","taper":"4 deg"}));
+    // A saved taper opens Advanced.
+    open(&mut h);
+    let taper2 = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper2, .. } => taper2.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    assert_eq!(taper2(&h), "");
+    h.step(&json!({"click":{"handle":"dialog:ui.taper_angle_2 up"}})).unwrap();
+    assert_eq!(taper2(&h), "5 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).taper2.as_deref(), Some("5 deg"));
 }
 
 /// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object

@@ -136,6 +136,14 @@ pub const TWO_SIDES_REVERSED: usize = 4;
 pub fn two_sided(direction: usize) -> bool {
     direction == TWO_SIDES || direction == TWO_SIDES_REVERSED
 }
+
+/// Whether the Extrude window offers (and sends) a taper for `direction`: every direction but a
+/// thin wall on two sides or symmetric, or a symmetric extrude with Symmetric Offset
+/// (`symmetric_offset`), which the build does not draft yet.
+pub fn extrude_taper_shown(direction: usize, thin: bool, symmetric_offset: bool) -> bool {
+    let both_ways = direction == 2 || two_sided(direction);
+    !(thin && both_ways) && !(direction == 2 && symmetric_offset)
+}
 /// Thin Extrude wall locations, as `solid.extrude` names them, and their labels.
 const WALL_SIDES: [&str; 4] = ["center", "inside", "outside", "two_sides"];
 const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
@@ -260,6 +268,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 taper: String,
                 /// An explicitly authored zero taper is still a model parameter.
                 taper_present: bool,
+                /// The second side's taper angle (two sides; empty: the same as `taper`).
+                taper2: String,
                 /// Optional distance beyond the selected end object.
                 to_offset: String,
                 /// Offset from the selected start (empty: no offset).
@@ -1112,6 +1122,7 @@ impl Dialog {
                     distance2: length_default(s, "10"),
                     taper: "0 deg".into(),
                     taper_present: false,
+                    taper2: String::new(),
                     to_offset: String::new(),
                     start: String::new(),
                     offset_start: false,
@@ -6880,6 +6891,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             distance2,
             taper,
             taper_present,
+            taper2,
             to_offset,
             start,
             offset_start,
@@ -6896,8 +6908,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let tapered = s.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
             if two_sided(*direction) {
                 common["distance2"] = json!(distance2);
-            } else if *direction < 2 && (*taper_present || tapered) {
-                common["taper"] = json!(taper);
+            }
+            // A taper drafts every side, the second its own when given; not where the build
+            // refuses one (see `extrude_taper_shown`), so those keep building straight.
+            if extrude_taper_shown(*direction, *thin, *offset_start && *symmetric_offset) {
+                if *taper_present || tapered {
+                    common["taper"] = json!(taper);
+                }
+                if two_sided(*direction) && !taper2.trim().is_empty() {
+                    common["taper2"] = json!(taper2);
+                }
             }
             put(&mut common, &[("start_offset", start)]);
             if *direction == 2 && *offset_start && *symmetric_offset {
@@ -9187,6 +9207,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 distance2: extent.distance2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "10")),
                 taper: extent.taper.as_deref().map(str::to_string).unwrap_or_else(|| "0 deg".into()),
                 taper_present: extent.taper.is_some(),
+                taper2: extent.taper2.as_deref().map(str::to_string).unwrap_or_default(),
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 offset_start: extent.start_offset.is_some(),
