@@ -364,6 +364,15 @@ pub enum SolverFailure {
         /// The interval's index.
         index: usize,
     },
+    /// A chamfer of setbacks' trace point whose first foot is at no station of the edge:
+    /// neither the edge parameter the point carries nor the nearest-point drop of the foot on
+    /// the edge puts the foot its setback from the edge, square to it, within the 3D
+    /// tolerance (past the edge's polar line a foot's station is a farthest point of the
+    /// edge, which the drop does not find): an empty search ([`ErrorKind::NotFound`]).
+    SetbackStationNotFound {
+        /// The edge parameter the drop found.
+        s: f64,
+    },
     /// `count` short intervals of the rail's classification could not be squeezed out (no
     /// single side edge at both ends, no edge use on the rail's face, no guess on the edge,
     /// or wider than the edge's tolerance): a case the refinement does not handle
@@ -555,6 +564,7 @@ impl SolverFailure {
             Self::RolloverCornerMissing => ErrorKind::InvalidInput,
             Self::RolloverHasNoFaceBeyond { .. } => ErrorKind::Unsupported,
             Self::RolloverIntervalNotAtEdge { .. } => ErrorKind::Unsupported,
+            Self::SetbackStationNotFound { .. } => ErrorKind::NotFound,
             Self::ShortIntervalsNotRemoved { .. } => ErrorKind::Unsupported,
             Self::SideEdgeNotOnRailFace => ErrorKind::NotFound,
             Self::SideSurfaceMissesEndPlane => ErrorKind::NotFound,
@@ -645,6 +655,7 @@ impl SolverFailure {
             Self::RolloverCornerMissing => SM_ERR_NULL_POINTER,
             Self::RolloverHasNoFaceBeyond { .. } => SM_ERR_NULL_POINTER,
             Self::RolloverIntervalNotAtEdge { .. } => SM_ERR,
+            Self::SetbackStationNotFound { .. } => SM_ERR,
             Self::ShortIntervalsNotRemoved { .. } => SM_ERR,
             Self::SideEdgeNotOnRailFace => SM_ERR_NULL_POINTER,
             Self::SideSurfaceMissesEndPlane => SM_ERR_NULL_POINTER,
@@ -899,6 +910,10 @@ impl core::fmt::Display for SolverFailure {
             Self::RolloverIntervalNotAtEdge { index } => write!(
                 f,
                 "interval {index} of the roll-over rail's classification is not bounded by an edge"
+            ),
+            Self::SetbackStationNotFound { s } => write!(
+                f,
+                "the chamfer of setbacks' trace point has its first foot at no station of the edge (the drop found s = {s})"
             ),
             Self::ShortIntervalsNotRemoved { count } => write!(
                 f,

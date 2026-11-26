@@ -568,29 +568,51 @@ impl SetbackFs {
         Ok(())
     }
 
-    /// The edge's parameter of the trace point `point`: `user_doubles[0]`, where every
-    /// solve of this solver leaves s, when foot 0 is at its station there (its reach and its
-    /// square to the edge within the solver's 3D tolerance); else foot 0's station from the
-    /// drop ([`Self::station_of`]), as for a point no solve of this solver made.
+    /// Whether `foot0` is at foot 0's station at `s`: its reach `|S_0 − C(s)|` within the
+    /// solver's 3D tolerance of its setback, and its square `(S_0 − C(s)) · C′(s) / |C′(s)|`
+    /// within that tolerance of 0.
     ///
     /// # Errors
     ///
-    /// Those of the evaluations and the drop.
-    fn station_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
+    /// Those of the edge's evaluation.
+    fn foot0_at_station(&mut self, k: &Kernel, s: f64, foot0: Point3) -> Result<bool> {
+        if !s.is_finite() {
+            return Ok(false);
+        }
         let tol = self.curve_based.solver.approx_tol_3d;
+        let jet = self.jet(k, s)?;
+        let g = foot0 - jet.point;
+        let speed = jet.d1.length();
+        let d0 = self.setbacks[0];
+        Ok(speed > 0.0 && (g.length() - d0).abs() <= tol && (g.dot(jet.d1) / speed).abs() <= tol)
+    }
+
+    /// The edge's parameter of the trace point `point`: `user_doubles[0]`, where every
+    /// solve of this solver leaves s, when foot 0 is at its station there
+    /// ([`Self::foot0_at_station`]); else foot 0's nearest point on the edge
+    /// ([`Self::station_of`]), as for a point no solve of this solver made, held to the same
+    /// test. The drop minimises the distance, so it finds no station past the edge's polar
+    /// line, where the station is a farthest point (`∂²|S − C|²/2∂s² = |C′|² − (S − C) · C″ < 0`):
+    /// such a point is refused, never answered at the drop's s.
+    ///
+    /// # Errors
+    ///
+    /// `SetbackStationNotFound` where neither s puts foot 0 at its station; those of the
+    /// evaluations and the drop.
+    fn station_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
         let foot0 = point.surface_pv[0][0][0];
         let s = point.user_doubles[0];
-        if s.is_finite() {
-            let jet = self.jet(k, s)?;
-            let g = foot0 - jet.point;
-            let speed = jet.d1.length();
-            let d0 = self.setbacks[0];
-            if speed > 0.0 && (g.length() - d0).abs() <= tol && (g.dot(jet.d1) / speed).abs() <= tol
-            {
-                return Ok(s);
-            }
+        if self.foot0_at_station(k, s, foot0)? {
+            return Ok(s);
         }
-        self.station_of(k, foot0)
+        let dropped = self.station_of(k, foot0)?;
+        if self.foot0_at_station(k, dropped, foot0)? {
+            return Ok(dropped);
+        }
+        Err(SolidError::blend_solver(
+            OP,
+            SolverFailure::SetbackStationNotFound { s: dropped },
+        ))
     }
 
     /// `ComputeUVVectors` of a chamfer of setbacks: each foot's own uv tangent, from the
@@ -605,16 +627,18 @@ impl SetbackFs {
     ///
     /// # Errors
     ///
-    /// `NoRoom(SetbacksCross)` for a folding station; `RailTangentZero` at s where a foot's
-    /// system is singular at the point or its motion is not finite (the rails then have no
-    /// tangent there); those of the evaluations and the drop.
+    /// `NoRoom(SetbacksCross)` for a folding station; `NoRoom(SetbackFootTangent)` where a
+    /// foot's system is singular at the point or its motion is not finite (the support's
+    /// section touches the setback's circle there: the foot's tangent is unbounded and the
+    /// asked chamfer does not fit); `SetbackStationNotFound` where foot 0 is at no station
+    /// ([`Self::station_parameter`]); those of the evaluations and the drop.
     pub fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
         let s = self.station_parameter(k, point)?;
         let uvs = [point.uv_curve_pv[0][0], point.uv_curve_pv[1][0]];
         let Some(station) = self.station_through(k, s, uvs)? else {
-            return Err(SolidError::blend_solver(
+            return Err(SolidError::blend(
                 OP,
-                SolverFailure::RailTangentZero { t: s },
+                BlendFailure::NoRoom(NoRoomReason::SetbackFootTangent),
             ));
         };
         let [t0, t1] = station.uv_tangents(point.curve_pv[1]);
@@ -1787,5 +1811,56 @@ mod tests {
             .unwrap();
         let ratio = foot.per_s.dot(jet.d1) / jet.d1.length_squared();
         assert!((ratio + 0.2).abs() < 1e-9, "{ratio}");
+    }
+
+    /// `ComputeUVVectors` at a point past the polar line whose s does not hold: setbacks
+    /// [12, 0.5], the feet at s = 0.37 (foot 0 at r = −2, angle θ = θ(0.37) in (0, π/2)),
+    /// `user_doubles[0]` = 0. Neither s puts foot 0 at its station, so the point is refused
+    /// `SetbackStationNotFound`, not answered with tangents at a wrong s:
+    /// - s = 0: C(0) = (10, 0, 20), and foot 0 − C(φ) is horizontal with
+    ///   `|S_0 − C(φ)|² = 2² + 10² + 2·2·10 cos(φ − θ) = 104 + 40 cos(φ − θ)`; at φ = 0
+    ///   that is `104 + 40 cos θ < 144`, so the reach is short of 12.
+    /// - The drop minimises that distance over the arc φ ∈ [0, π/2]. Its minimum is at the
+    ///   end farther in angle from θ, where `|φ − θ|` is largest. That gives
+    ///   `104 + 40 cos(max(θ, π/2 − θ))`, which lies in [104, 144) since
+    ///   `0 < max(θ, π/2 − θ) < π/2`, so the reach is again short of 12. Foot 0's true station
+    ///   is φ = θ, the arc's farthest point from it (reach 12): `|C′|² − (S_0 − C) · C″ < 0` (the
+    ///   fold test above).
+    ///
+    /// With its true s in `user_doubles[0]` the same point validates and is refused as
+    /// folding instead.
+    #[test]
+    fn rim_uv_vectors_past_the_axis_without_its_station_are_refused() {
+        let k = Kernel::default();
+        let d = [12.0, 0.5];
+        let mut fs = rim(&k, d);
+        let s = 0.37;
+        let want = rim_feet(s, d);
+        let exact = [
+            plate_uv(want[0]),
+            Point2::new((1.0 + s) / 3.0, (RIM_Z - d[1]) / RIM_Z),
+        ];
+        let mut p = TsectPnt::new();
+        FilletSolver::compute_surface_values(&k, &mut fs, exact, &mut p).unwrap();
+        assert!(p.curve_pv[0].distance(want[0]) < 1e-12);
+        p.curve_pv[1] = rim_frame(s).2;
+        p.user_doubles[0] = 0.0;
+        let err = fs.compute_uv_vectors(&k, &mut p).expect_err("refused");
+        assert!(
+            matches!(
+                err.blend_failure(),
+                Some(&BlendFailure::Solver(
+                    SolverFailure::SetbackStationNotFound { .. }
+                ))
+            ),
+            "{err:?}"
+        );
+        p.user_doubles[0] = s;
+        let err = fs.compute_uv_vectors(&k, &mut p).expect_err("refused");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
+            "{err:?}"
+        );
     }
 }

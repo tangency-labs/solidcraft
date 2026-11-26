@@ -188,6 +188,11 @@ pub enum NoRoomReason {
     /// `blend::fillet_section::setback_station`), so neighbouring stations' planes meet
     /// inside the chamfer.
     SetbacksCross,
+    /// A chamfer of setbacks held at every station whose foot's system is singular: the
+    /// support's section touches the circle of the setback about the edge point (#13710,
+    /// `blend::fillet_section::setback_station`'s foot), so the foot does not move
+    /// regularly with the edge and the asked chamfer does not fit there.
+    SetbackFootTangent,
     /// Two unequal offsets (a chamfer of two distances) where a face curves tighter than
     /// the offset along it, which folds there (the fork's `BallIsRegular`, 410dfe1;
     /// WR-696).
