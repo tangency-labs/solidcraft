@@ -8,7 +8,7 @@
 //! rule the shop gives no value for, and what the check cannot measure, is listed as not checked,
 //! with the reason: a part is never called fine for a rule that was not looked at.
 
-use solidcraft_kernel::services::prism::loop_circle;
+use solidcraft_kernel::affine::loop_circle;
 
 use crate::sheet_hardware::{clearance, mm};
 use crate::shop_rules::{BendLines, Limit, Measured, Profile, Rule, RuleId, Wanted};
@@ -204,7 +204,7 @@ fn flanges_of(sk: &SurfaceSheet, part: &mut Part) {
     for (i, b) in sk.bends.iter().enumerate() {
         let at = [(b.start.x + b.end.x) / 2.0, (b.start.y + b.end.y) / 2.0];
         for (left, side) in [(true, "left"), (false, "right")] {
-            match solidcraft_kernel::services::prism::flange_reach(&panels, &b.zone, b.start, b.end, left, sk.thickness) {
+            match solidcraft_kernel::affine::flange_reach(&panels, &b.zone, b.start, b.end, left, sk.thickness) {
                 Some(r) => part.flanges.push(Flange { number: i + 1, side, radius: b.radius, from_start: r.from_edge, from_line: r.from_line, at }),
                 None => unmeasured += 1,
             }

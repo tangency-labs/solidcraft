@@ -1,0 +1,1 @@
+| assets/sheet-metal/shop-rules.json | SolidCraft contributors | Original; fabrication shop rules (PCBWay, JLCCNC, SendCutSend), each value read from the shop's public page its entry cites and put in our own words (facts, not copied text); the shop check's rules (#20113) | MIT OR Apache-2.0 |

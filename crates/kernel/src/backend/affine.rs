@@ -2,8 +2,8 @@
 //! made before the interface existed, its refusal's words kept whole.
 
 use solidcore_ops::{affine as ops, prism};
-use solidcore_record::{Loop2, Seg2, Vec2};
-use solidcraft_kernel_api::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_kernel_api::{Affine, AffineRefused, AxisRefusal, FlangeReach, Matrix, OffsetQuad};
 
 use super::Solidcore;
 
@@ -143,6 +143,10 @@ impl Affine for Solidcore {
 
     fn note_beside(&self, at: (Vec2, f64), height: f64) -> Vec2 {
         prism::note_beside(at, height)
+    }
+
+    fn flange_reach(&self, panels: &[Region2], zone: &Region2, start: Vec2, end: Vec2, left: bool, inset: f64) -> Option<FlangeReach> {
+        prism::flange_reach(panels, zone, start, end, left, inset).map(|r| FlangeReach { from_edge: r.from_edge, from_line: r.from_line })
     }
 
     fn extent_along(&self, min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {

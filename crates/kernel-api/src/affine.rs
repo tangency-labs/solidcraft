@@ -4,7 +4,7 @@
 //! and the planar angle and curve helpers placement reads. Every value is plain numbers or the
 //! record's (`solidcore_record`), so the application holds no kernel type.
 
-use solidcore_record::{Loop2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 use crate::Backend;
 
@@ -32,6 +32,15 @@ pub enum AxisRefusal {
     ZeroAxis,
     /// The placement flattens space.
     FlatMap,
+}
+
+/// How far a flange stands from its bend in a flat pattern ([`Affine::flange_reach`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlangeReach {
+    /// From the edge of the bend's zone (where the flat sheet ends and the bend begins) (mm).
+    pub from_edge: f64,
+    /// From the bend's centre line (mm): the reach from the edge and the zone's half width.
+    pub from_line: f64,
 }
 
 /// A planar face square to a direction ([`crate::OpKind::Affine`]): its level and tolerance.
@@ -146,4 +155,13 @@ pub trait Affine: Backend {
     /// Where a note `height` high stands to name the circle `at` (centre and radius), level with
     /// its centre and clear of its rim on the right: its lower left corner.
     fn note_beside(&self, at: (Vec2, f64), height: f64) -> Vec2;
+    /// How far the flange stands from a bend in a flat pattern: the least reach, square to the
+    /// bend, from the edge of the bend's `zone` across a panel to the panel's far boundary, over
+    /// the bend's centre line from `start` to `end` less `inset` at each end. `panels` are the
+    /// flat's material less its bends' zones; `left` is the side of the line (as it runs from
+    /// `start` to `end`) the flange is on. A panel's holes do not stop the reach; a cut-out
+    /// through to its edge does. Of the panels that stand on the zone's edge on that side, the
+    /// least. `None` when no panel stands there, or a boundary is free-form (no closed form), or
+    /// an input is no length.
+    fn flange_reach(&self, panels: &[Region2], zone: &Region2, start: Vec2, end: Vec2, left: bool, inset: f64) -> Option<FlangeReach>;
 }

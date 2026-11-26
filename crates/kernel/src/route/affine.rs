@@ -2,10 +2,10 @@
 //! affine maps as row-vector matrices, points, axes and lines through them, reaches along a
 //! direction, parallelograms on a plane, and the planar angle and curve helpers placement reads.
 
-use solidcore_record::{Loop2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_kernel_api::{Affine, OpKind};
 
-pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, Matrix, OffsetQuad};
+pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, FlangeReach, Matrix, OffsetQuad};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -241,6 +241,20 @@ pub fn same_circle(a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
 pub fn note_beside(at: (Vec2, f64), height: f64) -> Vec2 {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.note_beside(at, height),
+    }
+}
+
+/// How far the flange stands from a bend in a flat pattern: the least reach, square to the
+/// bend, from the edge of the bend's `zone` across a panel to the panel's far boundary, over
+/// the bend's centre line from `start` to `end` less `inset` at each end. `panels` are the
+/// flat's material less its bends' zones; `left` is the side of the line (as it runs from
+/// `start` to `end`) the flange is on. A panel's holes do not stop the reach; a cut-out
+/// through to its edge does. Of the panels that stand on the zone's edge on that side, the
+/// least. `None` when no panel stands there, or a boundary is free-form (no closed form), or
+/// an input is no length.
+pub fn flange_reach(panels: &[Region2], zone: &Region2, start: Vec2, end: Vec2, left: bool, inset: f64) -> Option<FlangeReach> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.flange_reach(panels, zone, start, end, left, inset),
     }
 }
 
