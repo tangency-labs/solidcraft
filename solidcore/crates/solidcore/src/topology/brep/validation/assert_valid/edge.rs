@@ -288,8 +288,12 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
         rtn &= cx.rep.this_bool(b, C, this, 2, ok)?;
     }
 
+    // not upstream: the geometric tests of an edge whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::edge_clean(k, e);
+
     // Check Edge->Curve
-    if has_curve {
+    if has_curve && geo {
         rtn &= edge_curve_check(k, b, cx, e)?;
     }
 
@@ -305,29 +309,31 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
-    let curve_length = {
-        let c = super::super::required(b.edge(e)?.curve.as_ref())?;
-        c.approximate_length(k, &interval, 5, false)?.0
-    };
+    if geo {
+        let curve_length = {
+            let c = super::super::required(b.edge(e)?.curve.as_ref())?;
+            c.approximate_length(k, &interval, 5, false)?.0
+        };
 
-    // 7: Edge Length must be larger than its tolerance
-    let ok = !need || curve_length >= edge_tol - EFF_ZERO;
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
+        // 7: Edge Length must be larger than its tolerance
+        let ok = !need || curve_length >= edge_tol - EFF_ZERO;
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
 
-    // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
-    // Face->Surfaces (level 2)
-    let xsect_tol = edge_tol + edge_tol;
-    let mut max_gap = 0.0;
-    let ok = !cx.rep.need(2) || {
-        let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
-        max_gap = gap;
-        passed
-    };
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+        // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
+        // Face->Surfaces (level 2)
+        let xsect_tol = edge_tol + edge_tol;
+        let mut max_gap = 0.0;
+        let ok = !cx.rep.need(2) || {
+            let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
+            max_gap = gap;
+            passed
+        };
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+    }
 
     // 14: Edge->Edgeuse orientations must alternate, SAME-OPPO-SAME-OPPO
     let ok = !need || assert_test_edge14(b, e)?;
@@ -649,7 +655,13 @@ fn in_wire_shell(
 
 /// The UV trim checks of `SmEdgeuse::AssertValid` (tests 11, 6, 7, 25, 26) for an edge
 /// use holding a UV trim curve.
-fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) -> Result<bool> {
+fn uv_trim_checks(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    eu: EdgeuseId,
+    geo: bool,
+) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
     let mut rtn = true;
@@ -690,7 +702,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
 
     // UVTrimCurve->Owner pointer must equal this Edgeuse pointer
     let check = trim.owner() == Some((cx.keys)(this));
-    if check {
+    if check && geo {
         let s = super::super::required(surface)?;
         let on_surface = crate::curve::crv_on_surf::CrvOnSurf::new(
             k,
@@ -710,7 +722,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     rtn &= cx.rep.this_bool(b, C, this, 6, !need || check)?;
 
     // 7: see if the UVTrimCurve jumps across a periodic boundary inappropriately
-    let ok = !need || {
+    let ok = !need || !geo || {
         let trim = super::super::required(b.edgeuse(eu)?.uv_trim_curve.as_ref())?;
         seams::assert_no_periodic_jump(k, trim, closed_u, closed_v, &domain)?
     };
@@ -727,6 +739,15 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     rtn &= cx.rep.this_bool(b, C, this, 25, !need || equality)?;
     rtn &= cx.rep.this_bool(b, C, this, 26, !need || containment)?;
     Ok(rtn)
+}
+
+/// Whether edge use `eu`'s geometric tests run: its edge's neighbourhood has not passed
+/// them on a body before ([`crate::geom::check_memo`]).
+fn edgeuse_geometry_due(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
+    Ok(match b.edgeuse(eu)?.edge {
+        Some(e) => !crate::geom::check_memo::edge_clean(k, e),
+        None => true,
+    })
 }
 
 /// `SmEdgeuse::AssertValid(SM_NO_WALK)`.
@@ -746,6 +767,9 @@ pub(super) fn edgeuse(
         rtn &= base::topology(b, cx, this)?;
     }
     let need = cx.rep.need(0);
+    // not upstream: the geometric tests of a use of an edge whose neighbourhood passed
+    // them on a body before are skipped ([`crate::geom::check_memo`])
+    let geo = edgeuse_geometry_due(k, b, eu)?;
 
     // Edgeuse and the objects it attaches to need to share common contexts
     let record = b.edgeuse(eu)?;
@@ -779,7 +803,7 @@ pub(super) fn edgeuse(
 
     // for edgeuses with UVTrimCurves on closed surfaces
     if has_trim {
-        rtn &= uv_trim_checks(k, b, cx, eu)?;
+        rtn &= uv_trim_checks(k, b, cx, eu, geo)?;
     }
 
     // 17: Edgeuse type is SmLoopuse_TYPE only when m_pSorLU points to a Loopuse
@@ -888,7 +912,7 @@ pub(super) fn edgeuse(
                     };
                 rtn &= cx.rep.this_bool(b, C, this, 24, ok)?;
 
-                if let (Some(r), Some(_)) = (radial, mate) {
+                if let (Some(r), Some(_), true) = (radial, mate, geo) {
                     let options = BinormalOptions::default();
                     let t = extent.evaluate(0.456);
                     let target = evaluate_binormal(k, b, eu, t, true, &options)?;
@@ -922,7 +946,7 @@ pub(super) fn edgeuse(
     }
 
     // when Edgeuse has a UVTrimCurve - Check that it's valid
-    if has_trim {
+    if has_trim && geo {
         let level = cx.rep.level;
         // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
@@ -956,7 +980,7 @@ pub(super) fn edgeuse(
     }
 
     // 20: The Control Polygon turns to follow a singular surface boundary
-    let dog_leg = seams::has_dog_leg_near_pole(k, b, eu)?;
+    let dog_leg = geo && seams::has_dog_leg_near_pole(k, b, eu)?;
     rtn &= cx.rep.this_bool(b, C, this, 20, !need || !dog_leg)?;
 
     // all done

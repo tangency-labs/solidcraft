@@ -1243,6 +1243,31 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
+/// The middles of the edges of `body` that a rolling offset rounds where both their faces are
+/// among `moved`: convex edges for a body grown (`grown`), concave ones for a body shrunk. Smooth
+/// edges (faces meeting tangentially) have no corner to round. Decided exactly from the record's
+/// faces, edges and surfaces.
+pub(crate) fn offset_round_edges(body: &Body, moved: &[usize], grown: bool) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let mut is_moved = vec![false; rec.rec.faces.len()];
+    for &f in moved {
+        if let Some(slot) = is_moved.get_mut(f) {
+            *slot = true;
+        }
+    }
+    let mut out = Vec::new();
+    for (e, edge) in rec.rec.edges.iter().enumerate() {
+        let faces = rec.faces_of(e);
+        if faces.len() != 2 || !faces.iter().all(|f| is_moved.get(*f as usize).copied().unwrap_or(false)) || smooth_join(&rec, e)? {
+            continue;
+        }
+        if convex_at(&rec, e, edge.vertices[0]) == Some(grown) {
+            out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on an offset edge".into()))?);
+        }
+    }
+    Ok(out)
+}
+
 /// The point halfway along the edge each of `picks` takes, as a blend takes it ([`blend_edges`]),
 /// one per pick and in their order: where a moved copy of the body finds the same edge again. A
 /// pick itself need not: at the vertex two edges share (the halves of a rim a seam splits) it is
