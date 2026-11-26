@@ -181,6 +181,7 @@ mod validity;
 pub mod watch;
 
 pub use backend::Solidcore;
+pub use blend::BlendFit;
 pub use blend::ChamferSide;
 pub use blend::FilletTurn;
 pub use blend::FitSearch;
@@ -203,6 +204,7 @@ pub use blend::fillet_max_why;
 pub use blend::fillet_removing;
 pub use blend::fillet_setback;
 pub use blend::largest_fit_note;
+pub use blend::named_blend_fit;
 pub use blend::named_fit;
 pub use blend::names_largest_fit;
 pub use blend::scale_fit_note;
@@ -741,6 +743,22 @@ impl KernelError {
         match e.panic() {
             Some(m) => KernelError::Internal(format!("{context}: {m}")),
             None => KernelError::Failed(format!("{context}: {e}")),
+        }
+    }
+
+    /// The largest fitting size in mm named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn largest_fit(&self) -> Option<f64> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_fit(why),
+            _ => None,
+        }
+    }
+
+    /// The typed largest fitting size named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn blend_fit(&self) -> Option<BlendFit> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_blend_fit(why),
+            _ => None,
         }
     }
 }

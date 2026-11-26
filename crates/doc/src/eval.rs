@@ -803,7 +803,8 @@ pub struct SketchCopy {
 /// large for the geometry around them is reduced where it doesn't fit, to the largest that works
 /// for each group of edges sharing a face; the radius per edge is returned. With
 /// [`FilletFit::Taper`](crate::FilletFit::Taper) it tapers along each edge it doesn't fit. With
-/// the exact fit a radius too large is refused, naming the largest that fits ([`with_largest_fit`]).
+/// the exact fit a radius too large is refused directly with the largest size SMLib reports
+/// without searching by retrying builds (#10849).
 /// Also the picks whose edges a round overflowing its faces removed whole ([`kernel::fillet_removing`]).
 fn fillet_fitted(
     body: &kernel::Body,
@@ -816,22 +817,10 @@ fn fillet_fitted(
     cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
-        // A refusal the kernel could not size names no radius to try, and the search for the
-        // largest radius that fits cannot be guided by it: it then halves the radius from the
-        // middle down and blends every edge again for each of the sizes it tries. On the design
-        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
-        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
-        // found nothing: the round fails at any radius there. The refusal is reported as the
-        // kernel stated it, less a size it names that no round can have ([`without_unusable_fit`]).
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
-            Err(kernel::KernelError::TooLarge(without_unusable_fit(&why)))
-        }
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
-            let hint = kernel::named_fit(&why);
-            #[cfg(test)]
-            cost_tests::count(|c| c.fit_searches += 1);
-            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
-        }),
+        // SMLib's refusal already computes the largest fitting radius from the cause's own
+        // geometry (never by retrying builds): return it directly instead of running a search,
+        // dropping any unusable 0 mm fit note (#10849, #4282, #20685).
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err(kernel::KernelError::TooLarge(without_unusable_fit(&why))),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used), Vec::new())),
@@ -2003,6 +1992,13 @@ pub struct FeatureResult {
     unkept: bool,
     #[serde(skip)]
     pub state: Arc<ModelState>,
+}
+
+impl FeatureResult {
+    /// The largest fitting size reported by a blend refusal on this feature, if any.
+    pub fn largest_fit(&self) -> Option<kernel::BlendFit> {
+        self.error.as_deref().and_then(kernel::named_blend_fit)
+    }
 }
 
 /// Incremental evaluator: holds the state after every feature.

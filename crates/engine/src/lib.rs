@@ -206,6 +206,16 @@ impl EngineError {
             _ => None,
         }
     }
+    /// The largest fitting size reported by the kernel when a blend is refused as too large, if
+    /// the backend reported one (#10849).
+    pub fn largest_fit(&self) -> Option<solidcraft_kernel::BlendFit> {
+        let text = match self {
+            EngineError::Feature(f) => f.error.as_str(),
+            EngineError::Other(s) => s.as_str(),
+            _ => return None,
+        };
+        solidcraft_kernel::named_blend_fit(text)
+    }
 }
 
 /// A feature that failed with a kernel call's error ([`EngineError::Feature`]).
