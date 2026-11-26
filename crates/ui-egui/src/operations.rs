@@ -369,6 +369,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             if let Some(read) = app.insert_read.as_mut() {
                 read.cancel();
             }
+            record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
             return Ok(());
         }
         // It says itself how it ended: a save already replacing the file goes through.
@@ -449,6 +450,12 @@ fn record(panel: &mut Panel, key: &str, label: String, outcome: Outcome) {
         panel.finished.remove(0);
     }
     panel.finished.push(Finished { key: key.to_string(), label, outcome, at: now });
+}
+
+/// Records how an operation ended, for work that finishes on its own (the tests read of a
+/// drawing): `ui.operations` lists it with the ones it cancelled.
+pub(crate) fn record_ended(app: &mut SolveApp, key: &str, label: String, outcome: Outcome) {
+    record(&mut app.operations, key, label, outcome);
 }
 
 /// A row on screen: what it showed last, and since when it is gone (fading out).

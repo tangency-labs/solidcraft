@@ -81,6 +81,9 @@ pub struct InsertRead {
     /// Cancelled from the operations panel: the answer is dropped and no window opens.
     pub cancelled: bool,
     progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+    /// The sketch being edited and the design the picker ran in: the window opens only for them.
+    sketch: Option<u64>,
+    session: u64,
 }
 
 impl InsertRead {
@@ -114,8 +117,18 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
         });
         if worker.is_ok() {
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
-            app.insert_read =
-                Some(InsertRead { name, serial: crate::operations::serial(), command: command.to_string(), path, done, cancelled: false, progress });
+            let (sketch, session) = (crate::workspace::focused_sketch(app), app.session.uid);
+            app.insert_read = Some(InsertRead {
+                name,
+                serial: crate::operations::serial(),
+                command: command.to_string(),
+                path,
+                done,
+                cancelled: false,
+                progress,
+                sketch,
+                session,
+            });
             return;
         }
     }
@@ -137,8 +150,22 @@ pub fn tick(app: &mut SolveApp) {
         Err(TryRecvError::Disconnected) => Err(String::new()),
     };
     let Some(read) = app.insert_read.take() else { return };
-    if read.cancelled {
+    let key = format!("insert_read:{}", read.serial);
+    let label = reading_label(&read.name);
+    // The window is for the sketch and design the picker ran in, and only when nothing opened
+    // meanwhile: an answer that arrives after the sketch is finished, another sketch is picked or
+    // a dialog opens is dropped rather than put over what the person is doing.
+    let asked = app.session.uid == read.session && crate::workspace::focused_sketch(app) == read.sketch;
+    if read.cancelled || !asked || app.dialog.is_some() {
+        crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Cancelled);
         return;
+    }
+    match &job {
+        Ok(_) => crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Done),
+        Err(e) => {
+            let why = if e.is_empty() { "the read stopped".to_string() } else { e.clone() };
+            crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Failed(why));
+        }
     }
     let bounds = job.ok();
     open_with_bounds(app, &read.command, read.path, bounds.as_ref());
@@ -351,7 +378,14 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.settle();
         h.app.start("sketch.insert_svg");
-        h.frames(3);
+        // The drawing is read beside the window: wait for it, bounded, so a lost answer still fails.
+        for _ in 0..500 {
+            h.frame();
+            if h.app.dialog.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement: {:?}", h.app.status) };
         assert_eq!((p.path.as_str(), p.x, p.y, p.scale, p.angle, p.natural), (path.as_str(), 0.0, 0.0, 1.0, 0.0, Some((20.0, 10.0))));
         assert!(handle_at("dialog:insert:scale").is_some(), "the scale is drawn");
@@ -537,6 +571,53 @@ mod tests {
         // dropped rather than opening the window.
         assert!(h.app.insert_read.is_none(), "the read finished and left");
         assert!(h.app.dialog.is_none(), "a cancelled read opens no window");
+    }
+
+    /// A read whose sketch was finished meanwhile opens nothing: the answer arrives after the
+    /// interaction it was for is over.
+    #[test]
+    fn a_read_that_finishes_after_the_sketch_opens_no_window() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-then-finish.svg"));
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.settle();
+        for _ in 0..500 {
+            h.frame();
+            if h.app.insert_read.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(2);
+        assert!(h.app.insert_read.is_none(), "the read finished and left");
+        assert!(h.app.dialog.is_none(), "the finished sketch's read opens no window");
+    }
+
+    /// A read that finishes while another dialog is open keeps that dialog: it is dropped, not
+    /// put over it.
+    #[test]
+    fn a_read_that_finishes_beside_another_dialog_keeps_that_dialog() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("read-beside-dialog.svg"));
+        open(&mut h.app, "sketch.insert_svg", svg_file("other.svg"));
+        let before = h.app.dialog.as_ref().map(|d| d.kind.clone());
+        for _ in 0..500 {
+            h.frame();
+            if h.app.insert_read.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(2);
+        assert!(h.app.insert_read.is_none(), "the read finished and left");
+        let after = h.app.dialog.as_ref().map(|d| d.kind.clone());
+        let Some(Kind::InsertDrawing(p)) = after else { panic!("the other window was lost") };
+        assert_eq!(p.path, svg_file("other.svg"), "the window open is the one that was there");
+        assert!(matches!(before, Some(Kind::InsertDrawing(_))));
     }
 
     /// A drawing with more edges than the largest sketch takes opens with a Simplify distance
