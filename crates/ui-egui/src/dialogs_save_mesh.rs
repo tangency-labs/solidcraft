@@ -992,9 +992,7 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         crate::ui_kit::text(ui, &form.program, crate::ui_kit::Text::MonoNote("send_app_program"));
     }
     crate::ui_kit::text_row(ui, solidcraft_ui_text::tr("ui.send_app_name"), &mut form.name, "");
-    crate::ui_kit::sized_row(ui, solidcraft_ui_text::tr("ui.send_app_args"), 64.0, |ui| {
-        ui.add(egui::TextEdit::multiline(&mut form.args).desired_rows(3).desired_width(f32::INFINITY));
-    });
+    crate::ui_kit::multiline_text_field(ui, solidcraft_ui_text::tr("ui.send_app_args"), egui::Id::new("sm_app_args"), &mut form.args);
     crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.send_app_args_hint"), crate::ui_kit::Text::Note("send_app_note"));
     let labels: Vec<&str> = APP_FORMATS.iter().map(|f| f.0).collect();
     // The command this makes, with sample values, before it is added.
