@@ -5,6 +5,12 @@
 //! Not upstream (SolidCraft's contour flange orientation, #6790, moved into the kernel,
 //! docs/layers.md §1).
 //!
+//! References: W. Tiller, E. G. Hanson, "Offsets of Two-Dimensional Profiles", IEEE Computer
+//! Graphics and Applications 4(9), 1984, as given in Patrikalakis, Maekawa and Cho, *Shape
+//! Interrogation for Computer Aided Design and Manufacturing*, §11.2.4: each piece offset,
+//! consecutive offsets met where they cross, loops removed as a later step (here the caller's).
+//! How an arc's ends move: `plan/findings/develop.contour--long-arc-cut-short-at-its-corners.md`.
+//!
 //! Deviations: none (no upstream counterpart). No recursion.
 use std::collections::BTreeSet;
 use std::f64::consts::TAU;
