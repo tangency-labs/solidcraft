@@ -5,10 +5,12 @@ use super::state::Timeline2DState;
 use crate::SolveApp;
 use crate::ui_kit::Menu;
 use egui::{FontId, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model};
+use solidcraft_engine::Session;
+use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model, ModelBody};
 use solidcraft_engine::geom::Vec3Geom;
 use solidcraft_theme::Tokens;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 pub const HEADER_BANNER_HEIGHT: f32 = 26.0;
 pub const HEADER_T1_HEIGHT: f32 = 22.0;
@@ -26,35 +28,75 @@ pub const VIRTUAL_GROUP_HEIGHT: f32 = DOCK_TOTAL_HEIGHT;
 
 /// Discovers component IDs and names for the 2D timeline tracks.
 pub fn discover_component_tracks(app: &SolveApp) -> (Vec<u64>, BTreeMap<u64, String>) {
-    let mut component_ids: Vec<u64> = Vec::new();
-    let mut component_names: BTreeMap<u64, String> = BTreeMap::new();
+    ComponentTracks::new(&app.session.doc, &app.session.model).rows(&app.session.doc)
+}
 
-    // Root component 0 always first
-    component_ids.push(0);
-    let root_name = if app.session.doc.name.is_empty() { "Root Component".to_string() } else { app.session.doc.name.clone() };
-    component_names.insert(0, root_name);
+struct ComponentTracks {
+    /// Component IDs in first-use order, including any absent from the component list.
+    referenced: Vec<u64>,
+    affected: BTreeMap<u64, Vec<u64>>,
+}
 
-    for comp in &app.session.doc.components {
-        if comp.id != 0 && !component_ids.contains(&comp.id) {
-            component_ids.push(comp.id);
-            component_names.insert(comp.id, comp.name.clone());
-        }
-    }
-
-    let model = Some(&app.session.model);
-    for f in &app.session.doc.features {
-        let affected = feature_affected_components(&app.session.doc, model, f);
-        for &cid in &affected {
-            if !component_ids.contains(&cid) {
-                let comp_opt = app.session.doc.components.iter().find(|c| c.id == cid);
-                let name = comp_opt.map(|c| c.name.clone()).unwrap_or_else(|| format!("Component {cid}"));
-                component_ids.push(cid);
-                component_names.insert(cid, name);
+impl ComponentTracks {
+    fn new(doc: &Document, model: &Model) -> Self {
+        // The state before a result is the last one that was not skipped (Model::state_before).
+        let mut states = HashMap::with_capacity(model.results.len());
+        let mut before: &[ModelBody] = &[];
+        for result in &model.results {
+            let after = result.state.bodies.as_slice();
+            states.entry(result.id).or_insert((before, after));
+            if !result.skipped {
+                before = after;
             }
         }
+        let final_state = model.state();
+        let mut tracks = Self { referenced: Vec::new(), affected: BTreeMap::new() };
+        let mut seen = HashSet::new();
+        for f in &doc.features {
+            let affected = affected_components(doc, f, states.get(&f.id).copied(), Some(&final_state.bodies));
+            for &id in &affected {
+                if seen.insert(id) {
+                    tracks.referenced.push(id);
+                }
+            }
+            tracks.affected.insert(f.id, affected);
+        }
+        tracks
     }
 
-    (component_ids, component_names)
+    fn rows(&self, doc: &Document) -> (Vec<u64>, BTreeMap<u64, String>) {
+        let (mut ids, mut names) = super::assembly::collect_component_ids_and_names(doc);
+        for &id in &self.referenced {
+            names.entry(id).or_insert_with(|| {
+                ids.push(id);
+                format!("Component {id}")
+            });
+        }
+        (ids, names)
+    }
+}
+
+/// The parts of the grid that depend only on the design. A single slot per window keeps
+/// closed designs out of memory and lets scrolling and selection reuse the same analysis.
+struct TimelineAnalysis {
+    key: (u64, u64),
+    tracks: ComponentTracks,
+    graph: DependencyGraph,
+}
+
+impl TimelineAnalysis {
+    fn get(ctx: &egui::Context, session: &Session) -> Arc<Self> {
+        let id = egui::Id::unique("timeline_2d_analysis");
+        let key = (session.uid, session.model_revision());
+        if let Some(cached) = ctx.data(|d| d.get_temp::<Arc<Self>>(id))
+            && cached.key == key
+        {
+            return cached;
+        }
+        let data = Arc::new(Self { key, tracks: ComponentTracks::new(&session.doc, &session.model), graph: DependencyGraph::from_doc(&session.doc) });
+        ctx.data_mut(|d| d.insert_temp(id, data.clone()));
+        data
+    }
 }
 
 /// Represents a visual column on the timeline grid.
@@ -108,22 +150,12 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         state.separately_suppressed_features.clear();
     }
 
-    // 1. Build dependency graph
-    let dep_graph = DependencyGraph::from_doc(&app.session.doc);
+    let analysis = TimelineAnalysis::get(ui.ctx(), &app.session);
+    let dep_graph = &analysis.graph;
+    let (component_ids, component_names) = analysis.tracks.rows(&app.session.doc);
+    let feature_components_map = &analysis.tracks.affected;
     let total_features = app.session.doc.features.len();
     let marker_slot = app.session.doc.marker.unwrap_or(total_features);
-
-    // 2. Discover component tracks
-    let (component_ids, component_names) = discover_component_tracks(app);
-
-    let mut feature_components_map: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
-    {
-        let model = Some(&app.session.model);
-        for f in &app.session.doc.features {
-            let affected = feature_affected_components(&app.session.doc, model, f);
-            feature_components_map.insert(f.id, affected);
-        }
-    }
 
     // 3. Build visual columns (respecting folded groups)
     let visual_columns = build_visual_columns(&app.session.doc, &state.folded_groups);
@@ -141,12 +173,11 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     if checks.animating(now) {
         ui.ctx().request_repaint();
     }
-    // Each timeline step's visual column; between two steps, between their columns.
-    let step_cols: Vec<Option<f32>> =
-        app.session.doc.features.iter().map(|f| feature_to_visual_col(&visual_columns, f.id).map(|c| c as f32)).collect();
+    // Only the two ends of a checked corridor need their columns. Folded steps share a column.
     let step_col = |step: f32| -> Option<f32> {
+        let column = |i| feature_to_visual_col(&visual_columns, *dep_graph.features.get(i)?).map(|c| c as f32);
         let (a, b) = (step.floor().max(0.0) as usize, step.ceil().max(0.0) as usize);
-        let (ca, cb) = ((*step_cols.get(a)?)?, (*step_cols.get(b)?)?);
+        let (ca, cb) = (column(a)?, column(b)?);
         Some(ca + (cb - ca) * (step - a as f32))
     };
     // The checked corridor of the feature being dragged, in visual columns.
@@ -383,7 +414,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                 }
 
                 for t_idx in 0..num_tracks {
-                    if cell_is_occupied(c, t_idx, &visual_columns, &feature_components_map, &component_ids, &app.session.doc) {
+                    if cell_is_occupied(c, t_idx, &visual_columns, feature_components_map, &component_ids, &app.session.doc) {
                         continue;
                     }
                     let cy =
@@ -410,7 +441,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     // checks come back; otherwise the graph's corridor.
     let visual_corridor: Option<(f32, f32)> = shown
         .and_then(|s| Some((step_col(s.low)?, step_col(s.high)?)))
-        .or_else(|| compute_visual_corridor(&visual_columns, &dep_graph, &state.selected_features).map(|(a, b)| (a as f32, b as f32)));
+        .or_else(|| compute_visual_corridor(&visual_columns, dep_graph, &state.selected_features).map(|(a, b)| (a as f32, b as f32)));
 
     // Draw movable corridor background tint if selected (brackets painted in Step 11b on top of tracks and marker)
     if let Some((min_col, max_col)) = visual_corridor {
@@ -1000,7 +1031,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
             // Constrained to the original component track row horizontally
             let mut single_sel = BTreeSet::new();
             single_sel.insert(drag_fid);
-            let drag_corridor = dragged_checked.or_else(|| compute_visual_corridor(&visual_columns, &dep_graph, &single_sel));
+            let drag_corridor = dragged_checked.or_else(|| compute_visual_corridor(&visual_columns, dep_graph, &single_sel));
             let is_valid_drop = drag_corridor.is_some_and(|(min_c, max_c)| target_visual_col >= min_c && target_visual_col <= max_c);
 
             // A. Target cell highlight in grid (constrained to origin track row)
@@ -2007,18 +2038,31 @@ fn paint_dotted_vertical_line(p: &egui::Painter, x: f32, y_start: f32, y_end: f3
 
 /// Returns the sorted, deduplicated list of component IDs affected by a feature.
 pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Feature) -> Vec<u64> {
+    let before = model.map(|m| m.state_before(f.id));
+    let after = model.and_then(|m| m.result(f.id));
+    let states = before.as_ref().zip(after).map(|(a, b)| (a.bodies.as_slice(), b.state.bodies.as_slice()));
+    let final_state = model.map(Model::state);
+    affected_components(doc, f, states, final_state.as_ref().map(|s| s.bodies.as_slice()))
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static FEATURES_CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody], &[ModelBody])>, model_bodies: Option<&[ModelBody]>) -> Vec<u64> {
+    #[cfg(test)]
+    FEATURES_CHECKED.with(|n| n.set(n.get() + 1));
     let mut comps = BTreeSet::new();
     comps.insert(f.component);
 
     // 1. If evaluation results exist in model, compare state before and after this feature
-    if let Some(m) = model
-        && let Some(res) = m.result(f.id)
-    {
-        let before = m.state_before(f.id);
-        let after = &res.state;
-
-        for b_before in &before.bodies {
-            if let Some(b_after) = after.body(&b_before.name) {
+    if let Some((before, after)) = states {
+        // Keep the first match, as ModelState::body does even in damaged states with repeated names.
+        let after_by_name: HashMap<_, _> = after.iter().rev().map(|b| (b.name.as_str(), b)).collect();
+        let before_names: HashSet<_> = before.iter().map(|b| b.name.as_str()).collect();
+        for b_before in before {
+            if let Some(b_after) = after_by_name.get(b_before.name.as_str()) {
                 if b_before.geometry_key() != b_after.geometry_key() || b_before.component != b_after.component {
                     comps.insert(doc.model_body_component(b_before));
                     comps.insert(doc.model_body_component(b_after));
@@ -2028,8 +2072,8 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
             }
         }
 
-        for b_after in &after.bodies {
-            if b_after.feature == f.id || before.body(&b_after.name).is_none() {
+        for b_after in after {
+            if b_after.feature == f.id || !before_names.contains(b_after.name.as_str()) {
                 comps.insert(doc.model_body_component(b_after));
             }
         }
@@ -2046,9 +2090,6 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
             }
         }
     }
-
-    let model_state = model.map(|m| m.state());
-    let model_bodies = model_state.as_deref().map(|s| s.bodies.as_slice());
 
     let resolve_body = |b: &str| -> Option<u64> {
         let trimmed = b.trim();
