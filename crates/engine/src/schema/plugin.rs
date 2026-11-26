@@ -82,6 +82,12 @@ pub struct FormValidation {
 fn empty_params() -> Value {
     Value::Object(Default::default())
 }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct PluginMessage {
+    pub level: craft_plugin::LogLevel,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -98,6 +104,8 @@ pub struct RunResult {
     pub view: Option<PluginView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PluginMessage>,
 }
 
 /// A view command a plugin called, for the window to apply after the run lands.

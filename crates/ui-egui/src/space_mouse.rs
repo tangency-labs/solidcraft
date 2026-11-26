@@ -8,6 +8,8 @@
 
 use std::time::Duration;
 
+pub use solidcraft_space_mouse::ButtonSet;
+
 use crate::SolveApp;
 
 pub use solidcraft_space_mouse::{AxisCalibration, Calibration};
@@ -55,10 +57,20 @@ pub struct Input {
     pub calibrating: Option<(String, solidcraft_space_mouse::Wizard)>,
     /// Drops readings that have stopped changing close to the dead zone.
     pub settle: solidcraft_space_mouse::Settle,
-    /// The buttons down as of the last frame, one bit each (bit N for button N + 1).
-    pub buttons: u32,
+    /// The buttons down as of the last frame, by number (3Dconnexion's button ids).
+    pub buttons: ButtonSet,
+    /// The buttons held past the long-press threshold as of the last frame, for a reader that tells
+    /// long presses apart (smed); empty for the others.
+    pub long_buttons: ButtonSet,
     /// Every button pressed since the app started, so Preferences can list the ones the device has.
-    pub seen: u32,
+    pub seen: ButtonSet,
+    /// Every button long-pressed since the app started, so Preferences can list their long jobs.
+    pub seen_long: ButtonSet,
+    /// The device's rotation lock, for a reader that keeps one (smed: its Lock key or Preferences
+    /// switch it, and the reader then sends no rotation); none for the others.
+    pub lock: Option<bool>,
+    /// A change of the rotation lock asked for in Preferences, for the reader to pass on.
+    pub lock_request: Option<bool>,
     /// The modifiers the buttons hold down, as of the last frame.
     pub held: egui::Modifiers,
     /// The modifiers the keyboard holds, as the window last reported them (without `held`).
@@ -101,24 +113,30 @@ pub struct Input {
     pub bridge: Option<String>,
 }
 
-/// What the Linux reader found: the spacenavd socket and a direct (hidraw) 3D mouse, and whether that
-/// device was found but could not be opened (no permission), the last time it tried.
+/// What the Linux reader found: smed's socket, the spacenavd socket and a direct (hidraw) 3D mouse,
+/// and whether that device was found but could not be opened (no permission), the last time it tried.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DriversPresent {
+    pub smed: bool,
     pub spacenavd: bool,
     pub direct: bool,
     pub denied: bool,
 }
 
 /// What the reader saw of the buttons, taken in one look: the device they came from, those down
-/// now (bit N for button N + 1) and those that went down since the last look, even when they
-/// came up again before it. The taps are a set of buttons, not a queue of presses: two taps of one
-/// button between two looks reach the app as one, and run its job once.
+/// now (by number) and those that went down since the last look, even when they came up again
+/// before it. The taps are a set of buttons, not a queue of presses: two taps of one button between
+/// two looks reach the app as one, and run its job once. A reader that tells long presses apart
+/// (smed) reports them in `long_down` and `long_taps`; a button is then in one or the other.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Buttons {
     pub device: Option<String>,
-    pub down: u32,
-    pub taps: u32,
+    pub down: ButtonSet,
+    pub taps: ButtonSet,
+    pub long_down: ButtonSet,
+    pub long_taps: ButtonSet,
+    /// The device's rotation lock, from a reader that keeps one.
+    pub lock: Option<bool>,
     /// The reader has not yet seen the state of this device's buttons (a HID device's first report that
     /// carries them is still to come), so `down` is not known yet. The first look after that is a
     /// baseline, not a press.
@@ -136,6 +154,10 @@ pub enum ButtonKey {
     Shift,
     Ctrl,
     Alt,
+    Enter,
+    Delete,
+    Tab,
+    Space,
 }
 
 /// What a 3D mouse button does.
@@ -146,7 +168,8 @@ pub enum ButtonJob {
     Settings,
     /// A view as `SolveApp::animate_view` takes it: `fit`, `home` or a standard view (`top`, …).
     View(String),
-    /// Stands in for a key: Esc when pressed, Shift, Ctrl and Alt for as long as it's held.
+    /// Stands in for a key: Esc, Enter, Delete, Tab and Space when pressed, Shift, Ctrl and Alt for
+    /// as long as it's held.
     Key(ButtonKey),
     /// Runs a command, as its keyboard shortcut would.
     Command(String),
@@ -158,35 +181,124 @@ pub fn button_jobs(app: &SolveApp, device: &str) -> std::collections::BTreeMap<u
     app.preferences.space_mouse_buttons.get(device).cloned().unwrap_or_else(|| default_button_jobs(device))
 }
 
+/// A device read through smed starts from what was saved for it read directly. smed passes the axes
+/// on unchanged (HID report 0x01, frame for frame) and numbers the keys by the same ids as the HID
+/// report, so the calibration, the button jobs and the calibration offer's mark saved for
+/// `hid V:P` carry over to `smed V:P`, each unless something is saved for it already. Once the
+/// device has a calibration or button jobs of its own (carried over, or set before), it is marked
+/// (`space_mouse_adopted`) and never adopts again, so resetting its buttons or forgetting its
+/// calibration later is not undone at the next connect. The `hid`
+/// entries stay as they are, for when it is read directly again. Long-press jobs have no `hid`
+/// counterpart. Returns whether anything carried over.
+pub fn adopt_direct_settings(prefs: &mut crate::prefs::Prefs, device: &str) -> bool {
+    let Some(ids) = device.strip_prefix("smed ") else { return false };
+    if prefs.space_mouse_adopted.contains(device) {
+        return false;
+    }
+    let direct = format!("hid {ids}");
+    let mut adopted = false;
+    if !prefs.space_mouse_calibrations.contains_key(device)
+        && let Some(calibration) = prefs.space_mouse_calibrations.get(&direct).cloned()
+    {
+        prefs.space_mouse_calibrations.insert(device.to_owned(), calibration);
+        adopted = true;
+    }
+    if !prefs.space_mouse_buttons.contains_key(device)
+        && let Some(jobs) = prefs.space_mouse_buttons.get(&direct).cloned()
+    {
+        prefs.space_mouse_buttons.insert(device.to_owned(), jobs);
+        adopted = true;
+    }
+    if prefs.space_mouse_offered.contains(&direct) && prefs.space_mouse_offered.insert(device.to_owned()) {
+        adopted = true;
+    }
+    // Settled once smed has a calibration or button jobs of its own, carried over or set before: a
+    // later reset of them then stays a reset. With neither, a later direct read still carries over.
+    if prefs.space_mouse_calibrations.contains_key(device) || prefs.space_mouse_buttons.contains_key(device) {
+        prefs.space_mouse_adopted.insert(device.to_owned());
+    }
+    adopted
+}
+
+/// What each of `device`'s buttons does when held past the long-press threshold: what the user set,
+/// else the measured defaults. A button with no long job does its short job on a long press too.
+pub fn button_long_jobs(app: &SolveApp, device: &str) -> std::collections::BTreeMap<u8, ButtonJob> {
+    app.preferences.space_mouse_long_buttons.get(device).cloned().unwrap_or_else(|| default_long_button_jobs(device))
+}
+
+/// The vendor and product ids in a device key (`hid 046d:c62b`, `smed 256f:c633`).
+fn device_ids(device: &str) -> Option<(u16, u16)> {
+    let (vendor, product) = device.split_once(' ')?.1.split_once(':')?;
+    Some((u16::from_str_radix(vendor, 16).ok()?, u16::from_str_radix(product, 16).ok()?))
+}
+
+/// What Preferences calls button `number` of `device`: the name printed on it for a device we have
+/// measured (`T`, `Esc`, `V1`; a symbol key in the user's language), else `Button 3`; a long press's
+/// row adds that it is held.
+pub fn button_name(device: &str, number: u8, long: bool) -> String {
+    use solidcraft_space_mouse::buttons::Printed;
+    let printed = device_ids(device).and_then(|(vendor, product)| solidcraft_space_mouse::buttons::printed(vendor, product, number));
+    let printed = printed.map(|printed| match printed {
+        Printed::Text(text) => text.to_owned(),
+        Printed::Roll => solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string(),
+        // Not "Rotation lock": that is the checkbox in the same section, which the key switches.
+        Printed::Lock => solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string(),
+    });
+    let number = number.to_string();
+    match (printed, long) {
+        (Some(key), false) => key,
+        (Some(key), true) => solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", &key)]),
+        (None, false) => solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number)]),
+        (None, true) => solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number)]),
+    }
+}
+
+fn job_of(action: solidcraft_space_mouse::buttons::Action) -> Option<ButtonJob> {
+    use solidcraft_space_mouse::buttons::Action;
+    Some(match action {
+        Action::Menu => ButtonJob::Settings,
+        Action::Fit => ButtonJob::View("fit".into()),
+        Action::ViewTop => ButtonJob::View("top".into()),
+        Action::ViewRight => ButtonJob::View("right".into()),
+        Action::ViewFront => ButtonJob::View("front".into()),
+        Action::ViewBottom => ButtonJob::View("bottom".into()),
+        Action::ViewLeft => ButtonJob::View("left".into()),
+        Action::ViewBack => ButtonJob::View("back".into()),
+        Action::ViewIso => ButtonJob::View("iso".into()),
+        Action::Esc => ButtonJob::Key(ButtonKey::Esc),
+        Action::Shift => ButtonJob::Key(ButtonKey::Shift),
+        Action::Ctrl => ButtonJob::Key(ButtonKey::Ctrl),
+        Action::Alt => ButtonJob::Key(ButtonKey::Alt),
+        Action::Enter => ButtonJob::Key(ButtonKey::Enter),
+        Action::Delete => ButtonJob::Key(ButtonKey::Delete),
+        Action::Tab => ButtonJob::Key(ButtonKey::Tab),
+        Action::Space => ButtonJob::Key(ButtonKey::Space),
+        Action::Roll | Action::RotationLock => return None,
+    })
+}
+
+/// The ids whose measured jobs `device` starts with. The SpaceMouse Enterprise gets them only through
+/// smed, which they came with: read directly it keeps starting with no jobs, as it always did.
+fn measured_ids(device: &str) -> Option<(u16, u16)> {
+    let ids = device_ids(device)?;
+    (ids != (0x256f, 0xc633) || device.starts_with("smed ")).then_some(ids)
+}
+
 /// The printed keys' jobs on a device we have measured (`solidcraft_space_mouse::buttons`), from
-/// its key (`hid 046d:c62b`, `web 046d:c62b`). Only a key with vendor and product ids gets them,
-/// which in practice is a raw HID device: the `spacenavd` and `3dxware` keys carry no ids, and
-/// spacenavd numbers its buttons from 0, not 1 as the table here does. Keys with no job here (Roll,
-/// the rotation lock) start empty.
+/// its key (`hid 046d:c62b`, `web 046d:c62b`, `smed 256f:c633`). Only a key with vendor and product
+/// ids gets them: the `spacenavd` and `3dxware` keys carry no ids, and spacenavd numbers its buttons
+/// from 0, not by 3Dconnexion's ids as the table does. Keys with no job here (Roll, the rotation
+/// lock, which a driver that keeps one handles itself) start empty, and so does an Enterprise read
+/// without smed (`measured_ids`).
 pub fn default_button_jobs(device: &str) -> std::collections::BTreeMap<u8, ButtonJob> {
-    use solidcraft_space_mouse::buttons::{Action, defaults};
-    let ids = device.split_once(' ').and_then(|(_, ids)| ids.split_once(':'));
-    let table = ids.and_then(|(vendor, product)| Some((u16::from_str_radix(vendor, 16).ok()?, u16::from_str_radix(product, 16).ok()?)));
-    let Some(table) = table.and_then(|(vendor, product)| defaults(vendor, product)) else { return Default::default() };
-    table
-        .iter()
-        .enumerate()
-        .filter_map(|(index, action)| {
-            let job = match (*action)? {
-                Action::Menu => ButtonJob::Settings,
-                Action::Fit => ButtonJob::View("fit".into()),
-                Action::ViewTop => ButtonJob::View("top".into()),
-                Action::ViewRight => ButtonJob::View("right".into()),
-                Action::ViewFront => ButtonJob::View("front".into()),
-                Action::Esc => ButtonJob::Key(ButtonKey::Esc),
-                Action::Shift => ButtonJob::Key(ButtonKey::Shift),
-                Action::Ctrl => ButtonJob::Key(ButtonKey::Ctrl),
-                Action::Alt => ButtonJob::Key(ButtonKey::Alt),
-                Action::Roll | Action::RotationLock => return None,
-            };
-            Some((u8::try_from(index + 1).ok()?, job))
-        })
-        .collect()
+    let table = measured_ids(device).and_then(|(vendor, product)| solidcraft_space_mouse::buttons::defaults(vendor, product));
+    table.unwrap_or_default().into_iter().filter_map(|(number, action)| Some((number, job_of(action)?))).collect()
+}
+
+/// The measured long-press jobs of `device` (the Enterprise's T, R and F give the opposite views).
+pub fn default_long_button_jobs(device: &str) -> std::collections::BTreeMap<u8, ButtonJob> {
+    let table = measured_ids(device).and_then(|(vendor, product)| solidcraft_space_mouse::buttons::long_defaults(vendor, product));
+    table.unwrap_or_default().into_iter().filter_map(|(number, action)| Some((number, job_of(action)?))).collect()
 }
 
 /// Whether a button may do anything now: only where navigation and the keyboard shortcuts would
@@ -227,13 +339,19 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
     {
         app.space_mouse.buttons_device = seen.device.clone();
         app.space_mouse.buttons = seen.down;
+        app.space_mouse.long_buttons = seen.long_down;
     }
     app.space_mouse.buttons_pending = seen.pending;
     app.space_mouse.buttons_generation = seen.generation;
+    app.space_mouse.lock = seen.lock;
     let buttons = seen.down;
-    let pressed = (buttons & !app.space_mouse.buttons) | seen.taps;
+    let long_buttons = seen.long_down;
+    let pressed = buttons.minus(app.space_mouse.buttons) | seen.taps;
+    let long_pressed = long_buttons.minus(app.space_mouse.long_buttons) | seen.long_taps;
     app.space_mouse.buttons = buttons;
-    app.space_mouse.seen |= buttons;
+    app.space_mouse.long_buttons = long_buttons;
+    app.space_mouse.seen |= buttons | seen.taps;
+    app.space_mouse.seen_long |= long_buttons | seen.long_taps;
     // The keyboard's own modifiers, from what the window was told before anything is added to it.
     // egui drops its modifiers when the window loses focus, so those go too.
     let mut focused = ctx.input(|i| i.focused);
@@ -252,25 +370,30 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
     let keyboard = app.space_mouse.keyboard;
     let mut held = egui::Modifiers::NONE;
     let device = seen.device.clone().filter(|_| buttons_active(app, ctx, focused));
-    let jobs = device.map(|device| button_jobs(app, &device)).unwrap_or_default();
+    let jobs = device.as_ref().map(|device| button_jobs(app, device)).unwrap_or_default();
+    let long_jobs = device.as_ref().map(|device| button_long_jobs(app, device)).unwrap_or_default();
     let before = std::mem::replace(&mut app.space_mouse.held, egui::Modifiers::NONE);
-    for (number, job) in jobs {
-        let Some(bit) = number.checked_sub(1).and_then(|index| 1_u32.checked_shl(u32::from(index))) else { continue };
-        if (buttons | seen.taps) & bit == 0 {
-            continue;
-        }
-        match job {
-            ButtonJob::Key(ButtonKey::Shift) if buttons & bit != 0 => held.shift = true,
-            ButtonJob::Key(ButtonKey::Alt) if buttons & bit != 0 => held.alt = true,
-            ButtonJob::Key(ButtonKey::Ctrl) if buttons & bit != 0 => {
-                held.ctrl = true;
-                // Ctrl is the command key everywhere but on a Mac.
-                held.command |= !cfg!(target_os = "macos");
+    // Each button with a job for either kind of press: its short job, and its long job (the short
+    // one when it has none of its own).
+    let numbers: std::collections::BTreeSet<u8> = jobs.keys().chain(long_jobs.keys()).copied().collect();
+    for number in numbers {
+        let short = jobs.get(&number);
+        let long = long_jobs.get(&number).or(short);
+        for (job, down, active) in [(short, buttons, pressed), (long, long_buttons, long_pressed)] {
+            let Some(job) = job else { continue };
+            match job {
+                ButtonJob::Key(ButtonKey::Shift) if down.contains(number) => held.shift = true,
+                ButtonJob::Key(ButtonKey::Alt) if down.contains(number) => held.alt = true,
+                ButtonJob::Key(ButtonKey::Ctrl) if down.contains(number) => {
+                    held.ctrl = true;
+                    // Ctrl is the command key everywhere but on a Mac.
+                    held.command |= !cfg!(target_os = "macos");
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        if pressed & bit != 0 {
-            run_button_job(app, &job, keyboard, raw);
+            if active.contains(number) {
+                run_button_job(app, job, keyboard, raw);
+            }
         }
     }
     app.space_mouse.held = held;
@@ -309,9 +432,16 @@ fn run_button_job(app: &mut SolveApp, job: &ButtonJob, modifiers: egui::Modifier
         // Navigation, where the 3D mouse's section is.
         ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D),
         ButtonJob::View(view) => app.animate_view(view),
-        ButtonJob::Key(ButtonKey::Esc) => {
+        ButtonJob::Key(key @ (ButtonKey::Esc | ButtonKey::Enter | ButtonKey::Delete | ButtonKey::Tab | ButtonKey::Space)) => {
+            let key = match key {
+                ButtonKey::Enter => egui::Key::Enter,
+                ButtonKey::Delete => egui::Key::Delete,
+                ButtonKey::Tab => egui::Key::Tab,
+                ButtonKey::Space => egui::Key::Space,
+                _ => egui::Key::Escape,
+            };
             for pressed in [true, false] {
-                raw.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers });
+                raw.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
             }
         }
         ButtonJob::Key(_) => {}
@@ -553,7 +683,8 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     if app.space_mouse.read_device != app.space_mouse.device {
         // Another device: its buttons and its resting hand are not the last one's.
         app.space_mouse.read_device = app.space_mouse.device.clone();
-        app.space_mouse.seen = 0;
+        app.space_mouse.seen = ButtonSet::EMPTY;
+        app.space_mouse.seen_long = ButtonSet::EMPTY;
         app.space_mouse.settle = Default::default();
     }
     let calibration = calibration(app);
@@ -709,7 +840,7 @@ mod tests {
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
     fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, None, None);
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, false, None, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
@@ -774,6 +905,23 @@ mod tests {
         assert_eq!(calibration_repaint_after(false, false), Duration::from_millis(250));
     }
 
+    /// A measured device's keys are named as printed, short and held; any other button by number.
+    #[test]
+    fn buttons_are_named_as_printed_on_measured_devices() {
+        assert_eq!(button_name("smed 256f:c633", 3, false), "T");
+        assert_eq!(button_name("smed 256f:c633", 176, false), "Space");
+        // Names that are not printed come from the text catalog, which a unit test does not load:
+        // compare with the same lookup (the Preferences test checks the English text).
+        assert_eq!(button_name("smed 256f:c633", 3, true), solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", "T")]));
+        assert_eq!(button_name("hid 046d:c62b", 23, false), "Esc");
+        // The keys that carry a symbol are named in the user's language.
+        assert_eq!(button_name("smed 256f:c633", 9, false), solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string());
+        assert_eq!(button_name("hid 046d:c62b", 27, false), solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string());
+        assert_eq!(button_name("smed 256f:c633", 4, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "4")]));
+        assert_eq!(button_name("spacenavd", 3, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "3")]));
+        assert_eq!(button_name("spacenavd", 3, true), solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", "3")]));
+    }
+
     #[test]
     fn a_measured_device_starts_with_its_printed_keys() {
         let jobs = default_button_jobs("hid 046d:c62b");
@@ -794,8 +942,9 @@ mod tests {
         let device = app.space_mouse.device.clone();
         // As the reader reports them: a button newly down since its own last look is a tap, and a reader
         // that has just connected to this device starts from nothing down.
-        let before = if app.space_mouse.buttons_device == device { app.space_mouse.buttons } else { 0 };
-        buttons_hook(app, ctx, Buttons { device, down: buttons, taps: buttons & !before, pending: false, generation: 0 }, &mut raw);
+        let before = if app.space_mouse.buttons_device == device { app.space_mouse.buttons } else { ButtonSet::EMPTY };
+        let buttons = ButtonSet::from_mask(buttons);
+        buttons_hook(app, ctx, Buttons { device, down: buttons, taps: buttons.minus(before), ..Default::default() }, &mut raw);
         ctx.run_ui(raw.clone(), |_| {}).textures_delta.clear();
         raw
     }
@@ -836,7 +985,7 @@ mod tests {
         assert!(app.prefs_window.shell.open);
         press(&mut app, &ctx, 0, vec![]);
         assert_eq!(escapes(&press(&mut app, &ctx, ESC, vec![])), 0);
-        assert_eq!(app.space_mouse.seen & ESC, ESC);
+        assert!(app.space_mouse.seen.contains(23));
         // A job the user set replaces the defaults.
         app.prefs_window.shell.open = false;
         press(&mut app, &ctx, 0, vec![]);
@@ -946,17 +1095,193 @@ mod tests {
         app.space_mouse.device = Some("hid 046d:c62b".into());
         let ctx = window(true);
         // Down and up before the hook looked: nothing is held, the press is in `taps`.
-        let tap = Buttons { device: Some("hid 046d:c62b".into()), down: 0, taps: ESC, pending: false, generation: 0 };
+        let tap = Buttons {
+            device: Some("hid 046d:c62b".into()),
+            down: ButtonSet::from_mask(0),
+            taps: ButtonSet::from_mask(ESC),
+            pending: false,
+            generation: 0,
+            ..Default::default()
+        };
         assert_eq!(escapes(&press_seen(&mut app, &ctx, tap)), 1);
-        assert_eq!(app.space_mouse.buttons, 0);
-        let nothing = Buttons { device: Some("hid 046d:c62b".into()), down: 0, taps: 0, pending: false, generation: 0 };
+        assert_eq!(app.space_mouse.buttons, ButtonSet::EMPTY);
+        let nothing = Buttons {
+            device: Some("hid 046d:c62b".into()),
+            down: ButtonSet::from_mask(0),
+            taps: ButtonSet::from_mask(0),
+            pending: false,
+            generation: 0,
+            ..Default::default()
+        };
         assert_eq!(escapes(&press_seen(&mut app, &ctx, nothing)), 0, "and not again");
+    }
+
+    fn key_presses(raw: &egui::RawInput, key: egui::Key) -> usize {
+        raw.events.iter().filter(|e| matches!(e, egui::Event::Key { key: k, pressed: true, .. } if *k == key)).count()
+    }
+
+    /// An Enterprise through smed: T, R and F held give the opposite views, its keys past 32 and the
+    /// four keyboard keys do their jobs, and a long press does the button's long job instead of its
+    /// short one; a button without a long job does its short job when held.
+    #[test]
+    fn an_enterprise_through_smed_runs_its_keyboard_keys_and_long_jobs() {
+        let device = "smed 256f:c633";
+        // Every measured job, short and long, as the device's keys are printed.
+        let view = |name: &str| ButtonJob::View(name.into());
+        let key = ButtonJob::Key;
+        let short: std::collections::BTreeMap<u8, ButtonJob> = [
+            (1, ButtonJob::Settings),
+            (2, view("fit")),
+            (3, view("top")),
+            (5, view("right")),
+            (6, view("front")),
+            (11, view("iso")),
+            (23, key(ButtonKey::Esc)),
+            (24, key(ButtonKey::Alt)),
+            (25, key(ButtonKey::Shift)),
+            (26, key(ButtonKey::Ctrl)),
+            (36, key(ButtonKey::Enter)),
+            (37, key(ButtonKey::Delete)),
+            (175, key(ButtonKey::Tab)),
+            (176, key(ButtonKey::Space)),
+        ]
+        .into();
+        assert_eq!(default_button_jobs(device), short);
+        // Read without smed, the Enterprise keeps its old default: no jobs, short or long.
+        for direct in ["hid 256f:c633", "web 256f:c633"] {
+            assert!(default_button_jobs(direct).is_empty() && default_long_button_jobs(direct).is_empty(), "{direct}");
+        }
+        // Each view job is one the camera knows (the ISO key turns the view isometric).
+        assert_eq!(solidcraft_viewport::StandardView::parse("iso"), Some(solidcraft_viewport::StandardView::Iso));
+        let long = default_long_button_jobs(device);
+        assert_eq!(long, [(3, view("bottom")), (5, view("left")), (6, view("back"))].into());
+        assert!(default_long_button_jobs("hid 046d:c62b").is_empty(), "a device without long presses has no long jobs");
+        let mut app = app();
+        app.space_mouse.device = Some(device.into());
+        let ctx = window(true);
+        let set = |ids: &[u8]| {
+            let mut set = ButtonSet::EMPTY;
+            for &id in ids {
+                set.insert(id);
+            }
+            set
+        };
+        let tap = |short: &[u8], long: &[u8]| Buttons { device: Some(device.into()), taps: set(short), long_taps: set(long), ..Default::default() };
+        for (id, key) in [(36, egui::Key::Enter), (37, egui::Key::Delete), (175, egui::Key::Tab), (176, egui::Key::Space)] {
+            let raw = press_seen(&mut app, &ctx, tap(&[id], &[]));
+            assert_eq!((key_presses(&raw, key), escapes(&raw)), (1, 0), "button {id}");
+        }
+        // Esc (23) has no long job: held, it still presses Escape.
+        assert_eq!(escapes(&press_seen(&mut app, &ctx, tap(&[], &[23]))), 1);
+        // Given one, held it does that instead, and a short press keeps its own job.
+        app.preferences.space_mouse_long_buttons.insert(device.into(), [(23, ButtonJob::Key(ButtonKey::Tab))].into());
+        let raw = press_seen(&mut app, &ctx, tap(&[], &[23]));
+        assert_eq!((key_presses(&raw, egui::Key::Tab), escapes(&raw)), (1, 0), "held");
+        let raw = press_seen(&mut app, &ctx, tap(&[23], &[]));
+        assert_eq!((key_presses(&raw, egui::Key::Tab), escapes(&raw)), (0, 1), "short");
+        // Every key seen, short and long, is remembered for Preferences' rows.
+        assert!(app.space_mouse.seen.contains(176) && app.space_mouse.seen.contains(23));
+        assert!(app.space_mouse.seen_long.contains(23) && !app.space_mouse.seen_long.contains(176));
+        // Cleared mappings give the old behaviour: no job, short or long.
+        app.preferences.space_mouse_buttons.insert(device.into(), Default::default());
+        app.preferences.space_mouse_long_buttons.insert(device.into(), Default::default());
+        let raw = press_seen(&mut app, &ctx, tap(&[23, 3], &[23, 3]));
+        assert!(raw.events.is_empty(), "a cleared mapping does nothing: {:?}", raw.events);
+        // The lock the reader reports is what Preferences shows.
+        for lock in [Some(true), Some(false), None] {
+            press_seen(&mut app, &ctx, Buttons { device: Some(device.into()), lock, ..Default::default() });
+            assert_eq!(app.space_mouse.lock, lock);
+        }
+    }
+
+    /// Settings carry over from `hid V:P` to `smed V:P` once, each only where smed has none of its
+    /// own, and never to anything else; short and long presses stay apart.
+    #[test]
+    fn a_device_read_through_smed_adopts_its_direct_settings_where_it_has_none() {
+        let (direct, smed) = ("hid 256f:c633", "smed 256f:c633");
+        let mut prefs = crate::prefs::Prefs::default();
+        assert!(!adopt_direct_settings(&mut prefs, smed), "nothing saved, nothing to carry over");
+        let calibration = solidcraft_space_mouse::Calibration {
+            dead_zone_share: 0.07,
+            kind: solidcraft_space_mouse::Kind::ReturnToCenter,
+            axes: std::array::from_fn(|source| solidcraft_space_mouse::AxisCalibration {
+                source,
+                reversed: false,
+                rest: 3,
+                dead_zone: 9,
+                full: [340; 2],
+            }),
+        };
+        prefs.space_mouse_calibrations.insert(direct.into(), calibration);
+        prefs.space_mouse_buttons.insert(direct.into(), [(3, ButtonJob::View("front".into()))].into());
+        prefs.space_mouse_offered.insert(direct.into());
+        // Its own button jobs are kept; the calibration and the mark it lacks carry over.
+        prefs.space_mouse_buttons.insert(smed.into(), [(3, ButtonJob::View("back".into()))].into());
+        assert!(adopt_direct_settings(&mut prefs, smed));
+        assert_eq!(prefs.space_mouse_calibrations.get(smed), Some(&calibration));
+        assert_eq!(prefs.space_mouse_buttons.get(smed).and_then(|jobs| jobs.get(&3)), Some(&ButtonJob::View("back".into())));
+        assert!(prefs.space_mouse_offered.contains(smed));
+        assert!(prefs.space_mouse_adopted.contains(smed));
+        // Once: a reset of its buttons and a forgotten calibration stay so at the next connect.
+        prefs.space_mouse_buttons.remove(smed);
+        prefs.space_mouse_calibrations.remove(smed);
+        assert!(!adopt_direct_settings(&mut prefs, smed), "once");
+        assert!(!prefs.space_mouse_buttons.contains_key(smed) && !prefs.space_mouse_calibrations.contains_key(smed));
+        // Its own button jobs and calibration already there, nothing to carry over: settled all the
+        // same, so a later reset is not undone by the direct read's jobs.
+        let (direct_own, smed_own) = ("hid 256f:c632", "smed 256f:c632");
+        prefs.space_mouse_buttons.insert(direct_own.into(), [(3, ButtonJob::View("front".into()))].into());
+        prefs.space_mouse_buttons.insert(smed_own.into(), [(3, ButtonJob::View("back".into()))].into());
+        prefs.space_mouse_calibrations.insert(direct_own.into(), calibration);
+        prefs.space_mouse_calibrations.insert(smed_own.into(), calibration);
+        assert!(!adopt_direct_settings(&mut prefs, smed_own), "nothing it lacks");
+        assert!(prefs.space_mouse_adopted.contains(smed_own), "settled");
+        prefs.space_mouse_buttons.remove(smed_own);
+        assert!(!adopt_direct_settings(&mut prefs, smed_own));
+        assert!(!prefs.space_mouse_buttons.contains_key(smed_own), "the reset stays");
+        // Either of its own is enough, its calibration alone or its button jobs alone.
+        let calibrated = "smed 256f:c630";
+        prefs.space_mouse_calibrations.insert(calibrated.into(), calibration);
+        let mapped = "smed 256f:c62f";
+        prefs.space_mouse_buttons.insert(mapped.into(), [(1, ButtonJob::Settings)].into());
+        for device in [calibrated, mapped] {
+            assert!(!adopt_direct_settings(&mut prefs, device));
+            assert!(prefs.space_mouse_adopted.contains(device), "{device} settled");
+        }
+        // Saved for neither: not settled, so what is set for it read directly later still carries over.
+        let (direct_new, smed_new) = ("hid 256f:c631", "smed 256f:c631");
+        assert!(!adopt_direct_settings(&mut prefs, smed_new));
+        assert!(!prefs.space_mouse_adopted.contains(smed_new));
+        prefs.space_mouse_buttons.insert(direct_new.into(), [(1, ButtonJob::Settings)].into());
+        assert!(adopt_direct_settings(&mut prefs, smed_new));
+        assert_eq!(prefs.space_mouse_buttons.get(smed_new), prefs.space_mouse_buttons.get(direct_new));
+        // A device read any other way adopts nothing.
+        for other in [direct, "web 256f:c633", "spacenavd", "hid 046d:c62b", "smed"] {
+            let before = prefs.clone();
+            assert!(!adopt_direct_settings(&mut prefs, other), "{other}");
+            assert_eq!(serde_json::to_value(&prefs).unwrap(), serde_json::to_value(&before).unwrap(), "{other}");
+        }
+        // Its own calibration is kept too; only what it lacks carries over.
+        let (direct_pro, smed_pro) = ("hid 046d:c62b", "smed 046d:c62b");
+        let own = solidcraft_space_mouse::Calibration { dead_zone_share: 0.2, ..calibration };
+        prefs.space_mouse_calibrations.insert(direct_pro.into(), calibration);
+        prefs.space_mouse_buttons.insert(direct_pro.into(), [(1, ButtonJob::Settings)].into());
+        prefs.space_mouse_calibrations.insert(smed_pro.into(), own);
+        assert!(adopt_direct_settings(&mut prefs, smed_pro));
+        assert_eq!(prefs.space_mouse_calibrations.get(smed_pro), Some(&own));
+        assert_eq!(prefs.space_mouse_buttons.get(smed_pro), prefs.space_mouse_buttons.get(direct_pro));
+        // Through smed the short jobs come from the direct read, the long ones from the measurement.
+        let mut app = app();
+        app.preferences.space_mouse_buttons.insert(direct.into(), [(23, ButtonJob::Key(ButtonKey::Tab))].into());
+        adopt_direct_settings(&mut app.preferences, smed);
+        assert_eq!(button_jobs(&app, smed).get(&23), Some(&ButtonJob::Key(ButtonKey::Tab)));
+        assert_eq!(button_long_jobs(&app, smed).get(&3), Some(&ButtonJob::View("bottom".into())));
     }
 
     #[test]
     fn a_press_on_a_new_device_runs_that_devices_mapping_whatever_the_frame_before_had() {
         let (a, b) = ("hid 046d:c62b", "hid 256f:c63a");
-        let device = |name: Option<&str>, down: u32| Buttons { device: name.map(Into::into), down, taps: 0, pending: false, generation: 0 };
+        let device = |name: Option<&str>, down: u32| Buttons { device: name.map(Into::into), down: ButtonSet::from_mask(down), ..Default::default() };
         let setup = || {
             let mut app = app();
             app.preferences.space_mouse_buttons.insert(a.into(), [(1, ButtonJob::Key(ButtonKey::Shift))].into());
@@ -973,7 +1298,14 @@ mod tests {
         assert!(!app.space_mouse.held.shift, "A's hold does not carry over");
         assert_eq!(escapes(&press_seen(&mut app, &ctx, device(Some(b), 1))), 0, "and holding is not pressing");
         press_seen(&mut app, &ctx, device(Some(b), 0));
-        let tap = Buttons { device: Some(b.into()), down: 1, taps: 1, pending: false, generation: 0 };
+        let tap = Buttons {
+            device: Some(b.into()),
+            down: ButtonSet::from_mask(1),
+            taps: ButtonSet::from_mask(1),
+            pending: false,
+            generation: 0,
+            ..Default::default()
+        };
         assert_eq!(escapes(&press_seen(&mut app, &ctx, tap.clone())), 1, "a press on B runs B's job");
         // None -> B: the first press is not swallowed by there having been no device (it is a tap).
         let (mut app, ctx) = setup();
@@ -985,11 +1317,32 @@ mod tests {
         let (mut app, ctx) = setup();
         app.space_mouse.device = None;
         press_seen(&mut app, &ctx, device(None, 0));
-        let waiting = Buttons { device: Some(b.into()), down: 0, taps: 0, pending: true, generation: 0 };
+        let waiting = Buttons {
+            device: Some(b.into()),
+            down: ButtonSet::from_mask(0),
+            taps: ButtonSet::from_mask(0),
+            pending: true,
+            generation: 0,
+            ..Default::default()
+        };
         assert_eq!(escapes(&press_seen(&mut app, &ctx, waiting)), 0);
         assert_eq!(escapes(&press_seen(&mut app, &ctx, device(Some(b), 1))), 0, "the first state is a baseline");
         press_seen(&mut app, &ctx, device(Some(b), 0));
-        assert_eq!(escapes(&press_seen(&mut app, &ctx, Buttons { device: Some(b.into()), down: 1, taps: 1, pending: false, generation: 0 })), 1);
+        assert_eq!(
+            escapes(&press_seen(
+                &mut app,
+                &ctx,
+                Buttons {
+                    device: Some(b.into()),
+                    down: ButtonSet::from_mask(1),
+                    taps: ButtonSet::from_mask(1),
+                    pending: false,
+                    generation: 0,
+                    ..Default::default()
+                }
+            )),
+            1
+        );
         // And a button already down when the first device appears is not a press.
         let (mut app, ctx) = setup();
         press_seen(&mut app, &ctx, device(None, 0));
@@ -1157,12 +1510,12 @@ mod tests {
         let ctx = window(true);
         app.space_mouse.device = Some("hid 046d:c62b".into());
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
-        app.space_mouse.seen = 0b101;
+        app.space_mouse.seen = ButtonSet::from_mask(0b101);
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
-        assert_eq!(app.space_mouse.seen, 0b101);
+        assert_eq!(app.space_mouse.seen, ButtonSet::from_mask(0b101));
         app.space_mouse.device = Some("hid 256f:c63a".into());
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
-        assert_eq!(app.space_mouse.seen, 0);
+        assert_eq!(app.space_mouse.seen, ButtonSet::EMPTY);
     }
 
     #[test]

@@ -195,6 +195,18 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             operation: "NoEffect",
         })
     );
+    let r: Result<Result<()>> = run("refuses mesh", |_| {
+        Ok(Err(Error::Mesh("uncertified fitted profile".into())))
+    });
+    assert_eq!(r, Ok(Err(Error::Mesh("uncertified fitted profile".into()))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses mesh",
+            kind: FailureCode::OPS,
+            operation: "Mesh",
+        })
+    );
     let r: Result<()> = run("panics", |_| panic!("on purpose"));
     assert!(matches!(r, Err(Error::Internal(_))));
     assert_eq!(

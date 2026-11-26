@@ -46,6 +46,7 @@ mod reseam;
 pub(crate) mod seams;
 mod slivers;
 mod touching;
+mod tracked;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -1216,7 +1217,13 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
-        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+        let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
+        if let Some(why) = skipped {
+            // The body keeps its imported trims, which passed every check; say so rather than
+            // leave a reader to find that its round faces were not tidied along their seams.
+            notes.push(format!("the seams of faces on closed surfaces were not completed, the body keeps its imported trims ({why})"));
+        }
+        if let Some((completed, from)) = completion {
             face_origin = from
                 .iter()
                 .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
@@ -1759,6 +1766,11 @@ impl<'t> Assembly<'t> {
         };
         let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // A spline face's trim that lies far off its edge (the kernel's drop settled on another part
+        // of the surface) is made again by following the edge along the surface.
+        if form.is_none() {
+            tracked::retrack(&surface, &self.edges, &edge_loops, &mut pcs)?;
+        }
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
@@ -1794,6 +1806,9 @@ impl<'t> Assembly<'t> {
                 self.patches_extended += 1;
             }
         }
+        // On a surface that closes on itself a pcurve may run past the seam by its fit's
+        // rounding while the uses beside it end on it: put on the range ([`onto_seam`]).
+        onto_seam(&surface, &edge_loops, &mut pcs);
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1838,6 +1853,17 @@ impl<'t> Assembly<'t> {
                     }
                     let (Some(sd), Some(ed)) = (start.get(d), end.get(d)) else { continue };
                     if !((sd - ed).abs() <= 0.5 * (b - a)) {
+                        // The two uses meet a jump apart along `d`, but the iso-line run between
+                        // them lies within the vertex's tolerance of it (a narrow strip's end
+                        // an exporter closed with one vertex, not an edge): the loop runs along
+                        // it there, as at a pole. Certified on the iso-lines through both ends.
+                        let centre = v3(self.vertices.get(v as usize).ok_or("vertex reference")?.point);
+                        let within = |at: &[f64; 2]| -> bool {
+                            poles.as_ref().is_some_and(|s| matches!(s.iso_within(*at, d, (*ed, *sd), centre, reach), Ok(true)))
+                        };
+                        if within(start) && within(end) {
+                            continue;
+                        }
                         // Whether the surface closes across `d` there: its two boundaries meet.
                         let ends_at = |x: f64| {
                             let mut q = *start;
@@ -2613,6 +2639,91 @@ pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
         }
     }
     out
+}
+
+/// A face's pcurves on a surface that closes on itself (`surface`, its loops `edge_loops`, as
+/// `pcs`) put on the surface's range along each closed direction where the fit leaves one past
+/// it by more than a billionth of the period (as the base period holds a trim, and the seam
+/// completion moves a trim further out by whole periods), but by no more than the use misses
+/// the uses beside it in its loop at its own two vertices: its control points past an end move
+/// onto that end. Left there, the seam completion moves the use a whole period, to the seam's
+/// other side, a period from the uses it joins (face #553893 of the Pro Shop file, a period of
+/// 0.0215 and a seam use 4.3e-11 past it). A use further past crosses the seam, and a loop of
+/// one use has no neighbour: those stay. A B-spline is a convex combination of its control
+/// points, so the pcurve then lies on the range, and moves by no more than its points did; the
+/// gap to the edge is measured and covered (`raise_edges`). The number of uses moved.
+pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &mut [Vec<Curve2>]) -> usize {
+    let Ok(on) = SurfaceEval::new(surface) else { return 0 };
+    let domain = on.domain();
+    let mut moved = 0;
+    for (l, pc) in edge_loops.iter().zip(pcs.iter_mut()) {
+        let n = pc.len();
+        if n < 2 || l.len() != n {
+            continue;
+        }
+        // Where each use starts and ends, in the loop's direction.
+        let ends: Vec<Option<([f64; 2], [f64; 2])>> = l
+            .iter()
+            .zip(pc.iter())
+            .map(|(&(_, forward), c)| {
+                let [a, b] = c.interval()?;
+                let (s, e) = (solidcore_ops::pcurve::eval(c, a)?, solidcore_ops::pcurve::eval(c, b)?);
+                Some(if forward { (s, e) } else { (e, s) })
+            })
+            .collect();
+        for d in 0..2 {
+            let (Some(Some(period)), Some(Some((lo, hi)))) = (domain.period.get(d), domain.range.get(d)) else { continue };
+            let (lo, hi) = (lo.min(*hi), lo.max(*hi));
+            let round = 1e-9 * period;
+            if !(round > 0.0 && lo.is_finite() && hi.is_finite()) {
+                continue;
+            }
+            for k in 0..n {
+                let (Some(before), Some(after)) = ((k + n - 1).checked_rem(n), (k + 1).checked_rem(n)) else {
+                    continue;
+                };
+                let (Some(Some((start, end))), Some(Some((_, prev_end))), Some(Some((next_start, _)))) =
+                    (ends.get(k), ends.get(before), ends.get(after))
+                else {
+                    continue;
+                };
+                // How far it misses the uses beside it at its vertices.
+                let at = |q: &[f64; 2]| q.get(d).copied().unwrap_or(f64::NAN);
+                let miss = (at(start) - at(prev_end)).abs().max((at(end) - at(next_start)).abs());
+                let Some(c) = pc.get_mut(k) else { continue };
+                let xs: Vec<f64> = control_points(c).iter().map(at).collect();
+                let past = xs.iter().fold(0.0f64, |m, &x| m.max(lo - x).max(x - hi));
+                if !(past > round && past <= miss) {
+                    continue;
+                }
+                let onto = |x: f64| x.max(lo).min(hi);
+                match c {
+                    Curve2::Spline { points, .. } => points.iter_mut().filter_map(|p| p.get_mut(d)).for_each(|x| *x = onto(*x)),
+                    Curve2::RationalSpline { homogeneous, .. } => {
+                        for h in homogeneous.iter_mut().filter(|h| h[2] > 0.0) {
+                            let w = h[2];
+                            if let Some(x) = h.get_mut(d) {
+                                let y = onto(*x / w);
+                                if y != *x / w {
+                                    *x = y * w;
+                                }
+                            }
+                        }
+                    }
+                }
+                moved += 1;
+            }
+        }
+    }
+    moved
+}
+
+/// The control points of `c` in (u, v).
+fn control_points(c: &Curve2) -> Vec<[f64; 2]> {
+    match c {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+    }
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the
