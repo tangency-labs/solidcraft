@@ -114,6 +114,9 @@ pub struct AppState {
     pub file_grants: Vec<FileGrant>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
+    /// This session runs a plugin dialog's live preview, whose result is thrown away: what
+    /// `plugin.preview` answers to the plugin.
+    pub preview: bool,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
@@ -370,6 +373,10 @@ fn resolve_grant_paths(params: &Value, grants: &[(&str, &Path)]) -> std::io::Res
 
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
+    // Whether the run is a preview: it reads nothing past the run itself.
+    if id == "plugin.preview" {
+        return None;
+    }
     let family = id.split_once('.').map_or(id, |(family, _)| family);
     match family {
         "plugin" => Some("plugin"),
