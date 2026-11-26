@@ -86,6 +86,44 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+
+/// Whether `kind` is a feature whose command takes `body_name`, and if so whether its operation is
+/// New Body: only then does the feature name a body of its own (#20776).
+pub(crate) fn body_name_slot(kind: &Kind) -> Option<bool> {
+    let operation = match kind {
+        Kind::Extrude { operation, .. }
+        | Kind::Revolve { operation, .. }
+        | Kind::Loft { operation, .. }
+        | Kind::Sweep { operation, .. }
+        | Kind::Primitive { operation, .. } => *operation,
+        _ => return None,
+    };
+    Some(OPS.get(operation).copied().unwrap_or("new") == "new")
+}
+
+/// The body name typed in a dialog's Body Name row: what a New Body feature names its body. Empty
+/// is no name, so the command names the body as it always has.
+pub(crate) fn typed_body_name(d: &Dialog) -> Option<&str> {
+    d.extra.get("body_name").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty())
+}
+
+/// Send the typed body name as `body_name` when the operation is New Body, and no stale one
+/// (from a feature opened for editing, then switched to Join or Cut) otherwise. Every command the
+/// dialog made loses any copied name, and only the first, the one that makes the body, gets the
+/// typed one. An edit's `timeline.redefine` holds the feature's parameters under `params`.
+fn apply_body_name(d: &Dialog, cmds: &mut [(String, Value)]) {
+    let Some(new_body) = body_name_slot(&d.kind) else { return };
+    let name = typed_body_name(d).filter(|_| new_body);
+    for (i, (cmd, params)) in cmds.iter_mut().enumerate() {
+        let target = if cmd == "timeline.redefine" { params.get_mut("params") } else { Some(params) };
+        let Some(map) = target.and_then(Value::as_object_mut) else { continue };
+        map.remove("body_name");
+        if let (0, Some(name)) = (i, name) {
+            map.insert("body_name".into(), json!(name));
+        }
+    }
+}
+
 /// A pipe's section: a solid rod or a hollow tube, which has a wall (#18344).
 pub(crate) const PIPE_TYPES: [&str; 2] = ["Solid", "Hollow"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
@@ -6624,6 +6662,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     // The unticked bodies of a Cut's list are the window's own, not a command parameter.
     normalized.extra.remove(crate::cut_bodies::SKIPPED);
     let mut cmds = dialog_commands(app, &normalized)?;
+    apply_body_name(d, &mut cmds);
     for (command, params) in &mut cmds {
         crate::sketch_tools::projection_policy(app, command, params);
     }
@@ -10463,6 +10502,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => break,
             }
         }
+    }
+    // The name the feature gave its body, if it gave one: shown in Body Name, kept on OK.
+    if body_name_slot(&d.kind).is_some()
+        && let Some(name) = f.body_names.first().filter(|name| !name.trim().is_empty())
+    {
+        d.extra.insert("body_name".into(), json!(name));
     }
     // Extrude shows the name it has, to read and to change (#18668).
     if matches!(f.kind, FeatureKind::Extrude { .. }) {
