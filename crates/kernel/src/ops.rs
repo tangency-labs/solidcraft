@@ -138,9 +138,13 @@ pub(crate) fn inner_box(x: &Body) -> Option<solidcraft_geom::Aabb3> {
             && let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters())
         {
             let [t0, t1] = e.interval;
-            for i in 1..samples {
-                if let Some(p) = eval.point(t0 + (t1 - t0) * f64::from(i) / f64::from(samples)) {
-                    b.add(p);
+            if t0.is_finite() && t1.is_finite() {
+                for i in 1..samples {
+                    if let Some(p) = eval.point(t0 + (t1 - t0) * f64::from(i) / f64::from(samples))
+                        && p.is_finite()
+                    {
+                        b.add(p);
+                    }
                 }
             }
         }

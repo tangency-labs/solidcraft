@@ -346,7 +346,7 @@ mod tests {
         let far = crate::box_solid(Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 10.0, 10.0)).unwrap().keeping_meshes();
         let touching = crate::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().keeping_meshes();
         assert!(!a.meets(&far).unwrap());
-        assert_eq!(a.meets_each(&[far.clone()]).unwrap(), vec![false]);
+        assert_eq!(a.meets_each(std::slice::from_ref(&far)).unwrap(), vec![false]);
         assert_eq!(a.cached_mesh_count(), 0);
         assert_eq!(far.cached_mesh_count(), 0);
         assert!(a.meets(&touching).unwrap());

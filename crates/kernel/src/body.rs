@@ -2679,6 +2679,9 @@ impl Body {
 /// Checks cheap inner boxes first so overlapping bodies skip measuring `exact_bounds`.
 fn exact_boxes_separate(a: &Body, b: &Body, gap: f64) -> bool {
     let margin = gap + a.record().tolerance + b.record().tolerance;
+    if !margin.is_finite() {
+        return false;
+    }
     if let (Some(ia), Some(ib)) = (crate::ops::inner_box(a), crate::ops::inner_box(b))
         && !shell_groups::boxes_separate(ia, ib, margin)
     {
@@ -2687,7 +2690,13 @@ fn exact_boxes_separate(a: &Body, b: &Body, gap: f64) -> bool {
     let (Ok(ba), Ok(bb)) = (a.exact_bounds(), b.exact_bounds()) else {
         return false;
     };
-    !ba.is_empty() && !bb.is_empty() && shell_groups::boxes_separate(ba, bb, margin)
+    !ba.is_empty()
+        && !bb.is_empty()
+        && ba.min.is_finite()
+        && ba.max.is_finite()
+        && bb.min.is_finite()
+        && bb.max.is_finite()
+        && shell_groups::boxes_separate(ba, bb, margin)
 }
 
 /// `chord`, or a thousandth of the edge's own extent where that is finer: the body's size says

@@ -8655,11 +8655,8 @@ fn unrecorded_touches(pieces: &[Body], touches: &[Vec<usize>]) -> Result<Vec<[us
             Ok(Some((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord)))
         })
         .collect::<Result<Vec<_>>>()?;
-    let shapes: Vec<Option<kernel::DistanceShape>> = pieces
-        .iter()
-        .zip(&meshes)
-        .map(|(p, m)| m.as_ref().map(|(mesh, chord)| kernel::DistanceShape::new(p, mesh, *chord)))
-        .collect();
+    let shapes: Vec<Option<kernel::DistanceShape>> =
+        pieces.iter().zip(&meshes).map(|(p, m)| m.as_ref().map(|(mesh, chord)| kernel::DistanceShape::new(p, mesh, *chord))).collect();
     let mut out = Vec::new();
     for [a, b] in candidates {
         let (Some(Some(sa)), Some(Some(sb)), Some(pa), Some(pb)) = (shapes.get(a), shapes.get(b), pieces.get(a), pieces.get(b)) else {
