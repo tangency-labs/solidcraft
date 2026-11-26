@@ -537,10 +537,8 @@ its front edge and then raise it:
 {"command":"solid.transform_face","params":{"body":"Block","face":[5,5,10],"axis":[1,0,0],"origin":[0,0,10],"angle":"45 deg","translate":[0,0,2]}}
 ```
 
-Select a face and choose **Transform Face** from its context menu. The **Move/Copy**
-shortcut (**M** by default) still moves the whole body. To have that shortcut open
-Transform Face when exactly one face is selected, enable **Use the Move/Copy shortcut
-for Transform Face** in **Preferences → Shortcuts**. This also works if you rebind Move/Copy.
+Select a face and choose **Transform Face** from its context menu or the command palette.
+The **Move/Copy** shortcut (**M** by default) still moves the whole body.
 
 Drag an arrow to translate along its axis, or drag a ring to rotate about that axis.
 To rotate around a different point, choose **Pivot → Pick on face**. On a flat
@@ -548,7 +546,6 @@ face, click a marked corner, edge midpoint, or face center. The original face is
 while you pick. The handles move to the new pivot and the preview resumes. The point is
 saved as **Custom** coordinates, which you can also type or edit. **OK** applies the
 preview; **Esc** discards it.
-Choose **Move/Copy** explicitly to move the whole body instead.
 
 Press **Delete** on anything selected (bodies, faces, sketches, features, planes, components,
 canvases). It runs as one undoable step and lists the features that would go with it or fail.

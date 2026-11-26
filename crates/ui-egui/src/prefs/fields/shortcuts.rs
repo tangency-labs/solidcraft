@@ -8,8 +8,6 @@
 macro_rules! shortcuts_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
-            /// Use the configured Move/Copy shortcut for Transform Face when one face is selected.
-            move_shortcut_transforms_face: bool = false, PAGE_SHORTCUTS;
             preview_reselect_modifier: crate::tool_modifiers::PreviewModifier = Default::default(), PAGE_SHORTCUTS;
             /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
             /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch

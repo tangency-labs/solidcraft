@@ -1258,7 +1258,6 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `maya_horizontal_zoom`: Maya Alt+right drag zooms horizontally (right in, left out), default `true`; `false` restores vertical drag zoom. Other presets and the fixed Zoom tool are unchanged.
 - `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
-- `move_shortcut_transforms_face` (default false): with exactly one face selected, the configured Move/Copy shortcut opens Transform Face instead. Explicit Move/Copy still moves the owning body.
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))

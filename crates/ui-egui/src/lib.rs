@@ -4605,6 +4605,8 @@ impl SolveApp {
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
         policy::enforce(self);
+        // Shortcuts run here, before `ui` installs the language scope: a tool started by its
+        // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
         panel_runtime::tick_app(self, ctx);
         render_ui::focus_shortcut(self, ctx);
@@ -4679,6 +4681,21 @@ impl SolveApp {
         tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() && !self.toolbar_custom.app_bar_customizing {
+            // Completion owns its keys before either CAD shortcuts or text editors see them.
+            panel_runtime::reserve_host_input(self, ctx);
+            if !keymap::capturing(self) {
+                expression_complete::begin_frame(ctx);
+            }
+            agent_chat::toggle_shortcut(self, ctx);
+            // A digit for a construction line's Length box is not a shortcut (#10258).
+            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
+                sketch_construction::claim_typed_length(self, ctx);
+            }
+            if !self.embedded {
+                toolbar::shortcuts(self, ctx);
+            }
+        }
         recovery_ui::tick(self);
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
@@ -4907,24 +4924,6 @@ impl SolveApp {
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         let _language = self.prepare_text(ui.ctx());
-        // Logic-only ticks in an occluded window still see the previous painted pass's
-        // key events. Route shortcuts only here, when egui has supplied fresh input.
-        let ctx = ui.ctx();
-        if self.issue_report.draft.is_none() && self.file_picker.is_none() && !self.toolbar_custom.app_bar_customizing {
-            // Completion owns its keys before either CAD shortcuts or text editors see them.
-            panel_runtime::reserve_host_input(self, ctx);
-            if !keymap::capturing(self) {
-                expression_complete::begin_frame(ctx);
-            }
-            agent_chat::toggle_shortcut(self, ctx);
-            // A digit for a construction line's Length box is not a shortcut (#10258).
-            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
-                sketch_construction::claim_typed_length(self, ctx);
-            }
-            if !self.embedded {
-                toolbar::shortcuts(self, ctx);
-            }
-        }
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
