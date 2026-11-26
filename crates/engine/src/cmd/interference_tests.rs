@@ -393,6 +393,27 @@ fn unchecked_overlap_sanity_accepts_bounded_overlap_and_rejects_corrupted_result
     assert!(super::unchecked_overlap_out_of_bounds(&good, (0.0, &box_a), op_b).is_some());
     assert!(super::unchecked_overlap_out_of_bounds(&good, op_a, (-10.0, &box_b)).is_some());
     assert!(super::unchecked_overlap_out_of_bounds(&good, (1_000_000.0, &Aabb3::EMPTY), op_b).is_some());
+
+    // A small operand paired with a huge operand must scale volume, AABB, and centroid slack to
+    // the small operand / overlap box rather than the huge operand's diagonal.
+    let huge_box = bounds([0.0, 0.0, 0.0], [1_000.0, 1_000.0, 1_000.0]);
+    let tiny_box = bounds([500.0, 500.0, 500.0], [501.0, 501.0, 501.0]);
+    let (huge, tiny) = ((1_000_000_000.0, &huge_box), (1.0, &tiny_box));
+    assert_eq!(super::unchecked_overlap_out_of_bounds(&meas(0.5, 4.0, [500.5, 500.5, 500.5], tiny_box), huge, tiny), None);
+    assert_eq!(super::unchecked_overlap_out_of_bounds(&meas(1.0, 6.0, [500.5, 500.5, 500.5], tiny_box), huge, tiny), None);
+    for (label, m) in [
+        ("2 mm³ against 1 mm³ tiny operand", meas(2.0, 6.0, [500.5, 500.5, 500.5], tiny_box)),
+        ("0.5 mm³ inside 0.125 mm³ overlap box", meas(0.5, 1.5, [500.25, 500.25, 500.25], bounds([500.0, 500.0, 500.0], [500.5, 500.5, 500.5]))),
+        ("bbox 0.001 mm outside tiny overlap", meas(0.5, 4.0, [500.5, 500.5, 500.5], bounds([499.999, 500.0, 500.0], [501.0, 501.0, 501.0]))),
+        ("centroid 0.001 mm outside tiny overlap box", meas(0.5, 4.0, [501.001, 500.5, 500.5], tiny_box)),
+    ] {
+        assert!(super::unchecked_overlap_out_of_bounds(&m, huge, tiny).is_some(), "{label} must be rejected");
+    }
+    let far_box = bounds([2_000.0, 0.0, 0.0], [2_001.0, 1.0, 1.0]);
+    assert!(
+        super::unchecked_overlap_out_of_bounds(&meas(0.5, 4.0, [500.5, 500.5, 500.5], tiny_box), huge, (1.0, &far_box)).is_some(),
+        "disjoint operand boxes must be rejected"
+    );
 }
 
 /// When SMLib's `CheckLevel::All` alone refuses a temporary intersection solid (both operands
@@ -544,21 +565,88 @@ fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise(
     assert_eq!(unchecked_calls.get(), 0);
     assert!(matches!(got, super::OverlapOutcome::Empty), "{got:?}");
 
-    // 8. Cancellation stops before invoking unchecked fallback.
+    // 8. Pre-existing cancellation stops before starting any checked or unchecked overlap attempt.
+    let checked_calls = Cell::new(0usize);
     let unchecked_calls = Cell::new(0usize);
+    let measure_calls = Cell::new(0usize);
     let got = super::resolve_overlap_with(super::OverlapOps {
-        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_checked: |_| {
+            checked_calls.set(checked_calls.get() + 1);
+            Err::<Option<f64>, _>(result_only_err())
+        },
         run_unchecked: |_| {
             unchecked_calls.set(unchecked_calls.get() + 1);
             Ok(Some(500.0))
         },
-        measure: |&v: &f64| Ok(sane_measure(v)),
+        measure: |&v: &f64| {
+            measure_calls.set(measure_calls.get() + 1);
+            Ok(sane_measure(v))
+        },
         check_checked_bounds: |_: &MassMeasure| None,
         check_unchecked_bounds: |_: &MassMeasure| None,
         accept_unchecked_volume: |v| v > 0.0,
         is_disjoint: || false,
         is_cancelled: || true,
     });
-    assert_eq!(unchecked_calls.get(), 0);
+    assert_eq!((checked_calls.get(), unchecked_calls.get(), measure_calls.get()), (0, 0, 0));
     assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+
+    // 9. Cancellation occurring during an unchecked overlap stops before measuring that body.
+    let cancelled = Cell::new(false);
+    let unchecked_calls = Cell::new(0usize);
+    let measure_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_unchecked: |_| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            cancelled.set(true);
+            Ok(Some(500.0))
+        },
+        measure: |&v: &f64| {
+            measure_calls.set(measure_calls.get() + 1);
+            Ok(sane_measure(v))
+        },
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v > 0.0,
+        is_disjoint: || false,
+        is_cancelled: || cancelled.get(),
+    });
+    assert_eq!(unchecked_calls.get(), 1);
+    assert_eq!(measure_calls.get(), 0, "must not measure an unchecked overlap after cancellation");
+    assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+}
+
+/// An expired deadline stops `measure_overlap` and `check_pair` from starting new overlap
+/// attempts or measurements.
+#[test]
+fn measure_overlap_stops_when_deadline_expires() {
+    use std::cell::Cell;
+
+    use solidcore_record::Vec3;
+
+    let a = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let b = solidcraft_kernel::box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(15.0, 10.0, 10.0)).unwrap();
+    let expired = web_time::Instant::now();
+    let measure_calls = Cell::new(0usize);
+    let got = super::measure_overlap(
+        &a,
+        &b,
+        |body| {
+            measure_calls.set(measure_calls.get() + 1);
+            solidcraft_kernel::measure_mass(body)
+        },
+        |_| None,
+        |v| v > 0.0,
+        false,
+        || web_time::Instant::now() >= expired,
+    );
+    assert_eq!(measure_calls.get(), 0, "expired deadline must stop before measuring");
+    assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+
+    let names = ("A".to_string(), "B".to_string());
+    let stopped = super::check_pair(&a, &b, &names, a.size(), false, || web_time::Instant::now() >= expired);
+    assert!(matches!(stopped, super::Outcome::Unchecked(_)), "expired deadline must leave pair unchecked");
+    let active = super::check_pair(&a, &b, &names, a.size(), false, || false);
+    assert!(matches!(active, super::Outcome::Hit(h) if (h.volume_mm3 - 500.0).abs() < 1e-6), "active deadline must find the 500 mm³ overlap");
 }

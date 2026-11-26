@@ -225,13 +225,13 @@ fn round_ms(ms: f64) -> f64 {
 }
 
 /// The exact check of one pair: the bodies' intersection, measured.
-fn check(job: &Job) -> Done {
+fn check(job: &Job, should_stop: impl Fn() -> bool) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope, should_stop));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool, should_stop: impl Fn() -> bool) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
     let m = match measure_overlap(
         a,
@@ -240,6 +240,7 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelo
         |m| (m.volume > threshold).then(|| impossible_overlap(m.volume, &m.bbox, a, b)).flatten(),
         |v| v > threshold,
         false,
+        should_stop,
     ) {
         OverlapOutcome::Empty => return Outcome::Clear,
         OverlapOutcome::Unchecked { reason, .. } => return Outcome::Unchecked(reason),
@@ -310,6 +311,9 @@ struct OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBoun
 ///    holds and [`unchecked_overlap_invalid`] certifies its volume, area, bounding box, and
 ///    centroid against both operands. Otherwise returns [`OverlapOutcome::Unchecked`] with the
 ///    primary checked error.
+///
+/// Stops before starting another overlap attempt or measurement when `should_stop` or the active
+/// kernel watch reports cancellation.
 pub(crate) fn measure_overlap(
     a: &Body,
     b: &Body,
@@ -317,6 +321,7 @@ pub(crate) fn measure_overlap(
     check_checked_bounds: impl Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
     accept_unchecked_volume: impl Fn(f64) -> bool,
     check_disjoint: bool,
+    should_stop: impl Fn() -> bool,
 ) -> OverlapOutcome {
     let intersect = |mode, swapped: bool| {
         let (first, second) = if swapped { (b, a) } else { (a, b) };
@@ -330,7 +335,7 @@ pub(crate) fn measure_overlap(
         check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
         accept_unchecked_volume,
         is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
-        is_cancelled: || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()),
+        is_cancelled: || should_stop() || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()),
     })
 }
 
@@ -347,6 +352,9 @@ where
     FDisjoint: Fn() -> bool,
     FCancelled: Fn() -> bool,
 {
+    if (ops.is_cancelled)() {
+        return OverlapOutcome::Unchecked { reason: "cancelled".into(), measure_distance: false };
+    }
     let finish_checked = |body: &T| match (ops.measure)(body) {
         Ok(m) => {
             if let Some(why) = (ops.check_checked_bounds)(&m) {
@@ -385,7 +393,11 @@ where
         if (ops.is_cancelled)() {
             return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
         }
-        if let Ok(Some(body)) = (ops.run_unchecked)(swapped)
+        let unchecked = (ops.run_unchecked)(swapped);
+        if (ops.is_cancelled)() {
+            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        }
+        if let Ok(Some(body)) = unchecked
             && let Ok(m) = (ops.measure)(&body)
             && (ops.accept_unchecked_volume)(m.volume)
             && (ops.check_unchecked_bounds)(&m).is_none()
@@ -393,7 +405,7 @@ where
             return OverlapOutcome::Measured(m);
         }
     }
-    OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: true }
+    OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: !(ops.is_cancelled)() }
 }
 
 /// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
@@ -437,19 +449,30 @@ fn unchecked_overlap_out_of_bounds(m: &solidcraft_kernel::MassMeasure, (va, ba):
     if ba.is_empty() || !ba.min.is_finite() || !ba.max.is_finite() || bb.is_empty() || !bb.min.is_finite() || !bb.max.is_finite() {
         return Some("operand bounding box is empty or non-finite".into());
     }
-    if let Some(why) = overlap_out_of_bounds(m.volume, &m.bbox, (va, ba), (vb, bb)) {
-        return Some(why);
+    // Each bound scales its slack to the measurement it compares rather than the larger operand's
+    // diagonal, so a small body paired with a large one cannot pass a corrupted volume or box.
+    let volume = m.volume;
+    let min_vol = va.min(vb);
+    if volume > min_vol * (1.0 + 1e-6) + 1e-12 {
+        return Some(format!(
+            "not checked: the shared part measured {volume:.3} mm³, more than the smaller body's {min_vol:.3} mm³; the boolean misread this pair"
+        ));
     }
-    let size = ba.diagonal().max(bb.diagonal()).max(1.0);
-    let tol = 1e-6 * size;
+    let inter_box = ba.intersection(bb);
+    let inter_tol = inter_box.diagonal() * 1e-6 + 1e-9;
+    let allowed_box = inter_box.inflated(inter_tol);
+    if inter_box.is_empty() || !allowed_box.contains(m.bbox.min) || !allowed_box.contains(m.bbox.max) {
+        return Some("not checked: the shared part reaches outside where the two bodies' boxes overlap; the boolean misread this pair".into());
+    }
     // A positive-density solid's volume cannot exceed its own bounding box's volume.
     let d = m.bbox.size();
     let box_vol = d.x * d.y * d.z;
-    if !box_vol.is_finite() || m.volume > box_vol * (1.0 + 1e-6) + 1e-9 * size.powi(3) {
-        return Some(format!("not checked: the shared part measured {:.3} mm³, more than its own bounding box's {:.3} mm³", m.volume, box_vol));
+    if !box_vol.is_finite() || volume > box_vol * (1.0 + 1e-6) + 1e-12 {
+        return Some(format!("not checked: the shared part measured {volume:.3} mm³, more than its own bounding box's {box_vol:.3} mm³"));
     }
     // A positive-density solid's centroid always lies inside its own bounding box.
-    if !m.bbox.inflated(tol).contains(m.centroid) {
+    let bbox_tol = m.bbox.diagonal() * 1e-6 + 1e-9;
+    if !m.bbox.inflated(bbox_tol).contains(m.centroid) {
         return Some("not checked: the shared part's centroid lies outside its own bounding box".into());
     }
     None
@@ -511,10 +534,11 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
     for _ in 0..want {
         let (jobs, next, stop, tx) = (jobs.clone(), next.clone(), stop.clone(), tx.clone());
         let spawned = solidcraft_kernel::kernel_thread("solidcraft-interference").spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
+            let should_stop = || stop.load(Ordering::Relaxed) || web_time::Instant::now() >= deadline;
+            while !should_stop() {
                 let k = next.fetch_add(1, Ordering::Relaxed);
                 let Some(job) = jobs.get(k) else { break };
-                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job))).unwrap_or_else(|_| Done {
+                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job, &should_stop))).unwrap_or_else(|_| Done {
                     outcome: Outcome::Unchecked("internal error while checking this pair".into()),
                     ms: 0.0,
                     kernel: KernelTimes::default(),
@@ -559,7 +583,8 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
 
 /// The jobs one after another on this thread, none started past `deadline`.
 fn run_here(jobs: &[Job], deadline: web_time::Instant) -> Vec<Option<Done>> {
-    jobs.iter().map(|job| (web_time::Instant::now() < deadline).then(|| check(job))).collect()
+    let expired = || web_time::Instant::now() >= deadline;
+    jobs.iter().map(|job| (!expired()).then(|| check(job, &expired))).collect()
 }
 
 #[cfg(test)]

@@ -450,6 +450,7 @@ fn measure_pair(
             |m| (m.volume > 0.0).then(|| super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)).flatten(),
             |v| v > 0.0 && v >= min_volume,
             true,
+            || false,
         ) {
             super::interference::OverlapOutcome::Unchecked { reason, measure_distance } => {
                 out.unchecked = Some(reason);
