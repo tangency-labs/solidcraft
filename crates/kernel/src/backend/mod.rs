@@ -16,6 +16,7 @@ mod curves;
 mod develop;
 mod exchange;
 mod frames;
+mod hatch;
 mod hole_stacks;
 mod modelling;
 mod planar;

@@ -28,6 +28,7 @@ pub mod curves;
 pub mod develop;
 pub mod exchange;
 pub mod frames;
+pub mod hatch;
 pub mod hole_stacks;
 pub mod modelling;
 pub mod planar;
@@ -103,6 +104,8 @@ pub enum OpKind {
     HoleStacks,
     /// Planar helpers: sketch arcs, path turns, section corners, paper strokes ([`Planar`]).
     Planar,
+    /// Hatching: line families clipped into marks, pen dots ([`hatch::Hatching`]).
+    Hatch,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
     /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
@@ -136,6 +139,7 @@ impl OpKind {
         OpKind::Query,
         OpKind::HoleStacks,
         OpKind::Planar,
+        OpKind::Hatch,
         OpKind::Frames,
         OpKind::Projection,
         OpKind::Affine,
@@ -164,6 +168,7 @@ impl OpKind {
             OpKind::Query => "query",
             OpKind::HoleStacks => "hole_stacks",
             OpKind::Planar => "planar",
+            OpKind::Hatch => "hatch",
             OpKind::Frames => "frames",
             OpKind::Projection => "projection",
             OpKind::Affine => "affine",

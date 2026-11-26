@@ -25,7 +25,6 @@ pub use solidcore_ops::face_surface;
 pub use solidcore_ops::mesh;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
-pub use solidcore_ops::profile;
 pub use solidcore_ops::round_face;
 pub use solidcore_ops::session;
 pub use solidcore_ops::shaft_spline;
