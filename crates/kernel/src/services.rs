@@ -14,6 +14,7 @@ use crate::body::Body;
 
 pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
+pub use solidcore_ops::ErrorClass;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::cancel;
@@ -21,7 +22,6 @@ pub use solidcore_ops::constraint;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
-pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::mesh;
 pub use solidcore_ops::mid_joint;

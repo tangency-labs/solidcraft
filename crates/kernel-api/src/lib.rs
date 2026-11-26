@@ -28,6 +28,7 @@ pub mod curves;
 pub mod develop;
 pub mod exchange;
 pub mod frames;
+pub mod hole_stacks;
 pub mod modelling;
 pub mod points;
 pub mod projection;
@@ -38,6 +39,7 @@ pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, Curves};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
+pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 pub use points::{Distance, PointSetSummary, Points, PointsRefused};
 pub use projection::{ProjectionRefused, Projections};
@@ -95,6 +97,8 @@ pub enum OpKind {
     Points,
     /// Exact queries of a body's record ([`Queries`]).
     Query,
+    /// Hole stacks through touching bodies ([`HoleStacks`]).
+    HoleStacks,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
     /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
@@ -126,6 +130,7 @@ impl OpKind {
         OpKind::Develop,
         OpKind::Points,
         OpKind::Query,
+        OpKind::HoleStacks,
         OpKind::Frames,
         OpKind::Projection,
         OpKind::Affine,
@@ -152,6 +157,7 @@ impl OpKind {
             OpKind::Develop => "develop",
             OpKind::Points => "points",
             OpKind::Query => "query",
+            OpKind::HoleStacks => "hole_stacks",
             OpKind::Frames => "frames",
             OpKind::Projection => "projection",
             OpKind::Affine => "affine",
