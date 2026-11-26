@@ -86,8 +86,8 @@ pub trait Affine: Backend {
         origin: [f64; 3],
         direction: [f64; 3],
     ) -> Result<([f64; 3], [f64; 3]), AffineRefused>;
-    /// How far `point` stands from `origin` along `direction`, in lengths of `direction`;
-    /// negative behind `origin`.
+    /// The dot product of `point - origin` with `direction`: the distance from `origin` along a
+    /// unit `direction` (a longer one scales it by its length); negative behind `origin`.
     fn distance_along(&self, origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64;
     /// How far the box from `min` to `max` reaches from `origin` along `direction`, `[low,
     /// high]`.

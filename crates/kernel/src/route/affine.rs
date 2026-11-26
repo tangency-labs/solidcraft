@@ -115,8 +115,8 @@ pub fn placed_axis(
     }
 }
 
-/// How far `point` stands from `origin` along `direction`, in lengths of `direction`;
-/// negative behind `origin`.
+/// The dot product of `point - origin` with `direction`: the distance from `origin` along a
+/// unit `direction` (a longer one scales it by its length); negative behind `origin`.
 pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.distance_along(origin, direction, point),
