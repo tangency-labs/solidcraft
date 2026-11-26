@@ -99,6 +99,11 @@ pub struct ToleranceHeal {
     pub collapsed_faces: usize,
     /// Pieces of no length cut out of edge curves.
     pub cut_pieces: usize,
+    /// Edges whose tolerances shrank to their curves' certified gaps to their faces: those of
+    /// [`ToleranceHeal::refitted_edges`], and those whose curves already lay on their faces.
+    pub reseated_edges: usize,
+    /// Edges whose curves were fitted again between their two faces.
+    pub refitted_edges: usize,
     /// The largest certified distance any of those edits moved the part's boundary, mm.
     pub largest_bound: f64,
     /// Failed tests of the check before (the one that decided the heal) and after (SMLib's
@@ -124,6 +129,12 @@ impl ToleranceHeal {
         }
         if self.cut_pieces > 0 {
             done.push(format!("{} curve pieces of no length cut out", self.cut_pieces));
+        }
+        if self.refitted_edges > 0 {
+            done.push(format!("{} edge curves fitted back onto their faces", self.refitted_edges));
+        }
+        if self.reseated_edges > 0 {
+            done.push(format!("{} edge tolerances shrunk to their certified gaps", self.reseated_edges));
         }
         format!(
             "{} (nothing moved more than {:.2e} mm; no tolerance raised); SMLib's check fails {} tests, was {}",
@@ -245,6 +256,8 @@ pub(crate) fn heal_given_check(body: &Body, own: Option<&CheckFailure>) -> Resul
         re_ended_edges: report.re_ended_edges,
         collapsed_faces: report.collapsed_faces,
         cut_pieces: report.cut_pieces,
+        reseated_edges: report.reseated_edges,
+        refitted_edges: report.refitted_edges,
         largest_bound: report.largest_bound,
         failed: [before.failures, check.as_ref().map_or(0, |c| c.failures)],
         face_source: healed.face_source,

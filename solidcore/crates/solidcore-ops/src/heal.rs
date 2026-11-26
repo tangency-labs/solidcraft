@@ -22,6 +22,7 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::heal::reseat::{reseat_edges, Refusal as ReseatRefusal, ReseatReport};
 use solidcore::heal::tolerance_defects::{heal_short_edges_and_slivers, Healed, Refusal};
 use solidcore::topology::brep::p3::{brep_copy_mapped, edit_brep};
 use solidcore::EntityRef;
@@ -65,11 +66,22 @@ pub struct HealReport {
     pub collapsed_faces: usize,
     /// Pieces of no length cut out of edge curves.
     pub cut_pieces: usize,
-    /// The largest certified bound behind a squeeze or a collapse: how far the geometry each
-    /// removed lay from what stands for it now, mm.
+    /// Edges whose tolerances shrank to their curves' certified gaps to their faces
+    /// (`solidcore::heal::reseat`): those of [`HealReport::refitted_edges`], and those whose
+    /// curves already lay on their faces.
+    pub reseated_edges: usize,
+    /// Edges whose curves were fitted again between their two faces.
+    pub refitted_edges: usize,
+    /// Vertices of those edges whose tolerances shrank to their certified gaps.
+    pub shrunk_vertices: usize,
+    /// The largest certified bound behind a squeeze, a collapse, a cut or a re-seat: how far the
+    /// geometry each removed or moved lay from what stands for it now, mm.
     pub largest_bound: f64,
     /// Short edges and sliver faces left as they were, each with why (no proof found).
     pub refused: Vec<String>,
+    /// Edges with a large tolerance left as they were by the re-seat, each with why: most cover
+    /// a real gap between their two surfaces, which no curve closes.
+    pub not_reseated: Vec<String>,
     /// Why the healed copy was not kept, when it was not.
     pub why_not: Option<String>,
 }
@@ -143,7 +155,39 @@ fn refusal_text(r: &Refusal) -> String {
     }
 }
 
-fn summarise(healed: &Healed, report: &mut HealReport) {
+/// The edges [`reseat_edges`] looks at: those whose tolerance is above this many times the
+/// body's.
+const RESEAT_ABOVE: f64 = 10.0;
+
+fn reseat_refusal_text(r: &ReseatRefusal) -> String {
+    match r {
+        ReseatRefusal::NotTwoFaces => "the edge does not join two different faces".into(),
+        ReseatRefusal::NoSurface(_) => "a face of the edge has no surface".into(),
+        ReseatRefusal::NoCurve => "the edge has no curve with a B-spline form".into(),
+        ReseatRefusal::NoFoot(_) => "a point of the edge did not drop onto a face's surface".into(),
+        ReseatRefusal::FarTarget(d) => {
+            format!("a point between the faces lies {d:.3e} mm from the edge, past its tolerance")
+        }
+        ReseatRefusal::NoGain(Some(g)) => {
+            format!("the curve fitted between the faces is only certified within {g:.3e} mm")
+        }
+        ReseatRefusal::NoGain(None) => {
+            "the curve fitted between the faces has no certified gap to them".into()
+        }
+        ReseatRefusal::NotEnclosed => "how far the curve would move could not be bounded".into(),
+        ReseatRefusal::TrimsGrow => {
+            "the trims made from the new curve would grow a tolerance".into()
+        }
+        ReseatRefusal::AlreadyOnFaces => {
+            "the curve already lies on its faces; its stated tolerance is kept".into()
+        }
+    }
+}
+
+fn summarise(healed: &Healed, reseated: &ReseatReport, report: &mut HealReport) {
+    report.reseated_edges = reseated.reseated.len();
+    report.refitted_edges = reseated.reseated.iter().filter(|r| r.samples > 0).count();
+    report.shrunk_vertices = reseated.vertices.len();
     report.squeezed_edges = healed.squeezed.len();
     report.re_ended_edges = healed.squeezed.iter().map(|s| s.re_ended.len()).sum();
     report.collapsed_faces = healed.collapsed.len();
@@ -154,6 +198,7 @@ fn summarise(healed: &Healed, report: &mut HealReport) {
         .map(|s| s.bound)
         .chain(healed.collapsed.iter().map(|(_, d)| *d))
         .chain(healed.cut_pieces.iter().map(|(_, d)| *d))
+        .chain(reseated.reseated.iter().map(|r| r.moved))
         .fold(0.0, f64::max);
     report.refused = healed
         .refused_edges
@@ -165,6 +210,11 @@ fn summarise(healed: &Healed, report: &mut HealReport) {
                 .iter()
                 .map(|(_, r)| format!("sliver face left: {}", refusal_text(r))),
         )
+        .collect();
+    report.not_reseated = reseated
+        .refused
+        .iter()
+        .map(|(_, r)| reseat_refusal_text(r))
         .collect();
 }
 
@@ -192,8 +242,12 @@ pub fn heal_tolerance_defects(
         re_ended_edges: 0,
         collapsed_faces: 0,
         cut_pieces: 0,
+        reseated_edges: 0,
+        refitted_edges: 0,
+        shrunk_vertices: 0,
         largest_bound: 0.0,
         refused: Vec::new(),
+        not_reseated: Vec::new(),
         why_not: None,
     };
     let made = run_on("heal_tolerance_defects", &[("brep", body)], |k| {
@@ -225,7 +279,9 @@ pub fn heal_tolerance_defects(
         };
         let expect = Expect::of(k, &mut a)?;
         let healed = match edit_brep(k, &mut a, |k, b, scope| {
-            heal_short_edges_and_slivers(k, b, scope.env)
+            let healed = heal_short_edges_and_slivers(k, b, scope.env)?;
+            let reseated = reseat_edges(k, b, scope.env, RESEAT_ABOVE)?;
+            Ok((healed, reseated))
         }) {
             Ok(h) => h,
             // a stopped heal is the caller's stop, never "not kept"
@@ -274,8 +330,15 @@ pub fn heal_tolerance_defects(
             return Ok((None, report));
         }
     };
-    summarise(&healed, &mut report);
-    if healed.squeezed.is_empty() && healed.collapsed.is_empty() && healed.cut_pieces.is_empty() {
+    let (healed, reseated) = healed;
+    summarise(&healed, &reseated, &mut report);
+    // A tolerance shrunk alone (an edge already on its faces) does not call for the check: it
+    // rides along with an edit that does. A curve fitted again does.
+    if healed.squeezed.is_empty()
+        && healed.collapsed.is_empty()
+        && healed.cut_pieces.is_empty()
+        && reseated.reseated.iter().all(|r| r.samples == 0)
+    {
         report.why_not = Some("nothing the heal takes could be proved".into());
         return Ok((None, report));
     }

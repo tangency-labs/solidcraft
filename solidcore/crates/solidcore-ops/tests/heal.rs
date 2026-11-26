@@ -1437,3 +1437,115 @@ fn an_edge_whose_gap_is_under_the_check_limit_heals_to_a_tolerance_under_it() {
     let (body, _) = Body::from_record(&box_with_a_bowed_top_edge(bow, TOLS), false).unwrap();
     assert!(failed(&body).contains(&59), "{:?}", failed(&body));
 }
+
+/// A box whose every edge and vertex tolerance is 2.2e-2 (past 1000 times the body's, so the
+/// check fails Test #59 on the edges), its front top edge bowed 1e-2 above the top face
+/// ([`box_with_a_bowed_top_edge`]). The bowed edge's curve is fitted again between its two faces
+/// (#20764): every control point of the new curve lies within 1e-9 mm of the line y = 0, z = 10
+/// (so the whole curve does, by the convex hull), and its tolerance shrinks from 2.2e-2 to at
+/// most 1e-4. How far it moved is bounded: the bow's 1e-2 at its middle, at most twice that.
+/// The eleven straight edges keep their lines, and their tolerances, which the check refuses as
+/// too wide, shrink to their certified gaps; so do the eight vertices: the healed box passes the
+/// check.
+#[test]
+fn an_edge_bowed_off_its_two_faces_is_fitted_back_between_them() {
+    let tols = Tols {
+        body: 1e-5,
+        edge: 2.2e-2,
+        vertex: 2.2e-2,
+    };
+    let rec = box_with_a_bowed_top_edge(1e-2, tols);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
+    assert!(failed(&body).contains(&59), "{:?}", failed(&body));
+    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    assert!(report.kept, "{report:?}");
+    assert_eq!(
+        (report.reseated_edges, report.refitted_edges),
+        (12, 1),
+        "{report:?}"
+    );
+    // the curve moved from its bow onto the line: 1e-2 at its middle, a bound at least that
+    assert!(
+        report.largest_bound >= 1e-2 && report.largest_bound <= 2e-2,
+        "{report:?}"
+    );
+    assert_eq!(report.shrunk_vertices, 8, "{report:?}");
+    let healed = healed.unwrap();
+    assert!(
+        failed(&healed.body).is_empty(),
+        "{:?}",
+        failed(&healed.body)
+    );
+    let after = &healed.record;
+    for v in &after.vertices {
+        assert!(v.tolerance <= 1e-4, "{:?}", v.tolerance);
+    }
+    let mut fitted = 0;
+    for e in &after.edges {
+        assert!(e.tolerance <= 1e-4, "{:?}", e.tolerance);
+        match &e.curve {
+            Curve::Line { .. } => {}
+            Curve::Spline { points, .. } => {
+                fitted += 1;
+                // the box's edge from (0, 0, 10) to (10, 0, 10): y = 0, z = 10
+                for p in points {
+                    assert!(p[1].abs() <= 1e-9 && (p[2] - 10.0).abs() <= 1e-9, "{p:?}");
+                }
+            }
+            c => panic!("an edge became {c:?}"),
+        }
+    }
+    assert_eq!(fitted, 1);
+}
+
+/// A box whose tolerances are small (the edges' and vertices' 5e-5, five times the body's, which
+/// the check takes), its front top edge bowed 1e-4 above the top face
+/// ([`box_with_a_bowed_top_edge`]): the edge's curve lies off its face by more than its
+/// tolerance covers, so the check fails its gap tests. The edge is fitted again between its two
+/// faces (#20764), within its own tolerance: its control points lie within 1e-9 mm of the line
+/// y = 0, z = 10, its tolerance does not grow, no other edge or vertex changes, and the healed
+/// box passes the check.
+#[test]
+fn an_edge_off_its_face_past_a_small_tolerance_is_fitted_back_within_it() {
+    let tols = Tols {
+        body: 1e-5,
+        edge: 5e-5,
+        vertex: 5e-5,
+    };
+    let rec = box_with_a_bowed_top_edge(1e-4, tols);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
+    let before = failed(&body);
+    assert!(before.contains(&4), "{before:?}");
+    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    assert!(report.kept, "{report:?}");
+    assert_eq!(
+        (
+            report.reseated_edges,
+            report.refitted_edges,
+            report.shrunk_vertices
+        ),
+        (1, 1, 0),
+        "{report:?}"
+    );
+    let healed = healed.unwrap();
+    assert!(
+        failed(&healed.body).is_empty(),
+        "{:?}",
+        failed(&healed.body)
+    );
+    let after = &healed.record;
+    for v in &after.vertices {
+        assert_eq!(v.tolerance, tols.vertex);
+    }
+    let mut fitted = 0;
+    for e in &after.edges {
+        assert!(e.tolerance <= tols.edge, "{:?}", e.tolerance);
+        if let Curve::Spline { points, .. } = &e.curve {
+            fitted += 1;
+            for p in points {
+                assert!(p[1].abs() <= 1e-9 && (p[2] - 10.0).abs() <= 1e-9, "{p:?}");
+            }
+        }
+    }
+    assert_eq!(fitted, 1);
+}
