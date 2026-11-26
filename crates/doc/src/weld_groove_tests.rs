@@ -3,15 +3,16 @@
 //! refusal of picks that are not one chain from the toe; the joint's frame on both grooves, the
 //! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
 //! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
-//! parts only read, and a plate not straight along the joint or an outer face that is no plane
-//! refused; the weld filling a Y groove flat (its volume in closed form), a fill the groove cannot
+//! parts only read, and a plate not straight along the joint (naming its wall), an outer face that
+//! is no plane, a right outer face off the arrow side, a round groove whose walls are no cylinders
+//! and faces past the direction search's budget refused; the weld filling a Y groove flat (its volume in closed form), a fill the groove cannot
 //! take refused with the size that builds; parts of different length and a gap that steps along
 //! the joint refused with the stretches that keep one section, each of which builds on its own;
 //! the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a warning, full
 //! penetration). Ported from the second groove PR's first slice (solidcore
 //! `weld::groove::joint`, never pushed) onto ops reads (#18500).
 
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::services::prism::{Contour, extrude_planar_regions};
@@ -150,15 +151,14 @@ fn picks_that_are_not_one_chain_from_the_toe_are_refused() {
 
 // ---- the joint's frame ----
 
-/// Each part's chain and the joint's frame, the outer faces the ones facing +y.
+/// The joint's frame, the outer faces the ones facing +y.
 fn joint(parts: &[(Body, Order); 2], faces: [&[usize]; 2]) -> Result<Plane> {
-    let picks = [pick(&parts[0], faces[0]), pick(&parts[1], faces[1])];
-    let chains = [chain(&picks[0], JointPart::Left)?, chain(&picks[1], JointPart::Right)?];
-    joint_frame([&picks[0], &picks[1]], [&chains[0], &chains[1]])
+    joint_frame([&pick(&parts[0], faces[0]), &pick(&parts[1], faces[1])])
 }
 
-/// The farthest any point of a test's parts lies from its frame's origin, rounded up: 300 mm (the
-/// L-shaped plate's far corner is about 270 mm from its toe; the 40 by 120 plates' about 75 mm).
+/// The farthest any point of a test's parts lies from its frame's origin, rounded up to 300 mm:
+/// the L-shaped plate's far corner (200, -8, 240) is 269.9 mm from its toe's middle (-1, 0, 60);
+/// the 40 by 120 plates' corners are about 75 mm from theirs.
 const REACH: f64 = 300.0;
 
 /// How far each of a frame's unit axes may be off what the test expects, as a vector length: half
@@ -246,7 +246,27 @@ fn a_plate_not_straight_along_the_joint_is_refused() {
     let (lf, rf) = (facing(&left, [c, 0.0, s]), facing(&right, [-1.0, 0.0, 0.0]));
     assert_eq!((lf.len(), rf.len()), (1, 1));
     let got = joint(&[left, right], [&lf, &rf]).unwrap_err();
-    assert!(matches!(got, GrooveRefusal::GrooveFaceNotStraight { .. }), "{got:?}");
+    // no direction runs both walls straight; the wall named is the one that strays from the
+    // first direction tried, the cross product of a wall's normal and the outer faces'
+    let named = [
+        GrooveRefusal::GrooveFaceNotStraight { part: JointPart::Left, face: lf[0] },
+        GrooveRefusal::GrooveFaceNotStraight { part: JointPart::Right, face: rf[0] },
+    ];
+    assert!(named.contains(&got), "{got:?}");
+}
+
+#[test]
+fn a_right_outer_face_off_the_arrow_side_is_refused() {
+    let left = plate(&[(-40.0, 0.0), (-40.0, -6.0), (-1.0, -6.0), (-1.0, 0.0)]);
+    let right = plate(&[(1.0, 0.0), (1.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    // the right plate's bottom as its outer face: it meets the wall, but faces away from the
+    // left plate's top
+    let down = [0.0, -1.0, 0.0];
+    let got = frame_of([pick(&left, &lf), pick_up(&right, &rf, down)]).unwrap_err();
+    assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, down)[0] });
+    let got = groove_weld([&pick(&left, &lf), &pick_up(&right, &rf, down)], &flat()).unwrap_err();
+    assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, down)[0] });
 }
 
 /// The pick of `faces` on `plate`, its outer face the one facing `up`.
@@ -256,8 +276,7 @@ fn pick_up<'a>(plate: &'a (Body, Order), faces: &'a [usize], up: [f64; 3]) -> Gr
 
 /// The joint's frame of two picks.
 fn frame_of(picks: [GroovePick<'_>; 2]) -> Result<Plane> {
-    let chains = [chain(&picks[0], JointPart::Left)?, chain(&picks[1], JointPart::Right)?];
-    joint_frame([&picks[0], &picks[1]], [&chains[0], &chains[1]])
+    joint_frame([&picks[0], &picks[1]])
 }
 
 /// brett19's probe on #22033: the left plate's top runs past its toe (x = -1, z 0..120) on a tab
@@ -332,6 +351,43 @@ fn a_round_groove_runs_along_its_walls_axis() {
     let n = normal(&frame);
     assert!(near(Vec3::new(n[0], n[1], n[2]), [0.0, 0.0, 1.0]), "{frame:?}");
     assert!(within(frame.origin, [-9.0, 0.0, 60.0], points()), "{:?}", frame.origin);
+}
+
+/// brett19 on #22033: the round groove of [`round_groove`] made without the app's fixes on this
+/// thread, so its arcs sweep to extrusions, not cylinders: the only planes are the parallel outer
+/// faces and no face gives an axis, so the joint has no direction.
+#[test]
+fn a_round_groove_whose_walls_are_no_cylinders_has_no_direction() {
+    let without: Vec<&str> = solidcraft_kernel::smlib_trace::fixes().into_iter().filter(|&f| f != "linear_sweep_arc_is_cylinder").collect();
+    session::set_thread_fixes(without).unwrap();
+    let (parts, faces) = round_groove();
+    assert_eq!(joint(&parts, [&faces[0], &faces[1]]).unwrap_err(), GrooveRefusal::DirectionUndetermined);
+}
+
+/// brett19 on #22033: faces past the ops search's budget (#22066's sixty 10 mm plates, their tops
+/// spread round y, each tilted off square to y by 0.9 of what the zone allows) give no proved
+/// direction, and the joint is refused as undecided, not as a face that is not straight.
+#[test]
+fn faces_past_the_direction_search_s_budget_are_undecided() {
+    let zone = sweep::zone_tolerance().unwrap();
+    let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
+    let plates: Vec<((Body, Order), usize)> = (0..60)
+        .map(|k| {
+            let (sin, cos) = (TAU * f64::from(k) / 60.0).sin_cos();
+            let l = (1.0 + alpha * alpha).sqrt();
+            let n = [cos / l, alpha / l, sin / l];
+            let x = [-sin, 0.0, cos];
+            let y = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+            let plane = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(x[0], x[1], x[2]), y: Vec3::new(y[0], y[1], y[2]) };
+            let plate = swept_by(&plane, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], 1.0);
+            let top = facing(&plate, n);
+            assert_eq!(top.len(), 1, "{k}: {top:?}");
+            (plate, top[0])
+        })
+        .collect();
+    let picks: Vec<GroovePick<'_>> = plates.iter().map(|(p, f)| GroovePick { part: &p.0, order: &p.1, faces: &[], outer: *f }).collect();
+    let faces: Vec<(JointPart, &GroovePick<'_>, usize)> = picks.iter().map(|p| (JointPart::Left, p, p.outer)).collect();
+    assert_eq!(direction(&faces).unwrap_err(), GrooveRefusal::DirectionUndecided);
 }
 
 #[test]

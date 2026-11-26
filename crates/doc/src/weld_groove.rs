@@ -29,8 +29,10 @@
 //! #18500, Q56); each one builds on its own ([`groove_weld_over`]). Building them all at once
 //! comes later. [`joint_frame`] reads one chain over the whole joint, so a groove face split
 //! along the joint into faces side by side is refused there ([`GrooveRefusal::ArrowFaceNotAtToe`]);
-//! [`groove_weld`] reads the chain piece by piece (brett19's point 7 on #22033). Faces that lie
-//! on one surface are read as separate faces.
+//! [`groove_weld`] reads the chain piece by piece (brett19's point 7 on #22033). An outer face
+//! split along the joint into faces side by side is not covered: one outer face is picked, so
+//! the toe is read only where that face meets the groove. Faces that lie on one surface are read
+//! as separate faces.
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
@@ -71,9 +73,16 @@ pub enum GrooveRefusal {
     /// A part's outer face `face` is not a plane.
     #[error("the {part:?} part's outer face {face} is not a plane")]
     OuterFaceNotPlane { part: JointPart, face: usize },
+    /// The right part's outer face `face` is not on the arrow side the left one's sets: it faces
+    /// away from the left outer face, or runs from its toe back over the groove.
+    #[error("the {part:?} part's outer face {face} is not on the arrow side of the joint")]
+    OuterFaceWrongSide { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) strays across the joint's direction
     /// by more than the zone tolerance ([`Body::face_straying`]): it does not run straight along
-    /// the joint.
+    /// the joint. From the direction search, no direction runs every face straight, and the face
+    /// named is the first, in the order the faces are read (the left part's, then the right one's,
+    /// each part's outer face last), that strays from the first direction tried. [`groove_weld`]
+    /// also names a groove face with no length along the joint.
     #[error("face {face} of the {part:?} part is not straight along the joint")]
     GrooveFaceNotStraight { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) is a surface whose straightness
@@ -124,8 +133,7 @@ pub struct GroovePick<'a> {
     pub outer: usize,
 }
 
-/// A part's groove faces in order from the toe. Only [`chain`] makes one, so [`joint_frame`] can
-/// trust it.
+/// A part's groove faces in order from the toe. Only [`chain`] makes one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chain {
     /// The groove faces (record indices), the one beside the outer face first, each next one
@@ -216,53 +224,48 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
     Ok(faces)
 }
 
-/// The joint's frame, from both picks and their chains: a plane whose normal is the joint's
-/// direction `d`, along which every groove and outer face of both parts runs straight.
+/// The joint's frame, from both picks: a plane whose normal is the joint's direction `d`, along
+/// which every groove and outer face of both parts runs straight. Each pick's groove faces are
+/// read as one chain from the toe first ([`chain`]).
 ///
-/// `d` is the direction those faces are proved straight along ([`straight_direction`], ops): the
-/// cross product of the two plane normals furthest from parallel when two are proved apart, else
-/// a cylinder's axis (a round groove between coplanar plates), each face then proved straight
-/// along it within the zone tolerance. Which faces give it depends on their normals only, so the
-/// order of the picks and of the parts changes nothing but `d`'s sign.
+/// `d` is the direction those faces are proved straight along ([`straight_direction`], ops), the
+/// first of these that proves every face straight within the zone tolerance: the cross product of
+/// the two plane normals furthest from parallel when two are proved apart; else a direction inside
+/// every plane's and cylinder's band (how far `d` may lean for the face to stay within the zone);
+/// else a cylinder's axis (a round groove between coplanar plates). Which faces give it depends on
+/// their normals only, so the order of the picks and of the parts changes nothing but `d`'s sign.
 ///
 /// The frame (brett19 on #18500): `y` is the left outer face's outward normal with its part along
 /// `d` taken out, `x = y × d` ([`affine::frame_axes`], an exact cross product), and `d` takes the
 /// sign that makes `x` point out of the left part at its toe: against the direction into the left
 /// outer face from its toe edge ([`Body::edge_inward`], read from the face's loop, so an outer face
 /// that is not convex is read as a convex one is). Swapping the parts reverses `d`. The origin is
-/// the middle of the left toe's first edge.
+/// the middle of the left toe's first edge. The right outer face must lie on the same side: facing
+/// within a right angle of `y`, and running from its toe away from the left part.
 ///
 /// # Errors
-/// [`GrooveRefusal::OuterFaceNotPlane`]; [`GrooveRefusal::ArrowFaceNotAtToe`] for a chain with no
-/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
-/// [`GrooveRefusal::GrooveFaceNotStraight`];
-/// [`GrooveRefusal::GrooveFaceNotProved`]; [`GrooveRefusal::Invalid`] for a chain with no face.
-/// The errors of the ops calls otherwise.
-pub fn joint_frame(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<Plane> {
-    Ok(frame_along(picks, chains)?.0)
-}
-
-/// [`joint_frame`] and the joint's direction, the plane's normal (`x × y`).
-fn frame_along(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<(Plane, [f64; 3])> {
+/// The errors of [`chain`] for either pick; [`GrooveRefusal::OuterFaceNotPlane`];
+/// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
+/// [`GrooveRefusal::GrooveFaceNotStraight`]; [`GrooveRefusal::GrooveFaceNotProved`];
+/// [`GrooveRefusal::OuterFaceWrongSide`]. The errors of the ops calls otherwise.
+pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
     let parts = [JointPart::Left, JointPart::Right];
+    let chains = [chain(picks[0], parts[0])?, chain(picks[1], parts[1])?];
     let outer = [outer_normal(picks[0], parts[0])?, outer_normal(picks[1], parts[1])?];
     // every face of the joint: left part first, groove faces from the toe, then the outer face
     let mut faces: Vec<(JointPart, &GroovePick<'_>, usize)> = Vec::new();
-    for ((pick, chain), part) in picks.into_iter().zip(chains).zip(parts) {
-        if chain.faces.is_empty() {
-            return Err(GrooveRefusal::Invalid("a chain with no groove face"));
-        }
-        if chain.toe.is_empty() {
-            return Err(GrooveRefusal::ArrowFaceNotAtToe { part, face: pick.outer });
-        }
+    for ((pick, chain), part) in picks.into_iter().zip(&chains).zip(parts) {
         faces.extend(chain.faces.iter().chain([&pick.outer]).map(|&f| (part, pick, f)));
     }
     let d = direction(&faces)?;
-    let [left, _] = picks;
-    let Some(&toe) = chains[0].toe.first() else {
-        return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: left.outer });
+    let [left, right] = picks;
+    // chain() gives a toe edge on every chain it makes
+    let (Some(&toe), Some(&right_toe)) = (chains[0].toe.first(), chains[1].toe.first()) else {
+        return Err(GrooveRefusal::Invalid("a chain with no toe edge"));
     };
-    signed_frame(left, toe, d, outer[0])
+    let (frame, _) = signed_frame(left, toe, d, outer[0])?;
+    same_side(right, right_toe, &frame, outer[1])?;
+    Ok(frame)
 }
 
 /// The outward normal of `pick`'s outer face.
@@ -323,6 +326,19 @@ fn signed_frame(left: &GroovePick<'_>, toe: usize, d: [f64; 3], outer: [f64; 3])
     Ok((Plane { origin: v(toe), x: v(x), y: v(y) }, d))
 }
 
+/// Whether the right part's outer face, of outward normal `outer`, lies on the arrow side the
+/// left one sets in `frame`: facing within a right angle of its `y`, and running from the toe edge
+/// `toe` along its `x`, away from the left part ([`Body::edge_inward`]).
+///
+/// # Errors
+/// [`GrooveRefusal::OuterFaceWrongSide`]; the errors of the ops calls.
+fn same_side(right: &GroovePick<'_>, toe: usize, frame: &Plane, outer: [f64; 3]) -> Result<()> {
+    let inward = right.part.edge_inward(right.order, toe, right.outer)?;
+    let faces_up = affine::distance_along([0.0; 3], point(frame.y), outer) > 0.0;
+    let runs_away = affine::distance_along([0.0; 3], point(frame.x), inward) > 0.0;
+    if faces_up && runs_away { Ok(()) } else { Err(GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: right.outer }) }
+}
+
 /// A groove weld: its body and what built it.
 #[derive(Debug)]
 pub struct GrooveWeld {
@@ -365,7 +381,8 @@ pub struct Stretch {
 /// [`GrooveRefusal::SectionChanges`] with the stretches that keep one section, for a joint that
 /// is not one stretch ([`groove_weld_over`] builds one of them); [`GrooveRefusal::Invalid`],
 /// [`GrooveRefusal::TJoint`], [`GrooveRefusal::OuterFaceNotPlane`];
-/// [`GrooveRefusal::ArrowFaceNotAtToe`] when no left groove face meets the left outer face;
+/// [`GrooveRefusal::ArrowFaceNotAtToe`] when no groove face of a part meets its outer face;
+/// [`GrooveRefusal::OuterFaceWrongSide`];
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
 /// [`GrooveRefusal::GrooveFaceNotProved`];
@@ -433,6 +450,11 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
         return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: left.outer });
     };
     let (frame, d) = signed_frame(left, toe, d, outer[0])?;
+    let right = picks[1];
+    let Some(right_toe) = toe_edge(right, &faces[1])? else {
+        return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Right, face: right.outer });
+    };
+    same_side(right, right_toe, &frame, outer[1])?;
     let o = point(frame.origin);
 
     // each groove face's span along the joint, from its edges across it
