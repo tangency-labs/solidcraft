@@ -65,6 +65,8 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
+pub mod weld_symbol;
 
 pub use error::EntityRef;
 pub use error::Result;

@@ -202,6 +202,7 @@ mod tests {
             dpi: 96.0,
             middle: Some((40.0, 25.0)),
             align: Align::Middle,
+            simplify: 0.0,
         }
     }
 

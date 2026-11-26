@@ -16,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
-    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
-    LengthExpr, NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3,
-    ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
+    AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -420,10 +420,13 @@ pub struct ConeParams {
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
     /// The direction `height` is measured along: from the base towards the top when `height` is
-    /// positive. Default: Z.
+    /// positive. X, Y, Z or `[x, y, z]`, each a number or an expression with no unit
+    /// (`["0", "-sin(t)", "-cos(t)"]`), which the cone follows as the parameters change. A
+    /// parameter added as a plain number is a length: divide it by its unit (`"n / 1 mm"`).
+    /// Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// How the cone combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,
@@ -871,10 +874,15 @@ pub struct MirrorParams {
     /// The features to mirror, by name. Read when `bodies` lists none.
     #[serde(default)]
     pub features: Option<NameList>,
-    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
-    /// where that instance is.
+    /// The bodies to mirror, by name as the viewport shows them (or explicitly qualified as
+    /// `NAME (Occ:1)`): a further instance's copy goes where that instance is.
     #[serde(default)]
     pub bodies: Option<NameList>,
+    /// Optional per-body occurrence paths from the root (`[]` for a root body), one per entry in
+    /// `bodies`, matching the stored feature definition (`timeline.inspect` / `timeline.edit`).
+    /// Omit to resolve placements from `bodies` names.
+    #[serde(default)]
+    pub placements: Option<Vec<Vec<u64>>>,
     /// The plane to mirror across. The mirror follows a construction plane, and an explicit
     /// plane's origin given as length expressions.
     pub plane: PlaneParam,
@@ -1133,6 +1141,11 @@ pub struct PatternCircularParams {
     #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1354,6 +1367,11 @@ pub struct PatternRectangularParams {
     /// As `copy_at_end1`, along the second direction.
     #[serde(default, deserialize_with = "copy_at_end2")]
     pub copy_at_end2: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -577,6 +577,36 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// Three pins r 0.5, 2 high, on the top of the 30 x 20 x 10 block, shelled closed with a wall
+/// of their radius (solidcore#3353, acid-8 stage 5's seven bosses): each pin's side collapses
+/// onto its axis, so all three come off together, what is left is shelled once (two shells in
+/// all, counted) and the pins are joined back on, solid.
+///
+/// Closed form: 6000 + 3 pi 0.5^2 2 - (30 - 1)(20 - 1)(10 - 1).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn pins_as_thin_as_the_wall_come_off_together_and_stay_solid() {
+    all_fixes();
+    let mut b = block();
+    for x in [8.0, 15.0, 22.0] {
+        let pin = make_cylinder([x, 10.0, 10.0], 0.5, 2.0).unwrap();
+        b = crate::boolean::boolean(b, pin, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let (r, shells) = session::counted(solidcore::kernel::WorkCounters::shells, || {
+        shell(&b, &order(&b), &[], -0.5)
+    });
+    r.unwrap();
+    // the first shell, refused for the pins, and one of the block with all three off (one
+    // at a time it was one more for each pin)
+    assert_eq!(shells, 2);
+    let want = ABC + 3.0 * PI * 0.25 * 2.0 - 29.0 * 19.0 * 9.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// The stress corpus's cut spheres and tori with a thin feature (S6226, S2226): a pin r 2,
 /// 10 high, on the cut ball's cap, shelled closed with a 3 wall. The cap is the cutting box's
 /// bottom, so its surface normal points into the ball, and only its other face use faces out
@@ -3126,6 +3156,67 @@ mod drafts {
             ([-430.0, -180.0, 2300.0], crate::PointClass::Outside),
             ([-430.0, 0.0, 2300.0], crate::PointClass::Outside),
             ([-430.0, 180.0, 2300.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// A frustum r 100 at z = 0 to r 40 at z = 200 (its side leaning atan 0.3, 16.70 degrees,
+    /// inward) with six blind holes r 5, from z = 150 up through the top, their centres on the
+    /// circle r 32 (each reaching out to r 37). Its side drafted to lean 18 degrees, about its
+    /// base, is r(z) = 100 - z tan 18 degrees, which passes r 37 at z0 = 193.89 and is r 35.02
+    /// at the top: every hole breaks out through the drafted side near the top, its wall and
+    /// the cone's passing through each other between the two points where the hole's rim
+    /// crosses the top's new rim. The body is the frustum less the holes: pi int r^2 less
+    /// 6 int lens(r(z), 5, 32) over z 150 to 200, the lens the discs' closed-form overlap,
+    /// 25 pi below z0. The lens integral above z0, after z = z0 + s^2 (which makes it
+    /// analytic), by Gauss-Legendre: 20, 40 and 80 nodes agree to every digit printed,
+    /// 3061182.2920648409. (At this size the drafted cone's stored top height, recovered from
+    /// its net, is 200 plus a rounding, though its top row lies in the top's plane.)
+    #[test]
+    fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+        /// 18 degrees less atan 0.3, radians: the turn that leaves the side at 18 degrees.
+        const TURN: f64 = 0.022_702_470_881_112_213;
+        /// The drafted frustum less the six holes (the quadrature above).
+        const DRAFTED: f64 = 3_061_182.292_064_841;
+        /// sqrt 3, the double nearest it (ops computes no geometry, its tests included).
+        const SQRT_3: f64 = 1.732_050_807_568_877_2;
+        all_fixes();
+        let mut b = make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+        let s = SQRT_3;
+        for (x, y) in [
+            (32.0, 0.0),
+            (16.0, 16.0 * s),
+            (-16.0, 16.0 * s),
+            (-32.0, 0.0),
+            (-16.0, -16.0 * s),
+            (16.0, -16.0 * s),
+        ] {
+            let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let side = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[side], [0.0; 3], Z, Z, TURN).unwrap();
+        let got = volume(&b);
+        assert!(rel(got, DRAFTED) < 1e-9, "{got} vs {DRAFTED}");
+        // r(190) = 38.27 and the old side's r(190) = 43: (40 cos 30, 40 sin 30, 190), between
+        // two holes, is cut away; r 30 there stays; the hole's centre line and its outer reach
+        // past the new side near the top are void.
+        for (point, wanted) in [
+            ([20.0 * s, 20.0, 190.0], crate::PointClass::Outside),
+            ([15.0 * s, 15.0, 195.0], crate::PointClass::Inside),
+            ([32.0, 0.0, 170.0], crate::PointClass::Outside),
+            ([36.0, 0.0, 199.5], crate::PointClass::Outside),
+            ([30.0, 0.0, 100.0], crate::PointClass::Inside),
         ] {
             assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
         }

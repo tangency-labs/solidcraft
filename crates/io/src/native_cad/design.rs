@@ -468,7 +468,7 @@ impl Builder {
             },
             Some("cone") if whole("angle", TAU) => FeatureKind::Cone {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius1")?),
                 top_radius: mm(len("radius2")?),
                 height: mm(len("height")?),
@@ -566,6 +566,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             Some("circular") => {
@@ -593,6 +594,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
