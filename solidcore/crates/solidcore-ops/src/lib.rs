@@ -27,7 +27,7 @@
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
 //! [`cell_grid`] (the cells of a grid over a profile), [`profile`] (line families clipped to a
-//! region).
+//! region), [`shaft_spline`] (the outlines of a splined shaft and its hub from plain numbers).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -95,8 +95,10 @@ pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod round_face;
 pub mod section_corners;
 pub mod session;
+pub mod shaft_spline;
 pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;

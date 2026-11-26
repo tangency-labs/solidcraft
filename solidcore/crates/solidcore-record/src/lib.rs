@@ -37,6 +37,8 @@ pub mod plane;
 #[allow(missing_docs)]
 pub mod profile;
 pub mod projection;
+pub mod round_face;
+pub mod shaft_spline;
 pub mod step;
 pub mod vec;
 
