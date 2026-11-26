@@ -1,6 +1,6 @@
 //! meshbake FILE.nb [--mode display|export] [--no-dev] : mesh one body with SolidCraft's mesher (`Body::mesh_plan`) and
-//! solidcore-tess's (`solidcore_tess::plan`), grade each, print JSON lines. `MB_ONLY=solidcraft|solidcore-tess` runs one.
-use solidcore_ops::face_surface::FaceSurface;
+//! solidcore-tess's (`solidcraft_kernel::services::tess::plan`), grade each, print JSON lines. `MB_ONLY=solidcraft|solidcore-tess` runs one.
+use solidcraft_kernel::services::face_surface::FaceSurface;
 use solidcore_record::brep::Brep;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -261,10 +261,10 @@ fn main() {
     let size = body.size();
     let (sc_tol, core_tol, chord) = if mode == "display" {
         let t = solidcraft_kernel::MeshTolerance::display_of(size);
-        (t, solidcore_tess::MeshTolerance::display_of(size), t.chord)
+        (t, solidcraft_kernel::services::tess::MeshTolerance::display_of(size), t.chord)
     } else {
         let t = solidcraft_kernel::MeshTolerance::export_of(size);
-        (t, solidcore_tess::MeshTolerance::export_of(size), t.chord)
+        (t, solidcraft_kernel::services::tess::MeshTolerance::export_of(size), t.chord)
     };
     let _ = bbox_diag(&rec);
     let head = serde_json::json!({"body": name, "mode": mode, "size": size, "chord": chord, "faces": rec.faces.len(), "angle_deg": sc_tol.angle.map(|a| a.to_degrees())});
@@ -294,7 +294,7 @@ fn main() {
                     let un = b.unmeshed_faces();
                     Ok((M { pos: mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect(), tris: mesh.triangles.clone(), tri_face: mesh.tri_face.clone() }, un))
                 } else {
-                    let (plan, stats) = solidcore_tess::plan(&rec, &core_tol, size).map_err(|e| e.to_string())?;
+                    let (plan, stats) = solidcraft_kernel::services::tess::plan(&rec, &core_tol, size).map_err(|e| e.to_string())?;
                     let (mesh, refused) = plan.evaluate();
                     let un = stats.unmeshed.len() + refused.len();
                     Ok((M { pos: mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect(), tris: mesh.triangles.clone(), tri_face: mesh.tri_face.clone() }, un))

@@ -105,8 +105,8 @@ use crate::boolean::merge::p1::{self, MergeOptions, MergeState, VertexCopy};
 use crate::boolean::topology_intersector::p1::{IntersectorBrep, Relations, TopologyIntersector};
 use crate::boolean::topology_intersector::p2::IntersectorBrepP2;
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::boolean::BooleanStage;
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -458,8 +458,7 @@ pub fn merge_edge_with(
         }
 
         // Get or make matching Brep vertices
-        let mut mates = [None, None];
-        for (slot, v) in mates.iter_mut().zip([v, v2]) {
+        let mut related = |v: Option<VertexId>| -> Result<VertexId> {
             let mut mate = v.and_then(|v| relations.vertices.primary(v));
             if mate.is_none() {
                 mate = p1::merge_vertex(
@@ -472,21 +471,18 @@ pub fn merge_edge_with(
                     ctx.context(),
                 )?;
             }
-            *slot = Some(mate.ok_or_else(|| {
-                SolidError::boolean_entity_missing(
+            // `merge_vertex` makes or finds a mate for every vertex it is given
+            mate.ok_or_else(|| {
+                SolidError::boolean_null_defect(
                     OP_EDGE,
-                    BooleanStage::Relate,
-                    "a vertex related to the edge's end",
+                    BooleanStage::Merge,
+                    "the other B-rep's edge has no vertex at an end, though the kernel gives \
+                     every edge a vertex at each end",
                 )
-            })?);
-        }
-        let [Some(bv), Some(bv2)] = mates else {
-            return Err(SolidError::boolean_entity_missing(
-                OP_EDGE,
-                BooleanStage::Relate,
-                "a vertex related to the edge's end",
-            ));
+            })
         };
+        let bv = related(v)?;
+        let bv2 = related(v2)?;
 
         // make the new Brep wire edge
         let brep_edge =
@@ -587,10 +583,11 @@ fn orientation_to_find(
         }
     } else {
         let vb_rel = relations.vertices.primary(v).ok_or_else(|| {
-            SolidError::boolean_entity_missing(
+            SolidError::boolean_null_defect(
                 OP_FACEUSE,
-                BooleanStage::Relate,
-                "a vertex related to the edge's vertex",
+                BooleanStage::Merge,
+                "the other edge use's vertex has no related primary vertex, though the edge \
+                 was merged first, which relates both its ends",
             )
         })?;
         if vb == vb_rel {
@@ -598,10 +595,12 @@ fn orientation_to_find(
         } else if vb2 == Some(vb_rel) {
             Ok(reverse_orientation(eu::orientation(brep, prim)?))
         } else {
-            Err(SolidError::boolean_stage_failed(
+            Err(SolidError::boolean_defect(
                 OP_FACEUSE,
-                BooleanStage::Relate,
-                "the related vertex is not an end of the edge use",
+                BooleanStage::Merge,
+                "the vertex related to the other edge use's vertex is not an end of the \
+                 primary edge, though that edge was made or related between the vertices \
+                 related to the other edge's ends",
             ))
         }
     }
@@ -780,12 +779,8 @@ pub fn make_faceuse_attempt_with(
         )?,
     };
     // error - unable to classify input OtherBrep faceuse into a Brep region
-    let region = region.ok_or_else(|| {
-        SolidError::stage_failed(
-            OP_FACEUSE,
-            "the face use of the other B-rep lies in no region of the primary B-rep",
-        )
-    })?;
+    let region =
+        region.ok_or_else(|| SolidError::boolean(OP_FACEUSE, BooleanFailure::FaceInNoRegion))?;
 
     // Now merge all unrelated input face->vertices into Brep's Region as shell
     // vertices, and pick up the radial sector edge uses.
@@ -822,15 +817,10 @@ pub fn make_faceuse_attempt_with(
                 ctx.context(),
             )?;
 
-            // load VertexLoopuses into sLoopVertices
-            if kk == 0 && vertex_loop {
-                loop_vertices.push(brep_vertex.ok_or_else(|| {
-                    SolidError::boolean_entity_missing(
-                        OP_FACEUSE,
-                        BooleanStage::Relate,
-                        "a vertex related to the loop's vertex",
-                    )
-                })?);
+            // load VertexLoopuses into sLoopVertices (`merge_vertex` of a vertex always
+            // gives its mate)
+            if let (0, true, Some(brep_vertex)) = (kk, vertex_loop, brep_vertex) {
+                loop_vertices.push(brep_vertex);
             }
         }
 
@@ -873,22 +863,23 @@ pub fn make_faceuse_attempt_with(
                 orient,
                 None,
             ) {
-                Ok(sector) => sector.radial_edgeuse,
+                Ok(sector) => sector.radial_edgeuse.ok_or_else(|| {
+                    SolidError::boolean(OP_FACEUSE, BooleanFailure::NoRadialEdgeUse)
+                }),
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
-                Err(_) => None,
+                // the failed search is the cause
+                Err(e) => Err(Failure::new(OP_FACEUSE, BooleanFailure::NoRadialEdgeUse)
+                    .caused_by(e)
+                    .into_error()),
             };
             // add the classified radial sector's Edgeuse to the sFaceEdgeuses list
-            face_edgeuses.push(found.ok_or_else(|| {
-                SolidError::stage_failed(
-                    OP_FACEUSE,
-                    "no radial edge use classifies the face's edge use",
-                )
-            })?);
+            face_edgeuses.push(found?);
         }
     }
 
@@ -1012,6 +1003,16 @@ pub fn make_faceuse_attempt_with(
     })
 }
 
+/// Not upstream (WR-450, #18923): the bisection pieces the same-parameter bound of a carried
+/// trim may take ([`copy_uv_trim_curves_of_other_face`]): the bisection's own cap
+/// ([`MAX_PIECES`](crate::query::curve_surface_gap::MAX_PIECES)), passed as a budget so that
+/// the bisection stops as soon as the enclosure of an evaluated point is past the edge's
+/// tolerance (then the bound cannot be within it: a trim that slips is turned away at once,
+/// not after the whole bisection on a dense net). Pieces left open when the cap is reached
+/// leave the gap unenclosed, so the trim is turned away, where without a budget they would
+/// be bounded as they stand.
+const CARRY_PIECES: usize = crate::query::curve_surface_gap::MAX_PIECES;
+
 /// Not upstream (tangency-labs/solidcore#488, the fork's
 /// `sm_CopyUVTrimCurvesOfOtherFace`; WR-361): gives the
 /// edge uses of `new_face`, just made in `brep` from the other operand's face use
@@ -1047,9 +1048,11 @@ fn copy_uv_trim_curves_of_other_face(
 ) -> Result<()> {
     let (fu1, fu2) = crate::topology::face::p2::faceuses(brep, new_face)?;
     let (Some(fu1), Some(fu2)) = (fu1, fu2) else {
-        return Err(SolidError::entity_missing(
+        return Err(SolidError::boolean_null_defect(
             OP_FACEUSE,
-            "a pair of face uses on the new face",
+            BooleanStage::Merge,
+            "the face just made has not both of its face uses, though the kernel makes every \
+             face with a pair",
         ));
     };
     let orientation = other.faceuse(other_fu)?.orientation;
@@ -1068,9 +1071,11 @@ fn copy_uv_trim_curves_of_other_face(
     let other_uses = eu::faceuse_edgeuses(other, other_fu, false, None)?;
     let new_uses = eu::faceuse_edgeuses(brep, new_fu, false, None)?;
     if other_uses.len() != new_uses.len() {
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP_FACEUSE,
-            "the new face and the other face have different numbers of edge uses",
+            BooleanStage::Merge,
+            "the face made as a copy of the other face has another number of edge uses, \
+             though it was made from one primary edge use for each of the other face's",
         ));
     }
     for (other_eu, new_eu) in other_uses.into_iter().zip(new_uses) {
@@ -1161,6 +1166,46 @@ fn copy_uv_trim_curves_of_other_face(
         // tolerance 2.6 times what the trims need)
         if plane && matches!(new_curve.kind(), CurveKind::Line(_)) {
             continue;
+        }
+        // Not upstream (WR-450, #18923): on the other operand's own edge, which MergeEdge
+        // copied, the trim stands for MakeFace's, which is dropped from the edge's curve at
+        // the edge's own parameters, and every reader pairs it with the edge's other trims at
+        // one edge parameter (a volume enclosure's strips, a vertex's sectors). Nothing proves
+        // the other operand's trim does: an edge's tolerance covers its trims' distance from
+        // it as curves, not how far their parameters slip along it, and the other operand's
+        // trims come from its own operations (fillet1019's corner round extended for a
+        // defeature, kept as its B-spline: a trim within 4.2e-4 of its edge, tolerance
+        // 4.3e-4, but 5.9e-3 from it at equal parameters, which held the volume enclosure's
+        // strips there 5.9e-3 wide). So where the pair's exact data bound it, it is carried
+        // only where its same-parameter gap is proved within the new edge's tolerance
+        // (`trim_same_parameter_deviation_bound`, enclosed over the whole interval: no sample
+        // decides it); elsewhere the edge keeps MakeFace's trim. An edge MergeEdge did not
+        // copy (one the intersection made or related, carried above only on a free-form
+        // surface or at a singular end) is not gated, and its carry stays unproved: the
+        // intersector fitted the edge's curve from that trace at the trace's own parameters,
+        // so the trace is the curve's source rather than a stand-in for it (solidcraft#2992's
+        // traces lie up to 1.07e-5 from their edges at equal parameters, at the fit's
+        // tolerance 1e-5, and MakeFace's re-fit of them is the cusped trim the carry is there
+        // to avoid)
+        if relations.copied_edges.contains(&new_edge) {
+            let tol = new_record.tolerance;
+            let gap = crate::topology::edgeuse::p3::trim_same_parameter_deviation_bound(
+                k,
+                &*brep,
+                new_eu,
+                trim,
+                tol,
+                [tol, tol],
+                Some(CARRY_PIECES),
+            )?;
+            // (`None` is a pair with no exact data to bound it from (a UV line, whose
+            // rounding moves its parameters; a surface without an exact net; a curve on a
+            // surface): it is carried as before, unproved either way. A pair with exact data
+            // is carried only on a bound within the tolerance: one not enclosed is
+            // `Some(INFINITY)`, and a NaN bound proves nothing)
+            if gap.is_some_and(|g| g.is_nan() || g > tol) {
+                continue;
+            }
         }
         let copy = trim.copy(k)?;
         // TRUE = delete a trim MakeFace made for sectoring

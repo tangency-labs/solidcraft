@@ -61,7 +61,8 @@
 //!   silently short file.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, AttributeHandle, AttributeStore, Behavior, ObjectKey};
 use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::Vec3;
@@ -82,7 +83,7 @@ use crate::topology::database_io::{DatabaseWriter, FileType};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::geometry_write::{write_curve, write_surface};
 use crate::topology::topology::Topology;
-use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId};
+use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -603,7 +604,7 @@ pub fn write_curve_to_db(
             l.base_with_nurb()?.write_to_db(db, version)?;
         } else {
             let b = bspline_curve_part(curve).ok_or_else(|| {
-                SolidError::topology_missing(OP_CURVE, "the curve's B-spline part")
+                SolidError::topology(OP_CURVE, TopologyFailure::CurveNotBSpline { entity: None })
             })?;
             b.write_to_db(db, version)?;
         }
@@ -652,13 +653,19 @@ pub fn write_surface_to_db(
             .extended_base_surface()
             .unwrap_or_else(|| off.base_surface());
         let b = bspline_surface_part(base)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the offset surface's B-spline base")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     } else {
         db.write_type(B_SPLINE_SURFACE_TYPE, None);
         let b = bspline_surface_part(surface)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the surface's B-spline part")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     }
@@ -1152,10 +1159,18 @@ impl BrepData {
 fn make_uv_curve_2d(c: &mut Curve) -> Result<()> {
     let b = bspline_curve_part_mut(c)
         .ok_or_else(|| SolidError::invalid_input(OP_UV, "UV curve is not a B-spline curve"))?;
-    let cur = b
-        .nurb
-        .as_mut()
-        .ok_or_else(|| SolidError::topology_missing(OP_UV, "the UV curve's NURBS data"))?;
+    let cur = b.nurb.as_mut().ok_or_else(|| {
+        Failure::new(
+            OP_UV,
+            TopologyFailure::Defect {
+                why: "the UV curve's B-spline part has no NURB built yet (a line made from two \
+                      points has none), and this conversion reads a built one without building \
+                      it, where the curve write builds a line's",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let cpts = cur.cpts_mut();
     let first_z = cpts.first().map_or(NOZ, |p| p.z);
     if first_z != NOZ && cpts.iter().all(|p| p.z == 0.0) {
@@ -1203,13 +1218,147 @@ pub fn write_brep_to_file(
 ) -> Result<Vec<u8>> {
     // (the attribute pointers FromBrep collects; the file is written without them)
     let mut attributes = Vec::new();
-    let mut data = BrepData::from_brep(b, env, &mut attributes)?;
+    let mut data = BrepData::from_brep(k, b, env, &mut attributes)?;
     data.write_to_file_with_nurbs(k, file_type)
 }
 
-/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`].
-fn null() -> SolidError {
-    SolidError::topology_missing(OP_FROM, "a link of the B-rep's topology")
+/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`] at a link the B-rep's edits always set
+/// (`why` names the link and the edit that sets it).
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP_FROM, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+const NO_SECOND_LOOPUSE: &str =
+    "a face loop has no second loop use, though making a loop makes its two loop uses together";
+const NO_LOOPUSE_FACEUSE: &str =
+    "a face loop's loop use has no face use, though a loop use is made on its face use";
+const NO_EDGEUSE_NEXT: &str =
+    "an edge use has no successor, though linking an edge use into its loop or wire sets it";
+const NO_EDGEUSE_MATE: &str =
+    "an edge use has no mate, though making an edge use makes its mate with it";
+const NO_EDGEUSE_LOOPUSE: &str =
+    "a loop edge use has no loop use, though an edge use not on a wire is made on its loop use";
+
+/// The tolerances [`BrepData::from_brep_with`] writes in place of the held ones: for each
+/// edge and vertex whose end-checked trim-cover raise still holds
+/// ([`Brep::trim_cover_raises`]), the tolerance from before the raise, no lower than the
+/// B-rep's tolerance (as the read clamps it), while
+/// - a vertex is no tighter than any edge at it as written (an edge whose raise no longer
+///   holds is written as it is, and the vertex stays above it), and
+/// - every UV trim the read of the written file end checks at those tolerances
+///   (`sm_CheckUVTrimCurve`, `check_uv_trim_curve_at`) is kept as at the held ones: a
+///   trim set after the read (a replaced trim, one made by a later fit) whose ends need the
+///   raise keeps its edge and that edge's vertices raised, so the read does not delete it.
+///
+/// Each failing trim takes at least one entry out, so the loop runs at most once per entry
+/// and once more.
+fn written_tolerances(
+    k: &Kernel,
+    b: &Brep,
+    unraise: bool,
+) -> Result<(BTreeMap<EdgeId, f64>, BTreeMap<VertexId, f64>)> {
+    let raises = b.trim_cover_raises();
+    if !unraise || !raises.end_checked {
+        return Ok((BTreeMap::new(), BTreeMap::new()));
+    }
+    // (no lower than the B-rep's tolerance: the read takes each entity's tolerance as the
+    // larger of the written one and the B-rep's, so `before` is at least the read's B-rep
+    // tolerance and the floor binds only after a later raise of the B-rep's tolerance,
+    // whose value the read of the written file then raises from)
+    let body_tolerance = b.tolerance();
+    let floored = |before: f64| {
+        if before < body_tolerance {
+            body_tolerance
+        } else {
+            before
+        }
+    };
+    let mut edges = BTreeMap::new();
+    for (&e, &(before, after)) in &raises.edges {
+        if b.edge(e)?.tolerance.to_bits() == after.to_bits() {
+            edges.insert(e, floored(before));
+        }
+    }
+    let mut vertices = BTreeMap::new();
+    for (&v, &(before, after)) in &raises.vertices {
+        if b.vertex(v)?.tolerance.to_bits() == after.to_bits() {
+            vertices.insert(v, floored(before));
+        }
+    }
+    if edges.is_empty() && vertices.is_empty() {
+        return Ok((edges, vertices));
+    }
+    let mut ends = Vec::new();
+    for e in bl::edges(b, None)? {
+        let vs: Vec<VertexId> = crate::topology::vertex::edge_vertices(b, e)?
+            .into_iter()
+            .flatten()
+            .collect();
+        ends.push((e, vs));
+    }
+    let uses = crate::topology::brep::p2::edgeuses(b, None)?;
+    loop {
+        let edge_tolerance = |e: EdgeId| -> Result<f64> {
+            Ok(match edges.get(&e) {
+                Some(&t) => t,
+                None => b.edge(e)?.tolerance,
+            })
+        };
+        let mut floor: BTreeMap<VertexId, f64> = BTreeMap::new();
+        for (e, vs) in &ends {
+            let t = edge_tolerance(*e)?;
+            for &v in vs {
+                let f = floor.entry(v).or_insert(t);
+                if t > *f {
+                    *f = t;
+                }
+            }
+        }
+        let unraised: BTreeMap<VertexId, f64> = vertices
+            .iter()
+            .filter(|(v, &t)| floor.get(v).is_none_or(|&f| t >= f))
+            .map(|(&v, &t)| (v, t))
+            .collect();
+        let vertex_tolerance = |v: VertexId| -> Result<f64> {
+            Ok(match unraised.get(&v) {
+                Some(&t) => t,
+                None => b.vertex(v)?.tolerance,
+            })
+        };
+        let mut drop_edges = Vec::new();
+        let mut drop_vertices = Vec::new();
+        for &eu in &uses {
+            let Some(e) = eu1::edge(b, eu)? else {
+                continue;
+            };
+            let vs = ends
+                .iter()
+                .find(|(x, _)| *x == e)
+                .map(|(_, vs)| vs.as_slice())
+                .unwrap_or_default();
+            if !edges.contains_key(&e) && !vs.iter().any(|v| unraised.contains_key(v)) {
+                continue;
+            }
+            let kept =
+                bl::check_uv_trim_curve_at(k, b, eu, &edge_tolerance, &vertex_tolerance).is_ok();
+            if !kept && bl::check_uv_trim_curve(k, b, eu).is_ok() {
+                drop_edges.push(e);
+                drop_vertices.extend_from_slice(vs);
+            }
+        }
+        let mut dropped = false;
+        for e in drop_edges {
+            dropped |= edges.remove(&e).is_some();
+        }
+        for v in drop_vertices {
+            dropped |= vertices.remove(&v).is_some();
+        }
+        if !dropped {
+            return Ok((edges, unraised));
+        }
+    }
 }
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or
@@ -1282,10 +1431,38 @@ impl BrepData {
     /// notes); [`SolidError::InvalidInput`] for a vertex loop use without vertex; those
     /// of the topology queries and the geometry copies.
     pub fn from_brep(
+        k: &Kernel,
         b: &Brep,
         env: &FromBrepEnv<'_>,
         all_attributes: &mut Vec<AttributeHandle>,
     ) -> Result<Self> {
+        Self::from_brep_with(k, b, env, all_attributes, true)
+    }
+
+    /// [`BrepData::from_brep`], writing a tolerance that a B-rep file read's kept-trim
+    /// cover raised ([`Brep::trim_cover_raises`],
+    /// [`crate::topology::TrimCoverRaises::end_checked`]) as the one it raised it from
+    /// when `unraise` (not upstream).
+    ///
+    /// The raise is the read's own: a read of the written file runs the same end check
+    /// and the same cover over the same trims at the same tolerances, raises the
+    /// tolerance again and records the raise, so the edges it covers fit at the
+    /// tolerance from before the raise, as in `b` (#16922). Written raised, the read
+    /// would take the raised tolerance as the edge's own and fit along it at that value.
+    /// Only an entry whose entity still holds the raised value is written back; a
+    /// tolerance changed since is written as it is. A part file read's raise is written
+    /// as it is: its trims were never end checked, and the written file's end check
+    /// could delete them at the tolerance before the raise.
+    /// [`crate::topology::api_files::rebuild_native`] rebuilds without the cover and
+    /// writes the tolerances as they are.
+    pub(crate) fn from_brep_with(
+        k: &Kernel,
+        b: &Brep,
+        env: &FromBrepEnv<'_>,
+        all_attributes: &mut Vec<AttributeHandle>,
+        unraise: bool,
+    ) -> Result<Self> {
+        let (written_edges, written_vertices) = written_tolerances(k, b, unraise)?;
         let mut attr_map = BTreeSet::new();
         let mut table = AttributeTable {
             store: env.attributes,
@@ -1337,7 +1514,10 @@ impl BrepData {
             map.insert(EntityRef::Vertex(v), i as u64);
             let vertex = b.vertex(v)?;
             let mut vd = VertexData::zeroed();
-            vd.zone_tol_3d = vertex.tolerance;
+            vd.zone_tol_3d = written_vertices
+                .get(&v)
+                .copied()
+                .unwrap_or(vertex.tolerance);
             vd.point = vertex.point;
             vd.topology = topology_data(env, &mut table, EntityRef::Vertex(v));
             bd.vertices.push(vd);
@@ -1348,8 +1528,8 @@ impl BrepData {
         let mut all_edgeuses: Vec<EdgeuseId> = Vec::new();
         for (i, &e) in edges.iter().enumerate() {
             map.insert(EntityRef::Edge(e), i as u64);
-            if edge::is_wire(b, e)? {
-                let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+            // a wire edge has its primary edge use (`is_wire` reads it)
+            if let (true, Some(prim)) = (edge::is_wire(b, e)?, eu1::primary_edgeuse(b, e)?) {
                 let n = all_edgeuses.len() as u64;
                 map.insert(EntityRef::Edgeuse(prim), n);
                 if let Some(m) = eu1::mate(b, prim)? {
@@ -1413,7 +1593,10 @@ impl BrepData {
         };
         let mut surface_index: BTreeMap<FaceId, u64> = BTreeMap::new();
         for f in surface_owners(b, None, &face_ref)? {
-            let surface = b.face(f)?.surface.as_ref().ok_or_else(null)?;
+            // `surface_owners` returns only faces with a surface (it fails on one without)
+            let Some(surface) = b.face(f)?.surface.as_ref() else {
+                continue;
+            };
             surface_index.insert(f, bd.surfaces.len() as u64);
             bd.surfaces.push(Keyed {
                 key: (env.surface_key)(f),
@@ -1444,8 +1627,8 @@ impl BrepData {
 
             // set pLUT1 = topFU->loopuse (pLUT2 stays the other loop use)
             let (lu1, lu2) = loopuse::loop_loopuses(b, l)?;
-            let lu2 = lu2.ok_or_else(null)?;
-            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(null)?;
+            let lu2 = lu2.ok_or_else(|| broken_link(NO_SECOND_LOOPUSE))?;
+            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(|| broken_link(NO_LOOPUSE_FACEUSE))?;
             let lut1 = if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
                 lu2
             } else {
@@ -1485,10 +1668,11 @@ impl BrepData {
         // Edgeuses (top face use edge uses and wire primary edge uses, not mates)
         for &eu in &all_edgeuses {
             let mut ed = EuData::zeroed();
-            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(null)?;
+            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_NEXT))?;
             ed.next_eu = edgeuse_index(&map, &mate_map, next);
-            let mate = eu1::mate(b, eu)?.ok_or_else(null)?;
-            let mate_next = eu1::edgeuse_next(b, mate)?.ok_or_else(null)?;
+            let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_MATE))?;
+            let mate_next =
+                eu1::edgeuse_next(b, mate)?.ok_or_else(|| broken_link(NO_EDGEUSE_NEXT))?;
             ed.mate_next_eu = edgeuse_index(&map, &mate_map, mate_next);
             ed.edge = get_map(&map, eu1::edge(b, eu)?.map(EntityRef::Edge));
 
@@ -1499,7 +1683,7 @@ impl BrepData {
                 ed.shell = get_map(&map, eu1::shell(b, eu)?.map(EntityRef::Shell));
             } else {
                 // an edge in a loop connecting edges to a face
-                let lu = eu1::loopuse(b, eu)?.ok_or_else(null)?;
+                let lu = eu1::loopuse(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_LOOPUSE))?;
                 let l = loopuse::loop_(b, lu)?;
                 ed.eu_type = 0;
                 ed.loop_ = get_map(&map, l.map(EntityRef::Loop));
@@ -1534,7 +1718,9 @@ impl BrepData {
 
         // Edges - set EdgeData objects and store Curves
         for &e in &edges {
-            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(|| {
+                SolidError::topology(OP_FROM, TopologyFailure::EdgeWithoutEdgeuses)
+            })?;
             let mut ed = EdgeData::zeroed();
             ed.prim_eu = edgeuse_index(&map, &mate_map, prim);
 
@@ -1550,14 +1736,17 @@ impl BrepData {
 
             // every edge owns its curve: a new 3D curve each
             let edge_rec = b.edge(e)?;
-            let curve = edge_rec.curve.as_ref().ok_or_else(null)?;
+            let curve = edge_rec
+                .curve
+                .as_ref()
+                .ok_or_else(|| SolidError::topology(OP_FROM, TopologyFailure::EdgeWithoutCurve))?;
             ed.curve = bd.curves_3d.len() as u64;
             bd.curves_3d.push(Keyed {
                 key: (env.curve_key)(e),
                 object: curve.clone_for_evaluation()?,
             });
 
-            ed.zone_tol_3d = edge_rec.tolerance;
+            ed.zone_tol_3d = written_edges.get(&e).copied().unwrap_or(edge_rec.tolerance);
             ed.interval = edge_rec.interval;
             ed.topology = topology_data(env, &mut table, EntityRef::Edge(e));
             bd.edges.push(ed);
@@ -1591,6 +1780,60 @@ mod tests {
     /// written to a version 32 database (the B-spline part only) with the NURB its
     /// `MakeNurb` gives: the bytes equal those of the same line with its NURB made first
     /// (upstream's `pBSP->SmBSplineCurve::WriteToDB` on the line itself).
+    /// A swept surface made with `empty()` has no generator curve: its write names that,
+    /// with upstream's `SM_ERR_NULL_POINTER`, as the caller's input.
+    #[test]
+    fn a_swept_surface_without_generator_names_it() {
+        use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surf_of_revolution::SurfOfRevolution;
+        for s in [
+            Surface::from(SurfOfRevolution::empty()),
+            Surface::from(SurfOfExtrusion::empty()),
+        ] {
+            let e = surface_bytes(&s).unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::SurfaceWithoutGenerator),
+                "{e:?}"
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        }
+    }
+
+    /// An edge added and never linked has no edge use: flattening its B-rep names that,
+    /// with upstream's `SM_ERR_NULL_POINTER`, as the caller's input, not a defect.
+    #[test]
+    fn an_edge_without_edge_use_names_it() {
+        use crate::geom::object::ObjectRef;
+        use crate::math::Point3;
+        let mut b = Brep::new();
+        let v0 = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Point3::new(1.0, 0.0, 0.0)).unwrap();
+        b.add_edge(v0, v1).unwrap();
+        let attributes = AttributeStore::default();
+        let records = crate::topology::topology::NotifyRecords::default();
+        let env = FromBrepEnv {
+            attributes: &attributes,
+            key_of: &|_: EntityRef| ObjectRef {
+                type_code: 0,
+                key: ObjectKey(0),
+            },
+            records: &records,
+            curve_key: &|_: EdgeId| ObjectKey(0),
+            uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+            surface_key: &|_: FaceId| ObjectKey(0),
+        };
+        let e = BrepData::from_brep(&Kernel::default(), &b, &env, &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::EdgeWithoutEdgeuses),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!e.is_defect());
+    }
+
     #[test]
     fn a_lazy_line_writes_the_nurb_it_makes_at_version_32() {
         use crate::curve::line::Line;

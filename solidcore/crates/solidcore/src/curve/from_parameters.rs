@@ -14,9 +14,10 @@
 //!
 //! **Exact classes at bound 0** (owner rule 13564): a circle or ellipse is made as that conic,
 //! and is returned only once its NURBS form is proved to lie on the plane and the quadric
-//! (sphere or elliptic cylinder) of the record's own numbers ([`curve_on_quadrics`], to the
-//! rounding of checking it). A conic given with its NURBS form keeps that NURBS, proved on the
-//! record's conic the same way. A line is the record's two points; a spline its own definition.
+//! (sphere or elliptic cylinder) of the record's own numbers
+//! ([`curve_on_quadrics_with_constants`], to the rounding of checking it). A conic given with
+//! its NURBS form keeps that NURBS, proved on the record's conic the same way. A line is the
+//! record's two points; a spline its own definition.
 //!
 //! The record's numbers are taken as they are: a frame's axes are the record's (not rebuilt by
 //! cross products), a rational spline's homogeneous points are copied (not divided by their
@@ -33,7 +34,7 @@ use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -41,7 +42,9 @@ use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::implicit::{conic_turn, curve_on_quadrics, QuadricEquation};
+#[cfg(test)]
+use crate::surface::implicit::curve_on_quadrics;
+use crate::surface::implicit::{conic_turn, curve_on_quadrics_with_constants, QuadricEquation};
 
 const OP: &str = "curve::from_parameters::from_parameters";
 const OP_TRIM: &str = "curve::from_parameters::uv_trim";
@@ -119,19 +122,19 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
             knots.push(n.saturating_sub(1) as f64);
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
             Ok(EdgeCurve {
-                curve: Curve::from(spline(&knots, &rows, 3, OP)?),
+                curve: Curve::from(spline(&knots, &rows, 3, false, OP)?),
                 interval: Extent1d::from_raw(lo, hi),
             })
         }
         Record::Spline { knots, points } => {
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
             Ok(EdgeCurve {
-                curve: Curve::from(spline(knots, &rows, 3, OP)?),
+                curve: Curve::from(spline(knots, &rows, 3, false, OP)?),
                 interval: Extent1d::from_raw(lo, hi),
             })
         }
         Record::RationalSpline { knots, homogeneous } => Ok(EdgeCurve {
-            curve: Curve::from(spline(knots, homogeneous, 3, OP)?),
+            curve: Curve::from(spline(knots, homogeneous, 3, true, OP)?),
             interval: Extent1d::from_raw(lo, hi),
         }),
         Record::SurfaceIntersection { .. } => Err(SolidError::Unsupported {
@@ -181,9 +184,9 @@ pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
-/// record's conic (proved, [`curve_on_quadrics`]) and turn anticlockwise about the frame's z,
-/// at most once round (certified per Bézier segment, [`conic_turn`]); the kernel's conic is
-/// over the angles from the form's start through the angle it turns.
+/// record's conic (proved, [`curve_on_quadrics_with_constants`]) and turn anticlockwise about
+/// the frame's z, at most once round (certified per Bézier segment, [`conic_turn`]); the
+/// kernel's conic is over the angles from the form's start through the angle it turns.
 ///
 /// # Errors
 ///
@@ -200,16 +203,16 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     let nurbs = match form {
         Record::Spline { knots, points } => {
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
-            spline(knots, &rows, 3, OP)?
+            spline(knots, &rows, 3, false, OP)?
         }
-        Record::RationalSpline { knots, homogeneous } => spline(knots, homogeneous, 3, OP)?,
+        Record::RationalSpline { knots, homogeneous } => spline(knots, homogeneous, 3, true, OP)?,
         _ => return Err(bad("a conic's NURBS form is not a spline")),
     };
     if !(rx > 0.0 && ry > 0.0 && rx.is_finite() && ry.is_finite()) {
         return Err(bad("a radius is not finite and positive"));
     }
     let (o, x, y) = axes(frame)?;
-    if !curve_on_quadrics(&nurbs, &quadrics(o, x, y, rx, ry, circle))? {
+    if !on_conic(&nurbs, o, x, y, rx, ry, circle)? {
         return Err(bad("a conic's NURBS form is off the record's conic"));
     }
     let domain = form_angles(&nurbs, o, x, y, rx, ry)?.ok_or_else(|| {
@@ -259,7 +262,7 @@ pub fn uv_trim_on_edge(
     let [su, sv] = scale;
     let same = su == 1.0 && sv == 1.0;
     let at = |x: f64, y: f64| if same { (x, y) } else { (su * x, sv * y) };
-    let (knots, rows): (&[f64], Vec<[f64; 4]>) = match c {
+    let (knots, rows, rational): (&[f64], Vec<[f64; 4]>, bool) = match c {
         Record2::Spline { knots, points } => (
             knots,
             points
@@ -269,6 +272,7 @@ pub fn uv_trim_on_edge(
                     [x, y, NOZ, 1.0]
                 })
                 .collect(),
+            false,
         ),
         Record2::RationalSpline { knots, homogeneous } => (
             knots,
@@ -279,6 +283,7 @@ pub fn uv_trim_on_edge(
                     [x, y, NOZ, h[2]]
                 })
                 .collect(),
+            true,
         ),
     };
     let n = rows.len();
@@ -320,7 +325,7 @@ pub fn uv_trim_on_edge(
             })
             .collect()
     };
-    Ok(Curve::from(spline(&mapped, &rows, 2, OP_TRIM)?))
+    Ok(Curve::from(spline(&mapped, &rows, 2, rational, OP_TRIM)?))
 }
 
 /// The intersection tolerance of an entity whose zone tolerance is `zone`: twice it, the
@@ -355,7 +360,7 @@ pub struct RecordCurve {
 ///   product), its y axis reversed where the conic's NURBS runs against its angle (its own
 ///   `inside_out`, no sampling), with that NURBS as its form, over the kernel's interval.
 ///   Exact class at bound 0: returned only once the form is proved on the label's plane and
-///   sphere or elliptic cylinder ([`curve_on_quadrics`]).
+///   sphere or elliptic cylinder ([`curve_on_quadrics_with_constants`]).
 /// - **B-spline, hyperbola, parabola:** its NURBS as a spline or rational spline, homogeneous
 ///   points copied, over the kernel's interval; an interval past the knots by the rounding of
 ///   the kernel's parameter (10⁻¹² of its size) ends on them.
@@ -417,7 +422,7 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
                 made = copy;
                 made.base()
             };
-            if !curve_on_quadrics(nurbs, &quadrics(o, x, y, rx, ry, circle))? {
+            if !on_conic(nurbs, o, x, y, rx, ry, circle)? {
                 return Err(bad("a conic's NURBS is off its own frame and radii"));
             }
             let frame = Frame {
@@ -608,17 +613,9 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-/// Unit and square axes, each within 8 ulps of 1: the record construction's
-/// and the exact-form check's shared frame test.
-fn unit_square(x: Vec3, y: Vec3) -> bool {
-    let ulps = 8.0 * f64::EPSILON;
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    unit(x) && unit(y) && x.dot(y).abs() <= ulps
-}
-
 fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
     let (x, y) = (p3(f.x_axis), p3(f.y_axis));
-    if !unit_square(x, y) {
+    if !axes_are_orthonormal(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
@@ -639,7 +636,7 @@ pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
         && rx.is_finite()
         && ry.is_finite()
         && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
-        && unit_square(x, y))
+        && axes_are_orthonormal(x, y))
     {
         return Ok(false);
     }
@@ -649,7 +646,49 @@ pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
             point.z = 0.0;
         }
     }
-    curve_on_quadrics(&form, &quadrics(o, x, y, rx, ry, false))
+    on_conic(&form, o, x, y, rx, ry, false)
+}
+
+/// Whether `nurbs` lies on the plane and the sphere or elliptic cylinder of a conic
+/// ([`quadrics`]), to the rounding of checking it ([`curve_on_quadrics_with_constants`]). Each
+/// quadric's constant counts at the size of the terms it is computed from (`|n_i o_i|` summed;
+/// `|o|^2 + r^2`, or `|o_i a_ij o_j|` summed and 1): the constant cancels to far below that
+/// rounding, and that of the form's points built from the centre, when the conic passes near
+/// the world origin (#3384).
+///
+/// # Errors
+///
+/// Those of [`curve_on_quadrics_with_constants`].
+fn on_conic(
+    nurbs: &BSplineCurve,
+    o: Point3,
+    x: Vec3,
+    y: Vec3,
+    rx: f64,
+    ry: f64,
+    circle: bool,
+) -> Result<bool> {
+    let q = quadrics(o, x, y, rx, ry, circle);
+    let oa = [o.x, o.y, o.z];
+    let plane = q[0]
+        .1
+        .iter()
+        .zip(oa)
+        .map(|(b, p)| 2.0 * (b * p).abs())
+        .sum::<f64>();
+    let (a, _, _) = q[1];
+    let form = a
+        .iter()
+        .zip(oa)
+        .map(|(row, p)| {
+            row.iter()
+                .zip(oa)
+                .map(|(aij, q)| (p * aij * q).abs())
+                .sum::<f64>()
+        })
+        .sum::<f64>();
+    let shape = form + if circle { rx * rx } else { 1.0 };
+    curve_on_quadrics_with_constants(nurbs, &q, [plane, shape])
 }
 
 /// The plane of a conic and its sphere (a circle) or elliptic cylinder (an ellipse), as
@@ -762,7 +801,7 @@ fn conic(
         Ellipse::create_canonical(k, &placement, rx, ry, Some(&deg), None)?
     };
     e.edit_parameterization(k, &deg, true, None)?;
-    if !curve_on_quadrics(e.base(), &quadrics(o, x, y, rx, ry, circle))? {
+    if !on_conic(e.base(), o, x, y, rx, ry, circle)? {
         return Err(bad("the conic's NURBS is off the record's conic"));
     }
     Ok(EdgeCurve {
@@ -772,9 +811,16 @@ fn conic(
 }
 
 /// A B-spline of `dim` 2 or 3 from its knots and homogeneous rows `(w x, w y, w z, w)` (`z`
-/// [`NOZ`] in 2D, `w = 1` for a polynomial one): filled directly when its knots are clamped,
-/// else clamped to its domain by the kernel's canonical constructor.
-fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Result<BSplineCurve> {
+/// [`NOZ`] in 2D): polynomial (`w = NOW`, matching `BSplineCurve::create_canonical`) when
+/// `rational` is `false`, rational with the given weights when `true`. Filled directly when its
+/// knots are clamped, else clamped to its domain by the kernel's canonical constructor.
+fn spline(
+    knots: &[f64],
+    rows: &[[f64; 4]],
+    dim: u64,
+    rational: bool,
+    op: &'static str,
+) -> Result<BSplineCurve> {
     let bad = |reason: &'static str| SolidError::invalid_input(op, reason);
     let n = rows.len();
     let degree = knots
@@ -793,7 +839,7 @@ fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Resul
     if is_clamped(knots, degree) {
         let pw: Vec<CPoint> = rows
             .iter()
-            .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+            .map(|&[x, y, z, w]| CPoint::new(x, y, z, if rational { w } else { NOW }))
             .collect();
         let nurb = NurbCurve::new(pw, degree, knots.to_vec())?;
         let mut c = BSplineCurve::new(dim);
@@ -820,7 +866,7 @@ fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Resul
         knot_multiplicities: &mults,
         knots: &unique,
         knot_type: KnotType::Unspecified,
-        weights: Some(&weights),
+        weights: rational.then_some(weights.as_slice()),
         trim: None,
     };
     BSplineCurve::create_canonical(&data)

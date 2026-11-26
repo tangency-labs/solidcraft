@@ -11,8 +11,11 @@
 //! from the edges' and vertices' own ([`own_tolerances`]). Each entity keeps its tolerance across
 //! the kernels instead of every one taking the largest at each crossing.
 //!
-//! A face whose surface is not a B-spline kind (an offset) exports its approximation, as
-//! `FlatFromBrep` does (`SmSurface::ApproximateSurface`).
+//! A face whose surface is not a B-spline kind (an offset) exports a B-spline in its place, as
+//! `FlatFromBrep` does, but fitted within half the face's own tolerance rather than half the
+//! body's largest (#21926): an implicit offset gets the kernel's certified net, proved within it
+//! at every parameter, where that net has no `C0` knot inside it; any other surface
+//! `SmSurface::ApproximateSurface`'s fit, checked at samples.
 //!
 //! [`from_arrays`] also runs the capi's `PutEnclosingShellsFirst` ([`put_enclosing_shells_first`],
 //! an addition to SmuConvert): a bounded region of several shells starts its list at the shell
@@ -53,7 +56,6 @@ use solidcore::topology::brep_data::{
     VertexData,
 };
 use solidcore::topology::brep_data_write::FromBrepEnv;
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, ShellId, VertexId, edge, shell, vertex};
 use solidcore::{EntityRef, Kernel, Point2, Point3, SolidError, Vec3};
@@ -62,7 +64,7 @@ use crate::flat::*;
 use crate::import::Arrays;
 use crate::{Error, Result};
 
-use super::{Body, answer, run, with_body};
+use super::{Body, answer, run, with_body, with_own_body};
 
 // ---- shared ------------------------------------------------------------------------------------
 
@@ -270,7 +272,7 @@ pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<
 
 /// The `SmBSplineSurface` part of a surface that is one (`IsKindOf(SmBSplineSurface_TYPE)`), its
 /// NURB made first (`GetOrCreateGwNurbPointer`); `None` for the other kinds.
-fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
+pub(super) fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
     Ok(match s.kind_with_nurb(k).map_err(sc("SmSurface::GetOrCreateGwNurbPointer"))? {
         SurfaceKind::BSpline(b) => Some(b),
         // A procedural round (solidcore#2274) and a Ball corner's
@@ -293,6 +295,17 @@ fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSp
 /// `body` as the flat arrays the C API exports (`FlatFromBrep`).
 pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
     with_body("FlatFromBrep", body, |k, b| Ok(flat_from_brep(k, b)))?
+}
+
+/// [`to_arrays`] of a body made to read a file's trims from: the trims it builds raise their
+/// edges by upstream's sampled distance, not a proved one, through
+/// [`solidcore::Kernel::with_sampled_trim_raise`], which restores the proved raise after the
+/// call: proving every trim of every face a file translates cost many times the translation.
+/// The body is a sheet made only for this call ([`crate::pcurves`]), so the token over this
+/// thread's work stops it ([`with_own_body`]): a work limit there stops a trim whose edge never
+/// drops onto its surface within the tolerance (#20575).
+pub(crate) fn to_arrays_sampled_trims(body: &Body) -> Result<Arrays> {
+    with_own_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
 }
 
 /// One NURBS curve's arrays (`smu_AddSmBSplineCurve3d`, `smu_AddSmBSplineCurve2d`): counts and
@@ -709,11 +722,16 @@ fn write_edge_curve(k: &Kernel, o: &mut Out, ids: &EdgeIds, e: &EdgeExport, c: O
     nurbs(o, &part)
 }
 
+/// `SmFace::GetTolerance`: the face's own zone tolerance.
+fn face_tolerance(b: &Brep, f: FaceId) -> Result<f64> {
+    solidcore::topology::face::p2::tolerance(b, f).map_err(sc("SmFace::GetTolerance"))
+}
+
 /// `ZoneTolWithFaces`: `own` or, where larger, the B-rep's tolerance or that of a face round it.
 fn zone_tol_with_faces(b: &Brep, own: f64, brep_tol: f64, faces: &[FaceId]) -> Result<f64> {
     let mut tol = own.max(brep_tol);
     for &f in faces {
-        let t = solidcore::topology::face::p2::tolerance(b, f).map_err(sc("SmFace::GetTolerance"))?;
+        let t = face_tolerance(b, f)?;
         if t.is_finite() && t > tol {
             tol = t;
         }
@@ -730,7 +748,7 @@ fn max_zone_tol(b: &Brep) -> Result<f64> {
         }
     };
     for f in bl::faces(b, None).map_err(sc("GetFaces"))? {
-        take(solidcore::topology::face::p2::tolerance(b, f).map_err(sc("SmFace::GetTolerance"))?);
+        take(face_tolerance(b, f)?);
     }
     for e in bl::edges(b, None).map_err(sc("GetEdges"))? {
         take(edge::tolerance(b, e).map_err(sc("SmEdge::GetTolerance"))?);
@@ -739,6 +757,67 @@ fn max_zone_tol(b: &Brep) -> Result<f64> {
         take(vertex::tolerance(b, v).map_err(sc("SmVertex::GetTolerance"))?);
     }
     Ok(max)
+}
+
+/// The tolerance a face's stand-in surface is fitted to: half the least tolerance the record can
+/// state for the face. [`own_tolerances`] gives an imported face the least of its edges' and
+/// loop vertices' written tolerances and the B-rep's (`xsect / 2`); each of the former is at least
+/// the face's own ([`zone_tol_with_faces`] takes the largest of the faces round the entity), so
+/// the face's own tolerance, where it has one, or `xsect / 2`, whichever is less, is never more
+/// than the record states. Half of it, as SMLib's approximation tolerance is half its zone
+/// tolerance, leaves the face's edges room within it.
+fn face_approx_tol(b: &Brep, f: FaceId, xsect: f64) -> Result<f64> {
+    let body = xsect / 2.0;
+    let own = face_tolerance(b, f)?;
+    Ok(if own.is_finite() && own > 0.0 { own.min(body) } else { body } / 2.0)
+}
+
+/// The B-spline written for a face surface with no B-spline form, within `tol` of it (#21926).
+/// An implicit offset surface gets the kernel's certified net of it, proved within `tol` at
+/// every parameter ([`solidcore_ops::offset::certified_offset_net`], the net a shell or a thicken
+/// puts in an offset face's place). Where no certificate is made (an offset of an offset, a base
+/// with no B-spline form, a pole) and for every other kind, `SmSurface::ApproximateSurface`
+/// fits it to `tol`, splitting its spans up to 5 times and checking it at sampled points only;
+/// its failure to reach `tol` fails the export, as does no surface, which would leave the arrays
+/// without this face's NURBS: the face's tolerance in the record cannot be raised to cover a
+/// coarser fit (the record caps it at the body's), so a fit outside it would be a record whose
+/// face is not where it says.
+///
+/// A certified net with a full-multiplicity interior knot ([`has_interior_c0_knot`]) is not
+/// written either: it is fitted instead. There the base is only `C0` in its parameter (a
+/// revolution's circle at its quarter knots) though tangent continuous, and the net keeps the
+/// knot `C0`. Its certificate bounds the net's distance from the offset, not its normal, so the
+/// net can turn its normal at that knot. An offset of the written face (a thicken of an offset
+/// sheet: an emboss's slab) then meets a knot it cannot prove tangent continuous and refuses the
+/// face as creased, though the face is smooth.
+fn approximate_face_surface(k: &Kernel, surface: &Surface, tol: f64) -> Result<Surface> {
+    match solidcore_ops::offset::certified_offset_net(k, surface, tol) {
+        Ok(Some((net, bound))) if bound <= tol && !has_interior_c0_knot(k, &net)? => return Ok(net),
+        Err(e) if e.is_unported_or_cancelled() => return Err(sc("certified_offset_net")(e)),
+        Ok(_) | Err(_) => {}
+    }
+    surface
+        .approximate_surface(k, approx_tol3d(k, tol), 5, true)
+        .map_err(sc("SmSurface::ApproximateSurface"))?
+        .surface
+        .ok_or_else(|| bad("a face surface SMLib could not convert to a B-spline"))
+}
+
+/// Whether `net`, a B-spline, has an interior knot of multiplicity its degree or more in either
+/// direction, where it is only `C0` in its parameter. A surface with no NURB has none.
+fn has_interior_c0_knot(k: &Kernel, net: &Surface) -> Result<bool> {
+    let Some(nurb) = bspline_surface_part(k, net)?.and_then(|part| part.gw_nurb()) else {
+        return Ok(false);
+    };
+    let (p, q) = nurb.degrees();
+    let c0 = |knots: &[f64], deg: usize| {
+        let (Some(&lo), Some(&hi)) = (knots.get(deg), knots.len().checked_sub(deg + 1).and_then(|i| knots.get(i))) else {
+            return false;
+        };
+        let interior: Vec<f64> = knots.iter().copied().filter(|&x| x > lo && x < hi).collect();
+        deg > 0 && interior.chunk_by(|a, b| a == b).any(|run| run.len() >= deg)
+    };
+    Ok(c0(nurb.u_knots(), p) || c0(nurb.v_knots(), q))
 }
 
 /// The shells in `SmBrepData::FromBrep`'s order: the regions, the infinite one first, each
@@ -784,15 +863,7 @@ pub(crate) fn key_of(e: EntityRef) -> ObjectRef {
 /// vertices and point-shell vertices, edgeuses and wire edgeuses are split apart, every index
 /// compacted for the split.
 fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None).map_err(sc("GetEdgeuses"))? {
-        if eu1::faceuse(b, eu).map_err(sc("GetFaceuse"))?.is_none()
-            || eu1::uv_trim_curve_pointer(b, eu).map_err(sc("GetUVTrimCurvePointer"))?.is_some()
-        {
-            continue;
-        }
-        let made = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true).map_err(sc("GetOrCreateUVTrimCurve"))?;
-        made.status.map_err(sc("GetOrCreateUVTrimCurve"))?;
-    }
+    solidcore::topology::brep::create_missing_uv_trim_curves(k, b).map_err(sc("GetOrCreateUVTrimCurve"))?;
     let b: &Brep = b;
 
     // the BrepData; its records keep the B-rep's lists' order
@@ -806,7 +877,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bd = BrepData::from_brep(b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
+    let bd = BrepData::from_brep(k, b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
     let shell_ids = shells_in_order(b)?;
     let face_ids = bl::faces(b, None).map_err(sc("GetFaces"))?;
     let edge_ids = bl::edges(b, None).map_err(sc("GetEdges"))?;
@@ -823,7 +894,8 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
     // (EDGE_TOLERANCE, VERTEX_TOLERANCE). Writing the largest one there instead, as SMLib's
     // `FlatFromBrep` does, makes it every entity's on import (MakeTopologyFromData raises each
     // entity to the B-rep's), so every crossing between the kernels spread the largest tolerance
-    // over the body. Curves are still approximated to the largest.
+    // over the body. Curves are still approximated to the largest; a face's surface is
+    // approximated to its own tolerance ([`face_approx_tol`]).
     let zone = max_zone_tol(b)?;
     let brep_tol = b.tolerance();
     let xsect = 2.0 * if brep_tol.is_finite() && brep_tol > 0.0 && brep_tol < zone { brep_tol } else { zone };
@@ -1013,18 +1085,14 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         }
         if nurbs_form || nurbs_kind {
             // Every analytic class is an SmBSplineSurface: its own NURBS, in face order with the
-            // NURBS faces' surfaces. Another surface (an offset) is approximated within the
-            // curves' tolerance, splitting its spans up to 5 times; its status fails the export,
-            // as does no surface, which would leave the arrays without this face's NURBS.
+            // NURBS faces' surfaces. Another surface (an offset) is approximated within half the
+            // tolerance the record states for the face ([`face_approx_tol`]), never the body's
+            // largest (#21926); see [`approximate_face_surface`].
             let approximated;
             let part = match bspline_surface_part(k, surface)? {
                 Some(part) => part,
                 None => {
-                    approximated = surface
-                        .approximate_surface(k, approx_tol3d(k, approx_tol), 5, true)
-                        .map_err(sc("SmSurface::ApproximateSurface"))?
-                        .surface
-                        .ok_or_else(|| bad("a face surface SMLib could not convert to a B-spline"))?;
+                    approximated = approximate_face_surface(k, surface, face_approx_tol(b, f, xsect)?)?;
                     bspline_surface_part(k, &approximated)?.ok_or_else(|| bad("an approximated face surface that is not a B-spline"))?
                 }
             };
@@ -1820,8 +1888,10 @@ fn compress_knots(knots: &[f64]) -> (Vec<f64>, Vec<usize>) {
 }
 
 /// `smu_CreateSmBSplineCurve_FromArrays`: a curve of `dim` 2 or 3; an unclamped knot vector goes
-/// through `SmBSplineCurve::CreateCanonical`, which clamps it.
+/// through `SmBSplineCurve::CreateCanonical`, which clamps it. Curves whose weights are all 1 are
+/// built polynomial (`w = NOW`, matching `SmBSplineCurve::CreateCanonical`).
 fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], degree: usize, dim: u64) -> Result<BSplineCurve> {
+    let rational = weights.iter().any(|&w| w != 1.0);
     if !is_clamped(knots, degree) {
         let (unique, mults) = compress_knots(knots);
         let data = CanonicalData {
@@ -1832,15 +1902,23 @@ fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], 
             knot_multiplicities: &mults,
             knots: &unique,
             knot_type: KnotType::Unspecified,
-            weights: Some(weights),
+            weights: rational.then_some(weights),
             trim: None,
         };
         return BSplineCurve::create_canonical(&data).map_err(sc("SmBSplineCurve::CreateCanonical"));
     }
     let mut pw = Vec::with_capacity(points.len());
     for (p, &w) in points.iter().zip(weights) {
-        let z = if dim == 3 { if w == 1.0 { p.z } else { w * p.z } } else { NOZ };
-        pw.push(if w == 1.0 { CPoint::new(p.x, p.y, z, 1.0) } else { CPoint::new(w * p.x, w * p.y, z, w) });
+        if !rational {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, NOW));
+        } else if w == 1.0 {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, 1.0));
+        } else {
+            let z = if dim == 3 { w * p.z } else { NOZ };
+            pw.push(CPoint::new(w * p.x, w * p.y, z, w));
+        }
     }
     let nurb = NurbCurve::new(pw, degree, knots.to_vec()).map_err(sc("sm_AllocateNurbCurve"))?;
     let mut c = BSplineCurve::new(dim);
@@ -2014,6 +2092,26 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
     let Some(found) = found else { return Ok(None) };
     let (Some(want), Some(part)) = (nurbs.gw_nurb(), bspline_surface_part(k, &found)?) else { return Ok(None) };
     Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
+}
+
+/// `TorusOfArrays`: the torus of the arrays' own numbers (torus `j`'s frame and radii) on the face's
+/// NURBS form, where the reader needs it and the kernel proves it
+/// (`Torus::from_label_unless_found_stands`). `found` is what SMLib's test ([`analytic_of_nurbs`])
+/// worked back out of the form, from circles through three points of each meridian. Where the form
+/// lies on it, it is the face's torus as this reader has always made it, to the last bit, and this
+/// is `None`. A tube that shows only a short arc fixes those circles to its rounding over the
+/// square of the arc's angle: the torus found was 1e-10 to 1e-9 off the form it was found in (a
+/// 1.2 degree arc of a tube of radius 13.7), which the body's own check then refused, and below
+/// about 0.3 degrees none was found. There the arrays' own numbers, the ones the torus was made
+/// with, are the face's torus where the kernel proves the form on them. `None` too where it does
+/// not, and where the arrays name no frame for the torus (too short, or axes that make none).
+fn torus_of_arrays(k: &Kernel, f: &In<'_>, j: usize, nurbs: &BSplineSurface, found: Option<&Surface>) -> Result<Option<Surface>> {
+    let numbers = || -> Result<(Axis2Placement, f64, f64)> {
+        let p = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)?;
+        Ok((p, get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?))
+    };
+    let Ok((p, major, minor)) = numbers() else { return Ok(None) };
+    Torus::from_label_unless_found_stands(k, p, major, minor, nurbs, found).map_err(sc("Torus::from_label_unless_found_stands"))
 }
 
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
@@ -2296,10 +2394,30 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_sphere += usize::from(ty == SURFACE_SPHERE_I);
             i_cyl += usize::from(ty == SURFACE_CYLINDER_I);
             i_cone += usize::from(ty == SURFACE_CONE_I);
+            let j_torus = i_torus;
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            analytic_of_nurbs(k, &nurbs, ty, xsect)?
-                .ok_or_else(|| Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface")))?
+            let found = analytic_of_nurbs(k, &nurbs, ty, xsect)?;
+            // a torus the form does not lie on, or that was not found: the arrays' own, where
+            // the kernel proves the form on it
+            let found = if ty == SURFACE_TORUS_I {
+                match torus_of_arrays(k, f, j_torus, &nurbs, found.as_ref())? {
+                    Some(own) => Some(own),
+                    None => found,
+                }
+            } else {
+                found
+            };
+            match found {
+                Some(analytic) => analytic,
+                // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
+                // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
+                // keeps that, on the range and trims it already carries. So is a torus no reading
+                // gives: its tube shows too short an arc for SMLib's test to find it, and the
+                // arrays' own numbers are not proved on the form.
+                None if ty == SURFACE_CONE_I || ty == SURFACE_TORUS_I => Surface::from(nurbs),
+                None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
+            }
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;
@@ -2665,4 +2783,35 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<bool> {
         proven &= established;
     }
     Ok(proven)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Clamped polynomial B-spline curves (all weights 1, as flat arrays carry every non-rational
+    /// edge curve and UV trim) import with `w = NOW`, matching `SmBSplineCurve::CreateCanonical`;
+    /// rational curves keep every homogeneous weight (#20422).
+    #[test]
+    fn clamped_polynomial_bspline_curves_import_as_non_rational() {
+        let pts3 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0), Point3::new(2.0, 0.0, 1.0)];
+        let clamped = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let poly3 = bspline_curve_from_arrays(&pts3, &[1.0; 3], &clamped, 2, 3).unwrap();
+        let nurb = poly3.gw_nurb().unwrap();
+        assert!(nurb.cpts().iter().all(|p| p.w == NOW), "{:?}", nurb.cpts());
+
+        let unclamped = [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
+        let poly_unclamped = bspline_curve_from_arrays(&pts3, &[1.0; 3], &unclamped, 2, 3).unwrap();
+        assert!(poly_unclamped.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW));
+
+        let pts2 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0)];
+        let poly2 = bspline_curve_from_arrays(&pts2, &[1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], 1, 2).unwrap();
+        assert!(poly2.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW && p.z == NOZ));
+
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = [Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let rat = bspline_curve_from_arrays(&arc, &[1.0, w, 1.0], &clamped, 2, 3).unwrap();
+        let got: Vec<[f64; 4]> = rat.gw_nurb().unwrap().cpts().iter().map(|p| [p.x, p.y, p.z, p.w]).collect();
+        assert_eq!(got, vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]]);
+    }
 }

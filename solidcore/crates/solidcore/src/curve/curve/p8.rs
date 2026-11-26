@@ -121,10 +121,18 @@
 //!   told apart. The certificates do bounded work: at most 16 control points of a curve's
 //!   stretch for the cones, 4096 piece pairs a level over 24 levels in the subdivision,
 //!   and 64 pieces of each in the conic slope test; past that, or for curve kinds they do
-//!   not cover, the ranges are kept. With `Kernel::fixes.simple_coincidence_crossing_is_point`
-//!   a span pair whose separation keeps one side without vanishing is already the nearest
-//!   point (`Curve::simple_coincidence_checker`), and `drop_ranges_of_tangencies` then makes
-//!   a section tangent to a floor arc at their shared end one point (#18064).
+//!   not cover, the ranges are kept. A face/face section tangent to a floor arc at
+//!   their shared end vertex is made one point by the tangency witness, from the
+//!   surfaces (`crate::intersect::curve_class::witness`, #18064).
+//! - **Flank points of an ellipse's touch (#18828).** After the spurious points are
+//!   culled, consecutive point solutions of a line and an ellipse that is no circle are
+//!   replaced by the line's one touch with the ellipse when the line lies in the ellipse's
+//!   plane and provably does not cross it twice there
+//!   (`Curve::flank_points_of_an_ellipse_touch`, `Ellipse::touch_between_line_flanks`):
+//!   at a tangency the local solves stop on both sides of the double root, where the
+//!   curves are within the solver's zero of each other, and upstream returns those points.
+//!   A touch at the ellipse's seam, whose flank points lie at the two ends of the
+//!   parameter range, is left as upstream.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
@@ -132,7 +140,8 @@ use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
 use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{native_failure, Result, SolidError};
+use crate::error::curve::CurveFailure;
+use crate::error::{native_failure, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -150,6 +159,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, NOZ};
 use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
+use crate::profile::profile_scope;
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -243,6 +253,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     other: &Curve,
     other_interval: &Extent1d,
     dist_tol: f64,
+    excluded_target_ends: [bool; 2],
     sols: &mut SolutionArray<O>,
 ) -> Result<()> {
     let mut moved_any = Vec::new();
@@ -270,6 +281,9 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
             };
             let (sol_on_end, sol_on_drop) = if which == 0 { (t1, t2) } else { (t2, t1) };
             for end in 0..2 {
+                if which == 1 && excluded_target_ends.get(end).copied() == Some(true) {
+                    continue;
+                }
                 if moved {
                     break;
                 }
@@ -304,6 +318,16 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     continue;
                 }
                 let drop_t = dropped.parameter;
+                // Dropping a source end can also land on an excluded target end.
+                // Reject the move before it can replace or remove the interior root.
+                let target_t = if which == 0 { drop_t } else { end_t };
+                if excluded_target_ends
+                    .iter()
+                    .zip([other_interval.min(), other_interval.max()])
+                    .any(|(&excluded, end)| excluded && target_t == end)
+                {
+                    continue;
+                }
                 // A range solution overlapping the stretch (in either curve's parameter)
                 // already reports that contact as a coincidence. Moving the point across
                 // it onto the range's far end would drop the point there as named twice,
@@ -328,6 +352,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
                 // solution stays where upstream puts it.
+                k.work_counters.add_contact_stretch_certification();
                 let Some(within) = native_failure(curves_stay_within(
                     k,
                     end_curve,
@@ -717,11 +742,28 @@ fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Opti
     memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
 }
 
+/// Why a cache in this module's slots has a tree with a top node: the slots are crate
+/// private and filled only by [`build_cache`], whose build sets the tree, with its top
+/// node, whenever it succeeds.
+const BUILT_CACHE_HAS_TREE: &str = "the curve's cache, filled only by build_cache, has a \
+     tree with its top node: the build sets both whenever it succeeds";
+
+/// The kernel's defect for a built cache without its tree or top node, with the `NER`
+/// status upstream reports.
+fn built_cache_defect() -> SolidError {
+    Failure::new(
+        OP_GCI,
+        CurveFailure::Defect {
+            why: BUILT_CACHE_HAS_TREE,
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache
-        .tree()
-        .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the curve cache's tree"))
+    cache.tree().ok_or_else(built_cache_defect)
 }
 
 /// `GetOrCreateObjectCache` for a curve (`NER` on failure). `zone_tol_3d` is the zone
@@ -744,7 +786,9 @@ fn build_cache<O: SolutionObject>(
     ) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::curve_missing(OP_GCI, "the curve's cache")),
+        Err(e) => Err(Failure::new(OP_GCI, CurveFailure::CacheNotBuilt)
+            .caused_by(e)
+            .into_error()),
     }
 }
 
@@ -828,6 +872,61 @@ impl Curve {
             [None, None],
             0.0,
             true,
+            [false; 2],
+        )
+    }
+
+    /// Not upstream (#15049): [`Curve::global_curve_intersect`] with a contact tolerance:
+    /// coplanar circles, or a circle and a line in its plane, overlapping past touching by
+    /// less than `contact_tol` touch at one point ([`analytic_curve_intersect`]), as in
+    /// [`Curve::global_curve_intersect_cached_with_zone_tols`]; zero is
+    /// [`Curve::global_curve_intersect`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_in_contact<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        contact_tol: f64,
+    ) -> Result<SolutionArray<O>> {
+        if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
+            let own = operand_handles(self, other);
+            let inner = CurveIntersectOptions {
+                skip_global_coincidence_check: opts.skip_global_coincidence_check,
+                handles: [Some(own[0]), Some(own[1])],
+                analytic_handles: [Some(own[2]), Some(own[3])],
+            };
+            return Ok(self
+                .global_curve_intersect_in_contact(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    dist_tol,
+                    &inner,
+                    contact_tol,
+                )?
+                .without_objects());
+        }
+        self.global_curve_intersect_body(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            &mut None,
+            &mut None,
+            [None, None],
+            contact_tol,
+            true,
+            [false; 2],
         )
     }
 
@@ -867,6 +966,7 @@ impl Curve {
             cache2,
             [None, None],
             0.0,
+            [false; 2],
         )
     }
 
@@ -899,6 +999,7 @@ impl Curve {
         cache2: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
             let own = operand_handles(self, other);
@@ -919,6 +1020,7 @@ impl Curve {
                     &mut None,
                     zone_tols,
                     contact_tol,
+                    excluded_target_ends,
                 )?
                 .without_objects());
         }
@@ -934,6 +1036,7 @@ impl Curve {
             zone_tols,
             contact_tol,
             false,
+            excluded_target_ends,
         )
     }
 
@@ -978,6 +1081,7 @@ impl Curve {
                 [None, None],
                 0.0,
                 false,
+                [false; 2],
             )?
             .without_objects())
     }
@@ -1003,6 +1107,7 @@ impl Curve {
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
         own_slots: bool,
+        excluded_target_ends: [bool; 2],
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -1070,23 +1175,18 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
-        if cache1_slot.is_none() {
-            *cache1_slot = Some(build_cache(k, self, h_this, zone_tols[0])?);
-        }
-        if !same_curve && cache2_slot.is_none() {
-            *cache2_slot = Some(build_cache(k, other, h_other, zone_tols[1])?);
-        }
-        let cache1 = cache1_slot
-            .as_mut()
-            .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the first curve's cache"))?;
+        profile_scope!(k, "curve::global_curve_intersect::cached");
+        let cache1 = match cache1_slot {
+            Some(c) => c,
+            slot @ None => slot.insert(build_cache(k, self, h_this, zone_tols[0])?),
+        };
         let mut cache2_own = if same_curve {
             None
         } else {
-            Some(
-                cache2_slot
-                    .as_mut()
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the second curve's cache"))?,
-            )
+            Some(match cache2_slot {
+                Some(c) => c,
+                slot @ None => slot.insert(build_cache(k, other, h_other, zone_tols[1])?),
+            })
         };
 
         // get curve spatial decomposition trees from each cache
@@ -1095,13 +1195,8 @@ impl Curve {
             let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
             // no work - topNode bounding boxes are disjoint
-            let root1 =
-                tree1.node(tree1.top_node().ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "the first tree's top node")
-                })?)?;
-            let root2 = tree2.node(tree2.top_node().ok_or_else(|| {
-                SolidError::curve_missing(OP_GCI, "the second tree's top node")
-            })?)?;
+            let root1 = tree1.node(tree1.top_node().ok_or_else(built_cache_defect)?)?;
+            let root2 = tree2.node(tree2.top_node().ok_or_else(built_cache_defect)?)?;
             let mut bbox = root1.bbox;
             bbox.expand_absolute(dist_tol);
             if bbox.are_disjoint(&root2.bbox, 0.0) {
@@ -1327,14 +1422,7 @@ impl Curve {
             }
 
             if !needs_more_work {
-                self.drop_ranges_of_tangencies(
-                    k,
-                    &mut sols,
-                    other,
-                    interval,
-                    other_interval,
-                    dist_tol,
-                )?;
+                self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval)?;
                 return Ok(sols);
             }
         }
@@ -1451,7 +1539,7 @@ impl Curve {
         // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
         // coincidence. Dropped before the contacts move to the curve ends, as a range
         // there would stop the flank's point solutions moving to the touch past it.
-        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval)?;
         let self_intersect = core::ptr::eq(tree1, tree2);
         // Not for a self intersection: there the "other" curve is this curve, so the
         // stretch test compares the curve with itself and always passes, and the move
@@ -1465,6 +1553,7 @@ impl Curve {
                 other,
                 other_interval,
                 dist_tol,
+                excluded_target_ends,
                 &mut sols,
             )?;
         }
@@ -1627,6 +1716,18 @@ impl Curve {
             &named,
             &this_whole_domain,
             &other_whole_domain,
+        )?;
+
+        // Not upstream (#18828): two point solutions on the flanks of a line's touch with an
+        // ellipse are that one touch.
+        self.flank_points_of_an_ellipse_touch(
+            k,
+            &mut sols,
+            other,
+            interval,
+            other_interval,
+            dist_tol,
+            contact_tol,
         )?;
 
         // Not upstream (WR-647): a merged range that ends where the curves part is their
@@ -2154,11 +2255,11 @@ impl Curve {
 
                 // Ok, one sol is much better than the other. Check the distances at
                 // both solutions and at the midpoint.
-                let curve_a = named
-                    .curve_of(sol_a.objects[0])
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "a solution's first curve"))?;
+                let curve_a = named.curve_of(sol_a.objects[0]).ok_or_else(|| {
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 0 })
+                })?;
                 let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "a solution's second curve")
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 1 })
                 })?;
                 // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
                 // 8311f8e)
@@ -2221,12 +2322,15 @@ impl Curve {
     /// touching point lies beyond one end on both curves (a point solution, or the
     /// point where an end of each curve's interval meets the other's within the scaled
     /// zero), where the two curves are tangent, and from which the gap grows faster
-    /// than linearly up to the range's far end: the gap at the touch is no larger than
-    /// at this curve's midpoint between it and the far end (dropped onto the other
-    /// curve), and the gap there is less than half the far end's. The gap of a tangency
-    /// grows at least as the square of the distance from the touch, so at the midpoint
-    /// it is at most a quarter of the far end's, and growth that is linear or slower is
-    /// no tangency.
+    /// than linearly across the range: the gap at the touch is less than at the range's
+    /// near end, and the gap divided by the straight distance from the touch on this
+    /// curve is less at the near end than at the far end. The gap of a tangency grows at
+    /// least as the square of the distance from the touch, so that ratio grows with the
+    /// distance, and growth that is linear or slower is no tangency. The gap is taken at the
+    /// range's two ends, the exact intersections the solve found, and not between the
+    /// range and the touch: an intersection curve fitted to its surfaces strays from the
+    /// other curve there by up to its fit tolerance, which can be larger than the
+    /// flank's own gap (#18064's insert with a flatter top).
     ///
     /// Three things tell such a flank from a coincidence, whose gap along the range is
     /// only the rounding of the evaluations and says nothing of growth:
@@ -2238,7 +2342,7 @@ impl Curve {
     ///   stops (a seam edge along its surface's seam curve, a cone's edge along its
     ///   ruling);
     /// - the far end's two parameters give points within the scaled zero of each other,
-    ///   as an exact end does, and the gap at the midpoint is larger than at the touch.
+    ///   as an exact end does, and the gap at the near end is larger than at the touch.
     ///
     /// # Errors
     ///
@@ -2250,7 +2354,6 @@ impl Curve {
         other: &Self,
         interval: &Extent1d,
         other_interval: &Extent1d,
-        dist_tol: f64,
     ) -> Result<()> {
         let gap_at = |a: f64, b: f64| -> Result<f64> {
             Ok(self
@@ -2339,26 +2442,19 @@ impl Curve {
                         continue;
                     }
                     let g_touch = gap_at(touch[0], touch[1])?;
-                    // this curve's midpoint between the touch and the far end, dropped onto
-                    // the other curve between them
-                    let mut span = Extent1d::from_value(touch[1]);
-                    span.add_value(far[1]);
-                    let mid = self.evaluate_point(k, (touch[0] + far[0]) / 2.0)?;
-                    let dropped = other.drop_point(
-                        k,
-                        &span,
-                        mid,
-                        None,
-                        dist_tol,
-                        Some(span.mid()),
-                        SolverOperation::Minimize,
-                    )?;
-                    if !dropped.success {
-                        continue;
-                    }
-                    let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
+                    let g_near = gap_at(near[0], near[1])?;
                     let g_far = gap_at(far[0], far[1])?;
-                    if g_far < scaled_zero && g_touch < g_mid && 2.0 * g_mid < g_far {
+                    // the distances of the range's ends from the touch along this curve
+                    let at_touch = self.evaluate_point(k, touch[0])?;
+                    let d_near = at_touch.distance(self.evaluate_point(k, near[0])?);
+                    let d_far = at_touch.distance(far_self);
+                    // the far end lies farther from the touch than the near end, which lies
+                    // off it (short_of_touch), and g_near / d_near < g_far / d_far
+                    if g_far < scaled_zero
+                        && g_touch < g_near
+                        && d_near < d_far
+                        && g_near * d_far < g_far * d_near
+                    {
                         flank = true;
                     }
                 }
@@ -2438,11 +2534,11 @@ impl Curve {
     ///   of one sign; or [`curves_meet_at_most_once`]); else (two curved curves tangent to
     ///   each other, an exact or near overlap, also with a conic over an arc, two touches)
     ///   the stretch keeps its ranges: a tangency has no sign change, so at the scaled zero
-    ///   it is a short coincidence and no bound tells it from one. With
-    ///   `Kernel::fixes.simple_coincidence_crossing_is_point` the span pairs of a one-sided
-    ///   approach are already nearest points, and `drop_ranges_of_tangencies` makes a
-    ///   section tangent to a floor arc at their shared end one point (#18064). So does a curve
-    ///   against itself whose touch is where it folds back onto itself. Curves that come
+    ///   it is a short coincidence and no bound tells it from one. `drop_ranges_of_tangencies`
+    ///   drops the flank ranges beside a touch (a curve against itself whose touch is where
+    ///   it folds back onto itself), and a face/face section tangent to a floor arc at their
+    ///   shared end vertex is made one point by the tangency witness
+    ///   (`crate::intersect::curve_class::witness`, #18064). Curves that come
     ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
     ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
@@ -2791,9 +2887,8 @@ impl Curve {
                 // overlap, a fitted copy touching its edge where the fit is exact, two
                 // touches) and keeps its ranges: a tangency of two curved curves has no
                 // sign change, so at the scaled zero it cannot be told from a short
-                // coincidence. With `simple_coincidence_crossing_is_point` the per-span
-                // nearest points and `drop_ranges_of_tangencies` make the shared-end
-                // tangency of a section and a floor arc one point (#18064)
+                // coincidence (the face/face tangency witness makes the shared-end
+                // tangency of a section and a floor arc one point, #18064)
                 if !(touch_is_alone(
                     k,
                     self,
@@ -2826,6 +2921,77 @@ impl Curve {
         gone.sort_unstable();
         for &i in gone.iter().rev() {
             sols.remove_at(i, 1);
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#18828): replaces two consecutive point solutions of a line and an
+    /// ellipse (either way round) that stand for one touch with that touch
+    /// (`Ellipse::touch_between_line_flanks`). At a tangency the local solves of the
+    /// global solve stop on both flanks of the double root, where the curves are within
+    /// the solver's zero of each other, and [`Curve::contacts_seen_through_tolerance`] only
+    /// reads range solutions. The proof here is the circle's contact rule read on the
+    /// ellipse's support function: the line stays outside the ellipse or enters it by no
+    /// more than the contact tolerance, so the two points are not two crossings to keep.
+    /// The touch is then tried against the point solutions on both sides of it, and each
+    /// joins it with no further test of where it lies: the line does not cross the ellipse
+    /// twice, and the distance from a point of a line to a convex region is convex along
+    /// the line, so the points of the line within the tolerance of the ellipse are one
+    /// stretch about the touch, and a point solution is one of them. Range solutions, and
+    /// pairs with no certified touch, are left as they are.
+    ///
+    /// # Errors
+    ///
+    /// Those of `Ellipse::touch_between_line_flanks`.
+    fn flank_points_of_an_ellipse_touch<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        sols: &mut SolutionArray<O>,
+        other: &Self,
+        interval: &Extent1d,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        contact_tol: f64,
+    ) -> Result<()> {
+        // the ellipse, the line, their intervals and which parameter is the ellipse's
+        let (ellipse, line, e_ivl, l_ivl, e_at) = match (self.kind(), other.kind()) {
+            (CurveKind::Ellipse(e), CurveKind::Line(l)) => (e, l, interval, other_interval, 0),
+            (CurveKind::Line(l), CurveKind::Ellipse(e)) => (e, l, other_interval, interval, 1),
+            _ => return Ok(()),
+        };
+        let l_at = 1 - e_at;
+        let mut ii = 0;
+        while ii + 1 < sols.len() {
+            let (a, b) = (sol_at(sols, ii)?, sol_at(sols, ii + 1)?);
+            if a.solution_type != SolutionType::SingleValue
+                || b.solution_type != SolutionType::SingleValue
+            {
+                ii += 1;
+                continue;
+            }
+            let flank =
+                |s: &Solution<O>| Ok::<_, SolidError>([s.start.param(e_at)?, s.start.param(l_at)?]);
+            let Some([u, w, dist]) = ellipse.touch_between_line_flanks(
+                k,
+                e_ivl,
+                line,
+                l_ivl,
+                dist_tol,
+                contact_tol,
+                [flank(&a)?, flank(&b)?],
+            )?
+            else {
+                ii += 1;
+                continue;
+            };
+            let mut touch = a;
+            *touch.start.param_mut(e_at)? = u;
+            *touch.start.param_mut(l_at)? = w;
+            touch.start.solution_value = dist;
+            put_at(sols, ii, &touch)?;
+            sols.remove_at(ii + 1, 1);
+            // (the touch against the point before it next, then the one after)
+            ii = ii.saturating_sub(1);
         }
         Ok(())
     }
@@ -4300,7 +4466,8 @@ mod tests {
         let mut sols = SolutionArray::new();
         sols.add(&range);
         sols.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut sols).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut sols)
+            .unwrap();
         assert_eq!(sols.len(), 2, "the point is kept");
         let kept = sols.get(1).unwrap();
         assert_eq!(kept.solution_type, SolutionType::SingleValue);
@@ -4311,7 +4478,8 @@ mod tests {
         // so it moves there
         let mut alone = SolutionArray::new();
         alone.add(&point);
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut alone).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut alone)
+            .unwrap();
         assert_eq!(alone.len(), 1);
         assert_eq!(alone.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
 
@@ -4320,9 +4488,39 @@ mod tests {
         for t in [0.1, 0.3, 0.5] {
             chain.add(&sol(SolutionType::SingleValue, [t, t], [0.0, 0.0]));
         }
-        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut chain).unwrap();
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, [false; 2], &mut chain)
+            .unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        // A source end drops onto the bounded target's start, even though the
+        // actual oblique crossing is interior to both curves. Its mask applies
+        // through this indirect route as well as when moving to a target end.
+        let zone = 1e-5;
+        let oblique = polyline(&[
+            [-3.0 * zone, 0.0, 4.8 * zone],
+            [0.0, 0.0, 1.8 * zone],
+            [1.9 * zone, 0.0, -0.1 * zone],
+        ]);
+        let bounded = polyline(&[[0.0, 0.0, 0.0], [0.0, 0.0, 6.0 * zone]]);
+        let crossing = sol(SolutionType::SingleValue, [0.5, 0.3], [0.0, 0.0]);
+        for (mask, expected) in [([false; 2], [1.0, 0.0]), ([true, false], [0.5, 0.3])] {
+            let mut contact = SolutionArray::new();
+            contact.add(&crossing);
+            move_contacts_to_curve_ends(
+                &k,
+                &oblique,
+                &unit(),
+                &bounded,
+                &unit(),
+                2.0 * zone,
+                mask,
+                &mut contact,
+            )
+            .unwrap();
+            assert_eq!(contact.len(), 1);
+            assert_eq!(contact.get(0).unwrap().start.parameters[..2], expected);
+        }
 
         let crosses = |others: &[Solution<H>], gone: &[usize]| {
             let mut s = SolutionArray::new();
@@ -4647,5 +4845,174 @@ mod tests {
         let bent = parabola(1e-13, 1.0);
         assert!(touch_is_alone(&k, &line, whole, &bent, whole, [0.5, 0.5], 1e-5).unwrap());
         assert!(touch_is_alone(&k, &bent, whole, &line, whole, [0.5, 0.5], 1e-5).unwrap());
+    }
+
+    /// #18828: the foot's inner side face cuts the plate's corner cylinder (radius 2 about
+    /// x = -3, z = 8.3, along y) in an ellipse whose top, P = (-3, -15.817157, 10.3),
+    /// touches the foot's top edge, the line along the side face at z = 10.3. In the
+    /// Boolean the general solve stopped on both flanks of that double root, 2.68e-5 and
+    /// 2.44e-5 from P along the line, where the curves are about 3e-11 apart, and the two
+    /// point solutions became a 2.68e-5 edge from a vertex back to itself. Those two flank
+    /// points are the one touch at P, either way round, and so are three points left on
+    /// that stretch. A line 1e-3 below the top cuts the ellipse at two crossings 0.30
+    /// apart, which stay two; so do the flank points without a contact tolerance when the
+    /// line runs a hair inside the top.
+    #[test]
+    fn flank_points_of_a_line_tangent_to_an_ellipse_are_its_touch() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        use crate::curve::line::Line;
+        let k = Kernel::default();
+        let (a, b) = (
+            Vec3::new(-3.0565447957777483, -15.938417685876269, 10.3),
+            Vec3::new(-1.5555361814781503, -12.71949432476632, 10.3),
+        );
+        let d = (b - a).unitize_or_z();
+        let centre = Vec3::new(-3.0, -15.817156980012088, 8.3);
+        let ellipse = Curve::from(
+            Ellipse::new(
+                &k,
+                centre,
+                d,
+                Vec3::Z,
+                Extent1d::from_min_max(60.0, 120.0),
+                2.0 / d.x,
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let top = centre + 2.0 * Vec3::Z;
+        let e_ivl = ellipse.natural_interval();
+        // the points of the line `(a, b)` at `along` from P, dropped onto the ellipse: a
+        // solution `[ellipse, line]` as the general solve gives it
+        let solution = |line: &Curve, at: Vec3| {
+            let dropped = ellipse
+                .drop_point(&k, &e_ivl, at, None, 1e-3, None, SolverOperation::Minimize)
+                .unwrap();
+            let on_line = line
+                .drop_point(
+                    &k,
+                    &line.natural_interval(),
+                    at,
+                    None,
+                    1e-3,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            let p = ellipse.evaluate_point(&k, dropped.parameter).unwrap();
+            let q = line.evaluate_point(&k, on_line.parameter).unwrap();
+            let mut s = sol(
+                SolutionType::SingleValue,
+                [dropped.parameter, on_line.parameter],
+                [0.0, 0.0],
+            );
+            s.start.solution_value = p.distance(q);
+            s
+        };
+        let run = |line: &Curve, flanks: &[Vec3], contact: f64, swapped: bool| {
+            let mut sols = SolutionArray::new();
+            for &f in flanks {
+                let mut s = solution(line, f);
+                if swapped {
+                    s.start.parameters.swap(0, 1);
+                }
+                sols.add(&s);
+            }
+            let (this, other, ivl, other_ivl) = if swapped {
+                (line, &ellipse, line.natural_interval(), e_ivl)
+            } else {
+                (&ellipse, line, e_ivl, line.natural_interval())
+            };
+            this.flank_points_of_an_ellipse_touch(
+                &k, &mut sols, other, &ivl, &other_ivl, 2e-5, contact,
+            )
+            .unwrap();
+            let e_at = usize::from(swapped);
+            sols.as_slice()
+                .iter()
+                .map(|s| {
+                    ellipse
+                        .evaluate_point(&k, s.start.param(e_at).unwrap())
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let tangent = Curve::from(Line::from_points(a, b, 3));
+        let flanks = [top - 2.68e-5 * d, top + 2.44e-5 * d];
+        // (a third point on the stretch, on either side of the touch, joins it as well,
+        // with or without a contact tolerance: the tangent line does not enter the ellipse)
+        let thirds = [
+            [flanks[0], top - 1.1e-5 * d, flanks[1]],
+            [flanks[0], top + 0.9e-5 * d, flanks[1]],
+        ];
+        for swapped in [false, true] {
+            for contact in [1e-5, 0.0] {
+                let mut runs = vec![flanks.to_vec()];
+                runs.extend(thirds.iter().map(|t| t.to_vec()));
+                for points_in in runs {
+                    let points = run(&tangent, &points_in, contact, swapped);
+                    assert_eq!(points.len(), 1, "swapped {swapped}: {points:?}");
+                    assert!(points[0].distance(top) < 1e-9, "{points:?} vs {top:?}");
+                }
+            }
+        }
+        // two crossings of a line 1e-3 below the top: x - x0 = ±√(2 · 1e-3 · ρ) with the
+        // radius of curvature ρ = (2 / d.x)² / 2 at the top
+        let below = Vec3::new(0.0, 0.0, -1e-3);
+        let cut = Curve::from(Line::from_points(a + below, b + below, 3));
+        let half = (2.0 * 1e-3 * (2.0 / d.x).powi(2) / 2.0).sqrt();
+        let crossings = [top + below - half * d, top + below + half * d];
+        assert_eq!(run(&cut, &crossings, 1e-5, false).len(), 2);
+        // a hair (1e-9) inside the top, with no contact tolerance: the circle rule's zero
+        // keeps upstream's two points
+        let inside = Vec3::new(0.0, 0.0, -1e-9);
+        let hair = Curve::from(Line::from_points(a + inside, b + inside, 3));
+        assert_eq!(run(&hair, &flanks.map(|f| f + inside), 0.0, false).len(), 2);
+        // and through the intersector, with the Boolean's tolerances and the ellipse as the
+        // join built it (the side face's section of the corner cylinder: 3.4 degrees about
+        // the top, its y axis down), for which the general solve returns the two flank
+        // points 2.68e-5 and 2.44e-5 from P: one touch at P, either way round
+        let section = Curve::from(
+            Ellipse::new(
+                &k,
+                centre,
+                Vec3::new(0.42261826174069966, 0.9063077870366499, 0.0),
+                -Vec3::Z,
+                Extent1d::from_min_max(268.379895042679, 271.79999999999984),
+                4.732403166304994,
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for (this, other, e_at) in [(&section, &tangent, 0), (&tangent, &section, 1)] {
+            let sols = this
+                .global_curve_intersect_cached_with_zone_tols(
+                    &k,
+                    &this.natural_interval(),
+                    other,
+                    &other.natural_interval(),
+                    2e-5,
+                    &opts(),
+                    &mut None,
+                    &mut None,
+                    [None, None],
+                    1e-5,
+                    [false; 2],
+                )
+                .unwrap();
+            let points: Vec<Vec3> = sols
+                .as_slice()
+                .iter()
+                .map(|s| {
+                    section
+                        .evaluate_point(&k, s.start.param(e_at).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(points.len(), 1, "ellipse at {e_at}: {points:?}");
+            assert!(points[0].distance(top) < 1e-9, "{points:?} vs {top:?}");
+        }
     }
 }

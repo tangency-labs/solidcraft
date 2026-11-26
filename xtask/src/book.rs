@@ -18,6 +18,7 @@ use crate::cargo;
 const TABS: &[&str] = &["SOLID", "SKETCH", "SURFACE", "SHEET METAL", "WELDMENTS", "PLASTIC"];
 const SNAPSHOT_SIZE: (&str, &str) = ("960", "600");
 
+/// Builds the SolidCraft mdBook documentation and verifies or captures UI screenshots.
 pub fn run(root: &Path, build: bool) -> Result<(), String> {
     let book = root.join("docs/book");
     std::fs::copy(root.join("assets/branding/web/source/og.png"), book.join("src/og.png")).map_err(|e| format!("book preview card: {e}"))?;
@@ -50,8 +51,20 @@ pub fn run(root: &Path, build: bool) -> Result<(), String> {
         }
         println!("book: {}", png.strip_prefix(root).unwrap_or(&png).display());
     }
-    let shot = "sample-plate.png";
-    std::fs::copy(root.join("docs/screenshots").join(shot), gen_dir.join(shot)).map_err(|e| format!("{shot}: {e}"))?;
+    for shot in [
+        "sample-plate.png",
+        "timeline-2d-assembly.png",
+        "timeline-2d-corridor-selection.png",
+        "timeline-2d-corridor-smart-inset.png",
+        "timeline-2d-dock-closeup.png",
+        "timeline-2d-group.png",
+        "timeline-2d-overview.png",
+        "timeline-2d-resize-1row.png",
+        "timeline-2d-view-assembly-full.png",
+        "timeline-2d-view-modeling-full.png",
+    ] {
+        std::fs::copy(root.join("docs/screenshots").join(shot), gen_dir.join(shot)).map_err(|e| format!("{shot}: {e}"))?;
+    }
 
     if build {
         let mut c = std::process::Command::new("mdbook");

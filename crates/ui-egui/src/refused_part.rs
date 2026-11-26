@@ -134,12 +134,12 @@ mod tests {
         crate::i18n::install();
         let _english = solidcraft_ui_text::scope("en");
         let rounded = RefusedPart { body: "VALVE_COVER_01".into(), face: Some(412), surface: Some(SurfaceKind::Torus) };
-        assert_eq!(message(&rounded, Some("join")), "Couldn't join to VALVE_COVER_01. One of its rounded faces can't be used for modelling.");
+        assert_eq!(message(&rounded, Some("join")), "Couldn't join to VALVE_COVER_01. One of its rounded faces can't be used for modeling.");
         let apart = RefusedPart { body: "Bracket".into(), face: None, surface: None };
-        assert_eq!(message(&apart, Some("cut")), "Couldn't cut Bracket. Its faces don't meet closely enough to be used for modelling.");
+        assert_eq!(message(&apart, Some("cut")), "Couldn't cut Bracket. Its faces don't meet closely enough to be used for modeling.");
         let flat = RefusedPart { body: "Plate".into(), face: Some(0), surface: Some(SurfaceKind::Plane) };
         let text = message(&flat, None);
-        assert_eq!(text, "Couldn't change Plate. One of its flat faces can't be used for modelling.");
+        assert_eq!(text, "Couldn't change Plate. One of its flat faces can't be used for modeling.");
         assert!(!text.contains("SMLib") && !text.contains("SM_ERR"), "{text}");
     }
 }

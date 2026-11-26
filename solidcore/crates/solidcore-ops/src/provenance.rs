@@ -5,13 +5,18 @@
 //!
 //! What the data is and how it joins is the application's ([`Provenance`]); ops only stores it on
 //! the kernel's attribute store and calls the application's rule at each event. An application's
-//! construction history is built on it.
+//! construction history is built on it: it attaches its data to an operand's faces and edges by
+//! record index ([`Body::attach`]), runs its operations, and reads what each face and edge of the
+//! result carries ([`Body::carried`]).
 
 use solidcore::geom::attribute::{
     ids, ApplicationValue, Attribute, AttributeHandlers, AttributeValue, AttributeView, Behavior,
     ObjectKey, Placement,
 };
 use solidcore::{Brep, EntityRef};
+
+use crate::body::Body;
+use crate::order::{self, Order};
 
 /// An application's provenance data and its rules for the kernel's edits. Each rule returns what
 /// the entity it names carries afterwards: `Some` replaces what it carried (`None` there before
@@ -201,9 +206,14 @@ impl<P: Provenance> AttributeHandlers for Carried<P> {
 /// # Errors
 /// [`Error::Argument`](crate::Error::Argument) for an ID another type took; the kernel's, for an
 /// entity not in `b`.
-#[allow(dead_code)] // the application's handle on it comes with the record's order
+#[allow(dead_code)] // ops' own callers go through `Body::attach`
 pub(crate) fn attach<P: Provenance>(b: &mut Brep, e: EntityRef, data: P) -> crate::Result<()> {
     take::<P>()?;
+    put(b, e, data)
+}
+
+/// [`attach`] once `P` has its ID.
+fn put<P: Provenance>(b: &mut Brep, e: EntityRef, data: P) -> crate::Result<()> {
     let old = b
         .entity_attributes(e)
         .into_iter()
@@ -222,11 +232,93 @@ pub(crate) fn attach<P: Provenance>(b: &mut Brep, e: EntityRef, data: P) -> crat
 
 /// What of kind `P` `e` carries.
 #[must_use]
-#[allow(dead_code)] // as attach
 pub(crate) fn read<P: Provenance>(b: &Brep, e: EntityRef) -> Option<P> {
     let (_, a) = b
         .entity_attributes(e)
         .into_iter()
         .find(|(_, a)| a.attribute_id() == P::ID)?;
     a.application_value::<Carried<P>>().map(|c| c.0.clone())
+}
+
+/// A face or an edge of a body, by its index in an [`Order`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Carrier {
+    /// Record face `i`.
+    Face(usize),
+    /// Record edge `i`.
+    Edge(usize),
+}
+
+/// What of one kind of provenance each face and edge of a body carries, in an [`Order`]'s
+/// lists ([`Body::carried`]): `None` for one that carries none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CarriedBy<P> {
+    /// Per record face.
+    pub faces: Vec<Option<P>>,
+    /// Per record edge.
+    pub edges: Vec<Option<P>>,
+}
+
+impl Body {
+    /// Attaches each of `data` to its face or edge (through `order`), replacing what of kind `P`
+    /// it carried; the kernel's edits of the body carry it on from then by `P`'s rules. `P` takes
+    /// its ID first: an ID below [`FIRST_ID`] does not compile, one another type took is refused.
+    /// The body is edited in place, with no copy kept: on an error, the entities before the one
+    /// refused carry their data.
+    ///
+    /// # Errors
+    /// [`Error::Argument`](crate::Error::Argument) for an ID another type took or an index past
+    /// the order's faces or edges; [`Error::Internal`](crate::Error::Internal) for a body a panic
+    /// left unfinished; the kernel's, for an entity the body does not have.
+    pub fn attach<P: Provenance>(
+        &self,
+        order: &Order,
+        data: Vec<(Carrier, P)>,
+    ) -> crate::Result<()> {
+        take::<P>()?;
+        let mut at = Vec::with_capacity(data.len());
+        for (c, p) in data {
+            let e = match c {
+                Carrier::Face(i) => EntityRef::Face(order::face(order, i)?),
+                Carrier::Edge(i) => EntityRef::Edge(order::edge(order, i)?),
+            };
+            at.push((e, p));
+        }
+        if self.is_poisoned() {
+            return Err(crate::Error::Internal(
+                "provenance::attach: the body was left unfinished by an earlier panic".to_owned(),
+            ));
+        }
+        let mut b = self.lock();
+        for (e, p) in at {
+            put(&mut b, e, p)?;
+        }
+        Ok(())
+    }
+
+    /// What of kind `P` each face and edge of `order` carries (`None` for none, or data of
+    /// another type under `P`'s ID). The body is only read.
+    ///
+    /// # Errors
+    /// [`Error::Internal`](crate::Error::Internal) for a body a panic left unfinished.
+    pub fn carried<P: Provenance>(&self, order: &Order) -> crate::Result<CarriedBy<P>> {
+        if self.is_poisoned() {
+            return Err(crate::Error::Internal(
+                "provenance::carried: the body was left unfinished by an earlier panic".to_owned(),
+            ));
+        }
+        let b = self.lock();
+        Ok(CarriedBy {
+            faces: order
+                .faces
+                .iter()
+                .map(|&f| read::<P>(&b, EntityRef::Face(f)))
+                .collect(),
+            edges: order
+                .edges
+                .iter()
+                .map(|&e| read::<P>(&b, EntityRef::Edge(e)))
+                .collect(),
+        })
+    }
 }

@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "ui.drawing_export.text": "النص",
+    "ui.drawing_export.text_outlines": "مخططات",
+    "ui.drawing_export.text_real": "نص حقيقي"
+  },
+  "he": {
+    "ui.drawing_export.text": "טקסט",
+    "ui.drawing_export.text_outlines": "קווי מתאר",
+    "ui.drawing_export.text_real": "טקסט אמיתי"
+  },
+  "ja": {
+    "ui.drawing_export.text": "テキスト",
+    "ui.drawing_export.text_outlines": "アウトライン",
+    "ui.drawing_export.text_real": "実テキスト"
+  },
+  "vi": {
+    "ui.drawing_export.text": "Văn bản",
+    "ui.drawing_export.text_outlines": "Đường viền",
+    "ui.drawing_export.text_real": "Văn bản thật"
+  },
+  "zh": {
+    "ui.drawing_export.text": "文本",
+    "ui.drawing_export.text_outlines": "轮廓",
+    "ui.drawing_export.text_real": "实际文本"
+  },
+  "de": {
+    "ui.drawing_export.text": "Text",
+    "ui.drawing_export.text_outlines": "Konturen",
+    "ui.drawing_export.text_real": "Echter Text"
+  },
+  "ko": {
+    "ui.drawing_export.text": "텍스트",
+    "ui.drawing_export.text_outlines": "윤곽선",
+    "ui.drawing_export.text_real": "실제 텍스트"
+  },
+  "en": {
+    "ui.drawing_export.text": "Text",
+    "ui.drawing_export.text_outlines": "Outlines",
+    "ui.drawing_export.text_real": "Real text"
+  }
+}

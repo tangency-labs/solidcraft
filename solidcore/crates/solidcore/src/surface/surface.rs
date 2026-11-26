@@ -9,6 +9,7 @@
 
 pub mod approximate;
 pub mod assert_valid;
+pub mod certified_line;
 pub mod exact_pieces;
 pub mod fold_certificate;
 pub mod p1;
@@ -22,10 +23,7 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
-#[cfg(feature = "wr57-replay")]
-pub mod replay;
 
 pub use p1::StepSurface;
-pub use p2::{
-    CacheTreeState, Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType,
-};
+pub use p2::{Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType};
+pub(crate) use p6::SurfaceContinuities;

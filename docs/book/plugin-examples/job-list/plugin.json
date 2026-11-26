@@ -1,0 +1,47 @@
+{
+  "id": "job-list",
+  "name": "Job List",
+  "version": "0.1.0",
+  "description": "Keeps a list of machining jobs in the design and shows it in a docked panel.",
+  "capabilities": ["commands@0.2", "ui@0.1", "storage@0.1"],
+  "runtime": {
+    "module": "job-list.wasm",
+    "data_format": 1,
+    "commands": ["storage.get", "storage.set"],
+    "entries": [
+      {
+        "name": "add",
+        "effect": "edit",
+        "input_schema": {"type": "object", "properties": {
+          "name": {"type": "string", "title": "Job", "default": "Pocket"},
+          "tool": {"type": "number", "title": "Tool diameter", "default": 6, "minimum": 0.1, "unit": "mm"}
+        }}
+      },
+      {"name": "clear", "effect": "edit", "input_schema": {"type": "object", "properties": {}}},
+      {"name": "refresh", "effect": "read", "input_schema": {"type": "object", "properties": {}}}
+    ],
+    "ui": {
+      "ui_version": 1,
+      "panels": [{
+        "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+        "layout": {"root": 0, "nodes": [
+          {"widget": {"group": [1, 2]}},
+          {"widget": {"toolbar": [
+            {"label": "Refresh", "icon": null, "entry": "refresh"},
+            {"label": "Clear", "icon": null, "entry": "clear"}
+          ]}},
+          {"widget": {"table": {
+            "bind": "/jobs", "row_id": "id",
+            "columns": [
+              {"key": "name", "label": "Job", "unit": null},
+              {"key": "tool", "label": "Tool", "unit": "length"}
+            ],
+            "select": "single", "on_select": null, "on_edit": null
+          }}}
+        ]}
+      }],
+      "workspaces": []
+    },
+    "limits": {"fuel": 1000000000, "memory_mib": 32, "deadline_ms": 5000}
+  }
+}

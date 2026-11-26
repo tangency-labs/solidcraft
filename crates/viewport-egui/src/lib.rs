@@ -5,6 +5,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod rounded;
+
+pub use rounded::clip_card;
+
 use std::sync::Arc;
 
 use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
@@ -19,10 +23,10 @@ pub struct TileCallback(pub u64, pub Frame);
 pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
-/// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
+/// bottom edge, through `middle` halfway down when given (#9230). The viewport callback composites transparently onto this egui mesh, so the host
 /// passes the colours it shows (its theme's, as they animate); no background colour belongs to a
 /// cached model scene or GPU upload.
-pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
+pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, middle: Option<egui::Color32>, bottom: egui::Color32) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
     mesh.colored_vertex(rect.right_top(), top);
@@ -30,6 +34,16 @@ pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Co
     mesh.colored_vertex(rect.left_bottom(), bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
+    // A colour of the user's halfway down (#9230): two bands, top to middle and middle to bottom.
+    if let Some(middle) = middle {
+        mesh.indices.clear();
+        mesh.colored_vertex(egui::pos2(rect.right(), rect.center().y), middle);
+        mesh.colored_vertex(egui::pos2(rect.left(), rect.center().y), middle);
+        mesh.add_triangle(0, 1, 4);
+        mesh.add_triangle(0, 4, 5);
+        mesh.add_triangle(5, 4, 2);
+        mesh.add_triangle(5, 2, 3);
+    }
     painter.add(egui::Shape::mesh(mesh));
 }
 
@@ -213,6 +227,41 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 mod tests {
     use egui::{Rect, pos2, vec2};
 
+    #[test]
+    fn card_paint_clips_rounded_corners_without_covering_the_picture_behind_it() {
+        for scale in [1.0, 1.1, 1.1458334, 1.25, 1.75, 2.0] {
+            for origin in [pos2(0.0, 0.0), pos2(12.3, 18.7), pos2(7.0, 31.0)] {
+                for header in [false, true] {
+                    let ctx = egui::Context::default();
+                    ctx.set_pixels_per_point(scale);
+                    let card = Rect::from_min_size(origin, vec2(240.0, 160.0));
+                    let radius = egui::CornerRadius { nw: if header { 0 } else { 8 }, ne: if header { 0 } else { 8 }, sw: 8, se: 8 };
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        let ctx = ui.ctx();
+                        let painter = ctx.layer_painter(egui::LayerId::background());
+                        let start = painter.add(egui::Shape::Noop);
+                        painter.rect_filled(card, 0, egui::Color32::RED);
+                        super::clip_card(&painter, start, card, radius);
+                    });
+                    let clips: Vec<_> =
+                        output.shapes.iter().filter(|entry| matches!(entry.shape, egui::Shape::Rect(_))).map(|entry| entry.clip_rect).collect();
+                    assert!(!clips.is_empty());
+                    assert!(clips.len() <= 35, "only corner rows need separate scissors");
+                    assert_eq!(clips.first().unwrap().top(), card.top());
+                    assert_eq!(clips.last().unwrap().bottom(), card.bottom());
+                    assert!(clips.iter().any(|clip| clip.left() == card.left() && clip.right() == card.right() && clip.height() > 100.0));
+                    for pair in clips.windows(2) {
+                        assert_eq!(pair[0].bottom(), pair[1].top(), "no seam or double-painted row");
+                    }
+                    if !header {
+                        assert!(clips.first().unwrap().left() > card.left(), "a hidden header exposes rounded top corners");
+                    }
+                    assert!(clips.last().unwrap().left() > card.left(), "the bottom corner contains no card pixels");
+                }
+            }
+        }
+    }
+
     /// The background is drawn from the two colours it is given, top edge then bottom edge, on a
     /// bare context: no theme is published or read.
     #[test]
@@ -220,7 +269,7 @@ mod tests {
         let (top, bottom) = (egui::Color32::from_rgb(10, 20, 30), egui::Color32::from_rgb(200, 150, 100));
         let rect = Rect::from_min_size(pos2(5.0, 7.0), vec2(300.0, 200.0));
         let ctx = egui::Context::default();
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, bottom));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::paint_background(ui.painter(), rect, top, None, bottom));
         // The first frame of a bare context uploads the font atlas; nothing displays it here.
         out.textures_delta.clear();
         let meshes: Vec<_> = out

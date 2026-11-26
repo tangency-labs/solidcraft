@@ -11,8 +11,8 @@
 //! - **unsupported**: the kernel alone does not account for the result (`operation_expressible`
 //!   false), the rig itself rated it unsupported, or the conversion does not carry a record yet;
 //! - **unported**: an operation this crate does not have yet, named, so the case is not run;
-//! - **known-failing**: listed in `known_failing.json` beside the corpus, the one list, each entry
-//!   with its reason and issue. A listed case is steady while it reproduces the rig's result,
+//! - **known-failing**: listed in `kernel_cases_known_failing/` beside the corpus, the one list:
+//!   `<area>/<case>.json` per listed case, with its reason and issue. A listed case is steady while it reproduces the rig's result,
 //!   or, when its entry records `fails` (solidcore fails it differently from the rig), while it
 //!   fails exactly so. A listed case that moves from that (it passes, or fails otherwise) is
 //!   reported, so the list can shrink.
@@ -181,10 +181,13 @@ mod f64_bits {
     }
 }
 
-/// An entry of the known-failing list.
+/// An entry of the known-failing list: `kernel_cases_known_failing/<area>/<case>.json`, the case
+/// named by its path (one file per case, so PRs listing or unlisting different cases never touch
+/// the same file).
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Listed {
+    #[serde(skip)]
     case: String,
     issue: String,
     reason: String,
@@ -196,15 +199,45 @@ struct Listed {
     fails: Option<String>,
 }
 
+fn known_failing_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases_known_failing")
+}
+
+/// The known-failing list, by case (`<area>/<case>`): one file per case under
+/// [`known_failing_dir`], each `{"issue", "reason", "fails"?}`.
 fn known_failing() -> BTreeMap<String, Listed> {
-    let text = std::fs::read_to_string(corpus().join("known_failing.json")).unwrap();
-    let list: Vec<Listed> = serde_json::from_str(&text).unwrap();
-    let mut out = BTreeMap::new();
-    for l in list {
-        assert!(!l.reason.is_empty() && !l.issue.is_empty(), "{}", l.case);
-        let case = l.case.clone();
-        assert!(out.insert(case.clone(), l).is_none(), "{case} listed twice");
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Listed>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            assert!(
+                p.extension().is_some_and(|x| x == "json") && p.parent() != Some(root),
+                "{}: the known-failing list holds only <area>/<case>.json files",
+                p.display()
+            );
+            let text = std::fs::read_to_string(&p).unwrap();
+            let mut l: Listed =
+                serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+            l.case = p
+                .strip_prefix(root)
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            assert!(
+                !l.reason.is_empty() && !l.issue.is_empty(),
+                "{}: issue and reason must not be empty",
+                p.display()
+            );
+            assert!(out.insert(l.case.clone(), l).is_none());
+        }
     }
+    let root = known_failing_dir();
+    let mut out = BTreeMap::new();
+    walk(&root, &root, &mut out);
     out
 }
 
@@ -1001,6 +1034,7 @@ fn call_with_copy(
             let turn = match p.get("turn").map(Value::as_str) {
                 None | Some(Some("mitre")) => Turn::Mitre,
                 Some(Some("swept")) => Turn::Swept,
+                Some(Some("auto")) => Turn::Auto,
                 Some(_) => return Err(bad("turn")),
             };
             let kind = match p["kind"].as_str() {
@@ -4423,7 +4457,7 @@ fn kernel_cases() {
     for k in listed.keys() {
         assert!(
             all.contains(k),
-            "known_failing.json lists {k}, which the corpus does not have"
+            "kernel_cases_known_failing/{k}.json lists a case the corpus does not have: delete it"
         );
     }
 
@@ -5117,4 +5151,91 @@ fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
     let joined = union_all(bodies).unwrap();
     let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
+}
+
+/// A bounded cliff does not excuse a separate material-adding blend on the same plate.
+#[test]
+fn tangent_cliff_still_checks_a_separate_concave_blend() {
+    use solidcore_ops::blend::blend_with;
+    use solidcore_ops::{make_box, make_cylinder, pick};
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let plate = make_box([-9.0, -6.0, -9.0], [12.0, 12.0, 9.0]).unwrap();
+    let tangent = make_cylinder([0.0, 0.0, -1.0], 3.0, 18.0).unwrap();
+    let inset = make_cylinder([-6.0, 0.0, -1.0], 1.0, 18.0).unwrap();
+    let plate = boolean(plate, tangent, BooleanOp::Union).unwrap().unwrap();
+    let body = boolean(plate, inset, BooleanOp::Union).unwrap().unwrap();
+    let points = [[0.0, 3.0, 0.0], [-6.0, 1.0, 0.0]];
+    let picks = pick::edges(&body, &points, 1e-4).unwrap().unwrap();
+    let apply = |body: &Body, picks: &[usize]| {
+        blend_with(
+            body,
+            Blend::Chamfer,
+            picks,
+            &[0.75],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+    };
+    for point in points {
+        let copy = body.copy().unwrap();
+        let pick = pick::edges(&copy, &[point], 1e-4).unwrap().unwrap();
+        apply(&copy, &pick).unwrap();
+        copy.check_solid().unwrap();
+    }
+    let error = apply(&body, &picks).unwrap_err();
+    assert_eq!(error, solidcore_ops::Error::NoRoom);
+}
+
+/// The exact cone, the original tangent walls and the upper rail survive clipping.
+#[test]
+fn tangent_cliff_chamfers_keep_the_walls_and_upper_rail() {
+    use solidcore_ops::measure::PointClass;
+    use solidcore_ops::pick;
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    for (name, walls) in [
+        (
+            "12060-chamfer-circular-shoulder-between-tangent-walls",
+            &[[0.0, -1.0], [0.0, 1.0]][..],
+        ),
+        (
+            "12060-chamfer-closed-shoulder-at-tangent-seam",
+            &[[1.0, 0.0]][..],
+        ),
+    ] {
+        let entry = corpus().join("fillets").join(format!("{name}.json"));
+        let case: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        let operand: Record = serde_json::from_value(records(&entry, &case)["b1"].clone()).unwrap();
+        let (body, order) = Body::from_record(&operand, true).unwrap();
+        let mut input = [Slot {
+            body: Arc::new(body),
+            order: Some(order),
+        }];
+        let result = call(&case["calls"][0], &mut input).unwrap().unwrap();
+        let body = result.body;
+        body.check_solid().unwrap();
+        let diagonal = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!(pick::edges(&body, &[[diagonal, diagonal, 0.75]], 1e-5)
+            .unwrap()
+            .is_ok());
+        assert_eq!(
+            body.classify_point([-3.375, 0.0, 0.375]).unwrap(),
+            PointClass::OnBoundary,
+            "{name}: conical face at half height"
+        );
+        for &[x, y] in walls {
+            let point = |normal| [normal * x + 0.5 * y, normal * y + 0.5 * x, 0.375];
+            for (distance, class) in [
+                (2.98, PointClass::Inside),
+                (3.0, PointClass::OnBoundary),
+                (3.02, PointClass::Outside),
+            ] {
+                assert_eq!(
+                    body.classify_point(point(distance)).unwrap(),
+                    class,
+                    "{name}: original side wall at {x}, {y}"
+                );
+            }
+        }
+    }
 }
