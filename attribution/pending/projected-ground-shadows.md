@@ -1,0 +1,1 @@
+| crates/gpu/src/view/ground_shadow.rs | SolidCraft contributors | original GPU coverage projection and separable Gaussian WGSL, embedded as Rust source; derived from analytic projection and Gaussian weights | MIT OR Apache-2.0 |

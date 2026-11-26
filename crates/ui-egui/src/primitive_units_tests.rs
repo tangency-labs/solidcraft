@@ -640,7 +640,7 @@ fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
-        ("solid.extrude", &["10", "10", "", "", "2", "1"]),
+        ("solid.extrude", &["10", "10", "", "", "", "2", "1"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),

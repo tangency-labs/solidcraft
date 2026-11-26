@@ -201,6 +201,7 @@ mod tests {
             natural: Some((20.0, 10.0)),
             middle: Some((40.0, 25.0)),
             align: Align::Middle,
+            simplify: 0.0,
         }
     }
 

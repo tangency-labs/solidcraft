@@ -1889,6 +1889,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -2738,6 +2739,7 @@ mod tests {
             colors: Colors::default(),
             source_points: count as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3762,6 +3764,7 @@ mod tests {
             colors: Colors::default(),
             source_points: 3,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -4272,7 +4275,10 @@ mod tests {
                 legacy.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
                 legacy.write_all(&data).unwrap();
             }
-            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), doc);
+            // Its features keep the order of the pieces they split bodies into (#21552).
+            let mut upgraded = doc.clone();
+            upgraded.features.iter_mut().for_each(|f| f.least_face_piece_order = true);
+            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), upgraded);
         }
     }
 
