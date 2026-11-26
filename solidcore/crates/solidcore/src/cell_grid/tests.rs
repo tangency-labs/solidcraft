@@ -15,7 +15,9 @@ use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
-use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
+use crate::cell_grid::region::{
+    clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region, EPS,
+};
 use crate::cell_grid::snap::{piece_hits, simple, snap_loop as snap_loop_by};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
