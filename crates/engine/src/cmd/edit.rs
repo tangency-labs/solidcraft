@@ -169,7 +169,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MOVE_MANY_CONTRACT)
         .output(output_schema_for::<TimelineMoved>)
         .params(
-        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
+        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block; refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
         .icon("rollback")
@@ -1108,7 +1108,8 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
-    let (mut next, ordered, _, checked) = reorder_features(s, next, &moving, slot, false, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    let (mut next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, allow, cmd)?;
     let marker = next.marker;
     place_marker(s, &mut next, &moving, active, cmd)?;
     let checked = checked.filter(|_| next.marker == marker);
@@ -1118,7 +1119,17 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
+    reply(
+        cmd,
+        TimelineMoved {
+            features: ordered,
+            groups,
+            group: target,
+            position: slot,
+            broken: allow.then(|| broken_features(&broken)),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {

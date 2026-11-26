@@ -995,6 +995,46 @@ fn failed_timeline_move_many_keeps_folder_membership_and_order() {
 }
 
 #[test]
+fn timeline_move_many_with_allow_errors_moves_block_into_folder_and_lists_broken() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let error =
+        s.execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1})).unwrap_err().to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": "yes"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`allow_errors` must be true or false"), "{error}");
+    assert_eq!(s.doc, before);
+
+    let r = run(&mut s, "timeline.move_many", json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": true}));
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    let folder = s.doc.timeline_groups.iter().find(|f| f.id == group).unwrap();
+    let expected_ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert_eq!(folder.features, expected_ids, "both moved features join the folder with the box and chamfer");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores both order and folder membership");
+}
+
+#[test]
 fn timeline_folders_can_nest_and_reject_cycles() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));

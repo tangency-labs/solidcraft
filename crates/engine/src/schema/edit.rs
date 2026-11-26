@@ -1367,7 +1367,8 @@ pub struct TimelineMovedToGroup {
 
 /// Move features and folders (with everything in them) to a place in the timeline and into a
 /// folder, together, as one block and one undo step. The block keeps the order its features had.
-/// Give at least one of `features` and `groups`. Refused when a feature that worked would fail.
+/// Give at least one of `features` and `groups`. Refused when a feature that worked would fail,
+/// unless `allow_errors` is true.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = move_many_needs_an_item)]
 pub struct TimelineMoveManyParams {
@@ -1396,6 +1397,11 @@ pub struct TimelineMoveManyParams {
     #[serde(default, deserialize_with = "active_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub active: Option<bool>,
+    /// True: make the move even when it breaks features that worked; they are listed in `broken`.
+    /// Default: false, the move is refused. `null` is read as absent.
+    #[serde(default, deserialize_with = "allow_errors_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub allow_errors: Option<bool>,
 }
 
 /// What `timeline.move_many` returns.
@@ -1410,6 +1416,10 @@ pub struct TimelineMoved {
     pub group: Option<u64>,
     /// The slot asked for, as a whole number of at least 0.
     pub position: usize,
+    /// With `allow_errors`: the features the move broke; empty when it broke none. Absent
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broken: Option<Vec<BrokenFeature>>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1696,7 +1706,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineUngroupParams>(), &["group", "groups"]);
         assert_keys(input_schema_for::<TimelineRenameGroupParams>(), &["group", "name"]);
         assert_keys(input_schema_for::<TimelineMoveToGroupParams>(), &["features", "group", "groups", "joints"]);
-        assert_keys(input_schema_for::<TimelineMoveManyParams>(), &["active", "features", "group", "groups", "position"]);
+        assert_keys(input_schema_for::<TimelineMoveManyParams>(), &["active", "allow_errors", "features", "group", "groups", "position"]);
         assert_keys(input_schema_for::<TimelineReorderParams>(), &["active", "allow_errors", "feature", "position"]);
         assert_keys(input_schema_for::<TimelineReorderManyParams>(), &["active", "allow_errors", "features", "position"]);
         assert_keys(input_schema_for::<TimelineRedefineParams>(), &["command", "feature", "params"]);
@@ -1822,6 +1832,7 @@ mod tests {
             ("timeline.move_many", json!({"features": [1], "position": 1e9})),
             ("timeline.move_many", json!({"features": [1], "position": 0, "active": "yes"})),
             ("timeline.move_many", json!({"features": [1], "position": 0, "group": "a"})),
+            ("timeline.move_many", json!({"features": [1], "position": 0, "allow_errors": 0})),
             ("timeline.reorder", json!({})),
             ("timeline.reorder", json!({"feature": 1})),
             ("timeline.reorder", json!({"feature": null, "position": 0})),
@@ -2411,6 +2422,10 @@ mod tests {
         let r = run("timeline.reorder_many", json!({"features": ["Pad"], "position": 1, "allow_errors": true}));
         assert!(r["broken"].as_array().is_some_and(|b| !b.is_empty()), "{r}");
         matches(output_schema_for::<TimelineReorderedMany>(), "timeline.reorder_many", &r);
+        run("edit.undo", json!({}));
+        let r = run("timeline.move_many", json!({"features": ["Pad"], "position": 1, "allow_errors": true}));
+        assert!(r["broken"].as_array().is_some_and(|b| !b.is_empty()), "{r}");
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
     }
 
     /// A call that works today gets no warning and none that would be refused in strict: what the
@@ -2460,6 +2475,7 @@ mod tests {
             ("timeline.move_to_group", json!({"group": "a"}), "`group` must be a timeline folder id"),
             ("timeline.move_many", json!({"features": [1], "position": "1"}), "`position` must be a number"),
             ("timeline.move_many", json!({"features": [1], "position": 1, "active": "yes"}), "`active` must be true or false"),
+            ("timeline.move_many", json!({"features": [1], "position": 1, "allow_errors": "yes"}), "`allow_errors` must be true or false"),
             ("timeline.reorder", json!({"feature": 1, "position": 1e9}), "`position` must be a number"),
             ("timeline.reorder", json!({"feature": null, "position": 1}), "`feature` must be an id or name"),
             ("timeline.reorder_many", json!({"features": [], "position": 1}), "`features` must list at least one feature"),
@@ -2541,6 +2557,8 @@ mod tests {
                 (json!({"position": 1}), false),
                 (json!({"features": [1], "position": 1e9}), false),
                 (json!({"features": [1], "position": 1, "active": 1}), false),
+                (json!({"features": [1], "position": 1, "allow_errors": true}), true),
+                (json!({"features": [1], "position": 1, "allow_errors": "yes"}), false),
             ],
         );
         takes(
