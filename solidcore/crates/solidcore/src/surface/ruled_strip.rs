@@ -10,8 +10,8 @@
 //!   [`FOLD_SAMPLES`] parameters).
 //! - Closeness: a free far edge is fitted to its rulings' ends; it strays when it passes more
 //!   than a tolerance ([`far_tolerance`]) from them at any of [`STRAY_SAMPLES`] parameters
-//!   ([`strays`]). The edge's spans are then halved ([`crate::nurbs::knots::span_midpoints`]),
-//!   at most [`MAX_HALVINGS`] times.
+//!   ([`strays`]; sampled only, no whole-span bound: see its notes). The edge's spans are then
+//!   halved ([`crate::nurbs::knots::span_midpoints`]), at most [`MAX_HALVINGS`] times.
 //! - A straight strip whose corners leave no length along its edge ([`cut_away`]).
 //!
 //! Not upstream: no counterpart in SMLib. Deviations: none. No recursion.
@@ -80,6 +80,21 @@ pub fn strip_folds(mut at: impl FnMut(f64) -> Option<(Vec3, Vec3)>) -> Option<bo
 /// parameters `f` from 0 to 1, `at(f)` giving the far edge's point and the ruling's end there.
 /// `None` where `at` cannot evaluate one, where a distance is not a number, or for a tolerance
 /// that is not a finite, non-negative number: nothing is accepted that was not measured.
+///
+/// What `Some(false)` guarantees, and what it does not (a known limit, not a certificate):
+/// - Guaranteed: at each of the `STRAY_SAMPLES + 1` parameters `f = i / STRAY_SAMPLES`
+///   (`i = 0 ..= 64`) the far edge lies within `tol` of the ruling's end, every distance
+///   measured finite. The law extension passes `tol` = [`far_tolerance`]
+///   (`FAR_TOLERANCE · (size + length)`).
+/// - Only sampled: between two of those parameters nothing is measured, so a far edge that
+///   leaves `tol` and comes back between samples is not caught. This is no whole-span
+///   enclosure (control-point, Bernstein or interval bound) of the deviation.
+/// - Why: `at` gives points only, and the rulings' ends are the edge pushed along a direction
+///   taken from its face's normal (an offset-like curve with no spline form here). Bounding the
+///   gap between samples needs a bound on how fast those ends move, that is on the face's
+///   curvature along the edge, which this function is not given. A hull bound on the fitted far
+///   edge alone would not bound the difference.
+/// - Exact strips (on planes, cylinders, cones) are built in closed form and never checked here.
 pub fn strays(tol: f64, mut at: impl FnMut(f64) -> Option<(Vec3, Vec3)>) -> Option<bool> {
     if !(tol.is_finite() && tol >= 0.0) {
         return None;

@@ -37,7 +37,8 @@ pub fn strip_folds(mut at: impl FnMut(f64) -> Option<([f64; 3], [f64; 3])>) -> O
 
 /// Whether a far edge strays more than `tol` from its rulings' ends, `at(f)` giving the far
 /// edge's point and the ruling's end at the parameter `f` from 0 to 1 ([`kernel::strays`]).
-/// `None` where `at` cannot evaluate one.
+/// `None` where `at` cannot evaluate one. Measured at sample parameters only, not bounded
+/// between them: what is guaranteed is in [`kernel::strays`].
 pub fn strays(tol: f64, mut at: impl FnMut(f64) -> Option<([f64; 3], [f64; 3])>) -> Option<bool> {
     kernel::strays(tol, |f| at(f).map(|(a, b)| (vec(a), vec(b))))
 }

@@ -135,6 +135,10 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         ExtendLimit::UpToBody(_) if opts.mode == ExtendMode::Law => {
             return Err(KernelError::Invalid("not supported yet: a law extension up to a whole body (pick a face of it)".into()));
         }
+        // A law strip is cut only by a plane or a face; sketch curves would trim it as a split.
+        ExtendLimit::UpTo(SplitTool::Curves { .. }) if opts.mode == ExtendMode::Law => {
+            return Err(KernelError::Invalid("not supported yet: a law extension up to sketch curves (pick a plane or a face)".into()));
+        }
         ExtendLimit::UpToBody(_) if opts.mode != ExtendMode::Natural => {
             return Err(KernelError::Invalid("not supported yet: a tangent or curvature extension up to a whole body (pick a face of it)".into()));
         }
@@ -1036,6 +1040,27 @@ mod tests {
         let t = 5.0 / (1.5 - 30f64.to_radians().cos());
         assert!(rel(area(&out), 100.0 + 10.0 * t) < 1e-9, "{} vs {}", area(&out), 100.0 + 10.0 * t);
         assert!(measure(&out).unwrap().bbox.min.x.abs() < 1e-9);
+    }
+
+    /// Up to sketch curves (a sketch line at x = 17 on the square's plane) a law extension is
+    /// refused before any strip is built; the plane x = 17 (170) and the box face x = 13 (130)
+    /// still extend.
+    #[test]
+    fn a_law_extension_up_to_sketch_curves_is_refused() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let line = vec![Seg2::Line { a: Vec2::new(17.0, -5.0), b: Vec2::new(17.0, 15.0) }];
+        let curves = SplitTool::Curves { plane: Plane::XY, curves: vec![line], along: None };
+        let e = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&curves))).unwrap_err();
+        assert!(e.to_string().contains("not supported yet: a law extension up to sketch curves"), "{e}");
+        let x17 = SplitTool::Plane(Plane::from_normal(Vec3::new(17.0, 0.0, 0.0), Vec3::X).unwrap());
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&x17))).unwrap();
+        assert!(rel(area(&out), 170.0) < 1e-9, "{}", area(&out));
+        let wall = crate::box_solid(Vec3::new(13.0, -5.0, -5.0), Vec3::new(20.0, 15.0, 5.0)).unwrap();
+        let face = crate::surfaces::nearest_face(&wall, Vec3::new(13.0, 5.0, 0.0)).unwrap();
+        let tool = SplitTool::Face { body: &wall, face };
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&tool))).unwrap();
+        assert!(rel(area(&out), 130.0) < 1e-9, "{}", area(&out));
     }
 
     /// Up to a target the long strip would fold before or reach only far out: the cylinder strip's
