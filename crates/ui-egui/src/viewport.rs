@@ -1853,7 +1853,7 @@ fn look_key(
     let name = b.definition_name();
     hash_look(doc.appearances.bodies.get(name), &mut h);
     hash_look(doc.appearances.components.get(&b.component), &mut h);
-    let material = doc.materials.get(name);
+    let material = doc.resolved_body_material(name);
     material.hash(&mut h);
     hash_look(material.and_then(|m| doc.material_look(m)).as_ref(), &mut h);
     faces.get(name).copied().unwrap_or(0).hash(&mut h);
@@ -1995,7 +1995,7 @@ pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
 /// Pack a complete imported mesh from its indexed geometry when the facets supply their own
 /// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
-fn build_shared_tris(
+pub(crate) fn build_shared_tris(
     mesh: &solidcraft_engine::geom::Mesh,
     body: Option<&solidcraft_engine::doc::ModelBody>,
 ) -> std::sync::Arc<crate::gpu::SharedTris> {
@@ -3324,7 +3324,10 @@ fn body_scene(
                     let slot = slots.face(f);
                     set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
                     let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
-                    let material = finish(color, pbr);
+                    let mut material = finish(color, pbr);
+                    if brushed(&material) {
+                        material.turn = turn_axis(&b.body, f);
+                    }
                     arena.set_material(slot, material);
                     face_colors.push(slot);
                     face_classes.push(class);
@@ -3497,7 +3500,45 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         ior: p.dielectric_ior() as f32,
         pbr: true,
         two_sided: false,
+        turn: None,
     })
+}
+
+/// Whether the viewport brushes a finish: a metal between polished and blasted (the shader's
+/// `brushing` strength is above zero).
+fn brushed(m: &crate::gpu::Material) -> bool {
+    m.pbr && m.metallic > 0.5 && m.roughness > 0.18 && m.roughness < 0.75
+}
+
+/// The axis face `face` of `body` was turned about, as `Material::turn` takes it: its cylinder's,
+/// cone's or torus's, or for a flat face bounded only by circles about one centre (a lug's end, a
+/// boss's top) the normal through that centre. `None` for other faces.
+fn turn_axis(body: &solidcraft_engine::kernel::Body, face: usize) -> Option<[[f32; 3]; 2]> {
+    use solidcraft_engine::geom::Vec3Geom;
+    use solidcraft_engine::kernel::{FaceSurface, edge_circle, face_edge_indices, face_surface};
+    let (at, along) = match face_surface(body, face)? {
+        FaceSurface::Cylinder { origin, axis, .. } => (origin, axis),
+        FaceSurface::Cone { apex, axis, .. } => (apex, axis),
+        FaceSurface::Torus { center, axis, .. } => (center, axis),
+        FaceSurface::Plane { normal, .. } => {
+            let tol = (body.size() * 1e-6).max(1e-6);
+            let mut centre = None;
+            for edge in face_edge_indices(body, face) {
+                let circle = edge_circle(body, edge)?;
+                if circle.axis.dot(normal).abs() < 1.0 - 1e-6 {
+                    return None;
+                }
+                match centre {
+                    None => centre = Some(circle.center),
+                    Some(c) if circle.center.dist(c) <= tol => {}
+                    Some(_) => return None,
+                }
+            }
+            (centre?, normal)
+        }
+        FaceSurface::Sphere { .. } => return None,
+    };
+    Some([at.to_f32(), along.to_f32()])
 }
 
 /// The colour of a measured seam whose highest order met is `order`, from the theme's
@@ -9252,7 +9293,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
-                crate::context_menu::open(app, p, held_mods);
+                if crate::sketch_tools::detach_simulated_at(app, p) {
+                    // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
+                } else {
+                    crate::context_menu::open(app, p, held_mods);
+                }
             } else if crate::dialogs_frame::open_menu(app, p) {
                 // A centreline of the Frame Member being made: its Remove Tube menu (#15705).
             } else if app.preferences.right_click_confirms {

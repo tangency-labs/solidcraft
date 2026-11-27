@@ -489,6 +489,16 @@ pub struct CoincidentResult {
 pub enum CoincidentMade {
     /// A coincident (or point-on-curve) constraint was added.
     Added(Constrained),
+    /// Two plain points were merged into one shared sketch point (or already shared it).
+    Merged {
+        /// The surviving shared point id.
+        point: String,
+        /// `true` when the two points already shared the same point.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        existing: bool,
+        /// The sketch's solve: `{solved, dof}`.
+        sketch: Value,
+    },
     /// The two points were already coincident, or the two lines already collinear: nothing was added.
     Existing {
         /// The constraint that already joins them.

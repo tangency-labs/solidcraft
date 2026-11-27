@@ -1194,3 +1194,55 @@ fn create_copy_on_component_with_expression_uses_solid_move() {
     assert_eq!(cmds[0].1["copy"], json!(true));
     assert_eq!(cmds[0].1["translate"], json!(["dx", "0 mm", "0 mm"]));
 }
+
+/// #22710: a sub-assembly whose part is defined in another component owns no bodies, but its
+/// placement shows that part. Its menu offers this placement's Isolate, and Zoom to Selection and
+/// Export are on, all aimed at the placement; a placement that shows nothing keeps them off.
+#[test]
+fn a_subassembly_of_parts_defined_elsewhere_can_be_isolated_and_zoomed_to() {
+    let mut h = Harness::new();
+    let a = h.app.run("component.create", json!({"name":"Slide drive","grounded":false})).unwrap();
+    let a_component = a["component"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = h.app.run("component.create", json!({"name":"Corner pulley","grounded":false})).unwrap();
+    let (b_occurrence, b_component) = (b["occurrence"].as_u64().unwrap(), b["component"].as_u64().unwrap());
+    // The pulley is made in Slide drive and placed twice there; one placement then moves to Corner
+    // pulley. Slide drive keeps the other, so the pulley stays defined there, as a part shared by
+    // two sub-assemblies is.
+    h.app.run("component.activate", json!({"component": a_component})).unwrap();
+    let part = h.app.run("component.create", json!({"name":"Pulley","grounded":false})).unwrap();
+    let (part_occurrence, part_component) = (part["occurrence"].as_u64().unwrap(), part["component"].as_u64().unwrap());
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.app.run("occurrence.copy", json!({"occurrence": part_occurrence, "translate": [20, 0, 0]})).unwrap();
+    h.app.run("occurrence.reparent", json!({"occurrence": part_occurrence, "parent": b_component})).unwrap();
+    assert!(h.app.session.doc.component_within(part_component, a_component), "the pulley is still defined in Slide drive");
+    assert!(context_menu::component_bodies(&h.app, b_component).is_empty(), "so Corner pulley owns no body");
+    let path = vec![b_occurrence];
+    assert!(!h.app.session.occurrence_bodies(&path, true).unwrap_or_default().is_empty(), "but its placement shows one");
+
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: path.clone() });
+    let find =
+        |id: &str| items.iter().find(|i| i.id == id).unwrap_or_else(|| panic!("no {id} in {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>()));
+    let isolate = find("ui.isolateOccurrence");
+    assert!(isolate.enabled);
+    assert_eq!(isolate.params.as_ref().unwrap()["path"], json!(path));
+    let zoom = find("ui.zoomTo");
+    assert!(zoom.enabled);
+    assert_eq!(zoom.params.as_ref().unwrap()["items"], json!([Sel::Occurrence { path: path.clone() }]));
+    let export = items.iter().flat_map(|i| i.children.iter()).find(|c| c.id == "ui.export").unwrap();
+    assert!(export.enabled && export.params.as_ref().unwrap()["bodies"].as_array().is_some_and(|b| !b.is_empty()));
+    assert!(items.iter().find(|i| i.children.iter().any(|c| c.id == "ui.export")).is_some_and(|g| g.enabled), "and its flyout row");
+
+    // Isolate does what it says: only the pulley's placement stays on screen.
+    context_menu::run_item(&mut h.app, isolate, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.before_isolate.is_some(), "isolated");
+
+    // An empty sub-assembly still offers neither.
+    h.app.run("browser.visibility", json!({"visible": true, "unisolate": true})).unwrap();
+    let empty = h.app.run("component.create", json!({"name":"Empty","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![empty] });
+    assert!(!items.iter().any(|i| i.id == "ui.isolateOccurrence" || i.id == "ui.isolate"));
+    assert!(items.iter().find(|i| i.id == "ui.zoomTo").is_some_and(|z| !z.enabled));
+}

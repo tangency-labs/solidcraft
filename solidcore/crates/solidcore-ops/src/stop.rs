@@ -6,7 +6,8 @@
 //! ([`crate::provenance`]), and the kernel's edits carry the tags through: so after the imprints
 //! each face says which face of the walls it is a piece of, and each edge whether a body cut it
 //! (an edge new where the faces met, or a body's own edge). Ops sequences the kernel's calls (the
-//! imprint, the record, the edge use's binormal, the faces taken out) and compares what they
+//! imprint, the record, the side of each cut edge a kept face lies on, proved by the kernel along
+//! the whole edge, the faces taken out) and compares what they
 //! return; it computes nothing itself.
 //!
 //! An extension of a surface up to a whole body ([`stop_extension`]) stops the same way: its start
@@ -20,8 +21,9 @@
 use std::collections::BTreeSet;
 
 use solidcore::query::api_queries::{
-    edgeuse_binormal_along, edgeuse_binormal_away_from, unit_direction, vertex_match_tolerance,
+    edgeuse_binormal_away_from, unit_direction, vertex_match_tolerance,
 };
+use solidcore::query::tangent_edge::{side_along, SideAlong};
 use solidcore::topology::{edge, face, EdgeId};
 use solidcore::{EntityRef, Point3, Vec3};
 use solidcore_record::brep::Brep as Record;
@@ -42,8 +44,9 @@ pub const MAX_BODIES: usize = 10_000;
 /// The most start points one [`stop_at_bodies`] takes.
 pub const MAX_STARTS: usize = 100_000;
 
-/// Where along each cut edge [`stop_at_bodies`] checks which side of it a kept piece lies on,
-/// as fractions of the edge's interval.
+/// Where along each cut edge an extension's check ([`stop_extension`]) looks at the side a
+/// kept piece lies on, as fractions of the edge's interval. To Next's check ([`stop_at_bodies`])
+/// proves it over the whole edge instead.
 const SIDE_SAMPLES: [f64; 7] = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
 
 /// How far a kept piece may run on along the walls' direction across a cut edge: the cosine of
@@ -108,8 +111,8 @@ pub struct Stopped {
 /// within ten times the largest tolerance (the record's, an edge's, or 1e-9 of the walls' size).
 ///
 /// Each kept piece must lie on the start side of every cut edge bounding it: the kernel's
-/// binormal of the edge use, into the piece, never runs on with `along` (sampled along the
-/// edge). A piece that runs on past a body beside it (a body covering only part of a wall, the
+/// binormal of the edge use, into the piece, never runs on with `along`, proved over the whole
+/// edge (the kernel's `side_along`, never at sample points). A piece that runs on past a body beside it (a body covering only part of a wall, the
 /// wall running past its side) is refused: keeping it would keep wall above that body.
 ///
 /// `None` when no body cut the walls. The bodies and the walls are unchanged.
@@ -117,7 +120,8 @@ pub struct Stopped {
 /// # Errors
 /// - [`Error::Argument`]: no start, more than [`MAX_STARTS`] starts or [`MAX_BODIES`] bodies, a
 ///   coordinate that is not finite, or an `along` of no length;
-/// - [`Error::Unsupported`]: a kept piece that runs on past the side of a body in its way;
+/// - [`Error::Unsupported`]: a kept piece that runs on past the side of a body in its way, or one
+///   whose side of a cut edge is not proved;
 /// - [`Error::Internal`]: a piece that comes from no face of the walls, or no piece holding a
 ///   start;
 /// - the kernel's errors (those of [`imprint`] and [`remove_faces`] too).
@@ -573,9 +577,10 @@ fn runs_away(cur: &Body, order: &Order, kept: &[usize], feet: &[Feet]) -> Result
 }
 
 /// Refuses a kept face (record faces `kept` of `cur`, order `order`) that runs on with `along`
-/// across one of the edges a body cut (`cut`): there the kernel's binormal of the face's edge
-/// use, pointing into the face, has a positive part along `along`. A sample the kernel cannot
-/// evaluate (a degenerate stretch of the edge) decides nothing.
+/// across one of the edges a body cut (`cut`): the kernel's binormal of the face's edge use,
+/// pointing into the face, has a part along `along` over [`ON_PAST`] somewhere on the edge. That
+/// is proved over the whole edge, never sampled (the kernel's `side_along`): an edge it cannot
+/// place on either side is refused too, as not proved.
 fn runs_on_past(
     cur: &Body,
     order: &Order,
@@ -596,13 +601,16 @@ fn runs_on_past(
                 let Some(eu) = edge::edgeuse_of_face(b, e, Some(f))? else {
                     continue;
                 };
-                for s in SIDE_SAMPLES {
-                    let Ok(part) = edgeuse_binormal_along(k, b, eu, s, along) else {
-                        continue;
-                    };
-                    if part > ON_PAST {
+                match side_along(k, b, eu, along, ON_PAST)? {
+                    SideAlong::Within => {}
+                    SideAlong::RunsOn { .. } => {
                         return Ok(Err(Error::Unsupported(
                             "part of a wall runs on past the side of a body in its way (the body covers only part of the wall)",
+                        )));
+                    }
+                    SideAlong::Undecided { .. } => {
+                        return Ok(Err(Error::Unsupported(
+                            "which side of a body part of a wall lies on is not proved along the edge where they meet",
                         )));
                     }
                 }
@@ -695,6 +703,113 @@ mod tests {
         // The walls and the bodies are unchanged.
         assert!(close(wall.area(1e-9).unwrap(), 500.0));
         assert_eq!(slab.counts().unwrap()[0], 6);
+    }
+
+    /// The side of an edge is proved along all of it, not at points. A plate bounded at the top
+    /// by the cubic Bezier through (0, 10), (3.1535, 11), (0.682, 12), (2.5855, 13): its `x'` is
+    /// `30 (t - 0.53) (t - 0.595)`, so the curve turns back (x falling as y rises) only for t in
+    /// (0.53, 0.595), between the old sample points 1/2 and 5/8. There the plate runs on past the
+    /// curve along +y: at t = 0.5625 the binormal into it is `(y', -x') / |T|` with `x' =
+    /// -0.0317`, `y' = 3`, a part of 0.0106 along +y. At the samples t = k/8 that part is at most
+    /// -0.0285, so a check at them passes it. The same plate under a curve that never turns back
+    /// (the middle points (1, 11), (2, 12)) is within.
+    #[test]
+    fn the_side_of_a_cut_edge_is_proved_along_all_of_it() {
+        all_fixes();
+        let plate = |p1: [f64; 2], p2: [f64; 2]| {
+            let at = |p: [f64; 2]| [p[0], p[1], 0.0];
+            let profile = [
+                Curve::Nurbs {
+                    degree: 3,
+                    points: [[0.0, 10.0], p1, p2, [2.5855, 13.0]]
+                        .iter()
+                        .map(|p| [p[0], p[1], 0.0, 1.0])
+                        .collect(),
+                    knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                },
+                Curve::Line {
+                    start: at([2.5855, 13.0]),
+                    end: at([2.5855, 0.0]),
+                },
+                Curve::Line {
+                    start: at([2.5855, 0.0]),
+                    end: at([0.0, 0.0]),
+                },
+                Curve::Line {
+                    start: at([0.0, 0.0]),
+                    end: at([0.0, 10.0]),
+                },
+            ];
+            extrude(
+                &profile,
+                [0.0, 0.0, 1.0],
+                1.0,
+                0.0,
+                DraftCorner::Curvature,
+                true,
+            )
+            .unwrap()
+        };
+        // The test's curve itself, in plain numbers: along +y, the plate's binormal into it has
+        // the part `-x' / |T|`, so its sign is the sign of `-x'`. At the old samples t = k/8,
+        // `x'` is at least 0.0855 (the part at most -0.0285); at t = 0.5625 it is -0.0317 (the
+        // part 0.0106): the samples pass the edge, the plate runs on between them.
+        let x_rate = |t: f64| {
+            let [a, b, c, e] = [0.0, 3.1535, 0.682, 2.5855];
+            let u = 1.0 - t;
+            3.0 * (u * u * (b - a) + 2.0 * u * t * (c - b) + t * t * (e - c))
+        };
+        for k in 1..8 {
+            let t = f64::from(k) / 8.0;
+            assert!(x_rate(t) > 0.085, "{t} {}", x_rate(t));
+        }
+        assert!(x_rate(0.5625) < -0.03, "{}", x_rate(0.5625));
+        // each use of the curve's edge on the plate at z = 0 (the side face's use runs along +z,
+        // square to +y): the proof's answer
+        let along = Vec3::new(0.0, 1.0, 0.0);
+        let answers = |body: &Body| {
+            with_body("test", body, |k, b| {
+                let mut out = Vec::new();
+                for e in b.edge_list().to_vec() {
+                    let curved = edge::curve(b, e)?.is_some_and(|c| {
+                        !matches!(c.kind(), solidcore::curve::curve::CurveKind::Line(_))
+                    });
+                    let ivl = edge::interval(b, e)?;
+                    let mid = edge::curve(b, e)?
+                        .map(|c| c.evaluate_point(k, 0.5 * (ivl.min() + ivl.max())))
+                        .transpose()?;
+                    if !curved || mid.is_none_or(|p| p.z.abs() > 1e-9) {
+                        continue;
+                    }
+                    let mut uses = Vec::new();
+                    for f in b.face_list().to_vec() {
+                        if face::edges(b, f, None, false, None)?.contains(&e) {
+                            uses.extend(edge::edgeuse_of_face(b, e, Some(f))?);
+                        }
+                    }
+                    for eu in uses {
+                        out.push(side_along(k, b, eu, along, ON_PAST)?);
+                    }
+                }
+                Ok(Some(out))
+            })
+            .unwrap()
+            .unwrap()
+        };
+        let folded = answers(&plate([3.1535, 11.0], [0.682, 12.0]));
+        assert!(!folded.is_empty());
+        assert!(
+            folded
+                .iter()
+                .any(|side| matches!(side, SideAlong::RunsOn { at } if (0.53..0.595).contains(at))),
+            "{folded:?}"
+        );
+        let plain = answers(&plate([1.0, 11.0], [2.0, 12.0]));
+        assert!(!plain.is_empty());
+        assert!(
+            plain.iter().all(|side| *side == SideAlong::Within),
+            "{plain:?}"
+        );
     }
 
     /// A chain of lines through `points` (x, z) at y = `-half`, swept 2 `half` along y: a sheet
