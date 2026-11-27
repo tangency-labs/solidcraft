@@ -130,7 +130,7 @@ struct Budgeted<R> {
 impl<R: Read> Read for Budgeted<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let left = self.left.get();
-        if left == 0 && !buf.is_empty() {
+        if left == 0 {
             return Err(io::Error::other("the archive's directory is larger than its bound"));
         }
         let want = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
