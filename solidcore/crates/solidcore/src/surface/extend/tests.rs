@@ -2140,8 +2140,8 @@ fn a_label_its_form_does_not_prove_extends_as_the_form() {
 }
 
 /// The quarter circle r 6 about `(4, y, 4)` in the plane `y` from `(10, y, 4)` up to
-/// `(4, y, 10)`, revolved `turn` degrees about z: at `y = 0` a torus (major 4, minor 6)
-/// without its label, the round on a post's top edge that the shell of #14370 offsets. In
+/// `(4, y, 10)`, revolved `turn` degrees about z: at `y = 0` a torus about `(0, 0, 4)`
+/// (major 4, minor 6) without its label, the round on a post's top edge that the shell of #14370 offsets. In
 /// the plane `y = 1` the circle's plane misses the axis, and the revolution is no torus.
 fn revolved_quarter_circle(kk: &Kernel, y: f64, turn: f64) -> Surface {
     use crate::curve::curve::Curve;
@@ -2176,7 +2176,7 @@ fn round_sides(s: &Surface) -> Vec<BoxSide> {
 
 /// A revolved quarter circle (a torus without its label, a quarter turn of it) extended 1.5
 /// past its two sides round the axis: as a torus's, its net continued Natural on the torus
-/// (major 4, minor 6) and 1.5 across each side, where a revolution's are left. Asked on every
+/// (about (0, 0, 4), major 4, minor 6) and 1.5 across each side, where a revolution's are left. Asked on every
 /// side, its sides along the generator are extended too, as any revolution's.
 #[test]
 fn a_revolved_circle_turns_on_round_its_axis_as_a_torus() {
@@ -2192,12 +2192,12 @@ fn a_revolved_circle_turns_on_round_its_axis_as_a_torus() {
         panic!("not a B-spline: {:?}", e.surface.kind());
     };
     let on = Implicit::Torus {
-        centre: Vec3::ZERO,
+        centre: Vec3::new(0.0, 0.0, 4.0),
         axis: Vec3::Z,
         major: 4.0,
         minor: 6.0,
     };
-    let tube = |x: Vec3| (x.x.hypot(x.y) - 4.0).hypot(x.z) - 6.0;
+    let tube = |x: Vec3| (x.x.hypot(x.y) - 4.0).hypot(x.z - 4.0) - 6.0;
     on_its_analytic(grown, &on, tube, 1e-11);
     for (side, done) in BoxSide::ALL.into_iter().zip(e.sides) {
         if round.contains(&side) {

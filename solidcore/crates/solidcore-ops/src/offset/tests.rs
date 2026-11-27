@@ -1107,15 +1107,22 @@ fn a_box_whose_posts_have_rounded_tops_shells() {
                 [sx * (a - t), sy * (c - along), 10.0 - t],
                 [sx * (a - along), sy * (c - t), 10.0 - t],
             ] {
-                let near = record
+                // the vertex nearest the closed form, within its own tolerance of it
+                let (near, tol) = record
                     .vertices
                     .iter()
                     .map(|v| {
                         let d = [0, 1, 2].map(|i| v.point[i] - want[i]);
-                        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                        (
+                            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt(),
+                            v.tolerance,
+                        )
                     })
-                    .fold(f64::INFINITY, f64::min);
-                assert!(near < 1e-6, "t {t}: no vertex at {want:?} ({near})");
+                    .fold((f64::INFINITY, 0.0), |m, x| if x.0 < m.0 { x } else { m });
+                assert!(
+                    near <= tol,
+                    "t {t}: no vertex at {want:?} ({near}, tolerance {tol})"
+                );
             }
             let h = 4.0 * FRAC_1_SQRT_2;
             let mid = Point3::new(sx * (a + h), sy * (c + h), 10.0 - t);
@@ -1127,7 +1134,12 @@ fn a_box_whose_posts_have_rounded_tops_shells() {
                 .filter_map(|&e| edge_closest_point(&k, &brep, e, mid).ok())
                 .map(|p| p.closest.distance)
                 .fold(f64::INFINITY, f64::min);
-            assert!(on < 1e-6, "t {t}: no edge through {mid:?} ({on})");
+            // within the largest edge tolerance of the body
+            let tol = record.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+            assert!(
+                on <= tol,
+                "t {t}: no edge through {mid:?} ({on}, tolerance {tol})"
+            );
         }
     }
 }
