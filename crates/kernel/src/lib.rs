@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+pub mod dogbone;
 mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
@@ -899,3 +900,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;
