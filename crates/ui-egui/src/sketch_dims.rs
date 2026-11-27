@@ -961,7 +961,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
                 return None;
             }
-            Some(line_input_positions([start, end], &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
+            Some(line_inputs_off_pointer([start, end], &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
         })
     } else {
         None
@@ -1143,19 +1143,19 @@ fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Optio
         .collect()
 }
 
-/// Where the Line tool's measured Length and Angle fields go: [`line_input_search`], with the
+/// Where the Line tool's measured Length and Angle fields go: [`line_input_positions`], with the
 /// fields also kept off `pointer`. While the pointer rests on a field the tool has no hover and
 /// the preview stays at the last point, so a field left there would take the click meant for the
 /// next point (#22769). Where no placement clears the pointer, the fields go where they would
 /// without one.
-fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
+fn line_inputs_off_pointer(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let under = |positions: &[Pos2]| {
         pointer.is_some_and(|pointer| {
             positions.iter().zip(sizes).any(|(pos, size)| egui::Rect::from_min_size(*pos, *size).expand(2.0).contains(pointer))
         })
     };
-    let placed = line_input_search(segment, sizes, view, gap, pointer);
-    if under(&placed) { line_input_search(segment, sizes, view, gap, None) } else { placed }
+    let placed = line_input_positions(segment, sizes, view, gap, pointer);
+    if under(&placed) { line_input_positions(segment, sizes, view, gap, None) } else { placed }
 }
 
 /// Keep measured Length and Angle fields clear of the projected line, each other and `pointer`
@@ -1163,7 +1163,7 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
 /// side. Retry first-field candidates when the second field cannot fit. Candidate count is bounded
 /// for the two fields. Only if the original candidates fail, also try axis-aligned neighbors and
 /// slides away from the line. An area too small to fit them can only clamp.
-fn line_input_search(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
+fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;
     let length = delta.length();

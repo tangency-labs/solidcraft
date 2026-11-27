@@ -830,7 +830,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         [egui::pos2(780.0, 580.0), egui::pos2(766.0, 566.0)],
         [egui::pos2(400.0, 300.0), egui::pos2(400.0, 300.0)],
     ] {
-        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
+        let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
         let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1]), "{rects:?}");
         for rect in rects {
@@ -839,7 +839,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         }
     }
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
-    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(Room::new(tiny, None)), 8.0, None);
+    let positions = super::line_inputs_off_pointer([egui::pos2(1.0, 1.0); 2], &sizes, Some(Room::new(tiny, None)), 8.0, None);
     assert_eq!(positions.len(), 2);
     assert!(positions.iter().all(|p| p.is_finite()));
 }
@@ -856,7 +856,7 @@ fn line_inputs_retry_the_first_position_when_both_fit_in_a_shallow_view() {
         assert!(view.contains_rect(rect));
         assert!(!segment_intersects_input(segment, rect.expand(4.0)));
     }
-    let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
+    let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
     let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
     assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {rects:?}");
     for rect in rects {
@@ -986,7 +986,7 @@ fn line_inputs_slide_clear_of_slanted_previews_in_small_views() {
             assert!(view.contains_rect(rect));
             assert!(!segment_intersects_input(segment, rect.expand(4.0)));
         }
-        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
+        let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
         let rects: Vec<_> = positions.iter().map(|p| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {segment:?}, {rects:?}");
         for rect in rects {
@@ -1377,11 +1377,11 @@ fn line_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
     let room = || Some(Room::new(view, None));
     // The preview left at the last point while the pointer rests on a field.
     let resting = [egui::pos2(400.0, 300.0), egui::pos2(404.0, 300.0)];
-    let before = super::line_input_positions(resting, &sizes, room(), 8.0, None);
+    let before = super::line_inputs_off_pointer(resting, &sizes, room(), 8.0, None);
     for offset in [egui::vec2(-20.0, -20.0), egui::vec2(-30.0, -12.0), egui::vec2(-12.0, -28.0)] {
         let pointer = resting[0] + offset;
         assert!(egui::Rect::from_min_size(before[0], sizes[0]).contains(pointer), "{offset:?} is on the Length field without a pointer");
-        let positions = super::line_input_positions(resting, &sizes, room(), 8.0, Some(pointer));
+        let positions = super::line_inputs_off_pointer(resting, &sizes, room(), 8.0, Some(pointer));
         let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1]), "{rects:?}");
         for rect in rects {
@@ -1393,8 +1393,8 @@ fn line_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
     for end in [egui::pos2(460.0, 300.0), egui::pos2(400.0, 240.0), egui::pos2(380.0, 280.0), egui::pos2(414.0, 310.0)] {
         let segment = [egui::pos2(400.0, 300.0), end];
         assert_eq!(
-            super::line_input_positions(segment, &sizes, room(), 8.0, Some(end)),
-            super::line_input_positions(segment, &sizes, room(), 8.0, None),
+            super::line_inputs_off_pointer(segment, &sizes, room(), 8.0, Some(end)),
+            super::line_inputs_off_pointer(segment, &sizes, room(), 8.0, None),
             "{segment:?}"
         );
     }
@@ -1402,8 +1402,8 @@ fn line_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
     let segment = [egui::pos2(1.0, 1.0); 2];
     assert_eq!(
-        super::line_input_positions(segment, &sizes, Some(Room::new(tiny, None)), 8.0, Some(egui::pos2(1.0, 1.0))),
-        super::line_input_positions(segment, &sizes, Some(Room::new(tiny, None)), 8.0, None)
+        super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(tiny, None)), 8.0, Some(egui::pos2(1.0, 1.0))),
+        super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(tiny, None)), 8.0, None)
     );
 }
 
