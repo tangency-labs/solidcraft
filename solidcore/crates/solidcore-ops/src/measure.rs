@@ -24,7 +24,7 @@ pub use solidcore::prism::measure::FaceRun;
 pub use solidcore::prism::measure::StraightBy;
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
-    edge_face_gap_samples, face_normal_at_edge,
+    edge_face_gap_samples, face_internal_point, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
@@ -2284,6 +2284,50 @@ impl Body {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
         Ok(points)
+    }
+
+    /// An interior point of record face `face` (`SmFace::CalculateAnInternalPoint`): on the
+    /// face's surface and inside its trims. The line classifications run on the body in place
+    /// so lazy UV trim curves and caches stay on it (rolled back on error, refusal, cancel or
+    /// panic).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `face` index past `order.faces`; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a point that is not finite; the kernel's error (a face
+    /// without a surface, a face where no isoparameter line meets the interior, a dangling
+    /// face in `order`, unported steps, cancellation or fuel exhaustion).
+    pub fn face_internal_point(&self, order: &Order, face: usize) -> Result<[f64; 3]> {
+        let f = order::face(order, face)?;
+        with_body("face_internal_point", self, |k, b| {
+            let p = array(face_internal_point(k, b, f)?);
+            if !p.iter().all(|x| x.is_finite()) {
+                return Ok(Err(Error::Status(crate::error::INVALID_INPUT)));
+            }
+            Ok(Ok(p))
+        })?
+    }
+
+    /// An interior point of every face in `order.faces`, in `order`'s face order
+    /// ([`Body::face_internal_point`] for each, under one lock and one rollback snapshot of the
+    /// body).
+    ///
+    /// # Errors
+    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for a point that is not finite; the kernel's
+    /// error for the first face that fails (the body is rolled back on error, refusal, cancel
+    /// or panic).
+    pub fn face_internal_points(&self, order: &Order) -> Result<Vec<[f64; 3]>> {
+        with_body("face_internal_points", self, |k, b| {
+            let mut out = Vec::new();
+            for &f in &order.faces {
+                k.check_cancelled("face_internal_points")?;
+                let p = array(face_internal_point(k, b, f)?);
+                if !p.iter().all(|x| x.is_finite()) {
+                    return Ok(Err(Error::Status(crate::error::INVALID_INPUT)));
+                }
+                out.push(p);
+            }
+            Ok(Ok(out))
+        })?
     }
 }
 

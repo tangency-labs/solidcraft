@@ -149,7 +149,15 @@ fn records(entities: Vec<Ent>, k: f64, file: &mut DxfFile<DxfShape>, budget: &mu
                     _ => omitted("POINT")?,
                 },
                 "CIRCLE" => match (entity.get(10), entity.get(20), entity.get(40)) {
-                    (Some(x), Some(y), Some(r)) => DxfShape::Circle { c: pt(x, y), r: r * k },
+                    (Some(x), Some(y), Some(r)) => {
+                        // The center is in the circle's OCS. For a -Z normal, the DXF
+                        // arbitrary axis algorithm gives -X and +Y as its in-plane axes.
+                        let x = match (layered_number(&entity, 210), layered_number(&entity, 220), layered_number(&entity, 230)) {
+                            (Ok(None | Some(0.0)), Ok(None | Some(0.0)), Ok(Some(-1.0))) => -x,
+                            _ => x,
+                        };
+                        DxfShape::Circle { c: pt(x, y), r: r * k }
+                    }
                     _ => omitted("CIRCLE")?,
                 },
                 "ARC" => match (entity.get(10), entity.get(20), entity.get(40), entity.get(50), entity.get(51)) {

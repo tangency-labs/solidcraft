@@ -309,6 +309,22 @@ To enable it once (owner):
 3. Keep the fork `bherbruck/winget-pkgs` (Komac pushes its branches there). Its default branch
    doesn't need syncing.
 
+**Install scope.** The MSI installs for all users by default and just for the user with
+`ALLUSERS=2 MSIINSTALLPERUSER=1`. WinGet doesn't pass either by itself: a manifest that only
+says `Scope: machine` (as the winget-pkgs one does) keeps installing for all users, unchanged.
+To offer `winget install --scope user`, the manifest needs a second installer entry per
+architecture, with the same URL, hash and product code, plus:
+
+```yaml
+  Scope: user
+  InstallerSwitches:
+    Custom: ALLUSERS=2 MSIINSTALLPERUSER=1
+```
+
+and the existing entries `Scope: machine`. That first edit is made by hand in the winget-pkgs
+pull request of the first release with the scope choice. Komac copies the other fields from the
+previous manifest, so later updates should keep both entries; check the next one does.
+
 When the token expires, create a new one the same way and run step 2 again. If a release was
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
@@ -332,9 +348,12 @@ against the binary inside it. It then uploads the wheels as `release-python`, so
 to the draft and listed in `SHA256SUMS.txt` like every other asset. Wheel versions follow PEP 440:
 `0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a nightly.
 
-Publishing the release runs `pypi.yml`, which uploads the release's wheels with PyPI trusted
-publishing, so no token is stored. A stable release goes to PyPI. A pre-release goes to TestPyPI
-only. Like `winget.yml`, a publication made with `GITHUB_TOKEN` (every nightly) doesn't trigger it;
+`pypi.yml` uploads the release's wheels with PyPI trusted publishing, so no token is stored.
+Publishing a pre-release sends its wheels to TestPyPI only. The release reaches PyPI when it becomes
+a full release: flipping the pre-release to a release (or publishing one as a release) uploads its
+wheels to PyPI with no manual run, and the flip doesn't upload to TestPyPI again. A pre-release
+never goes to PyPI. Like `winget.yml`, an event made with `GITHUB_TOKEN` (every nightly) doesn't
+trigger it, so flip the release as yourself;
 to upload one by hand, run `gh workflow run pypi.yml -R tangency-labs/solidcraft --ref v<version> -f tag=v<version>`
 (from the tag: the environments deploy from `v*` tags only, step 2).
 A release with no wheels uploads nothing. PyPI refuses to replace a file it already has, so a
