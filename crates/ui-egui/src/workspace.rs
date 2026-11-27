@@ -403,44 +403,43 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
     match (tab, panel) {
         ("MODEL", "CONSTRUCT") => &[
             CommandGroup {
-                label: "ui.construct_planes",
-                // Plane, Axis and Point (method from the picks) lead their own heading.
-                ids: &[
-                    "construct.plane",
-                    "construct.plane.offset",
-                    "construct.plane.at_angle",
-                    "construct.plane.midplane",
-                    "construct.plane.two_edges",
-                    "construct.plane.axis_point",
-                    "construct.plane.three_points",
-                    "construct.plane.tangent",
-                    "construct.plane.along_path",
-                    "construct.plane.perpendicular",
-                    "construct.plane.square_to_line",
-                ],
-            },
-            CommandGroup {
                 label: "ui.construct_axes",
                 ids: &[
                     "construct.axis",
-                    "construct.axis.through_cylinder",
                     "construct.axis.normal_to_face",
+                    "construct.axis.through_cylinder",
+                    "construct.axis.edge",
                     "construct.axis.two_planes",
                     "construct.axis.two_points",
-                    "construct.axis.edge",
+                ],
+            },
+            CommandGroup {
+                label: "ui.construct_planes",
+                ids: &[
+                    "construct.plane",
+                    "construct.plane.along_path",
+                    "construct.plane.at_angle",
+                    "construct.plane.midplane",
+                    "construct.plane.offset",
+                    "construct.plane.perpendicular",
+                    "construct.plane.tangent",
+                    "construct.plane.axis_point",
+                    "construct.plane.square_to_line",
+                    "construct.plane.three_points",
+                    "construct.plane.two_edges",
                 ],
             },
             CommandGroup {
                 label: "ui.construct_points",
                 ids: &[
                     "construct.point",
-                    "construct.point.vertex",
-                    "construct.point.two_edges",
-                    "construct.point.three_planes",
-                    "construct.point.center",
-                    "construct.point.edge_plane",
                     "construct.point.along_path",
                     "construct.point.average",
+                    "construct.point.center",
+                    "construct.point.edge_plane",
+                    "construct.point.vertex",
+                    "construct.point.three_planes",
+                    "construct.point.two_edges",
                 ],
             },
         ],
@@ -1805,11 +1804,11 @@ mod tests {
 
     /// Every Construct command appears once, under its entity heading, including filtered menus.
     #[test]
-    fn construct_groups_keep_every_command_in_planes_axes_points_order() {
+    fn construct_groups_keep_every_command_in_axes_planes_points_order() {
         let specs = solidcraft_engine::command_specs();
         let (commands, _) = layout("MODEL", "CONSTRUCT", &specs).unwrap();
         let grouped = grouped_commands("MODEL", "CONSTRUCT", &commands);
-        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_planes", "ui.construct_axes", "ui.construct_points"]);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_axes", "ui.construct_planes", "ui.construct_points"]);
         assert_eq!(grouped.len(), commands.len());
         let mut seen = std::collections::BTreeSet::new();
         let mut previous = 0;
@@ -1817,9 +1816,9 @@ mod tests {
             assert!(seen.insert(c.id), "duplicate {}", c.id);
             // The tool that picks its method from the selection leads its entity's heading.
             let entity = |e: &str| c.id == format!("construct.{e}") || c.id.starts_with(&format!("construct.{e}."));
-            let rank = if entity("plane") {
+            let rank = if entity("axis") {
                 0
-            } else if entity("axis") {
+            } else if entity("plane") {
                 1
             } else if entity("point") {
                 2
@@ -1829,9 +1828,12 @@ mod tests {
             assert!(rank >= previous, "out of order: {}", c.id);
             previous = rank;
         }
-        assert_eq!(grouped[0].1.id, "construct.plane");
-        assert_eq!(grouped[1].1.id, "construct.plane.offset");
-        assert_eq!(grouped[2].1.id, "construct.plane.at_angle");
+        assert_eq!(grouped[0].1.id, "construct.axis");
+        assert_eq!(grouped[1].1.id, "construct.axis.normal_to_face");
+        assert_eq!(grouped[6].1.id, "construct.plane");
+        assert_eq!(grouped[7].1.id, "construct.plane.along_path");
+        assert_eq!(grouped[17].1.id, "construct.point");
+        assert_eq!(grouped[18].1.id, "construct.point.along_path");
         assert!(ungrouped("MODEL", "CONSTRUCT", &commands).is_empty());
         // Removing pinned tools must not leave an empty heading or lose other commands.
         let without_planes: Vec<_> =
