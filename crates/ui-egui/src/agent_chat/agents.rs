@@ -301,7 +301,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
     let mut out = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(d) = &app.agent_chat.detection {
-        out.extend(d.found.iter().map(|f| Entry {
+        out.extend(d.found.iter().filter(|f| !app.preferences.agent_hidden_discovered.contains(f.id)).map(|f| Entry {
             id: f.id.to_string(),
             name: f.name.to_string(),
             kind: Kind::Acp,

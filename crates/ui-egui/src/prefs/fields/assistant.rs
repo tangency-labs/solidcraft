@@ -31,6 +31,8 @@ macro_rules! assistant_preferences {
             agent_control: bool = false, PAGE_ASSISTANT;
             /// The control channel's port. The default one takes the next free port when it is taken.
             agent_control_port: u16 = 27878, PAGE_ASSISTANT;
+            /// Discovered agents removed by the user; refreshing discovery does not bring them back.
+            agent_hidden_discovered: std::collections::BTreeSet<String> = Default::default(), PAGE_ASSISTANT;
             /// An agent's slow commands over the control channel (MCP) compute off the window thread,
             /// so the window stays live while they run (#1989, [`crate::control_job`]), the default. Off:
             /// they run on the window thread, and the window waits for each.

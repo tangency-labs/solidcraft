@@ -1002,12 +1002,10 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                             edit = Some(entry.id.clone());
                                         }
                                     }
-                                    if !entry.found {
-                                        let button = ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost);
-                                        solidcraft_ui_registry::publish_target(&format!("prefs:ai_remove:{}", entry.id), button.rect);
-                                        if button.clicked() {
-                                            remove = Some(entry.id.clone());
-                                        }
+                                    let button = ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost);
+                                    solidcraft_ui_registry::publish_target(&format!("prefs:ai_remove:{}", entry.id), button.rect);
+                                    if button.clicked() {
+                                        remove = Some(entry.id.clone());
                                     }
                                     match entry.login {
                                         "login_found" => ui_kit::settings_badge(ui, tr("ui.agent_chat_login_found"), false),
@@ -1180,6 +1178,12 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             if ui_kit::button(ui, tr("ui.agent_chat_refresh"), ui_kit::Button::Enabled(app.agent_chat.detecting.is_none())).clicked() {
                 refresh(app, &ui.ctx().clone());
             }
+            if !app.preferences.agent_hidden_discovered.is_empty()
+                && ui_kit::button(ui, tr("ui.ai_restore_discovered"), ui_kit::Button::Small).clicked()
+            {
+                app.preferences.agent_hidden_discovered.clear();
+                refresh(app, &ui.ctx().clone());
+            }
         });
     });
     if let Some(e) = test {
@@ -1224,24 +1228,37 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         b.set_reasoning_effort(&effort);
     }
     if let Some(id) = remove {
-        app.agent_chat.login_results.remove(&id);
-        app.agent_chat.settings.tests.remove(&id);
-        app.preferences.agents.retain(|a| a.id != id);
-        app.preferences.agent_permissions.remove(&id);
-        app.preferences.agent_always_allow.remove(&id);
-        if let Some(s) = &app.services.secrets {
-            let _ = s.delete(&id);
-        }
-        if app.agent_chat.agent_id.as_deref() == Some(id.as_str()) {
-            app.agent_chat.agent_id = None;
-        }
-        // A removed agent is not missed at the next start: the default connects instead.
-        if app.preferences.agent_last == id {
-            app.preferences.agent_last.clear();
-        }
+        remove_agent(app, &id);
     }
     if app.agent_chat.settings.tests.values().any(|t| matches!(t, Test::Running(_))) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Remove an agent from the Assistant, without uninstalling a discovered CLI.
+pub(super) fn remove_agent(app: &mut SolveApp, id: &str) {
+    let Some(entry) = agents::entries(app).into_iter().find(|entry| entry.id == id) else { return };
+    super::disconnect_endpoint(app, id);
+    app.agent_chat.login_results.remove(id);
+    app.agent_chat.settings.tests.remove(id);
+    if entry.found {
+        app.preferences.agent_hidden_discovered.insert(id.to_owned());
+    } else {
+        app.preferences.agents.retain(|a| a.id != id);
+        app.preferences.agent_permissions.remove(id);
+        app.preferences.agent_always_allow.remove(id);
+        if let Some(s) = &app.services.secrets {
+            let _ = s.delete(id);
+        }
+    }
+    if app.agent_chat.agent_id.as_deref() == Some(id) {
+        app.agent_chat.agent_id = None;
+    }
+    if app.preferences.agent_default == id {
+        app.preferences.agent_default.clear();
+    }
+    if app.preferences.agent_last == id {
+        app.preferences.agent_last.clear();
     }
 }
 
