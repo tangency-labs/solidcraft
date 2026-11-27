@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{AxisRef, Direction, ExtendTo, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
+use solidcraft_engine::doc::{AxisRef, Direction, ExtendMode, ExtendTo, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::kernel::{Construction, Continuity};
 
@@ -41,12 +41,15 @@ crate::dialog_descriptor::dialog_descriptors! {
             operation: usize = 0 => op_index(operation),
         } => json!({"thickness": thickness, "symmetric": symmetric, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         // `to_object`: the edges go up to the plane, face or body in the To Object input, not a
-        // distance. An extension back to the surface's own bounds shows as Distance.
+        // distance. An extension back to the surface's own bounds shows as Distance. `mode`: an
+        // index into [`EXTEND_MODES`]; `angle`: a law extension's angle to the surface (law only).
         Extend("surface.extend", "EXTEND", [("Edges", EDGES, true)],
-            FeatureKind::SurfaceExtend { distance, up_to, .. }) {
+            FeatureKind::SurfaceExtend { distance, up_to, mode, angle, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
             to_object: bool = false => matches!(up_to, Some(ExtendTo::Plane(_) | ExtendTo::Face(_) | ExtendTo::Body(_))),
-        } => if *to_object { json!({}) } else { json!({"distance": distance}) };
+            mode: usize = 0 => extend_mode_index(*mode),
+            angle: String = EXTEND_ANGLE.into() => angle.as_deref().map_or_else(|| EXTEND_ANGLE.to_string(), str::to_string),
+        } => extend_params(distance, *to_object, *mode, angle);
         Fair("surface.fair", "ui.fair_surface_title", [("Surface or faces", BODIES | FACES, true)],
             FeatureKind::SurfaceFair { strength, iterations, keep_edges, tolerance, .. }) {
             strength: f64 = 1.0 => *strength,
@@ -234,6 +237,48 @@ const UNTRIM_HOLES: [&str; 3] = ["All", "Picked", "None"];
 /// How far Extend goes: a distance, or up to a picked plane, face or body.
 const EXTENTS: [&str; 2] = ["Distance", "To Object"];
 
+/// How Extend continues the surface (labels, and the `mode` parameter): the surface itself, a
+/// run-off tangent or keeping curvature, or a strip built from the edges at an angle (law).
+pub(crate) const EXTEND_MODES: [(&str, &str); 4] =
+    [("ui.extend_natural", "natural"), ("Tangent (G1)", "tangent"), ("Curvature (G2)", "curvature"), ("ui.extend_law", "law")];
+
+/// The index of the law extension in [`EXTEND_MODES`].
+pub(crate) const EXTEND_LAW: usize = 3;
+
+/// A law extension's angle when none is given: tangent to the surface, as the command's default.
+const EXTEND_ANGLE: &str = "0 deg";
+
+/// A stored extension's mode as an index into [`EXTEND_MODES`].
+fn extend_mode_index(mode: ExtendMode) -> usize {
+    match mode {
+        ExtendMode::Natural => 0,
+        ExtendMode::Tangent => 1,
+        ExtendMode::Curvature => 2,
+        ExtendMode::Law => EXTEND_LAW,
+    }
+}
+
+/// Extend's own values as `surface.extend` parameters: the distance (unless it goes up to an
+/// object), the mode when it is not the natural default, and the angle of a law extension only
+/// (the command refuses an angle with any other mode).
+fn extend_params(distance: &str, to_object: bool, mode: usize, angle: &str) -> Value {
+    let mut p = Map::new();
+    if !to_object {
+        p.insert("distance".into(), json!(distance));
+    }
+    match EXTEND_MODES.get(mode).map(|(_, word)| *word) {
+        Some("law") => {
+            p.insert("mode".into(), json!("law"));
+            p.insert("angle".into(), json!(angle));
+        }
+        Some(word) if word != "natural" => {
+            p.insert("mode".into(), json!(word));
+        }
+        _ => {}
+    }
+    Value::Object(p)
+}
+
 /// Extend's pick input for what the edges go up to: Extrude's To Object label, taking what
 /// `surface.extend`'s `up_to` takes.
 const EXTEND_TO: &str = "To Object";
@@ -357,7 +402,15 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             });
             choice_row(ui, "Operation", "th_op", operation, &OP_LABELS);
         }
-        Surf::Extend { distance, to_object } => {
+        Surf::Extend { distance, to_object, mode, angle } => {
+            // How the surface goes on; a law extension also takes its angle to the surface. The
+            // hover text says what each builds (the command refuses what it can't build, and the
+            // window shows its reason).
+            choice_row(ui, "Type", "sx_mode", mode, &EXTEND_MODES.map(|(label, _)| label))
+                .backing_on_hover_text(solidcraft_ui_text::tr("ui.extend_type_tip"));
+            if *mode == EXTEND_LAW {
+                enter |= expr_row(ui, "Angle", angle);
+            }
             let mut extent = usize::from(*to_object);
             form_row(ui, "Extent Type", |ui| {
                 combo(ui, "sx_ext", &EXTENTS, &mut extent);
@@ -1362,16 +1415,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceExtend { edges, mode, angle, up_to, neighbours, .. } => {
-            // The dialog edits the edges and the distance or the plane, face or body they go up to; the
-            // rest (a law extension's angle too) is kept as it was.
+        FeatureKind::SurfaceExtend { edges, up_to, neighbours, .. } => {
+            // The dialog edits the edges, the type (a law extension's angle with it) and the distance
+            // or the plane, face or body they go up to; the rest is kept as it was.
             let mut extra = Map::new();
-            if !mode.is_natural() {
-                extra.insert("mode".into(), json!(mode));
-            }
-            if let Some(a) = angle {
-                extra.insert("angle".into(), json!(a));
-            }
             if !*neighbours {
                 extra.insert("neighbours".into(), json!(false));
             }

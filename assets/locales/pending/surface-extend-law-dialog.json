@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.extend_law": "Law",
+    "ui.extend_natural": "Natural",
+    "ui.extend_type_tip": "Natural: the surface itself continued. Tangent (G1) and Curvature (G2): a run-off face that meets the surface smoothly at the edge. Law: a strip built from the picked edges (trimmed edges too) that leaves them at the Angle you set: 0° is tangent to the surface, a positive angle turns toward the side the face's normal points to, and the angle stays between -90° and 90°."
+  },
+  "ar": {
+    "ui.extend_law": "قانون",
+    "ui.extend_natural": "طبيعي",
+    "ui.extend_type_tip": "طبيعي: يستمر السطح نفسه. مماس (G1) وانحناء (G2): وجه امتداد يلتقي بالسطح بسلاسة عند الحافة. قانون: شريط يُبنى من الحواف المختارة (والحواف المقصوصة أيضًا) ويغادرها بالزاوية التي تحددها: 0° مماس للسطح، والزاوية الموجبة تميل نحو الجهة التي يشير إليها اتجاه الوجه العمودي، وتبقى الزاوية بين -90° و90°."
+  },
+  "de": {
+    "ui.extend_law": "Gesetz",
+    "ui.extend_natural": "Natürlich",
+    "ui.extend_type_tip": "Natürlich: Die Fläche selbst wird fortgesetzt. Tangential (G1) und Krümmung (G2): eine Auslauffläche, die an der Kante glatt an die Fläche anschließt. Gesetz: ein Streifen aus den gewählten Kanten (auch beschnittenen), der sie unter dem eingestellten Winkel verlässt: 0° ist tangential zur Fläche, ein positiver Winkel dreht zur Seite, in die die Flächennormale zeigt, und der Winkel bleibt zwischen -90° und 90°."
+  },
+  "he": {
+    "ui.extend_law": "חוק",
+    "ui.extend_natural": "טבעי",
+    "ui.extend_type_tip": "טבעי: המשטח עצמו ממשיך. משיק (G1) ועקמומיות (G2): פאת המשך שפוגשת את המשטח בצורה חלקה בקצה. חוק: רצועה שנבנית מהקצוות שנבחרו (גם קצוות גזומים) ויוצאת מהם בזווית שקבעתם: 0° משיקה למשטח, זווית חיובית פונה לצד שאליו מצביע הנורמל של הפאה, והזווית נשארת בין -90° ל-90°."
+  },
+  "ja": {
+    "ui.extend_law": "法則",
+    "ui.extend_natural": "自然",
+    "ui.extend_type_tip": "自然: サーフェスそのものを延長します。接線 (G1) と曲率 (G2): エッジでサーフェスに滑らかにつながる延長面を作ります。法則: 選択したエッジ (トリムされたエッジも可) から作る帯状の面で、設定した角度でエッジから離れます。0° はサーフェスに接し、正の角度は面の法線が向く側へ傾きます。角度は -90° から 90° の間です。"
+  },
+  "ko": {
+    "ui.extend_law": "법칙",
+    "ui.extend_natural": "자연",
+    "ui.extend_type_tip": "자연: 서피스 자체를 이어서 늘립니다. 접선(G1)과 곡률(G2): 모서리에서 서피스와 매끄럽게 이어지는 연장 면을 만듭니다. 법칙: 선택한 모서리(잘린 모서리 포함)로 만든 띠 면이 설정한 각도로 모서리를 떠납니다. 0°는 서피스에 접하고, 양의 각도는 면의 법선이 가리키는 쪽으로 기울며, 각도는 -90°와 90° 사이입니다."
+  },
+  "vi": {
+    "ui.extend_law": "Quy luật",
+    "ui.extend_natural": "Tự nhiên",
+    "ui.extend_type_tip": "Tự nhiên: chính bề mặt được kéo dài tiếp. Tiếp tuyến (G1) và Độ cong (G2): một mặt kéo dài nối trơn với bề mặt tại cạnh. Quy luật: một dải dựng từ các cạnh đã chọn (kể cả cạnh đã cắt), rời cạnh theo Góc bạn đặt: 0° là tiếp tuyến với bề mặt, góc dương nghiêng về phía pháp tuyến của mặt, và góc nằm giữa -90° và 90°."
+  },
+  "zh": {
+    "ui.extend_law": "法则",
+    "ui.extend_natural": "自然",
+    "ui.extend_type_tip": "自然：延续曲面本身。相切 (G1) 和曲率 (G2)：在边处与曲面平滑相接的延伸面。法则：由所选边（包括修剪过的边）生成的条带，按您设置的角度离开边：0° 与曲面相切，正角度朝面法向所指的一侧偏转，角度须在 -90° 到 90° 之间。"
+  }
+}

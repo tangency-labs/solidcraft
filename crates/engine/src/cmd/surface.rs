@@ -2592,6 +2592,34 @@ mod tests {
         assert_eq!(s.doc.features.len(), before);
     }
 
+    /// Law extension up to a face, as the Extend window sends it (#22415): the square sheet's edge
+    /// at x = 10 at 30° up to a box's bottom face at z = 2 (its plane extended) stops the strip 4
+    /// long: 100 + 10 × 4 = 140, its far edge at z = 2, x = 10 + 4 cos 30° = 13.464102. Refusals
+    /// leave the sheet's 100.
+    #[test]
+    fn extend_by_law_up_to_a_face() {
+        let mut s = Session::default();
+        square_sheet(&mut s);
+        run(&mut s, "solid.box", json!({"corner": [30, -5, 2], "length": 5, "width": 20, "height": 10, "body_name": "Block"}));
+        let before = s.doc.features.len();
+        for p in [
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "law", "angle": "90 deg"}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "mode": "law", "angle": "30 deg", "up_to": {"body": "Block"}}),
+        ] {
+            assert!(s.execute("surface.extend", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.features.len(), before);
+        assert!((area(&s, "Sheet") - 100.0).abs() < 1e-9);
+        run(
+            &mut s,
+            "surface.extend",
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "mode": "law", "angle": "30 deg", "up_to": {"body": "Block", "point": [32.5, 5, 2]}}),
+        );
+        assert!((area(&s, "Sheet") - 140.0).abs() < 1e-9, "{}", area(&s, "Sheet"));
+        let bb = bbox(&s, "Sheet");
+        assert!((bb.max.z - 2.0).abs() < 1e-9 && (bb.max.x - (10.0 + 4.0 * 30f64.to_radians().cos())).abs() < 1e-9, "{bb:?}");
+    }
+
     /// The planned surface commands are registered but refuse to run: disabled with the
     /// issue that tracks them, an error (never a panic) from every caller, and the design left
     /// as it was.

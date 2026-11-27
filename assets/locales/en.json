@@ -2570,7 +2570,7 @@
   "help.solid.web": "Adds a thin wall along each open sketch curve, each filled out to the next faces of the body. Use it for a grid of supporting walls inside housings and trays.",
   "help.surface.blend": "Creates a surface that bridges the edges of two bodies, tangent or curvature continuous to both. Use it to join two surfaces smoothly across a gap.",
   "help.surface.boundary": "Creates a surface filling a loop of two to four sketch curves, or a network of curves. Use it for free-form panels defined by their edges.",
-  "help.surface.extend": "Lengthens a surface past its edges, by a distance or up to a plane or face. Use it so that surfaces overlap before you trim or stitch them.",
+  "help.surface.extend": "Lengthens a surface past its edges, by a distance or up to a plane or face; the Law type leaves the edges at an angle you set, trimmed edges too. Use it so that surfaces overlap before you trim or stitch them.",
   "help.surface.extrude": "Pushes sketch curves or profiles along a distance into a surface, walls only, without caps. Use it for thin walls and for cutting or splitting tools.",
   "help.surface.fair": "Smooths the inside of free-form faces while their edges stay put. Use it to even out bumps and wavy reflections in a surface.",
   "help.surface.loft": "Creates a surface that passes through two or more sections in order, without caps. Use it for shells and transitions between different shapes.",

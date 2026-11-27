@@ -400,6 +400,8 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
         FeatureKind::Thicken { .. } => "surface_thicken",
+        // A law extension (a strip at an angle to the surface) has its own drawing.
+        FeatureKind::SurfaceExtend { mode: solidcraft_engine::doc::ExtendMode::Law, .. } => "surface_extend_law",
         FeatureKind::SurfaceExtend { .. } => "surface_extend",
         FeatureKind::SurfaceTrim { .. } => "surface_trim",
         other => crate::workspace::feature_icon(other).unwrap_or("feature"),

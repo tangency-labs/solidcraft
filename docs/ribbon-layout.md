@@ -125,6 +125,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 - The selection filter, previously in SELECT on multiple tabs including UTILITIES, is in VIEW / SELECT. This is a populated control group, although it has no command ids.
 - MODEL’s Pattern button uses the existing `solid.pattern.rectangular` command; Circular and Path stay in its menu. No generic pattern command is registered.
 - 3D Sketch (`sketch.create3d`, #19426) starts a 3D sketch with no plane to choose and opens 3D Line in it. MODEL / SKETCH also lists the 3D line, arc, spline, control point spline and point commands, which need a 3D sketch open. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
+- Extending a surface by a law (a strip leaving the edges at an angle, #22415) is the Law type of the existing Extend window (`surface.extend`, SURFACE / EDIT), not a command of its own; a law extension's History row shows its own icon, `surface_extend_law`.
 - Physical Properties maps to the existing `component.properties` command. Material data checks map to `material.properties.validate`. Calibrate maps to the existing canvas editor (`canvas.edit`).
 - VIEW / VIEWS lists the existing named-view and navigation commands. Display, Show, Agent and Window are omitted: their requested settings have no engine commands. No Fit or Orientation commands were invented.
 - RENDER / IMAGE exposes the already registered `render.start`, which previously had no visible panel. The Render workspace and its existing SCENE command are preserved.
