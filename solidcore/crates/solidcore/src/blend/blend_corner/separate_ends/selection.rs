@@ -73,9 +73,7 @@ pub fn plan(
     reserve(&mut paired, count)?;
     paired.resize(count, false);
     let mut pairs = Vec::new();
-    let mut trailing = Vec::new();
     reserve(&mut pairs, count / 2)?;
-    reserve(&mut trailing, count / 2)?;
     for &v in b.vertex_list() {
         k.check_cancelled(OP)?;
         let start = endpoints.partition_point(|&(at, _)| at < v);
@@ -108,28 +106,31 @@ pub fn plan(
         let (Some(a_order), Some(z_order)) = (a_order, z_order) else {
             return Ok(SeparateEndPlan::NotApplicable);
         };
-        let (edges, sizes, last) = if a_order < z_order {
-            ([a, z], [a_size, z_size], *j)
+        let (edges, sizes) = if a_order < z_order {
+            ([a, z], [a_size, z_size])
         } else {
-            ([z, a], [z_size, a_size], *i)
+            ([z, a], [z_size, a_size])
         };
         pairs.push(SeparateEndPair {
             vertex: v,
             edges,
             sizes,
         });
-        trailing.push((last, v));
     }
     if !paired.into_iter().all(|used| used) {
         return Ok(SeparateEndPlan::NotApplicable);
     }
 
-    match independent_separate_ends(k, b, &pairs, kind)? {
+    // Querying a corner can build a lazy planar trim. Prove the bounds of
+    // that actual trim on a copy and leave the ordinary construction in
+    // charge of any edits to the target, including its caches.
+    let fit = b.with_rollback_untouched(
+        |copy| independent_separate_ends(k, copy, &pairs, kind),
+        |_| false,
+    )?;
+    match fit {
         SeparateEndFit::NotApplicable => Ok(SeparateEndPlan::NotApplicable),
-        SeparateEndFit::WithinSupports | SeparateEndFit::Fits => {
-            trailing.sort_unstable_by_key(|&(index, _)| index);
-            Ok(SeparateEndPlan::Ends(SeparateEndGroups { trailing }))
-        }
+        SeparateEndFit::Fits => Ok(SeparateEndPlan::Ends(SeparateEndGroups { pairs })),
         SeparateEndFit::Limited { size, edge } => Ok(SeparateEndPlan::Limited { size, edge }),
         SeparateEndFit::Obstructed { vertex } => Err(Failure::new(OP, BlendFailure::CornerRefused)
             .at(EntityRef::Vertex(vertex))
@@ -139,7 +140,7 @@ pub fn plan(
 
 /// The kernel's two groups of independent Ends.
 pub struct SeparateEndGroups {
-    trailing: Vec<(usize, VertexId)>,
+    pairs: Vec<SeparateEndPair>,
 }
 
 // A temporary kernel attribute below the applications' range and the ops overflow mark.
@@ -164,8 +165,6 @@ impl SeparateEndGroups {
         self,
         k: &mut Kernel,
         b: &mut Brep,
-        edges: &[EdgeId],
-        sizes: &[f64],
         mut pass: impl FnMut(
             &mut Kernel,
             &mut Brep,
@@ -175,32 +174,27 @@ impl SeparateEndGroups {
     ) -> Result<std::result::Result<(), E>> {
         let mut group_edges = Vec::new();
         let mut group_sizes = Vec::new();
-        let capacity = edges.len() / 2;
+        let capacity = self.pairs.len();
         reserve(&mut group_edges, capacity)?;
         reserve(&mut group_sizes, capacity)?;
-        let mut trailing = self.trailing.iter().enumerate().peekable();
-        for (i, &e) in edges.iter().enumerate() {
+        for (i, pair) in self.pairs.iter().enumerate() {
             k.check_cancelled(OP)?;
-            if let Some(&(index, _)) = trailing
-                .next_if(|(_, (index, _))| *index == i)
-                .map(|(_, pick)| pick)
-            {
-                b.add_attribute(
-                    EntityRef::Edge(e),
-                    Attribute::application(TRAILING_ID, Behavior::Copy, Trailing(index)),
-                )?;
-            } else if let Some(&size) = sizes.get(i).or_else(|| sizes.first()) {
-                group_edges.push(e);
-                group_sizes.push(size);
-            }
+            let [lead, tail] = pair.edges;
+            let [width, _] = pair.sizes;
+            b.add_attribute(
+                EntityRef::Edge(tail),
+                Attribute::application(TRAILING_ID, Behavior::Copy, Trailing(i)),
+            )?;
+            group_edges.push(lead);
+            group_sizes.push(width);
         }
         if let Err(refusal) = pass(k, b, &group_edges, &group_sizes)? {
             return Ok(Err(refusal));
         }
 
         let mut surviving = Vec::new();
-        reserve(&mut surviving, self.trailing.len())?;
-        surviving.resize(self.trailing.len(), None);
+        reserve(&mut surviving, capacity)?;
+        surviving.resize(capacity, None);
         for &e in b.edge_list() {
             k.check_cancelled(OP)?;
             let Some((handle, pick)) = b
@@ -211,30 +205,23 @@ impl SeparateEndGroups {
             else {
                 continue;
             };
-            let Ok(position) = self
-                .trailing
-                .binary_search_by_key(&pick, |&(index, _)| index)
-            else {
-                continue;
-            };
-            if let Some(slot) = surviving.get_mut(position) {
+            if let Some(slot) = surviving.get_mut(pick) {
                 if slot.replace((e, handle)).is_some() {
-                    return Err(corner_refused(self.trailing.get(position).map(|&(_, v)| v)));
+                    return Err(corner_refused(self.pairs.get(pick).map(|p| p.vertex)));
                 }
             }
         }
 
         group_edges.clear();
         group_sizes.clear();
-        for ((index, vertex), found) in self.trailing.into_iter().zip(surviving) {
+        for (pair, found) in self.pairs.into_iter().zip(surviving) {
             let Some((e, handle)) = found else {
-                return Err(corner_refused(Some(vertex)));
+                return Err(corner_refused(Some(pair.vertex)));
             };
-            if let Some(&size) = sizes.get(index).or_else(|| sizes.first()) {
-                b.remove_attribute(EntityRef::Edge(e), handle)?;
-                group_edges.push(e);
-                group_sizes.push(size);
-            }
+            let [_, width] = pair.sizes;
+            b.remove_attribute(EntityRef::Edge(e), handle)?;
+            group_edges.push(e);
+            group_sizes.push(width);
         }
         k.check_cancelled(OP)?;
         pass(k, b, &group_edges, &group_sizes)

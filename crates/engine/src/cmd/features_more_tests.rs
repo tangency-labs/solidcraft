@@ -76,6 +76,31 @@ fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
     assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some("join"));
 }
 
+/// Grouped faces are picked in the world, so a construction plane they extrude to is read there
+/// too, not in the frame of the moved component that is active (#8527).
+#[test]
+fn grouped_face_auto_operation_reads_a_root_plane_in_the_world() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[0,0,20]}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":"25 mm","name":"Below"}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":"35 mm","name":"Above"}));
+    run(&mut s, "component.activate", json!({"component":part["component"]}));
+    // The top face is at z = 30 in the world: Below (z = 25) is inside the part, Above 5 mm over it.
+    for (plane, expected, volume) in [("Below", "cut", 500.), ("Above", "join", 1500.)] {
+        let params = json!({"faces":[[2,2,30],[8,8,30]],"face_body":"Stock","to":{"plane":plane}});
+        assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected), "{plane}");
+        let mut actual = s.scratch();
+        let mut params = params;
+        params["operation"] = json!("auto");
+        run(&mut actual, "solid.extrude", params);
+        let got = solidcraft_kernel::measure(&actual.model.state().body("Stock").unwrap().body).unwrap().volume;
+        assert!((got - volume).abs() < 1e-6, "{plane}: {got}, want {volume}");
+    }
+}
+
 /// A part inserted into a new design (a STEP file) sits in its own component under the empty
 /// root. A sketch on its face must join it going out and cut it going in, never make a
 /// separate body beside it.
@@ -2025,6 +2050,55 @@ fn coil_and_loft_to_a_point() {
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
 }
 
+/// #20736: `height_measure: overall` sets the coil's height end to end. The section reaches past
+/// the centre line at both ends by its size along the axis: the section's size with axial ends, its
+/// size times the cosine of the pitch angle with square ends. The issue's own example, a round 2 mm
+/// section, 20 across, pitch 7, overall 42, touches planes 42 apart; square sections give exact corners.
+#[test]
+fn a_coils_overall_height_is_its_height_end_to_end() {
+    let span = |p: Value| {
+        let mut s = Session::default();
+        let mut p = p;
+        p["body_name"] = json!("Coil");
+        run(&mut s, "solid.coil", p);
+        let (lo, hi, _) = z_x(&mut s, "Coil");
+        hi - lo
+    };
+    let round = json!({"diameter": 20, "height": 42, "pitch": 7, "section_size": 2, "height_measure": "overall"});
+    assert!((span(round) - 42.0).abs() < 0.02, "the issue's coil");
+    let square = |end: &str, measure: &str, size: f64| {
+        span(json!({"diameter": 20, "height": 30, "pitch": 9, "section": "square", "section_size": size,
+            "section_position": "outside", "end_cut": end, "height_measure": measure}))
+    };
+    assert!((square("axial", "overall", 3.0) - 30.0).abs() < 1e-6);
+    assert!((square("square", "overall", 3.0) - 30.0).abs() < 1e-6);
+    // Square ends reach less far than the section's size: the centre line alone falls short by less.
+    let over = square("square", "center_line", 3.0) - 30.0;
+    let c = std::f64::consts::PI * 23.0;
+    assert!((over - 3.0 * c / (c * c + 81.0).sqrt()).abs() < 1e-6, "{over}");
+    assert!((square("axial", "centre_line", 3.0) - 33.0).abs() < 1e-6, "the default measures the centre line");
+    // It follows a parameter, as a height does.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "50 mm"}));
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 20, "height": "H", "pitch": 7, "section": "square", "section_size": 2, "height_measure": "overall", "body_name": "Coil"}),
+    );
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "60 mm"}));
+    let (lo, hi, _) = z_x(&mut s, "Coil");
+    assert!((hi - lo - 60.0).abs() < 1e-6, "{}", hi - lo);
+    // Refused where it can't apply.
+    let mut s = Session::default();
+    for p in [
+        json!({"diameter": 20, "revolutions": 3, "pitch": 7, "section_size": 2, "height_measure": "overall"}),
+        json!({"diameter": 20, "revolutions": 3, "height": 30, "section_size": 2, "end_cut": "square", "height_measure": "overall"}),
+        json!({"diameter": 20, "height": 30, "pitch": 7, "section_size": 2, "height_measure": "tip"}),
+    ] {
+        assert!(s.execute("solid.coil", &p).is_err(), "{p}");
+    }
+}
+
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
 /// 10 up down to a drain pad (`pad`: corners, 1 up), in either section order. The loft's top
 /// edges lie on the outer walls; the cut used to fail for one order of the sections (an
@@ -3868,6 +3942,19 @@ fn placements_of_one_part_moved_together_each_go_the_way_asked() {
     assert!(about(turned.min.x, -8.0) && about(turned.max.x, 0.0) && about(turned.min.y, 0.0) && about(turned.max.y, 20.0), "{turned:?}");
     let turned = placed_bounds(&s, &b);
     assert!(about(turned.min.x, 0.0) && about(turned.max.x, 30.0) && about(turned.min.y, 100.0) && about(turned.max.y, 120.0), "{turned:?}");
+}
+
+/// A Move of placements only has no body Move to carry or leave constructions with, so it says
+/// so rather than dropping `carry` without a word (#20139 review).
+#[test]
+fn placements_moved_alone_refuse_carry() {
+    let mut s = Session::default();
+    let (a, b) = twice_placed_blade(&mut s);
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 10]}, "name": "Pole"}));
+    let document = s.doc.to_json();
+    let error = s.execute("solid.move", &json!({"bodies": [a, b], "translate": [10, 0, 0], "carry": ["Pole"]})).unwrap_err();
+    assert!(error.to_string().contains("`carry` needs a body to move"), "{error}");
+    assert_eq!(s.doc.to_json(), document);
 }
 
 /// The same part inserted from a STEP assembly, where a rigid group holds the placements in the

@@ -40,12 +40,13 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
-    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 112 because
-    // the Roll key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable Navigation
-    // preferences.
+    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 111 because
+    // the keyboard profile (#15302) is a portable Shortcuts preference; 111 -> 113 because the Roll
+    // key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable
+    // Navigation preferences.
     assert_eq!(
         keys.len(),
-        112,
+        113,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -840,6 +841,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "invert_navigator_arrows",
         "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
+        "keyboard_profile",
         "language",
         "layout",
         "line_drag_draws_one",
@@ -935,7 +937,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: two more portable keys, roll_key and trackpad_twist_rolls (rolling the view, #22691).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 112);
+    // Test change: one more portable key, keyboard_profile (the keyboard profile your keys sit on, #15302).
+    assert_eq!(expected.len(), 113);
     assert_eq!(actual, expected);
 }
 

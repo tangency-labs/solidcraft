@@ -35,16 +35,13 @@ use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
-use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::sweep::api_brep::{
-    CornerRefusal, OffsetCornerType, TaperExtrude, create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
-    create_taper_extrude_with_corner,
+    CornerRefusal, OffsetCornerType, TaperExtrude, create_linear_sweep, create_rotational_sweep, create_taper_extrude_with_corner,
 };
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2::{ArenaNotifyState, is_manifold_solid};
 use solidcore::topology::brep::p3::new_brep;
-use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{StitchAndOrientOptions, stitch_and_orient};
 use solidcore::topology::brep::p7::copy_faces;
 use solidcore::topology::brep::p8::{FaceBuildEnv, create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves};
@@ -67,8 +64,8 @@ const MAX_COORD: f64 = 1e9;
 /// `SMLIB_FLAT_MAX_LEN`: most reals a curve list may hold.
 const FLAT_MAX_LEN: usize = 1 << 27;
 
-/// `SMLIB_SCREW_MAX_TURNS`.
-const SCREW_MAX_TURNS: f64 = 200.0;
+/// `SMLIB_SCREW_MAX_TURNS`: solidcore-ops' bound, as many turns as the kernel's spans hold.
+const SCREW_MAX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
 
 /// `SMLIB_SCREW_MAX_LAW`.
 const SCREW_MAX_LAW: usize = 1024;
@@ -361,7 +358,7 @@ fn sweep_error(call: &'static str, e: solidcore_ops::Error, detail: Option<Strin
 }
 
 /// A curve list as solidcore-ops takes it: the same curves.
-fn ops_curves(curves: &[Profile]) -> Vec<solidcore_ops::sweep::Curve> {
+pub(super) fn ops_curves(curves: &[Profile]) -> Vec<solidcore_ops::sweep::Curve> {
     use solidcore_ops::sweep::Curve as Ops;
     curves
         .iter()
@@ -453,19 +450,6 @@ fn bspline(c: &Curve) -> solidcore::Result<Option<BSplineCurve>> {
         CurveKind::Ellipse(e) => Some(e.base().clone()),
         _ => None,
     })
-}
-
-/// `joined`: a path of end-to-end curves as one B-spline (`CreateCurveSweep` takes one curve).
-fn joined(path: &[Curve]) -> solidcore::Result<Out<BSplineCurve>> {
-    let mut parts = Vec::with_capacity(path.len());
-    for c in path {
-        let Some(b) = bspline(c)? else { return Ok(Err(Error::Argument)) };
-        parts.push(b);
-    }
-    if parts.len() == 1 {
-        return Ok(parts.pop().ok_or(Error::Argument));
-    }
-    Ok(called(BSplineCurve::create_by_joining(&mut parts, None)))
 }
 
 /// `turned`: `v` turned `angle` right-handed about the unit `k` (Rodrigues).
@@ -579,27 +563,6 @@ fn segmented(k: &Kernel, given: &[Profile], path: &[Curve]) -> solidcore::Result
     }
 }
 
-/// `loops`: the runs of curves, given by their `ends` in order, that each close a loop (each
-/// run's curves end to end, the last ending where the first starts, within 10⁻⁶). One run of all
-/// of them when they do not split into closed loops.
-fn loops(ends: &[(Point3, Point3)]) -> Vec<std::ops::Range<usize>> {
-    let mut out = Vec::new();
-    let mut from = 0;
-    let mut first = None;
-    for (i, &(a, b)) in ends.iter().enumerate() {
-        let start = *first.get_or_insert(a);
-        if (b - start).length() <= 1e-6 {
-            out.push(from..i + 1);
-            from = i + 1;
-            first = None;
-        }
-    }
-    if from != ends.len() || out.is_empty() {
-        return std::iter::once(0..ends.len()).collect();
-    }
-    out
-}
-
 /// `carried`: copies of the profile's curves carried by `m`.
 fn carried(k: &Kernel, profile: &[Curve], m: &Rigid) -> solidcore::Result<Vec<Curve>> {
     let at = m.placement();
@@ -678,7 +641,10 @@ fn piecewise(k: &mut Kernel, profile: &[Curve], segs: &[Segment], cap: bool) -> 
 /// `smlib_sweep_placed`: `profile` swept along `path`, with the rigid motions that placed it at
 /// the start, half way and the end. Along a straight path the sweep is SM_API's linear sweep, and
 /// turning with arcs about one axis its rotational sweep: both build the walls exactly, as the
-/// sweep piece by piece does along lines and arcs that turn with the path ([`piecewise`]).
+/// sweep piece by piece does along lines and arcs that turn with the path ([`piecewise`]). Any
+/// other path takes solidcore-ops' curve sweep of the curves made here
+/// ([`solidcore_ops::sweep::curve_sweep_in`]), which round a closed path sweeps each loop of a
+/// capped profile on its own and takes the holes' tubes from the first loop's.
 pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFrame, cap: bool) -> Result<(Body, [Affine; 3])> {
     let mut placed = [motion(Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 0.0)); 3];
     let body = making("smlib_sweep", |k| {
@@ -732,71 +698,18 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
                 Err(e) => Err(e),
             });
         }
-        let path_curve = match joined(&along)? {
-            Ok(b) => Curve::from(b),
-            Err(e) => return Ok(Err(e)),
+        let frame = match frame {
+            SweepFrame::Follow => solidcore_ops::sweep::SweepFrame::Follow,
+            SweepFrame::Translate => solidcore_ops::sweep::SweepFrame::Translate,
         };
-        // Round a closed path the profile comes back onto itself: the walls close on each other
-        // there, where caps would lie on top of each other inside the solid.
-        let (Some(head), Some(tail)) = (along.first(), along.last()) else { return Ok(Err(Error::Argument)) };
-        let closed = (ends(k, head)?.0 - ends(k, tail)?.1).length() <= 1e-6;
-        // `SmApiCreateCurveSweep` with `bProfileAtPathStart` (fork 2dd71a0), so the profile is
-        // swept where it lies, and the placements it reports (fork 5d3939e).
-        let options = SweepOptions {
-            cap_ends: cap && !closed,
-            translational_sweep: frame == SweepFrame::Translate,
-            profile_at_path_start: true,
-            ..SweepOptions::default()
-        };
-        // Round a closed path each loop of the profile closes into a tube of its own, and the
-        // curve sweep makes each tube bound a solid of its own: a hole's tube would add its
-        // volume instead of taking it away. So there each loop is swept on its own, and the
-        // holes' tubes (the loops after the first, as a region lists them) are taken from the
-        // first loop's.
-        let mut groups: Vec<std::ops::Range<usize>> = std::iter::once(0..curves.len()).collect();
-        if closed && cap {
-            let mut at = Vec::with_capacity(curves.len());
-            for c in &curves {
-                at.push(ends(k, c)?);
+        Ok(match solidcore_ops::sweep::curve_sweep_in(k, &curves, &along, frame, cap) {
+            Ok(Ok((b, motions))) => {
+                placed = motions.map(|a| Affine { m: a.m, t: a.t });
+                finish(b, cap)?
             }
-            groups = loops(&at);
-        }
-        let mut whole: Option<Brep> = None;
-        for (i, g) in groups.into_iter().enumerate() {
-            let Some(group) = curves.get(g) else { return Ok(Err(Error::Argument)) };
-            let refs: Vec<Option<&Curve>> = group.iter().map(Some).collect();
-            let r = match create_curve_sweep_with_placements(k, &refs, Some(&path_curve), None, None, Some(&options)) {
-                Ok(r) => r,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            if i == 0 {
-                for (m, p) in placed.iter_mut().zip(&r.placements) {
-                    *m = motion(p.x_axis(), p.y_axis(), p.z_axis(), p.origin());
-                }
-            }
-            let mut b = r.sweep.brep;
-            if closed {
-                let tol = b.tolerance();
-                match stitch_faces(k, &mut b, tol, None, false) {
-                    // A solid asked for has no free edge left; a sheet (an open profile, or one
-                    // not capped) keeps the profile's own ends free (#17828).
-                    Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
-                    Ok(_) => b.refresh_cached_topology(),
-                    Err(e) => return Ok(Err(status(e))),
-                }
-            }
-            whole = Some(match whole {
-                None => b,
-                Some(outer) => match super::boolean::merged(k, outer, b, crate::BooleanOp::Subtract) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(Err(status(e))),
-                },
-            });
-        }
-        match whole {
-            Some(b) => finish(b, cap),
-            None => Ok(Err(Error::Argument)),
-        }
+            Ok(Err(e)) => Err(sweep_error("smlib_sweep", e, None)),
+            Err(e) => Err(status(e)),
+        })
     })?;
     Ok((body, placed))
 }

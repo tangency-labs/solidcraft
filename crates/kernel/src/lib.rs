@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+pub mod dogbone;
 mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
@@ -48,6 +49,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;
@@ -183,6 +185,7 @@ mod validity;
 pub mod watch;
 
 pub use backend::Solidcore;
+pub use blend::BlendFit;
 pub use blend::ChamferSide;
 pub use blend::FilletTurn;
 pub use blend::FitSearch;
@@ -205,6 +208,7 @@ pub use blend::fillet_max_why;
 pub use blend::fillet_removing;
 pub use blend::fillet_setback;
 pub use blend::largest_fit_note;
+pub use blend::named_blend_fit;
 pub use blend::named_fit;
 pub use blend::names_largest_fit;
 pub use blend::scale_fit_note;
@@ -358,6 +362,7 @@ pub use fill::PatchSpec;
 pub use fill::patch_edges_crowned;
 pub use fill::patch_edges_report;
 pub use fill::patch_edges_with;
+pub use helix::MAX_HELIX_TURNS;
 pub use helix::loft_to_point;
 pub use helix::loft_to_point_with_rails;
 pub use helix::sweep_helix;
@@ -385,6 +390,7 @@ pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
 pub use measure::levels_along;
+pub use measure::line_meets_box;
 pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
@@ -404,6 +410,7 @@ pub use ops::BoolOp;
 pub use ops::apart;
 pub use ops::half_space;
 pub use ops::join_apart;
+pub use ops::overlapping_piece_pairs;
 pub use ops::place_matrix;
 pub use ops::split_by_plane;
 pub use ops::transform;
@@ -417,6 +424,8 @@ pub use point_path::along_path;
 pub use point_path::curve_path;
 pub use point_path::edge_path;
 pub use point_path::face_section_along;
+pub use point_path::polyline_fraction_at;
+pub use point_path::polyline_point_at;
 pub use point_path::project_onto_face;
 pub use point_path::sketch_record_curve;
 pub use point_path::sweep_point_path_with;
@@ -480,13 +489,16 @@ pub use route::mesh;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::plan_sketch_cell_grid;
 pub use route::planar;
 pub use route::points;
+pub use route::profiles;
 pub use route::projection;
 pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
+pub use route::runtime;
 pub use route::sections;
 pub use route::shaft_spline;
 pub use route::shell;
@@ -527,9 +539,7 @@ pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 
-/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
-/// stops with it (a sketch solve).
-pub use solidcraft_smlib::stop::token as stop_token;
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 /// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
 /// scopes and counted work of the calls this process made.
@@ -618,6 +628,7 @@ pub use surface_ruled::ruled_surface;
 pub use surface_ruled::ruled_surface_with;
 pub use surface_trim::TrimKeep;
 pub use surface_trim::mutual_trim;
+pub use surface_trim::split_sheet_where_it_cuts;
 pub use surface_trim::stop_at_bodies;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
@@ -773,6 +784,22 @@ impl KernelError {
             None => KernelError::Failed(format!("{context}: {e}")),
         }
     }
+
+    /// The largest fitting size in mm named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn largest_fit(&self) -> Option<f64> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_fit(why),
+            _ => None,
+        }
+    }
+
+    /// The typed largest fitting size named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn blend_fit(&self) -> Option<BlendFit> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_blend_fit(why),
+            _ => None,
+        }
+    }
 }
 
 /// The native kernel call running right now (SMLib), for crash reports.
@@ -893,3 +920,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

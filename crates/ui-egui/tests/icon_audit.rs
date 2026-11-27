@@ -772,6 +772,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     for (name, source) in [
         ("dimensions and constraints", include_str!("scenarios/s11_sketch_constraints.json")),
         ("corner popup", include_str!("scenarios/sketch_corner_window.json")),
+        ("flange corner cards", include_str!("scenarios/sheet_flange_corner_cards.json")),
         ("sketch palette", include_str!("scenarios/sketch_palette_linetype_icons.json")),
         ("sketch Select Other", include_str!("scenarios/select_other_coincident_lines.json")),
         ("canvas calibration", include_str!("scenarios/s19_canvas_calibrate.json")),
