@@ -78,10 +78,11 @@ fn addr(port: u16) -> String {
     format!("127.0.0.1:{port}")
 }
 
-/// A port nothing listens on.
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
+/// The port of an address nothing can ever listen on. Binding port 0 asks the system for any free
+/// port, so no listener is ever at port 0 and a connect to it cannot succeed. The client reports
+/// every failed connect as "not running", whichever error the system gives (refused at once, an
+/// unusable address, or a timeout).
+const NEVER_LISTENING_PORT: u16 = 0;
 
 #[test]
 fn a_call_is_one_round_trip_with_the_token() {
@@ -115,7 +116,12 @@ fn a_wrong_token_or_none_is_refused() {
 
 #[test]
 fn an_app_not_running_says_how_to_start_it() {
-    let port = free_port();
+    let port = NEVER_LISTENING_PORT;
+    // If a system let this connect through, say so here, not as a confusing `Lost` below.
+    assert!(
+        std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(2)).is_err(),
+        "a connect to port 0 succeeded on this system"
+    );
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::NotRunning(m) = &e else { panic!("{e:?}") };
