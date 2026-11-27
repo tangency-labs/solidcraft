@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+pub mod dogbone;
 mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
@@ -421,6 +422,8 @@ pub use point_path::along_path;
 pub use point_path::curve_path;
 pub use point_path::edge_path;
 pub use point_path::face_section_along;
+pub use point_path::polyline_fraction_at;
+pub use point_path::polyline_point_at;
 pub use point_path::project_onto_face;
 pub use point_path::sketch_record_curve;
 pub use point_path::sweep_point_path_with;
@@ -899,3 +902,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

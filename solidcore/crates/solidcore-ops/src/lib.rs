@@ -60,6 +60,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dogbone;
 pub mod dome;
 pub mod dxf;
 pub mod error;
