@@ -2087,6 +2087,24 @@ impl Body {
         }))
     }
 
+    /// Outward normals and estimated areas of this body's planar faces, in record-face order.
+    /// Curved faces are omitted. The area estimate uses the kernel integrator at `1e-8` relative
+    /// accuracy; planar classification and normals use the face's own tolerance.
+    ///
+    /// # Errors
+    /// The errors of [`Body::face_plane_normal`] and [`Body::face_area`].
+    pub fn planar_face_areas(&self, order: &Order) -> Result<Vec<([f64; 3], f64)>> {
+        let [face_count, _, _] = self.counts()?;
+        let mut faces = Vec::new();
+        for face in 0..face_count {
+            if let Some(normal) = self.face_plane_normal(order, face)? {
+                let area = self.face_area(order, face, 1e-8)?;
+                faces.push((normal.value, area));
+            }
+        }
+        Ok(faces)
+    }
+
     /// Where record face `face` lies along `direction`, when it is a plane square to it: the
     /// signed distance from `origin` to the face's plane measured along `direction` (a point of
     /// the face, its centroid, dotted with the unit `direction`), and the face's own tolerance

@@ -1,9 +1,9 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc};
+use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
-use solidcraft_kernel_api::planar::{Planar, PlanarRefused};
+use solidcraft_kernel_api::planar::{Planar, PlanarRefused, StrokeRun};
 
 use super::Solidcore;
 
@@ -76,6 +76,13 @@ impl Planar for Solidcore {
         paper_gaps::straight_length(a, b)
     }
 
+    fn stroke_runs(&self, points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f64) -> Vec<StrokeRun> {
+        stroke_runs::runs(points, closed, min_step, smooth_turn_cos)
+            .into_iter()
+            .map(|run| StrokeRun { points: run.points, closed: run.closed })
+            .collect()
+    }
+
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool {
         paper_gaps::projected_endpoints_are_distinct(basis, ends)
     }
@@ -86,6 +93,10 @@ impl Planar for Solidcore {
 
     fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool {
         board_drill::hole_reaches_loops(center, size, angle, loops)
+    }
+
+    fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
+        board_drill::side_on_hole_wall(center, size, angle, points, chord)
     }
 
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
