@@ -1890,6 +1890,16 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             face_ids.push(fid(f));
         }
         let brep = hd(first.b, K_BREP, 0);
+        // Bare faces with no owning face use / B-rep fall back to the per-face loop so
+        // `TopologyIntersector::delete_faces` reports `"face without B-rep"`.
+        let Some(b) = self.brep(brep) else {
+            return Ok(None);
+        };
+        for &f in &face_ids {
+            if b.faces().get(f).and_then(|rec| rec.faceuse).is_none() {
+                return Ok(None);
+            }
+        }
         let keep_ids: Option<Vec<EdgeId>> = keep_wires.map(|ws| {
             ws.iter()
                 .filter(|e| e.kind == K_EDGE && e.b == brep.b)

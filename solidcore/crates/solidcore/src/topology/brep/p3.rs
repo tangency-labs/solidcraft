@@ -3787,6 +3787,7 @@ fn delete_faces_batch_in(
     // ---- Phase 2: delete resulting wire edges (excluding keep_wires) ----
     let mut deleted_edges: Vec<EdgeId> = Vec::new();
     let mut deleted_edge_set: BTreeSet<EdgeId> = BTreeSet::new();
+    let mut deleted_wire_endpoints: BTreeMap<ShellId, Vec<(VertexId, VertexId)>> = BTreeMap::new();
 
     let phase2_res: Result<()> = (|| {
         for e in candidate_edges {
@@ -3838,7 +3839,8 @@ fn delete_faces_batch_in(
             let (vu2, v2) = eu_vertex(b, eu_mate)?;
             vertex_remove_vertexuse(b, v2, vu2)?;
 
-            for (v, vu) in [(v1, vu1), (v2, vu2)] {
+            for (v, vu, use_eu) in [(v1, vu1, eu), (v2, vu2, eu_mate)] {
+                b.edgeuse_mut(use_eu)?.vertexuse = None;
                 if vertex::vertexuses(b, v)?.is_empty() {
                     b.vertex_mut(v)?.vertexuses.push(vu);
                     b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
@@ -3858,9 +3860,18 @@ fn delete_faces_batch_in(
                 deleted_edge_set.insert(e);
             }
             destroy_res?;
+            for use_eu in [eu, eu_mate] {
+                let rec = b.edgeuse_mut(use_eu)?;
+                rec.ccw = None;
+                rec.cw = None;
+            }
             crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
             crate::topology::edgeuse::p2::destroy(k, b, eu_mate, env)?;
 
+            deleted_wire_endpoints
+                .entry(shell)
+                .or_default()
+                .push((v1, v2));
             deleted_edges.push(e);
         }
         Ok(())
@@ -3945,9 +3956,202 @@ fn delete_faces_batch_in(
         &merged_into,
         &shell_wire_edges,
         &deleted_edge_set,
+        &deleted_wire_endpoints,
     )?;
 
     Ok((deleted_edges, deleted_vertices))
+}
+
+/// All vertices on all loops of `fu`, used to build the post-deletion connectivity DSU.
+fn faceuse_all_vertices(b: &Brep, fu: FaceuseId) -> Result<Vec<VertexId>> {
+    let mut out = Vec::new();
+    for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+        if lu1::is_vertex_loopuse(b, lu)? {
+            if let Some(vu) = lu1::vertexuse(b, lu)? {
+                if let Some(v) = vertexuse::vertex(b, vu)? {
+                    out.push(v);
+                }
+            }
+        } else {
+            for eu in lu1::edgeuses(b, lu, None, None)? {
+                if let Some(vu) = eu1::vertexuse(b, eu)? {
+                    if let Some(v) = vertexuse::vertex(b, vu)? {
+                        out.push(v);
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Map-backed disjoint-set union over vertices for offline reverse replay of deleted wire
+/// edges (no slice indexing; `O(E log V)`).
+#[derive(Default)]
+struct VertexDsu {
+    parent: std::collections::BTreeMap<VertexId, VertexId>,
+    rank: std::collections::BTreeMap<VertexId, u8>,
+    face_entry: std::collections::BTreeMap<VertexId, VertexId>,
+    unseeded: std::collections::BTreeMap<VertexId, Vec<usize>>,
+}
+
+impl VertexDsu {
+    fn find(&mut self, mut x: VertexId) -> VertexId {
+        let mut root = x;
+        while let Some(&p) = self.parent.get(&root) {
+            if p == root {
+                break;
+            }
+            root = p;
+        }
+        while let Some(&p) = self.parent.get(&x) {
+            if p == root {
+                break;
+            }
+            self.parent.insert(x, root);
+            x = p;
+        }
+        root
+    }
+
+    fn union(&mut self, a: VertexId, b: VertexId) {
+        let ra = self.find(a);
+        let rb = self.find(b);
+        if ra == rb {
+            return;
+        }
+        let rank_a = self.rank.get(&ra).copied().unwrap_or(0);
+        let rank_b = self.rank.get(&rb).copied().unwrap_or(0);
+        let (keep, drop) = if rank_a < rank_b { (rb, ra) } else { (ra, rb) };
+        self.parent.insert(drop, keep);
+        if rank_a == rank_b {
+            self.rank.insert(keep, rank_a.saturating_add(1));
+        }
+        if let Some(fv) = self.face_entry.remove(&drop) {
+            self.face_entry.entry(keep).or_insert(fv);
+        }
+        if let Some(mut moved) = self.unseeded.remove(&drop) {
+            let dst = self.unseeded.entry(keep).or_default();
+            if dst.len() < moved.len() {
+                moved.append(dst);
+                *dst = moved;
+            } else {
+                dst.append(&mut moved);
+            }
+        }
+    }
+}
+
+/// Replays `deleted_wires` in reverse against the surviving face/wire graph of `shell` to
+/// find the last `wire_split_shell` seed vertex `v2` that moved each surviving face
+/// component into a new shell in per-edge deletion order.
+fn compute_wire_split_seeds(
+    b: &Brep,
+    all_fus: &[FaceuseId],
+    wires: &[EdgeuseId],
+    deleted_wires: &[(VertexId, VertexId)],
+) -> Result<Vec<VertexId>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    if all_fus.is_empty() || deleted_wires.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut dsu = VertexDsu::default();
+    let mut face_verts: BTreeSet<VertexId> = BTreeSet::new();
+    let mut incident: BTreeSet<VertexId> = BTreeSet::new();
+
+    for &fu in all_fus {
+        let verts = faceuse_all_vertices(b, fu)?;
+        let Some(&first) = verts.first() else {
+            continue;
+        };
+        for &v in &verts {
+            face_verts.insert(v);
+            incident.insert(v);
+            let r = dsu.find(v);
+            dsu.face_entry.entry(r).or_insert(v);
+        }
+        for &v in verts.iter().skip(1) {
+            dsu.union(first, v);
+        }
+    }
+    for &eu in wires {
+        let (_, v1) = eu_vertex(b, eu)?;
+        incident.insert(v1);
+        if let Some(mate) = eu1::mate(b, eu)? {
+            let (_, v2) = eu_vertex(b, mate)?;
+            incident.insert(v2);
+            dsu.union(v1, v2);
+        }
+    }
+
+    let live_in_shell = incident.clone();
+    let mut seen_roots: BTreeSet<VertexId> = BTreeSet::new();
+    let mut comp_seeds: Vec<Option<VertexId>> = Vec::new();
+    for &v in &face_verts {
+        let r = dsu.find(v);
+        if seen_roots.insert(r) {
+            let idx = comp_seeds.len();
+            comp_seeds.push(None);
+            dsu.unseeded.insert(r, vec![idx]);
+        }
+    }
+
+    // Replay deleted wire edges backwards from the last deleted edge to the first.
+    // The first split putting a component on the `v2` side is the last `wire_split_shell`
+    // call that reordered that component in forward execution.
+    let mut wire_adj: BTreeMap<VertexId, Vec<VertexId>> = BTreeMap::new();
+    for &(v1, v2) in deleted_wires.iter().rev() {
+        let v1_live = incident.contains(&v1) || b.vertex(v1).is_ok();
+        let v2_live = incident.contains(&v2) || b.vertex(v2).is_ok();
+        if v1 != v2 && v1_live && v2_live {
+            let r1 = dsu.find(v1);
+            let r2 = dsu.find(v2);
+            if r1 != r2 {
+                if let Some(comps) = dsu.unseeded.remove(&r2) {
+                    let seed = if live_in_shell.contains(&v2) {
+                        Some(v2)
+                    } else {
+                        // `v2` was a deleted wire vertex (or only survives on another
+                        // shell): trace the still-present wire chain from `v2` to the
+                        // first vertex on a surviving face/wire of this shell.
+                        let mut stack = vec![v2];
+                        let mut seen = BTreeSet::from([v2]);
+                        let mut entry = None;
+                        while let Some(u) = stack.pop() {
+                            if live_in_shell.contains(&u) {
+                                entry = Some(u);
+                                break;
+                            }
+                            if let Some(nbrs) = wire_adj.get(&u) {
+                                for &w in nbrs {
+                                    if seen.insert(w) {
+                                        stack.push(w);
+                                    }
+                                }
+                            }
+                        }
+                        entry.or_else(|| dsu.face_entry.get(&r2).copied())
+                    };
+                    if let Some(seed) = seed {
+                        for c in comps {
+                            if let Some(slot) = comp_seeds.get_mut(c) {
+                                *slot = Some(seed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        wire_adj.entry(v1).or_default().push(v2);
+        wire_adj.entry(v2).or_default().push(v1);
+        incident.insert(v1);
+        incident.insert(v2);
+        dsu.union(v1, v2);
+    }
+
+    Ok(comp_seeds.into_iter().flatten().collect())
 }
 
 /// First vertex on any loop of `fu`, used as a seed for shell traversal.
@@ -3973,7 +4177,7 @@ fn faceuse_seed_vertex(b: &Brep, fu: FaceuseId) -> Result<Option<VertexId>> {
 /// Reconciles every surviving touched shell after a batch deletion: destroys empty
 /// shells, gives surviving isolated vertices their own vertex shells, and splits any
 /// disconnected shell into one shell per connected component in a single pass.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn reconcile_shells_after_batch(
     k: &mut Kernel,
     b: &mut Brep,
@@ -3982,6 +4186,7 @@ fn reconcile_shells_after_batch(
     merged_into: &std::collections::BTreeMap<ShellId, ShellId>,
     shell_wire_edges: &std::collections::BTreeMap<ShellId, Vec<EdgeId>>,
     deleted_edges: &std::collections::BTreeSet<EdgeId>,
+    deleted_wire_endpoints: &std::collections::BTreeMap<ShellId, Vec<(VertexId, VertexId)>>,
 ) -> Result<()> {
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -4090,6 +4295,12 @@ fn reconcile_shells_after_batch(
             b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(new_s));
         }
 
+        let wire_split_seeds = deleted_wire_endpoints
+            .get(&shell)
+            .map(|dw| compute_wire_split_seeds(b, &all_fus, &wires, dw))
+            .transpose()?
+            .unwrap_or_default();
+
         // Partition `all_fus` and `wires` into connected components in one pass.
         // Track visited entities explicitly because `shell_traversal_with_marks` advances
         // `lock`'s mark generation on each call.
@@ -4097,9 +4308,31 @@ fn reconcile_shells_after_batch(
         let mut marks = Marks::default();
         let mut visited_fus: BTreeSet<FaceuseId> = BTreeSet::new();
         let mut visited_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
-        let mut components: Vec<(Vec<FaceuseId>, Vec<EdgeuseId>)> = Vec::new();
+        let mut components: Vec<(Vec<FaceuseId>, Vec<EdgeuseId>, bool)> = Vec::new();
 
         let walk_res: Result<()> = (|| {
+            for &seed_v in &wire_split_seeds {
+                let mut comp_eus = Vec::new();
+                let mut comp_fus = Vec::new();
+                tt::shell_traversal_with_marks(
+                    k,
+                    b,
+                    &mut marks,
+                    seed_v,
+                    shell,
+                    Some(&mut comp_eus),
+                    Some(&mut comp_fus),
+                    &lock,
+                )?;
+                if comp_fus.iter().any(|fu| visited_fus.contains(fu)) {
+                    continue;
+                }
+                visited_fus.extend(&comp_fus);
+                visited_eus.extend(&comp_eus);
+                if !comp_fus.is_empty() || !comp_eus.is_empty() {
+                    components.push((comp_fus, comp_eus, true));
+                }
+            }
             for &fu in &all_fus {
                 if visited_fus.contains(&fu) {
                     continue;
@@ -4122,7 +4355,7 @@ fn reconcile_shells_after_batch(
                 visited_fus.extend(&comp_fus);
                 visited_eus.extend(&comp_eus);
                 if !comp_fus.is_empty() || !comp_eus.is_empty() {
-                    components.push((comp_fus, comp_eus));
+                    components.push((comp_fus, comp_eus, false));
                 }
             }
             for &eu in &wires {
@@ -4145,7 +4378,7 @@ fn reconcile_shells_after_batch(
                 visited_fus.extend(&comp_fus);
                 visited_eus.extend(&comp_eus);
                 if !comp_fus.is_empty() || !comp_eus.is_empty() {
-                    components.push((comp_fus, comp_eus));
+                    components.push((comp_fus, comp_eus, false));
                 }
             }
             Ok(())
@@ -4155,7 +4388,7 @@ fn reconcile_shells_after_batch(
 
         if components.len() <= 1 {
             if all_fus.is_empty() {
-                if let Some((_, comp0_eus)) = components.first() {
+                if let Some((_, comp0_eus, _)) = components.first() {
                     if let Some(&first_eu) = comp0_eus
                         .iter()
                         .find(|&&eu| eu1::is_shell_edgeuse(b, eu).unwrap_or(false))
@@ -4165,23 +4398,51 @@ fn reconcile_shells_after_batch(
                         set_shell_head(b, shell, ShellMembers::Edgeuse(first_eu))?;
                     }
                 }
+            } else if let Some((mut comp0_fus, _, true)) = components.pop() {
+                // Match `wire_split_shell`'s face-use order when a wire split moved this
+                // component out of the wire-bearing shell.
+                for &fu in &all_fus {
+                    if !visited_fus.contains(&fu) {
+                        comp0_fus.push(fu);
+                    }
+                }
+                shell::shell_set_faceuses(b, shell, comp0_fus)?;
+            }
+            if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, shell) {
+                b.shell_mut(shell)?.faces = faces;
             }
             continue;
         }
 
         // Multiple disconnected components: matching `delete_face_nesting`, move each
         // earlier component into a new shell in `O(|shell|)` total time and keep the last
-        // component in `shell`.
-        let Some((mut last_fus, last_eus)) = components.pop() else {
+        // component in `shell`. Unseeded components preserve their original `all_fus` order.
+        let Some((mut last_fus, last_eus, last_seeded)) = components.pop() else {
             continue;
         };
+        if !last_seeded && !last_fus.is_empty() {
+            let comp_set: BTreeSet<FaceuseId> = last_fus.into_iter().collect();
+            last_fus = all_fus
+                .iter()
+                .copied()
+                .filter(|fu| comp_set.contains(fu))
+                .collect();
+        }
         for &fu in &all_fus {
             if !visited_fus.contains(&fu) {
                 last_fus.push(fu);
             }
         }
 
-        for (comp_fus, comp_eus) in components {
+        for (mut comp_fus, comp_eus, seeded) in components {
+            if !seeded && !comp_fus.is_empty() {
+                let comp_set: BTreeSet<FaceuseId> = comp_fus.into_iter().collect();
+                comp_fus = all_fus
+                    .iter()
+                    .copied()
+                    .filter(|fu| comp_set.contains(fu))
+                    .collect();
+            }
             let new_shell = b.add_shell_record(crate::topology::Shell {
                 region: Some(region),
                 ..crate::topology::Shell::default()
@@ -4210,6 +4471,9 @@ fn reconcile_shells_after_batch(
                         b.edgeuse_mut(eu)?.owner = EdgeuseOwner::Shell(Some(new_shell));
                     }
                 }
+                if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, new_shell) {
+                    b.shell_mut(new_shell)?.faces = faces;
+                }
             }
         }
 
@@ -4221,9 +4485,13 @@ fn reconcile_shells_after_batch(
                 set_shell_type(b, shell, ShellType::Wire)?;
                 set_shell_head(b, shell, ShellMembers::Edgeuse(first_eu))?;
             }
+            b.shell_mut(shell)?.faces.clear();
         } else {
             set_shell_type(b, shell, ShellType::Faceuse)?;
             shell::shell_set_faceuses(b, shell, last_fus)?;
+            if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, shell) {
+                b.shell_mut(shell)?.faces = faces;
+            }
         }
     }
 
@@ -8155,12 +8423,24 @@ pub(crate) mod test_support {
             assert!(b.edge(e).is_ok(), "dangling edge {e:?} left in edge_list");
         }
         assert_eq!(p1::edges(&b, None).unwrap().len(), 11);
-        // No surviving edge use may still point to the deleted wire edge.
+        // No surviving edge use may still point to a deleted edge, vertex use, or mate.
         for (eu, rec) in b.edgeuses().iter() {
             if let Some(e) = rec.edge {
                 assert!(
                     b.edge(e).is_ok(),
                     "surviving edgeuse {eu:?} points to deleted edge {e:?}"
+                );
+            }
+            if let Some(vu) = rec.vertexuse {
+                assert!(
+                    b.vertexuse(vu).is_ok(),
+                    "surviving edgeuse {eu:?} points to deleted vertexuse {vu:?}"
+                );
+            }
+            for neighbor in [rec.ccw, rec.cw].into_iter().flatten() {
+                assert!(
+                    b.edgeuse(neighbor).is_ok(),
+                    "surviving edgeuse {eu:?} points to deleted neighbor {neighbor:?}"
                 );
             }
         }
@@ -8227,5 +8507,107 @@ pub(crate) mod test_support {
             let fu = rec.faceuse.expect("surviving face must have a faceuse");
             assert!(b.faceuse(fu).is_ok());
         }
+    }
+
+    #[test]
+    fn delete_faces_batch_matches_wire_split_shell_faceuse_order() {
+        use super::{delete_face, delete_faces_batch, p1, DeleteFaceOptions, Kernel, Point3};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p4::{delete_edge, delete_vertex, DeleteEnv};
+        use crate::topology::edge;
+        use crate::topology::face::p4 as face4;
+        use crate::topology::integrity::derived_shell_faces;
+        use crate::topology::shell::ShellMembers;
+        use crate::topology::topology_traverser::{face_edges, Marks};
+        use crate::topology::vertex;
+
+        // Build two identical boxes and delete three faces meeting at one corner so the
+        // resulting dangling wire chain splits off the surviving solid shell during wire
+        // deletion. Batch deletion must leave the same shell face-use order and cached
+        // `Shell::faces` as the per-entity loop.
+        let mut k_batch = Kernel::default();
+        let mut b_batch = create_box(&mut k_batch, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b_batch.set_editing_enabled(true);
+
+        let mut k_loop = Kernel::default();
+        let mut b_loop = create_box(&mut k_loop, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b_loop.set_editing_enabled(true);
+
+        let del_batch: Vec<_> = p1::faces(&b_batch, None)
+            .unwrap()
+            .into_iter()
+            .take(3)
+            .collect();
+        let del_loop: Vec<_> = p1::faces(&b_loop, None)
+            .unwrap()
+            .into_iter()
+            .take(3)
+            .collect();
+
+        {
+            let mut state = ArenaNotifyState::new(&b_batch);
+            let mut env = state.env(None);
+            delete_faces_batch(&mut k_batch, &mut b_batch, &mut env, &del_batch, None).unwrap();
+        }
+        {
+            let mut state = ArenaNotifyState::new(&b_loop);
+            let mut env = state.env(None);
+            let mut marks = Marks::default();
+            let mut edges = Vec::new();
+            let mut verts = Vec::new();
+            for &f in &del_loop {
+                for e in face_edges(&b_loop, f).unwrap() {
+                    if !edges.contains(&e) {
+                        edges.push(e);
+                    }
+                }
+                for v in face4::vertices(&b_loop, f, None, false, None).unwrap() {
+                    if !verts.contains(&v) {
+                        verts.push(v);
+                    }
+                }
+                delete_face(
+                    &mut k_loop,
+                    &mut b_loop,
+                    &mut env,
+                    &mut marks,
+                    f,
+                    DeleteFaceOptions::default(),
+                )
+                .unwrap();
+            }
+            for e in edges {
+                if edge::is_wire(&b_loop, e).unwrap() {
+                    let mut del = DeleteEnv::from_notify(&mut env);
+                    delete_edge(&mut k_loop, &mut b_loop, &mut del, e, None).unwrap();
+                }
+            }
+            for v in verts {
+                if vertex::is_shell_vertex(&b_loop, v).unwrap() {
+                    let mut del = DeleteEnv::from_notify(&mut env);
+                    delete_vertex(&mut k_loop, &mut b_loop, &mut del, v).unwrap();
+                }
+            }
+        }
+
+        let batch_shells = p1::shells(&mut k_batch, &b_batch, None).unwrap();
+        let loop_shells = p1::shells(&mut k_loop, &b_loop, None).unwrap();
+        assert_eq!(batch_shells.len(), loop_shells.len());
+        assert_eq!(batch_shells.len(), 1);
+
+        let batch_fus = match &b_batch.shell(batch_shells[0]).unwrap().members {
+            ShellMembers::Faceuses(list) => list.clone(),
+            other => panic!("expected face-use shell, got {other:?}"),
+        };
+        let loop_fus = match &b_loop.shell(loop_shells[0]).unwrap().members {
+            ShellMembers::Faceuses(list) => list.clone(),
+            other => panic!("expected face-use shell, got {other:?}"),
+        };
+        assert_eq!(batch_fus, loop_fus);
+        assert_eq!(
+            b_batch.shell(batch_shells[0]).unwrap().faces,
+            derived_shell_faces(&b_batch, batch_shells[0]).unwrap()
+        );
     }
 }
