@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 
 use super::MODEL_LIST_CAP;
 use super::acp::ModelInfo;
-use super::agents::Protocol;
+use super::agents::{Protocol, ServiceTier};
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
 use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
@@ -874,6 +874,7 @@ enum Cmd {
     SetModel(String),
     SetRequestTimeout(u64),
     SetReasoningEffort(String),
+    SetServiceTier(ServiceTier),
     SetInstructions(String),
 }
 
@@ -920,6 +921,7 @@ impl ApiBackend {
                 wake,
                 cancel: stop,
                 no_reasoning: Default::default(),
+                service_tier: ServiceTier::Default,
             };
             w.run(cmd_rx);
         });
@@ -953,6 +955,11 @@ impl ChatBackend for ApiBackend {
     fn set_reasoning_effort(&mut self, effort: &str) {
         if let Some(c) = &self.cmds {
             let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
+        }
+    }
+    fn set_service_tier(&mut self, tier: ServiceTier) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetServiceTier(tier));
         }
     }
     fn set_instructions(&mut self, text: &str) {
@@ -1009,6 +1016,7 @@ struct Worker {
     cancel: Arc<AtomicBool>,
     /// Set once the endpoint refused tools together with a reasoning effort: later requests ask for none.
     no_reasoning: std::cell::Cell<bool>,
+    service_tier: ServiceTier,
 }
 
 impl Worker {
@@ -1052,6 +1060,12 @@ impl Worker {
                     // A new choice starts the refusal dance again: an earlier `none` answer was
                     // the endpoint's, not the user's, and must not silently override the choice.
                     self.no_reasoning.set(false);
+                }
+                Cmd::SetServiceTier(tier) => {
+                    if tier == ServiceTier::Default || self.cfg.protocol.service_tiers(&self.cfg.base_url, self.cfg.openai_responses).contains(&tier)
+                    {
+                        self.service_tier = tier;
+                    }
                 }
                 Cmd::SetInstructions(text) => self.note = super::acp::system_note(&text),
                 Cmd::NewChat => {
@@ -1274,12 +1288,15 @@ impl Worker {
         if self.cfg.protocol == Protocol::OpenAi && super::agents::is_opencode_go(&self.cfg.base_url) {
             return self.go_request();
         }
-        if self.uses_responses() {
-            let (status, response) = self.post(&self.responses_body())?;
-            return if status == 200 { responses_reply(&response) } else { Err(http_error(status, &response)) };
+        let responses = self.uses_responses();
+        let mut body = if responses { self.responses_body() } else { self.body() };
+        if self.service_tier != ServiceTier::Default {
+            body["service_tier"] = json!(self.service_tier.id());
         }
-        let mut body = self.body();
         let (status, v) = self.post(&body)?;
+        if responses {
+            return if status == 200 { responses_reply(&v) } else { Err(http_error(status, &v)) };
+        }
         // Some OpenAI models refuse function tools on this endpoint unless the reasoning effort is
         // "none" (HTTP 400 naming `reasoning_effort`): ask again once with it, and keep it for the
         // next requests. Anthropic has no such parameter. A reasoning effort the user chose wins:
@@ -2776,6 +2793,89 @@ mod tests {
         b.shutdown(true);
     }
 
+    #[test]
+    fn endpoint_turns_send_only_supported_service_tier_overrides() {
+        for (base_url, openai_responses, expected) in [
+            ("http://localhost:1/v1", true, [None, Some("fast"), Some("ultrafast"), None]),
+            ("https://api.openai.com/v1", false, [None, Some("fast"), Some("fast"), None]),
+            ("http://localhost:1/v1", false, [None, None, None, None]),
+        ] {
+            let (sent, requests) = channel();
+            let http: HttpFn = Arc::new(move |request| {
+                let reply = if request.method == "GET" {
+                    json!({"data": [{"id": "model"}]})
+                } else {
+                    let body: Value = serde_json::from_slice(request.body.as_deref().unwrap()).unwrap();
+                    sent.send((request.url.clone(), body.get("service_tier").cloned())).unwrap();
+                    if openai_responses {
+                        json!({"status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done"}]}]})
+                    } else {
+                        json!({"choices": [{"message": {"role": "assistant", "content": "Done"}}]})
+                    }
+                };
+                Ok((200, reply.to_string().into_bytes()))
+            });
+            let cfg = ApiConfig {
+                name: "Test".into(),
+                protocol: Protocol::OpenAi,
+                base_url: base_url.into(),
+                model: "model".into(),
+                key: None,
+                allow_insecure_http: false,
+                http,
+                request_timeout_s: 300,
+                reasoning_effort: String::new(),
+                openai_responses,
+            };
+            let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+            let mut backend = ApiBackend::start(cfg, ctx).unwrap();
+            let selections = [None, Some(ServiceTier::Fast), Some(ServiceTier::Ultrafast), Some(ServiceTier::Default)];
+            let path = if openai_responses { "responses" } else { "chat/completions" };
+            for (selection, expected) in selections.into_iter().zip(expected) {
+                if let Some(selection) = selection {
+                    backend.set_service_tier(selection);
+                }
+                backend.prompt(&[PromptPart::Text("hi".into())]);
+                let (url, actual) = requests.recv_timeout(Duration::from_secs(10)).unwrap();
+                assert_eq!(url, format!("{base_url}/{path}"));
+                assert_eq!(actual, expected.map(Value::from));
+            }
+            backend.shutdown(true);
+        }
+    }
+
+    #[test]
+    fn a_model_rejecting_ultrafast_reports_why_and_can_retry_with_fast() {
+        let detail = "The model 'gpt-4.1' does not support the 'ultrafast' service tier.";
+        let refused = json!({"error": {"message": detail, "type": "invalid_request_error", "param": "service_tier", "code": "unsupported_value"}});
+        let accepted = json!({
+            "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done"}]}]
+        });
+        let (mut worker, requests) = scripted_worker(vec![(400, refused), (200, accepted)]);
+        let (events, replies) = channel();
+        worker.events = events;
+        worker.cfg.openai_responses = true;
+        worker.cfg.model = "gpt-4.1".into();
+        worker.service_tier = ServiceTier::Ultrafast;
+
+        let prompt = vec![PromptPart::Text("Try the model.".into())];
+        worker.turn(prompt.clone());
+        let reported: Vec<_> = replies.try_iter().collect();
+        assert!(reported.iter().any(|event| matches!(event, Event::Error(message) if message == &format!("HTTP 400 ({detail})"))));
+        assert!(matches!(reported.last(), Some(Event::TurnEnded { reason }) if reason == "error"));
+        assert_eq!(requests.lock().unwrap().len(), 1);
+
+        worker.service_tier = ServiceTier::Fast;
+        worker.turn(prompt);
+        let reported: Vec<_> = replies.try_iter().collect();
+        assert!(reported.iter().any(|event| matches!(event, Event::Text { text, .. } if text == "Done")));
+        assert!(matches!(reported.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()));
+        let requests = requests.lock().unwrap();
+        let tiers: Vec<_> = requests.iter().map(|body| body["service_tier"].as_str()).collect();
+        assert_eq!(tiers, [Some("ultrafast"), Some("fast")]);
+    }
+
     /// Go models route by family; the preset's base stays one URL for all of them.
     /// Covers every model the public list returned, so each picks its protocol
     /// at once instead of burning fallback requests on the first turn.
@@ -3544,6 +3644,7 @@ mod tests {
             wake: Arc::new(|| {}),
             cancel: Arc::new(AtomicBool::new(false)),
             no_reasoning: Default::default(),
+            service_tier: ServiceTier::Default,
         };
         (w, seen)
     }
@@ -3561,6 +3662,7 @@ mod tests {
         let log = seen.clone();
         worker.cfg.openai_responses = true;
         worker.cfg.base_url = "https://api.openai.com/v1".into();
+        worker.service_tier = ServiceTier::Ultrafast;
         worker.cfg.http = Arc::new(move |request| {
             log.lock().unwrap().push(request.clone());
             Ok((200, answers.lock().unwrap().pop().unwrap().to_string().into_bytes()))
@@ -3577,6 +3679,7 @@ mod tests {
             assert_eq!(request.method, "POST");
             assert!(request.headers.iter().any(|(name, value)| name == "Authorization" && value == "Bearer sk-secret"));
             assert_eq!(body["reasoning"]["effort"], "medium");
+            assert_eq!(body["service_tier"], "ultrafast");
             assert_eq!(body["store"], false);
             assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
             assert_eq!(body["tools"][0]["name"], "measure");
