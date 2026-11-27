@@ -703,6 +703,23 @@ fn two_rails_to_the_apex_of_a_pyramid() {
     assert!(close(volume(&b), 4000.0, 1e-4), "volume {}", volume(&b));
 }
 
+/// #22751: four straight rails up the corners of a square of half side 10 to the point 30 mm up
+/// make the pyramid, 20² · 30 / 3 = 4000, as two do; so do three of them.
+#[test]
+fn three_or_four_rails_to_the_apex_of_a_pyramid() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let edge = |sx: f64, sy: f64| -> Vec<Vec3> {
+        (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(sx * 10.0 * (1.0 - t), sy * 10.0 * (1.0 - t), 30.0 * t)).collect()
+    };
+    let rails = [edge(1.0, 1.0), edge(-1.0, 1.0), edge(-1.0, -1.0), edge(1.0, -1.0)];
+    for n in [3, 4] {
+        let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, &rails[..n], RailFit::Scale).unwrap();
+        assert!(close(volume(&b), 4000.0, 1e-4), "{n} rails: volume {}", volume(&b));
+        let m = measure(&b).unwrap();
+        assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{n} rails: {:?}", m.bbox);
+    }
+}
+
 /// A rail that ends beside the apex does not reach the point the loft goes to: refused.
 #[test]
 fn a_rail_that_misses_the_apex_is_refused() {
