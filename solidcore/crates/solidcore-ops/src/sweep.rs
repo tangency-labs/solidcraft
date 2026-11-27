@@ -124,8 +124,9 @@ const DRAFT_LIMIT: f64 = PI / 2.0 - 1e-6;
 )]
 const TURN_LIMIT: f64 = std::f64::consts::TAU * (1.0 + 1e-12);
 
-/// Most turns of a screw sweep.
-pub const SCREW_MAX_TURNS: f64 = 200.0;
+/// Most turns of a screw sweep: the kernel's, as many as its spans hold
+/// (`sweep::screw::MAX_TURNS`).
+pub const SCREW_MAX_TURNS: f64 = screw::MAX_TURNS;
 
 /// Most pairs of a screw sweep's radial law.
 pub const SCREW_MAX_LAW: usize = 1024;
@@ -1096,6 +1097,19 @@ pub fn sweep_placed(
     Ok((body, placed, route))
 }
 
+/// Whether an ordered sketch chain's last and first endpoints meet within `tol`.
+/// Empty chains do not close; interior joins are not rechecked here.
+#[must_use]
+pub fn loft_section_closed(chain: &[solidcore_record::Seg2], tol: f64) -> bool {
+    use solidcore::sweep::loft_sections::section_ends_meet;
+    chain
+        .first()
+        .zip(chain.last())
+        .is_some_and(|(first, last)| {
+            section_ends_meet(&convert::seg2(first), &convert::seg2(last), tol)
+        })
+}
+
 /// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
 /// plane's coordinates, end to end.
 #[derive(Clone, Debug)]
@@ -1425,6 +1439,49 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
         .collect::<Option<Vec<_>>>()
         .ok_or(Error::Exception)?;
     Ok((body, Some(faces)))
+}
+
+/// An exported sheet through two closed planar sections, tangent at one end along their centre connector.
+/// `tangent_at` selects the section (0 or 1); `crown` scales the derivative at that end only.
+/// With `faced`, orient the walls out of the sectioned region. The source lists are in the
+/// returned record's face order, indexing the original curves flattened in section order.
+///
+/// # Errors
+/// The kernel's refusals for invalid sections, a degenerate tangent or an invalid sheet.
+pub fn loft_sheet_planar_g1(
+    sections: &[LoftSection; 2],
+    tangent_at: usize,
+    crown: f64,
+    faced: bool,
+) -> Result<(solidcore_record::brep::Brep, Vec<Vec<usize>>)> {
+    use solidcore::sweep::{loft_sections::LoftSection as Input, skin_planar_g1::skin_planar_g1};
+    let given = sections.each_ref().map(|s| Input {
+        origin: convert::vec3(s.plane.origin),
+        x: convert::vec3(s.plane.x),
+        y: convert::vec3(s.plane.y),
+        segs: s.segs.iter().map(convert::seg2).collect(),
+    });
+    let made = run("loft_sheet_planar_g1", |k| {
+        match skin_planar_g1(k, &given, tangent_at, crown, faced, MAX_CURVES) {
+            Ok(skin) => Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })??;
+    let (brep, sources) = made;
+    let body = Body::new(brep);
+    let report = body.check(crate::CheckLevel::All)?;
+    if !report.is_valid() {
+        return Err(Error::Internal(format!("loft_sheet_planar_g1: {report}")));
+    }
+    let (record, order) = body.to_record()?;
+    let mut sources: BTreeMap<FaceId, Vec<usize>> = sources.into_iter().collect();
+    let faces = order
+        .faces
+        .iter()
+        .map(|f| sources.remove(f))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((record, faces))
 }
 
 /// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.
@@ -1826,8 +1883,10 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 /// ([`ScrewWalls::Pieces`]); [`screw_sweep_with`] chooses.
 ///
 /// # Errors
-/// [`Error::Argument`] for a number, law or curve list refused (and the kernel's refusals of
-/// them); the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// [`Error::Argument`] for a number, law or curve list refused; [`Error::Refused`] for the
+/// kernel's refusals, in its words (an axis without a usable length, a profile on the axis,
+/// more turns than the spans hold at the tolerance); the kernel's status; [`Error::Empty`],
+/// [`Error::NotSolid`].
 pub fn screw_sweep(
     profile: &[Curve],
     origin: [f64; 3],
@@ -1962,7 +2021,7 @@ pub fn screw_sweep_with(
         );
         match built {
             Ok(b) => finish(k, b, Expect::SOLID),
-            Err(e) => Ok(Err(argument_or_status(e))),
+            Err(e) => Ok(Err(status(e))),
         }
     })
 }

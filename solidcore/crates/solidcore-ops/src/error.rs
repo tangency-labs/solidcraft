@@ -103,6 +103,8 @@ pub enum Error {
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
     /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    /// Where no radius builds it, the kernel names the side edge and the radius it is
+    /// rounded at first for the turn to pass (`side_edge`, `least_radius`).
     TurnRefused {
         /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
         room: bool,
@@ -110,6 +112,12 @@ pub enum Error {
         why: String,
         /// The corner's point, where the kernel's session notes it.
         at: Option<[f64; 3]>,
+        /// The sharp side edge between the rounds that no radius of theirs passes (its index
+        /// in the body's native list), where the kernel names it.
+        side_edge: Option<usize>,
+        /// The least radius `side_edge` is rounded at first for the turn to pass (the rounds'
+        /// one radius), where the kernel names it.
+        least_radius: Option<f64>,
     },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
     /// back a corner only where every edge meeting it is blended, all convex or all concave, or
