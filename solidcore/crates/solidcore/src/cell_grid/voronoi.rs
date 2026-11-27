@@ -404,7 +404,8 @@ fn convex_piece(prims: &[Prim]) -> Option<Vec<Vec2>> {
 }
 
 /// Whether every piece keeps `w` clear of the outline as drawn (measured at each of its pieces'
-/// ends and middles and at the outline's corners, and never crossing it), for the fields' outlines (`fields`) and the keep-outs' (`keepouts`) as asked.
+/// ends and middles and at the outline's corners, and never crossing it), for the fields' outlines
+/// (`fields`) and the keep-outs' (`keepouts`) as asked.
 fn keeps_rim(
     outline: &Region,
     (fields, keepouts): (bool, bool),
