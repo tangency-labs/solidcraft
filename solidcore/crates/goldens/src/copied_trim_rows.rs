@@ -17,7 +17,15 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::topology::{edge, Brep};
+
 use crate::operand_trim_rows::trim_blocks::{certify, Row};
+use crate::trim_hook::with_hook;
+use crate::UnitDiff;
 
 // From main's (59cc18ae6c) and this branch's runs: (case, this branch's output digest,
 // main's output digest with trims cleared).
@@ -75,4 +83,52 @@ fn copied_trim_rows_are_certified() {
     let trims = certify(&crate::units::topology_brep_p7::Runner, ROWS);
     eprintln!("{} rows, {trims} trims", ROWS.len());
     assert_eq!(ROWS.len(), 9);
+}
+
+/// Every trim the rows' bodies hold shares its edge's interval, bit for bit
+/// (`docs/validity-and-tolerances.md`: "A pcurve shares its edge's interval"): the copy keeps
+/// the source trim's parameterization, not only its image, which the certificate above
+/// matches by nearest parameters.
+#[test]
+fn copied_trims_share_their_edges_interval() {
+    let runner = crate::units::topology_brep_p7::Runner;
+    for row in ROWS {
+        let case = crate::case::regression_case(&runner, row.case);
+        let seen: Rc<RefCell<(usize, Vec<String>)>> = Rc::default();
+        let sink = Rc::clone(&seen);
+        with_hook(
+            Box::new(move |b: &mut Brep| {
+                let mut s = sink.borrow_mut();
+                let ids: Vec<_> = b.edgeuses().ids().collect();
+                for eu in ids {
+                    let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.as_ref() else {
+                        continue;
+                    };
+                    let e = eu1::edge(b, eu)
+                        .unwrap()
+                        .expect("a trimmed edge use has an edge");
+                    let (t, i) = (trim.natural_interval(), edge::interval(b, e).unwrap());
+                    s.0 += 1;
+                    if t.min().to_bits() != i.min().to_bits()
+                        || t.max().to_bits() != i.max().to_bits()
+                    {
+                        s.1.push(format!(
+                            "edge use {}: trim [{:e}, {:e}], edge [{:e}, {:e}]",
+                            eu.index(),
+                            t.min(),
+                            t.max(),
+                            i.min(),
+                            i.max()
+                        ));
+                    }
+                }
+            }),
+            || runner.run_rust(&case),
+        )
+        .unwrap();
+        let s = seen.borrow();
+        eprintln!("{}: {} trims share their edges' intervals", row.case, s.0);
+        assert!(s.0 > 0, "{}: no trims", row.case);
+        assert!(s.1.is_empty(), "{}: {:?}", row.case, s.1);
+    }
 }
