@@ -248,10 +248,11 @@ fn from_slope_height(
     taper: &str,
     two_sided: bool,
 ) -> Option<f64> {
-    let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
-        let p = point.as_array()?;
-        Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
-    });
+    use crate::dialogs::ObjectPlace;
+    let to_point = match crate::dialogs::object_place(&app.session, &d.inputs, "To Object") {
+        Some(ObjectPlace::Point(p)) => Some(p),
+        _ => None,
+    };
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
     // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
     let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
@@ -261,18 +262,22 @@ fn from_slope_height(
     if kept_level {
         return None;
     }
-    let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
-    let p = point.as_array()?;
-    let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
+    // A From plane starts the arrow where it meets the line through the profiles' middle
+    // ([`reference_height`]).
+    let Some(ObjectPlace::Point(p)) = crate::dialogs::object_place(&app.session, &d.inputs, "From Object") else { return None };
     let ends = solidcraft_engine::doc::ExtrudeEnds { to: None, through_all: all, tapered, two_sided };
     solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p, to_point, ends)
 }
 
-fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
-    let point = crate::dialogs::object_point(&d.inputs, label)?;
-    let p = point.as_array()?;
-    let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    Some(solidcraft_engine::doc::object_height(&crate::open_meshing::session_world(&app.session), plane, centre, p))
+/// The height above `plane` along its normal through `centre` of the To or From Object pick
+/// `label`: a point's, or where a plane meets that line (#8527).
+pub(crate) fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
+    match crate::dialogs::object_place(&app.session, &d.inputs, label)? {
+        crate::dialogs::ObjectPlace::Point(p) => {
+            Some(solidcraft_engine::doc::object_height(&crate::open_meshing::session_world(&app.session), plane, centre, p))
+        }
+        crate::dialogs::ObjectPlace::Plane(to) => solidcraft_engine::doc::kernel::level_on_plane(plane, centre, &to).ok(),
+    }
 }
 
 /// The two faces at an edge, near `p`: for each, the normal and centroid of its triangle nearest

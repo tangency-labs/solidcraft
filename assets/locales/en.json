@@ -7341,7 +7341,7 @@
   "ui.extract_done": "The component is now its own design, linked here.",
   "ui.extrude": "Extrude",
   "ui.extrude_auto_to_object": "Extrude to a picked target",
-  "ui.extrude_auto_to_object_tip": "A face, vertex or parallel plane switches the extent to To Object.",
+  "ui.extrude_auto_to_object_tip": "A face, a vertex or a plane parallel or at a slant to the profile switches the extent to To Object.",
   "ui.extrude_cut_targets_tip": "The bodies the extrusion cuts. With none picked, SolidCraft chooses the bodies automatically.",
   "ui.extrude_extent_type_2": "Extent Type 2",
   "ui.extrude_join_targets_tip": "The bodies the extrusion joins. With none picked, it joins the body its sketch or face is on, or else the shown bodies of the active component.",

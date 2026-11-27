@@ -1885,3 +1885,65 @@ fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     assert!(shows(&h));
     assert_eq!(sent(&h).as_deref(), Some("Slab"));
 }
+
+/// An extrude to a construction plane or point reopens with that reference as its To Object, and
+/// OK keeps it: the extrude still follows the plane when it moves (#8527).
+#[test]
+fn edited_extrude_to_a_reference_shows_it_and_keeps_it() {
+    for (to, shown) in [
+        (json!({"plane":"Ceiling"}), solidcraft_engine::Sel::Plane { name: "Ceiling".into() }),
+        (json!({"construct_point":"Tip"}), solidcraft_engine::Sel::ConstructionPoint { name: "Tip".into() }),
+    ] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name":"H","expression":"25 mm"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":"H","name":"Ceiling"})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point":{"point":[5,5,25]},"name":"Tip"})).unwrap();
+        let mut h = make_in(h, json!({"to": to}));
+        let stored = extent(&h).to_ref;
+        assert!(stored.is_some());
+        open(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        let picked = d.inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first()).cloned();
+        assert_eq!(picked, Some(shown), "{to}");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none());
+        assert_eq!(extent(&h).to_ref, stored, "{to}");
+    }
+    // Moved by its parameter after the edit, the plane still ends the extrude: 10 x 10 x 40 mm.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("parameters.add", json!({"name":"H","expression":"25 mm"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"H","name":"Ceiling"})).unwrap();
+    let mut h = make_in(h, json!({"to":{"plane":"Ceiling"}}));
+    open(&mut h);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.frames(2);
+    h.app.run("parameters.change", json!({"name":"H","expression":"40 mm"})).unwrap();
+    h.frames(2);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let volume = solidcraft_engine::doc::kernel::measure(&state.body("Main").unwrap().body).unwrap().volume;
+    assert!((volume - 4000.0).abs() < 1e-6, "{volume}");
+}
+
+/// The window's arrow runs from a From plane or point to a To plane or point the extrude
+/// follows (#8527): it starts at the From one's height, 5 mm, and reaches the To one's, 25 mm.
+#[test]
+fn the_arrow_runs_between_from_and_to_references() {
+    use solidcraft_engine::geom::PlaneGeom as _;
+    for (from, to) in [(json!({"plane":"Floor"}), json!({"plane":"Ceiling"})), (json!({"construct_point":"Low"}), json!({"construct_point":"High"}))]
+    {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Floor"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":25,"name":"Ceiling"})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point":{"point":[5,5,5]},"name":"Low"})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point":{"point":[5,5,25]},"name":"High"})).unwrap();
+        let mut h = make_in(h, json!({"from": from, "to": to}));
+        open(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        let (base, dir) = crate::canvas::anchor(&h.app, d).unwrap();
+        assert!((base.z - 5.0).abs() < 1e-6, "{from}: the arrow starts at z {}", base.z);
+        let plane = solidcore_record::Plane::from_normal(base, dir.unwrap()).unwrap();
+        let span = crate::canvas::reference_height(&h.app, d, "To Object", &plane, base).unwrap();
+        assert!((span - 20.0).abs() < 1e-6, "{to}: the arrow reaches {span} past its start");
+    }
+}
