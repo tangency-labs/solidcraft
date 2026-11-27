@@ -20,6 +20,8 @@ pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 pub(crate) mod print;
+mod revision_table;
+pub(crate) mod table_window;
 
 use panels::Tool;
 
@@ -53,6 +55,8 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
+    /// A table's editor open in its own window ([`table_window`]).
+    table_window: Option<table_window::TableWindow>,
     /// What was selected in the other workspace when Drawing was entered (Design's selection while
     /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
     selection_away: Vec<solidcraft_engine::Sel>,
@@ -336,7 +340,8 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     let open = app.drawing_workspace.settings_open
         || app.drawing_workspace.options.is_some()
         || app.drawing_workspace.add_sheet.is_some()
-        || app.drawing_workspace.first_sheet.is_some();
+        || app.drawing_workspace.first_sheet.is_some()
+        || app.drawing_workspace.table_window.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.sheet_menu = None;
     app.drawing_workspace.rename_sheet = None;
@@ -352,6 +357,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
+    app.drawing_workspace.table_window = None;
     app.drawing_workspace.settings = None;
     open
 }
@@ -391,18 +397,7 @@ pub(crate) fn follow_selection(app: &mut SolveApp) {
     if ours {
         close_panel(app);
     }
-    let kind = one.and_then(|object| {
-        let drawing = app.session.drawing("drawing.inspect").ok()?;
-        if drawing.view(object).is_some() {
-            Some("view")
-        } else if drawing.dimension(object).is_some() {
-            Some("dimension")
-        } else if drawing.notes.by_id(object).is_some() {
-            Some("note")
-        } else {
-            None
-        }
-    });
+    let kind = one.and_then(|object| page_for(app.session.drawing("drawing.inspect").ok()?, object)).filter(|kind| *kind != "revision_table");
     if let (Some(object), Some(kind)) = (one, kind) {
         edit_object(app, kind, object);
         app.drawing_workspace.shown_for = Some(object);
@@ -481,18 +476,7 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
 /// Edit object `object` of the open drawing, as a double-click on it at `at` does (the menu's Edit,
 /// with `at` where the menu was opened).
 pub(crate) fn edit(app: &mut SolveApp, object: u64, at: egui::Pos2) {
-    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
-    let kind = if drawing.view(object).is_some() {
-        "view"
-    } else if drawing.dimension(object).is_some() {
-        "dimension"
-    } else if drawing.notes.by_id(object).is_some() {
-        "note"
-    } else if drawing.tables.by_id(object).is_some() {
-        "parts_list"
-    } else {
-        return;
-    };
+    let Some(kind) = app.session.drawing("drawing.inspect").ok().and_then(|drawing| page_for(drawing, object)) else { return };
     // A dimension's or a note's text is edited where it is drawn; the menu has no pointer on it,
     // so the box opens where the menu was opened.
     // From a row of the browser there is no place on the sheet to put the box: its options open.
@@ -585,12 +569,31 @@ pub(crate) fn edit_title_cell(app: &mut SolveApp, sheet: u64, point: Vec2, at: e
     true
 }
 
+/// Where object `object` of `drawing` is edited, by what it is: a page of the right panel, or for a
+/// table (`parts_list`, `revision_table`) the table window. The one rule a double-click, a Browser
+/// row's Open, the sheet menu's Edit and the selection follow.
+pub(crate) fn page_for(drawing: &solidcraft_engine::doc::drawing::Drawing, object: u64) -> Option<&'static str> {
+    use solidcraft_engine::doc::drawing::table::Kind;
+    if drawing.view(object).is_some() {
+        Some("view")
+    } else if drawing.dimension(object).is_some() {
+        Some("dimension")
+    } else if drawing.notes.by_id(object).is_some() {
+        Some("note")
+    } else {
+        drawing.tables.by_id(object).map(|table| match table.kind {
+            Kind::PartsList(_) => "parts_list",
+            Kind::Revision => "revision_table",
+        })
+    }
+}
+
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let (command, receiver) = match kind {
         "view" => ("drawing.view.edit", "view"),
         "dimension" => ("drawing.dimension.edit", "dimension"),
         "note" => ("drawing.note.edit", "note"),
-        "parts_list" => ("drawing.table.edit", "table"),
+        "parts_list" | "revision_table" => ("drawing.table.edit", "table"),
         _ => return,
     };
     let Ok(drawing) = app.session.drawing(command) else { return };
@@ -598,7 +601,7 @@ pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
         "view" => drawing.view(object).is_some(),
         "dimension" => drawing.dimension(object).is_some(),
         "note" => drawing.notes.by_id(object).is_some(),
-        "parts_list" => drawing.tables.by_id(object).is_some(),
+        "parts_list" | "revision_table" => drawing.tables.by_id(object).is_some(),
         _ => false,
     };
     if !exists {
@@ -615,7 +618,11 @@ pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
         "view" => Tool::Edit(Some(object)),
         "dimension" => Tool::Dimension(Some(object)),
         "note" => Tool::Note(Some(object)),
-        "parts_list" => Tool::PartsList(Some(object)),
+        // Either table's editor is the table window, in place of whatever the right panel showed.
+        "parts_list" | "revision_table" => {
+            close_panel(app);
+            return table_window::open(app, object);
+        }
         _ => return,
     };
     close_panel(app);
@@ -1145,6 +1152,7 @@ pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     first_sheet::show_picker(app, ctx);
     show_sheet_menu(app, ctx);
     show_delete_sheet(app, ctx);
+    table_window::show(app, ctx);
     if app
         .drawing_workspace
         .add_sheet

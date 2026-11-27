@@ -203,6 +203,8 @@ pub struct GridOutput {
     pub cancelled: Option<(String, usize)>,
     /// The add-row control was pressed: the source adds its draft row.
     pub add_row: bool,
+    /// How much wider the columns are than the grid's visible part ([`Table::overflow`]).
+    pub overflow: f32,
 }
 
 /// What [`GridSource::editor`] drew.
@@ -324,8 +326,10 @@ struct State {
     keyed: bool,
 }
 
-/// The keys that stay with a grid holding the keyboard, rather than moving egui's focus.
-const KEYS_STAY: egui::EventFilter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
+/// The keys that stay with a grid holding the keyboard, rather than moving egui's focus. Esc too:
+/// egui drops the focus on Esc otherwise, before the grid reads its keys, and a range could not
+/// collapse.
+const KEYS_STAY: egui::EventFilter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
 
 /// Give the grid's focus target the keyboard when the grid asked for it (a click on a cell, a
 /// keyboard commit), unless the pointer is pressed or released this frame. The filter goes with
@@ -605,6 +609,7 @@ impl<'a> Grid<'a> {
                     out.add_row = true;
                 }
             }
+            out.overflow = table.overflow();
         };
         match table {
             Some(table) => draw(ui, table),
@@ -818,7 +823,7 @@ fn draw_cell<S: GridSource>(
         } else {
             t.form_dim
         };
-        let font = egui::FontId::monospace(t.font_label);
+        let font = cell_font();
         let text_rect = rect.shrink2(vec2(inset, 0.0));
         if matches!(kind, CellKind::Number { .. }) {
             let width = ui.painter().layout_no_wrap(text.clone(), font.clone(), ink).size().x.min(text_rect.width());
@@ -880,10 +885,15 @@ fn cell_name(cell: &Cell<'_>) -> String {
     format!("{column}, {}", cell.key)
 }
 
+/// The font a text cell is drawn, hit-tested and measured (`ContentWidth::cell_text`) in.
+pub(crate) fn cell_font() -> egui::FontId {
+    egui::FontId::monospace(Tokens::get().font_label)
+}
+
 /// The character a click at `pos` lands before, in a cell showing `text` from `rect`'s left inset.
 fn caret_at(ui: &Ui, text: &str, rect: egui::Rect, pos: egui::Pos2) -> usize {
     let t = Tokens::get();
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), egui::FontId::monospace(t.font_label), t.form_ink);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), cell_font(), t.form_ink);
     galley.cursor_from_pos(vec2(pos.x - rect.left() - t.form_inset, galley.size().y / 2.0)).index.0
 }
 

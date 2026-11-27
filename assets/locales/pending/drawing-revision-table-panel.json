@@ -1,0 +1,66 @@
+{
+  "ar": {
+    "ui.drawing_panel.revision_table": "جدول المراجعات",
+    "ui.drawing_revision_table.add_row": "إضافة صف",
+    "ui.drawing_revision_table.shown": "ظاهر",
+    "ui.drawing_revision_table.remove": "إزالة",
+    "ui.drawing_revision_table.empty": "لا توجد مراجعات بعد.",
+    "ui.drawing_table_window.gone": "لم يعد الجدول على الورقة."
+  },
+  "de": {
+    "ui.drawing_panel.revision_table": "Revisionstabelle",
+    "ui.drawing_revision_table.add_row": "Zeile hinzufügen",
+    "ui.drawing_revision_table.shown": "Sichtbar",
+    "ui.drawing_revision_table.remove": "Entfernen",
+    "ui.drawing_revision_table.empty": "Noch keine Revisionen.",
+    "ui.drawing_table_window.gone": "Die Tabelle ist nicht mehr auf dem Blatt."
+  },
+  "en": {
+    "ui.drawing_panel.revision_table": "Revision Table",
+    "ui.drawing_revision_table.add_row": "Add row",
+    "ui.drawing_revision_table.shown": "Shown",
+    "ui.drawing_revision_table.remove": "Remove",
+    "ui.drawing_revision_table.empty": "No revisions yet.",
+    "ui.drawing_table_window.gone": "The table is no longer on the sheet."
+  },
+  "he": {
+    "ui.drawing_panel.revision_table": "טבלת גרסאות",
+    "ui.drawing_revision_table.add_row": "הוספת שורה",
+    "ui.drawing_revision_table.shown": "מוצג",
+    "ui.drawing_revision_table.remove": "הסרה",
+    "ui.drawing_revision_table.empty": "אין גרסאות עדיין.",
+    "ui.drawing_table_window.gone": "הטבלה כבר לא נמצאת בגיליון."
+  },
+  "ja": {
+    "ui.drawing_panel.revision_table": "改訂表",
+    "ui.drawing_revision_table.add_row": "行を追加",
+    "ui.drawing_revision_table.shown": "表示",
+    "ui.drawing_revision_table.remove": "削除",
+    "ui.drawing_revision_table.empty": "改訂はまだありません。",
+    "ui.drawing_table_window.gone": "表はもうシート上にありません。"
+  },
+  "ko": {
+    "ui.drawing_panel.revision_table": "개정 표",
+    "ui.drawing_revision_table.add_row": "행 추가",
+    "ui.drawing_revision_table.shown": "표시",
+    "ui.drawing_revision_table.remove": "제거",
+    "ui.drawing_revision_table.empty": "아직 개정이 없습니다.",
+    "ui.drawing_table_window.gone": "표가 더 이상 시트에 없습니다."
+  },
+  "vi": {
+    "ui.drawing_panel.revision_table": "Bảng sửa đổi",
+    "ui.drawing_revision_table.add_row": "Thêm hàng",
+    "ui.drawing_revision_table.shown": "Hiển thị",
+    "ui.drawing_revision_table.remove": "Xóa",
+    "ui.drawing_revision_table.empty": "Chưa có bản sửa đổi nào.",
+    "ui.drawing_table_window.gone": "Bảng không còn trên tờ."
+  },
+  "zh": {
+    "ui.drawing_panel.revision_table": "修订表",
+    "ui.drawing_revision_table.add_row": "添加行",
+    "ui.drawing_revision_table.shown": "显示",
+    "ui.drawing_revision_table.remove": "删除",
+    "ui.drawing_revision_table.empty": "尚无修订。",
+    "ui.drawing_table_window.gone": "表格已不在图纸上。"
+  }
+}

@@ -779,13 +779,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         && !placing
         && let Some(hit) = hit
     {
-        let kind = match hit.kind {
-            ObjectKind::View => Some("view"),
-            ObjectKind::Dimension => Some("dimension"),
-            ObjectKind::Note => Some("note"),
-            ObjectKind::PartsList => Some("parts_list"),
-            _ => None,
-        };
+        let opens =
+            matches!(hit.kind, ObjectKind::View | ObjectKind::Dimension | ObjectKind::Note | ObjectKind::PartsList | ObjectKind::RevisionTable);
+        let kind = opens.then(|| crate::drawing_workspace::page_for(&drawing, hit.object)).flatten();
         // A dimension's or a note's text is edited where it is, as a sketch dimension's value is.
         let at = response.interact_pointer_pos().or_else(|| response.hover_pos());
         if let Some(kind) = kind
@@ -798,7 +794,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if owns_tools
         && response.double_clicked()
         && !placing
-        && !hit.is_some_and(|hit| drawing.has_object(hit.object) || hit.kind == ObjectKind::PartsList)
+        && !hit.is_some_and(|hit| drawing.has_object(hit.object) || matches!(hit.kind, ObjectKind::PartsList | ObjectKind::RevisionTable))
         && let (Some(point), Some(at)) = (on_paper, response.interact_pointer_pos())
     {
         crate::drawing_workspace::edit_title_cell(app, sheet, point, at);

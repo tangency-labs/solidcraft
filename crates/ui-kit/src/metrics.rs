@@ -56,6 +56,12 @@ impl ContentWidth {
         ui.painter().layout_no_wrap(text.to_owned(), crate::type_face::semibold(t.font_label), t.form_ink).size().x.ceil()
     }
 
+    /// Width of a grid text cell showing `text` in full: the cell's own font and insets.
+    pub fn cell_text(ui: &Ui, text: &str) -> f32 {
+        let t = Tokens::get();
+        ui.painter().layout_no_wrap(text.to_owned(), super::grid::cell_font(), t.form_ink).size().x.ceil() + 2.0 * t.form_inset
+    }
+
     pub fn button(ui: &Ui, label: &str) -> f32 {
         label_width(ui, label) + 2.0 * ui.spacing().button_padding.x
     }

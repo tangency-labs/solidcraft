@@ -12,6 +12,8 @@ struct Sheet {
     value_required: bool,
     /// Cells built this frame.
     drawn: usize,
+    /// The Name column's room for its controls: wider than the screen makes the grid overflow.
+    min_width: f32,
 }
 
 impl Sheet {
@@ -22,6 +24,7 @@ impl Sheet {
             grows: false,
             value_required: false,
             drawn: 0,
+            min_width: 0.0,
         }
     }
 
@@ -52,7 +55,7 @@ impl Sheet {
 impl GridSource for Sheet {
     fn columns(&self) -> Vec<GridColumn> {
         vec![
-            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex(),
+            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex().min_content_width(self.min_width),
             GridColumn::new("value", "Value", 1.0, CellKind::Text).flex(),
             GridColumn::new("note", "Note", 1.0, CellKind::ReadOnly).flex(),
         ]
@@ -219,6 +222,19 @@ fn shift_arrows_shift_click_and_drag_select_ranges() {
     assert!(Grid::editing(&ctx, Grid::state_of("g")).is_none(), "a drag never opens an editor");
     press(&ctx, &mut sheet, Key::A, COMMAND);
     assert_eq!(selection(&ctx), (0, 4, 0, 2), "Ctrl+A selects everything");
+}
+
+/// Esc collapses a range to its cursor, and the grid keeps the keyboard (#16127). egui drops the
+/// focus on Esc unless the grid's focus filter keeps it, and then the grid never saw the Esc.
+#[test]
+fn escape_collapses_a_range_and_the_grid_keeps_the_keyboard() {
+    let (ctx, mut sheet) = focused(3);
+    press(&ctx, &mut sheet, Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(selection(&ctx), (0, 1, 0, 0), "Shift+Down makes a range");
+    press(&ctx, &mut sheet, Key::Escape, Modifiers::NONE);
+    assert_eq!(selection(&ctx), (1, 1, 0, 0), "Esc collapses it to the cursor");
+    press(&ctx, &mut sheet, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(selection(&ctx), (1, 1, 1, 1), "and the arrows still move the cursor");
 }
 
 #[test]
@@ -442,6 +458,22 @@ fn every_cell_reads_as_column_and_row_with_its_value() {
     assert_eq!(cell.value(), Some("1 mm"));
     assert!(registry::rect_of("grid:g:r1:value").is_some(), "and a stable handle");
     assert!(registry::rect_of("dialog:table:g:r1:cell:Value").is_some(), "the table's own handles stay");
+}
+
+/// A grid says how much wider its columns are than what it shows: none when they fit, and the
+/// difference when a column needs more room than the screen has, so a host can grow by that much.
+#[test]
+fn overflow_is_how_much_wider_the_columns_are_than_the_grid() {
+    let ctx = egui::Context::default();
+    let mut sheet = Sheet::new(2);
+    assert_eq!(frame(&ctx, &mut sheet, vec![]).overflow, 0.0, "flexible columns fit");
+    sheet.min_width = 900.0;
+    frame(&ctx, &mut sheet, vec![]);
+    let overflow = frame(&ctx, &mut sheet, vec![]).overflow;
+    let viewport = registry::rect_of("dialog:table:g:viewport").expect("the grid's viewport");
+    let content = registry::count_of("dialog:table:g:content_width").expect("the grid's content width") as f32;
+    assert!(overflow > 900.0 - 480.0, "{overflow}");
+    assert!((overflow - (content - viewport.width())).abs() < 1.0, "{overflow} against {content} - {}", viewport.width());
 }
 
 /// A favourite and its original row can share a table without sharing widget identity or edits.

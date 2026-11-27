@@ -2664,7 +2664,8 @@ fn gallery_covers_every_inline_element() {
                 // Inherited labels, state keys and accessors, parsers and size measurements do not render elements.
                 if !matches!(
                     name.as_str(),
-                    "dimension"
+                    "cell_font"
+                        | "dimension"
                         | "eye_drag_id"
                         | "expressions"
                         | "icon_label_width"
