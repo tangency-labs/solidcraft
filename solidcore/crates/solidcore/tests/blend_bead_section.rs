@@ -63,6 +63,15 @@ const SQUARE: [BeadEnd; 2] = [BeadEnd::Square; 2];
 
 /// The setbacks of every case (mm).
 const SETBACK: f64 = 5.0;
+
+/// How far below the largest leg that fits a leg search may name its leg: the searches of
+/// `blend::foot_blend` (`LEG_FIT_BRACKET`) and `blend::weld_bead` halve down from the leg
+/// asked until their bracket is `1e-7 (1 + its upper end)` wide, and its upper end is at most
+/// the leg asked.
+fn leg_stop(asked: f64) -> f64 {
+    1e-7 * (1.0 + asked)
+}
+
 /// How far the profiles are swept: the corner edge's length (mm).
 const LENGTH: f64 = 100.0;
 /// The arms' thickness (mm).
@@ -1109,7 +1118,10 @@ fn a_bead_apart_whose_toe_runs_past_its_face_is_refused_with_the_leg_that_fits()
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.9 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(50.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, SETBACK]);
     assert!(
@@ -1135,10 +1147,10 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
     let want = 50.0_f64.sqrt() / 2.0 * (3.0 * PI / 8.0).tan();
-    // the bound is checked at the bead's stations: never past the closed form, and within a
-    // millionth of it
+    // the fit is the float below the planar bead's closed-form bound: never past the closed
+    // form, and within rounding of it
     assert!(
-        fit.size <= want && want - fit.size < 1e-6,
+        fit.size <= want && want - fit.size < 1e-9,
         "{} {want}",
         fit.size
     );
@@ -1384,6 +1396,87 @@ fn a_bead_round_a_rod_on_a_plate_is_sound() {
     }
 }
 
+/// A leg past the end of a curved face has no toe on it, and is refused with the leg that
+/// fits: round the rod on its plate (the rod 40 high, the plate reaching 35 beyond it) a leg
+/// of 45 along either face is refused as `NoToeAtLeg`, naming that face and its leg: the
+/// rod's height on the rod's cylinder, the plate's reach on the plate, each from below and
+/// within the leg search's stop ([`leg_stop`] of 45). At the leg named along the rod the bead
+/// builds, and the part's file is unchanged.
+#[test]
+fn a_leg_past_the_end_of_a_rod_is_refused_with_the_leg_that_fits() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::FitMeasure;
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
+    let before = smb(&k, &part);
+    let mut fits = Vec::new();
+    for face in edge::faces(&part, joint, None).unwrap() {
+        let size = ChamferSize::Distances([45.0, 4.0]);
+        let along = [Some(face)];
+        let err = weld_bead_body(
+            &mut k,
+            &mut part,
+            &[joint],
+            &[size],
+            0.0,
+            &along,
+            &[],
+            SQUARE,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+        assert!(
+            matches!(
+                err.blend_failure(),
+                Some(BlendFailure::NoRoom(NoRoomReason::NoToeAtLeg))
+            ),
+            "{err:?}"
+        );
+        let named = err
+            .site()
+            .and_then(|s| s.face)
+            .map(solidcore::error::TargetFace::id);
+        assert_eq!(named, Some(face), "{err:?}");
+        let fit = err.fit().unwrap();
+        assert_eq!(fit.measure, FitMeasure::Leg, "{err:?}");
+        println!("a leg of 45 along {face:?}: {} fits", fit.size);
+        fits.push((fit.size, face));
+    }
+    fits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(fits.len(), 2, "the joint has two faces: {fits:?}");
+    let (Some(&(on_plate, _)), Some(&(on_rod, rod_face))) = (fits.first(), fits.last()) else {
+        panic!("the joint has two faces: {fits:?}");
+    };
+    assert!(
+        on_plate > 35.0 - leg_stop(45.0) && on_plate <= 35.0 + 1e-6,
+        "{on_plate}"
+    );
+    assert!(
+        on_rod > 40.0 - leg_stop(45.0) && on_rod <= 40.0 + 1e-6,
+        "{on_rod}"
+    );
+    let size = ChamferSize::Distances([on_rod, 4.0]);
+    let along = [Some(rod_face)];
+    if let Err(refused) = weld_bead_body(
+        &mut k,
+        &mut part,
+        &[joint],
+        &[size],
+        0.0,
+        &along,
+        &[],
+        SQUARE,
+    ) {
+        panic!("refused at the leg named, {on_rod}: {refused:?}");
+    }
+    assert!(smb(&k, &part) == before, "the part changed");
+}
+
 /// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
 /// and the tubes' file is unchanged.
 #[test]
@@ -1499,7 +1592,7 @@ fn a_foot_blend_puts_each_foot_at_its_leg_between_planes() {
             let edge = pick(&k, &b, at);
             let before = smb(&k, &b);
             let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            let (lo, hi) = (blend.interval().min(), blend.interval().max());
             for f in [0.0, 0.3, 1.0] {
                 let s = blend.station(&k, lo + f * (hi - lo), legs, None).unwrap();
                 let w = [s.feet[0] - s.root, s.feet[1] - s.root];
@@ -1537,7 +1630,7 @@ fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
     let (mut part, joints) = tubes(&mut k, &joint);
     let before = smb(&k, &part);
     let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let mut worst = 0.0_f64;
     for i in 0..200 {
         let t = lo + (hi - lo) * (f64::from(i) + 0.5) / 200.0;
@@ -1560,6 +1653,50 @@ fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
 
+/// Round the tee at legs of 20 some stations are found only from their neighbour's foot: the
+/// root's direction into the face (a foot's first start) misses there, and the foot of the
+/// station before (its second start) finds it. The joint is walked up as a build walks it,
+/// each station from the one before. What is found is a station: each foot at its leg from
+/// the root, square to the joint, on its own tube. Without the second start it is a miss.
+#[test]
+fn a_station_the_root_s_direction_misses_is_found_from_its_neighbour_s_foot() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let joint = branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0));
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &joint);
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
+    let legs = [20.0, 20.0];
+    let at = |i: u32| lo + (hi - lo) * f64::from(i) / 400.0;
+    let mut near = None;
+    for i in 0..23 {
+        near = Some(blend.station(&k, at(i), legs, near.as_ref()).unwrap());
+    }
+    let t = at(23);
+    assert!(
+        blend.station(&k, t, legs, None).is_err(),
+        "t {t}: found from the root's direction, so this station does not test the second start"
+    );
+    let s = blend.station(&k, t, legs, near.as_ref()).unwrap();
+    let mut on = Vec::new();
+    for foot in s.feet {
+        let w = foot - s.root;
+        assert!(
+            (w.length() - 20.0).abs() <= 1e-6,
+            "t {t}: a leg of {}",
+            w.length()
+        );
+        assert!(
+            w.dot(s.tangent).abs() <= 1e-6,
+            "t {t}: not square to the joint"
+        );
+        let tube = joint.iter().position(|tb| tb.off(foot) <= 1e-6);
+        assert!(tube.is_some(), "t {t}: a foot off both tubes");
+        on.push(tube);
+    }
+    assert_ne!(on[0], on[1], "t {t}: both feet on one tube");
+}
+
 /// The foot blend's section face between planes (equal and unequal legs, chord, convex and
 /// concave): along the edge its sides are the feet and its middle stands the sagitta off the
 /// chord's middle, to the weld's fit tolerance (0.01 mm); between planes at 90 degrees with 5 mm legs a
@@ -1579,7 +1716,7 @@ fn a_foot_blend_section_face_runs_from_foot_to_foot_between_planes() {
         let edge = pick(&k, &b, at);
         let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
         let face = blend.section_face(&k, legs, h, tol).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for i in 0..23 {
             let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 23.0;
             let s = blend.station(&k, t, legs, None).unwrap();
@@ -1616,7 +1753,7 @@ fn a_foot_blend_section_face_runs_round_a_tube_joint() {
     let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
     for h in [0.0, 1.0, -0.2] {
         let face = blend.section_face(&k, [4.0, 4.0], h, tol).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for i in 0..61 {
             let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 61.0;
             let s = blend.station(&k, t, [4.0, 4.0], None).unwrap();
@@ -1846,7 +1983,10 @@ fn a_toe_past_its_face_is_refused_with_the_leg_that_fits() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.9 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(45.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, 5.0]);
     assert!(
@@ -1913,10 +2053,69 @@ fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
 
+/// Between two planes the bead takes every sagitta the planar bead takes, and no other: at
+/// 90, 60 and 120 degrees, with 4 mm legs and with legs of 3 and 5 mm, the first along each
+/// face in turn, concave and convex, a bead too deep or too high is refused with the planar
+/// bead's own fit (`beads_apart`: the exact bead's frame, the float below its closed-form
+/// bound), to the bit; at that fit it builds, and at the next float up, the bound itself, it
+/// is refused. The part does not change.
+#[test]
+fn a_bead_between_planes_takes_the_planar_bead_s_sagittas() {
+    use solidcore::error::FitMeasure;
+    for alpha in [FRAC_PI_2, FRAC_PI_3, 2.0 * FRAC_PI_3] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let mut cases = vec![([4.0; 2], None)];
+        for face in edge::faces(&b, edge, None).unwrap() {
+            cases.push(([3.0, 5.0], Some(face)));
+        }
+        for (legs, first) in cases {
+            let (size, along) = (ChamferSize::Distances(legs), [first]);
+            for sign in [-1.0, 1.0] {
+                let planar = beads_apart(&mut k, &mut b, &[edge], &[size], sign * 100.0, &along)
+                    .unwrap_err()
+                    .fit()
+                    .unwrap();
+                assert_eq!(planar.measure, FitMeasure::Sagitta);
+                let mut bead = |h: f64| {
+                    weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &along, &[], SQUARE)
+                };
+                let err = bead(sign * 100.0).err().unwrap();
+                let fit = err.fit().unwrap();
+                println!(
+                    "{} degrees, legs {legs:?} along {first:?}, side {sign}: the planar bead's fit {}, the weld's {}",
+                    alpha.to_degrees(),
+                    planar.size,
+                    fit.size
+                );
+                assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
+                assert!(
+                    fit.size.to_bits() == planar.size.to_bits(),
+                    "{} against the planar bead's {}",
+                    fit.size,
+                    planar.size
+                );
+                let built = bead(sign * planar.size);
+                assert!(
+                    built.is_ok(),
+                    "at the planar bead's fit {}: {:?}",
+                    planar.size,
+                    built.err()
+                );
+                let bound = f64::from_bits(planar.size.to_bits() + 1);
+                assert!(bead(sign * bound).is_err(), "built at the bound {bound}");
+            }
+        }
+        assert!(smb(&k, &b) == before, "the corner changed");
+    }
+}
+
 /// A refusal's size is searched over the whole weld, not the failed piece's alone: round the
 /// T-joint the concave bound changes along the joint, and a stitch of three short spans that
-/// is too deep names a depth no larger than the least any of its spans names alone (to a
-/// twentieth: a span's own size is that of its own stations), and a tenth shallower than it
+/// is too deep names the least depth any of its spans names alone (each span's size is
+/// enclosed over that span alone, for the fit as for the build), and at exactly that depth
 /// the stitch builds. Both ways round the joint, so that in one the first span is not the
 /// tightest.
 #[test]
@@ -1942,15 +2141,59 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
         let together = depth(&stitch).expect("the stitch is refused with a depth");
         println!("spans alone {alone:?}, together {together}");
         assert!(least.is_finite(), "no span alone is refused with a depth");
-        assert!(together <= least * 1.05, "{together} against {alone:?}");
-        assert!(bead(&stitch, -0.9 * together).is_ok(), "{together}");
+        assert!(
+            together.to_bits() == least.to_bits(),
+            "{together} against {alone:?}"
+        );
+        assert!(bead(&stitch, -together).is_ok(), "{together}");
+    }
+}
+
+/// A tolerance the net cannot hold is refused once its stations have been doubled as often as
+/// they are (`SkinPastStationCap`), naming the tolerance asked, the bound reached and the
+/// stations made. The chord's certified net between planes carries its rounding in its bound,
+/// about 1e-10 of the part's size, so a tolerance of 1e-13 is out of its reach; the weld's own
+/// tolerance holds on the same joint.
+#[test]
+fn a_tolerance_the_net_cannot_hold_is_refused_at_the_station_cap() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    let legs = [5.0; 2];
+    assert!(blend
+        .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+        .is_ok());
+    let err = blend.section_face(&k, legs, 0.0, 1e-13).err().unwrap();
+    match err.blend_failure() {
+        Some(&BlendFailure::SkinPastStationCap {
+            asked,
+            reached,
+            stations,
+            rounds,
+        }) => {
+            println!("asked {asked}, reached {reached}, {stations} stations, {rounds} rounds");
+            assert!(
+                asked == 1e-13 && reached > asked && reached.is_finite(),
+                "{err}"
+            );
+            assert!(stations > 4 && rounds > 1, "{err}");
+        }
+        _ => panic!("{err:?}"),
     }
 }
 
 /// A sagitta's fit is named only where the feet are proved: on a branch off the main tube's
 /// axis (main r 20, branch r 10 from (0, 6, 0) along (1, 0, 0.3)) the feet at legs of 4 are
 /// not, and a bead with a sagitta is refused without a sagitta to retry at, concave and
-/// convex. The part does not change.
+/// convex. The refusal is the station's own: its Newton does not converge at one of the
+/// joint's check stations (`StationDidNotConverge`, naming the station, the residual and the
+/// tolerance it had to reach). The part does not change.
+///
+/// This records a defect as it is, #22763: `StationDidNotConverge` is the defect class, and
+/// these stations should converge or be refused with a size that builds. The match on it, and
+/// with it the refusal carrying no sagitta, are to be rewritten when #22763 is fixed.
 #[test]
 fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
     use solidcore::error::FitMeasure;
@@ -1982,6 +2225,14 @@ fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
                 .is_none_or(|fit| fit.measure != FitMeasure::Sagitta),
             "{err:?}"
         );
+        match err.blend_failure() {
+            Some(&BlendFailure::StationDidNotConverge {
+                residual: Some(residual),
+                tolerance,
+                ..
+            }) => assert!(residual > tolerance && tolerance > 0.0, "{err}"),
+            _ => panic!("{err:?}"),
+        }
     }
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
@@ -2103,10 +2354,10 @@ fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
     let legs = [4.0; 2];
     for (what, k, mut part, joint) in parts {
         let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for h in [-1.0, 1.0] {
             let started = std::time::Instant::now();
-            let enclosed = blend.bound_over(&k, legs, h, &[]).unwrap();
+            let enclosed = blend.bound_over(&k, legs, h, [lo, hi]).unwrap();
             let took = started.elapsed();
             let least = (0..=2000)
                 .filter_map(|i| {
@@ -2118,6 +2369,9 @@ fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
                 "{what}, sagitta {h}: enclosed {enclosed:?}, least of 2001 parameters {least}, {took:?}"
             );
             if let Ok((lower, _)) = enclosed {
+                // the lower end is below the bound at every parameter; the reference is
+                // `bound_at` in floats at 2001 of them, a few last places off the bound
+                // there either way, so the comparison leaves it 1e-12 of itself
                 assert!(
                     lower <= least * (1.0 + 1e-12),
                     "{what} {h}: {lower} above {least}"
@@ -2445,13 +2699,13 @@ fn the_feet_series_in_a_corner_are_the_leader_s() {
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
     let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let (ta, tb) = (lo + 0.3 * (hi - lo), lo + 0.4 * (hi - lo));
     let series = blend
         .feet_series(&k, [SETBACK, 3.0], ta, tb)
         .unwrap()
         .expect("the piece is proved");
-    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let cn = NurbsCurve::of(blend.leader()).unwrap();
     let d = curve_derivs_over(&cn, Ivl::new(ta, tb), 1, None).unwrap();
     for foot in &series {
         for (got, want) in [
@@ -2491,8 +2745,8 @@ fn the_feet_series_round_a_rod_hold_their_closed_forms() {
     let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
     let (r, l) = (15.0, 6.0);
     let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
-    let lo = blend.interval.min();
-    let (knots, _) = blend.leader.knots(None).unwrap();
+    let lo = blend.interval().min();
+    let (knots, _) = blend.leader().knots(None).unwrap();
     let next = knots
         .iter()
         .copied()
@@ -2503,7 +2757,7 @@ fn the_feet_series_round_a_rod_hold_their_closed_forms() {
         .feet_series(&k, [l; 2], ta, tb)
         .unwrap()
         .expect("the piece is proved");
-    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let cn = NurbsCurve::of(blend.leader()).unwrap();
     let d = curve_derivs_over(&cn, Ivl::new(ta, tb), FEET_SERIES_ORDER, None).unwrap();
     let s = blend.station(&k, 0.5 * (ta + tb), [l; 2], None).unwrap();
     let mut fact = 1.0;
@@ -2563,7 +2817,7 @@ fn the_chord_s_section_face_is_within_its_proved_bound() {
         let face = blend
             .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
             .unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for j in 0..=40 {
             let t = lo + (hi - lo) * f64::from(j) / 40.0;
             let s = blend.station(&k, t, legs, None).unwrap();
@@ -2616,7 +2870,7 @@ fn the_arc_s_section_face_is_within_its_proved_bound() {
             );
             assert!(bound <= WELD_FIT_TOLERANCE, "{what} {h}: {bound}");
             let face = blend.section_face(&k, legs, h, WELD_FIT_TOLERANCE).unwrap();
-            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            let (lo, hi) = (blend.interval().min(), blend.interval().max());
             for j in 0..=20 {
                 let t = lo + (hi - lo) * f64::from(j) / 20.0;
                 let s = blend.station(&k, t, legs, None).unwrap();
@@ -2660,7 +2914,7 @@ fn a_foot_on_the_other_branch_is_not_proved() {
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
     let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let legs = [5.0, 5.0];
     let mut stations = Vec::new();
     for f in [0.0, 0.25, 0.5] {
@@ -2727,7 +2981,10 @@ fn a_part_without_some_uv_curves_is_only_read() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.0 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(45.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
 }
 
 // ---- the exact bead's refusals and the part left as it was ----
@@ -3083,7 +3340,10 @@ fn an_oversized_leg_is_refused_before_an_oversized_sagitta() {
     };
     let leg = fit(apart(&mut k, &mut b, 60.0, 100.0));
     assert_eq!(leg.measure, FitMeasure::Leg, "{leg:?}");
-    assert!(leg.size > 39.0 && leg.size <= 40.0, "{leg:?}");
+    assert!(
+        leg.size > 40.0 - leg_stop(60.0) && leg.size <= 40.0,
+        "{leg:?}"
+    );
     let h = fit(apart(&mut k, &mut b, leg.size, 100.0));
     assert_eq!(h.measure, FitMeasure::Sagitta, "{h:?}");
     assert!(apart(&mut k, &mut b, leg.size, h.size).is_ok(), "{h:?}");
