@@ -2477,6 +2477,52 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
     }
 }
 
+#[test]
+fn component_export_names_are_opt_in_and_keep_existing_defaults() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.doc_mut().name = "Assembly".into();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "RootBody"})).unwrap();
+    let part = h.app.run("component.create", json!({"name": "Bracket", "activate": true})).unwrap();
+    let component = part["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "PartBody"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let names = seen.clone();
+    h.app.services.pick_save = Some(Box::new(move |name, _| {
+        names.borrow_mut().push(name.to_string());
+        Box::pin(std::future::ready(None))
+    }));
+    let targets = [
+        Target::Component { id: component },
+        Target::Occurrence { path: h.app.session.doc.first_path(component) },
+        Target::Body { name: "PartBody".into() },
+        Target::Component { id: 0 },
+    ];
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    let defaults = seen.borrow().clone();
+    assert_eq!(defaults[0], "PartBody.step");
+    assert_eq!(defaults[1], defaults[0]);
+    assert_eq!(defaults[2], defaults[0]);
+    h.app.preferences.export_name = "{component}".into();
+    seen.borrow_mut().clear();
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    assert_eq!(*seen.borrow(), ["Bracket.step", "Bracket.step", defaults[2].as_str(), defaults[3].as_str()]);
+    h.app.preferences.export_name = "{body}".into();
+    act(&mut h.app, &targets[0], "Export…");
+    h.frames(3);
+    h.settle();
+    assert_eq!(seen.borrow().last().map(String::as_str), Some("PartBody.step"));
+}
+
 /// A selected browser body exports the *full* body selection, just as Save As Mesh and
 /// Send to Slicer do (#18902). A body outside the selection exports only itself.
 #[test]

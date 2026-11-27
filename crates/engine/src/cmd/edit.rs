@@ -3333,11 +3333,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("start_offset").or_insert_with(|| json!(start));
     }
-    if let FeatureKind::Revolve { convention, .. } = &old.kind
+    if let FeatureKind::Revolve { convention, join_profile_arcs, .. } = &old.kind
         && cid == "solid.revolve"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+        parameters.entry("join_profile_arcs").or_insert_with(|| json!(join_profile_arcs));
     }
     if let FeatureKind::SurfaceRevolve { faced, stays_surface, .. } = &old.kind
         && cid == "surface.revolve"
@@ -3533,7 +3534,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
         spec.run_nested_continuing(&mut trial, &params)
     }?;
-    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| match r.get("occurrences") {
+        // A pattern of picked placements adds them again once and keeps no feature (#22942).
+        Some(_) => bad(
+            cmd,
+            format!(
+                "a pattern of picked placements adds new placements once and is not kept in the timeline, so `{}` can't be changed into one: make it as a new pattern instead",
+                old.name
+            ),
+        ),
+        None => bad(cmd, format!("`{cid}` did not make a feature")),
+    })?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
         && !occurrences.is_empty()

@@ -2489,23 +2489,50 @@ fn missing_save_cache(
     if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
-    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+    let first_error = || {
+        let result = s.model.results.iter().find(|r| r.error.is_some())?;
         let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
-        format!("feature {feature} has an error")
-    } else if s.active_sketch.is_some() {
+        Some(format!("feature {feature} has an error"))
+    };
+    let reason = if s.active_sketch.is_some() {
         "a sketch is being edited".into()
     } else if !s.pending_moves.is_empty() {
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
-        "there are no evaluated bodies to cache".into()
+        first_error().unwrap_or_else(|| "there are no evaluated bodies to cache".into())
     } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
         refusal
     } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
         reason.into()
+    } else if !s.model.results.iter().any(|r| !r.skipped && r.error.is_none())
+        && let Some(err) = first_error()
+    {
+        err
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
     Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
+/// Note when a partial model cache was saved around failing features: valid features are kept in
+/// the cache, and only the failing features were left out so reopening re-evaluates them (#18815).
+fn partial_save_cache_note(s: &Session, cache: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+    if !cache || !reader.is_some_and(DesignContainerReader::has_model_cache) {
+        return None;
+    }
+    let mut errored = s.model.results.iter().filter(|r| r.error.is_some());
+    let first = errored.next()?;
+    let count = 1 + errored.count();
+    let feature = s.doc.feature(first.id).map_or("a timeline feature", |f| f.name.as_str());
+    if count == 1 {
+        Some(format!(
+            "Model cache saved partially: feature {feature} has an error and was left out of the cache; opening this design will re-evaluate only that feature."
+        ))
+    } else {
+        Some(format!(
+            "Model cache saved partially: {count} features with errors (including {feature}) were left out of the cache; opening this design will re-evaluate only those features."
+        ))
+    }
 }
 
 /// A successful save can exceed the opening limit on disk or when its contents are unpacked.
@@ -2612,6 +2639,9 @@ fn write_bytes(
     let reader = if format == "container" { DesignContainerReader::from_written_bytes(&bytes).ok() } else { None };
     let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().is_some_and(DesignContainerReader::exceeds_expanded_open_limit));
     let cache_not_saved = missing_save_cache(s, cache, skip_reason, reader.as_ref());
+    if let Some(note) = partial_save_cache_note(s, cache, reader.as_ref()) {
+        notes.push(note);
+    }
     s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
@@ -3233,8 +3263,9 @@ fn rolled_back_feature_needs_body_names(f: &solidcraft_doc::Feature) -> bool {
 }
 
 /// The evaluated model a save keeps, so opening need not rebuild it: only the finished evaluation
-/// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors),
-/// and none while an import's SMLib check of its parts still runs: the save does not wait for it
+/// of `design`, the document saved (no sketch being edited, no uncaptured moves; valid features
+/// are still kept when another feature has an error, #18815), and none while an import's SMLib
+/// check of its parts still runs: the save does not wait for it
 /// ([`solidcraft_doc::Model::saved_if_checked`], #20133).
 fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::SavedModel> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
@@ -5867,9 +5898,10 @@ mod tests {
         assert!(saved_geometry(&editing, &editing.doc).is_none());
     }
 
-    /// A save with a failing feature succeeds but explains that its missing model cache will
-    /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
-    /// unchanged; an ordinary cache is still silent (#18815).
+    /// A save with a failing downstream feature keeps a partial model cache for all valid
+    /// features and notes which failing feature was excluded; reopening adopts the valid features
+    /// without rebuilding them and reproduces the exact error. Plain JSON and explicit
+    /// `cache: false` are unchanged; an ordinary cache is still silent (#18815).
     #[test]
     fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
         let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));
@@ -5877,15 +5909,26 @@ mod tests {
         s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
         s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
         s.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[40,0,0],"operation":"new","name":"Extra"})).unwrap();
         s.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
         assert!(s.model.results.iter().any(|r| r.error.is_some()), "the suppressed Pocket leaves Round invalid");
         let saved = s.execute("file.save", &json!({"path":path})).unwrap();
-        let notice = saved["cache_not_saved"].as_str().expect("a failing feature must be reported");
-        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
-        assert_eq!(saved["warnings"][0], notice);
+        assert!(saved.get("cache_not_saved").is_none(), "partial cache is saved around the failing feature: {saved}");
+        let notice = saved["warnings"][0].as_str().expect("partial cache note must name the excluded failing feature");
+        assert!(notice.contains("partially") && notice.contains("Round") && notice.contains("error"), "{notice}");
         let bytes = std::fs::read(&path).unwrap();
-        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert!(solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
         assert_eq!(solidcraft_io::read_design(&bytes).unwrap().to_json(), s.doc.to_json(), "the authoritative design is saved");
+
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(reopened.model.recomputed, 1, "reopening re-evaluates only Round, reusing Block and Extra");
+        let block_id = s.doc.find_feature("Block").unwrap().id;
+        let round_id = s.doc.find_feature("Round").unwrap().id;
+        let extra_id = s.doc.find_feature("Extra").unwrap().id;
+        assert_eq!(reopened.model.result(block_id).unwrap().ms, s.model.result(block_id).unwrap().ms);
+        assert_eq!(reopened.model.result(extra_id).unwrap().ms, s.model.result(extra_id).unwrap().ms);
+        assert_eq!(reopened.model.result(round_id).unwrap().error, s.model.result(round_id).unwrap().error);
 
         let disabled = s.execute("file.save", &json!({"cache":false})).unwrap();
         assert!(disabled.get("cache_not_saved").is_none());
@@ -5893,9 +5936,31 @@ mod tests {
         let json_path = path.with_extension("json");
         let plain = s.execute("file.save_as", &json!({"path":json_path})).unwrap();
         assert!(plain.get("cache_not_saved").is_none(), "JSON cannot contain a native model cache");
+        assert!(plain.get("warnings").is_none(), "JSON cannot contain a partial model cache notice");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&json_path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+    }
+
+    /// When every non-skipped feature has an error (no valid bodies to cache), saving omits the
+    /// cache and still reports `cache_not_saved` naming the failing feature (#18815).
+    #[test]
+    fn saving_when_all_features_fail_reports_missing_cache() {
+        let path = std::env::temp_dir().join(format!("solidcraft-cache-all-error-{}.sc", std::process::id()));
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges":[[10,0,20]],"radius":1,"name":"Round"})).unwrap();
+        s.execute("timeline.suppress", &json!({"feature":"Block","suppressed":true})).unwrap();
+        assert!(s.model.state().bodies.is_empty() && s.model.results.iter().any(|r| r.error.is_some()));
+        let saved = s.execute("file.save", &json!({"path":path})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("omitted cache must report the failing feature");
+        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
+        assert_eq!(saved["warnings"][0], notice);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+
+        let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}.bak", path.display()));
     }
 

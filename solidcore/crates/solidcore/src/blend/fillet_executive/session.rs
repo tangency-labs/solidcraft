@@ -2511,6 +2511,42 @@ impl<'target> FilletSession<'target> {
                 // chain meets the cliff, looks for rail ends across the cliff's tangent seam;
                 // its other corners are made as in any pass
                 corner.roll_over = roll_over_ends.contains(&vertex);
+                // #22151: the Mixed corner of a round is a Coons fill, no rolling ball's
+                // surface: refused at its vertex until the Roll-over build takes it. Two
+                // chamfers meet their faces G0, and their Coons patches are the corner's
+                // faces (`calc_mixed_edge_geom`): they still build.
+                let round_at_mixed = corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+                    && edgeuses.iter().any(|&edgeuse| {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            return false;
+                        };
+                        solvers
+                            .get(id.0 as usize)
+                            .and_then(Option::as_ref)
+                            .and_then(|s| s.base().fillet_surface_generator())
+                            .is_some_and(|g| {
+                                g.fillet_surface_generator_type()
+                                    != FilletSurfaceGeneratorType::Linear
+                            })
+                    });
+                if round_at_mixed {
+                    let location = crate::topology::vertex::point(target, vertex).ok();
+                    return Ok(CornerCreation::Refused {
+                        location,
+                        error: crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                        comment: crate::blend::blend_corner::mixed::MIXED_ROUNDS_NOT_BUILT
+                            .to_owned(),
+                        fit_edge: None,
+                        fit: None,
+                        refusal: None,
+                    });
+                }
                 // Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not

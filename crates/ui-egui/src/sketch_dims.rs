@@ -987,7 +987,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
     } else {
         None
     };
@@ -1334,7 +1334,10 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
 /// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
-fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// The stack also keeps off `pointer` (when given): while the pointer rests on a box the tool has
+/// no hover and the preview stays tiny at the first point, so a box left there would take the
+/// click meant for the polygon. Where no side clears both, the pointer is not considered.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let size =
         vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
     let candidates = [
@@ -1344,10 +1347,13 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
         egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
     ];
     let inside = |pos: Pos2| view.map_or(pos, |view| view.clamp(egui::Rect::from_min_size(pos, size)).min);
+    let clear = |pos: &Pos2| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5));
+    let off_pointer = |pos: &Pos2| pointer.is_none_or(|pointer| !egui::Rect::from_min_size(*pos, size).expand(2.0).contains(pointer));
     let start = candidates
         .into_iter()
         .map(inside)
-        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .find(|pos| clear(pos) && off_pointer(pos))
+        .or_else(|| candidates.into_iter().map(inside).find(clear))
         .unwrap_or_else(|| inside(candidates[0]));
     let mut y = start.y;
     sizes
