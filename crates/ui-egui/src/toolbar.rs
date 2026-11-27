@@ -1,13 +1,12 @@
 //! Application bar, the workspace toolbar (tabs and panels) and keyboard shortcuts.
 
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::app_bar_layout::application::{CONTENT_PADDING, GAP};
 use crate::ui_kit::{self, Container, Edge, Surface};
-use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
-use crate::{SolveApp, app_bar, icons};
+use crate::{SolveApp, app_bar};
 use solidcraft_theme::Tokens;
 
 pub use crate::workspace::TABS;
@@ -36,6 +35,22 @@ fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
 pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
+}
+
+/// The groups that leave what is open (the sketch, the active component, the edit), pinned at
+/// the ribbon's right end when last: labelled Exit, their own buttons never shown pressed.
+fn exit_panel(tab: &str, panel: &str) -> bool {
+    matches!((tab, panel), ("SKETCH", "FINISH SKETCH") | ("MODEL", "ACTIVE COMPONENT" | "FINISH EDITING"))
+}
+
+/// Whether a panel of `tab` is on the ribbon now: an exit group only while there is something
+/// to leave.
+pub(crate) fn panel_shown(app: &SolveApp, tab: &str, panel: &str) -> bool {
+    match (tab, panel) {
+        ("MODEL", "ACTIVE COMPONENT") => app.session.active_component != 0,
+        ("MODEL", "FINISH EDITING") => app.edit_in_place.active.is_some(),
+        _ => true,
+    }
 }
 
 pub use crate::ribbon::TAB_ROW_HEIGHT;
@@ -85,11 +100,12 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
     if persistent_available(app, id) { running_command(app).as_deref() == Some(id) } else { shows_pressed(app, id) }
 }
 
-/// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
-/// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
-/// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
-/// span free (for the document tabs). None when even the icon doesn't fit: it never covers the
-/// bar's other buttons. `handle` names it for scenarios.
+/// An application-bar chip for something on offer (Update) at the right of `span` (the bar's free
+/// space), drawn by the kit's one chip painter like Donate and Discord: accent-filled (outlined on
+/// the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels`
+/// that fits (a round icon chip when none does or `labeled` is false). Every label but the last
+/// also leaves `keep` points of the span free (for the document tabs). None when even the icon
+/// doesn't fit: it never covers the bar's other buttons. `handle` names it for scenarios.
 pub(crate) fn offer_pill(
     ui: &mut egui::Ui,
     span: Rect,
@@ -101,14 +117,9 @@ pub(crate) fn offer_pill(
     quiet: bool,
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
-    let font = FontId::proportional(t.font_label);
-    let icon_x = CONTENT_PADDING + app_bar::PILL_ICON_SIZE / 2.0;
-    let text_x = CONTENT_PADDING + app_bar::PILL_ICON_SIZE + GAP;
-    let right_pad = CONTENT_PADDING;
     let last = labels.len().saturating_sub(1);
     let label = labels.iter().enumerate().filter(|_| labeled).find_map(|(i, text)| {
-        let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), t.app_bar_text));
-        let width = text_x + galley.size().x + right_pad;
+        let width = app_bar::chip_width(ui.ctx(), Some(text));
         let room = if i < last { span.width() - keep } else { span.width() };
         (width <= room).then_some((*text, width))
     });
@@ -116,32 +127,22 @@ pub(crate) fn offer_pill(
     if width > span.width() {
         return None;
     }
-    let height = if label.is_some() { app_bar::PILL_HEIGHT } else { app_bar::ITEM_HEIGHT };
-    let rect = Rect::from_min_size(pos2(span.right() - width, span.center().y - height / 2.0), vec2(width, height));
+    let rect = Rect::from_min_size(pos2(span.right() - width, span.center().y - app_bar::ITEM_HEIGHT / 2.0), vec2(width, app_bar::ITEM_HEIGHT));
     let response = ui.interact(rect, ui.scope_id().with(("sc_offer_pill", handle)), Sense::click());
     let name = label.map(|(text, _)| text).or(labels.first().copied()).unwrap_or_default().to_string();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
-    crate::scenario::publish_target(handle, rect);
-    let hot = response.hovered() || response.has_focus();
-    let radius = if label.is_some() { f32::from(app_bar::ITEM_PILL_RADIUS) } else { f32::from(app_bar::ITEM_RADIUS) };
-    if hot {
-        ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
-    } else if quiet {
-        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
-    } else {
-        ui.painter().rect_filled(rect, radius, t.accent);
+    let chip = Rect::from_center_size(rect.center(), vec2(label.map_or(app_bar::PILL_HEIGHT, |(_, w)| w), app_bar::PILL_HEIGHT));
+    crate::scenario::publish_target(handle, chip);
+    let lift = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_offer_lift", handle)), response.hovered() || response.has_focus(), 0.1);
+    let fill = if quiet { egui::Color32::TRANSPARENT } else { t.accent };
+    app_bar::paint_chip(ui, chip, fill, icon, label.map(|(text, _)| text), lift, 0.0);
+    if quiet {
+        ui.painter().rect_stroke(chip, app_bar::ITEM_PILL_RADIUS, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
     }
     if response.has_focus() {
-        app_bar::paint_focus(ui.painter(), rect, if label.is_some() { app_bar::ITEM_PILL_RADIUS } else { app_bar::ITEM_RADIUS });
+        app_bar::paint_focus(ui.painter(), chip, app_bar::ITEM_PILL_RADIUS);
     }
-    let glyph_x = if label.is_some() { rect.left() + icon_x } else { rect.center().x };
-    let icon_size = if label.is_some() { app_bar::PILL_ICON_SIZE } else { app_bar::ITEM_ICON_SIZE };
-    let glyph = Rect::from_center_size(pos2(glyph_x, rect.center().y), vec2(icon_size, icon_size));
-    icons::paint_on(ui.painter(), glyph, icon, Some(true), 1.0);
-    if let Some((text, _)) = label {
-        ui.painter().text(pos2(rect.left() + text_x, rect.center().y), Align2::LEFT_CENTER, text, font, t.app_bar_text);
-    }
-    Some((rect, response))
+    Some((chip, response))
 }
 
 /// The application bar's height: the window's title bar on desktop builds.
@@ -303,12 +304,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
                 handles: APP_BAR_HANDLES,
             };
-            let measure = |text: &str| {
-                ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(t.font_label), t.app_bar_text).size().x
-                    + CONTENT_PADDING * 2.0
-                    + app_bar::PILL_ICON_SIZE
-                    + GAP
-            };
+            let measure = |text: &str| app_bar::chip_width(ui.ctx(), Some(text));
             let offers = app_bar::Offers {
                 update: crate::update::offered(app)
                     .map(|release| measure(&solidcraft_ui_text::format("update.button_version", &[("version", release.version())]))),
@@ -1608,7 +1604,7 @@ struct RibbonPanels {
     panels: Vec<Panel>,
     /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
-    /// The last panel leaves the sketch or the edit.
+    /// The last panel is an exit group, pinned at the right.
     exit: bool,
     running: Option<String>,
 }
@@ -1616,14 +1612,13 @@ struct RibbonPanels {
 impl RibbonPanels {
     fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
         let labels = app.preferences.ribbon_labels;
-        let editing_in_place = app.edit_in_place.active.is_some();
         let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
         let panels = lists
             .iter()
             .map(|(panel, cmds, shown)| {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
-                let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
+                let finish = exit_panel(tab, panel);
                 let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
@@ -1655,7 +1650,14 @@ impl RibbonPanels {
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
-                            && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
+                            && matches!(
+                                selected.id,
+                                "sketch.finish"
+                                    | "sketch.finish_auto_constrain"
+                                    | "sketch.cancel"
+                                    | "component.activate.parent"
+                                    | "component.finish_edit"
+                            ),
                         persistent,
                         disabled: info.disabled_reason,
                         coming_soon: coming_soon(app, selected),
@@ -1720,10 +1722,9 @@ impl RibbonPanels {
                 }
             })
             .collect::<Vec<_>>();
-        // The Sketch exit group follows the last sketch panel (Finish Edit the last panel while
-        // editing in place).
-        let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
-            && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
+        // An exit group shown last is pinned at the right; the caller leaves out the ones with
+        // nothing to leave (`panel_shown`).
+        let exit = panels.last().is_some_and(|p| exit_panel(tab, p.panel));
         let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
         let plugins = (!buttons.is_empty()).then(|| PluginGroup {
             label: app.tr("ui.plugins").to_string(),
@@ -2014,10 +2015,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             && !ribbon::dragging(ui.ctx());
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let editing_in_place = app.edit_in_place.active.is_some();
         let lists: Vec<_> = crate::toolbar_custom::panel_lists_for(app, &tab)
             .into_iter()
-            .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
+            .filter(|(panel, _, _)| panel_shown(app, &tab, panel))
             .map(|(panel, mut cmds, promote)| {
                 let promote = if tab == "SKETCH" && panel == "CREATE" && !app.preferences.sketch_construction_lines {
                     promote.saturating_sub(1)
@@ -3164,6 +3164,11 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         app.esc_handled = true;
         app.escape_owner = Some(crate::EscapeOwner::Overlay);
         app.last_escape = None;
+        return;
+    }
+    // Undo and Redo take back an open dialog's last handle drag first, also with the keyboard
+    // in that dialog's value box (#22838).
+    if !popup_owner && !inline_editor && !chat_owner && crate::dialog_drag_undo::keys(app, ctx) {
         return;
     }
     if popup_owner
@@ -7112,8 +7117,9 @@ mod fill_width_tests {
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
                 let (collapsed, trimmed, more) = (count("toolbar_collapsed"), count("toolbar_trimmed"), count("toolbar_more"));
-                // FINISH EDITING is shown only while a linked design is edited in place.
-                let lists: Vec<_> = crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| *panel != "FINISH EDITING").collect();
+                // The exit groups with nothing to leave are not on the toolbar.
+                let lists: Vec<_> =
+                    crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| panel_shown(&h.app, tab, panel)).collect();
                 let mut end = bar.left();
                 let mut on_bar = 0;
                 for (panel, cmds, promote) in &lists {

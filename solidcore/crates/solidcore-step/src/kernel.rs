@@ -134,6 +134,12 @@ impl SurfaceEval {
     pub(crate) fn iso_within(&self, uv: [f64; 2], d: usize, range: (f64, f64), centre: Vec3, reach: f64) -> Result<bool, String> {
         self.0.iso_within(uv, d, range, c::vec3(centre), reach).map_err(|e| e.to_string())
     }
+    /// A certified bound on how far the surface moves when a point of the strip `along` x `across`
+    /// moves along `d` by at most `o` within it ([`k::SurfaceEval::strip_shift_bound`]), rounded up;
+    /// refused for a surface that is not a spline and where no bound is decided.
+    pub(crate) fn strip_shift_bound(&self, d: usize, along: [f64; 2], across: [f64; 2], o: f64) -> Result<f64, String> {
+        self.0.strip_shift_bound(d, along, across, o).map_err(|e| e.to_string())
+    }
     /// `pc` with its control points put on the knot range and a certified bound on how far that
     /// moves the surface under it; `None` when it is on the range, refused where the move is past
     /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
