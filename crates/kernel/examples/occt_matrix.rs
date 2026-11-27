@@ -411,7 +411,7 @@ fn main() {
     let mut summary = String::from(
         "\n| op | cases | solidcore pass | occt pass / fail / unsupported | occt looser than solidcore (any / above 1e-12) |\n|---|---|---|---|---|\n",
     );
-    for op in ["box", "cylinder", "sphere", "torus", "boolean", "fillet"] {
+    for op in ["box", "cylinder", "sphere", "torus", "extrude", "revolve", "boolean", "fillet"] {
         let of: Vec<&serde_json::Value> = rows.iter().filter(|r| r["op"] == op).collect();
         let count = |k: &str, v: &str| of.iter().filter(|r| r[k]["verdict"] == v).count();
         // Looser: larger than solidcore's beyond the last bits (1e-15), and also above 1e-12.
