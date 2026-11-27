@@ -765,6 +765,58 @@ fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// A dome: a ball r 4 centred on the top of a 60 x 40 x 25 block, half of it standing as one
+/// spherical face, shelled closed (#22788). Under half the radius the dome's inset, the ball
+/// r 4 - w, crosses the top's, the plane w below it, and the void takes the part of that ball
+/// above the plane: V = block + dome - (60 - 2w)(40 - 2w)(25 - 2w) - (4/3) pi (4 - w)^3 +
+/// pi h^2 (3 (4 - w) - h) / 3, h = (4 - w) - w the cap below the plane. From the radius on the
+/// inset has no surface at all: the dome holds no cavity and stays solid, and the void is the
+/// block's (that shell was refused as a collapse, the dome being a single face no feature
+/// walk took). The same on a cylinder r 10, 20 high, with a ball r 2 on its top, at 2.5.
+///
+/// Closed forms: 60000 + (2/3) pi 4^3 less the void; pi 10^2 20 + (2/3) pi 2^3 - pi 7.5^2 15.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_dome_inset_by_its_radius_or_more_stays_solid() {
+    all_fixes();
+    let dome = 2.0 / 3.0 * PI * 64.0;
+    let made = |w: f64| {
+        let blk = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+        let ball = make_sphere([0.0, 0.0, 25.0], 4.0).unwrap();
+        let b = crate::boolean::boolean(blk, ball, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        shell(&b, &order(&b), &[], -w).unwrap();
+        assert!(b.is_manifold_solid().unwrap(), "{w}");
+        assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0, "{w}");
+        volume(&b)
+    };
+    let void = |w: f64| (60.0 - 2.0 * w) * (40.0 - 2.0 * w) * (25.0 - 2.0 * w);
+    // under half the radius, as before: the inset ball less its cap below the void's ceiling
+    let (w, r) = (1.9, 2.1);
+    let h = r - w;
+    let want =
+        60000.0 + dome - void(w) - 4.0 / 3.0 * PI * r.powi(3) + PI * h * h * (3.0 * r - h) / 3.0;
+    let got = made(w);
+    assert!(rel(got, want) < 1e-9, "{w}: {got} {want}");
+    for w in [4.0, 5.0] {
+        let want = 60000.0 + dome - void(w);
+        let got = made(w);
+        assert!(rel(got, want) < 1e-9, "{w}: {got} {want}");
+    }
+
+    let base = make_cylinder([0.0; 3], 10.0, 20.0).unwrap();
+    let ball = make_sphere([0.0, 0.0, 20.0], 2.0).unwrap();
+    let b = crate::boolean::boolean(base, ball, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -2.5).unwrap();
+    let want = PI * 100.0 * 20.0 + 2.0 / 3.0 * PI * 8.0 - PI * 56.25 * 15.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
@@ -2409,6 +2461,178 @@ fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
         shell(&b, &o, &[through(&b, &o, [69.0, -25.0, 10.0])], -t).unwrap();
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "t {t}: {}", report.text);
+    }
+}
+
+/// #23056's sections: the 16 control points of a closed uniform cubic spline round an ellipse
+/// 60 x 40 and one 50 x 32, as SolidCraft's sketch gave them (x across, z up).
+const WIDE_ELLIPSE: [[f64; 2]; 16] = [
+    [0.0, 40.0],
+    [22.961, 36.9552],
+    [42.4264, 28.2843],
+    [55.4328, 15.3073],
+    [60.0, 0.0],
+    [55.4328, -15.3073],
+    [42.4264, -28.2843],
+    [22.961, -36.9552],
+    [0.0, -40.0],
+    [-22.961, -36.9552],
+    [-42.4264, -28.2843],
+    [-55.4328, -15.3073],
+    [-60.0, 0.0],
+    [-55.4328, 15.3073],
+    [-42.4264, 28.2843],
+    [-22.961, 36.9552],
+];
+const NARROW_ELLIPSE: [[f64; 2]; 16] = [
+    [0.0, 32.0],
+    [19.1342, 29.5641],
+    [35.3553, 22.6274],
+    [46.194, 12.2459],
+    [50.0, 0.0],
+    [46.194, -12.2459],
+    [35.3553, -22.6274],
+    [19.1342, -29.5641],
+    [0.0, -32.0],
+    [-19.1342, -29.5641],
+    [-35.3553, -22.6274],
+    [-46.194, -12.2459],
+    [-50.0, 0.0],
+    [-46.194, 12.2459],
+    [-35.3553, 22.6274],
+    [-19.1342, 29.5641],
+];
+
+/// The closed uniform cubic spline of the control points `cvs` on the plane y = `y`, as one
+/// curve of its 16 Bézier pieces (`knots` 0..16, each inner one triple), the form SolidCraft
+/// lofts. It starts at the spline's point at control point 2, (P1 + 4 P2 + P3) / 6, and runs
+/// towards control point 1, as SolidCraft traced it: the loft's seam runs from there on the
+/// first section to the same point on the second.
+fn closed_spline_section(cvs: &[[f64; 2]; 16], y: f64) -> Vec<crate::sweep::Curve> {
+    // the control points from 2 backwards: q(j) = P(2 - j), periodically
+    let q = |j: usize| {
+        let [x, z] = cvs[(18 - j % 16) % 16];
+        [x, y, z]
+    };
+    let mix = |w: [f64; 3], p: [[f64; 3]; 3]| -> [f64; 4] {
+        let s = w[0] + w[1] + w[2];
+        let c = |i: usize| (w[0] * p[0][i] + w[1] * p[1][i] + w[2] * p[2][i]) / s;
+        [c(0), c(1), c(2), 1.0]
+    };
+    let mut points = Vec::new();
+    for j in 0..16 {
+        // piece j between the knots of q(j) and q(j + 1): its first three Bézier points
+        let (before, here, after) = (q(j + 15), q(j), q(j + 1));
+        points.push(mix([1.0, 4.0, 1.0], [before, here, after]));
+        points.push(mix([0.0, 2.0, 1.0], [before, here, after]));
+        points.push(mix([0.0, 1.0, 2.0], [before, here, after]));
+    }
+    points.push(points[0]);
+    let mut knots = vec![0.0; 4];
+    for i in 1..16 {
+        knots.extend([f64::from(i); 3]);
+    }
+    knots.extend([16.0; 4]);
+    vec![crate::sweep::Curve::Nurbs {
+        degree: 3,
+        points,
+        knots,
+    }]
+}
+
+/// #23056: the ruled loft of [`WIDE_ELLIPSE`] at y = 0 and [`NARROW_ELLIPSE`] at y = 60, one
+/// closed face whose seam runs from (41.35, 0, 27.57) to (34.46, 60, 22.05), thickened 3 to
+/// its outside. The wall is the loft face, its offset and a ruled wall at each end, each closed
+/// on itself with a seam of its own.
+fn thickened_closed_loft() -> Body {
+    let (wall, _) = crate::sweep::loft_sheet(
+        &[
+            closed_spline_section(&WIDE_ELLIPSE, 0.0),
+            closed_spline_section(&NARROW_ELLIPSE, 60.0),
+        ],
+        1,
+    )
+    .unwrap();
+    thicken(&wall, 3.0, false).unwrap();
+    wall
+}
+
+/// #23056: a box x 15..45, y 30..70, z 0..60 cut from the top of [`thickened_closed_loft`]
+/// crosses the seams of the loft face and of its offset at y = 30, and takes the seam of the
+/// wall at y = 60 away. The notch adds the box's planes x = 15, x = 45 and y = 30 to the
+/// wall's four faces (the box's other sides miss the wall: at z = 0 it lies beyond x = 50), and
+/// the loft face and its offset still go all the way round below y = 30, each one face with
+/// its seam: seven faces, one closed solid, which SMLib's full check takes. The part of the
+/// wall inside the box, cut across the same seams, passes it too, and the two together are
+/// the wall: their volumes add up to its volume, within twice the volumes' accuracy (1e-8
+/// each). The offset face's seam was its lift from the exact offset, up to 8.5e-7 off the
+/// certified net that replaced that offset, so the notch's corner on it lay that far beside
+/// the net's seam, and test #36 ("Face Near missing Seam") failed.
+#[test]
+fn a_box_cut_across_the_seam_of_a_thickened_closed_loft_passes_the_full_check() {
+    all_fixes();
+    let wall = thickened_closed_loft();
+    let report = wall.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the wall: {}", report.text);
+    let whole = volume(&wall);
+    let notch = || make_box([15.0, 30.0, 0.0], [30.0, 40.0, 60.0]).unwrap();
+    let inside =
+        crate::boolean::boolean(wall.copy().unwrap(), notch(), crate::BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+    let cut = crate::boolean::boolean(wall, notch(), crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(cut.is_manifold_solid().unwrap());
+    assert_eq!(cut.counts().unwrap()[0], 7);
+    let report = cut.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the notched wall: {}", report.text);
+    let report = inside.check(crate::CheckLevel::All).unwrap();
+    assert!(
+        report.is_valid(),
+        "the wall inside the box: {}",
+        report.text
+    );
+    let parts = volume(&cut) + volume(&inside);
+    assert!(rel(parts, whole) < 2e-8, "{parts} vs {whole}");
+}
+
+/// #23056: [`thickened_closed_loft`] split by the plane x = 38 or z = 25, each crossing the
+/// seams of the loft face and of its offset (x 41.35 to 34.46, z 27.57 to 22.05 along the
+/// loft's), gives two closed solids that SMLib's full check takes, and that together are the
+/// wall: their volumes add up to its volume, within twice the volumes' accuracy (1e-8 each).
+#[test]
+fn splits_across_the_seam_of_a_thickened_closed_loft_pass_the_full_check() {
+    use crate::split::{split_body, Tool};
+    use solidcore_record::brep::Surface as RecordSurface;
+    all_fixes();
+    let x38 = Tool {
+        surface: RecordSurface::Plane {
+            origin: [38.0, 0.0, 0.0],
+            u_axis: [0.0, 1.0, 0.0],
+            v_axis: [0.0, 0.0, 1.0],
+        },
+        domain: [[-10.0, 70.0], [-60.0, 60.0]],
+    };
+    let z25 = Tool {
+        surface: RecordSurface::Plane {
+            origin: [0.0, 0.0, 25.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        },
+        domain: [[-80.0, 80.0], [-10.0, 70.0]],
+    };
+    for (name, plane) in [("x = 38", x38), ("z = 25", z25)] {
+        let wall = thickened_closed_loft();
+        let whole = volume(&wall);
+        let (a, b) = split_body(&wall, &plane).unwrap().unwrap();
+        let halves = volume(&a) + volume(&b);
+        assert!(rel(halves, whole) < 2e-8, "{name}: {halves} vs {whole}");
+        for half in [a, b] {
+            assert!(half.is_manifold_solid().unwrap(), "{name}");
+            let report = half.check(crate::CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{name}: {}", report.text);
+        }
     }
 }
 

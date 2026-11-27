@@ -3333,11 +3333,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("start_offset").or_insert_with(|| json!(start));
     }
-    if let FeatureKind::Revolve { convention, .. } = &old.kind
+    if let FeatureKind::Revolve { convention, join_profile_arcs, .. } = &old.kind
         && cid == "solid.revolve"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+        parameters.entry("join_profile_arcs").or_insert_with(|| json!(join_profile_arcs));
     }
     if let FeatureKind::SurfaceRevolve { faced, stays_surface, .. } = &old.kind
         && cid == "surface.revolve"

@@ -9328,9 +9328,11 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
         "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
-        "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
-        }
+        "construct.axis.normal_to_face" => (
+            "construct.axis.normal_to_face",
+            "AXIS PERPENDICULAR TO FACE OR PLANE",
+            &[("Face or plane", FACES | PLANES, "face", false), ("Point", POINT, "point", false)],
+        ),
         "construct.axis.two_planes" => {
             ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
@@ -9787,7 +9789,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, to } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, join_profile_arcs, to } => {
             let mut d = start("solid.revolve")?;
             let frame = feature_frame(s, f.component);
             let stored_axis = match axis {
@@ -9798,6 +9800,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             };
             d.kind = Kind::Revolve { angle: shown_expr(angle, ValueKind::Angle), operation: op_index(operation), axis: stored_axis };
             d.extra.insert("convention".into(), json!(convention));
+            d.extra.insert("join_profile_arcs".into(), json!(join_profile_arcs));
             if let Some(a2) = angle2 {
                 d.extra.insert("angle2".into(), json!(a2));
             }

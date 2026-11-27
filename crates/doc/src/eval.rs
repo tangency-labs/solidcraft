@@ -7087,7 +7087,10 @@ impl CaptureStepper {
                         }
                         match &o.snap {
                             crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
-                            crate::joints::Snap::FaceCenter { .. } | crate::joints::Snap::CircleCenter { .. } | crate::joints::Snap::Edge { .. } => {
+                            crate::joints::Snap::FaceCenter { .. }
+                            | crate::joints::Snap::CircleCenter { .. }
+                            | crate::joints::Snap::Edge { .. }
+                            | crate::joints::Snap::BetweenFaces { .. } => {
                                 note_comp(&mut joint_components, &mut any_component_dirty);
                             }
                             crate::joints::Snap::SketchPoint { sketch, x, .. } => {
@@ -11883,9 +11886,17 @@ fn centered_extrude(
     // lie on both sides of it, as their roles already say.
     let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !matches!(cap_roles, CapRoles::TwoSided);
     let start_name = || Some("start".to_string());
+    // An extrude whose start is offset off its sketch plane, with both caps on one side of it,
+    // gives both caps one role by their height (`top`, numbered `top#1` and `top#2` by where
+    // they lie). A piece of either cap that a later feature split off is named after that shared
+    // role, which stands for both caps, so it could not keep a sketch's attachment (T-1986). Each
+    // cap also answers to the end it closes, `cap:low` or `cap:high`, which no other face of the
+    // feature claims: a sketch on it attaches by that name. Its own name stays as it was.
+    let same_side = matches!(cap_roles, CapRoles::ByHeight) && caps[0] == caps[1];
     let cap_synonyms = match one_sided_direction.filter(|_| spans) {
         Some(crate::Direction::Positive) => [start_name(), None],
         Some(crate::Direction::Negative) => [None, start_name()],
+        Some(crate::Direction::Symmetric) | None if same_side => [Some("cap:low".to_string()), Some("cap:high".to_string())],
         Some(crate::Direction::Symmetric) | None => [None, None],
     };
     let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
@@ -12579,7 +12590,7 @@ fn feature_tools_with_constructor(
             }
             Ok(tools)
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, angle2, symmetric, convention, to, .. } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, angle2, symmetric, convention, join_profile_arcs, to, .. } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -12641,6 +12652,13 @@ fn feature_tools_with_constructor(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let (operation, _) = feature_op(f);
+            let revolve = if *join_profile_arcs {
+                kernel::revolve_joining_arcs
+            } else if operation == Operation::NewBody {
+                kernel::revolve_whole
+            } else {
+                kernel::revolve
+            };
             let axis_w = ss.plane.dir_to_world(d);
             let origin_w = ss.plane.to_world(o);
             // To a curved face: turn past the whole target body, then cut back to its surface
@@ -12664,7 +12682,7 @@ fn feature_tools_with_constructor(
                 };
                 let far = tb.mesh().positions.iter().map(|q| angle_of(*q)).fold(0.0, f64::max);
                 let sweep = (far + 0.05).min(std::f64::consts::TAU - 1e-3);
-                let bodies = kernel::revolve(&ss.plane, regions, o, d, sweep)?;
+                let bodies = revolve(&ss.plane, regions, o, d, sweep)?;
                 let tools = regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect();
                 let n = ss.plane.normal();
                 let tol_side = |q: Vec3| if flat(q).dot(u0) > 0.0 { ((q - ss.plane.origin).dot(n)).abs() } else { f64::MAX };
@@ -12675,9 +12693,6 @@ fn feature_tools_with_constructor(
             {
                 return build_curved(&regions, -axis_w, tb);
             }
-            // A new body is final: its planar faces come out whole. A boolean's tool is not
-            // healed (the boolean heals its result).
-            let revolve = if operation == Operation::NewBody { kernel::revolve_whole } else { kernel::revolve };
             if *convention == crate::RevolveConvention::SketchNormal {
                 let mut out = Vec::new();
                 for (region, region_extent) in regions.iter().zip(&region_extents) {
@@ -12890,6 +12905,7 @@ fn feature_tools_with_constructor(
                 let axis = if *clockwise { -k } else { k };
                 // Clockwise changes rotation; negating pitch keeps the chosen propagation direction.
                 let pitch = if *clockwise { -p } else { p };
+                kernel::require_plane_through_axis(&ss.plane, *base, axis)?;
                 return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
             }
             let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;

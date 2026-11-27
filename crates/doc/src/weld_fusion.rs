@@ -1,8 +1,8 @@
 //! Fusion spot and fusion seam welds on lapped sheets: arc, laser or electron beam welds made
 //! through the top sheet into the one under it ([`fusion_weld`]). A fusion spot is one point; a
 //! fusion seam runs along a path of lines and arcs, as a resistance seam does
-//! ([`crate::weld_seam`]). Where they sit is a spot site ([`crate::weld_spot::spot_site`]) or a
-//! seam site ([`crate::weld_seam::seam_site`]) of the weld's width.
+//! ([`crate::weld_seam`]). Where they sit is a spot site ([`crate::weld_spot::spot_site`]) of the
+//! weld's width, or a fusion seam site ([`fusion_seam_site`]).
 //!
 //! SolidCraft's own, as the spot and the seam are: every body comes from the kernel interface; this module adds the
 //! weld's rules and sizes. The commands and their storage come with #15131.
@@ -30,9 +30,9 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 use solidcore_record::brep::Curve as RecordCurve;
 use solidcraft_kernel::curves as curve;
 use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
-use solidcraft_kernel::{KernelError, affine};
+use solidcraft_kernel::{Body, KernelError, affine};
 
-use crate::weld_seam::{Laid, SeamNotice, SeamPiece, SeamRefusal, add, corners, lay, scale};
+use crate::weld_seam::{Laid, SeamNotice, SeamPiece, SeamRefusal, SeamSite, add, corners, lay, scale, site};
 use crate::weld_spot::{SpotPiece, SpotSide, SpotZone, check_sheets, positive};
 
 /// Why a fusion weld is refused.
@@ -166,7 +166,7 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
     }
     let [n, x] = affine::orthonormal_axes(weld.normal, [1.0, 0.0, 0.0])?;
     let laid = if weld.path.is_empty() { Vec::new() } else { lay(weld.start, &weld.path, n, tol)? };
-    let reach = laid.iter().flat_map(|p| [p.ends().0, p.ends().1]).chain([weld.start]).flatten().fold(0.0_f64, |m, c| m.max(c.abs())) + w + t1 + t2;
+    let reach = laid.iter().map(Laid::reach).fold(weld.start.iter().fold(0.0_f64, |m, c| m.max(c.abs())), f64::max) + w + t1 + t2;
     if !reach.is_finite() || reach > profiles::MAX_COORD {
         return bad("a fusion weld so large that it passes the model's size limit");
     }
@@ -207,6 +207,17 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
     }
     let notices = if laid.is_empty() { Vec::new() } else { corners(&laid, n, tol / w)? };
     Ok(Fusion { pieces, notices })
+}
+
+/// The site of a fusion seam of `width` drawn from `start` along `path` on record face `face` of
+/// sheet `picked`: a seam site ([`crate::weld_seam::seam_site`]) whose arcs must turn wider than
+/// this weld's widest part, the cap's `0.5 w` (the resistance seam's edge zone is wider).
+///
+/// # Errors
+/// [`FusionRefusal::Path`] with the seam site's refusal, [`SeamRefusal::ArcTighterThanSeam`] for
+/// an arc the weld cannot follow.
+pub fn fusion_seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64) -> Result<SeamSite> {
+    Ok(site(sheets, picked, face, start, path, width, 0.5 * width)?)
 }
 
 /// Which body of the weld.

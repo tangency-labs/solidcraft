@@ -130,6 +130,7 @@ pub(super) fn registration(panel: &PanelSnapshot) -> PanelResult<PanelSpec> {
         features: PanelFeatures { popout: false, ..Default::default() },
         side_height_policy: SideHeightPolicy::Content,
         fixed_bottom_height: None,
+        bottom_always_open: false,
         header_actions: Vec::new(),
         text_heavy: true,
     })

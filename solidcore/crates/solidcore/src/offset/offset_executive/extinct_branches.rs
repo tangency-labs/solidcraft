@@ -4,8 +4,10 @@
 //! loop of a planar support. Its straight-edged faces and the attachment polygon
 //! bound a convex polyhedron on the support's outward side. If two opposite exposed
 //! supporting planes have crossed in the offset, their material halfspaces have
-//! empty intersection. No cavity reaches the branch: its offset faces AND its
-//! attachment loop disappear. Removing only the faces would leave a hole.
+//! empty intersection, or meet only on one plane (inset by exactly half the branch's
+//! width), where their common part has no volume. No cavity reaches the branch: its
+//! offset faces AND its attachment loop disappear. Removing only the faces would leave
+//! a hole.
 //!
 //! This is a halfspace contradiction certificate, not a winding/area test: reversing
 //! two dimensions preserves a loop's orientation. It implements the empty-cell event
@@ -185,20 +187,22 @@ struct Extinction {
 
 impl OffsetExecutive {
     /// Consume certified empty branch cells before any neighbour offsets are mated.
-    /// The source remains intact for the shell difference and for provenance.
+    /// The source remains intact for the shell difference and for provenance. Returns
+    /// the source faces of the branches removed: their offsets hold no cavity, so walls
+    /// meeting across them are not a refusal.
     pub(super) fn remove_extinct_branches(
         &mut self,
         kernel: &mut Kernel,
         original: &Brep,
         notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<BTreeSet<FaceId>> {
         if !self.inset()
             || !self.merge_results()
             || !self.local_faces.is_empty()
             || self.operation() != OffsetOperation::SolidOffset
             || !brep_is_manifold_solid(original)?
         {
-            return Ok(());
+            return Ok(BTreeSet::new());
         }
         let mut events = Vec::new();
         for support in bp1::faces(original, None)? {
@@ -224,14 +228,15 @@ impl OffsetExecutive {
             }
         }
         if events.is_empty() {
-            return Ok(());
+            return Ok(BTreeSet::new());
         }
         let mut result = self
             .take_offset_brep()
             .ok_or_else(|| missing("no offset body"))?;
         let status = self.remove_branches_in(kernel, original, &mut result, &events, notifications);
         self.set_offset_brep(result);
-        status
+        status?;
+        Ok(events.into_iter().flat_map(|e| e.faces).collect())
     }
 
     fn branch_is_empty(
