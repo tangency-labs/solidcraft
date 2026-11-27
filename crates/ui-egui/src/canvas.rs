@@ -1492,21 +1492,13 @@ fn box_dropped_id() -> egui::Id {
     egui::Id::unique("sc_canvas_box_dropped")
 }
 
-fn box_drag_id() -> egui::Id {
-    egui::Id::unique("sc_canvas_box_drag")
-}
-
 /// Every frame. A dropped box keeps its place only while shown, so the next opens by its handle.
-pub(crate) fn share_box_drag(ctx: &egui::Context, drag: bool, grips: bool) {
+pub(crate) fn share_box_drag(ctx: &egui::Context) {
     let frame = ctx.cumulative_frame_nr();
     let shown_last = ctx.data(|d| d.get_temp::<u64>(box_dropped_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
-    ctx.data_mut(|d| {
-        d.insert_temp(box_drag_id(), drag);
-        d.insert_temp(box_drag_id().with("grips"), grips);
-        if !shown_last {
-            d.insert_temp(box_dropped_id(), None::<Pos2>);
-        }
-    });
+    if !shown_last {
+        ctx.data_mut(|d| d.insert_temp(box_dropped_id(), None::<Pos2>));
+    }
 }
 
 fn dropped(ctx: &egui::Context) -> Option<Pos2> {
@@ -1516,16 +1508,11 @@ fn dropped(ctx: &egui::Context) -> Option<Pos2> {
 fn box_grip(ui: &mut egui::Ui, area: egui::Id) {
     let ctx = ui.ctx().clone();
     let shown = ctx.memory(|m| m.area_rect(area));
-    let grip = if ctx.data(|d| d.get_temp::<bool>(box_drag_id().with("grips"))).unwrap_or(false) {
-        let dots = crate::ui_kit::panel_grip(ui);
-        crate::scenario::publish_target("value_box:grip", dots.rect);
-        ui.interact(dots.rect, area.with("grip"), egui::Sense::drag())
-    } else {
-        // Registered before the label and field, so the field keeps its own presses. Inset: the
-        // box is placed edge to edge with a handle's reach (#6608), and that edge is the handle's.
-        ui.interact(shown.map_or(egui::Rect::NOTHING, |r| r.shrink(2.0)), area.with("grip"), egui::Sense::drag())
-    }
-    .on_hover_cursor(egui::CursorIcon::Grab);
+    // Registered before the label and field, so the field keeps its own presses. Inset: the box
+    // is placed edge to edge with a handle's reach (#6608), and that edge is the handle's.
+    let grip = ui
+        .interact(shown.map_or(egui::Rect::NOTHING, |r| r.shrink(2.0)), area.with("grip"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::Grab);
     // By where the pointer is, not by each frame's motion: the box moves a frame after it.
     let pointer = grip.interact_pointer_pos();
     let held = area.with("grip_held");
@@ -1577,7 +1564,7 @@ fn value_box_full(
         return None;
     }
     let t = Tokens::get();
-    let main = area == egui::Id::unique("sc_canvas_area") && ui.ctx().data(|d| d.get_temp::<bool>(box_drag_id())).unwrap_or(false);
+    let main = area == egui::Id::unique("sc_canvas_area");
     if main {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(box_dropped_id().with("shown"), frame));
@@ -3289,7 +3276,7 @@ mod tests {
         let ctx = egui::Context::default();
         let frame = |shown: bool| {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                share_box_drag(ui.ctx(), true, false);
+                share_box_drag(ui.ctx());
                 if shown {
                     let f = ui.ctx().cumulative_frame_nr();
                     ui.ctx().data_mut(|d| d.insert_temp(box_dropped_id().with("shown"), f));
@@ -3331,10 +3318,8 @@ mod tests {
         }
     }
 
-    fn moving_body(drag: bool, grips: bool) -> crate::scenario::Harness {
+    fn moving_body() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.drag_dialogs = drag;
-        h.app.preferences.show_drag_grips = grips;
         h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
         h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         h.step(&serde_json::json!({"start": "solid.move"})).unwrap();
@@ -3346,11 +3331,10 @@ mod tests {
         h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box")
     }
 
-    /// With no dots the value box drags by its frame, and stays.
+    /// The value box drags by its frame, and stays.
     #[test]
-    fn without_grips_a_value_box_drags_by_its_frame_and_stays() {
-        let mut h = moving_body(true, false);
-        assert!(crate::scenario::handle_at("value_box:grip").is_none(), "no dots");
+    fn a_value_box_drags_by_its_frame_and_stays() {
+        let mut h = moving_body();
         let first = main_box(&h);
         let from = egui::pos2(first.left() + 4.0, first.center().y);
         h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
@@ -3361,25 +3345,10 @@ mod tests {
         assert!((main_box(&h).min - first.min - by).length() < 0.5, "and stays there");
     }
 
-    /// Shown grips draw their dots; with dragging off there are none, whatever the grips say.
+    /// A press in the value field focuses it rather than dragging the box.
     #[test]
-    fn grip_dots_show_only_with_dragging_and_grips_on() {
-        let h = moving_body(true, true);
-        assert!(crate::scenario::handle_at("value_box:grip").is_some(), "dots drawn");
-        drop(h);
-        let mut h = moving_body(false, true);
-        assert!(crate::scenario::handle_at("value_box:grip").is_none(), "off: stock, no dots");
-        let first = main_box(&h);
-        let from = egui::pos2(first.left() + 4.0, first.center().y);
-        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
-        h.frames(10);
-        assert_eq!(dropped(&h.ctx), None, "off: nothing drags it");
-    }
-
-    /// With no dots a press in the value field focuses it rather than dragging the box.
-    #[test]
-    fn without_grips_a_click_in_the_value_field_focuses_it() {
-        let mut h = moving_body(true, false);
+    fn a_click_in_the_value_field_focuses_it() {
+        let mut h = moving_body();
         let first = main_box(&h);
         h.step(&serde_json::json!({"click": [first.right() - 20.0, first.center().y]})).unwrap();
         h.frames(4);

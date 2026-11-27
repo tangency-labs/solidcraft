@@ -314,8 +314,6 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let guess = egui::vec2(width + t.space_6 * 2.0, t.control_height * 2.0 + t.space_6 * 3.0);
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
     super::note_shown(ctx);
-    let drag = app.preferences.drag_dialogs;
-    let grips = app.preferences.show_drag_grips;
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.
     let on_window = ctx.input(|i| {
@@ -333,27 +331,22 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let (title, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
                 let name = solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    if drag && grips {
-                        super::grip_dots(ui);
-                    }
                     crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline)
                         .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                 });
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));
                 let ok = cancel.translate(egui::vec2(-(side + t.space_2), 0.0));
-                if drag {
-                    // Short of the check and the cross, which keep their clicks.
-                    let (dragged, held) = super::grip(ui, title.with_max_x(ok.left() - t.space_2));
-                    if dragged != egui::Vec2::ZERO {
-                        ANCHOR.with(|a| {
-                            if let Some(open) = a.borrow_mut().as_mut() {
-                                open.2 += dragged;
-                            }
-                        });
-                    }
-                    grabbed = held;
+                // Short of the check and the cross, which keep their clicks.
+                let (dragged, held) = super::grip(ui, title.with_max_x(ok.left() - t.space_2));
+                if dragged != egui::Vec2::ZERO {
+                    ANCHOR.with(|a| {
+                        if let Some(open) = a.borrow_mut().as_mut() {
+                            open.2 += dragged;
+                        }
+                    });
                 }
+                grabbed = held;
                 if button(ui, ok, "dimwin:ok", solidcraft_ui_text::tr("ui.heading_ok"), "finish") {
                     answer = Some(true);
                 }

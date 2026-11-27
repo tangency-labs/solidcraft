@@ -1531,24 +1531,21 @@ const EDIT_HEIGHT: f32 = 80.0;
 /// The room the box leaves at the view's right and bottom edges.
 const EDIT_MARGIN: f32 = 6.0;
 
-/// Where the value box opens: beside the text, or beside the pointer while a value is typed
-/// first. `size` is the box's (at least as wide as its field and [`EDIT_HEIGHT`] tall).
+/// Where the value box opens: beside `at`, its text or, while a value is typed first, the
+/// pointer. `size` is the box's (at least as wide as its field and [`EDIT_HEIGHT`] tall).
 ///
 /// Beside the pointer the box keeps [`EDIT_GAP`] from it on at least one axis, so it never
 /// covers the square around the pointer a click picks in (#11057). It opens below and right of
 /// the pointer; where the view has no room there it tries left, then above, then above and left.
 /// Where no corner fits it keeps the gap on one axis and slides along the other, and it only
 /// gives up the gap when the view is too small for the box on either side.
-fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::Vec2) -> Pos2 {
+fn edit_anchor(at: Pos2, drawable: Option<egui::Rect>, size: egui::Vec2) -> Pos2 {
     let (w, h) = (size.x, size.y);
     let Some(rect) = drawable else {
-        return if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
+        return at + vec2(EDIT_GAP, EDIT_GAP);
     };
     let clamp_x = |x: f32| x.clamp(rect.left(), (rect.right() - w - EDIT_MARGIN).max(rect.left()));
     let clamp_y = |y: f32| y.clamp(rect.top(), (rect.bottom() - h - EDIT_MARGIN).max(rect.top()));
-    if !live {
-        return Pos2::new(clamp_x(at.x - 45.0), clamp_y(at.y - 11.0));
-    }
     let fits_x = |x: f32| x >= rect.left() && x + w <= rect.right() - EDIT_MARGIN;
     let fits_y = |y: f32| y >= rect.top() && y + h <= rect.bottom() - EDIT_MARGIN;
     let (right, left) = (at.x + EDIT_GAP, at.x - EDIT_GAP - w);
@@ -1600,12 +1597,6 @@ pub(crate) fn kept_in(pos: Pos2, size: egui::Vec2, drawable: Option<egui::Rect>)
     let x = pos.x.clamp(rect.left(), (rect.right() - size.x - EDIT_MARGIN).max(rect.left()));
     let y = pos.y.clamp(rect.top(), (rect.bottom() - size.y - EDIT_MARGIN).max(rect.top()));
     if x.is_finite() && y.is_finite() { Pos2::new(x, y) } else { rect.min }
-}
-
-pub(crate) fn grip_dots(ui: &mut egui::Ui) -> Rect {
-    let rect = crate::ui_kit::panel_grip(ui).rect;
-    crate::scenario::publish_target("dimension:grip", rect);
-    rect
 }
 
 /// Lets `band`, a dimension's name line, drag its box or window. Registered over the name, so a
@@ -1667,16 +1658,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     // taller box flipped above the pointer still ends short of it.
     let drawn = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_dim_edit_area"))).map(|r| r.size()).filter(|s| s.is_finite());
     let size = drawn.map_or(vec2(popup_width, EDIT_HEIGHT), |s| s.max(vec2(popup_width, EDIT_HEIGHT)));
-    let drag = app.preferences.drag_dialogs;
-    let grips = app.preferences.show_drag_grips;
-    let opens = edit_anchor(at, e.live.is_some() || drag, drawable, size);
+    let opens = edit_anchor(at, drawable, size);
     let anchor = if e.live.is_some() {
         set_moved(ctx, egui::Vec2::ZERO);
         opens
-    } else if drag {
-        kept_in(opens + moved(ctx), size, drawable)
     } else {
-        opens
+        kept_in(opens + moved(ctx), size, drawable)
     };
     note_shown(ctx);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
@@ -1699,14 +1686,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                             .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"))
                         }
                     };
-                    let held = if e.live.is_none() && drag {
-                        let band = ui
-                            .horizontal(|ui| {
-                                let dots = grips.then(|| grip_dots(ui));
-                                let name = name_line(ui).rect;
-                                dots.map_or(name, |d| d.union(name))
-                            })
-                            .inner;
+                    let held = if e.live.is_none() {
+                        let band = ui.horizontal(|ui| name_line(ui).rect).inner;
                         grip(ui, band.with_max_x(band.left().max(ui.max_rect().right()))).1
                     } else {
                         name_line(ui);
@@ -2011,13 +1992,11 @@ mod tests {
         use egui::pos2;
         let view = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
         let size = vec2(220.0, 80.0);
-        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), size);
+        let a = edit_anchor(pos2(300.0, 200.0), Some(view), size);
         assert_eq!(a, pos2(330.0, 230.0), "30 px below and right of the pointer");
         // Its right and bottom edges stop 30 px short of the pointer.
-        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), size);
+        let a = edit_anchor(pos2(960.0, 560.0), Some(view), size);
         assert_eq!((a.x + 220.0, a.y + 80.0), (930.0, 530.0), "left of and above the pointer");
-        // Editing an existing dimension still opens where its text is.
-        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), size), pos2(255.0, 189.0));
     }
 
     /// #11057: wherever the pointer is and whatever the box's size, the box stays inside the view
@@ -2037,16 +2016,16 @@ mod tests {
         // A tall box (a wrapped error line) near the bottom: above the pointer by its real height.
         let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
         let tall = vec2(228.0, 130.0);
-        let a = edit_anchor(pos2(300.0, 560.0), true, Some(view), tall);
+        let a = edit_anchor(pos2(300.0, 560.0), Some(view), tall);
         assert_eq!(a.y + tall.y, 530.0, "the bottom edge stops 30 px above the pointer");
         // A view too short for the box above or below the pointer but wide enough beside it.
         let short = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 120.0));
-        let a = edit_anchor(pos2(500.0, 60.0), true, Some(short), vec2(220.0, 80.0));
+        let a = edit_anchor(pos2(500.0, 60.0), Some(short), vec2(220.0, 80.0));
         assert_eq!(a.x, 530.0, "beside the pointer, right of it");
         assert!(clear(a, vec2(220.0, 80.0), pos2(500.0, 60.0)));
         // A view too narrow for the box beside the pointer but tall enough below it.
         let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(260.0, 600.0));
-        let a = edit_anchor(pos2(130.0, 100.0), true, Some(narrow), vec2(220.0, 80.0));
+        let a = edit_anchor(pos2(130.0, 100.0), Some(narrow), vec2(220.0, 80.0));
         assert_eq!(a.y, 130.0, "below the pointer, slid sideways into the view");
         assert!(clear(a, vec2(220.0, 80.0), pos2(130.0, 100.0)));
         // A sweep of pointers over views of several sizes and offsets, and boxes of several sizes.
@@ -2062,7 +2041,7 @@ mod tests {
                 for i in 0..=20 {
                     for j in 0..=20 {
                         let p = pos2(view.left() + view.width() * i as f32 / 20.0, view.top() + view.height() * j as f32 / 20.0);
-                        let a = edit_anchor(p, true, Some(view), size);
+                        let a = edit_anchor(p, Some(view), size);
                         let r = Rect::from_min_size(a, size);
                         let room = view.width() >= size.x + EDIT_MARGIN && view.height() >= size.y + EDIT_MARGIN;
                         if room {
@@ -2084,7 +2063,7 @@ mod tests {
             }
         }
         // A view or pointer that is not a number does not panic.
-        let _ = edit_anchor(pos2(f32::NAN, f32::INFINITY), true, Some(view), vec2(220.0, 80.0));
+        let _ = edit_anchor(pos2(f32::NAN, f32::INFINITY), Some(view), vec2(220.0, 80.0));
     }
 
     #[test]

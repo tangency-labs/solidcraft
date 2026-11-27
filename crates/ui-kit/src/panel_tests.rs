@@ -2272,16 +2272,3 @@ fn a_dragged_dialog_stays_while_open_and_the_next_opens_docked() {
     assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "the next dialog opens docked");
     assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "and stays docked");
 }
-
-/// Off, a dragged dialog keeps its drag after it closes, as before.
-#[test]
-fn with_reopen_docked_off_the_next_dialog_keeps_the_last_drag() {
-    let ctx = egui::Context::default();
-    crate::frame::set_reopen_docked(&ctx, false);
-    let to = egui::vec2(-240.0, 130.0);
-    crate::frame::set_dock_offset(&ctx, "k", to);
-    assert_eq!(dock_frame(&ctx, true), to);
-    dock_frame(&ctx, false);
-    dock_frame(&ctx, false);
-    assert_eq!(dock_frame(&ctx, true), to, "the next dialog opens where the last was left");
-}

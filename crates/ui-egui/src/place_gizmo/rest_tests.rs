@@ -143,12 +143,11 @@ fn a_press_off_centre_does_not_jump_the_pad() {
     assert!((end[1] - (start[1] + dy)).abs() < 6.0, "y jumped: start {start:?} end {end:?}");
 }
 
-/// The value box opens edge to edge with the marker's reach; with movable value boxes on, a
-/// press on that edge still takes the marker, not the box.
+/// The value box opens edge to edge with the marker's reach; though the box drags, a press on
+/// that edge still takes the marker, not the box.
 #[test]
 fn a_press_on_the_value_box_edge_by_the_marker_takes_the_marker() {
     let mut h = plate();
-    assert!(h.app.preferences.drag_dialogs);
     h.step(&json!({"start": "plastic.rest"})).unwrap();
     h.step(&json!({"click": {"world": [40, 25, 10]}})).unwrap();
     h.settle();

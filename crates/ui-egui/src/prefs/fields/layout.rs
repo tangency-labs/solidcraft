@@ -47,9 +47,6 @@ macro_rules! layout_preferences {
             design_views_as_tabs: bool = false, PAGE_LAYOUT;
             /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
             dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
-            /// Value boxes and the dimension window drag; a dragged one, or dialog, keeps its place only
-            /// until it closes. Off: as before.
-            drag_dialogs: bool = true, PAGE_LAYOUT;
             /// Drawing properties use the same left/right, resizable panel pattern as Assistant.
             drawing_panel_side: String = "right".into(), PAGE_LAYOUT;
             drawing_panel_width: f32 = 320.0, PAGE_LAYOUT, accept(240.0..=560.0);
@@ -151,8 +148,6 @@ macro_rules! layout_preferences {
             /// and entering Render opens a view of its own, as in 0.43.0. Off: the tab looks as
             /// it did before design views, with no switcher until the user opens a second view.
             show_design_view_switcher: bool = false, PAGE_LAYOUT;
-            /// Grip dots where `drag_dialogs` lets things drag; they drag without them too.
-            show_drag_grips: bool = false, PAGE_LAYOUT;
             /// Minimize, Maximize and Close at the right end of SolidCraft's own title bar (Windows, and
             /// Linux without the system's title bar). Off for a tiling window manager, which handles the
             /// window itself (#20385); the bar still moves the window. On by default, as before.

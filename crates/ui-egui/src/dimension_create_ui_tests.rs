@@ -2878,19 +2878,16 @@ fn screen(h: &mut Harness, world: [f64; 2]) -> egui::Pos2 {
     egui::pos2(p[0].as_f64().unwrap() as f32, p[1].as_f64().unwrap() as f32)
 }
 
-/// A placed dimension's box opens beside its text, clear of the line. With no dots its name line
-/// drags it while the value keeps the keyboard; the next box opens beside its own text.
+/// A placed dimension's box opens beside its text, clear of the line. Its name line drags it
+/// while the value keeps the keyboard; the next box opens beside its own text.
 #[test]
 fn a_placed_dimension_box_opens_beside_its_text_and_keeps_where_it_was_dragged() {
     let mut h = roomy_line();
-    h.app.preferences.drag_dialogs = true;
-    h.app.preferences.show_drag_grips = false;
     place(&mut h, &[[10., 0.]], [10., -6.]);
     h.frames(3);
     let text = screen(&mut h, [10., -6.]);
     let (a, b) = (screen(&mut h, [0., 0.]), screen(&mut h, [20., 0.]));
     let first = box_rect(&h);
-    assert!(crate::scenario::handle_at("dimension:grip").is_none(), "no dots");
     assert!(!first.expand(2.0).contains(text), "the box is beside its text, not over it: {first:?} {text:?}");
     let line_band = egui::Rect::from_two_pos(a, b).expand(2.0);
     assert!(!first.intersects(line_band), "the box is clear of the measured line: {first:?} {line_band:?}");
@@ -2924,8 +2921,6 @@ fn a_placed_dimension_box_opens_beside_its_text_and_keeps_where_it_was_dragged()
 #[test]
 fn the_dimension_window_drags_by_its_name_and_remembers_it() {
     let mut h = roomy_line();
-    h.app.preferences.drag_dialogs = true;
-    h.app.preferences.show_drag_grips = false;
     h.app.preferences.dimension_input = crate::prefs::DimensionInput::Window;
     place(&mut h, &[[10., 0.]], [10., -6.]);
     h.frames(3);
@@ -2943,42 +2938,4 @@ fn the_dimension_window_drags_by_its_name_and_remembers_it() {
     h.frames(3);
     assert!(!crate::dim_view::editing());
     assert_eq!(crate::dim_view::moved(&h.ctx), egui::Vec2::ZERO, "closed: the next window opens beside its dimension");
-}
-
-/// Off: stock, whatever the grips setting says.
-#[test]
-fn with_dragging_off_the_dimension_box_opens_on_its_text_and_stays() {
-    let mut h = roomy_line();
-    h.app.preferences.drag_dialogs = false;
-    h.app.preferences.show_drag_grips = true;
-    place(&mut h, &[[10., 0.]], [10., -6.]);
-    h.frames(3);
-    let text = screen(&mut h, [10., -6.]);
-    let first = box_rect(&h);
-    assert!(crate::scenario::handle_at("dimension:grip").is_none(), "no dots");
-    assert!((first.min - (text - egui::vec2(45.0, 11.0))).length() < 1.0, "on its text: {first:?} {text:?}");
-    let name = h.app.session.doc.next_d_name();
-    let label = h.widget(&format!("Dimension: {name}")).expect("the box's name line");
-    h.step(&json!({"drag": [label, [label[0] + 60.0, label[1] + 40.0]], "steps": 8})).unwrap();
-    h.frames(3);
-    assert_eq!(crate::dim_view::moved(&h.ctx), egui::Vec2::ZERO, "nothing dragged");
-    assert!(crate::dim_view::editing());
-    assert_eq!(box_rect(&h).min, first.min, "the box stays where it opened");
-}
-
-/// With grips on, the value box and the dimension window draw the dots of a grip.
-#[test]
-fn shown_grips_draw_dots_on_the_box_and_the_window() {
-    for window in [false, true] {
-        let mut h = roomy_line();
-        h.app.preferences.drag_dialogs = true;
-        h.app.preferences.show_drag_grips = true;
-        if window {
-            h.app.preferences.dimension_input = crate::prefs::DimensionInput::Window;
-        }
-        place(&mut h, &[[10., 0.]], [10., -6.]);
-        h.frames(3);
-        assert!(crate::scenario::handle_at("dimension:grip").is_some(), "dots drawn (window: {window})");
-        h.step(&json!({"key": "Escape"})).unwrap();
-    }
 }

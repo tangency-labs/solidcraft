@@ -40,24 +40,11 @@ fn dock_offset_id(key: &str) -> egui::Id {
 pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
     let frame = ctx.cumulative_frame_nr();
     let open = ctx.data(|d| d.get_temp::<u64>(dock_offset_id(key).with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
-    if !open && reopen_docked(ctx) {
+    if !open {
         set_dock_offset(ctx, key, egui::Vec2::ZERO);
         return egui::Vec2::ZERO;
     }
     ctx.data(|d| d.get_temp::<egui::Vec2>(dock_offset_id(key))).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
-}
-
-fn reopen_docked_id() -> egui::Id {
-    egui::Id::unique("sc_dock_reopen_docked")
-}
-
-/// Off: a dragged dialog's place is kept for the next one, as before.
-pub fn set_reopen_docked(ctx: &egui::Context, on: bool) {
-    ctx.data_mut(|d| d.insert_temp(reopen_docked_id(), on));
-}
-
-fn reopen_docked(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(reopen_docked_id())).unwrap_or(true)
 }
 
 pub fn set_dock_offset(ctx: &egui::Context, key: &str, offset: egui::Vec2) {
