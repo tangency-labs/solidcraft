@@ -271,8 +271,8 @@ pub struct KernelFormMask {
 /// Why `solidcore_ops::Body::from_record` refused a B-rep body's record.
 #[derive(Clone, Debug)]
 pub(crate) struct OpsRefusal {
-    why: String,
-    internal: bool,
+    pub(crate) why: String,
+    pub(crate) internal: bool,
 }
 
 impl OpsRefusal {
