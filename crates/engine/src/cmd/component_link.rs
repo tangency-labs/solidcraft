@@ -1861,6 +1861,18 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
     (images, warnings)
 }
 
+/// The name to read the STEP text of a design's bodies under: `shown`, unless its extension names a
+/// format with its own reader (FreeCAD, Rhino, IGES). The text is STEP whatever the design came
+/// from: a design an importer plugin wrote from `part.FCStd` is linked as `part.FCStd`, and routing
+/// that STEP by the name sent it to the FreeCAD reader, which refused it.
+fn step_label(shown: &str) -> String {
+    if solidcraft_io::is_native_cad_path(shown) || solidcraft_io::is_iges_path(shown) {
+        Path::new(shown).with_extension("step").to_string_lossy().into_owned()
+    } else {
+        shown.to_string()
+    }
+}
+
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature, and its mesh
 /// bodies, which a Mesh Import feature beside it holds (#20050).
 fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
@@ -1875,7 +1887,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     }
     let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let mut feature = solidcraft_io::step_import_feature(&step, &step_label(shown)).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
@@ -5263,6 +5275,34 @@ mod tests {
 
     /// A one-face sheet at z = 0.15 bounded by spline edges lying on the plane z = 0, written
     /// without pcurves: its edges are 0.15 mm off their face and read with tolerances of 0.45 mm.
+    /// An importer plugin's design carries its geometry as an Import feature labelled with the file it
+    /// came from (`part.FCStd`) holding STEP. Linking it must read that STEP as STEP, as File > Open
+    /// does, not hand it to the FreeCAD reader because of the label.
+    #[test]
+    fn a_design_an_importer_wrote_from_a_freecad_file_links_its_step_geometry() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-importer-fcstd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
+        let step = solidcraft_io::export(&part.doc, &["Block".to_string()], solidcraft_io::Format::Step, "Block").unwrap();
+        let mut kind = solidcraft_io::step_import_feature(&step, "block.step").unwrap().kind;
+        if let FeatureKind::Import { file, .. } = &mut kind {
+            *file = "part.FCStd".into();
+        }
+        let mut doc = Document::default();
+        doc.add_feature(kind, None).unwrap();
+        let bytes = solidcraft_io::write_design(&doc).unwrap();
+        for name in ["part.FCStd", "part.fcstd", "part.3dm"] {
+            let source = Source::File(dir.join(name));
+            let ((_, feature, ..), _) = design_bodies(&source, &bytes, None, Default::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(feature.body_names.len(), 1, "{name}");
+        }
+        assert_eq!(step_label("/a/part.FCStd"), "/a/part.step");
+        assert_eq!(step_label("/a/part.sc"), "/a/part.sc");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn loose_sheet_step() -> String {
         let mut t = String::from(
             "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\n\
