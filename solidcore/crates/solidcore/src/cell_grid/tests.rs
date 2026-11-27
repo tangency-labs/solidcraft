@@ -3315,7 +3315,7 @@ fn a_filled_voronoi_grid_leaves_no_rim_wider_than_one_web() {
         let d = W + 0.01;
         let mut probes = Vec::new();
         for k in 0..=160 {
-            let f = k as f64 / 160.0;
+            let f = f64::from(k) / 160.0;
             probes.push(v(d + (40.0 - 2.0 * d) * f, d));
             probes.push(v(d + (40.0 - 2.0 * d) * f, 30.0 - d));
             probes.push(v(d, d + (30.0 - 2.0 * d) * f));
