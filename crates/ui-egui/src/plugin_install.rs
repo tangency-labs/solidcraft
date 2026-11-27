@@ -214,6 +214,25 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     lines
 }
 
+/// Label the action the user is confirming. A current version in the replacement receipt
+/// is the final, space-free word, even when the plugin's name has spaces (#18762).
+fn install_action(plugin: &Value) -> &'static str {
+    let Some(previous) = plugin.get("replaces").and_then(Value::as_str) else { return "plugin_install.install" };
+    if previous.split_whitespace().last() == plugin.get("version").and_then(Value::as_str) {
+        "plugin_install.replace"
+    } else {
+        "plugin_install.update"
+    }
+}
+
+/// Keep the installed and incoming versions together near the start of the confirmation,
+/// before the list of permissions a replacement will request.
+fn replacement_comparison(plugin: &Value) -> Option<String> {
+    let previous = plugin.get("replaces").and_then(Value::as_str)?;
+    let next = std::format!("{} {}", text(plugin, "name"), text(plugin, "version"));
+    Some(format("plugin_install.version_comparison", &[("installed", previous), ("new", &next)]))
+}
+
 /// The question, while a plugin waits for it.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut ask) = app.plugin_install.ask.take() else { return };
@@ -223,7 +242,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let replaces = plugin.get("replaces").and_then(Value::as_str).map(str::to_string);
     let lines = permission_lines(plugin);
     let title = tr(if ask.update { "plugin_update.title" } else { "plugin_install.title" }).to_string();
-    let install = tr(if ask.update { "plugin_update.update" } else { "plugin_install.install" }).to_string();
+    let install = tr(if ask.update { "plugin_update.update" } else { install_action(plugin) }).to_string();
     let cancel = tr("plugin_install.cancel").to_string();
     let valid = crate::plugins::valid_grants(&ask.grants) && !crate::plugins::busy(app);
     let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
@@ -234,6 +253,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, valid, |ui| {
             egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.55).show(ui, |ui| {
                 ui_kit::text(ui, &std::format!("{name} {version}"), ui_kit::Text::Heading("plugin_install_name"));
+                if let Some(comparison) = replacement_comparison(plugin) {
+                    ui_kit::text(ui, &comparison, ui_kit::Text::Report("plugin_install_version_comparison", false));
+                }
                 if !summary.is_empty() {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
@@ -290,7 +312,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &entry.name, ui_kit::Text::Hint("plugin_entry"));
                     for slot in &entry.slots {
                         let (key, name) = match slot {
-                            solidcraft_engine::plugin::UiSlot::Menu { name } => {
+                            solidcraft_engine::plugin::UiSlot::Menu { name, .. } => {
                                 let name = match crate::plugin_slots::menu_name(name) {
                                     Some("File") => tr("ui.file"),
                                     Some("Help") => tr("ui.help"),
@@ -298,7 +320,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 };
                                 ("prefs.plugin_slot_menu", name.to_string())
                             }
-                            solidcraft_engine::plugin::UiSlot::Ribbon { name } => (
+                            solidcraft_engine::plugin::UiSlot::Ribbon { name, .. } => (
                                 "prefs.plugin_slot_ribbon",
                                 // A tab the app doesn't have: the entry goes in the Plugins group.
                                 crate::plugin_slots::ribbon_name(name)
@@ -311,6 +333,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text(ui, tr("prefs.plugin_slot_command"), ui_kit::Text::Hint("plugin_entry_command"));
                     }
                 }
+                // Keep the existing replacement report after entry-point details. The
+                // comparison above is additive and does not move this warning (#18762).
                 if let Some(replaces) = &replaces {
                     ui_kit::text(
                         ui,
@@ -450,6 +474,43 @@ mod tests {
         assert_eq!(memory_request(&json!({"limits":{"memory_mib":64}}), 128), None);
         assert_eq!(memory_request(&json!({"limits":{"memory_mib":99999}}), 128), None);
         assert_eq!(memory_request(&json!({}), 128), None);
+    }
+
+    /// A review says Update for a different incoming version, Replace for the same version,
+    /// and retains Install when no package with the id is installed (#18762).
+    #[test]
+    fn replacement_review_uses_correct_action_and_both_versions() {
+        crate::i18n::install();
+        let fresh = json!({"name":"Gear Tools","version":"2.0.0"});
+        assert_eq!(install_action(&fresh), "plugin_install.install");
+        assert!(replacement_comparison(&fresh).is_none());
+
+        let newer = json!({"name":"Gear Tools","version":"2.0.0","replaces":"Gear Tools 1.0.0"});
+        assert_eq!(install_action(&newer), "plugin_install.update");
+        let comparison = replacement_comparison(&newer).expect("two versions");
+        assert_eq!(comparison, "Installed: Gear Tools 1.0.0. Incoming: Gear Tools 2.0.0.");
+
+        let same = json!({"name":"Gear Tools","version":"2.0.0","replaces":"Gear Tools 2.0.0"});
+        assert_eq!(install_action(&same), "plugin_install.replace");
+        assert!(replacement_comparison(&same).unwrap().contains("Incoming: Gear Tools 2.0.0"));
+
+        // The actual confirmation draws the replacement text above the permissions.
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.plugin_install.ask = Some(Ask { path: "unused.zip".into(), plugin: newer, grants: Default::default(), update: false });
+        let ctx = crate::fonts::test_context();
+        for frame in 0..3 {
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(820.0, 680.0));
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, |ui| show(&mut app, ui.ctx()))
+            });
+            if frame == 2 {
+                let labels = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join(" ");
+                assert!(labels.contains("Update"), "the confirmation uses Update: {labels}");
+                assert!(labels.contains("Gear Tools 1.0.0") && labels.contains("Gear Tools 2.0.0"), "old and new versions: {labels}");
+            }
+            output.textures_delta.clear();
+        }
+        assert!(app.plugin_install.ask.is_some(), "review never installs without approval");
     }
 
     fn review_folder_package(h: &mut crate::scenario::Harness, version: &str, files: Value) {

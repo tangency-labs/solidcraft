@@ -741,3 +741,38 @@ fn the_gestures_of_a_presentation_not_drawn_end_from_the_context() {
     assert!(rig.ctx.dragged_id().is_none());
     assert!(end_gestures(&rig.ctx, &mut rig.state.borrow_mut(), Source { scope: 7, presentation: 0 }).is_empty(), "once");
 }
+
+/// A trailing badge follows its row's name and stays clear of the count, also when the name is
+/// cut off to fit (#22361): the badge used to land on the count.
+#[test]
+fn a_badge_after_a_cut_off_name_stays_clear_of_the_count() {
+    let ctx = egui::Context::default();
+    for (label, cut) in [("Power", false), ("Basic components and connectors", true)] {
+        solidcraft_ui_registry::clear_handles();
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 100.0))), ..Default::default() };
+        let out = crate::test_support::raw_frame(&ctx, input, |ui| {
+            ui.set_width(170.0);
+            tree_row(ui, ui.scope_id().with(label), &Row { label, name: true, compact: true, count: "48", badges: &["lock"], ..Default::default() });
+        });
+        let count = out
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == "48" => Some(clipped.shape.visual_bounding_rect()),
+                _ => None,
+            })
+            .expect("the count is drawn");
+        let name = out
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() != "48" => Some((text.galley.elided, clipped.shape.visual_bounding_rect())),
+                _ => None,
+            })
+            .expect("the name is drawn");
+        let badge = solidcraft_ui_registry::rect_of(&format!("row_badge:lock:{label}")).expect("the badge is drawn");
+        assert_eq!(name.0, cut, "{label}: the name is cut off only when it does not fit");
+        assert!(badge.left() >= name.1.right(), "{label}: badge {badge:?} overlaps the name {:?}", name.1);
+        assert!(badge.right() <= count.left(), "{label}: badge {badge:?} overlaps the count {count:?}");
+    }
+}

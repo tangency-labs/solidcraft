@@ -23,6 +23,10 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
+/// Most images kept from a single MCP tool result (e.g. `screenshot` or `compare_picture`).
+const MAX_TOOL_IMAGES: usize = 4;
+/// Largest base64 payload kept for one tool-result image (5 MB, matching `attach::MAX_SENT_BYTES`).
+const MAX_TOOL_IMAGE_BASE64: usize = 5_000_000;
 /// Longest name kept for a listed model.
 const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
@@ -34,6 +38,11 @@ const MAX_HISTORY_IMAGES: usize = 2;
 /// What an older view becomes in the history.
 const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to keep the request small]";
 const DROPPED_THINKING_NOTE: &str = "[earlier reasoning, removed with older history]";
+/// Prompt accompanying tool-result images in OpenAI Chat Completions, where `role: "tool"`
+/// only accepts string content across many providers.
+const TOOL_IMAGES_NOTE: &str = "Images returned by the preceding tool call(s):";
+/// Fallback string when an MCP tool returns only image(s) with no text block.
+const TOOL_IMAGE_FALLBACK_TEXT: &str = "[a picture of the view]";
 /// How long one tool call may take (it may wait for the user's Allow, declined after four
 /// minutes). It does not depend on the endpoint's request timeout: a tool call is SolidCraft's own
 /// work and the user's answer, never a wait for the model, so a longer request timeout does not
@@ -329,7 +338,25 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
             "tool" => {
                 let id = m.get("tool_call_id").and_then(Value::as_str).unwrap_or("");
                 let text = m.get("content").and_then(Value::as_str).unwrap_or("");
-                go_push_block(&mut out, "user", json!({"type": "tool_result", "tool_use_id": id, "content": text}));
+                let content = if let Some(parts) = m.get("tool_images").and_then(Value::as_array) {
+                    let mut blocks = Vec::with_capacity(parts.len() + usize::from(!text.is_empty()));
+                    if !text.is_empty() {
+                        blocks.push(json!({"type": "text", "text": text}));
+                    }
+                    for p in parts {
+                        if let Some(url) = openai_part_image_url(p)
+                            && let Some((mime, data)) = go_data_url(url)
+                        {
+                            blocks.push(json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}));
+                        } else if let Some(t) = openai_part_text(p).filter(|t| !t.is_empty()) {
+                            blocks.push(json!({"type": "text", "text": t}));
+                        }
+                    }
+                    Value::Array(blocks)
+                } else {
+                    Value::String(text.to_string())
+                };
+                go_push_block(&mut out, "user", json!({"type": "tool_result", "tool_use_id": id, "content": content}));
             }
             _ => {}
         }
@@ -398,10 +425,35 @@ fn responses_input(system: &str, history: &[Value]) -> Vec<Value> {
                 }
             }
             "tool" => {
+                let call_id = m.get("tool_call_id").and_then(Value::as_str).unwrap_or("");
+                let text = m.get("content").and_then(Value::as_str).unwrap_or("");
+                let output = if let Some(parts) = m.get("tool_images").and_then(Value::as_array) {
+                    let mut items = Vec::with_capacity(parts.len() + usize::from(!text.is_empty()));
+                    if !text.is_empty() {
+                        items.push(json!({"type": "input_text", "text": text}));
+                    }
+                    let mut has_image = false;
+                    for p in parts {
+                        if let Some(url) = openai_part_image_url(p) {
+                            items.push(json!({"type": "input_image", "image_url": url}));
+                            has_image = true;
+                        } else if let Some(t) = openai_part_text(p).filter(|t| !t.is_empty()) {
+                            items.push(json!({"type": "input_text", "text": t}));
+                        }
+                    }
+                    if has_image {
+                        Value::Array(items)
+                    } else {
+                        let joined: Vec<&str> = items.iter().filter_map(|i| i.get("text").and_then(Value::as_str)).collect();
+                        Value::String(joined.join("\n"))
+                    }
+                } else {
+                    Value::String(text.to_string())
+                };
                 out.push(json!({
                     "type": "function_call_output",
-                    "call_id": m.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
-                    "output": m.get("content").and_then(Value::as_str).unwrap_or(""),
+                    "call_id": call_id,
+                    "output": output,
                 }));
             }
             _ => {}
@@ -443,8 +495,17 @@ fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String
         std::collections::HashMap::new()
     };
     let mut out: Vec<Value> = Vec::new();
+    let mut pending_images: Vec<Value> = Vec::new();
+    let flush_images = |out: &mut Vec<Value>, pending: &mut Vec<Value>| {
+        for part in pending.drain(..) {
+            go_push_part(out, "user", part);
+        }
+    };
     for m in history {
         let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+        if role != "tool" {
+            flush_images(&mut out, &mut pending_images);
+        }
         match role {
             "user" => match m.get("content") {
                 Some(Value::String(t)) => go_push_part(&mut out, "user", json!({"text": t})),
@@ -485,13 +546,95 @@ fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String
             "tool" => {
                 let id = m.get("tool_call_id").and_then(Value::as_str).unwrap_or("");
                 let name = names.get(id).map(String::as_str).unwrap_or("tool");
-                let text = m.get("content").and_then(Value::as_str).unwrap_or("");
+                let base_text = m.get("content").and_then(Value::as_str).unwrap_or("");
+                let mut dropped_notes: Vec<&str> = Vec::new();
+                if let Some(parts) = m.get("tool_images").and_then(Value::as_array) {
+                    for p in parts {
+                        if let Some(url) = openai_part_image_url(p)
+                            && let Some((mime, data)) = go_data_url(url)
+                        {
+                            pending_images.push(json!({"inlineData": {"mimeType": mime, "data": data}}));
+                        } else if let Some(t) = openai_part_text(p).filter(|t| !t.is_empty()) {
+                            dropped_notes.push(t);
+                        }
+                    }
+                }
+                let text = if dropped_notes.is_empty() {
+                    base_text.to_string()
+                } else {
+                    let mut lines = Vec::with_capacity(dropped_notes.len() + usize::from(!base_text.is_empty()));
+                    if !base_text.is_empty() {
+                        lines.push(base_text);
+                    }
+                    lines.extend(dropped_notes);
+                    lines.join("\n")
+                };
                 go_push_part(&mut out, "user", json!({"functionResponse": {"name": name, "response": {"output": text}}}));
             }
             _ => {}
         }
     }
+    flush_images(&mut out, &mut pending_images);
     out
+}
+
+/// OpenAI Chat Completions `messages` from the system note and OpenAI-shaped history.
+/// Strips internal `tool_images` fields from `role: "tool"` messages (keeping string `content`
+/// for providers that reject array content on tool messages) and appends one `role: "user"`
+/// message with `image_url` data URI blocks immediately after each contiguous run of `tool`
+/// messages that carried active images.
+fn openai_chat_messages(system: &str, history: &[Value]) -> Vec<Value> {
+    let mut messages = Vec::with_capacity(history.len() + 1);
+    messages.push(json!({"role": "system", "content": system}));
+    let mut pending_images: Vec<Value> = Vec::new();
+    let flush_images = |messages: &mut Vec<Value>, pending: &mut Vec<Value>| {
+        if !pending.is_empty() {
+            let mut content = Vec::with_capacity(pending.len() + 1);
+            content.push(json!({"type": "text", "text": TOOL_IMAGES_NOTE}));
+            content.append(pending);
+            messages.push(json!({"role": "user", "content": content}));
+        }
+    };
+    for m in history {
+        if m.get("role").and_then(Value::as_str) != Some("tool") {
+            flush_images(&mut messages, &mut pending_images);
+            messages.push(m.clone());
+            continue;
+        }
+        let Some(parts) = m.get("tool_images").and_then(Value::as_array) else {
+            messages.push(m.clone());
+            continue;
+        };
+        let mut active = 0usize;
+        let mut dropped_notes: Vec<&str> = Vec::new();
+        for p in parts {
+            if openai_part_image_url(p).is_some() {
+                pending_images.push(p.clone());
+                active += 1;
+            } else if let Some(t) = openai_part_text(p).filter(|t| !t.is_empty()) {
+                dropped_notes.push(t);
+            }
+        }
+        let base_text = m.get("content").and_then(Value::as_str).unwrap_or("");
+        let wire_text = if !dropped_notes.is_empty() {
+            let mut lines = Vec::with_capacity(dropped_notes.len() + usize::from(!base_text.is_empty()));
+            if !base_text.is_empty() {
+                lines.push(base_text);
+            }
+            lines.extend(dropped_notes);
+            lines.join("\n")
+        } else if base_text.is_empty() && active > 0 {
+            TOOL_IMAGE_FALLBACK_TEXT.to_string()
+        } else {
+            base_text.to_string()
+        };
+        let mut clean = m.as_object().cloned().unwrap_or_default();
+        clean.remove("tool_images");
+        clean.insert("content".to_string(), Value::String(wire_text));
+        messages.push(Value::Object(clean));
+    }
+    flush_images(&mut messages, &mut pending_images);
+    messages
 }
 
 /// The tool loop's Reply from shown text and tool calls; the kept assistant
@@ -1069,39 +1212,40 @@ impl Worker {
                     input: c.arguments.as_ref().ok().filter(|a| a.is_object()).cloned(),
                     output: None,
                 });
-                let (text, failed) = if self.cancel.load(Ordering::Relaxed) {
-                    ("cancelled by the user".to_string(), true)
+                let output = if self.cancel.load(Ordering::Relaxed) {
+                    ToolOutput::plain("cancelled by the user".to_string(), true)
                 } else if let Err(e) = &c.arguments {
                     // A call whose arguments do not parse is answered, never run with `{}`.
-                    (format!("Not run: {e}"), true)
+                    ToolOutput::plain(format!("Not run: {e}"), true)
                 } else if !self.tool_names.iter().any(|n| n == &c.name) {
-                    (format!("unknown tool `{}`", c.name), true)
+                    ToolOutput::plain(format!("unknown tool `{}`", c.name), true)
                 } else {
                     // A plugin tool goes back by its MCP name, and through the same approval
                     // gate as every other call: the app asks before it runs.
                     match self.mcp_call("tools/call", json!({"name": mcp_tool_name(&c.name), "arguments": args})) {
-                        Ok(r) => tool_text(&r),
-                        Err(e) => (e, true),
+                        Ok(r) => extract_tool_output(&r),
+                        Err(e) => ToolOutput::plain(e, true),
                     }
                 };
-                let shown: String = text.chars().take(2000).collect();
+                let shown = output.display_text();
                 self.emit(Event::Tool {
                     id: tool_id,
                     title: None,
                     kind: None,
-                    status: Some(if failed { ToolStatus::Failed } else { ToolStatus::Completed }),
+                    status: Some(if output.failed { ToolStatus::Failed } else { ToolStatus::Completed }),
                     input: None,
                     output: Some(shown),
                 });
                 match self.cfg.protocol {
-                    Protocol::OpenAi => self.history.push(json!({"role": "tool", "tool_call_id": c.id, "content": text})),
-                    Protocol::Anthropic => {
-                        results.push(json!({"type": "tool_result", "tool_use_id": c.id, "content": text, "is_error": failed}));
-                    }
+                    Protocol::OpenAi => self.history.push(openai_tool_message(&c.id, &output)),
+                    Protocol::Anthropic => results.push(anthropic_tool_result(&c.id, &output)),
                 }
             }
             if self.cfg.protocol == Protocol::Anthropic && !results.is_empty() {
                 self.history.push(json!({"role": "user", "content": results}));
+            }
+            if drop_old_views(&mut self.history, MAX_HISTORY_IMAGES) && self.cfg.protocol == Protocol::Anthropic {
+                drop_finished_thinking(&mut self.history);
             }
         }
     }
@@ -1292,9 +1436,14 @@ impl Worker {
     fn responses_body(&self) -> Value {
         let mut input = responses_input(&self.note, &self.history);
         for item in &mut input {
-            if item["role"] == "user"
-                && let Some(parts) = item["content"].as_array_mut()
-            {
+            let parts = if item["role"] == "user" {
+                item["content"].as_array_mut()
+            } else if item["type"] == "function_call_output" {
+                item["output"].as_array_mut()
+            } else {
+                None
+            };
+            if let Some(parts) = parts {
                 for part in parts.iter_mut().filter(|p| p["type"] == "input_image") {
                     part["detail"] = json!("auto");
                 }
@@ -1317,9 +1466,7 @@ impl Worker {
     fn body(&self) -> Value {
         match self.cfg.protocol {
             Protocol::OpenAi => {
-                let mut messages = Vec::with_capacity(self.history.len() + 1);
-                messages.push(json!({"role": "system", "content": self.note}));
-                messages.extend(self.history.iter().cloned());
+                let messages = openai_chat_messages(&self.note, &self.history);
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
                 if let Some(effort) = self.reasoning_effort() {
                     // The user's choice goes out on every request, ahead of any `none` the
@@ -1689,23 +1836,43 @@ fn anthropic_reply(body: &Value) -> Reply {
     Reply { text, calls, assistant, stop }
 }
 
-/// Keeps the newest `keep` pictures of the view in the history and swaps every older one for a
-/// short note, so the model still knows a view was shown. Text is never touched. Pictures come
-/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint. True when
-/// a picture was swapped.
+/// Keeps the newest `keep` pictures of the view in the history (both user-attached pictures and
+/// tool-result screenshots/overlays) and swaps every older one for a short note, so the model
+/// still knows a view was shown. Text is never touched. Pictures come as OpenAI `image_url` parts
+/// (in user `content` or tool `tool_images`) or Anthropic `image` blocks (in user `content` or
+/// `tool_result.content`), depending on the endpoint. True when a picture was swapped.
 fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
     let mut seen = 0;
     let mut dropped = false;
+    let mut visit_image = |part: &mut Value| {
+        seen += 1;
+        if seen > keep {
+            *part = json!({"type": "text", "text": DROPPED_VIEW_NOTE});
+            dropped = true;
+        }
+    };
     for msg in history.iter_mut().rev() {
+        if let Some(tool_images) = msg.get_mut("tool_images").and_then(Value::as_array_mut) {
+            for part in tool_images.iter_mut().rev() {
+                if part.get("type").and_then(Value::as_str) == Some("image_url") {
+                    visit_image(part);
+                }
+            }
+        }
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
         for part in content.iter_mut().rev() {
-            if !matches!(part.get("type").and_then(Value::as_str), Some("image_url" | "image")) {
-                continue;
-            }
-            seen += 1;
-            if seen > keep {
-                *part = json!({"type": "text", "text": DROPPED_VIEW_NOTE});
-                dropped = true;
+            match part.get("type").and_then(Value::as_str) {
+                Some("image_url" | "image") => visit_image(part),
+                Some("tool_result") => {
+                    if let Some(nested) = part.get_mut("content").and_then(Value::as_array_mut) {
+                        for sub in nested.iter_mut().rev() {
+                            if sub.get("type").and_then(Value::as_str) == Some("image") {
+                                visit_image(sub);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1880,24 +2047,197 @@ pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>,
     Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
 }
 
-/// A tool call's result as text for the model, and whether it failed.
-fn tool_text(r: &Value) -> (String, bool) {
+/// A validated image returned by an MCP tool (such as `screenshot` or `compare_picture`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ToolImage {
+    mime_type: String,
+    data_base64: String,
+}
+
+impl ToolImage {
+    fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.mime_type, self.data_base64)
+    }
+
+    fn openai_part(&self) -> Value {
+        json!({"type": "image_url", "image_url": {"url": self.data_url()}})
+    }
+
+    fn anthropic_block(&self) -> Value {
+        json!({"type": "image", "source": {"type": "base64", "media_type": self.mime_type, "data": self.data_base64}})
+    }
+}
+
+/// Structured result of one MCP `tools/call`: bounded text, validated images, and error flag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ToolOutput {
+    text: String,
+    images: Vec<ToolImage>,
+    failed: bool,
+}
+
+impl ToolOutput {
+    fn plain(text: String, failed: bool) -> Self {
+        Self { text, images: Vec::new(), failed }
+    }
+
+    fn display_text(&self) -> String {
+        if self.text.is_empty() && !self.images.is_empty() { TOOL_IMAGE_FALLBACK_TEXT.to_string() } else { self.text.chars().take(2000).collect() }
+    }
+}
+
+fn base64_digit(b: u8) -> Option<u8> {
+    match b {
+        b'A'..=b'Z' => Some(b - b'A'),
+        b'a'..=b'z' => Some(b - b'a' + 26),
+        b'0'..=b'9' => Some(b - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+/// Whether `data` is canonical non-empty standard base64 (RFC 4648) with at most two trailing `=`.
+fn is_valid_base64(data: &str) -> bool {
+    let bytes = data.as_bytes();
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
+        return false;
+    }
+    let padding = if bytes.ends_with(b"==") {
+        2
+    } else if bytes.ends_with(b"=") {
+        1
+    } else {
+        0
+    };
+    let payload_len = bytes.len() - padding;
+    if payload_len == 0 || !bytes[..payload_len].iter().all(|&b| base64_digit(b).is_some()) {
+        return false;
+    }
+    if padding > 0 {
+        let Some(last) = base64_digit(bytes[payload_len - 1]) else { return false };
+        let mask = if padding == 2 { 0x0f } else { 0x03 };
+        if last & mask != 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Decodes up to `max_bytes` leading bytes of a validated standard base64 string.
+fn decode_base64_prefix(data: &str, max_bytes: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(max_bytes);
+    for chunk in data.as_bytes().as_chunks::<4>().0 {
+        if out.len() >= max_bytes {
+            break;
+        }
+        let Some(d0) = base64_digit(chunk[0]) else { break };
+        let Some(d1) = base64_digit(chunk[1]) else { break };
+        let pad = if chunk[2] == b'=' {
+            2
+        } else if chunk[3] == b'=' {
+            1
+        } else {
+            0
+        };
+        let d2 = if pad < 2 { base64_digit(chunk[2]).unwrap_or(0) } else { 0 };
+        let d3 = if pad == 0 { base64_digit(chunk[3]).unwrap_or(0) } else { 0 };
+        let n = (u32::from(d0) << 18) | (u32::from(d1) << 12) | (u32::from(d2) << 6) | u32::from(d3);
+        let take = (3 - pad).min(max_bytes - out.len());
+        for i in 0..take {
+            out.push(((n >> (16 - i * 8)) & 0xff) as u8);
+        }
+    }
+    out
+}
+
+fn matches_image_header(mime_type: &str, header: &[u8]) -> bool {
+    match mime_type {
+        "image/png" => header.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => header.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/gif" => header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a"),
+        "image/webp" => header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WEBP".as_slice()),
+        _ => false,
+    }
+}
+
+/// Validates an MCP image content block (supported MIME type, size limit, canonical base64, and
+/// image magic header).
+fn validated_tool_image(mime: &str, data: &str) -> Option<ToolImage> {
+    let mime_type = match mime.trim().to_ascii_lowercase().as_str() {
+        "image/png" => "image/png",
+        "image/jpeg" | "image/jpg" => "image/jpeg",
+        "image/gif" => "image/gif",
+        "image/webp" => "image/webp",
+        _ => return None,
+    };
+    let data = data.trim();
+    if data.is_empty() || data.len() > MAX_TOOL_IMAGE_BASE64 || !is_valid_base64(data) {
+        return None;
+    }
+    let header = decode_base64_prefix(data, 12);
+    if !matches_image_header(mime_type, &header) {
+        return None;
+    }
+    Some(ToolImage { mime_type: mime_type.to_string(), data_base64: data.to_string() })
+}
+
+/// One OpenAI-shaped tool-result history item. Plain-text results stay a standard `tool` message;
+/// images travel alongside in `tool_images` (stripped or expanded per wire protocol before sending,
+/// and pruned by [`drop_old_views`]).
+fn openai_tool_message(call_id: &str, output: &ToolOutput) -> Value {
+    let mut msg = json!({"role": "tool", "tool_call_id": call_id, "content": output.text});
+    if !output.images.is_empty() {
+        msg["tool_images"] = Value::Array(output.images.iter().map(ToolImage::openai_part).collect());
+    }
+    msg
+}
+
+/// One Anthropic `tool_result` block. Plain-text results use string `content`; results with images
+/// use Anthropic's native content block array (`text` + `image`).
+fn anthropic_tool_result(tool_use_id: &str, output: &ToolOutput) -> Value {
+    let content = if output.images.is_empty() {
+        Value::String(output.text.clone())
+    } else {
+        let mut blocks = Vec::with_capacity(output.images.len() + usize::from(!output.text.is_empty()));
+        if !output.text.is_empty() {
+            blocks.push(json!({"type": "text", "text": output.text}));
+        }
+        blocks.extend(output.images.iter().map(ToolImage::anthropic_block));
+        Value::Array(blocks)
+    };
+    json!({"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": output.failed})
+}
+
+/// A tool call's result as bounded text and validated images for the model, plus whether it failed.
+fn extract_tool_output(r: &Value) -> ToolOutput {
     let failed = r.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    let parts: Vec<String> = r
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .take(16)
-                .map(|c| match c.get("type").and_then(Value::as_str) {
-                    Some("text") => c.get("text").and_then(Value::as_str).unwrap_or("").to_string(),
-                    Some("image") => "[a picture of the view]".to_string(),
-                    _ => String::new(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut text = parts.join("\n");
+    let mut text_parts: Vec<String> = Vec::new();
+    let mut images: Vec<ToolImage> = Vec::new();
+    if let Some(items) = r.get("content").and_then(Value::as_array) {
+        for c in items.iter().take(16) {
+            match c.get("type").and_then(Value::as_str) {
+                Some("text") => {
+                    if let Some(t) = c.get("text").and_then(Value::as_str) {
+                        text_parts.push(t.to_string());
+                    }
+                }
+                Some("image") => {
+                    let mime = c.get("mimeType").and_then(Value::as_str).unwrap_or("");
+                    let data = c.get("data").and_then(Value::as_str).unwrap_or("");
+                    if images.len() < MAX_TOOL_IMAGES
+                        && let Some(img) = validated_tool_image(mime, data)
+                    {
+                        images.push(img);
+                    } else {
+                        text_parts.push(TOOL_IMAGE_FALLBACK_TEXT.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut text = text_parts.join("\n");
     if text.len() > MAX_TOOL_TEXT {
         let mut cut = MAX_TOOL_TEXT;
         while !text.is_char_boundary(cut) {
@@ -1906,7 +2246,7 @@ fn tool_text(r: &Value) -> (String, bool) {
         text.truncate(cut);
         text.push_str("\n…(cut)");
     }
-    (text, failed)
+    ToolOutput { text, images, failed }
 }
 
 /// What a tool call card says: the tool and, for `execute` and `batch`, the commands.
@@ -3637,5 +3977,259 @@ mod tests {
         drop(sent);
         assert!(test_anthropic_endpoint(&http, "http://10.0.0.2/anthropic", Some("k"), "m").is_err());
         assert!(test_anthropic_endpoint(&http, "https://api.anthropic.com", None, "").is_err());
+    }
+
+    fn test_png_base64(tag: u8) -> String {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+        bytes.push(tag);
+        super::super::backend::base64(&bytes)
+    }
+
+    #[test]
+    fn tool_output_extracts_text_and_valid_images_with_guards() {
+        let png = test_png_base64(1);
+        let jpeg = super::super::backend::base64(&[0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+        let gif = super::super::backend::base64(b"GIF89a\x01\x00");
+        let webp = super::super::backend::base64(b"RIFF\x12\x00\x00\x00WEBP");
+
+        // Typical MCP `screenshot` / `compare_picture` payload: image + text blocks.
+        let r = json!({"content": [
+            {"type": "image", "mimeType": "image/png", "data": png},
+            {"type": "text", "text": "Front view 800x600"},
+        ]});
+        let out = extract_tool_output(&r);
+        assert!(!out.failed);
+        assert_eq!(out.text, "Front view 800x600");
+        assert_eq!(out.images, vec![ToolImage { mime_type: "image/png".into(), data_base64: png.clone() }]);
+        assert_eq!(out.display_text(), "Front view 800x600");
+
+        // Image-only payload keeps empty text for protocol encoders and fallback text for UI display.
+        let image_only = extract_tool_output(&json!({"content": [{"type": "image", "mimeType": "image/png", "data": png}]}));
+        assert!(image_only.text.is_empty());
+        assert_eq!(image_only.images.len(), 1);
+        assert_eq!(image_only.display_text(), TOOL_IMAGE_FALLBACK_TEXT);
+
+        // Plain-text error payload without images.
+        let plain_err = extract_tool_output(&json!({"isError": true, "content": [{"type": "text", "text": "no body"}]}));
+        assert!(plain_err.failed);
+        assert_eq!(plain_err.text, "no body");
+        assert!(plain_err.images.is_empty());
+
+        // Supported image formats (including normalized `image/jpg` -> `image/jpeg`).
+        let formats = extract_tool_output(&json!({"content": [
+            {"type": "image", "mimeType": "IMAGE/JPG", "data": jpeg},
+            {"type": "image", "mimeType": "image/gif", "data": gif},
+            {"type": "image", "mimeType": "image/webp", "data": webp},
+        ]}));
+        assert_eq!(formats.images.iter().map(|i| i.mime_type.as_str()).collect::<Vec<_>>(), ["image/jpeg", "image/gif", "image/webp"]);
+
+        // Invalid MIME, malformed or non-canonical base64, wrong magic bytes, and oversized payload fall back cleanly.
+        let not_a_png = super::super::backend::base64(b"not actually a png header");
+        let huge = format!("{}{}", super::super::backend::base64(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00"), "A".repeat(MAX_TOOL_IMAGE_BASE64));
+        let guarded = extract_tool_output(&json!({"content": [
+            {"type": "image", "mimeType": "image/svg+xml", "data": png},
+            {"type": "image", "mimeType": "image/png", "data": "not-base64!"},
+            {"type": "image", "mimeType": "image/png", "data": "AB=="},
+            {"type": "image", "mimeType": "image/png", "data": not_a_png},
+            {"type": "image", "mimeType": "image/png", "data": huge},
+        ]}));
+        assert!(guarded.images.is_empty(), "all invalid/oversized images must be rejected");
+        assert_eq!(guarded.text.matches(TOOL_IMAGE_FALLBACK_TEXT).count(), 5);
+
+        // Per-result image cap (`MAX_TOOL_IMAGES`) keeps the first four and notes extras.
+        let many: Vec<Value> =
+            (0..=MAX_TOOL_IMAGES).map(|i| json!({"type": "image", "mimeType": "image/png", "data": test_png_base64(i as u8)})).collect();
+        let capped = extract_tool_output(&json!({"content": many}));
+        assert_eq!(capped.images.len(), MAX_TOOL_IMAGES);
+        assert_eq!(capped.text, TOOL_IMAGE_FALLBACK_TEXT);
+    }
+
+    #[test]
+    fn tool_result_images_encode_for_all_api_protocols() {
+        let png = test_png_base64(7);
+        let data_url = format!("data:image/png;base64,{png}");
+        let screenshot_out = extract_tool_output(&json!({"content": [
+            {"type": "image", "mimeType": "image/png", "data": png},
+            {"type": "text", "text": "Front view saved"},
+        ]}));
+        let image_only_out = extract_tool_output(&json!({"content": [
+            {"type": "image", "mimeType": "image/png", "data": png},
+        ]}));
+        let measure_out = ToolOutput::plain("volume: 1000 mm^3".into(), false);
+
+        // 1. Direct Anthropic Messages: native `tool_result.content` array with `text` + `image`.
+        let direct_anthropic = anthropic_tool_result("tu_1", &screenshot_out);
+        assert_eq!(direct_anthropic["type"], "tool_result");
+        assert_eq!(direct_anthropic["tool_use_id"], "tu_1");
+        assert_eq!(direct_anthropic["is_error"], false);
+        assert_eq!(
+            direct_anthropic["content"],
+            json!([
+                {"type": "text", "text": "Front view saved"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png}},
+            ])
+        );
+        assert_eq!(anthropic_tool_result("tu_2", &measure_out)["content"], "volume: 1000 mm^3");
+
+        // Shared OpenAI-shaped history with a multi-tool round (screenshot with image + plain measure).
+        let history = vec![
+            json!({"role": "user", "content": "check the part"}),
+            json!({"role": "assistant", "content": null, "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "screenshot", "arguments": "{\"view\":\"front\"}"}},
+                {"id": "c2", "type": "function", "function": {"name": "measure", "arguments": "{}"}},
+            ]}),
+            openai_tool_message("c1", &screenshot_out),
+            openai_tool_message("c2", &measure_out),
+        ];
+
+        // 2. OpenAI Chat Completions: plain string `role: "tool"` messages (no `tool_images` key),
+        // followed immediately by one `role: "user"` message carrying the `image_url` data URI.
+        let chat = openai_chat_messages("sys", &history);
+        assert_eq!(chat.len(), 6, "{chat:?}");
+        assert_eq!(chat[3]["role"], "tool");
+        assert_eq!(chat[3]["tool_call_id"], "c1");
+        assert_eq!(chat[3]["content"], "Front view saved");
+        assert!(chat[3].get("tool_images").is_none(), "internal field must never go on the wire");
+        assert_eq!(chat[4]["role"], "tool");
+        assert_eq!(chat[4]["tool_call_id"], "c2");
+        assert_eq!(chat[4]["content"], "volume: 1000 mm^3");
+        assert_eq!(chat[5]["role"], "user");
+        assert_eq!(chat[5]["content"][0], json!({"type": "text", "text": TOOL_IMAGES_NOTE}));
+        assert_eq!(chat[5]["content"][1], json!({"type": "image_url", "image_url": {"url": data_url}}));
+
+        // Image-only tool result gets fallback string in Chat Completions `role: "tool"`.
+        let img_only_chat = openai_chat_messages("sys", &[openai_tool_message("c9", &image_only_out)]);
+        assert_eq!(img_only_chat[1]["content"], TOOL_IMAGE_FALLBACK_TEXT);
+        assert_eq!(img_only_chat[2]["content"][1]["image_url"]["url"], data_url);
+
+        // 3. OpenCode Go Anthropic Messages: native `image` base64 block inside `tool_result.content`.
+        let go_anthropic = go_anthropic_messages(&history);
+        assert_eq!(go_anthropic.len(), 3);
+        assert_eq!(go_anthropic[2]["role"], "user");
+        assert_eq!(
+            go_anthropic[2]["content"][0],
+            json!({
+                "type": "tool_result",
+                "tool_use_id": "c1",
+                "content": [
+                    {"type": "text", "text": "Front view saved"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png}},
+                ],
+            })
+        );
+        assert_eq!(go_anthropic[2]["content"][1]["content"], "volume: 1000 mm^3");
+
+        // 4. OpenAI Responses API: `function_call_output.output` carries `input_text` + `input_image`,
+        // and `Worker::responses_body` adds `"detail": "auto"` to tool `input_image` parts too.
+        let responses = responses_input("sys", &history);
+        let fc_out = responses.iter().find(|i| i["type"] == "function_call_output" && i["call_id"] == "c1").unwrap();
+        assert_eq!(
+            fc_out["output"],
+            json!([
+                {"type": "input_text", "text": "Front view saved"},
+                {"type": "input_image", "image_url": data_url},
+            ])
+        );
+        let measure_fc = responses.iter().find(|i| i["type"] == "function_call_output" && i["call_id"] == "c2").unwrap();
+        assert_eq!(measure_fc["output"], "volume: 1000 mm^3");
+
+        let (mut worker, _) = scripted_worker(Vec::new());
+        worker.cfg.openai_responses = true;
+        worker.history = history.clone();
+        let body = worker.responses_body();
+        let body_fc = body["input"].as_array().unwrap().iter().find(|i| i["type"] == "function_call_output" && i["call_id"] == "c1").unwrap();
+        assert_eq!(body_fc["output"][1], json!({"type": "input_image", "image_url": data_url, "detail": "auto"}));
+
+        // 5. Gemini: `functionResponse` parts followed by `inlineData` in the same `user` turn.
+        let gemini = go_gemini_contents(&history, &std::collections::HashMap::new());
+        assert_eq!(gemini.len(), 3);
+        assert_eq!(gemini[2]["role"], "user");
+        assert_eq!(
+            gemini[2]["parts"],
+            json!([
+                {"functionResponse": {"name": "screenshot", "response": {"output": "Front view saved"}}},
+                {"functionResponse": {"name": "measure", "response": {"output": "volume: 1000 mm^3"}}},
+                {"inlineData": {"mimeType": "image/png", "data": png}},
+            ])
+        );
+    }
+
+    #[test]
+    fn drop_old_views_prunes_tool_result_images_for_openai_and_anthropic() {
+        let make_out = |n: u8| {
+            extract_tool_output(&json!({"content": [
+                {"type": "image", "mimeType": "image/png", "data": test_png_base64(n)},
+                {"type": "text", "text": format!("view {n}")},
+            ]}))
+        };
+
+        // OpenAI-shaped history with 4 tool-result screenshots (> MAX_HISTORY_IMAGES == 2).
+        let mut openai_history = vec![json!({"role": "user", "content": "inspect all sides"})];
+        for n in 1..=4 {
+            openai_history.push(json!({"role": "assistant", "content": null, "tool_calls": [
+                {"id": format!("c{n}"), "type": "function", "function": {"name": "compare_picture", "arguments": "{}"}},
+            ]}));
+            openai_history.push(openai_tool_message(&format!("c{n}"), &make_out(n)));
+        }
+        assert!(drop_old_views(&mut openai_history, MAX_HISTORY_IMAGES));
+
+        // Verify all 4 OpenAI-history wire formats carry only the 2 newest images and keep notes for dropped ones.
+        let p3 = test_png_base64(3);
+        let p4 = test_png_base64(4);
+        let u3 = format!("data:image/png;base64,{p3}");
+        let u4 = format!("data:image/png;base64,{p4}");
+        let chat = openai_chat_messages("sys", &openai_history);
+        let chat_urls: Vec<&str> = chat.iter().filter_map(|m| m["content"].as_array()).flatten().filter_map(openai_part_image_url).collect();
+        assert_eq!(chat_urls, vec![u3.as_str(), u4.as_str()]);
+        // Pruned tool rounds emit no extra `user` message and carry `DROPPED_VIEW_NOTE` in their `tool` content.
+        assert_eq!(chat.iter().filter(|m| m["role"] == "user").count(), 3, "initial user + 2 active image rounds");
+        let pruned_tool = chat.iter().find(|m| m["role"] == "tool" && m["tool_call_id"] == "c1").unwrap();
+        assert_eq!(pruned_tool["content"], format!("view 1\n{DROPPED_VIEW_NOTE}"));
+
+        let responses = responses_input("sys", &openai_history);
+        let resp_c1 = responses.iter().find(|i| i["type"] == "function_call_output" && i["call_id"] == "c1").unwrap();
+        assert_eq!(resp_c1["output"], format!("view 1\n{DROPPED_VIEW_NOTE}"));
+        let resp_c4 = responses.iter().find(|i| i["type"] == "function_call_output" && i["call_id"] == "c4").unwrap();
+        assert_eq!(resp_c4["output"][1]["image_url"], format!("data:image/png;base64,{p4}"));
+
+        let go_anth = go_anthropic_messages(&openai_history);
+        let anth_data: Vec<&str> = go_anth
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .filter(|b| b["type"] == "tool_result")
+            .filter_map(|b| b["content"].as_array())
+            .flatten()
+            .filter_map(|b| b.pointer("/source/data").and_then(Value::as_str))
+            .collect();
+        assert_eq!(anth_data, vec![p3.as_str(), p4.as_str()]);
+
+        let gemini = go_gemini_contents(&openai_history, &std::collections::HashMap::new());
+        let gem_data: Vec<&str> = gemini
+            .iter()
+            .filter_map(|m| m["parts"].as_array())
+            .flatten()
+            .filter_map(|p| p.pointer("/inlineData/data").and_then(Value::as_str))
+            .collect();
+        assert_eq!(gem_data, vec![p3.as_str(), p4.as_str()]);
+
+        // Anthropic-shaped history mixing a user-attached image with tool_result screenshots.
+        let mut anth_history = vec![
+            user_message(Protocol::Anthropic, &[PromptPart::Text("ref".into()), PromptPart::Image { mime: "image/png".into(), base64: "U0".into() }]),
+            json!({"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "screenshot", "input": {}}]}),
+            json!({"role": "user", "content": [anthropic_tool_result("t1", &make_out(1))]}),
+            json!({"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "screenshot", "input": {}}]}),
+            json!({"role": "user", "content": [anthropic_tool_result("t2", &make_out(2))]}),
+            json!({"role": "assistant", "content": [{"type": "tool_use", "id": "t3", "name": "compare_picture", "input": {}}]}),
+            json!({"role": "user", "content": [anthropic_tool_result("t3", &make_out(3))]}),
+        ];
+        assert!(drop_old_views(&mut anth_history, MAX_HISTORY_IMAGES));
+        assert_eq!(anth_history[0]["content"][1], json!({"type": "text", "text": DROPPED_VIEW_NOTE}));
+        assert_eq!(
+            anth_history[2]["content"][0]["content"],
+            json!([{"type": "text", "text": "view 1"}, {"type": "text", "text": DROPPED_VIEW_NOTE}])
+        );
+        assert_eq!(anth_history[4]["content"][0]["content"][1]["source"]["data"], test_png_base64(2));
+        assert_eq!(anth_history[6]["content"][0]["content"][1]["source"]["data"], test_png_base64(3));
     }
 }

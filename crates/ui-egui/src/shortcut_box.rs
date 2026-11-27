@@ -177,12 +177,13 @@ pub fn score(q: &str, s: &str) -> u32 {
 fn keywords(id: &str) -> &'static str {
     match id {
         "file.save_mesh" => "export stl 3mf mesh 3d print printing slicer",
-        "file.export" => "export stl 3mf obj step urdf sdf gazebo mesh 3d print",
+        "file.export" => "export stl 3mf obj step urdf sdf gazebo mjcf mujoco mesh 3d print",
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
         "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
         "file.export_sdf" => "gazebo model simulation world texture",
+        "file.export_mjcf" => "mujoco robot simulation",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",
         "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",

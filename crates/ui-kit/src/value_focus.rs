@@ -129,9 +129,10 @@ pub fn editor_has_focus(ctx: &egui::Context) -> bool {
         .is_some_and(|id| ctx.memory(|memory| memory.focused() == Some(id)))
 }
 
-/// Only a value box drawn this pass can receive the keyboard after a viewport pick.
-pub fn canvas_value_focus(ctx: &egui::Context) -> Option<(egui::Id, usize)> {
-    ctx.data(|data| data.get_temp::<(u64, egui::Id, usize)>(egui::Id::unique("sc_canvas_value_focus")))
-        .filter(|(pass, _, _)| *pass == ctx.cumulative_pass_nr())
-        .map(|(_, id, length)| (id, length))
+/// Only value boxes drawn this pass can receive the keyboard after a viewport pick.
+pub fn canvas_value_fields(ctx: &egui::Context) -> Vec<(egui::Id, usize)> {
+    ctx.data(|data| data.get_temp::<(u64, Vec<(egui::Id, usize)>)>(egui::Id::unique("sc_canvas_value_focus")))
+        .filter(|(pass, _)| *pass == ctx.cumulative_pass_nr())
+        .map(|(_, fields)| fields)
+        .unwrap_or_default()
 }

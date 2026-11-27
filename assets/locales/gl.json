@@ -4904,7 +4904,7 @@
   "ui.ribbon_exit": "Saír",
   "ui.ribbon_labels": "Mostrar texto baixo as iconas da cinta",
   "ui.ribbon_menus_skip_pinned": "Deixar as ordes fixadas fóra dos menús despregables",
-  "ui.ribbon_pin_footer": "As ordes fixadas móstranse na cinta. Pasa o cursor sobre unha fila para fixala ou soltala.",
+  "ui.ribbon_pin_footer": "As ordes fixadas móstranse na cinta. Fixa ou solta unha orde desde o seu menú ⋯.",
   "ui.ribbon_workspace": "Espazo de traballo",
   "ui.right": "Dereita",
   "ui.right_click_confirms": "O clic dereito confirma as entradas do diálogo",

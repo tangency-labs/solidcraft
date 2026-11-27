@@ -551,6 +551,11 @@ impl crate::Feature {
             K::Align { from_frame, to_frame, .. } => {
                 for fr in [from_frame, to_frame].into_iter().flatten() {
                     if let crate::AlignFrame::Origin { origin } = fr {
+                        if let Some(sk) = origin.snap.sketch_feature_mut()
+                            && let Some(&mapped) = ids.get(sk)
+                        {
+                            *sk = mapped;
+                        }
                         for n in origin.snap.face_names_mut() {
                             *n = remap_topology(n, ids, bodies);
                         }
