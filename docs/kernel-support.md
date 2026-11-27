@@ -21,7 +21,7 @@ later.
 | Kernel | Adapter | Maintained by | Build feature | Operations | Naming gate | Accuracy gate |
 |---|---|---|---|---|---|---|
 | solidcore | `crates/kernel` (`Solidcore`) | SolidCraft | always on | all (`OpKind::ALL`) | the reference | the reference |
-| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude and revolve of sketch profiles (not tapered, not arcs joined first), boolean, fillet (constant radius, mitred turns), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
+| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude (not tapered) and revolve of sketch profiles, boolean, fillet (constant radius, mitred turns, the Fillet feature's too), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
 
 The Open CASCADE row is an experiment that checks the interface fits a second kernel; no build we
 ship routes anything to it. OCCT is LGPL-2.1 with the Open CASCADE exception: it lives in

@@ -151,7 +151,7 @@ impl Backend for Occt {
         match op {
             OpKind::Box | OpKind::Cylinder | OpKind::Sphere | OpKind::Torus | OpKind::Boolean => Support::Yes,
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
-            OpKind::Revolve => Support::Some("arcs not joined first".into()),
+            OpKind::Revolve => Support::Yes,
             OpKind::Fillet => Support::Some("constant radius with mitred turns".into()),
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
@@ -243,11 +243,10 @@ impl Modelling for Occt {
         _whole: bool,
         sides: RevolveSides<'_>,
     ) -> Result<Vec<Shape>, BackendError> {
-        let one_curve = match sides {
-            RevolveSides::AsDrawn => None,
-            RevolveSides::JoinFreeForm(f) => Some(f),
-            // solidcore's revolution certifies and joins pieces of one circle as it turns them.
-            RevolveSides::JoinArcs => return unsupported("a revolution that joins arcs"),
+        let (one_curve, join_arcs) = match sides {
+            RevolveSides::AsDrawn => (None, false),
+            RevolveSides::JoinFreeForm(f) => (Some(f), false),
+            RevolveSides::JoinArcs => (None, true),
         };
         let plans = crate::build::revolution_plans_of(plane, regions, axis.origin, axis.dir, angle, one_curve).map_err(refused)?;
         plans
@@ -255,6 +254,13 @@ impl Modelling for Occt {
             .map(|x| {
                 let (curves, origin, k, turn) =
                     crate::smlib_sweeps::revolution_curves(plane, &x.pieces, x.origin, x.axis, x.angle).map_err(refused)?;
+                // Pieces of one circle joined as solidcore joins them before it turns them.
+                let curves = if join_arcs {
+                    solidcore_ops::sweep::join_profile_arcs(&curves)
+                        .map_err(|e| BackendError::Unsupported(format!("input solidcore refuses ({e})")))?
+                } else {
+                    curves
+                };
                 Shape::revolve_profile(&encode_profile(&curves)?, origin, k, turn).map_err(failed)
             })
             .collect()
@@ -660,17 +666,26 @@ mod tests {
     }
 
     #[test]
-    fn a_revolution_that_joins_arcs_runs_on_solidcore() {
-        use crate::route::foreign::{Kernel, fell_back, set_kernel};
-        use solidcore_record::Vec2;
+    fn revolutions_that_join_arcs_match_solidcore_with_the_same_names() {
+        use solidcore_record::{Loop2, Seg2, Vec2};
+        use std::f64::consts::{PI, TAU};
+        let pl = Plane::XZ;
+        let y = Vec2::new(0.0, 1.0);
+        // x 2..4, z 0..3 turned 1 radian: area 6 about a centroid at radius 3 (Pappus).
         let rect = region(poly(&[(2.0, 0.0), (4.0, 0.0), (4.0, 3.0), (2.0, 3.0)]), vec![]);
-        let _chosen = crate::route::foreign::choosing();
-        set_kernel(Kernel::Occt);
-        let before = fell_back();
-        let b = crate::route::revolve_joining_arcs(&Plane::XZ, std::slice::from_ref(&rect), Vec2::ZERO, Vec2::new(0.0, 1.0), 1.0).unwrap();
-        set_kernel(Kernel::Solidcore);
-        assert!(fell_back() > before);
-        assert!(b[0].history().is_some());
+        parity("a rectangle, nothing to join", Some(18.0), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&rect), Vec2::ZERO, y, 1.0)
+        });
+        // A disc of r 1 at radius 6 drawn as two half circles, joined into one: a ring torus,
+        // 2π · 6 · π.
+        let half = |start: f64| Seg2::Arc { center: Vec2::new(6.0, 0.0), radius: 1.0, start, sweep: PI };
+        let disc = region(Loop2 { segs: vec![half(0.0), half(PI)] }, vec![]);
+        parity("two half circles joined", Some(12.0 * PI * PI), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&disc), Vec2::ZERO, y, TAU)
+        });
+        parity("two half circles joined, a quarter turn", Some(3.0 * PI * PI), || {
+            crate::route::revolve_joining_arcs(&pl, std::slice::from_ref(&disc), Vec2::ZERO, y, PI / 2.0)
+        });
     }
 
     /// `build` on both kernels: Open CASCADE ran it, the shared check passes both, and their
