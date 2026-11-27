@@ -13,8 +13,6 @@ publish = false
 solidcraft-kernel = { path = "../../../crates/kernel" }
 solidcraft-geom = { path = "../../../crates/geom" }
 solidcore-record = { path = "../../../solidcore/crates/solidcore-record" }
-solidcore-ops = { path = "../../../solidcore/crates/solidcore-ops" }
-solidcore-tess = { path = "../../../solidcore/crates/solidcore-tess" }
 serde_json = "1"
 
 [profile.release]

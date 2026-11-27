@@ -106,6 +106,12 @@ pub(super) fn link_target(file: &Path) -> PathBuf {
     parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
 }
 
+/// The place `file` really is, every link in its path followed (`None`: it cannot be resolved, as
+/// for a missing file, or on the web, which has no such links).
+pub(super) fn real_file(file: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(file).ok()
+}
+
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
@@ -114,6 +120,14 @@ pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
         Some(d) => absolute(&d.join(p)),
         _ => p.to_path_buf(),
     }
+}
+
+/// Whether `file` is in the folder of the design saved at `design`, or below it, with directory
+/// aliases resolved as a link's path is kept ([`link_target`]). An unsaved design has no folder.
+pub(super) fn inside_design_folder(design: Option<&str>, file: &Path) -> bool {
+    base_dir(design)
+        .and_then(|base| relative(&base, &link_target(file)))
+        .is_some_and(|rel| !rel.as_os_str().is_empty() && rel.components().all(|c| matches!(c, PathPart::Normal(_))))
 }
 
 /// One link's path, kept for a design saved at `from`, as a design saved at `to` keeps it: the
@@ -219,7 +233,8 @@ pub(crate) fn map_paths(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> St
 /// named: its component links', then its drawings' sources'. The read-only side of [`map_paths`].
 #[cfg_attr(not(test), expect(dead_code, reason = "a design pack (#9857) lists the files it packs here"))]
 pub(crate) fn linked_files(doc: &Document, from: Option<&str>) -> Vec<PathBuf> {
-    let links = doc.links.values().map(|link| link.path.as_str());
+    // A link to a design that came from the session names no file: it is not a file to pack.
+    let links = doc.links.values().map(|link| link.path.as_str()).filter(|path| !path.is_empty());
     let sources = doc.drawings.iter().flat_map(|d| d.sources.iter().filter_map(|source| source.path.as_deref()));
     let mut seen = BTreeSet::new();
     links.chain(sources).map(|path| absolute(&resolve(from, path))).filter(|file| seen.insert(file.clone())).collect()
@@ -231,7 +246,9 @@ type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
-    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
+    // A link to a design that came from the session names no file: it stays as it is.
+    let links: BTreeMap<u64, DesignLink> =
+        doc.links.iter().map(|(c, l)| (*c, DesignLink { path: if l.path.is_empty() { String::new() } else { map(&l.path) }, ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
     ((links != doc.links).then_some(links), sources.then_some(drawings))
@@ -354,20 +371,26 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 
 /// The bytes of the linked design at `file`, linked from the design saved at `design`, read
 /// through the folders the caller may use, or why they can't be: a network location not allowed
-/// or a device (judged from the path's text before anything is read), not a design file name,
-/// missing, larger than the design size limit, or outside an agent's folders. Each with the
+/// or a device (judged from the path's text before anything is read), not a design or STEP file
+/// name, missing, larger than the design (or STEP) size limit, or outside an agent's folders. Each with the
 /// reason to show. Every kind of link reads its file here.
-pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<u8>, LinkProblem> {
+/// `any`: the file is one an importer plugin reads, whatever its name, under the STEP size limit.
+pub(super) fn read_linked_file(file: &Path, design: Option<&str>, any: bool) -> Result<Vec<u8>, LinkProblem> {
     let shown = file.display().to_string();
     if let Some(why) = refusal(&shown, design) {
         return Err(why);
     }
-    if !solidcraft_io::is_design_path(&shown) {
+    // A linked STEP file is read under the STEP size limit; every other link is a design.
+    let step = any || super::component_link::is_step_source(&shown);
+    if !step && !solidcraft_io::is_design_path(&shown) {
         return Err(problem(LinkState::Unreadable, format!("{shown}: not a .{} design", solidcraft_io::DESIGN_EXT)));
     }
-    let limit = solidcraft_io::limits::max_design_bytes();
-    solidcraft_io::vfs::read_design_path(&shown, design, limit)
-        .map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(solidcraft_io::limits::Kind::Design, e)))
+    let (kind, limit) = if step {
+        (solidcraft_io::limits::Kind::Step, solidcraft_io::limits::max_step_bytes())
+    } else {
+        (solidcraft_io::limits::Kind::Design, solidcraft_io::limits::max_design_bytes())
+    };
+    solidcraft_io::vfs::read_design_path(&shown, design, limit).map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(kind, e)))
 }
 
 #[cfg(test)]
@@ -546,17 +569,20 @@ mod tests {
         let dir = folder("read");
         let good = dir.join("plate.sc");
         std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate")).unwrap()).unwrap();
-        let read = read_linked_file(&good, None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
+        let read = read_linked_file(&good, None, false).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
         assert_eq!(read, Ok(Some("plate".to_string())));
         assert_eq!(link_presence(&good, None), None);
-        let state = |file: &Path| read_linked_file(file, None).err().map(|e| (e.state, e.reason));
+        let state = |file: &Path| read_linked_file(file, None, false).err().map(|e| (e.state, e.reason));
         // Missing: no file there (and the same without reading it).
         let missing = dir.join("gone.sc");
         assert!(matches!(state(&missing), Some((LinkState::Missing, r)) if r.contains("gone.sc")));
         assert_eq!(link_presence(&missing, None).map(|p| p.state), Some(LinkState::Missing));
-        // Unreadable: not a design file name, or a folder.
+        // Unreadable: neither a design nor a STEP file name, or a folder.
+        std::fs::write(dir.join("part.txt"), b"ISO-10303-21;").unwrap();
+        assert!(matches!(state(&dir.join("part.txt")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        // A STEP file is a link source too (Insert STEP keeps its link), read under the STEP limit.
         std::fs::write(dir.join("part.step"), b"ISO-10303-21;").unwrap();
-        assert!(matches!(state(&dir.join("part.step")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        assert_eq!(read_linked_file(&dir.join("part.step"), None, false), Ok(b"ISO-10303-21;".to_vec()));
         std::fs::create_dir_all(dir.join("folder.sc")).unwrap();
         assert!(matches!(state(&dir.join("folder.sc")), Some((LinkState::Unreadable, _))));
         // A design a newer SolidCraft saved is read like any other, and opens saying so (#12166).
@@ -564,7 +590,7 @@ mod tests {
         newer["format"] = serde_json::json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
         std::fs::write(dir.join("next.sc"), newer.to_string()).unwrap();
         let opened =
-            read_linked_file(&dir.join("next.sc"), None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.newer_file.is_some()).ok());
+            read_linked_file(&dir.join("next.sc"), None, false).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.newer_file.is_some()).ok());
         assert_eq!(opened, Ok(Some(true)));
         // Not allowed: outside the folders an agent may use, without saying whether it exists.
         let inside = dir.join("inside");
@@ -588,11 +614,11 @@ mod tests {
     fn network_and_device_paths_are_refused_before_anything_is_read() {
         let calls = solidcraft_io::vfs::file_calls();
         let network = Path::new(r"\\fileserver\share\standard.sc");
-        let refused = read_linked_file(network, None).err();
+        let refused = read_linked_file(network, None, false).err();
         assert!(matches!(&refused, Some(p) if p.state == LinkState::NotAllowed && p.reason.contains("fileserver")), "{refused:?}");
         assert_eq!(link_presence(network, None).map(|p| p.state), Some(LinkState::NotAllowed));
         let device = Path::new(r"\\.\pipe\standard.sc");
-        assert_eq!(read_linked_file(device, None).err().map(|p| p.state), Some(LinkState::Unreadable));
+        assert_eq!(read_linked_file(device, None, false).err().map(|p| p.state), Some(LinkState::Unreadable));
         assert_eq!(solidcraft_io::vfs::file_calls(), calls, "a refused path asked the file system");
     }
 

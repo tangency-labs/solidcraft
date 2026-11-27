@@ -1,0 +1,436 @@
+{
+ "case": "21687-insert-intersect-chamfered-block-corner",
+ "area": "booleans",
+ "sources": [
+  "tangency-labs/solidcraft#21687"
+ ],
+ "what": "intersect of a 0.8 mm insert with a block chamfered 0.3 mm x 45 deg along its bottom edges; one side of the insert lies on a chamfered facet and its corner 0.00015 mm past the block's corner, so its next side leaves the next facet by 5.6e-6 rad (1.1e-5 mm at most): the chamfer wedge along both facets is removed, not lost",
+ "calls": [
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b1"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 7.0,
+    "draft": 0.0,
+    "profile": [
+     {
+      "line": {
+       "end": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "start": [
+        -2.0,
+        0.15,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "start": [
+        0.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        4.0,
+        0.15,
+        0.0
+       ],
+       "start": [
+        2.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        4.0,
+        10.0,
+        0.0
+       ],
+       "start": [
+        4.0,
+        0.15,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -2.0,
+        10.0,
+        0.0
+       ],
+       "start": [
+        4.0,
+        10.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -2.0,
+        0.15,
+        0.0
+       ],
+       "start": [
+        -2.0,
+        10.0,
+        0.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b2"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b3"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b3"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b4"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b4"
+   ],
+   "op": "blend_dropping",
+   "outputs": [
+    "b5"
+   ],
+   "params": {
+    "edges": {
+     "kind": "edge",
+     "picked": [
+      {
+       "at": [
+        [
+         -2.0,
+         0.15,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       "index": 11
+      },
+      {
+       "at": [
+        [
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         2.0,
+         0.0,
+         0.0
+        ]
+       ],
+       "index": 13
+      },
+      {
+       "at": [
+        [
+         2.0,
+         0.0,
+         0.0
+        ],
+        [
+         4.0,
+         0.15,
+         0.0
+        ]
+       ],
+       "index": 15
+      },
+      {
+       "at": [
+        [
+         4.0,
+         0.15,
+         0.0
+        ],
+        [
+         4.0,
+         10.0,
+         0.0
+        ]
+       ],
+       "index": 17
+      },
+      {
+       "at": [
+        [
+         4.0,
+         10.0,
+         0.0
+        ],
+        [
+         -2.0,
+         10.0,
+         0.0
+        ]
+       ],
+       "index": 7
+      },
+      {
+       "at": [
+        [
+         -2.0,
+         10.0,
+         0.0
+        ],
+        [
+         -2.0,
+         0.15,
+         0.0
+        ]
+       ],
+       "index": 9
+      }
+     ],
+     "points": [
+      [
+       -1.0,
+       0.075,
+       0.0
+      ],
+      [
+       1.0,
+       0.0,
+       0.0
+      ],
+      [
+       3.0,
+       0.075,
+       0.0
+      ],
+      [
+       4.0,
+       5.075,
+       0.0
+      ],
+      [
+       1.0,
+       10.0,
+       0.0
+      ],
+      [
+       -2.0,
+       5.075,
+       0.0
+      ]
+     ],
+     "tolerance": 0.6810735254367722
+    },
+    "kind": "chamfer",
+    "sizes": [
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3
+    ],
+    "turn": "mitre"
+   }
+  },
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b6"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 0.8,
+    "draft": 0.0,
+    "profile": [
+     {
+      "line": {
+       "end": [
+        0.00015,
+        -1.125e-05,
+        0.0
+       ],
+       "start": [
+        -1.0,
+        0.075,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "start": [
+        0.00015,
+        -1.125e-05,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        0.5,
+        2.0,
+        0.0
+       ],
+       "start": [
+        2.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        -1.0,
+        0.075,
+        0.0
+       ],
+       "start": [
+        0.5,
+        2.0,
+        0.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b7"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b8"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b9"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b10"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b7",
+    "b9"
+   ],
+   "op": "boolean",
+   "outputs": [
+    "b11"
+   ],
+   "params": {
+    "op": "intersect"
+   }
+  }
+ ],
+ "bodies": {
+  "b2": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b7": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b9": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "result": [
+  {
+   "body": "Insert",
+   "made": "b11"
+  }
+ ],
+ "expected": {
+  "source": "analytic",
+  "method": "V = integral over z in [0, 0.8] of the area of the insert's quad (-1,0.075),(0.00015,-1.125e-5),(2,0),(0.5,2) clipped by the block's hexagon section, each side moved in by max(0, 0.3 - z) for the 45 deg chamfer (Simpson, 20000 steps over [0, 0.3], piecewise quadratic): 2.28657966; faces: the insert's top, its three sides inside the block (from (0.5,2) to (-1,0.075), from (-1,0.075) along the facet line (-2,0.15)-(0,0), and from (2,0) to (0.5,2)), its bottom (on the block's bottom), the block's facet y = 0 above its chamfer (the insert's side along it lies outside the block, up to 1.1e-5), and the two chamfer faces along the facets the insert crosses = 8",
+  "body_count": 1,
+  "faces": 8,
+  "volume_mm3": 2.2865796601054
+ },
+ "operation_expressible": true,
+ "expressible": true,
+ "why_not": [],
+ "ungraded": [],
+ "traced_ops": [
+  "extrude",
+  "copy",
+  "tagged",
+  "blend_dropping",
+  "extrude",
+  "copy",
+  "copy",
+  "boolean"
+ ],
+ "records": "21687-insert-intersect-chamfered-block-corner.bodies.json.gz"
+}

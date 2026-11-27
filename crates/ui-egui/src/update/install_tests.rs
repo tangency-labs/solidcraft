@@ -228,7 +228,7 @@ fn installers_and_disk_images_are_handed_over() {
     std::fs::write(&pkg, b"msi").unwrap();
     assert_eq!(
         apply(&Method::Msi, &pkg).unwrap(),
-        Outcome::Installer("msiexec".into(), vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into()])
+        Outcome::Installer("msiexec".into(), vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()],)
     );
     assert_eq!(apply(&Method::Dmg, &pkg).unwrap(), Outcome::Opened(pkg.clone()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -236,17 +236,32 @@ fn installers_and_disk_images_are_handed_over() {
 
 #[test]
 fn windows_installer_is_followed_by_the_new_version() {
-    let args = vec!["/i".to_string(), r"C:\Users\a b\Temp\solidcraft-update\x.msi".to_string(), "/passive".to_string()];
+    let args =
+        vec!["/i".to_string(), r"C:\Users\a b\Temp\solidcraft-update\x.msi".to_string(), "/passive".to_string(), "REBOOT=ReallySuppress".to_string()];
     let (program, out) = relaunch_after(Path::new("msiexec"), &args, Path::new(r"C:\Program Files\SolidCraft\it's.exe"));
     assert_eq!(program, PathBuf::from("powershell"));
     assert_eq!(
         out.last().unwrap(),
         &concat!(
-            r#"Start-Process -FilePath 'msiexec' -ArgumentList '/i','"C:\Users\a b\Temp\solidcraft-update\x.msi"','/passive' -Wait; "#,
+            r#"Start-Process -FilePath 'msiexec' -ArgumentList '/i','"C:\Users\a b\Temp\solidcraft-update\x.msi"','/passive','REBOOT=ReallySuppress' -Wait; "#,
             r"Start-Process -FilePath 'C:\Program Files\SolidCraft\it''s.exe'"
         )
     );
     assert!(out.iter().any(|a| a == "-Command"));
+}
+
+/// The passive Windows update cannot reboot the user's PC even when another SolidCraft
+/// executable keeps an MSI file locked. This is a command contract, not a live Windows test.
+#[test]
+fn windows_passive_update_always_suppresses_system_reboot() {
+    let pkg = Path::new(r"C:\Users\a b\Temp\solidcraft-update\x.msi");
+    let Outcome::Installer(program, args) = apply(&Method::Msi, pkg).unwrap() else { panic!("expected MSI command") };
+    assert_eq!(program, PathBuf::from("msiexec"));
+    assert_eq!(&args[0..3], ["/i", pkg.to_str().unwrap(), "/passive"]);
+    assert!(args.iter().any(|arg| arg == "REBOOT=ReallySuppress"));
+    assert_eq!(args.iter().filter(|arg| arg.starts_with("REBOOT=")).count(), 1);
+    let (_, command) = relaunch_after(&program, &args, Path::new(r"C:\Program Files\SolidCraft\solidcraft.exe"));
+    assert!(command.last().unwrap().contains("'REBOOT=ReallySuppress'"), "suppression survives the PowerShell relaunch");
 }
 
 #[test]
