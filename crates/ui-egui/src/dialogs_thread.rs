@@ -294,6 +294,8 @@ pub struct Options {
     /// An index into the extents (full, length, up to).
     pub extent: usize,
     pub ease_out: Ease,
+    /// A modelled internal thread runs down to a blind hole's bottom (#22616).
+    pub to_bottom: bool,
     pub tip: ThreadTip,
     pub chamfer_angle: String,
     pub chamfer_depth: String,
@@ -308,6 +310,7 @@ impl Default for Options {
             starts: 1,
             extent: FULL,
             ease_out: Ease::default(),
+            to_bottom: false,
             tip: ThreadTip::default(),
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
@@ -506,6 +509,10 @@ pub(crate) fn rows(
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
         }
         enter |= end_rows(ui, &mut o.ease_out);
+        // A square end of a modelled thread can run down to a blind hole's bottom (#22616).
+        if *modeled && !o.ease_out.fade {
+            crate::ui_kit::checkbox_grid(ui, &mut [("Run to the hole's bottom", &mut o.to_bottom)], 2);
+        }
     });
     (enter, reset)
 }
@@ -653,6 +660,9 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if let Some(e) = o.ease_out.param() {
         p["ease_out"] = e;
     }
+    if o.to_bottom && !o.ease_out.fade && p.get("modeled").and_then(Value::as_bool).unwrap_or(false) {
+        p["to_bottom"] = json!(true);
+    }
     if o.tip != ThreadTip::None {
         p["tip"] = json!(o.tip);
         put(p, &[("chamfer_angle", o.chamfer_angle.as_str()), ("chamfer_depth", o.chamfer_depth.as_str())]);
@@ -717,6 +727,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         hand,
         starts,
         ease_out,
+        to_bottom,
         tip,
         chamfer_angle,
         chamfer_depth,
@@ -746,6 +757,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
             FULL
         },
         ease_out: Ease::of(ease_out),
+        to_bottom: *to_bottom,
         tip: *tip,
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
@@ -840,7 +852,7 @@ mod contribution_tests {
     fn custom_hole_widget() -> crate::scenario::Harness {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -923,7 +935,7 @@ mod contribution_tests {
     fn a_tapped_hole_is_modelled_with_the_threads_end() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -956,7 +968,7 @@ mod contribution_tests {
     fn a_tapped_holes_drill_is_the_tap_makers_or_one_within_its_range() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -999,7 +1011,7 @@ mod contribution_tests {
     fn manual_designation_keeps_keyboard_focus_when_custom_fields_appear() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();

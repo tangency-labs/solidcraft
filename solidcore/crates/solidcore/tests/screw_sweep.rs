@@ -30,6 +30,7 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::sweep::screw::MAX_STATIONS;
 use solidcore::sweep::screw::{
     screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, screw_sweep_with,
     Walls,
@@ -314,6 +315,83 @@ fn out_of_range_inputs_are_refused() {
     assert!(screw_sweep_radial(&mut k, &c, O, Z, 1.0, 3.0, &bad, 1e-4).is_err());
     let late = [(0.0, 0.1), (4.0, 0.0)];
     assert!(screw_sweep_radial(&mut k, &c, O, Z, 1.0, 3.0, &late, 1e-4).is_err());
+}
+
+/// #22577: a thread along a whole rod, 202 turns of pitch 1.25 (the fork stopped at 200).
+/// Its section is a V 1 wide at radius 8.5 with its point at 7.2; the top line runs along
+/// the axis, so every wall comes in half turns.
+fn rod_thread() -> Meridian {
+    Meridian::Polygon(vec![(7.2, 0.5), (8.5, 0.0), (8.5, 1.0)])
+}
+
+#[test]
+fn issue_22577_a_thread_of_202_turns_builds() {
+    let mut k = Kernel::default();
+    let (p, turns) = (1.25, 202.0);
+    // SolidCraft's tolerance: a ten-thousandth of the pitch
+    let tol = p * 1e-4;
+    let m = rod_thread();
+    let mut b = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    // 404 half turns of three walls and two caps; a section of three vertices and three
+    // edges at each of the 405 breaks and ends, three edges along each half turn
+    let halves = 2 * turns as usize;
+    assert_eq!(p1::faces(&b, None).unwrap().len(), 3 * halves + 2);
+    assert_eq!(
+        p1::edges(&b, None).unwrap().len(),
+        3 * (halves + 1) + 3 * halves
+    );
+    assert_eq!(p1::vertices(&b, None).unwrap().len(), 3 * (halves + 1));
+    // one closed boundary: the solid's region and the infinite one, a shell each
+    assert_eq!(p1::regions(&b, None).unwrap().len(), 2);
+    assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 2);
+    // Pappus: the section's area times 2 pi times its centroid's radius, per turn. Each
+    // wall lies within `tol` of its screw surface, so the volume is off by at most `tol`
+    // times the walls' area; a wall of a line of length l is at most l times the helix at
+    // its outer end, turn for turn.
+    let (area, centroid) = (0.5 * 1.0 * 1.3, (7.2 + 8.5 + 8.5) / 3.0);
+    let expected = area * 2.0 * PI * centroid * turns;
+    let flank = 0.5f64.hypot(1.3);
+    let helix = (2.0 * PI * 8.5).hypot(p) * turns;
+    let bound = tol * (1.0 + 2.0 * flank) * helix;
+    let v = volume(&k, &mut b);
+    assert!(
+        (v - expected).abs() <= bound,
+        "volume {v}, expected {expected} within {bound}"
+    );
+}
+
+#[test]
+fn issue_22577_more_turns_than_the_spans_hold_are_refused_by_the_spans() {
+    // At this tolerance a half turn takes eight spans: 1000 turns take 16000, more than
+    // `MAX_STATIONS`, and the refusal says so.
+    let mut k = Kernel::default();
+    let tol = 1.25e-4;
+    let refusal = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, 1000.0, tol);
+    assert!(
+        matches!(
+            refusal,
+            Err(SolidError::InvalidInput {
+                reason: "too many turns for the tolerance: more spans than a screw sweep takes",
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+    // past what the span bound can ever hold (a span turns at most an eighth of a turn), the
+    // turns themselves are refused, before any span is counted
+    let past = MAX_STATIONS / 8.0 + 1.0;
+    let early = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, past, 1.0);
+    assert!(
+        matches!(
+            early,
+            Err(SolidError::InvalidInput {
+                reason: "origin, pitch, turns or tolerance out of range",
+                ..
+            })
+        ),
+        "{early:?}"
+    );
 }
 
 #[test]

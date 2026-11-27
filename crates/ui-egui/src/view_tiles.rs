@@ -222,11 +222,11 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
     let layer = ui.layer_id();
     if render_ground {
-        let [top, bottom] = crate::render_workspace::tile_background(app);
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, bottom);
+        let (top, middle, bottom) = crate::render_workspace::tile_background(app);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, middle, bottom);
     } else if crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
         let t = Tokens::get();
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_middle, t.viewport_bottom);
     }
     let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {

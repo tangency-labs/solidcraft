@@ -386,7 +386,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             let gone = s.doc_mut().remove_occurrences(&std::collections::BTreeSet::from([o.id]));
             s.visibility.hidden_joints.retain(|h| !gone.contains(h));
             joints.extend(gone);
-            s.pending_moves.remove(&o.id);
+            s.clear_pending_move(o.id);
             done = true;
         } else {
             components.push(o.component);
@@ -1267,6 +1267,102 @@ mod tests {
         run(&mut s, "edit.undo", json!({}));
         let back: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
         assert_eq!(back, meshes, "undo brings the deleted mesh back");
+    }
+
+    /// Deleting an occurrence of a linked component must not renumber disambiguated body names
+    /// (`VIS (3)` → `VIS (2)`) on untouched components, which would break downstream patterns and
+    /// mirrors that reference those bodies by display name. Verified both in a live session and
+    /// when opening a legacy design saved with unpinned colliding `body_names`.
+    #[test]
+    fn deleting_an_occurrence_keeps_other_components_disambiguated_body_names_and_patterns() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-delete-occ-renumber-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save_part = |name: &str| {
+            let path = dir.join(format!("{name}.sc"));
+            let mut part = Session::default();
+            run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "VIS"}));
+            run(&mut part, "file.save", json!({"path": path.to_string_lossy()}));
+            path
+        };
+        let (p1, p2, p3) = (save_part("S1"), save_part("S2"), save_part("S3"));
+
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": p1.to_string_lossy(), "name": "S1"}));
+        let s2 = run(&mut s, "component.insert_design", json!({"path": p2.to_string_lossy(), "name": "S2", "translate": [30, 0, 0]}));
+        let s3 = run(&mut s, "component.insert_design", json!({"path": p3.to_string_lossy(), "name": "S3", "translate": [60, 0, 0]}));
+        let occ_s2 = s2["occurrence"].as_u64().unwrap();
+        let occ_s3 = s3["occurrence"].as_u64().unwrap();
+
+        let body_names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+        assert_eq!(body_names(&s), ["VIS", "VIS (2)", "VIS (3)"]);
+
+        run(
+            &mut s,
+            "solid.pattern.rectangular",
+            json!({"bodies": ["VIS (3)"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 20, "name": "PatternVIS"}),
+        );
+        run(&mut s, "solid.mirror", json!({"bodies": ["VIS (3)"], "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1]}, "name": "MirrorVIS"}));
+        let pat = s.doc.find_feature("PatternVIS").unwrap();
+        assert!(
+            matches!(&pat.kind, solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } if bodies.len() == 1 && bodies[0] == "VIS (3)" && placements == &[vec![occ_s3]]),
+            "{:?}",
+            pat.kind
+        );
+        assert_eq!(body_names(&s), ["VIS", "VIS (2)", "VIS (3)", "VIS (3) (2)", "VIS (3) (3)", "VIS (3) (4)"]);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+        // Save a legacy-style copy where the three linked Import features kept unpinned `["VIS"]`.
+        let mut legacy_doc = (*s.doc).clone();
+        for f in &mut legacy_doc.features {
+            if matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }) {
+                f.body_names = vec!["VIS".into()];
+            }
+        }
+        let legacy_json = legacy_doc.to_json();
+
+        let assert_clean_delete = |s: &mut Session, label: &str| {
+            let dry = run(s, "selection.delete", json!({"occurrences": [occ_s2], "dry_run": true}));
+            assert_eq!(dry["would_fail"], json!([]), "{label} dry_run: {dry}");
+            assert!(s.doc.occurrences.iter().any(|o| o.id == occ_s2), "{label}: dry_run must not mutate");
+
+            let deleted = run(s, "selection.delete", json!({"occurrences": [occ_s2]}));
+            assert_eq!(deleted["would_fail"], json!([]), "{label} delete: {deleted}");
+            assert!(!s.doc.occurrences.iter().any(|o| o.id == occ_s2), "{label}: S2 occurrence removed");
+            assert_eq!(
+                body_names(s),
+                ["VIS", "VIS (3)", "VIS (3) (2)", "VIS (3) (3)", "VIS (3) (4)"],
+                "{label}: untouched VIS (3) and its pattern/mirror copies must stay intact"
+            );
+            for r in &s.model.results {
+                assert!(r.error.is_none(), "{label}: feature `{}` failed: {:?}", r.name, r.error);
+                assert!(r.warning.is_none(), "{label}: feature `{}` warned: {:?}", r.name, r.warning);
+            }
+            // Full recompute from scratch keeps the exact same bodies and zero errors.
+            run(s, "timeline.compute_all", json!({}));
+            assert_eq!(body_names(s), ["VIS", "VIS (3)", "VIS (3) (2)", "VIS (3) (3)", "VIS (3) (4)"], "{label} after compute_all");
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{label} after compute_all");
+        };
+
+        // 1. Live session: delete S2, verify undo and redo.
+        assert_clean_delete(&mut s, "live");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(body_names(&s), ["VIS", "VIS (2)", "VIS (3)", "VIS (3) (2)", "VIS (3) (3)", "VIS (3) (4)"]);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(body_names(&s), ["VIS", "VIS (3)", "VIS (3) (2)", "VIS (3) (3)", "VIS (3) (4)"]);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+
+        // 2. Legacy design opened via `Session::opened_at` (the `doc.open` path).
+        let mut opened = Session::opened_at(solidcraft_doc::Document::from_json(&legacy_json).unwrap(), None, None);
+        assert!(!opened.is_dirty(), "pinning disambiguated names on open must not mark the design dirty");
+        assert_clean_delete(&mut opened, "opened_at legacy");
+
+        // 3. Legacy design constructed directly in memory via `Session::new`.
+        let mut raw = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+        assert_clean_delete(&mut raw, "Session::new legacy");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {

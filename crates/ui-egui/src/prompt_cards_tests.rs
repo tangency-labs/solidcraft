@@ -283,3 +283,55 @@ fn save_prompt_frames_dont_save_and_clicking_it_discards_for_close_and_quit() {
         }
     }
 }
+
+#[test]
+fn needs_capture_ignores_explode_show_and_prompts_for_driven_joints_with_revert_and_cancel() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.create", json!({"name": "Base", "grounded": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "BaseBody"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("component.create", json!({"name": "Arm", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 10], "body_name": "ArmBody"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app
+        .run(
+            "joint.as_built",
+            json!({"type": "revolute", "name": "Hinge", "a": "Base:1", "b": "Arm:1", "at": {"occurrence": "Base:1", "point": [0, 0, 10], "z": [0, 0, 1]}}),
+        )
+        .unwrap();
+
+    // Bug 3: active explode.show must NOT trigger needs_capture or sc_capture_prompt.
+    h.app.run("explode.create", json!({"name": "Apart", "moves": [{"occurrence": "Arm:1", "translate": [0, 0, 30]}]})).unwrap();
+    h.app.run("explode.show", json!({"view": "Apart"})).unwrap();
+    assert!(!h.app.session.pending_moves.is_empty());
+    assert!(!crate::browser::needs_capture(&h.app, "sketch.create"));
+    assert!(!crate::browser::needs_capture(&h.app, crate::browser::SAVE));
+    h.app.start("sketch.create");
+    h.frames(3);
+    assert!(h.app.tree.capture_prompt.is_none(), "explode.show must not open sc_capture_prompt");
+    assert!(h.app.dialog.is_some(), "sketch.create should start directly during explode.show");
+    crate::dialogs::cancel(&mut h.app);
+    h.app.run("explode.show", json!({})).unwrap();
+
+    // Bug 4: uncaptured joint.drive triggers needs_capture and sc_capture_prompt; Cancel keeps driven pose, Revert restores baseline.
+    h.app.run("joint.drive", json!({"joint": "Hinge", "value": 45})).unwrap();
+    assert!(crate::browser::needs_capture(&h.app, "sketch.create"));
+    assert!(crate::browser::needs_capture(&h.app, crate::browser::SAVE));
+    h.app.start("sketch.create");
+    card_is_drawn(&mut h);
+    assert_eq!(h.app.tree.capture_prompt.as_deref(), Some("sketch.create"));
+    press(&mut h, "Cancel");
+    assert!(h.app.tree.capture_prompt.is_none());
+    assert!(h.app.dialog.is_none());
+    let hinge_val = |h: &Harness| h.app.session.doc.assembly.joints[0].values[0].to_degrees();
+    assert!((hinge_val(&h) - 45.0).abs() < 1e-6);
+
+    h.app.start("sketch.create");
+    card_is_drawn(&mut h);
+    press(&mut h, "Revert");
+    assert!(h.app.tree.capture_prompt.is_none());
+    assert!(h.app.dialog.is_some(), "Revert lets sketch.create start");
+    assert!(hinge_val(&h).abs() < 1e-6, "Revert must put pre-capture driven joint back to 0 deg, got {}", hinge_val(&h));
+    crate::dialogs::cancel(&mut h.app);
+}
