@@ -70,6 +70,19 @@ fn defect(why: &'static str, status: i32) -> SolidError {
 const SOLVER_OFFSETS: &str = "a round's solver has no offset surface on a side: the solver is set \
      up with one on each side, and a roll-over replaces one, never removes it";
 
+/// Whether `edge` has a curve that is not a straight line (so the closed-form straight-edge
+/// rollover [`tangent_rollover_supports`] does not cover it).
+///
+/// # Errors
+/// Those of the curve lookup and line recogniser.
+fn edge_is_curved(k: &Kernel, target: &Brep, edge: EdgeId) -> Result<bool> {
+    const LINE_TOL: f64 = 1.0e-8;
+    let Some(curve) = edge::curve(target, edge)? else {
+        return Ok(false);
+    };
+    Ok(curve.is_line(k, 3, LINE_TOL)?.is_none())
+}
+
 /// The vertices of the edges of `face`.
 ///
 /// # Errors
@@ -215,35 +228,34 @@ impl FilletSession<'_> {
             } else {
                 None
             };
-            let rollovers = match closed {
-                Some(rollovers) => {
-                    // the section is every section only on a face beyond that is prismatic
-                    // along the edge too; elsewhere the rolled rails are proved after the trace
-                    // (a lone round's as on main)
-                    let exact = rollovers.iter().flatten().all(|r| r.prismatic_beyond);
-                    if lone || exact {
-                        self.objects.solver_mut(id)?.base_mut().rollover_proof =
-                            RolloverProof::ClosedForm;
-                    }
-                    // the other round's band on the face this one rolls onto is compared
-                    // with its rolled rail by the bands' check (#19242)
-                    rollovers
+            let rollovers = if let Some(rollovers) = closed {
+                // the section is every section only on a face beyond that is prismatic
+                // along the edge too; elsewhere the rolled rails are proved after the trace
+                // (a lone round's as on main)
+                let exact = rollovers.iter().flatten().all(|r| r.prismatic_beyond);
+                if lone || exact {
+                    self.objects.solver_mut(id)?.base_mut().rollover_proof =
+                        RolloverProof::ClosedForm;
                 }
-                None => {
-                    let Some(solver) = self
-                        .objects
-                        .solvers
-                        .get_mut(id.0 as usize)
-                        .and_then(Option::as_mut)
-                    else {
-                        return Err(defect(
-                            "a rolling round's solver is not held by the session: it was \
-                             read at the same id at the start of the step",
-                            SM_ERR,
-                        ));
-                    };
-                    rails_wholly_past(k, &mut *self.objects.target, solver, inputs)?
-                }
+                // the other round's band on the face this one rolls onto is compared
+                // with its rolled rail by the bands' check (#19242)
+                rollovers
+            } else if lone && !edge_is_curved(k, &*self.objects.target, inputs.edge)? {
+                [None, None]
+            } else {
+                let Some(solver) = self
+                    .objects
+                    .solvers
+                    .get_mut(id.0 as usize)
+                    .and_then(Option::as_mut)
+                else {
+                    return Err(defect(
+                        "a rolling round's solver is not held by the session: it was \
+                         read at the same id at the start of the step",
+                        SM_ERR,
+                    ));
+                };
+                rails_wholly_past(k, &mut *self.objects.target, solver, inputs)?
             };
             for (rail, rollover) in rollovers.into_iter().enumerate() {
                 if let Some(rollover) = rollover {
@@ -877,7 +889,7 @@ fn carried_rolled(
     else {
         return Ok(false);
     };
-    let tolerance = solver.base().approx_tol_3d.max(target.tolerance());
+    let tolerance = target.tolerance();
     for section in &rolled {
         for (rail, rollover) in rollovers.iter().enumerate() {
             let Some(rollover) = rollover else {
@@ -1271,7 +1283,28 @@ fn rail_within_face(
     let Some(curve) = edge::curve(fillets, rail)?.cloned() else {
         return Ok(false);
     };
-    let ivl = edge::interval(fillets, rail)?;
+    // `trim_rail_and_uv_curves` trims `curve` in place without rewriting `edge::interval`:
+    // intersect the edge interval with the curve's natural interval so we always inspect the
+    // trimmed rail span.
+    let nat = curve.natural_interval();
+    let edge_ivl = edge::interval(fillets, rail)?;
+    let (lo, hi) = if edge_ivl.min().is_finite()
+        && edge_ivl.max().is_finite()
+        && edge_ivl.min() < edge_ivl.max()
+    {
+        let ilo = edge_ivl.min().max(nat.min());
+        let ihi = edge_ivl.max().min(nat.max());
+        if ilo < ihi {
+            (ilo, ihi)
+        } else {
+            (nat.min(), nat.max())
+        }
+    } else {
+        (nat.min(), nat.max())
+    };
+    if !lo.is_finite() || !hi.is_finite() || lo >= hi {
+        return Ok(false);
+    }
     let tolerance = target.tolerance();
     if !fit.is_finite() {
         return Ok(false);
@@ -1283,7 +1316,7 @@ fn rail_within_face(
     let surface = surface.clone_for_evaluation()?;
     let face_domain = crate::topology::face::p2::uv_domain(target, face)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
-    let middle = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    let middle = curve.evaluate_point(k, 0.5 * (lo + hi))?;
     if !point_on_face(
         k,
         target,
@@ -1298,7 +1331,7 @@ fn rail_within_face(
     )? {
         return Ok(false);
     }
-    let Some(pieces) = rail_pieces_with_kernel(Some(k), &curve, ivl.min(), ivl.max())? else {
+    let Some(pieces) = rail_pieces_with_kernel(Some(k), &curve, lo, hi)? else {
         return Ok(false);
     };
     let mut others: Vec<FaceId> = Vec::new();
@@ -1338,8 +1371,8 @@ fn rail_within_face(
         face_domain: &face_domain,
         domain: &domain,
         curve: &curve,
-        lo: ivl.min(),
-        hi: ivl.max(),
+        lo,
+        hi,
         surface_tol,
         tolerance,
         gap,
@@ -1459,7 +1492,7 @@ fn end_inset_clear_of(
     at_start: bool,
 ) -> Result<Option<f64>> {
     const FRACTIONS: [f64; 7] = [1e-5, 1e-4, 1e-3, 5e-3, 1e-2, 2.5e-2, 5e-2];
-    const STUB_STEPS: [f64; 4] = [0.25, 0.5, 0.75, 1.0];
+    const STUB_STEPS: [f64; 3] = [0.25, 0.5, 0.75];
     let span = ctx.hi - ctx.lo;
     if !span.is_finite() || span <= 0.0 {
         return Ok(None);
@@ -1480,6 +1513,20 @@ fn end_inset_clear_of(
         if lower.is_nan() || lower <= clear_want {
             continue;
         }
+        if !point_on_face(
+            k,
+            target,
+            ctx.face,
+            ctx.surface,
+            ctx.face_domain,
+            ctx.domain,
+            q,
+            ctx.surface_tol,
+            ctx.tolerance,
+            true,
+        )? {
+            continue;
+        }
         for step in STUB_STEPS {
             let t = if at_start {
                 ctx.lo + step * delta
@@ -1496,8 +1543,8 @@ fn end_inset_clear_of(
                 ctx.domain,
                 pt,
                 ctx.surface_tol,
-                ctx.tolerance,
-                true,
+                ctx.gap,
+                false,
             )? {
                 return Ok(None);
             }
