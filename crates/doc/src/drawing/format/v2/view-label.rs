@@ -6,13 +6,17 @@
 //! deleted view's letter is given again. The last release warns about the newer format number,
 //! opens what it can read and keeps the rest.
 use serde_json::Value;
+use solidcraft_geom::drawing_sheet::view_letter;
 
 use crate::DocError;
-use crate::drawing::view::{ViewLabel, ViewLetters};
+use crate::drawing::view::{MAX_LETTERS, MAX_VIEWS, ViewLabel, ViewLetters};
 
 pub fn step(v: &mut Value) -> crate::Result<()> {
     let Some(top) = v.as_object_mut() else { return Ok(()) };
     let Some(views) = top.get_mut("views").and_then(Value::as_array_mut) else { return Ok(()) };
+    if views.len() > MAX_VIEWS {
+        return Err(DocError::Invalid(format!("a drawing has at most {MAX_VIEWS} views")));
+    }
     // Placed apart, as `View::needs_letter` reads it: a projected view placed at a point.
     let has = |view: &Value, field: &str, key: &str| view.get(field).and_then(|value| value.get(key)).is_some();
     let mut apart: Vec<(u64, usize)> = views
@@ -26,12 +30,18 @@ pub fn step(v: &mut Value) -> crate::Result<()> {
     }
     apart.sort_unstable();
     let unsaved = |e: serde_json::Error| DocError::Invalid(format!("view label not saved: {e}"));
+    // Starting from `ViewLetters::default()` with no letters taken yet, the `i`th view gets
+    // `view_letter(i)` directly in O(1) per view instead of rebuilding the used set each step.
     let mut given = ViewLetters::default();
-    let mut used: Vec<String> = Vec::new();
-    for (_, at) in apart {
-        let letter = given.next(used.iter().map(String::as_str))?;
-        let label = serde_json::to_value(ViewLabel::new(letter.clone())).map_err(unsaved)?;
-        used.push(letter);
+    for (i, (_, at)) in apart.into_iter().enumerate() {
+        let letter = view_letter(i)
+            .filter(|letter| letter.len() <= MAX_LETTERS)
+            .ok_or_else(|| DocError::Invalid("every view letter up to ZZZ has been given".into()))?;
+        given.given = u32::try_from(i)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(|| DocError::Invalid("every view letter up to ZZZ has been given".into()))?;
+        let label = serde_json::to_value(ViewLabel::new(letter)).map_err(unsaved)?;
         if let Some(view) = views.get_mut(at).and_then(Value::as_object_mut) {
             view.insert("label".into(), label);
         }
@@ -65,5 +75,28 @@ mod tests {
         let mut empty = json!({"name": "Untitled"});
         super::step(&mut empty).unwrap();
         assert_eq!(empty, json!({"name": "Untitled"}));
+    }
+
+    #[test]
+    fn max_views_upgrade_in_linear_time_and_excess_views_are_rejected() {
+        let count = crate::drawing::view::MAX_VIEWS;
+        let views: Vec<Value> = (1..=count as u64)
+            .map(|id| {
+                json!({
+                    "id": crate::ids::encode(id),
+                    "sheet": "0000000000001",
+                    "kind": {"projected": {"parent": "0000000000003", "side": "right"}},
+                    "place": {"at": [100.0, 100.0]},
+                })
+            })
+            .collect();
+        let mut v = json!({"views": views});
+        super::step(&mut v).unwrap();
+        assert_eq!(v["views"][0]["label"]["letter"], json!("A"));
+        assert_eq!(v["views"][count - 1]["label"]["letter"], json!(solidcraft_geom::drawing_sheet::view_letter(count - 1).unwrap()));
+        assert_eq!(v["view_letters"], json!({"reuse": true, "given": count}));
+
+        let mut too_many = json!({"views": vec![json!({"id": "0000000000001"}); count + 1]});
+        assert!(super::step(&mut too_many).is_err());
     }
 }

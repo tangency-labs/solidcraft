@@ -154,10 +154,11 @@ pub fn set_override(bytes: Option<u64>) -> Result<(), String> {
     Ok(())
 }
 
-/// Tell the STEP parser the limit now in force: the size check here lets a file through, and
-/// the parser has its own cap, which must not refuse it again (#13329).
+/// Tell the STEP and IGES parsers the limit now in force: the size check here lets a file through, and
+/// the parsers have their own caps, which must not refuse it again (#13329, #20304).
 fn sync_parser() {
     solidcraft_kernel::set_step_max_bytes(max_step_bytes());
+    solidcraft_kernel::set_iges_max_bytes(max_step_bytes());
 }
 
 /// The `--max-file-size` this run started with, in bytes.

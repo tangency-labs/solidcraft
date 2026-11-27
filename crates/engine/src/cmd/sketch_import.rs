@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); dpi?: the dots per inch the file's pixels are read at, 1 to 10000 (default 96; a file drawn at 72 dpi comes in at its drawn size with 72; lengths with a unit such as mm keep it); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&DRAWING_BOUNDS_CONTRACT)
         .output(output_schema_for::<DrawingBoundsResult>)
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
@@ -287,10 +287,20 @@ type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
 
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
+/// The dots per inch an SVG's pixels are read at: `dpi`, else CSS's 96 (#20240).
+fn dpi_of(p: &Value, cmd: &str, svg: bool) -> Result<f64> {
+    let Some(v) = p.get("dpi").filter(|v| !v.is_null()) else { return Ok(solidcraft_io::SVG_DEFAULT_DPI) };
+    if !svg {
+        return Err(bad(cmd, "`dpi` is for SVG drawings; a DXF has no pixels"));
+    }
+    v.as_f64().filter(|d| (1.0..=10000.0).contains(d)).ok_or_else(|| bad(cmd, "`dpi` must be a number from 1 to 10000 (dots per inch)"))
+}
+
 fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
+    let dpi = dpi_of(p, cmd, svg)?;
     let (geom, warnings) = if svg {
-        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+        solidcraft_io::read_svg_drawing_at(&text, dpi).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
     } else {
         solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
     }
@@ -317,7 +327,8 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (geom, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
-    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
+    let dpi = dpi_of(p, cmd, svg)?;
+    let sheet = svg.then(|| solidcraft_io::svg_sheet_at(&text, dpi)).flatten().map(drawing_box);
     reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), param_warnings: Vec::new() })
 }
 
@@ -440,7 +451,8 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
         Some("viewbox") if !svg => return Err(bad(cmd, "`size_from: viewbox` is for SVG drawings; a DXF has no sheet")),
-        Some("viewbox") => solidcraft_io::svg_sheet(&text).ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
+        Some("viewbox") => solidcraft_io::svg_sheet_at(&text, dpi_of(p, cmd, svg)?)
+            .ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
         Some(_) => return Err(bad(cmd, "`size_from` must be \"geometry\" or \"viewbox\"")),
     };
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
@@ -1549,6 +1561,47 @@ EOF
         p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
         s.execute("sketch.insert_svg", &p).unwrap();
         span(&s)
+    }
+
+    /// An SVG's pixels are read at 96 dpi unless `dpi` says otherwise (#20240): a file drawn at 72
+    /// dpi comes in at the size it was drawn at. A length with its own unit keeps it, and a DXF has
+    /// no pixels to read.
+    #[test]
+    fn an_svg_is_read_at_the_dpi_it_was_drawn_at() {
+        let size = |svg: &str, params: serde_json::Value| {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": svg});
+            p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+            s.execute("sketch.insert_svg", &p).unwrap();
+            let b = span(&s);
+            (b.2 - b.0, b.3 - b.1)
+        };
+        let near = |a: (f64, f64), e: (f64, f64)| assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6, "{a:?} vs {e:?}");
+        let px = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect x="0" y="0" width="72" height="36"/></svg>"#;
+        near(size(px, json!({})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 96})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 72})), (25.4, 12.7));
+        near(size(px, json!({"dpi": 72, "scale": 2})), (50.8, 25.4));
+        near(size(px, json!({"dpi": 72, "width": 10})), (10.0, 5.0));
+        // The sheet is read at the same dpi.
+        near(size(px, json!({"dpi": 72, "size_from": "viewbox"})), (25.4, 12.7));
+        // Measuring takes the same `dpi`, for the drawing and for its sheet.
+        let b = Session::default().execute("sketch.drawing_bounds", &json!({"text": px, "dpi": 72})).unwrap();
+        near((b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap()), (25.4, 12.7));
+        near((b["sheet"]["width"].as_f64().unwrap(), b["sheet"]["height"].as_f64().unwrap()), (50.8, 25.4));
+        // A file with its own size in millimetres is not a matter of pixels.
+        let mm =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;
+        near(size(mm, json!({"dpi": 72})), (100.0, 50.0));
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        for bad in [json!(0), json!(0.5), json!(20000), json!("72")] {
+            let e = s.execute("sketch.insert_svg", &json!({"text": px, "dpi": bad})).unwrap_err().to_string();
+            assert!(e.contains("dpi"), "{bad}: {e}");
+        }
+        let dxf = json!({"text": "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n0\n0\nENDSEC\n0\nEOF\n", "dpi": 72});
+        assert!(s.execute("sketch.insert_dxf", &dxf).unwrap_err().to_string().contains("DXF"));
     }
 
     /// A drawing can be given a size in millimetres (its aspect kept), turned about its origin and

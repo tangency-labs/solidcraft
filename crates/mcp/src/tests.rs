@@ -593,6 +593,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-reporting", "SKILL.md", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
+        ("solidcraft-reporting", "reference/report-template.md", include_str!("../../../skills/solidcraft-reporting/reference/report-template.md")),
         ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
         ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
@@ -609,9 +611,41 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 }
 
 #[test]
+fn skill_reference_falls_back_to_skill_md_when_reference_md_is_absent() {
+    let mut s = server();
+    for (skill, expected) in [
+        ("solidcraft-editing", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-checking", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
+        ("solidcraft-reporting", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
+    ] {
+        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
+        assert!(r.get("error").is_none(), "{skill}: {r}");
+        assert_ne!(r["result"]["isError"], json!(true), "{skill}: {r}");
+        assert_eq!(r["result"]["content"][0]["text"], expected);
+    }
+    // Skills with `reference.md` keep defaulting to it when `file` is omitted.
+    let modeling = raw_tool(&mut s, "skill_reference", json!({"skill": "solidcraft-modeling"}));
+    assert!(modeling.get("error").is_none(), "{modeling}");
+    assert_ne!(modeling["result"]["isError"], json!(true), "{modeling}");
+    assert_eq!(modeling["result"]["content"][0]["text"], include_str!("../../../skills/solidcraft-modeling/reference.md"));
+    // Explicit lookup for `solidcraft-reporting`'s template works as well.
+    let template = raw_tool(&mut s, "skill_reference", json!({"skill": "solidcraft-reporting", "file": "reference/report-template.md"}));
+    assert!(template.get("error").is_none(), "{template}");
+    assert_ne!(template["result"]["isError"], json!(true), "{template}");
+    assert_eq!(template["result"]["content"][0]["text"], include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"));
+}
+
+#[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
+    let skills = [
+        "solidcraft-checking",
+        "solidcraft-editing",
+        "solidcraft-mechanisms",
+        "solidcraft-modeling",
+        "solidcraft-reporting",
+        "solidcraft-sheetmetal",
+    ];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -626,8 +660,12 @@ fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Available files: SKILL.md, reference.md"), "{text}");
     }
-    for (skill, files) in [("solidcraft-checking", "SKILL.md, reference/porting.md"), ("solidcraft-editing", "SKILL.md")] {
-        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
+    for (skill, files) in [
+        ("solidcraft-checking", "SKILL.md, reference/porting.md"),
+        ("solidcraft-editing", "SKILL.md"),
+        ("solidcraft-reporting", "SKILL.md, reference/report-template.md"),
+    ] {
+        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill, "file": "reference.md"}));
         assert_eq!(r["result"]["isError"], true, "{r}");
         assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains(files), "{r}");
     }
@@ -2383,6 +2421,82 @@ fn compare_picture_returns_the_overlay_as_an_image() {
     // A reference outside the server's folders is refused through the existing path rules.
     let outside = raw_tool(&mut s, "compare_picture", json!({"reference": "/etc/hostname"}));
     assert_eq!(outside["result"]["isError"], json!(true), "{outside}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn compare_picture_part_fills_crop_is_accepted_and_forwarded() {
+    use image::ImageEncoder as _;
+    use std::io::Cursor;
+
+    // The MCP tool schema exposes `part_fills_crop` as a boolean.
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "compare_picture").expect("compare_picture tool");
+    assert_eq!(def["inputSchema"]["properties"]["part_fills_crop"]["type"], "boolean");
+
+    // Direct call and batch step both forward `part_fills_crop` to `inspect.compare_picture`.
+    let mut rec = Recorder { calls: Vec::new(), batch: Ok(json!({"completed": 1, "results": [{"overlap": 1.0}], "undone": 0})) };
+    let _ = crate::call_tool(&mut rec, "compare_picture", &json!({"reference": "crop.png", "part_fills_crop": true}));
+    assert_eq!(rec.calls[0].0, "engine.execute");
+    assert_eq!(rec.calls[0].1["command"], "inspect.compare_picture");
+    assert_eq!(rec.calls[0].1["params"]["part_fills_crop"], true);
+
+    let (rec_batch, body, is_error) = recorded_batch(
+        Ok(json!({"completed": 1, "results": [{"overlap": 1.0}], "undone": 0})),
+        json!({"commands": [{"command": "compare_picture", "params": {"reference": "crop.png", "part_fills_crop": true}}]}),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(rec_batch.calls[0].0, "engine.batch");
+    assert_eq!(rec_batch.calls[0].1["commands"][0]["command"], "inspect.compare_picture");
+    assert_eq!(rec_batch.calls[0].1["commands"][0]["params"]["part_fills_crop"], true);
+
+    // End-to-end through the MCP server schema check and headless engine: a uniform crop that
+    // fills the frame fails background detection without `part_fills_crop: true`, and succeeds
+    // with it both directly and as a `batch` step.
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-compare-fills-crop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let recovery = base.join("recovery");
+    std::fs::create_dir_all(&recovery).unwrap();
+    let scope = crate::agent_scope_with(Some(recovery.clone()), []);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(scope));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 30}}));
+
+    let (w, h) = (100u32, 150u32);
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
+    let mut png = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8).unwrap();
+    let path = recovery.join("tight-crop.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+
+    // Non-boolean `part_fills_crop` is rejected by schema validation.
+    let bad_type = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "part_fills_crop": "yes"}));
+    assert!(bad_type.get("error").is_some() || bad_type["result"]["isError"] == json!(true), "{bad_type}");
+
+    // Without `part_fills_crop: true`, background flood consumes the uniform frame.
+    let without = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "view": "front"}));
+    assert_eq!(without["result"]["isError"], json!(true), "{without}");
+
+    // With `part_fills_crop: true`, the direct MCP call passes schema validation and matches the box.
+    let direct = raw_tool(
+        &mut s,
+        "compare_picture",
+        json!({"reference": path.to_string_lossy(), "view": "front", "crop_px": [0, 0, 100, 150], "part_fills_crop": true}),
+    );
+    assert!(direct.get("error").is_none(), "{direct}");
+    assert_ne!(direct["result"]["isError"], json!(true), "{direct}");
+    let content = direct["result"]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "image", "{content:?}");
+    let info: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert!(info["overlap"].as_f64().unwrap() > 0.9, "{info}");
+
+    // Inside `batch`, `compare_picture` also forwards `part_fills_crop: true` to `inspect.compare_picture`.
+    let batch = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "compare_picture", "params": {"reference": path.to_string_lossy(), "view": "front", "crop_px": [0, 0, 100, 150], "part_fills_crop": true}}]}),
+    );
+    assert_eq!(batch["completed"], 1, "{batch}");
+    assert!(batch["results"][0]["overlap"].as_f64().unwrap() > 0.9, "{batch}");
+
     let _ = std::fs::remove_dir_all(&base);
 }
 
