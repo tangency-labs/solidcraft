@@ -3477,7 +3477,8 @@ fn join_across_coincidence<O: SolutionObject>(
     // Set last solution to range
     last_sol.solution_type = SolutionType::RangeOfValues;
     last_sol.contact = last_original_contact.absorbed(curr_sol.contact);
-    let last_original_unique = last_sol.unique;
+    // (a range carries no unique box, nor does a point merged with another: it is no
+    // crossing any more)
     last_sol.unique = None;
     // (no point merged or absorbed is shown the seam point it was identified as)
     last_sol.shared_contact = None;
@@ -3508,8 +3509,8 @@ fn join_across_coincidence<O: SolutionObject>(
         if (last_sol.start.param(0)? - curr_sol.start.param(0)?).abs() < tol {
             // restore last interval
             last_sol.solution_type = last_original_type;
-            // (not upstream) a range takes the point in; a point stands for both
-            last_sol.unique = last_original_unique;
+            // (not upstream) a range takes the point in; a point stands for both (neither a
+            // crossing, so neither keeps a unique box)
             last_sol.contact = if last_original_type == SolutionType::RangeOfValues {
                 last_original_contact.absorbed(curr_sol.contact)
             } else {
@@ -4987,6 +4988,20 @@ mod tests {
             let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
             assert_eq!(kept.solution_type, SolutionType::SingleValue);
             assert_eq!(kept.contact, want, "{a:?} {b:?}");
+            // the same with a unique box on either point: the point kept is no crossing, so
+            // it keeps no box
+            for (boxed_last, boxed_near) in [(true, false), (false, true), (true, true)] {
+                let mut last = last;
+                let mut near = near;
+                if boxed_last {
+                    last.unique = Some([[0.15, 0.25], [0.05, 0.15]]);
+                }
+                if boxed_near {
+                    near.unique = Some([[0.15, 0.25], [0.05, 0.15]]);
+                }
+                let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
+                assert_eq!((kept.contact, kept.unique), (want, None), "{a:?} {b:?}");
+            }
         }
         // a shared contact id is lost by a range and by a point that absorbs another
         let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);

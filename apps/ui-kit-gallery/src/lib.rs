@@ -4,8 +4,7 @@
 //! tokens every example draws with. Desktop (`cargo run -p ui-kit-gallery`) and browser
 //! (docs.solidcraft.io/kit/).
 //!
-//! The gallery is SolidCraft's own reference for contributors, under the SolidCraft Brand and
-//! Interface Licence like the kit it shows; it is not a library for other programs.
+//! The gallery is SolidCraft's own reference for contributors; it is not a library for other programs.
 
 mod pages;
 mod theme_panel;

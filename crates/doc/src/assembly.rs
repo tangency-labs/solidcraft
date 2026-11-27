@@ -843,8 +843,12 @@ impl Document {
         let mut out = Vec::new();
         let owners = self.model_body_components(st);
         let names = WorldNames::new(self, st);
+        let mut by_component: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+        for (b, owner) in st.bodies.iter().zip(&owners) {
+            by_component.entry(*owner).or_default().push(b);
+        }
         for (comp, path, m) in self.placements() {
-            for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
+            for b in by_component.get(&comp).into_iter().flatten().copied() {
                 let name = names.name(&b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
@@ -1104,7 +1108,7 @@ impl Document {
 }
 
 /// The most occurrences a design holds.
-const MAX_OCCURRENCES: usize = 100_000;
+pub(crate) const MAX_OCCURRENCES: usize = 100_000;
 
 /// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
 /// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000
