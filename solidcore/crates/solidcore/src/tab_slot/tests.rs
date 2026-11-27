@@ -473,12 +473,3 @@ fn a_bad_jitter_is_refused() {
         assert!(vary((0.0, 100.0), &[47.0], 6.0, 5.0, LASER, 1, j).is_err());
     }
 }
-
-#[test]
-fn a_stretch_key_is_its_midpoint_on_a_grid() {
-    assert_eq!(stretch_key((10.0, 30.0)), 20_000);
-    assert_eq!(stretch_key((10.0, 30.0004)), 20_000);
-    assert_eq!(stretch_key((-30.0, -10.0)), -20_000);
-    assert_ne!(stretch_seed_at(5, 20_000), stretch_seed_at(5, 20_001));
-    assert_ne!(stretch_seed_at(5, 20_000), stretch_seed_at(6, 20_000));
-}

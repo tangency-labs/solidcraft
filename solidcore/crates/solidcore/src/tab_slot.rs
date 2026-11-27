@@ -19,7 +19,6 @@
 //! | [`slot_outline`], [`slot_outline_along`] | none |
 //! | [`apart`]                    | none     |
 //! | [`vary`], [`stretch_seed`]    | none     |
-//! | [`stretch_key`], [`stretch_seed_at`] | none |
 
 use crate::error::{Result, SolidError};
 use crate::math::Point2;
@@ -217,33 +216,13 @@ fn starts(
 }
 
 /// The seed of stretch `index` of a joint seeded `seed` (a splitmix64 step of both), so that each
-/// stretch draws its own run of widths and one stretch's tab count does not shift another's. An
-/// index moves when another stretch is removed or reordered; [`stretch_seed_at`] keys on the
-/// stretch's position instead.
+/// stretch draws its own run of widths and one stretch's tab count does not shift another's.
+/// Keyed on the index, so removing or reordering a stretch of the same plate pair reshuffles the
+/// widths of the stretches after it. Keying on the stretch's position instead was rejected: any
+/// resize moves a stretch's midpoint and so would reroll every tab.
 #[must_use]
 pub fn stretch_seed(seed: u64, index: usize) -> u64 {
     splitmix(seed ^ splitmix(index as u64 ^ 0xA5A5_5A5A_1234_5678))
-}
-
-/// The grid (mm) [`stretch_key`] rounds a stretch's midpoint to.
-pub const STRETCH_KEY_GRID: f64 = 1.0e-3;
-
-/// A key for a stretch `(a, b)` along its strip that does not depend on the joint's other
-/// stretches: its midpoint `(a + b) / 2` rounded to [`STRETCH_KEY_GRID`]. The strip coordinate
-/// is the plane's own frame read along the strip's direction, so a stretch keeps its key when
-/// another stretch of the same pair is removed, added or reordered. A midpoint within rounding
-/// of a grid line's half may land either side of it.
-#[must_use]
-pub fn stretch_key(stretch: (f64, f64)) -> i64 {
-    ((stretch.0 + stretch.1) / 2.0 / STRETCH_KEY_GRID).round() as i64
-}
-
-/// The seed of the stretch keyed `key` ([`stretch_key`]) of a joint seeded `seed` (a splitmix64
-/// step of both): as [`stretch_seed`], but keyed on where the stretch lies rather than on its
-/// index, so removing or reordering another stretch of the same pair leaves its widths alone.
-#[must_use]
-pub fn stretch_seed_at(seed: u64, key: i64) -> u64 {
-    splitmix(seed ^ splitmix(key as u64 ^ 0x5A5A_A5A5_8765_4321))
 }
 
 /// One step of splitmix64: the next state and its output. Own small generator, so the widths of a

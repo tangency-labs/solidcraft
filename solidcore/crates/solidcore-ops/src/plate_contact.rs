@@ -294,7 +294,10 @@ impl Body {
     }
 
     /// [`Body::tab_slot_plan`] for a `joint` already found ([`Body::plate_pair`] of this body
-    /// against `slot` on `p`): the run and the stretches with their tabs.
+    /// against `slot` on `p`): the run and the stretches with their tabs. Stretch `i` draws its
+    /// widths from [`ts::stretch_seed`]`(spec.seed, i)`, so a resize that keeps the stretches
+    /// keeps every tab's width offset, while removing or reordering a stretch of this pair
+    /// reshuffles the widths of the stretches after it.
     ///
     /// # Errors
     /// Those of [`Body::tab_slot_plan`].
@@ -320,7 +323,11 @@ impl Body {
         };
         let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
         let mut out = Vec::new();
-        for stretch in pc::stretches(band, &defects, tol).map_err(status)? {
+        for (index, stretch) in pc::stretches(band, &defects, tol)
+            .map_err(status)?
+            .into_iter()
+            .enumerate()
+        {
             let starts = ts::place(stretch, spec.layout, spec.width, spec.end_distance, g_min)
                 .map_err(status)?;
             let tabs = match starts {
@@ -332,7 +339,7 @@ impl Body {
                         spec.width,
                         spec.end_distance,
                         g_min,
-                        ts::stretch_seed_at(spec.seed, ts::stretch_key(stretch)),
+                        ts::stretch_seed(spec.seed, index),
                         spec.width_jitter,
                     )
                     .map_err(status)?;
@@ -1010,16 +1017,15 @@ mod tests {
         assert!((v(&cut.slot_plate) - (96000.0 - slots)).abs() < 1e-6);
     }
 
-    /// Request 3, per stretch: Wall with a 40 x 2 slit (x 60..100, 10 high) up into its foot
-    /// meets Bottom along two stretches of one pair, x 20..60 and 100..140. Each stretch's widths
-    /// are keyed on where it lies, not on its index: with the slit run out past the wall's end (x
-    /// 19..100) only 100..140 is left, now the first stretch, and it draws the same widths.
+    /// Request 3, on a resize: Wall grown from 120 to 130 long (x 20..140 to 20..150), the same
+    /// seed, jitter and three tabs, with room enough that no width is clamped. The tabs move
+    /// with the ends, but each keeps its width's offset from the nominal 10.
     #[test]
-    fn a_stretch_keeps_its_widths_when_another_stretch_goes() {
-        let p = bottom().1;
+    fn a_resized_plate_keeps_each_tabs_width_offset() {
+        let (s, p) = bottom();
         let spec = TabSlotSpec {
-            layout: Layout::Count(2),
-            width: 8.0,
+            layout: Layout::Count(3),
+            width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
             min_land: 0.5,
@@ -1029,30 +1035,22 @@ mod tests {
             width_jitter: 3.0,
             tip_chamfer: 0.0,
         };
-        let s = bottom().0;
-        let plan = |from: f64| {
-            let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
-            let slit = make_box([from, 32.0, 5.0], [100.0 - from, 2.0, 11.0]).unwrap();
-            let wall = boolean(wall, slit, BooleanOp::Subtract).unwrap().unwrap();
+        let tabs = |length: f64| -> Vec<(f64, f64)> {
+            let wall = make_box([20.0, 30.0, 6.0], [length, 6.0, 60.0]).unwrap();
             let (_, plan) = wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
             plan.iter()
-                .map(|st| {
-                    let tabs = st.tabs.as_ref().unwrap();
-                    tabs.iter().map(|t| (t.start, t.width)).collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>()
+                .flat_map(|st| st.tabs.as_ref().unwrap().iter())
+                .map(|t| (t.start, t.width - spec.width))
+                .collect()
         };
-        let both = plan(60.0);
-        let right = plan(19.0);
-        assert_eq!((both.len(), right.len()), (2, 1), "{both:?} {right:?}");
-        assert!(both[1].iter().any(|t| (t.1 - 8.0).abs() > 1e-9), "{both:?}");
-        // The same widths; the starts up to the rounding of the two bodies' geometry.
-        assert_eq!(both[1].len(), right[0].len(), "{both:?} {right:?}");
-        for (a, b) in both[1].iter().zip(&right[0]) {
-            assert_eq!(a.1, b.1, "{both:?} {right:?}");
-            assert!((a.0 - b.0).abs() < 1e-9, "{both:?} {right:?}");
+        let short = tabs(120.0);
+        let long = tabs(130.0);
+        assert_eq!((short.len(), long.len()), (3, 3), "{short:?} {long:?}");
+        assert!(short.iter().any(|t| t.1.abs() > 1e-9), "{short:?}");
+        assert!((short[2].0 - long[2].0).abs() > 1.0, "{short:?} {long:?}");
+        for (a, b) in short.iter().zip(&long) {
+            assert!((a.1 - b.1).abs() < 1e-9, "{short:?} {long:?}");
         }
-        assert_ne!(both[0], both[1]);
     }
 
     /// Request 4: a tip chamfer takes a 2 x 2 triangle off each of a tab's two free corners
