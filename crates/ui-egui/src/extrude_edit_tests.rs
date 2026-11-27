@@ -1885,3 +1885,101 @@ fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     assert!(shows(&h));
     assert_eq!(sent(&h).as_deref(), Some("Slab"));
 }
+
+/// A new Extrude with a box made before it: a sketch's square, its profile picked, the dialog open.
+fn new_extrude_over_a_box() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":2,"width":2,"height":2})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    h
+}
+
+fn taper(h: &Harness) -> Option<String> {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Extrude { taper, .. }) => Some(taper.clone()),
+        _ => None,
+    }
+}
+
+fn drag_taper(h: &mut Harness) {
+    let at = crate::scenario::handle_at("taper").unwrap();
+    h.step(&json!({"drag":[[at.x, at.y],[at.x + 60.0, at.y]], "steps": 6})).unwrap();
+    h.frames(2);
+}
+
+fn key(h: &mut Harness, key: &str) {
+    h.step(&json!({"key": key, "cmd": true})).unwrap();
+    h.frames(4);
+}
+
+// Ctrl+Z after dragging Extrude's taper handle undid the design under the open dialog and left
+// the angle (#22838). It takes back the drag first, with the keyboard in the dialog's value box
+// or nowhere; Ctrl+Y drags it again; with no drag left, Ctrl+Z undoes the design as before.
+#[test]
+fn undo_takes_back_a_dialogs_handle_drag_before_the_design() {
+    for keyboard_free in [false, true] {
+        let mut h = new_extrude_over_a_box();
+        let depth = h.app.session.undo.len();
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+        drag_taper(&mut h);
+        let dragged = taper(&h).unwrap();
+        assert_ne!(dragged, "0 deg", "the drag tilts the walls");
+        if keyboard_free {
+            h.ctx.memory_mut(|m| m.stop_text_input());
+            h.frames(1);
+        } else {
+            assert!(h.ctx.memory(|m| m.focused()).is_some(), "the value box has the keyboard back");
+        }
+        key(&mut h, "Z");
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"), "keyboard free: {keyboard_free}");
+        assert_eq!(h.app.session.undo.len(), depth, "the design is left as it was");
+        key(&mut h, "Y");
+        assert_eq!(taper(&h), Some(dragged.clone()), "Redo drags it again");
+        assert_eq!(h.app.session.redo.len(), 0);
+        key(&mut h, "Z");
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+        if keyboard_free {
+            key(&mut h, "Z");
+            assert_eq!(h.app.session.undo.len(), depth - 1, "no drag left: the design's Undo, as before");
+        }
+    }
+}
+
+// A value typed after the drag is not thrown away by Undo: the drags are forgotten instead.
+#[test]
+fn undo_leaves_a_handle_drag_once_a_value_is_typed_after_it() {
+    let mut h = new_extrude_over_a_box();
+    drag_taper(&mut h);
+    let dragged = taper(&h).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7 mm"})).unwrap();
+    h.frames(2);
+    h.ctx.memory_mut(|m| m.stop_text_input());
+    h.frames(1);
+    let depth = h.app.session.undo.len();
+    key(&mut h, "Z");
+    assert_eq!(taper(&h), Some(dragged));
+    let Some(crate::dialogs::Kind::Extrude { distance, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("extrude") };
+    assert_eq!(distance, "7 mm");
+    assert_eq!(h.app.session.undo.len(), depth - 1, "the key works as before");
+}
+
+// Undo moved to another key takes back the drag too (#22838 review).
+#[test]
+fn undo_on_another_key_takes_back_a_handle_drag() {
+    let mut h = new_extrude_over_a_box();
+    crate::keymap::bind(&mut h.app, "edit.undo", "Ctrl+U", true).unwrap();
+    let depth = h.app.session.undo.len();
+    drag_taper(&mut h);
+    assert_ne!(taper(&h).as_deref(), Some("0 deg"));
+    key(&mut h, "U");
+    assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+    assert_eq!(h.app.session.undo.len(), depth);
+}

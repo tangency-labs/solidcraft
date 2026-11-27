@@ -2185,6 +2185,7 @@ mod tests {
             corner_relief: size.map(Into::into),
             height_from: None,
             bend_relief_shape: None,
+            corners: Vec::new(),
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -2407,6 +2408,8 @@ mod tests {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

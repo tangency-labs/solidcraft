@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.body_edge_lines": "Edge Lines",
+    "ui.hide_edge_lines": "Hide Edge Lines",
+    "ui.show_edge_lines": "Show Edge Lines"
+  },
+  "en-GB": {
+    "cmd.body_edge_lines": "Edge Lines",
+    "ui.hide_edge_lines": "Hide Edge Lines",
+    "ui.show_edge_lines": "Show Edge Lines"
+  },
+  "de": {
+    "cmd.body_edge_lines": "Kantenlinien",
+    "ui.hide_edge_lines": "Kantenlinien ausblenden",
+    "ui.show_edge_lines": "Kantenlinien einblenden"
+  },
+  "ja": {
+    "cmd.body_edge_lines": "エッジ線",
+    "ui.hide_edge_lines": "エッジ線を非表示",
+    "ui.show_edge_lines": "エッジ線を表示"
+  },
+  "zh": {
+    "cmd.body_edge_lines": "边线",
+    "ui.hide_edge_lines": "隐藏边线",
+    "ui.show_edge_lines": "显示边线"
+  },
+  "ko": {
+    "cmd.body_edge_lines": "모서리 선",
+    "ui.hide_edge_lines": "모서리 선 숨기기",
+    "ui.show_edge_lines": "모서리 선 표시"
+  },
+  "ar": {
+    "cmd.body_edge_lines": "خطوط الحواف",
+    "ui.hide_edge_lines": "إخفاء خطوط الحواف",
+    "ui.show_edge_lines": "إظهار خطوط الحواف"
+  },
+  "he": {
+    "cmd.body_edge_lines": "קווי קצה",
+    "ui.hide_edge_lines": "הסתרת קווי קצה",
+    "ui.show_edge_lines": "הצגת קווי קצה"
+  },
+  "vi": {
+    "cmd.body_edge_lines": "Đường cạnh",
+    "ui.hide_edge_lines": "Ẩn đường cạnh",
+    "ui.show_edge_lines": "Hiện đường cạnh"
+  }
+}

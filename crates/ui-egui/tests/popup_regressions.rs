@@ -68,9 +68,15 @@ fn parameter_transfer_buttons_use_existing_distinct_tray_arrows_at_1x_and_2x() {
             let (image, out) = capture(&mut h, &format!("parameters-{dark}-{ppp}x"));
             let meshes = h.ctx.tessellate(out.shapes, ppp);
             let t = Tokens::get();
-            for (label, id) in [("Import…", "import_tray"), ("Export CSV…", "export_tray"), ("Export JSON…", "export_tray")] {
-                let button = scenario::rect_of(&format!("dialog:button::{label}")).unwrap();
-                let expected = format!("icon:{id}:{}", (t.space_14 * ppp) as u32);
+            for (label, id, handle) in [
+                ("Import", "import_tray", "params:import"),
+                ("Export CSV", "export_tray", "params:export_csv"),
+                ("Export JSON", "export_tray", "params:export_json"),
+            ] {
+                let button = scenario::rect_of(handle).unwrap();
+                // Narrow headers use the kit's icon-only button; labelled actions keep 14 pt icons.
+                let icon_side = if button.width() <= t.control_height { button.width() - 2.0 * t.form_icon_inset } else { t.space_14 };
+                let expected = format!("icon:{id}:{}", (icon_side * ppp) as u32);
                 assert_ne!(solidcraft_ui_egui::icon_svg::resolve(id).master, "placeholder");
                 assert!(
                     meshes.iter().any(|clipped| match &clipped.primitive {
