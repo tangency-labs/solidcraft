@@ -153,34 +153,14 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-SolidCraft on Windows starts Direct3D 12, as web browsers do, and loads no other graphics API
-beside it. Only when Direct3D 12 can't open the window does it start again on Vulkan, then
-OpenGL, then software rendering, and later launches of that version go straight to the API that
-worked. Earlier versions started Vulkan first, with Direct3D 12 and OpenGL loaded alongside; choose
-**Vulkan** in **Preferences > Graphics > Graphics API** to keep using it. The GPU path tracer in
-Render needs Vulkan on Windows: on Direct3D 12 it offers **Restart with Vulkan**, and the CPU
-image methods work on either.
+SolidCraft lets wgpu, its graphics library, choose the graphics API and the graphics card, the
+same way any app built on it does: on Windows it looks at Vulkan, Direct3D 12 and OpenGL and
+takes the most capable card, on macOS Metal, on Linux Vulkan, then OpenGL. Choosing the API in
+**Preferences > Graphics > Graphics API**, or setting `WGPU_BACKEND`, starts only that one.
 
-If a graphics driver crashes the app while it starts a graphics API, the next launch knows
-which API it was and skips it on this computer, going on in the same order. Safe mode and
-software rendering leave it out too, so that driver is not loaded again (unless every API has
-crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
-API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
-Only a crash after SolidCraft started loading a graphics API counts, and only against an API
-the platform supports (never Metal or Direct3D 12 on Linux). A start that stops earlier, such as one
-missing a system library the window needs, blames no API.
-
-If the graphics driver stops responding while SolidCraft is open (the window stays white or
-black and every click takes a second), SolidCraft notices after a few seconds, closes, and
-starts again on the next graphics API: Vulkan, then Direct3D 12, then OpenGL, then the software
-renderer. Later starts keep the new one, as the Graphics API choice below (the software
-renderer is kept as `"backend": "cpu"` in `graphics.json`); choose **Automatic** there to go
-back. The restart doesn't keep a `WGPU_BACKEND` override, which would start the API that hung
-again. The unsaved changes of every open design are offered for recovery; a design whose
-changes couldn't be kept (no recovery folder, or writing it failed) is named in the new window
-instead. A graphics card that is only slow, and still finishes each frame, doesn't count. The
-software renderer draws without anti-aliasing unless you chose a level in Preferences ›
-Graphics.
+If the window can't open, SolidCraft starts once more on the software renderer, which doesn't
+depend on the graphics driver. After a launch that failed to come up or lost its graphics device,
+the next one starts in safe graphics mode on the software renderer.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

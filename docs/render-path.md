@@ -26,8 +26,7 @@ The path tracer runs on Vulkan, or on Metal on macOS (#3217). On Windows, the vi
 must already use Vulkan: opening a driver that startup deliberately avoided is unsafe.
 A Direct3D 12 session offers **Restart with Vulkan** in Render. The same saved choice is
 available in **Preferences > Graphics > Graphics API**. The host reads it before creating
-any adapter or device. Automatic starts Direct3D 12 alone on Windows, so the path tracer
-is off there until the user chooses Vulkan; it never opens a second, Vulkan device beside it.
+any adapter or device. Automatic leaves the choice to wgpu.
 Elsewhere, an unsupported viewport backend may reopen the same GPU through Vulkan or Metal.
 Where there is no suitable driver or device (Remote Desktop, WARP, older drivers), the path
 executor reports itself unavailable and CPU image methods remain usable.
