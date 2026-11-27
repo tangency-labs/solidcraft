@@ -112,6 +112,7 @@ pub mod stop;
 pub mod stroke_runs;
 pub mod surface;
 pub mod surface_cvs;
+pub mod surface_intersection;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
