@@ -1783,28 +1783,16 @@ enum OtherRegionSplit {
     Opaque,
 }
 
-struct PlannedOtherFaces {
-    ordered: Vec<FaceId>,
-    outer_disjoint_seeds: Vec<FaceId>,
-}
-
-/// Orders `other_keep` faces into connected components by shared edges in `other`:
-/// 1. Outermost disjoint components (no edge initially mated to `primary`, seed borders
-///    `other`'s infinite region), each in BFS order from its first face.
-/// 2. Components touching `primary` (at least one initially mated edge), each in BFS order
-///    starting from its initially mated faces so every face finds its region locally via
-///    mated-edge radial sectors instead of building `BrepQuery`.
-/// 3. Remaining disjoint components (e.g. cavity shells in `other`), each in BFS order.
-fn plan_other_keep_order(
+/// Finds the first face (in `other_keep` order) of each connected component of `other_keep`
+/// that has no initially mated edges and borders `other`'s infinite region. Preserves
+/// `other_keep`'s exact iteration order (never reorders faces).
+fn outer_disjoint_seeds(
     other: &Brep,
     other_keep: &[FaceId],
     initial_mated: &BTreeSet<EdgeId>,
-) -> Result<PlannedOtherFaces> {
+) -> Result<Vec<FaceId>> {
     if other_keep.len() <= 1 {
-        return Ok(PlannedOtherFaces {
-            ordered: other_keep.to_vec(),
-            outer_disjoint_seeds: Vec::new(),
-        });
+        return Ok(Vec::new());
     }
 
     let mut face_edge_lists: Vec<Vec<EdgeId>> = Vec::new();
@@ -1827,23 +1815,21 @@ fn plan_other_keep_order(
 
     let other_inf = other.infinite_region();
     let mut visited = vec![false; other_keep.len()];
-    let mut outer_disjoint: Vec<FaceId> = Vec::new();
-    let mut outer_disjoint_seeds: Vec<FaceId> = Vec::new();
-    let mut touching: Vec<FaceId> = Vec::new();
-    let mut inner_disjoint: Vec<FaceId> = Vec::new();
+    let mut seeds: Vec<FaceId> = Vec::new();
 
     for start in 0..other_keep.len() {
         if visited.get(start).copied().unwrap_or(true) {
             continue;
         }
-        // Discover the connected component in first-seen BFS order.
-        let mut comp = Vec::new();
+        let mut has_mated = false;
         let mut queue = VecDeque::from([start]);
         if let Some(slot) = visited.get_mut(start) {
             *slot = true;
         }
         while let Some(u) = queue.pop_front() {
-            comp.push(u);
+            if face_has_mated.get(u).copied().unwrap_or(false) {
+                has_mated = true;
+            }
             if let Some(edges) = face_edge_lists.get(u) {
                 for &e in edges {
                     if let Some(neighbors) = edge_to_faces.get(&e) {
@@ -1859,94 +1845,20 @@ fn plan_other_keep_order(
                 }
             }
         }
-
-        let mated_starts: Vec<usize> = comp
-            .iter()
-            .copied()
-            .filter(|&i| face_has_mated.get(i).copied().unwrap_or(false))
-            .collect();
-        if !mated_starts.is_empty() {
-            // Preserve the component's original order in `other_keep` whenever every face
-            // already shares a mated edge (either initially or from an earlier face of the
-            // component); only reorder into BFS from `mated_starts` when an unmated face
-            // appears before any mated path reaches it.
-            let mut orig_order = comp;
-            orig_order.sort_unstable();
-            let mut sim_mated = initial_mated.clone();
-            let mut already_mated_in_order = true;
-            for &u in &orig_order {
-                let Some(edges) = face_edge_lists.get(u) else {
-                    already_mated_in_order = false;
-                    break;
-                };
-                if !edges.iter().any(|e| sim_mated.contains(e)) {
-                    already_mated_in_order = false;
-                    break;
-                }
-                sim_mated.extend(edges.iter().copied());
-            }
-            if already_mated_in_order {
-                for u in orig_order {
-                    if let Some(&f) = other_keep.get(u) {
-                        touching.push(f);
-                    }
-                }
-            } else {
-                let mut in_order = BTreeSet::new();
-                let mut bfs = VecDeque::new();
-                for s in mated_starts {
-                    if in_order.insert(s) {
-                        bfs.push_back(s);
-                    }
-                }
-                while let Some(u) = bfs.pop_front() {
-                    if let Some(&f) = other_keep.get(u) {
-                        touching.push(f);
-                    }
-                    if let Some(edges) = face_edge_lists.get(u) {
-                        for &e in edges {
-                            if let Some(neighbors) = edge_to_faces.get(&e) {
-                                for &v in neighbors {
-                                    if in_order.insert(v) {
-                                        bfs.push_back(v);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else if let Some(&seed_face) = other_keep.get(start) {
-            let borders_other_inf = face::upward_faceuse(other, seed_face)?
-                .map(|fu| region_pair(other, fu))
-                .transpose()?
-                .is_some_and(|(o1, o2)| (Some(o1) == other_inf) != (Some(o2) == other_inf));
-            if borders_other_inf {
-                outer_disjoint_seeds.push(seed_face);
-                for u in comp {
-                    if let Some(&f) = other_keep.get(u) {
-                        outer_disjoint.push(f);
-                    }
-                }
-            } else {
-                for u in comp {
-                    if let Some(&f) = other_keep.get(u) {
-                        inner_disjoint.push(f);
-                    }
+        if !has_mated {
+            if let Some(&seed_face) = other_keep.get(start) {
+                let borders_other_inf = face::upward_faceuse(other, seed_face)?
+                    .map(|fu| region_pair(other, fu))
+                    .transpose()?
+                    .is_some_and(|(o1, o2)| (Some(o1) == other_inf) != (Some(o2) == other_inf));
+                if borders_other_inf {
+                    seeds.push(seed_face);
                 }
             }
         }
     }
 
-    let mut ordered = Vec::new();
-    let _ = ordered.try_reserve(other_keep.len());
-    ordered.extend(outer_disjoint);
-    ordered.extend(touching);
-    ordered.extend(inner_disjoint);
-    Ok(PlannedOtherFaces {
-        ordered,
-        outer_disjoint_seeds,
-    })
+    Ok(seeds)
 }
 
 fn resolve_preclassified_region(
@@ -2040,6 +1952,20 @@ fn classify_other_region_split(
             continue;
         }
         let mut fbox = qf1::calculate_bounding_box(k, primary, face_id, false)?;
+        if let Some(surface) = primary.face(face_id)?.surface.as_ref() {
+            if let Some(def) = surface.procedural_definition() {
+                let bound = def.bound();
+                if bound.is_finite() && bound >= 0.0 {
+                    fbox.expand_absolute(bound);
+                } else {
+                    return Ok(OtherRegionSplit::Opaque);
+                }
+            } else if surface.net_is_fitted() {
+                return Ok(OtherRegionSplit::Opaque);
+            }
+        } else {
+            return Ok(OtherRegionSplit::Opaque);
+        }
         let ftol = face::tolerance(primary, face_id)?;
         max_tol = max_tol.max(ftol);
         fbox.expand_absolute(ftol);
@@ -2069,14 +1995,15 @@ fn make_other_faces(
 ) -> Result<()> {
     let (_, mated_other_edges) = intersector.common_edges(primary, other)?;
     let initial_mated: BTreeSet<EdgeId> = mated_other_edges.into_iter().collect();
-    let planned = plan_other_keep_order(other, &faces.other_keep, &initial_mated)?;
+    let seeds = outer_disjoint_seeds(other, &faces.other_keep, &initial_mated)?;
 
     // Pre-classify every outermost disjoint seed face once against the unmutated `primary`
     // using a single shared `BrepQuery`, avoiding O(S) full `make_brep_cache` rebuilds.
+    // Skip when fewer than 2 disjoint seeds exist (a single seed builds `BrepQuery` once anyway).
     let mut preclassified: BTreeMap<FaceId, (RegionId, Point3)> = BTreeMap::new();
-    if !planned.outer_disjoint_seeds.is_empty() {
+    if seeds.len() >= 2 {
         let query = BrepQuery::of_brep(primary);
-        for &seed in &planned.outer_disjoint_seeds {
+        for &seed in &seeds {
             if let Some(fu1) = face::faceuses(other, seed)?.0 {
                 if let Some(hit) = p1::classify_unmated_other_face_with_query(
                     kernels.primary,
@@ -2096,7 +2023,7 @@ fn make_other_faces(
     let mut split_epoch = 0usize;
     let mut all_opaque = false;
 
-    for &f in &planned.ordered {
+    for &f in &faces.other_keep {
         let (fu1, fu2) = face::faceuses(other, f)?;
         let [fu1, fu2] = [fu1, fu2].map(|fu| {
             linked(
