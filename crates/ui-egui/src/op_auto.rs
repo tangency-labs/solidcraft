@@ -13,8 +13,8 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]). Pipe and Thicken don't choose, but this holds
-//!   for them too.
+//!   the feature's `targets` ([`scope_targets`]). Pipe, Thicken and an Emboss with no Target
+//!   Face don't choose, but this holds for them too.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
@@ -63,9 +63,9 @@ fn rule(kind: &Kind) -> Option<Rule> {
 }
 
 /// Whether the window's Join, Cut or Intersect takes only the shown bodies: every window that
-/// chooses, and Pipe and Thicken, which don't.
+/// chooses, and Pipe, Thicken and Emboss, which don't.
 fn scoped(kind: &Kind) -> bool {
-    rule(kind).is_some() || matches!(kind, Kind::Pipe { .. } | Kind::Surface(Surf::Thicken { .. }))
+    rule(kind).is_some() || matches!(kind, Kind::Pipe { .. } | Kind::Surface(Surf::Thicken { .. }) | Kind::Emboss { .. })
 }
 
 fn operation(kind: &mut Kind) -> Option<&mut usize> {
@@ -336,7 +336,10 @@ pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
     for (_, p) in cmds {
-        let changes = p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
+        // An Emboss or Deboss joins or cuts with no `operation`; with a Target Face it changes
+        // only that face's body.
+        let embosses = matches!(d.kind, Kind::Emboss { .. }) && p.get("face").is_none();
+        let changes = embosses || p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
         let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
         if !changes || named {
             continue;
