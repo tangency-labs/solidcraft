@@ -1151,6 +1151,14 @@ pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
 }
 
+/// Windows with OpenGL, decided once the window is open: the adapter wgpu picked draws with
+/// `backend`. The standard GPU startup ([`crate::gpu_startup`]) starts every backend, so
+/// [`system_title_bar`] can't tell beforehand that the window ends up on OpenGL; such a window
+/// then switches to the system title bar (#22530), as an OpenGL-only start gets it.
+pub fn system_title_bar_for_adapter(windows: bool, backend: eframe::wgpu::Backend) -> bool {
+    windows && backend == eframe::wgpu::Backend::Gl
+}
+
 /// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
 /// the largest STEP/import and design file this run reads, over the saved preference, without
 /// saving anything. A missing or bad value stops the start with this error.
@@ -2402,6 +2410,21 @@ full"
         }
         for b in [Backends::GL, Backends::VULKAN, Backends::METAL] {
             assert!(!system_title_bar(false, b), "{b:?}");
+        }
+    }
+
+    /// #22530: the standard startup starts every backend, and the adapter it then picks on an
+    /// older Intel GPU is OpenGL; that window gets the system title bar too.
+    #[test]
+    fn an_opengl_adapter_picked_among_all_backends_gets_the_system_title_bar() {
+        use eframe::wgpu::{Backend, Backends};
+        assert!(!system_title_bar(true, Backends::all()), "decided only once the adapter is known");
+        assert!(system_title_bar_for_adapter(true, Backend::Gl));
+        for b in [Backend::Dx12, Backend::Vulkan, Backend::Metal, Backend::BrowserWebGpu, Backend::Noop] {
+            assert!(!system_title_bar_for_adapter(true, b), "{b:?}");
+        }
+        for b in [Backend::Gl, Backend::Vulkan, Backend::Metal] {
+            assert!(!system_title_bar_for_adapter(false, b), "{b:?}");
         }
     }
 
