@@ -304,14 +304,9 @@ pub(super) fn coincident_opposites(
     let mut selected = Vec::new();
     for &p in &planes {
         k.check_cancelled(OP)?;
-        if planes
-            .iter()
-            .any(|&q| {
-                p.id != q.id
-                    && opposite(p, q, tolerance)
-                    && !share_an_original(exec, p.id, q.id)
-            })
-        {
+        if planes.iter().any(|&q| {
+            p.id != q.id && opposite(p, q, tolerance) && !share_an_original(exec, p.id, q.id)
+        }) {
             selected.push(p);
         }
     }
