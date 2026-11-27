@@ -1805,7 +1805,8 @@ fn resuffixed_level_face(st: &ModelState, body: Option<&str>, name: &str, p: Vec
             && matched > 0
             && matched.saturating_mul(2) >= total
         {
-            let (_, point) = nearest_on_face(&b.mesh(), face, if p.is_finite() { p } else { Vec3::ZERO })?;
+            let target = if p.is_finite() { p } else { Vec3::ZERO };
+            let point = solidcraft_kernel::point_closest(target, &b.body, solidcraft_kernel::Members::Faces(&[face])).ok()??.to;
             return Some(FaceHit { body: bi, face, point, verified: naming::names(b).verified(face), on_point: false });
         }
         None
