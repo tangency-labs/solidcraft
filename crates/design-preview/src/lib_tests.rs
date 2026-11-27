@@ -343,3 +343,15 @@ fn the_directory_bounds_hold_exactly_at_their_values() {
     assert!(fits(&directory(8 << 20)), "a directory of exactly 8 MiB");
     assert!(!fits(&directory((8 << 20) + 1)), "one byte more, still inside the file");
 }
+
+#[test]
+fn a_second_record_counts_unless_it_claims_several_disks() {
+    let parts: &[(&str, &[u8])] = &[("container.json", CONTAINER), ("document.json", DOCUMENT), ("cache/thumbnail.png", &png(240, 150))];
+    // A record inside the archive comment (four bytes before its end, so it is not the one that
+    // ends the file), claiming 0x7F7F entries in a directory of 0x7F7F7F7F bytes: refused when it
+    // gives one disk, ignored when it gives two (no reader takes those).
+    let one_disk = "PK\u{5}\u{6}\0\0\0\0\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\0\0tail";
+    assert!(!fits(&container_bytes(parts, one_disk)));
+    let two_disks = "PK\u{5}\u{6}\u{1}\0\0\0\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\0\0tail";
+    assert!(fits(&container_bytes(parts, two_disks)));
+}
