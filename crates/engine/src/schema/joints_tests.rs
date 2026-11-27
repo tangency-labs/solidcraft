@@ -106,6 +106,34 @@ fn center_rule_wall_pairs_have_two_world_points_in_both_schemas() {
 }
 
 #[test]
+fn between_faces_schema_treats_null_axes_as_omitted() {
+    let named = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let joint = serde_json::to_value(input_schema_for::<CreateJointParams>()).unwrap();
+    let constraint = serde_json::to_value(input_schema_for::<CreateConstraintParams>()).unwrap();
+    let faces = json!([[1, 2, 3], [4, 5, 6]]);
+    for (axes, valid) in [
+        (json!({"x": null}), true),
+        (json!({"z": null}), true),
+        (json!({"x": null, "z": null}), true),
+        (json!({"x": [1, 0, 0]}), false),
+        (json!({"z": [0, 0, 1]}), false),
+        (json!({"face": [1, 2, 3]}), false),
+    ] {
+        let mut origin = json!({"occurrence": "Slot:1", "faces": faces});
+        origin.as_object_mut().unwrap().extend(axes.as_object().unwrap().clone());
+        let paired = |kind| json!({"type": kind, "a": origin, "b": {"plane": "YZ"}});
+        let planar = paired("planar");
+        let center = paired("center");
+        assert_eq!(conforms(&named, &named, &origin), valid, "{origin}");
+        assert_eq!(conforms(&joint, &joint, &planar), valid, "{planar}");
+        assert_eq!(conforms(&constraint, &constraint, &center), valid, "{center}");
+        assert_eq!(serde_json::from_value::<MakeJointOriginParams>(origin).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateJointParams>(planar).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
+    }
+}
+
+#[test]
 fn secondary_construction_axis_x_is_in_the_origin_contract() {
     let p = json!({"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}});
     assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_ok());

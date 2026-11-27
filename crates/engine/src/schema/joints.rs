@@ -549,8 +549,8 @@ impl JsonSchema for JointOriginArg {
                         "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
-                        "z": at("The frame's z axis, a direction [x, y, z], where it is not the face's normal."),
-                        "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}.", "anyOf": [point, {"type": "string"}, {"type": "object"}]},
+                        "z": {"description": "The frame's z axis, a direction [x, y, z], where it is not the face's normal. Null is omitted.", "anyOf": [point, {"type": "null"}]},
+                        "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}. Null is omitted.", "anyOf": [point, {"type": "string"}, {"type": "object"}, {"type": "null"}]},
                         "end": {"description": "A circle's end: the name of the face across its rim there.", "type": "string"},
                         "on": at("An edge origin: a point on the face to use."),
                         "corner": at("An edge origin: a point near one end of the edge, for the corner there."),
@@ -2514,15 +2514,19 @@ pub struct MakeJointOriginParams {
 
 /// With `faces`, no other primary reference or custom axis applies.
 fn between_faces_origin_schema() -> Value {
-    json!({"if": {"required": ["faces"]}, "then": {
-        "not": {"anyOf": [
-            {"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]},
-            {"required": ["point"]}, {"required": ["frame"]}, {"required": ["plane"]},
-            {"required": ["axis"]}, {"required": ["sketch"]}, {"required": ["curve"]},
-            {"required": ["end"]}
-        ]},
-        "properties": {"x": {"type": "null"}, "z": {"type": "null"}}
-    }})
+    json!({"anyOf": [
+        {"not": {"required": ["faces"]}},
+        {
+            "required": ["faces"],
+            "not": {"anyOf": [
+                {"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]},
+                {"required": ["point"]}, {"required": ["frame"]}, {"required": ["plane"]},
+                {"required": ["axis"]}, {"required": ["sketch"]}, {"required": ["curve"]},
+                {"required": ["end"]}
+            ]},
+            "properties": {"x": {"type": "null"}, "z": {"type": "null"}}
+        }
+    ]})
 }
 
 fn origin_required(schema: &mut Schema) {
