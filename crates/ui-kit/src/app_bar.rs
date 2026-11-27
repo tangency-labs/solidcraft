@@ -3525,8 +3525,10 @@ fn group_label(ui: &mut egui::Ui, strip: &mut TabStrip, g: usize, rect: Rect, me
     }
     let resp = ui.interact(rect, ui.scope_id().with(("doc_group", g)), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.tip));
+    // The chevron at the label's end: the label lights up for it too, as it is the label's.
+    let chevron = Rect::from_min_max(pos2(rect.right() - GROUP_CHEVRON_ROOM, rect.top()), rect.right_bottom());
     let painter = ui.painter();
-    let hot = resp.hovered() || resp.has_focus();
+    let hot = resp.hovered() || resp.has_focus() || ui.rect_contains_pointer(chevron);
     if label.name.is_empty() {
         let dot = pos2(rect.left() + GROUP_DOT / 2.0, rect.center().y);
         if hot {
@@ -3548,7 +3550,6 @@ fn group_label(ui: &mut egui::Ui, strip: &mut TabStrip, g: usize, rect: Rect, me
     }
     // The chevron folds the group's designs away to the label, or shows them again. It is its own
     // click target, over the label's, so a click on it never starts a rename or opens the menu.
-    let chevron = Rect::from_min_max(pos2(rect.right() - GROUP_CHEVRON_ROOM, rect.top()), rect.right_bottom());
     solidcraft_ui_registry::publish_target(&format!("{}{g}:toggle", h.group), chevron);
     let c = chevron.center();
     let (a, b, d) = if label.collapsed {
