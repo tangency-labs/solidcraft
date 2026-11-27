@@ -53,6 +53,10 @@ macro_rules! navigation_preferences {
             middle_double_click: String = "home".into(), PAGE_NAVIGATION;
             /// Mouse gestures: a ring of tools on the right button.
             mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
+            /// Dragging with a mouse button orbits the view the other way on both axes (off: the model
+            /// follows the pointer). Picking the SolidWorks mapping turns it on; the trackpad's Shift
+            /// orbit keeps its own switch (`orbit_reverse`).
+            mouse_orbit_reverse: bool = false, PAGE_NAVIGATION => check_id_help("ui.reverse_mouse_orbit_direction", "ui.reverse_mouse_orbit_tip");
             /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
             nav: String = "fusion".into(), PAGE_NAVIGATION;
             /// What dragging a mouse button does when the user has chosen it, by button (`left`, `middle`,
