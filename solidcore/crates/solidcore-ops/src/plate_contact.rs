@@ -1046,7 +1046,12 @@ mod tests {
         let right = plan(19.0);
         assert_eq!((both.len(), right.len()), (2, 1), "{both:?} {right:?}");
         assert!(both[1].iter().any(|t| (t.1 - 8.0).abs() > 1e-9), "{both:?}");
-        assert_eq!(both[1], right[0]);
+        // The same widths; the starts up to the rounding of the two bodies' geometry.
+        assert_eq!(both[1].len(), right[0].len(), "{both:?} {right:?}");
+        for (a, b) in both[1].iter().zip(&right[0]) {
+            assert_eq!(a.1, b.1, "{both:?} {right:?}");
+            assert!((a.0 - b.0).abs() < 1e-9, "{both:?} {right:?}");
+        }
         assert_ne!(both[0], both[1]);
     }
 
