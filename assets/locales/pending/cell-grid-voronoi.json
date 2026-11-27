@@ -1,0 +1,56 @@
+{
+  "en": {
+    "ui.cell_grid.voronoi": "Voronoi",
+    "ui.cell_grid.seed": "Seed",
+    "ui.cell_grid.irregularity": "Irregularity",
+    "ui.cell_grid.corner_radius": "Corner radius"
+  },
+  "ar": {
+    "ui.cell_grid.voronoi": "فورونوي",
+    "ui.cell_grid.seed": "البذرة",
+    "ui.cell_grid.irregularity": "عدم الانتظام",
+    "ui.cell_grid.corner_radius": "نصف قطر الزاوية"
+  },
+  "de": {
+    "ui.cell_grid.voronoi": "Voronoi",
+    "ui.cell_grid.seed": "Startwert",
+    "ui.cell_grid.irregularity": "Unregelmäßigkeit",
+    "ui.cell_grid.corner_radius": "Eckenradius"
+  },
+  "he": {
+    "ui.cell_grid.voronoi": "וורונוי",
+    "ui.cell_grid.seed": "זרע",
+    "ui.cell_grid.irregularity": "אי־סדירות",
+    "ui.cell_grid.corner_radius": "רדיוס פינה"
+  },
+  "ja": {
+    "ui.cell_grid.voronoi": "ボロノイ",
+    "ui.cell_grid.seed": "シード",
+    "ui.cell_grid.irregularity": "不規則さ",
+    "ui.cell_grid.corner_radius": "角の半径"
+  },
+  "ko": {
+    "ui.cell_grid.voronoi": "보로노이",
+    "ui.cell_grid.seed": "시드",
+    "ui.cell_grid.irregularity": "불규칙도",
+    "ui.cell_grid.corner_radius": "모서리 반경"
+  },
+  "nb": {
+    "ui.cell_grid.voronoi": "Voronoi",
+    "ui.cell_grid.seed": "Frø",
+    "ui.cell_grid.irregularity": "Uregelmessighet",
+    "ui.cell_grid.corner_radius": "Hjørneradius"
+  },
+  "vi": {
+    "ui.cell_grid.voronoi": "Voronoi",
+    "ui.cell_grid.seed": "Hạt giống",
+    "ui.cell_grid.irregularity": "Độ bất quy tắc",
+    "ui.cell_grid.corner_radius": "Bán kính góc"
+  },
+  "zh": {
+    "ui.cell_grid.voronoi": "沃罗诺伊",
+    "ui.cell_grid.seed": "种子",
+    "ui.cell_grid.irregularity": "不规则度",
+    "ui.cell_grid.corner_radius": "角半径"
+  }
+}

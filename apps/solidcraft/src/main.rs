@@ -350,6 +350,10 @@ impl eframe::App for App {
                     self.solve.open_chosen_file(&f);
                 }
             }
+            // Workshop links: from this launch's command line, another launch or macOS.
+            for link in single_instance::take_links() {
+                solidcraft_ui_egui::workshop::open_link(&mut self.solve, ctx, &link);
+            }
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -1266,6 +1270,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         })),
         open_path: Some(Box::new(open_with::open_with_default_app)),
         open_bytes: None,
+        workshop_get: Some(std::sync::Arc::new(workshop_get)),
     }
 }
 
@@ -1303,6 +1308,40 @@ fn http_download(url: &str, to: &std::path::Path, progress: &dyn Fn(u64, Option<
     }
     file.sync_all().map_err(|e| fail(format!("{}: {e}", to.display())))?;
     Ok(())
+}
+
+/// HTTPS GET for Workshop links (docs/workshop-links.md): workshop.solidcraft.io only, no
+/// redirects, certificates from the operating system, a 30 s limit, at most 32 MB, and the
+/// response's signature headers, which the index is checked against.
+fn workshop_get(url: &str) -> Result<solidcraft_ui_egui::workshop::Signed, String> {
+    use std::time::Duration;
+    let host = solidcraft_ui_egui::workshop::index::HOST;
+    if !url.strip_prefix("https://").and_then(|rest| rest.strip_prefix(host)).is_some_and(|path| path.starts_with('/')) {
+        return Err(format!("only {host} is asked"));
+    }
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .https_only(true)
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .user_agent("SolidCraft")
+        .max_redirects(0)
+        .build()
+        .into();
+    let mut response = agent.get(url).header("Accept", "application/json").call().map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    if status != 200 {
+        return Err(format!("the Workshop answered HTTP {status}"));
+    }
+    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let (signature, key_id) = (header("x-workshop-signature"), header("x-workshop-key-id"));
+    let body = response.body_mut().with_config().limit(32 << 20).read_to_vec().map_err(|e| e.to_string())?;
+    Ok(solidcraft_ui_egui::workshop::Signed { body, signature, key_id })
 }
 
 /// HTTP for the agent chat's API agents (OpenAI-compatible endpoints, docs/agent-chat.md): to the
@@ -1696,9 +1735,18 @@ fn main() -> eframe::Result {
     // `--read-only`: the files named open read-only (Save asks for a new file), here or in the
     // window they are handed to.
     let mut read_only = false;
-    let mut args = std::env::args().skip(1);
+    // `--open-url solidcraft://workshop/…`: a Workshop page's Open in SolidCraft link, which the
+    // system hands over (docs/workshop-links.md). Looked up and asked about in the window.
+    // The link is the one argument read then: whatever else the command line holds (text a
+    // crafted link may have split into more arguments) is ignored, never taken as options or files.
+    let open_url = startup::open_url_argument(std::env::args_os().skip(1));
+    let mut links: Vec<String> = open_url.clone().flatten().into_iter().collect();
+    let mut args: Box<dyn Iterator<Item = String>> =
+        if open_url.is_some() { Box::new(std::iter::empty()) } else { Box::new(std::env::args().skip(1)) };
     while let Some(a) = args.next() {
         match a.as_str() {
+            // A `file:` URL names a local file; one that doesn't (another host, a bad escape) is dropped.
+            s if s.starts_with("file://") => files.extend(startup::file_url_path(s).map(|p| p.to_string_lossy().into_owned())),
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
@@ -1727,7 +1775,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [--open-url solidcraft://workshop/...] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1737,21 +1785,30 @@ fn main() -> eframe::Result {
     // Files given while SolidCraft already runs open in that window, and this launch ends (#18055).
     // Not with a control port, the sample or safe mode, which want a window of their own; no answer
     // within a moment starts normally.
-    if !files.is_empty()
+    // Workshop links go the same way; a window from before them refuses, and this launch opens them.
+    if (!files.is_empty() || !links.is_empty())
         && !new_instance
         && !safe_mode
         && !sample
         && control_port.is_none()
         && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
     {
+        if !links.is_empty() && single_instance::forward_links(&endpoint, &links) {
+            links.clear();
+        }
         let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
         // A window from before `--read-only` refuses read-only files, and this launch opens them itself.
-        let handed =
-            if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
-        if handed {
+        let handed = files.is_empty()
+            || if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
+        if handed && links.is_empty() {
             return Ok(());
         }
+        if handed {
+            files.clear();
+        }
     }
+    // The window looks the links up once it is ready.
+    single_instance::hold_links(links);
     // The log on disk, which a problem report attaches the end of (`log_file`); the run
     // before's log is kept beside it. After the hand-off above: a launch that only passes its
     // files to the running window must not move that window's log aside.
@@ -1806,12 +1863,19 @@ fn main() -> eframe::Result {
     // The crash guard (#18683): an API whose driver crashed the process while the last launch
     // started it is skipped from now on (until the next version), and each API this launch
     // probes or starts is named on disk first.
-    // Standard startup (`gpu_startup`) names no API on disk and skips none.
+    // Standard startup (`gpu_startup`) names an API on disk only while Intel's Vulkan driver
+    // creates the window's device on Windows (`gpu_startup::guards_device_creation`, #22110), and
+    // skips only an API that crashed there.
     let gpu_startup = gpu_startup::GpuStartup::current();
     solidcraft_engine::note!("SolidCraft graphics: {} startup", gpu_startup.name());
     let (backend_guard, skipped) = match (&settings, &backend_path) {
-        (Some(dir), Some(path)) if gpu_startup.legacy() => {
-            let (guard, skipped) = startup::BackendGuard::begin(dir, path, solidcraft_ui_egui::help::VERSION);
+        (Some(dir), Some(path)) => {
+            let version = solidcraft_ui_egui::help::VERSION;
+            let (guard, skipped) = if gpu_startup.legacy() {
+                startup::BackendGuard::begin(dir, path, version)
+            } else {
+                startup::BackendGuard::begin_standard(dir, path, version)
+            };
             (Some(guard), skipped)
         }
         _ => (None, startup::SkippedBackends::default()),
@@ -1877,18 +1941,34 @@ fn main() -> eframe::Result {
     }
     let saved_samples = if safe_mode { None } else { msaa() };
     let wgpu_options = if safe {
-        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed)
+        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed, backend_launch.backend.as_deref())
     } else {
         wgpu_options(gpu_startup, cpu_renderer, backend_launch.backend.as_deref(), skipped, backend_guard.as_ref())
     };
     // Named on disk when egui-wgpu creates the instance that loads the drivers (`startup_step`),
     // not before: the window system's event loop comes first, and a panic there (a missing
     // libxkbcommon-x11, #19643) is no driver's crash. Cleared once the first frame is presented
-    // (`App::backend_guard`) or startup returns.
+    // (`App::backend_guard`) or startup returns. Legacy startup only: standard startup names the
+    // API from its adapter choice, and only for Intel's Vulkan driver on Windows.
     if let Some(guard) = &backend_guard
+        && gpu_startup.legacy()
         && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
     {
         guard.attempt_when_the_instance_starts(setup.instance_descriptor.backends);
+    }
+    // Standard startup on Windows, in Automatic: OpenGL is named on disk while the instance
+    // starts, since its driver loads there before any adapter or vendor is known (#22917: AMD's
+    // `atio6axx.dll` crashed every start, safe mode included). After a crash there the launches of
+    // this version start Vulkan and D3D12 (`gpu_startup::standard_backends`); a clean start only
+    // writes the attempt file and removes it once the adapter is chosen.
+    let automatic =
+        !cpu_renderer && !backend_override && gpu_startup::chosen_backends(retry_backend.as_deref().or(backend_launch.backend.as_deref())).is_none();
+    if let Some(guard) = &backend_guard
+        && !gpu_startup.legacy()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
+        && gpu_startup::guards_instance_creation(cfg!(target_os = "windows"), setup.instance_descriptor.backends, automatic)
+    {
+        guard.attempt_while_the_instance_starts(eframe::wgpu::Backends::GL);
     }
     // A tracked full launch notes the API it starts, for the safe launch after a failure.
     if !safe
@@ -2428,6 +2508,8 @@ fn startup_step(step: &'static str, detail: &str) {
         startup::instance_starting();
     }
     if step == eframe::egui_wgpu::STEP_ADAPTER_CHOSEN {
+        // The instance came up: standard startup's OpenGL guard is over (#22917).
+        startup::adapter_chosen();
         solidcraft_engine::crash::set_environment(&format!("Renderer: {detail}"));
     }
     solidcraft_engine::crash::startup_step(step);
@@ -2471,7 +2553,7 @@ fn wgpu_options(
         let chosen = if startup_strategy.legacy() {
             startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed, probe)
         } else {
-            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference)
+            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed)
         };
         if let Some(backends) = chosen {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
@@ -2488,12 +2570,20 @@ fn wgpu_options(
             startup::configure_adapter(setup, cpu, environment, adapter);
         } else {
             // An adapter named by WGPU_ADAPTER_NAME or Preferences first, else a hardware Vulkan
-            // one, else wgpu's own request.
+            // one, else wgpu's own request. Intel's Vulkan driver on Windows is named on disk before
+            // it creates the device (#22110): a crash there makes the next launches start another
+            // API (`gpu_startup::standard_backends`). No other adapter writes anything.
+            let guard = guard.cloned();
             setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
                 let names: Vec<_> = adapters.iter().map(|a| startup::AdapterChoice::of(a, surface)).collect();
                 let kinds: Vec<_> = adapters.iter().map(|a| gpu_startup::AdapterKind::of(a, surface)).collect();
                 let picked =
                     startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
+                if let (Some(guard), Some(kind)) = (&guard, picked.and_then(|i| kinds.get(i)))
+                    && gpu_startup::guards_device_creation(cfg!(target_os = "windows"), kind.backend, kind.vendor)
+                {
+                    guard.attempt(eframe::wgpu::Backends::from(kind.backend));
+                }
                 Ok(picked.and_then(|i| adapters.get(i)).cloned())
             }));
         }
@@ -2513,12 +2603,20 @@ fn wgpu_options(
 
 /// Safe graphics mode's renderer settings (`startup::SafeGraphics`): wgpu's own backend and adapter
 /// choice, as v0.1.0 had, with no API order, no retries, no adapter preference and no float depth.
+/// A graphics API chosen in Preferences › Graphics (`preference`, `graphics.json`'s `backend`) is
+/// the only one started, so a driver the user moved away from is never loaded (#22110: with
+/// OpenGL or Direct3D 12 chosen, safe graphics still started Vulkan, whose driver crashed).
 /// After a failure, the API the failed launch used is left out (`failed`, [`startup::safe_backends`]),
 /// and so is every API that crashed while starting (`crashed`), the software renderer's included.
 /// Kept: two frames in flight ([`WINDOW_SURFACE`]), the D3D12 shader compiler that never loads a
 /// `dxcompiler.dll` from PATH (#6756), and the Intel Mac validation fix (#3080); with `cpu`, the
 /// software adapter.
-fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Backends) -> eframe::egui_wgpu::WgpuConfiguration {
+fn safe_wgpu_options(
+    cpu: bool,
+    failed: Option<&str>,
+    crashed: eframe::wgpu::Backends,
+    preference: Option<&str>,
+) -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(WINDOW_SURFACE);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
@@ -2530,9 +2628,17 @@ fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Bac
         }
         if std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| v.trim().is_empty()) || std::env::var_os(startup::WGPU_BACKEND_ENV).is_none() {
             // WGPU_BACKEND always has priority; otherwise the failed API (not for the software
-            // renderer, which picks its own adapter) and the crashed ones are left out.
+            // renderer, which picks its own adapter) and the crashed ones are left out. A chosen API
+            // takes the place of wgpu's own set (not for the software renderer).
+            // The software renderer starts D3D12 alone on Windows, its WARP adapter's API, so no
+            // Vulkan or OpenGL driver loads beside it (#22917).
             let failed = if cpu { None } else { failed };
-            setup.instance_descriptor.backends = startup::safe_backends(setup.instance_descriptor.backends, failed, crashed);
+            let chosen = if cpu {
+                gpu_startup::safe_software_backends(cfg!(target_os = "windows"), crashed)
+            } else {
+                gpu_startup::chosen_backends(preference)
+            };
+            setup.instance_descriptor.backends = startup::safe_backends(chosen.unwrap_or(setup.instance_descriptor.backends), failed, crashed);
         }
     }
     solidcraft_engine::note!("SolidCraft graphics: safe graphics mode, wgpu's own backend choice");
@@ -3354,19 +3460,21 @@ mod msaa_tests {
     #[test]
     fn safe_graphics_renderer_is_wgpus_own_choice() {
         let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
-        let eframe::egui_wgpu::WgpuSetup::CreateNew(safe) = super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty()).wgpu_setup else {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(safe) = super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty(), None).wgpu_setup
+        else {
             panic!()
         };
         assert_eq!(safe.instance_descriptor.backends, default.instance_descriptor.backends, "wgpu's own backends");
         assert!(safe.native_adapter_selector.is_none(), "no adapter preference");
         assert_eq!(safe.power_preference, default.power_preference);
-        let eframe::egui_wgpu::WgpuSetup::CreateNew(cpu) = super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty()).wgpu_setup else {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(cpu) = super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty(), None).wgpu_setup
+        else {
             panic!()
         };
         assert!(cpu.native_adapter_selector.is_some(), "the last-resort software renderer");
         if std::env::var_os("WGPU_BACKEND").is_none() {
             let eframe::egui_wgpu::WgpuSetup::CreateNew(after) =
-                super::safe_wgpu_options(false, Some("vulkan"), eframe::wgpu::Backends::empty()).wgpu_setup
+                super::safe_wgpu_options(false, Some("vulkan"), eframe::wgpu::Backends::empty(), None).wgpu_setup
             else {
                 panic!()
             };
@@ -3375,10 +3483,73 @@ mod msaa_tests {
             // in safe graphics mode and for the software renderer too: its driver is never loaded.
             for cpu in [false, true] {
                 let crashed = eframe::wgpu::Backends::VULKAN;
-                let eframe::egui_wgpu::WgpuSetup::CreateNew(guarded) = super::safe_wgpu_options(cpu, None, crashed).wgpu_setup else { panic!() };
+                let eframe::egui_wgpu::WgpuSetup::CreateNew(guarded) = super::safe_wgpu_options(cpu, None, crashed, None).wgpu_setup else {
+                    panic!()
+                };
                 assert!(!guarded.instance_descriptor.backends.contains(crashed), "software renderer {cpu}: no Vulkan");
                 assert!(!guarded.instance_descriptor.backends.is_empty());
             }
+        }
+    }
+
+    /// #22110: a graphics API chosen in Preferences › Graphics is the only one safe graphics mode
+    /// starts, so with OpenGL or Direct3D 12 chosen the Vulkan driver is never loaded; Automatic
+    /// keeps wgpu's own set, and the software renderer its own adapter.
+    #[test]
+    fn safe_graphics_starts_only_the_chosen_api() {
+        use eframe::wgpu::Backends;
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let backends = |cpu, failed, crashed, preference| {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = super::safe_wgpu_options(cpu, failed, crashed, preference).wgpu_setup else {
+                panic!()
+            };
+            setup.instance_descriptor.backends
+        };
+        let none = Backends::empty();
+        let own = backends(false, None, none, None);
+        assert_eq!(backends(false, None, none, Some("gl")), Backends::GL, "OpenGL chosen");
+        assert_eq!(backends(false, None, none, Some("dx12")), Backends::DX12, "Direct3D 12 chosen");
+        assert_eq!(backends(false, None, Backends::VULKAN, Some("gl")), Backends::GL);
+        assert_eq!(backends(false, None, none, Some("auto")), own, "Automatic: wgpu's own set");
+        assert_eq!(backends(false, None, none, Some("cpu")), own);
+        assert_eq!(backends(true, None, none, Some("gl")), backends(true, None, none, None), "the software renderer ignores the choice");
+        // After a failure of the API in use, the chosen ones less it, never none.
+        assert_eq!(backends(false, Some("dx12"), none, Some("dx12,gl")), Backends::GL);
+        assert_eq!(backends(false, Some("gl"), none, Some("gl")), Backends::GL);
+    }
+
+    /// #22917: the software renderer in safe graphics mode (`--safe-mode`, or after failed starts)
+    /// starts D3D12 alone on Windows, so AMD's OpenGL driver is never loaded; elsewhere, or once
+    /// D3D12 crashed, wgpu's own set less the crashed APIs as before.
+    #[test]
+    fn safe_software_renderer_never_starts_opengl_on_windows() {
+        use eframe::wgpu::Backends;
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let backends = |crashed, preference| {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = super::safe_wgpu_options(true, None, crashed, preference).wgpu_setup else {
+                panic!()
+            };
+            assert!(setup.native_adapter_selector.is_some(), "the software adapter");
+            setup.instance_descriptor.backends
+        };
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
+        let own = default.instance_descriptor.backends;
+        for preference in [None, Some("gl"), Some("vulkan"), Some("dx12")] {
+            for crashed in [Backends::empty(), Backends::GL, Backends::VULKAN] {
+                let started = backends(crashed, preference);
+                if cfg!(target_os = "windows") {
+                    assert_eq!(started, Backends::DX12, "{preference:?} {crashed:?}");
+                } else {
+                    assert_eq!(started, crate::startup::safe_backends(own, None, crashed), "as before");
+                }
+            }
+        }
+        if cfg!(target_os = "windows") {
+            assert_eq!(backends(Backends::DX12, None), own - Backends::DX12, "WARP's API crashed");
         }
     }
 
@@ -3387,8 +3558,8 @@ mod msaa_tests {
     #[test]
     fn the_window_keeps_two_frames_in_flight() {
         for options in [
-            super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty()),
-            super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty()),
+            super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty(), None),
+            super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty(), None),
         ] {
             assert_eq!(options.surface.desired_maximum_frame_latency, Some(2));
             assert_eq!(options.surface.present_mode, eframe::wgpu::PresentMode::AutoVsync);

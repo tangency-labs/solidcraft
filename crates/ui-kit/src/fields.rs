@@ -1792,7 +1792,13 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     // Focus leaves a field on pointer press, before the button reports a released click.
     let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
     open |= opening;
-    if open && ui.is_rect_visible(response.rect) {
+    // Keep this frame's inline TextEdit in its layer. Opening the popup on the next frame
+    // avoids registering that same editor id in both Middle and Foreground in one frame.
+    if opening {
+        response.request_focus();
+        ui.ctx().request_repaint();
+    }
+    if open && !opening && ui.is_rect_visible(response.rect) {
         let font = egui::FontId::monospace(t.font_label);
         let text_width = ui.fonts_mut(|f| f.layout_no_wrap("M".repeat(30), font.clone(), t.form_ink)).size().x;
         let width = (text_width + 2.0 * t.form_inset).max(width);
@@ -1851,7 +1857,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
         solidcraft_ui_registry::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
         open = opening || ctx.memory(|m| m.has_focus(id));
     } else {
-        open = false;
+        open = opening;
     }
     ui.data_mut(|d| d.insert_temp(open_id, open));
     response.widget_info(|| {

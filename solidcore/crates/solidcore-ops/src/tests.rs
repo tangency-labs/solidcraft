@@ -176,6 +176,36 @@ fn every_primitive_is_valid_at_every_level() {
     }
 }
 
+/// The check of some faces and edges of a valid body passes at every level, named through the
+/// body's record order; a face or edge past the record's is an argument error.
+#[test]
+fn a_local_check_passes_where_the_body_does() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let order = b.to_record().unwrap().1;
+    let all_faces: Vec<usize> = (0..order.faces.len()).collect();
+    let all_edges: Vec<usize> = (0..order.edges.len()).collect();
+    for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+        for (faces, edges) in [
+            (vec![0], vec![]),
+            (vec![1, 2], vec![0, 3]),
+            (all_faces.clone(), all_edges.clone()),
+        ] {
+            let r = b.check_local(&order, &faces, &edges, level).unwrap();
+            assert!(r.is_valid(), "{faces:?} {edges:?}, {level:?}: {r}");
+            assert_eq!(r.text, "");
+        }
+    }
+    let past = |faces: &[usize], edges: &[usize]| {
+        matches!(
+            b.check_local(&order, faces, edges, CheckLevel::All),
+            Err(Error::Argument)
+        )
+    };
+    assert!(past(&[order.faces.len()], &[]));
+    assert!(past(&[], &[order.edges.len()]));
+}
+
 /// A vertex whose tolerance is below the body's fails the check with its numbered line; a
 /// vertex pointing at no vertexuse fails `ValidatePointers`, and `AssertValid` is then skipped.
 #[test]
