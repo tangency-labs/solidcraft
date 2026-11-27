@@ -864,8 +864,79 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     };
     if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
         p["copy"] = json!(true);
+    } else {
+        let keep = keeps_axes(app, d);
+        let bodies = names(&p);
+        // An edited Move keeps the lists it was saved with while its bodies and the option are
+        // unchanged, so confirming it as it is replays the same constructions.
+        // An edited Move keeps the lists it was saved with while its bodies are unchanged: the
+        // constructions it leaves behind whatever the option says, and those it carries while
+        // the option stays as it was, so confirming it as it is replays the same constructions.
+        let saved = d.extra.get("saved_axes").filter(|s| s.get("bodies").is_some_and(|b| *b == json!(bodies)));
+        let list = |key: &str| saved.and_then(|s| s.get(key)).filter(|l| l.as_array().is_some_and(|a| !a.is_empty())).cloned();
+        if let Some(leave) = list("leave") {
+            p["leave"] = leave;
+        }
+        let same_option = saved.is_some_and(|s| s.get("keep").and_then(Value::as_bool) == Some(keep));
+        if same_option {
+            if let Some(carry) = list("carry") {
+                p["carry"] = carry;
+            }
+        } else if keep {
+            let through = axes_through(app, d.editing.map(|(id, _)| id), &bodies);
+            if !through.is_empty() {
+                p["carry"] = json!(through);
+            }
+        }
     }
     Ok(p)
+}
+
+/// The body names a solid.move parameter set lists.
+fn names(p: &Value) -> Vec<String> {
+    p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
+}
+
+/// Whether Keep Axes With Body is ticked. It starts unticked, so an ordinary Move moves what it
+/// always did.
+pub(crate) fn keeps_axes(_app: &SolveApp, d: &Dialog) -> bool {
+    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The construction axes held only by fixed points (a Center Pole) whose line runs through one
+/// of `bodies`, by feature id: Keep Axes With Body takes them along. Axes built on the bodies go
+/// with them anyway (#10127), and one that also reads a body, a plane or a sketch stays. Tested
+/// where the placed model puts the bodies before this Move: for an edited Move, the model
+/// before it, so a pole the bodies are moved away from is still found.
+pub(crate) fn axes_through(app: &SolveApp, editing: Option<u64>, bodies: &[String]) -> Vec<u64> {
+    let world = match editing {
+        Some(id) => {
+            std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default())
+        }
+        None => crate::open_meshing::session_world(&app.session),
+    };
+    let boxes: Vec<_> = bodies.iter().filter_map(|n| world.body(n).map(|b| b.mesh().bounds())).collect();
+    let mut through = Vec::new();
+    for c in &world.construct {
+        let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { continue };
+        if fixed_points_axis(app, c.feature)
+            && !through.contains(&c.feature)
+            && boxes.iter().any(|b| solidcraft_kernel::line_meets_box(b, origin, dir))
+        {
+            through.push(c.feature);
+        }
+    }
+    through
+}
+
+/// Whether the construction axis `feature` is drawn through two fixed points (or the origin), so
+/// nothing a Move does takes it along unless it is carried.
+fn fixed_points_axis(app: &SolveApp, feature: u64) -> bool {
+    use solidcraft_engine::doc::construct::{AxisDef, GeoRef};
+    let fixed = |g: &GeoRef| matches!(g, GeoRef::Point { .. } | GeoRef::Origin);
+    app.session.doc.feature(feature).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a, b } } if fixed(a) && fixed(b)),
+    )
 }
 
 /// The current type's move, or what it still needs picked.
@@ -1230,7 +1301,10 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, .. } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, carry, leave, .. } = feature
+    else {
+        return;
+    };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
@@ -1303,6 +1377,12 @@ pub fn for_feature(
     if *copy {
         d.extra.insert("copy".into(), json!(true));
     }
+    // The lists it was saved with, kept until the bodies or the option change.
+    d.extra.insert("keep_axes".into(), json!(!carry.is_empty()));
+    d.extra.insert(
+        "saved_axes".into(),
+        json!({"keep": !carry.is_empty(), "bodies": bodies.iter().map(|b| b.to_string()).collect::<Vec<_>>(), "carry": carry, "leave": leave}),
+    );
 }
 
 #[cfg(test)]
