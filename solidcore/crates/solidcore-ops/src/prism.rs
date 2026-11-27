@@ -545,6 +545,18 @@ pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlaceme
     convert::loop2(lp).placement(&convert::loop2(other), tol)
 }
 
+/// Whether the closed loop `lp` (in one plane's coordinates) crosses or touches itself anywhere
+/// but where its neighbouring pieces join, pieces within `tol` of each other counting as meeting
+/// ([`kp::loop_crosses`]): what a loop moved past a neck does
+/// ([`crate::develop::offset_closed_contour`]). `None` for a loop with a segment other than a
+/// line or an arc, or a `tol` that is not positive and finite.
+#[must_use]
+pub fn loop_crosses_itself(lp: &Loop2, tol: f64) -> Option<bool> {
+    let lp = convert::loop2(lp);
+    (tol.is_finite() && tol > 0.0 && lp.segs.iter().all(kp::Seg2::is_line_or_arc))
+        .then(|| kp::loop_crosses(&lp.segs, &[], tol))
+}
+
 /// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
 #[must_use]
 pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {
@@ -619,6 +631,34 @@ pub fn plane_gap(
         &convert::plane(from),
         &convert::plane(to),
         &regions,
+    )
+    .map_err(crate::error::status)
+}
+
+/// `plane` moved by `by` along `sketch`'s normal, its axes kept ([`extrude::plane_raised`]): an
+/// extrude's end on a slanted face moved along the extrusion.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a distance or an origin that is not finite.
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    extrude::plane_raised(&convert::plane(sketch), &convert::plane(plane), by)
+        .map(|f| convert::record_plane(&f))
+        .map_err(crate::error::status)
+}
+
+/// Which side of `from` and of `to` holds what lies past `from` and short of `to` along
+/// `travel`, each `true` for the side the plane's normal points to
+/// ([`extrude::slab_sides`]): the two cuts that keep an extrude's tools between its ends.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along `travel`, or a `travel` that is zero or not finite.
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    extrude::slab_sides(
+        convert::vec3(travel),
+        &convert::plane(from),
+        &convert::plane(to),
     )
     .map_err(crate::error::status)
 }

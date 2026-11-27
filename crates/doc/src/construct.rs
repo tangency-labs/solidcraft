@@ -817,6 +817,47 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// A flat face that meets the straight body edge `g` picks, as its body's name, its index and a
+/// point inside it: what a plane at an angle about the edge is measured from when no reference
+/// plane is given (#20233). A flat face along a straight edge holds the edge's direction, so the
+/// plane goes through the edge. The first such face in the body's face order; `None` when there
+/// is none, when the edge is not straight (a circular edge's flat cap is square to its axis) or
+/// when `g` is not a body edge.
+pub fn flat_face_at_edge(st: &ModelState, g: &GeoRef) -> Result<Option<(String, usize, Vec3)>> {
+    let GeoRef::Edge { at, name } = g else { return Ok(None) };
+    let (b, edge, points) = edge_pick(st, *at, name)?;
+    if b.body.is_mesh() || points.len() != 2 || kernel::edge_circle(&b.body, edge).is_some() {
+        return Ok(None);
+    }
+    let mid = (points[0] + points[1]) * 0.5;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let Ok(lines) = b.body.edges(tol) else { return Ok(None) };
+    let record = b.body.record();
+    let Some(e) = record.edges.get(edge) else { return Ok(None) };
+    let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
+    faces.sort_unstable();
+    faces.dedup();
+    for face in faces {
+        if !matches!(kernel::face_surface(&b.body, face), Some(FaceSurface::Plane { .. })) {
+            continue;
+        }
+        // A point a little way from the edge's middle towards the middle of another edge of the
+        // face, kept only when it lies on the face, so the pick is inside the face and not on the
+        // edge it shares with its neighbour.
+        for other in kernel::face_edge_indices(&b.body, face) {
+            let Some(q) = lines.get(other).filter(|_| other != edge).and_then(|l| l.points.get(l.points.len() / 2)) else { continue };
+            let p = mid + (*q - mid) * 1e-3;
+            if let Ok(Some(nearest)) = kernel::point_closest(p, &b.body, kernel::Members::Faces(&[face]))
+                && nearest.to.dist(p) < tol * 1e-3
+                && nearest.to.dist(mid) > tol * 1e-6
+            {
+                return Ok(Some((b.name.clone(), face, nearest.to)));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// What [`model_axis`] says about a reference that is neither an edge nor a face.
 pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
@@ -1484,8 +1525,9 @@ impl GeoRef {
                             .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
                             .any(|q| q.dist(*at) <= tol)
                     };
+                    let edge_names = crate::naming::edge_name_index(b);
                     let mut meet: Vec<String> =
-                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(&edge_names.names).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n.clone()).collect();
                     if meet.is_empty() {
                         continue;
                     }

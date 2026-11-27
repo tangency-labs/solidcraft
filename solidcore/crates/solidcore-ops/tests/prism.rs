@@ -13,9 +13,9 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, fill_channel, fitted_loop, loop_holds, planar_regions_boolean,
-    prism_equivalent, prism_section, region_area, Contour, FillFailure, FillOptions, FillSide,
-    PrismSection,
+    extrude_planar_regions, fill_channel, fitted_loop, loop_crosses_itself, loop_holds,
+    planar_regions_boolean, prism_equivalent, prism_section, region_area, Contour, FillFailure,
+    FillOptions, FillSide, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -2238,10 +2238,12 @@ fn faces_tilted_within_the_zone_run_along_a_direction_inside_every_band() {
     }
 }
 
-/// Flipped senses on #22066: the faces +x, +y and -x of a box and the same with the first and last
-/// swapped name the same pair as well as the same direction.
+/// Flipped senses on #22066: the faces +x, +y and -x of a box, and the same with the first and
+/// last swapped, give the same direction and name the same positions. +x and -x share one
+/// canonical normal, so the pair names the first of them passed (the review bot on #22066): +x
+/// in the first call, -x in the second.
 #[test]
-fn flipped_senses_name_the_same_faces() {
+fn flipped_senses_give_the_same_direction_and_name_the_first_of_tied_faces() {
     use solidcore_ops::measure::{straight_direction, Straight, StraightBy};
     all_fixes();
     let a = make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
@@ -2252,16 +2254,56 @@ fn flipped_senses_name_the_same_faces() {
         face([0.0, 1.0, 0.0]),
         face([-1.0, 0.0, 0.0]),
     );
-    let one = straight_direction(&[(&a, &ao, px), (&a, &ao, py), (&a, &ao, nx)]).unwrap();
-    let two = straight_direction(&[(&a, &ao, nx), (&a, &ao, py), (&a, &ao, px)]).unwrap();
-    assert_eq!(one, two);
-    assert_eq!(
-        one,
-        Straight::Along {
-            direction: [0.0, 0.0, 1.0],
-            by: StraightBy::Planes(1, 0)
+    let named = |inputs: [usize; 3]| {
+        let faces: Vec<_> = inputs.iter().map(|&f| (&a, &ao, f)).collect();
+        match straight_direction(&faces).unwrap() {
+            Straight::Along {
+                direction,
+                by: StraightBy::Planes(i, j),
+            } => (direction, [inputs[i], inputs[j]]),
+            got => panic!("{got:?}"),
         }
+    };
+    assert_eq!(named([px, py, nx]), ([0.0, 0.0, 1.0], [py, px]));
+    assert_eq!(named([nx, py, px]), ([0.0, 0.0, 1.0], [py, nx]));
+}
+
+/// The review bot on #22066: a face with no band (a ruled spline net whose rulings lean 1e-3 off z)
+/// strays along z, the direction of a box's +x and +y faces, which is inside both their bands.
+/// That proves no refusal, so the answer is `Undecided`, not `NotStraight` naming the net.
+#[test]
+fn a_face_with_no_band_that_strays_is_undecided_not_refused() {
+    use solidcore_ops::measure::{straight_direction, Straight};
+    all_fixes();
+    let a = make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let (_, ao) = a.to_record().unwrap();
+    let (px, py) = (
+        faces_facing(&a, &ao, [1.0, 0.0, 0.0])[0],
+        faces_facing(&a, &ao, [0.0, 1.0, 0.0])[0],
     );
+    let cubic = |z: f64, dx: f64| solidcore_ops::sweep::Curve::Nurbs {
+        degree: 3,
+        points: vec![
+            [dx, 0.0, z, 1.0],
+            [3.0 + dx, 2.0, z, 1.0],
+            [7.0 + dx, -2.0, z, 1.0],
+            [10.0 + dx, 0.0, z, 1.0],
+        ],
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    };
+    let sheet =
+        solidcore_ops::sweep::loft(&[vec![cubic(0.0, 0.0)], vec![cubic(10.0, 0.01)]], 1, false)
+            .unwrap();
+    let (_, so) = sheet.to_record().unwrap();
+    assert_eq!(so.faces.len(), 1);
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let strays = sheet
+        .face_straying(&so, 0, [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(strays > zone, "{strays}");
+    let got = straight_direction(&[(&a, &ao, px), (&a, &ao, py), (&sheet, &so, 0)]).unwrap();
+    assert_eq!(got, Straight::Undecided, "{got:?}");
 }
 
 /// A plate off the world axes with a square hole: from the edge where its top meets a wall of the
@@ -2542,4 +2584,46 @@ fn faces_past_the_search_s_budget_are_undecided_not_refused() {
     }
     let got = straight_direction(&faces).unwrap();
     assert_eq!(got, Straight::Undecided, "{got:?}");
+}
+
+/// A square does not cross itself; a bow tie (the square with two corners swapped) crosses
+/// itself at its middle, and a loop moved past a neck (two sides lying along one line) touches
+/// itself there. A loop with a free-form side is not decided.
+#[test]
+fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
+    let sq = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&sq, 1e-7), Some(false));
+    let bow = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), v(10.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&bow, 1e-7), Some(true));
+    let neck = Loop2::polygon(&[
+        v(0.0, 0.0),
+        v(4.0, 0.0),
+        v(4.0, 6.0),
+        v(10.0, 6.0),
+        v(10.0, 10.0),
+        v(4.0, 10.0),
+        v(4.0, 4.0),
+        v(0.0, 4.0),
+    ]);
+    assert_eq!(loop_crosses_itself(&neck, 1e-7), Some(true));
+    assert_eq!(loop_crosses_itself(&sq, 0.0), None);
+    let curvy = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(10.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(10.0, 0.0),
+                p1: v(12.0, 5.0),
+                p2: v(5.0, 12.0),
+                p3: v(0.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 10.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
 }

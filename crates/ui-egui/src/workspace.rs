@@ -439,7 +439,10 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+            },
             CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
         ],
         _ => &[],
@@ -570,7 +573,8 @@ pub const SECTIONS: &[Section] = &[
             "sketch.point3d",
         ],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    // Cell Grid cuts a sketch's area into a part, as Hole and Emboss do: it follows Hole in the menu.
+    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.cell_grid"] },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
@@ -601,7 +605,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
     },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
+    Section {
+        tab: "SURFACE",
+        panel: "EDIT",
+        promoted: 4,
+        ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "solid.split_body"],
+    },
     Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
@@ -759,6 +768,9 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constraint.equal",
             "sketch.constraint.parallel",
             "sketch.constraint.perpendicular",
+            // Horizontal or Vertical alone, whichever way the line runs now: in the drop-down.
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.construction",
             "sketch.constrainer",
         ],
@@ -1039,7 +1051,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "assembly.bom" => Some(("INSPECT", "CHECK")),
         "sheet.flat_pattern" => Some(("SHEET METAL", "FLAT")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
-        "sheet.convert" => Some(("MODEL", "MODIFY")),
+        "sheet.convert" | "solid.split_body" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
         "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
@@ -1639,6 +1651,7 @@ mod tests {
                 "face.delete",
                 "solid.shell",
                 "solid.combine",
+                "solid.finger_joint",
                 "solid.split_body",
                 "solid.scale",
                 "solid.remove",
@@ -1735,6 +1748,8 @@ mod tests {
             ("SURFACE", "SKETCH", "sketch.create"),
             ("MODEL", "SKETCH", "sketch.create3d"),
             ("SKETCH", "REFERENCE", "canvas.insert"),
+            ("MODEL", "MODIFY", "solid.split_body"),
+            ("SURFACE", "EDIT", "solid.split_body"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
         }
@@ -2139,6 +2154,9 @@ mod tests {
         assert!(ids("MANAGE", "RULES").contains(&"plastic.manage_rules"));
         let create = ids("MODEL", "CREATE");
         assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
+        // Cell Grid cuts a sketch's area into a part, as Hole does: it comes right after Hole.
+        let hole = create.iter().position(|id| *id == "solid.hole");
+        assert_eq!(hole.and_then(|i| create.get(i + 1)).copied(), Some("solid.cell_grid"), "{create:?}");
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
         // The former sketch/solid INSPECT panels now share a global INSPECT tab.

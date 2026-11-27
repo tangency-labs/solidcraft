@@ -104,6 +104,32 @@ Press Pull, Delete Face and Move Face.
 - **Elsewhere:** base feature, dumb solid, imported body.
 - **For translators:** not a base flange of sheet metal, and not a base sketch.
 
+### bend allowance
+
+The flat length a bend takes in a sheet's flat pattern, measured along the bend's neutral axis.
+
+For bend angle θ, inner radius R, thickness T and K-factor K, it is θ · (R + K·T). A press brake
+chart often gives it for a 90° bend. Compare *bend deduction*.
+
+- **In SolidCraft:** `allowance_mm` in `sheet.export_bend_table`; the `allowance` value of a sheet
+  metal rule's `unfold_method` (Sheet Metal Rules › Unfold › Bend Allowance), with the 90° value
+  in `unfold_value`.
+- **Elsewhere:** BA.
+- **For translators:** a length added for the bend, not a permission or a tolerance.
+
+### bend deduction
+
+How much shorter a sheet's flat blank is than its flange lengths measured to the outside of the
+bend.
+
+At 90° it is 2·(R + T) less the bend allowance, for inner radius R and thickness T. A press brake
+chart often gives it for a 90° bend. Compare *bend allowance*.
+
+- **In SolidCraft:** the `deduction` value of a sheet metal rule's `unfold_method` (Sheet Metal
+  Rules › Unfold › Bend Deduction), with the 90° value in `unfold_value`.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -373,6 +399,16 @@ construction plane.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
 
+### finger joint
+
+A connection made by alternating rectangular projections on two parts.
+
+- **In SolidCraft:** `solid.finger_joint`; the `FingerJointFeature` timeline feature and its
+  `bodies`, `count`, `clearance`, `inverted` and `edge_offset` parameters.
+- **Don't use:** dovetail joint.
+- **Elsewhere:** box joint, finger joint.
+- **For translators:** a woodworking connection, not an anatomical joint.
+
 ### folder
 
 One of the browser's fixed sections of a component: Bodies, Sketches, Construction, Joints.
@@ -422,6 +458,29 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### keyboard profile
+
+A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
+
+A keyboard profile sits under the user's own keys: a key the user changes always wins, and stays
+when another keyboard profile is chosen. Each one is a file that maps keys to existing commands,
+and it never adds a command. It is an app setting, not part of a design, and a settings profile
+carries the chosen one.
+
+- **In SolidCraft:** Preferences › Shortcuts › Keyboard profile; the `keyboard_profile`
+  preference; the files in `crates/ui-egui/keyboard-profiles/`.
+- **Don't use:** keymap, key scheme, preset (for the set of keys).
+- **Elsewhere:** keyboard profile, keyboard scheme, keymap.
+- **For translators:** a set of keyboard shortcuts, not a settings profile, a sketch profile or a
+  frame profile (see *Words with more than one meaning*, "Profile").
+
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
 
 ### leader
 
@@ -833,6 +892,16 @@ flange slope.
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
 
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -953,11 +1022,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
 | | the cross-section a frame member follows | frame profile | `frame.profile.*` |
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
+| | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
-| | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
 | | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |

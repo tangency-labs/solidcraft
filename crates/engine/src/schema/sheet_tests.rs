@@ -3,10 +3,10 @@ use serde_json::{Value, json};
 
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
-    ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams,
-    PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, TabParams, ThenSteps,
-    UnfoldParams,
+    DxfUnitsParam, ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams,
+    FlatPatternResult, FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide,
+    MeasureBodyParams, PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints,
+    TabParams, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -90,7 +90,21 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
-        &["bend_lines", "bend_notes", "body", "curves", "hardware_notes", "layers", "note_height", "path", "per_body", "profile", "text"],
+        &[
+            "bend_lines",
+            "bend_notes",
+            "body",
+            "curves",
+            "hardware_notes",
+            "layers",
+            "markings",
+            "note_height",
+            "path",
+            "per_body",
+            "profile",
+            "text",
+            "units",
+        ],
     );
 }
 
@@ -232,6 +246,9 @@ fn the_value_types_match_the_readers() {
     words(&["roles", "ROLES", "single", "Single"], &[json!("one"), json!("0"), json!(""), json!(5), json!(null)], &|v| {
         parse::<DxfLayersParam>(v).is_some()
     });
+    words(&["mm", "MM", "inches", "INCHES"], &[json!("feet"), json!("cm"), json!("mm "), json!(""), json!(4), json!(null)], &|v| {
+        parse::<DxfUnitsParam>(v).is_some()
+    });
     for w in ["exact", "EXACT", "arcs", "Arcs"] {
         assert_eq!(parse::<DxfCurvesParam>(json!(w)).map(|c| c.0), crate::cmd::dxf_curves(w), "{w}");
     }
@@ -240,6 +257,9 @@ fn the_value_types_match_the_readers() {
     }
     for w in ["roles", "ROLES", "single", "Single"] {
         assert_eq!(parse::<DxfLayersParam>(json!(w)).map(|l| l.0), crate::cmd::dxf_layers(w), "{w}");
+    }
+    for w in ["mm", "MM", "inches", "INCHES"] {
+        assert_eq!(parse::<DxfUnitsParam>(json!(w)).map(|u| u.0), crate::cmd::dxf_units(w), "{w}");
     }
     for (v, ok) in [
         (json!(3), true),
@@ -258,6 +278,7 @@ fn the_value_types_match_the_readers() {
         assert_eq!(parse::<DxfNoteHeight>(json!(mm)).map(|h| h.0), crate::cmd::dxf_note_height(mm), "{mm}");
     }
     for (ty, want) in [
+        (input_schema_for::<DxfUnitsParam>(), "^([Mm][Mm]|[Ii][Nn][Cc][Hh][Ee][Ss])$"),
         (input_schema_for::<DxfCurvesParam>(), "^([Ee][Xx][Aa][Cc][Tt]|[Aa][Rr][Cc][Ss])$"),
         (input_schema_for::<DxfTextParam>(), "^([Cc][Uu][Tt]|[Ee][Tt][Cc][Hh])$"),
         (input_schema_for::<DxfLayersParam>(), "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"),
@@ -307,6 +328,7 @@ fn strict_keeps_todays_errors() {
         ("sheet.export_bend_table", json!({"format": " csv", "body": "Nothing"})),
         ("sheet.export_bend_table", json!({"format": "JSON", "body": "Nothing"})),
         // A DXF export reads its words and its note height before it looks for a sheet.
+        ("sheet.export_dxf", json!({"units": "feet"})),
         ("sheet.export_dxf", json!({"curves": "arc"})),
         ("sheet.export_dxf", json!({"curves": " exact"})),
         ("sheet.export_dxf", json!({"text": "engrave"})),
@@ -480,7 +502,7 @@ fn rule_commands_publish_contracts_and_refuse_unknown_keys() {
 
 #[test]
 fn rule_contract_keys_and_readers_match() {
-    use super::{AngleDisplayParam, ManageRulesParams, RuleLibraryParams, RuleName, RulesParams};
+    use super::{AngleDisplayParam, ManageRulesParams, RuleLibraryParams, RuleName, RulesParams, UnfoldMethodParam};
     assert_keys(input_schema_for::<RulesParams>(), &[]);
     assert_keys(input_schema_for::<RuleLibraryParams>(), &["material"]);
     assert_keys(
@@ -503,8 +525,14 @@ fn rule_contract_keys_and_readers_match() {
             "relief_depth",
             "relief_width",
             "thickness",
+            "unfold_method",
+            "unfold_value",
         ],
     );
+    for (text, valid) in [("deduction", true), (" Bend Allowance ", true), ("K-Factor", true), ("neutral", false), ("", false)] {
+        assert_eq!(parse::<UnfoldMethodParam>(json!(text)).is_some(), valid, "{text}");
+    }
+    assert!(parse::<UnfoldMethodParam>(json!(1)).is_none());
     for (text, valid) in [("bend", true), (" INCLUDED ", true), ("\u{2003}BeNd\u{2003}", true), ("outside", false)] {
         assert_eq!(parse::<AngleDisplayParam>(json!(text)).is_some(), valid);
     }
@@ -556,7 +584,8 @@ fn rule_replies_match_the_output_schemas_without_warnings() {
             "sheet.manage_rules",
             json!({"name": "Other", "thickness": null, "k_factor": null, "bend_radius": null,
             "relief_width": null, "relief_depth": null, "corner_relief": null, "corner_relief_shape": null,
-            "bend_relief_shape": null, "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
+            "bend_relief_shape": null, "hem_gap": null, "gap": null, "angle_display": null, "unfold_method": null, "unfold_value": null,
+            "active": null, "delete": null}),
         ),
         ("sheet.rules", json!({})),
         ("sheet.manage_rules", json!({"name": "Other", "active": true})),
@@ -575,6 +604,8 @@ fn rule_replies_match_the_output_schemas_without_warnings() {
             let saved = off.doc.sheet.rules.iter().find(|r| json!(r.name) == rule["name"]).unwrap();
             let mut old = json!(saved);
             old["angle_display"] = json!(saved.angle_display);
+            old["unfold_method"] = json!(saved.unfold_method);
+            old["unfold_value"] = json!(saved.unfold_value);
             assert_eq!(*rule, old);
             let (vals, _) = off.doc.param_values();
             assert_eq!(b["values"], json!(off.doc.rule_values(&vals, saved).unwrap()));

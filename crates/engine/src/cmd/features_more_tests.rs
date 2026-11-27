@@ -775,6 +775,78 @@ fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
 }
 
 #[test]
+fn emboss_with_no_face_raises_a_profile_on_a_flat_top_with_rounded_edges() {
+    // #21195: the rounded top edges are cylinders touching the sketch's plane. A profile within
+    // their reach (here 3 mm from the round's tangent line) was sent to the cylinder wrap and
+    // refused, though it lies on the flat top. It is raised from that face, as with a face picked.
+    for face in [None, Some([0.0, 0.0, 10.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Plate"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 10], [0, -20, 10], [30, 0, 10], [-30, 0, 10]], "radius": 2}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -15], "p1": [10, 15]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let mut params = json!({"sketch": "Label", "depth": 1});
+        if let Some(f) = face {
+            params["face"] = json!(f);
+        }
+        run(&mut s, "solid.emboss", params);
+        assert!(rel(volume(&mut s) - before, 600.0) < 1e-6, "{face:?}: {}", volume(&mut s) - before);
+    }
+}
+
+#[test]
+fn emboss_with_no_face_raises_a_profile_on_a_pocket_floor_with_rounded_inside_corners() {
+    // #21195: the same refusal on a pocket's floor, whose edges are rounded on the inside: those
+    // rounds are cylinders touching the floor's plane from above. The profile lies on the floor.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "center": [0, 0, 10], "body_name": "Tray"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 24, "height": 20, "center": [0, 0, 20], "operation": "cut", "targets": ["Tray"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 12, 10], [0, -12, 10], [20, 0, 10], [-20, 0, 10]], "radius": 2}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-8, -6], "p1": [8, 6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.emboss", json!({"sketch": "Label", "depth": 1}));
+    assert!(rel(volume(&mut s) - before, 16.0 * 12.0) < 1e-6, "{}", volume(&mut s) - before);
+}
+
+#[test]
+fn emboss_on_a_picked_round_with_the_profile_on_the_flat_top_beside_it_is_refused() {
+    // #21195: only an emboss with no face picked prefers the flat face the profile lies on. With
+    // a round picked as the target, it is refused as before; a projection onto the round could
+    // not check the profile against that round's corners and left a stray sliver.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 10], [0, -20, 10], [30, 0, 10], [-30, 0, 10]], "radius": 2}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -15], "p1": [10, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    let round = [0.0, 18.0 + std::f64::consts::FRAC_1_SQRT_2 * 2.0, 8.0 + std::f64::consts::FRAC_1_SQRT_2 * 2.0];
+    assert!(s.execute("solid.emboss", &json!({"sketch": "Label", "depth": 1, "face": round})).is_err());
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
+fn emboss_with_no_face_on_a_tangent_plane_beside_a_drilled_wall_is_refused_not_raised_flat() {
+    // #21195: a wall the wrap cannot take (a hole through it, so not two arcs and two lines) is
+    // still the wall the sketch touches. With no flat face under the profile, the emboss is
+    // refused; it must not become a flat block standing off the cylinder on the sketch's plane.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "operation": "new", "body_name": "Can"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 60, "base": [-30, 0, 20], "axis": "X", "operation": "cut", "targets": ["Can"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Label"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, 15], "p1": [5, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    let e = s.execute("solid.emboss", &json!({"sketch": "Label", "depth": 1})).unwrap_err().to_string();
+    assert!(e.contains("cylinder"), "{e}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
 fn emboss_face_off_the_part_says_how_far() {
     // #392: a point beside the face was refused with "`face` must identify exactly one target
     // body surface", which didn't say the point was off the face.
@@ -1951,6 +2023,55 @@ fn coil_and_loft_to_a_point() {
     run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "apex"}]}));
     assert!(rel(volume(&mut s), 400.0 * 30.0 / 3.0) < 1e-6);
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
+}
+
+/// #20736: `height_measure: overall` sets the coil's height end to end. The section reaches past
+/// the centre line at both ends by its size along the axis: the section's size with axial ends, its
+/// size times the cosine of the pitch angle with square ends. The issue's own example, a round 2 mm
+/// section, 20 across, pitch 7, overall 42, touches planes 42 apart; square sections give exact corners.
+#[test]
+fn a_coils_overall_height_is_its_height_end_to_end() {
+    let span = |p: Value| {
+        let mut s = Session::default();
+        let mut p = p;
+        p["body_name"] = json!("Coil");
+        run(&mut s, "solid.coil", p);
+        let (lo, hi, _) = z_x(&mut s, "Coil");
+        hi - lo
+    };
+    let round = json!({"diameter": 20, "height": 42, "pitch": 7, "section_size": 2, "height_measure": "overall"});
+    assert!((span(round) - 42.0).abs() < 0.02, "the issue's coil");
+    let square = |end: &str, measure: &str, size: f64| {
+        span(json!({"diameter": 20, "height": 30, "pitch": 9, "section": "square", "section_size": size,
+            "section_position": "outside", "end_cut": end, "height_measure": measure}))
+    };
+    assert!((square("axial", "overall", 3.0) - 30.0).abs() < 1e-6);
+    assert!((square("square", "overall", 3.0) - 30.0).abs() < 1e-6);
+    // Square ends reach less far than the section's size: the centre line alone falls short by less.
+    let over = square("square", "center_line", 3.0) - 30.0;
+    let c = std::f64::consts::PI * 23.0;
+    assert!((over - 3.0 * c / (c * c + 81.0).sqrt()).abs() < 1e-6, "{over}");
+    assert!((square("axial", "centre_line", 3.0) - 33.0).abs() < 1e-6, "the default measures the centre line");
+    // It follows a parameter, as a height does.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "50 mm"}));
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 20, "height": "H", "pitch": 7, "section": "square", "section_size": 2, "height_measure": "overall", "body_name": "Coil"}),
+    );
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "60 mm"}));
+    let (lo, hi, _) = z_x(&mut s, "Coil");
+    assert!((hi - lo - 60.0).abs() < 1e-6, "{}", hi - lo);
+    // Refused where it can't apply.
+    let mut s = Session::default();
+    for p in [
+        json!({"diameter": 20, "revolutions": 3, "pitch": 7, "section_size": 2, "height_measure": "overall"}),
+        json!({"diameter": 20, "revolutions": 3, "height": 30, "section_size": 2, "end_cut": "square", "height_measure": "overall"}),
+        json!({"diameter": 20, "height": 30, "pitch": 7, "section_size": 2, "height_measure": "tip"}),
+    ] {
+        assert!(s.execute("solid.coil", &p).is_err(), "{p}");
+    }
 }
 
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
@@ -3798,6 +3919,19 @@ fn placements_of_one_part_moved_together_each_go_the_way_asked() {
     assert!(about(turned.min.x, 0.0) && about(turned.max.x, 30.0) && about(turned.min.y, 100.0) && about(turned.max.y, 120.0), "{turned:?}");
 }
 
+/// A Move of placements only has no body Move to carry or leave constructions with, so it says
+/// so rather than dropping `carry` without a word (#20139 review).
+#[test]
+fn placements_moved_alone_refuse_carry() {
+    let mut s = Session::default();
+    let (a, b) = twice_placed_blade(&mut s);
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 10]}, "name": "Pole"}));
+    let document = s.doc.to_json();
+    let error = s.execute("solid.move", &json!({"bodies": [a, b], "translate": [10, 0, 0], "carry": ["Pole"]})).unwrap_err();
+    assert!(error.to_string().contains("`carry` needs a body to move"), "{error}");
+    assert_eq!(s.doc.to_json(), document);
+}
+
 /// The same part inserted from a STEP assembly, where a rigid group holds the placements in the
 /// imported component: the move goes to the placement of the whole import, once.
 #[test]
@@ -4591,4 +4725,47 @@ fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
     assert!(!e.contains("for this geometry"), "{e}");
     assert_eq!(shape(&s), before);
     assert_eq!(body_volume(&s, "Base"), volume);
+}
+
+#[test]
+fn draft_invalid_neutral_errors_name_neutral() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    for neutral in [json!(null), json!(1.5), json!("MissingPlane"), json!("Box1"), json!({"origin": [0, 0, 0]})] {
+        let err = s.execute("solid.draft", &json!({"faces": [[0, 10, 10]], "angle": 3, "neutral": neutral})).unwrap_err().to_string();
+        assert!(err.contains("`neutral`"), "neutral={neutral}: {err}");
+        assert!(!err.contains("`plane`"), "neutral={neutral}: {err}");
+    }
+}
+
+/// #1126: the short flat wall of a teardrop outline drafted past the angle where its bottom edge
+/// closes ends in a point where its two sides meet, as the report expects. The outline is a circle
+/// of radius 20 and its two tangents from (0, 40), cut by the wall at y = 40 - h, h = 5 sqrt(3)
+/// (the wall 10 wide); the prism is 36 high and the wall is drafted 15 deg about its top, so with
+/// t = tan 15 deg = 2 - sqrt(3) the bottom edge closes at the depth h / t < 36. The outline's area
+/// is the 240 deg sector, 800 pi / 3, and the tangents' kite, 400 sqrt(3), less the triangle beyond
+/// the wall, h^2 / sqrt(3) = 25 sqrt(3). At the depth d the draft adds (h^2 - (h - d t)^2) / sqrt(3)
+/// down to d = h / t and the whole triangle below it: (h^2 / sqrt(3)) (36 - h / (3 t)) =
+/// 900 sqrt(3) - 125 / t in all. Still 6 faces, 12 edges and 8 vertices: the sides meet along a new
+/// edge on x = 0, y = 40 where the wall's bottom edge was. It was refused as an edge that vanishes.
+#[test]
+fn a_draft_past_where_a_short_walls_sides_meet_ends_the_wall_in_a_point() {
+    let r3 = 3.0_f64.sqrt();
+    let (wall, tangent) = (40.0 - 5.0 * r3, 10.0 * r3);
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Teardrop"}));
+    run(&mut s, "sketch.line", json!({"points": [[tangent, 10.0], [5.0, wall], [-5.0, wall], [-tangent, 10.0]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [-tangent, 10.0], "through": [0, -20], "end": [tangent, 10.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Teardrop", "distance": 36, "operation": "new", "body_name": "Drop"}));
+    let outline = 375.0 * r3 + 800.0 * std::f64::consts::PI / 3.0;
+    assert!((body_volume(&s, "Drop") - 36.0 * outline).abs() < 1e-6 * 36.0 * outline, "{}", body_volume(&s, "Drop"));
+    let draft = json!({"body": "Drop", "faces": [[0, wall, 18]], "angle": "15 deg", "neutral": {"origin": [0, 0, 36], "normal": [0, 0, 1]}, "pull": [0, 0, 1]});
+    run(&mut s, "solid.draft", draft);
+    let drafted = 36.0 * outline + 900.0 * r3 - 125.0 / (2.0 - r3);
+    assert!((body_volume(&s, "Drop") - drafted).abs() < 1e-6 * drafted, "{} against {drafted}", body_volume(&s, "Drop"));
+    let state = s.model.state();
+    let b = &state.body("Drop").unwrap().body;
+    assert_eq!([b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()], [1, 6, 12, 8]);
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
 }

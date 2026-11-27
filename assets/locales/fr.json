@@ -7272,7 +7272,7 @@
   "ui.ribbon_exit": "Quitter",
   "ui.ribbon_labels": "Afficher le texte sous les icônes du ruban",
   "ui.ribbon_menus_skip_pinned": "Laisser les commandes épinglées hors des menus déroulants",
-  "ui.ribbon_pin_footer": "Les commandes épinglées s’affichent dans le ruban. Survolez une ligne pour l’épingler ou la détacher.",
+  "ui.ribbon_pin_footer": "Les commandes épinglées s’affichent dans le ruban. Épinglez ou détachez une commande depuis son menu ⋯.",
   "ui.ribbon_workspace": "Espace de travail",
   "ui.right": "Droite",
   "ui.right_click_confirms": "Le clic droit valide les entrées du dialogue",

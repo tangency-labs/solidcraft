@@ -97,6 +97,7 @@ use crate::error::surface::{SolverPart, SurfaceFailure};
 use crate::error::{
     ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
 };
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -627,6 +628,78 @@ fn revolved_separation_bound(a: Revolved, b: Revolved, region: &Extent3d) -> f64
     at_corners + lip * e_a.min(e_b) + sin_theta * e
 }
 
+/// Not upstream: whether two cones (a cylinder is a cone of semi-angle 0), each as its axis
+/// placement, its radius at the placement's origin and its slope (the tangent of its
+/// semi-angle, the radius's change per unit of height along the Z axis), are one surface inside
+/// `region` by their definitions alone ([`Surface::same_analytic_surface`]). `None` when their
+/// axes are not one line within `tol` at the box's diagonal
+/// ([`Axis2Placement::are_coaxial`]); otherwise whether their radii differ by at most `tol` at
+/// both ends of the box along the first's axis (a radius is linear in the height), in either
+/// sense: both nappes are one surface, so the radius and slope may both flip sign.
+#[must_use]
+pub fn coaxial_cones_agree(
+    a: (&Axis2Placement, f64, f64),
+    b: (&Axis2Placement, f64, f64),
+    tol: f64,
+    region: &Extent3d,
+) -> Option<bool> {
+    let ((pa, r0, s0), (pb, rb, sb)) = (a, b);
+    if !pa.are_coaxial(pb, tol, region.size().length()) {
+        return None;
+    }
+    // The second cone on the first's axis: its radius at the first's origin and its slope
+    // per unit of the first's height.
+    let sense = pa.z_axis().dot(pb.z_axis()).signum();
+    let height = (pa.origin() - pb.origin()).dot(pb.z_axis());
+    let (radius, slope) = (rb + sb * height, sense * sb);
+    // The box's extent along the first's axis; the radii gap is linear in it.
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for corner in 0..8 {
+        let at = |i: usize| {
+            if (corner >> i) & 1 == 1 {
+                region.max_at(i)
+            } else {
+                region.min_at(i)
+            }
+        };
+        let p = Point3::new(at(0), at(1), at(2));
+        let h = (p - pa.origin()).dot(pa.z_axis());
+        lo = lo.min(h);
+        hi = hi.max(h);
+    }
+    let close = |r: f64, s: f64| {
+        [lo, hi]
+            .iter()
+            .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
+    };
+    Some(close(radius, slope) || close(-radius, -slope))
+}
+
+/// Not upstream: whether two tori with holes, each as its placement (centre and axis) and its
+/// major and minor radii, are one surface by their definitions
+/// ([`Surface::same_analytic_surface`]): coaxial within `tol` at `reach`
+/// ([`Axis2Placement::are_coaxial`]), centres and both radii within `tol`.
+#[must_use]
+pub fn tori_agree(
+    a: (&Axis2Placement, f64, f64),
+    b: (&Axis2Placement, f64, f64),
+    tol: f64,
+    reach: f64,
+) -> bool {
+    let ((pa, major_a, minor_a), (pb, major_b, minor_b)) = (a, b);
+    pa.are_coaxial(pb, tol, reach)
+        && (pa.origin() - pb.origin()).length() <= tol
+        && (major_a - major_b).abs() <= tol
+        && (minor_a - minor_b).abs() <= tol
+}
+
+/// Not upstream: whether two spheres, as (centre, radius), are one surface by their
+/// definitions ([`Surface::same_analytic_surface`]): centres and radii within `tol`.
+#[must_use]
+pub fn balls_agree(a: (Point3, f64), b: (Point3, f64), tol: f64) -> bool {
+    (a.0 - b.0).length() <= tol && (a.1 - b.1).abs() <= tol
+}
+
 /// Not upstream: the most boxes [`revolved_within`] reads before it gives up.
 const REVOLVED_MAX_BOXES: usize = 256;
 
@@ -828,72 +901,38 @@ impl Surface {
             }
             _ => None,
         };
-        let same_ball = |a: (Point3, f64), b: (Point3, f64)| {
-            (a.0 - b.0).length() <= tol && (a.1 - b.1).abs() <= tol
-        };
         match (self.kind(), other.kind()) {
             (SurfaceKind::Cone(a), SurfaceKind::Cone(b)) => {
-                let (pa, pb) = (&a.rev.position, &b.rev.position);
-                if !pa.are_coaxial(pb, tol, reach) {
-                    return Some(revolved_within(
-                        Revolved::cone(a),
-                        Revolved::cone(b),
-                        tol,
-                        region,
-                    ));
-                }
-                // The second cone on the first's axis: its radius at the first's origin
-                // and its slope per unit of the first's height.
-                let sense = pa.z_axis().dot(pb.z_axis()).signum();
-                let height = (pa.origin() - pb.origin()).dot(pb.z_axis());
-                let (radius, slope) = (b.radius(height), sense * b.tan_semi_angle());
-                let (r0, s0) = (a.base_radius(), a.tan_semi_angle());
-                // The box's extent along the first's axis; the radii gap is linear in it.
-                let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-                for corner in 0..8 {
-                    let at = |i: usize| {
-                        if (corner >> i) & 1 == 1 {
-                            region.max_at(i)
-                        } else {
-                            region.min_at(i)
-                        }
-                    };
-                    let p = Point3::new(at(0), at(1), at(2));
-                    let h = (p - pa.origin()).dot(pa.z_axis());
-                    lo = lo.min(h);
-                    hi = hi.max(h);
-                }
-                let close = |r: f64, s: f64| {
-                    [lo, hi]
-                        .iter()
-                        .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
-                };
+                let agree = coaxial_cones_agree(
+                    (&a.rev.position, a.base_radius(), a.tan_semi_angle()),
+                    (&b.rev.position, b.base_radius(), b.tan_semi_angle()),
+                    tol,
+                    region,
+                );
                 Some(
-                    close(radius, slope)
-                        || close(-radius, -slope)
+                    agree == Some(true)
                         || revolved_within(Revolved::cone(a), Revolved::cone(b), tol, region),
                 )
             }
             (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => {
-                let (pa, pb) = (&a.base.position, &b.base.position);
                 if a.major_radius.abs() <= tol || b.major_radius.abs() <= tol {
                     return Some(
                         ball(self)
                             .zip(ball(other))
-                            .is_some_and(|(x, y)| same_ball(x, y)),
+                            .is_some_and(|(x, y)| balls_agree(x, y, tol)),
                     );
                 }
-                Some(
-                    pa.are_coaxial(pb, tol, reach)
-                        && (pa.origin() - pb.origin()).length() <= tol
-                        && (a.major_radius - b.major_radius).abs() <= tol
-                        && (a.minor_radius - b.minor_radius).abs() <= tol,
-                )
+                Some(tori_agree(
+                    (&a.base.position, a.major_radius, a.minor_radius),
+                    (&b.base.position, b.major_radius, b.minor_radius),
+                    tol,
+                    reach,
+                ))
             }
             // A sphere against a sphere or a hole-less torus; any other pair is left to the
             // caller.
             _ => ball(self).zip(ball(other)).map(|(x, y)| {
-                same_ball(x, y)
+                balls_agree(x, y, tol)
                     || revolved_within(Revolved::ball(x), Revolved::ball(y), tol, region)
             }),
         }
@@ -3438,7 +3477,8 @@ fn join_across_coincidence<O: SolutionObject>(
     // Set last solution to range
     last_sol.solution_type = SolutionType::RangeOfValues;
     last_sol.contact = last_original_contact.absorbed(curr_sol.contact);
-    let last_original_unique = last_sol.unique;
+    // (a range carries no unique box, nor does a point merged with another: it is no
+    // crossing any more)
     last_sol.unique = None;
     // (no point merged or absorbed is shown the seam point it was identified as)
     last_sol.shared_contact = None;
@@ -3469,8 +3509,8 @@ fn join_across_coincidence<O: SolutionObject>(
         if (last_sol.start.param(0)? - curr_sol.start.param(0)?).abs() < tol {
             // restore last interval
             last_sol.solution_type = last_original_type;
-            // (not upstream) a range takes the point in; a point stands for both
-            last_sol.unique = last_original_unique;
+            // (not upstream) a range takes the point in; a point stands for both (neither a
+            // crossing, so neither keeps a unique box)
             last_sol.contact = if last_original_type == SolutionType::RangeOfValues {
                 last_original_contact.absorbed(curr_sol.contact)
             } else {
@@ -4948,6 +4988,20 @@ mod tests {
             let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
             assert_eq!(kept.solution_type, SolutionType::SingleValue);
             assert_eq!(kept.contact, want, "{a:?} {b:?}");
+            // the same with a unique box on either point: the point kept is no crossing, so
+            // it keeps no box
+            for (boxed_last, boxed_near) in [(true, false), (false, true), (true, true)] {
+                let mut last = last;
+                let mut near = near;
+                if boxed_last {
+                    last.unique = Some([[0.15, 0.25], [0.05, 0.15]]);
+                }
+                if boxed_near {
+                    near.unique = Some([[0.15, 0.25], [0.05, 0.15]]);
+                }
+                let kept = join_across_coincidence(last, &near, Some(&unit)).unwrap();
+                assert_eq!((kept.contact, kept.unique), (want, None), "{a:?} {b:?}");
+            }
         }
         // a shared contact id is lost by a range and by a point that absorbs another
         let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
