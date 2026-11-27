@@ -3516,7 +3516,18 @@ impl WorkspacePanelHost {
             + 2 * tabs.len()
             + usize::from(self.last_rejection.is_some());
         let separators = (groups.len() + usize::from(has_content) + tabs.len()).saturating_sub(1);
-        let Some(bounds) = menu_geometry(frame.layout.capacity, anchor, rows, separators) else {
+        // The menu widens for a content row whose label would not fit: icon or check, label, margins.
+        let widest = {
+            let t = solidcraft_theme::Tokens::get();
+            content_actions
+                .iter()
+                .map(|action| {
+                    let label = ui.painter().layout_no_wrap(action.label.clone(), egui::FontId::proportional(t.font_label), t.form_ink);
+                    t.control_height + t.space_2 + label.size().x + t.space_24
+                })
+                .fold(0.0_f32, f32::max)
+        };
+        let Some(bounds) = menu_geometry(frame.layout.capacity, anchor, rows, separators, widest) else {
             self.clear_menu();
             return;
         };
@@ -3652,7 +3663,7 @@ impl WorkspacePanelHost {
     }
 }
 
-fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separators: usize) -> Option<egui::Rect> {
+fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separators: usize, widest: f32) -> Option<egui::Rect> {
     let capacity = egui_rect(capacity);
     if rows == 0 || !capacity.is_positive() || !capacity.is_finite() {
         return None;
@@ -3661,9 +3672,10 @@ fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separa
     if capacity.width() <= t.space_6 * 2.0 || capacity.height() <= t.space_6 * 2.0 {
         return None;
     }
-    let width = ui_kit::LIST_W.min(capacity.width());
+    let width = ui_kit::LIST_W.max(widest).min(capacity.width());
     let content_height = rows as f32 * (t.control_height + t.space_2) + separators as f32 * (t.space_10 + 1.0);
-    let height = (content_height.min((t.control_height + t.space_2) * 12.0) + t.space_12).min(capacity.height());
+    // Up to 16 rows show without scrolling: a panel's own actions, its View options and a few tabs.
+    let height = (content_height.min((t.control_height + t.space_2) * 16.0) + t.space_12).min(capacity.height());
     let left = anchor.origin.x.min(capacity.right() - width).max(capacity.left());
     let top = (anchor.origin.y + anchor.size.height).min(capacity.bottom() - height).max(capacity.top());
     Some(egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)))
