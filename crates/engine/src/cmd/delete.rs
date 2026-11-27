@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views and annotations ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines, sketches, fills: [the ids that went], deleted: the names of the views that went with those asked for",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, annotations and placed images ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines, sketches, fills, images?: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -98,6 +98,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             centre_lines: None,
             sketches: None,
             fills: None,
+            images: None,
             param_warnings: Vec::new(),
         })
         .map_err(|error| bad(cmd, error.to_string()));
@@ -106,6 +107,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     let open = s.drawing(cmd)?.clone();
     let (mut views, mut dimensions, mut balloons, mut notes, mut centre_marks, mut centre_lines) =
         (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut images = Vec::new();
     for item in items {
         let Sel::Drawing { drawing, object } = item else { return Err(model()) };
         if *drawing != open.id {
@@ -123,11 +125,20 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             centre_marks.push(*object);
         } else if open.centre_line(*object).is_some() {
             centre_lines.push(*object);
+        } else if open.sheet_images.by_id(*object).is_some() {
+            images.push(*object);
         } else {
             return Err(bad(cmd, format!("the drawing open has no selectable object {}", ids::encode(*object))));
         }
     }
-    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() && centre_marks.is_empty() && centre_lines.is_empty() {
+    if views.is_empty()
+        && dimensions.is_empty()
+        && balloons.is_empty()
+        && notes.is_empty()
+        && centre_marks.is_empty()
+        && centre_lines.is_empty()
+        && images.is_empty()
+    {
         return Err(bad(cmd, "nothing to delete"));
     }
     let all = open.with_projected(&views);
@@ -166,6 +177,9 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.centre_lines.extend(centre_lines);
     gone.centre_lines.sort_unstable();
     gone.centre_lines.dedup();
+    gone.images.extend(images);
+    gone.images.sort_unstable();
+    gone.images.dedup();
     if s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.goes_with(open.id, &gone)) {
         return Err(bad(cmd, "finish or cancel the sketch being edited before deleting its view"));
     }
@@ -188,6 +202,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
         centre_lines: Some(listed(&gone.centre_lines)),
         sketches: Some(listed(&gone.sketches)),
         fills: Some(listed(&gone.fills)),
+        images: (!gone.images.is_empty()).then(|| listed(&gone.images)),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
@@ -442,6 +457,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         centre_lines: None,
         sketches: None,
         fills: None,
+        images: None,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))

@@ -248,6 +248,9 @@ pub struct SelectionDeleteResult {
     /// A drawing's delete: the ids of the fills that went with their views.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fills: Option<Vec<String>>,
+    /// A drawing's delete: ids of placed images that went, when any were selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

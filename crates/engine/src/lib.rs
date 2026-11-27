@@ -2043,7 +2043,7 @@ impl Session {
         self.drawn(d, source).map(|on| (&*on.doc, on.model.state())).map_err(|why| why.to_string())
     }
 
-    /// Whether `object` can be selected in `drawing`: a view, dimension or balloon of the drawing open.
+    /// Whether `object` can be selected in `drawing`: an object of the drawing open.
     pub(crate) fn selectable_in_drawing(&self, drawing: u64, object: u64) -> bool {
         self.open_drawing == Some(drawing) && self.doc.drawing(drawing).is_some_and(|d| d.has_object(object))
     }
