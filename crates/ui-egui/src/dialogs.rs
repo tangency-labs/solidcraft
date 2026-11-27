@@ -2122,9 +2122,11 @@ impl Dialog {
     }
 
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
-    /// or a parallel plane, is the target rather than another profile. An explicitly active
-    /// To Object or From Object input accepts parallel planes regardless of the automatic
-    /// switching preference. A start plane may coincide with the profiles.
+    /// or a plane parallel or at a slant to it, is the target rather than another profile. An
+    /// explicitly active To Object or From Object input accepts such planes regardless of the
+    /// automatic switching preference, and construction points too. A plane stays the plane and
+    /// a construction point the point, so the extrude follows them when they move (#8527). A
+    /// start plane may coincide with the profiles.
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
         let from_active = self.active_input().is_some_and(|i| i.label == FROM_OBJECT);
@@ -2134,14 +2136,15 @@ impl Dialog {
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
         let sel = match h {
-            // A place on the plane: its origin (a browser pick carries no point).
+            // A plane the extrusion runs along gives no end.
             Hit::Plane { name, .. } => {
                 let plane = plane_by_name(s, name)?;
-                if plane.normal().dot(reference.normal()).abs() < 1.0 - 1e-9 {
+                if plane.normal().dot(reference.normal()).abs() < 1e-9 {
                     return None;
                 }
-                Sel::Vertex { body: String::new(), point: plane.origin }
+                Sel::Plane { name: name.clone() }
             }
+            Hit::ConstructionPoint { name } if to_active || from_active => Sel::ConstructionPoint { name: name.clone() },
             _ if to_active || from_active => return None,
             Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
             Hit::Vertex { body, point } => Sel::Vertex { body: body.clone(), point: *point },
@@ -4988,10 +4991,14 @@ fn sync_reach(app: &SolveApp, d: &mut Dialog) {
     // A start offset, a To offset or a From Object move the ends: the distance stays as it is.
     let plain = d.editing.is_none() && start.trim().is_empty() && to_offset.trim().is_empty() && !object_on(&d.inputs, FROM_OBJECT);
     // Picks and the profiles' plane are both in world space.
+    let profiles = || d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first));
     let reach = match &target {
-        Some(Sel::Face { point, .. } | Sel::Vertex { point, .. }) if plain => {
-            d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| plane.height(*point))
-        }
+        Some(Sel::Face { point, .. } | Sel::Vertex { point, .. }) if plain => profiles().map(|plane| plane.height(*point)),
+        Some(Sel::ConstructionPoint { name }) if plain => profiles().zip(point_by_name(&app.session, name)).map(|(plane, point)| plane.height(point)),
+        // Where the plane meets the line along the extrusion through the profiles' origin.
+        Some(Sel::Plane { name }) if plain => profiles()
+            .zip(plane_by_name(&app.session, name))
+            .and_then(|(plane, to)| solidcraft_engine::doc::kernel::level_on_plane(&plane, plane.origin, &to).ok()),
         _ => None,
     };
     let Kind::Extrude { smart, distance, direction, .. } = &mut d.kind else { return };
@@ -6275,6 +6282,9 @@ fn object_target(s: &Session, reference: &solidcore_record::Plane, sel: &Sel) ->
                 .is_none_or(|face| reference.normal().dot(face.normal()).abs() < 1.0 - 1e-9 || reference.height(face.origin).abs() > TOLERANCE)
         }
         Sel::Vertex { point, .. } => reference.height(*point).abs() > TOLERANCE,
+        Sel::Plane { name } => plane_by_name(s, name)
+            .is_some_and(|plane| reference.normal().dot(plane.normal()).abs() < 1.0 - 1e-9 || reference.height(plane.origin).abs() > TOLERANCE),
+        Sel::ConstructionPoint { name } => point_by_name(s, name).is_some_and(|point| reference.height(point).abs() > TOLERANCE),
         _ => false,
     }
 }
@@ -6284,11 +6294,27 @@ pub(crate) fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
     object_point(inputs, TO_OBJECT)
 }
 
+/// A To or From Object pick as its command parameter: a point, or a plane or construction point
+/// the extrude follows (#8527).
 pub(crate) fn object_point(inputs: &[SelInput], label: &str) -> Option<Value> {
     inputs.iter().find(|i| i.label == label)?.items.first().and_then(|x| match x {
         Sel::Face { point, .. } | Sel::Vertex { point, .. } | Sel::Edge { point, .. } => Some(pt(*point)),
+        Sel::Plane { name } => Some(json!({"plane": name})),
+        Sel::ConstructionPoint { name } => Some(json!({"construct_point": name})),
         _ => None,
     })
+}
+
+/// The pick that stands for a stored To / From Object reference (#8527): an origin or
+/// construction plane, or a construction point. `None` for one the dialog does not offer.
+fn reference_pick(s: &Session, r: &solidcraft_engine::doc::ObjectRef) -> Option<Sel> {
+    use solidcraft_engine::doc::{PlaneRef, construct::GeoRef};
+    match &r.0 {
+        GeoRef::Plane { plane: PlaneRef::Origin { name } } => Some(Sel::Plane { name: name.clone() }),
+        GeoRef::Plane { plane: PlaneRef::Construction { feature, .. } } => s.doc.feature(feature.0).map(|f| Sel::Plane { name: f.name.clone() }),
+        GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
+        _ => None,
+    }
 }
 
 /// A To Object input filled from a stored place (editing).
@@ -6583,6 +6609,14 @@ fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
         return None;
     }
     Some(json!({"origin": [0.0, 0.0, 0.0], "x_dir": pt(p.x), "y_dir": pt(p.y)}))
+}
+
+/// The world place of a construction point by name, where it is shown.
+fn point_by_name(s: &Session, name: &str) -> Option<Vec3> {
+    crate::open_meshing::session_world(s).construct.iter().find(|c| c.name == name).and_then(|c| match &c.geom {
+        solidcraft_engine::doc::construct::ConstructGeom::Point(p) => Some(*p),
+        _ => None,
+    })
 }
 
 /// The world plane of an origin plane or a construction plane by name, where it is shown.
@@ -9692,11 +9726,19 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
-            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from), (TO_OBJECT2, extent.to2)] {
+            // A plane or construction point To / From Object shows as itself (#8527).
+            let references = [
+                (TO_OBJECT, extent.to, extent.to_ref.as_ref()),
+                (FROM_OBJECT, extent.from, extent.from_ref.as_ref()),
+                (TO_OBJECT2, extent.to2, None),
+            ];
+            for (label, point, reference) in references {
                 if let Some(point) = point {
                     set_object(&mut d.inputs, &mut d.active, label, true);
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
-                        input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                        let pick = reference.and_then(|r| reference_pick(s, r));
+                        input.items =
+                            vec![pick.unwrap_or(Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) })];
                     }
                 }
             }

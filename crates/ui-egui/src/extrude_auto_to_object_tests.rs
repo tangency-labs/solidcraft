@@ -16,8 +16,14 @@ fn scene() -> Harness {
 }
 
 fn scene_with(auto_to_object: bool) -> Harness {
+    scene_after(auto_to_object, |_| {})
+}
+
+/// [`scene_with`], with `more` run on the model before the dialog opens.
+fn scene_after(auto_to_object: bool, more: impl FnOnce(&mut Harness)) -> Harness {
     let mut h = Harness::new();
     h.app.preferences.extrude_auto_to_object = auto_to_object;
+    more(&mut h);
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 0, 0]})).unwrap();
     h.app.run("solid.cylinder", json!({"radius": 5, "height": 30, "base": [70, 10, 0], "operation": "new_body"})).unwrap();
     h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Lid"})).unwrap();
@@ -149,11 +155,12 @@ fn parallel_construction_plane_is_a_target_and_a_crossing_one_is_not() {
     assert!(to_object(dialog(&h)).is_none());
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     let d = dialog(&h);
-    assert!(matches!(to_object(d), Some(Sel::Vertex { body, .. }) if body.is_empty()));
+    // The plane itself, so the extrude follows it when it moves (#8527).
+    assert_eq!(to_object(d), Some(&Sel::Plane { name: "Lid".into() }));
     assert_eq!(distance(d), "25 mm");
     // The profile plane itself is nowhere to go: the target stays.
     assert!(!click(&mut h, |_| Hit::Plane { name: "XY".into(), point: Vec3::new(5.0, 5.0, 0.0) }));
-    assert!(matches!(to_object(dialog(&h)), Some(Sel::Vertex { point, .. }) if (point.z - 25.0).abs() < 1e-9));
+    assert_eq!(to_object(dialog(&h)), Some(&Sel::Plane { name: "Lid".into() }));
 }
 
 #[test]
@@ -182,7 +189,7 @@ fn target_below_keeps_its_side_and_exact_length() {
     // As the browser picks a plane: no place on it.
     assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));
     let d = dialog(&h);
-    assert!(matches!(to_object(d), Some(Sel::Vertex { point, .. }) if (point.z + 12.345678).abs() < 1e-9));
+    assert_eq!(to_object(d), Some(&Sel::Plane { name: "Under".into() }));
     assert_eq!(distance(d), "12.345678 mm");
     assert!(matches!(d.kind, Kind::Extrude { direction: 1, .. }), "the target is below the profile");
 }
@@ -212,7 +219,7 @@ fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
     assert!(to_object(dialog(&h)).is_none());
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
-    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert_eq!(commands[0].1["to"], json!({"plane": "Lid"}));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
 }
 
@@ -225,7 +232,7 @@ fn manual_to_object_accepts_a_parallel_plane_when_thin_extrude_is_on() {
     assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
-    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert_eq!(commands[0].1["to"], json!({"plane": "Lid"}));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
 }
 
@@ -251,7 +258,7 @@ fn thin_extrude_picked_by_curves_takes_a_parallel_plane_as_its_to_object() {
     assert!(matches!(dialog(&h).inputs[0].items.as_slice(), [Sel::SketchCurve { .. }, _, _, _]), "the curves stay the picks");
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
     assert_eq!(commands[0].1["thin"], json!(true));
-    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, -12.345678]));
+    assert_eq!(commands[0].1["to"], json!({"plane": "Under"}));
 
     h.step(&json!({"widget": "OK"})).unwrap();
     h.frames(4);
@@ -317,7 +324,7 @@ fn manual_from_object_accepts_parallel_and_coplanar_planes() {
         assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }));
         assert!(dialog(&h).active_input().unwrap().items.is_empty());
 
-        for (name, z) in [("Lid", 25.0), ("XY", 0.0), ("Under", -12.345678)] {
+        for name in ["Lid", "XY", "Under"] {
             // Browser plane picks carry no point; use the plane's exact world origin.
             assert!(click(&mut h, |_| Hit::Plane { name: name.into(), point: Vec3::ZERO }), "{name}, automatic={automatic}");
             let d = dialog(&h);
@@ -326,14 +333,14 @@ fn manual_from_object_accepts_parallel_and_coplanar_planes() {
             assert_eq!(d.inputs[0].items.len(), 1);
             assert_eq!(distance(d), "10 mm");
             let commands = apply_commands(&h.app, d).unwrap();
-            assert_eq!(commands[0].1["from"], json!([0.0, 0.0, z]));
+            assert_eq!(commands[0].1["from"], json!({"plane": name}));
             assert!(commands[0].1.get("to").is_none());
         }
 
         // Refusing a crossing plane must preserve the previous valid start.
         assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::ZERO }));
         let commands = apply_commands(&h.app, dialog(&h)).unwrap();
-        assert_eq!(commands[0].1["from"], json!([0.0, 0.0, -12.345678]));
+        assert_eq!(commands[0].1["from"], json!({"plane": "Under"}));
 
         assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
         let commands = apply_commands(&h.app, dialog(&h)).unwrap();
@@ -354,8 +361,8 @@ fn manual_from_object_keeps_the_selected_end_plane() {
     h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
     assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
-    assert_eq!(commands[0].1["from"], json!([0.0, 0.0, -12.345678]));
-    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert_eq!(commands[0].1["from"], json!({"plane": "Under"}));
+    assert_eq!(commands[0].1["to"], json!({"plane": "Lid"}));
 }
 
 #[test]
@@ -413,4 +420,78 @@ fn clicking_into_the_profiles_box_adds_an_off_plane_face_as_a_profile() {
     let d = dialog(&h);
     assert!(to_object(d).is_none(), "the box was chosen, so the pick is a profile");
     assert_eq!(d.inputs[0].items.len(), 2);
+}
+
+/// The box (8000 mm³) and the cylinder (750 pi mm³) of the scene taken off the volume of every
+/// body: what the extrude made, mm³.
+fn volume_made(h: &Harness) -> f64 {
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let all: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+    all - 8000.0 - 750.0 * std::f64::consts::PI
+}
+
+/// OK, then [`volume_made`].
+fn volume_after_ok(h: &mut Harness) -> f64 {
+    h.step(&json!({"widget": "OK"})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    volume_made(h)
+}
+
+/// A plane at a slant to the profile is a To Object too (#5995): the end is cut along it
+/// (#8527). A plane the extrusion runs along (YZ) gives no end and is still refused.
+#[test]
+fn manual_to_object_takes_a_slanted_plane_and_cuts_the_end_along_it() {
+    let mut h = scene_after(false, |h| {
+        let slope = json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"});
+        h.app.run("construct.plane.three_points", slope).unwrap();
+    });
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }));
+    assert!(click(&mut h, |_| Hit::Plane { name: "Slope".into(), point: Vec3::new(5.0, 5.0, 22.5) }));
+    assert_eq!(to_object(dialog(&h)), Some(&Sel::Plane { name: "Slope".into() }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!({"plane": "Slope"}));
+    // The 10 x 10 profile up to z = 20 + x / 2: 10 x the integral of (20 + x / 2) over x 0..10.
+    let volume = volume_after_ok(&mut h);
+    assert!((volume - 2250.0).abs() < 1e-6, "{volume}");
+}
+
+/// A construction point is a To Object: the extrude ends on the plane through it, parallel to
+/// the profile (#8527).
+#[test]
+fn manual_to_object_takes_a_construction_point() {
+    let mut h = scene_after(false, |h| {
+        h.app.run("construct.point.vertex", json!({"point": {"point": [5, 5, 18]}, "name": "Tip"})).unwrap();
+    });
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert!(click(&mut h, |_| Hit::ConstructionPoint { name: "Tip".into() }));
+    assert_eq!(to_object(dialog(&h)), Some(&Sel::ConstructionPoint { name: "Tip".into() }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!({"construct_point": "Tip"}));
+    // 10 x 10 x 18 mm.
+    let volume = volume_after_ok(&mut h);
+    assert!((volume - 1800.0).abs() < 1e-6, "{volume}");
+}
+
+/// A plane picked as To Object stays the plane: when a parameter moves it after OK, the
+/// extrude follows it (#8527). Before, the pick was the plane's origin, fixed where it was.
+#[test]
+fn a_plane_picked_as_to_object_is_followed_when_it_moves() {
+    let mut h = scene_after(false, |h| {
+        h.app.run("parameters.add", json!({"name": "H", "expression": "25 mm"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Ceiling"})).unwrap();
+    });
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert!(click(&mut h, |_| Hit::Plane { name: "Ceiling".into(), point: Vec3::ZERO }));
+    // 10 x 10 x 25 mm, then 10 x 10 x 40 mm.
+    let volume = volume_after_ok(&mut h);
+    assert!((volume - 2500.0).abs() < 1e-6, "{volume}");
+    h.app.run("parameters.change", json!({"name": "H", "expression": "40 mm"})).unwrap();
+    h.frames(2);
+    let volume = volume_made(&h);
+    assert!((volume - 4000.0).abs() < 1e-6, "{volume}");
 }
