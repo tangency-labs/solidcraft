@@ -123,7 +123,11 @@ fn an_app_not_running_says_how_to_start_it() {
         "a connect to port 0 succeeded on this system"
     );
     // `Connection::new` reads an address it cannot parse as port 0, so check it reads a real port.
-    assert_eq!(Connection::new(APP, &addr(4242), None).port(), 4242);
+    let real = Connection::new(APP, &addr(4242), None);
+    assert_eq!(real.port(), 4242);
+    // The message names the address and the port it was given, not a fixed one. Nothing connects to 4242.
+    let CallError::NotRunning(m) = real.explain(&std::io::Error::from(std::io::ErrorKind::NotConnected)) else { panic!("not `NotRunning`") };
+    assert!(m.contains("127.0.0.1:4242") && m.contains("--control 4242"), "{m}");
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::NotRunning(m) = &e else { panic!("{e:?}") };
