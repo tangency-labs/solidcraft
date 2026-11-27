@@ -162,7 +162,8 @@ error).
   apply. The whole build is one undo step: if any step fails, the design is left as it was, and the
   error names the failing step and command.
 - `insert` says where the part goes: `{"component": "${code}"}` (the default) makes a new component
-  named after the code and builds the steps inside it.
+  named after the code and builds the steps inside it. The component's part number is the code
+  and its description is the package's `name`, so a bill of materials names the part as ordered.
 
 ## 6. Provenance, sources and the guarantee level
 
@@ -216,7 +217,19 @@ solidcraft-cli run -- generator.build '{"package": "slot-nut-20.generator.json",
 `generator.build` returns `volume_mm3`, `bbox_mm` and `faces`, and with `"save": "path.sc"` also
 saves the design, so a maker's own build can be compared number for number.
 
-## 9. Limits and hostile input (the format stays data)
+## 9. Installing and using a package
+
+SolidCraft reads packages from the `generators` folder of its per-user data folder
+(`~/.local/share/solidcraft/generators` on Linux, `%LOCALAPPDATA%\SolidCraft\generators` on Windows,
+`~/Library/Application Support/SolidCraft/generators` on macOS), or from the folder the
+`SOLIDCRAFT_GENERATORS_DIR` environment variable names. A file there named `<id>.generator.json`
+is installed. **Insert > Library > Ordering Code** opens a dialog: choose a generator, type a code,
+read what SolidCraft made of it (the fields, the table rows used with their sources and status,
+the package's provenance text, or the package's own reason for refusing the code) and insert the
+part. Nothing is downloaded or run by the dialog; the Workshop's own ask-first install is what
+puts a package in the folder.
+
+## 10. Limits and hostile input (the format stays data)
 
 A package and a code are untrusted. The format is not a programming language: it has no
 recursion, no user-defined functions, no unbounded loops, no I/O and no clock. Every bound below
@@ -249,7 +262,7 @@ machine and in the browser.
   only list makers are table cells and `flags`).
 - No part of the path panics, reads a file other than the package, or reaches the network.
 
-## 10. Answers to the first adopter's questions
+## 11. Answers to the first adopter's questions
 
 1. **Grammar:** structured tokens plus `rules` with per-reason refusal texts, `not_modelled` refusals
    and defaults (section 2). The RFC 0019 regex is accepted as a declaration, checked by examples,

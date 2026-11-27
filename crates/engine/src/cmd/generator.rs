@@ -228,6 +228,8 @@ fn run_build(s: &mut Session, cmd: &str, g: &Generator, code: &str) -> Result<Bu
     let plan = g.plan(code).map_err(|e| bad(cmd, e.to_string()))?;
     let before = body_names(s)?;
     s.execute("component.create", &json!({"name": plan.component, "activate": true}))?;
+    // The ordering code is the part number, so the bill of materials names the part as ordered.
+    let _ = s.execute("component.metadata.set", &json!({"component": plan.component, "part_number": plan.parsed.code, "description": g.meta.name}));
     for c in &plan.commands {
         s.execute(&c.command, &c.params).map_err(|e| bad(cmd, format!("step {} (`{}`) failed: {e}", c.step + 1, c.command)))?;
     }
