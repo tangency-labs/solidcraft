@@ -102,8 +102,9 @@ macro_rules! navigation_preferences {
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
             /// A key that, held when a mouse orbit drag starts, makes that drag roll the view about
             /// the line of sight through the orbit point instead, as far as the pointer goes around
-            /// that point, like a dial (#22691). `none` (default), `alt` or `ctrl`, never the same key
-            /// as `free_orbit_key`. A key the mouse mapping already needs for that orbit does nothing.
+            /// that point, like a dial (#22691). `none` (default), `alt` or `ctrl`; while it is the same
+            /// key as `free_orbit_key`, that one wins and this does nothing. A key the mouse mapping
+            /// already needs for that orbit does nothing.
             roll_key: String = "none".into(), PAGE_NAVIGATION;
             /// Spread discrete wheel input across frames (off: apply each event immediately).
             smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");

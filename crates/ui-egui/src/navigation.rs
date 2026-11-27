@@ -1295,8 +1295,13 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             wrap_cursor(app, ui, rect);
         }
     } else {
-        app.viewport.orbit_flip = None;
-        app.viewport.orbit_roll = None;
+        // A drag that pans for a while (Space held) and orbits again is still one drag: with
+        // "A drag keeps the navigation it started with" on, it keeps the free-orbit and roll
+        // choices it began with. They are let go when the drag ends (below).
+        if !(app.preferences.nav_drag_keeps_mode && dragging) {
+            app.viewport.orbit_flip = None;
+            app.viewport.orbit_roll = None;
+        }
         if app.viewport.axis_drag.is_none() {
             app.viewport.orbit_free = None;
         }
@@ -3633,6 +3638,34 @@ mod tests {
         }
     }
 
+    /// A roll drag that pans for a while with Space held is still one drag: once Space is let go
+    /// it rolls again, with the Roll key long released (CodeRabbit on #22847).
+    #[test]
+    fn a_roll_drag_keeps_rolling_after_a_space_pan_in_the_middle() {
+        use super::{NavMode, Pos2};
+        use egui::{Event, Key, Modifiers, PointerButton, vec2};
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.roll_key = "alt".into();
+        h.app.home.open = false;
+        h.frames(2);
+        h.app.viewport.nav = Some(NavMode::Orbit);
+        let at = h.app.viewport.rect.map_or(Pos2::new(600.0, 400.0), |r| r.center()) + vec2(150.0, 0.0);
+        let button = |pressed, pos, modifiers| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+        let space = |pressed| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        h.frame_with(vec![Event::ModifiersChanged(Modifiers::ALT), Event::PointerMoved(at)]);
+        h.frame_with(vec![button(true, at, Modifiers::ALT)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 20.0))]);
+        assert_eq!(h.app.viewport.orbit_roll, Some(true), "the drag began as a roll");
+        h.frame_with(vec![Event::ModifiersChanged(Modifiers::NONE), space(true)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 40.0))]);
+        h.frame_with(vec![space(false)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 60.0))]);
+        assert_eq!(h.app.viewport.orbit_roll, Some(true), "after the pan the same drag rolls again");
+        h.frame_with(vec![button(false, at + vec2(0.0, 60.0), Modifiers::NONE)]);
+        h.frames(2);
+        assert_eq!(h.app.viewport.orbit_roll, None, "the end of the drag lets the choice go");
+    }
+
     #[test]
     fn the_roll_key_does_nothing_where_the_binding_needs_it_or_the_free_orbit_key_has_it() {
         use crate::prefs::NavButton;
@@ -3656,22 +3689,21 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_roll_key_or_the_free_orbit_keys_own_is_refused_and_a_good_one_is_kept() {
+    fn a_bad_roll_key_is_refused_and_the_free_orbit_keys_own_is_kept_but_does_nothing() {
         let mut h = crate::scenario::Harness::new();
         for bad in ["shift", "meta", ""] {
             let reply = h.call("ui.prefs", serde_json::json!({"roll_key": bad}));
             assert_eq!(reply["ok"], false, "{bad}: {reply}");
         }
-        let reply = h.call("ui.prefs", serde_json::json!({"free_orbit_key": "alt"}));
-        assert_eq!(reply["ok"], true, "{reply}");
-        let reply = h.call("ui.prefs", serde_json::json!({"roll_key": "alt"}));
-        assert_eq!(reply["ok"], false, "the free-orbit key's own key: {reply}");
         assert_eq!(h.app.preferences.roll_key, "none");
-        for good in ["ctrl", "none"] {
-            let reply = h.call("ui.prefs", serde_json::json!({"roll_key": good}));
-            assert_eq!(reply["ok"], true, "{good}: {reply}");
-            assert_eq!(h.app.preferences.roll_key, good);
+        // Settings applied one at a time (a profile) never trip over the other key's current
+        // value: the same key is kept, and the free-orbit key wins at the drag
+        // (`the_roll_key_does_nothing_where_the_binding_needs_it_or_the_free_orbit_key_has_it`).
+        for (key, value) in [("roll_key", "alt"), ("free_orbit_key", "alt"), ("roll_key", "ctrl"), ("roll_key", "none")] {
+            let reply = h.call("ui.prefs", serde_json::json!({key: value}));
+            assert_eq!(reply["ok"], true, "{key} {value}: {reply}");
         }
+        assert_eq!((h.app.preferences.free_orbit_key.as_str(), h.app.preferences.roll_key.as_str()), ("alt", "none"));
     }
 
     #[test]
