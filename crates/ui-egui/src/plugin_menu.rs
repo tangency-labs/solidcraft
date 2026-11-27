@@ -2644,7 +2644,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
             app.pick_folder("", move |app, path| {
                 let Some(path) = path else { return };
                 let request = json!({"command":"file.export","params":{"path":path,"format":format,"options":params}});
-                queue(app, id, request);
+                queue(app, id, request, None);
             });
             return Ok(());
         }
