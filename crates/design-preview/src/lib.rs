@@ -111,39 +111,61 @@ fn open_archive<R: Read + Seek>(mut source: R) -> Option<zip::ZipArchive<R>> {
     CONTAINERS.contains(&container.format.as_str()).then_some(archive)
 }
 
-/// `Some` when the end-of-central-directory record that ends `source` (`len` bytes long)
-/// describes a directory the `zip` crate may parse: one disk, the same entry count on it and in
-/// all, at most [`MAX_ENTRIES`] entries and [`MAX_DIRECTORY`] bytes, inside the file before the
-/// record, and no ZIP64 (a container never uses it). Checked before the `zip` crate reads the
+/// The end of a file that holds every end-of-central-directory record the `zip` crate may take
+/// (it looks back over the record's 22 bytes, the longest comment and a few bytes more) and the
+/// 20 bytes before each, where a ZIP64 locator would be.
+const DIRECTORY_TAIL: u64 = 66 << 10;
+
+/// `Some` when the end-of-central-directory records at the end of `source` (`len` bytes long)
+/// describe a directory the `zip` crate may parse. One record ends the file exactly, as a writer
+/// leaves it, and gives one disk. Every record the crate could take instead (it takes any whose
+/// comment fits in the file, and goes back to an earlier one when one fails) passes the same
+/// checks unless it claims several disks, which no reader takes: the same entry count on its disk
+/// and in all, at most [`MAX_ENTRIES`] entries and [`MAX_DIRECTORY`] bytes, inside the file before
+/// the record, and no ZIP64 (a container never uses it). Checked before the `zip` crate reads the
 /// directory, so a hostile one cannot make it allocate or loop beyond these bounds.
 fn directory_fits<R: Read + Seek>(source: &mut R, len: u64) -> Option<()> {
     const RECORD: &[u8] = b"PK\x05\x06";
     const ZIP64_LOCATOR: &[u8] = b"PK\x06\x07";
-    // The record is 22 bytes plus a comment of at most 65,535.
-    let tail_len = len.min(22 + 0xFFFF);
-    source.seek(SeekFrom::Start(len - tail_len)).ok()?;
+    let tail_len = len.min(DIRECTORY_TAIL);
+    let tail_at = len - tail_len;
+    source.seek(SeekFrom::Start(tail_at)).ok()?;
     let mut tail = Vec::with_capacity(usize::try_from(tail_len).ok()?);
     source.by_ref().take(tail_len).read_to_end(&mut tail).ok()?;
     let u16_at = |at: usize| tail.get(at..at + 2).and_then(|b| b.try_into().ok()).map(u16::from_le_bytes);
     let u32_at = |at: usize| tail.get(at..at + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes);
-    // The last signature whose comment length reaches exactly to the end of the file.
-    let at = (0..tail.len().checked_sub(21)?)
-        .rev()
-        .find(|&i| tail.get(i..i + 4) == Some(RECORD) && u16_at(i + 20).map(usize::from) == tail.len().checked_sub(i + 22))?;
-    let (disk, directory_disk, here, total) = (u16_at(at + 4)?, u16_at(at + 6)?, u16_at(at + 8)?, u16_at(at + 10)?);
-    let (size, offset) = (u64::from(u32_at(at + 12)?), u64::from(u32_at(at + 16)?));
-    let record_at = (len - tail_len).checked_add(u64::try_from(at).ok()?)?;
-    let zip64 = at.checked_sub(20).and_then(|s| tail.get(s..s + 4)) == Some(ZIP64_LOCATOR);
-    (disk == 0
-        && directory_disk == 0
-        && here == total
-        && usize::from(total) <= MAX_ENTRIES
-        && total != 0xFFFF
-        && size <= MAX_DIRECTORY
-        && offset != 0xFFFF_FFFF
-        && offset.checked_add(size)? <= record_at
-        && !zip64)
-        .then_some(())
+    let mut ends_the_file = false;
+    // Each signature followed by a whole record whose comment fits in the file.
+    for at in (0..tail.len().saturating_sub(21)).filter(|&i| tail.get(i..i + 4) == Some(RECORD)) {
+        let comment_end = (at + 22).checked_add(usize::from(u16_at(at + 20)?))?;
+        if comment_end > tail.len() {
+            continue;
+        }
+        let zip64 = at.checked_sub(20).and_then(|s| tail.get(s..s + 4)) == Some(ZIP64_LOCATOR);
+        let (disk, directory_disk, here, total) = (u16_at(at + 4)?, u16_at(at + 6)?, u16_at(at + 8)?, u16_at(at + 10)?);
+        let one_disk = disk == 0 && directory_disk == 0 && here == total;
+        if comment_end == tail.len() {
+            ends_the_file = true;
+            if !one_disk {
+                return None;
+            }
+        }
+        if !one_disk && !zip64 {
+            continue;
+        }
+        let (size, offset) = (u64::from(u32_at(at + 12)?), u64::from(u32_at(at + 16)?));
+        let record_at = tail_at.checked_add(u64::try_from(at).ok()?)?;
+        let fits = usize::from(total) <= MAX_ENTRIES
+            && total != 0xFFFF
+            && size <= MAX_DIRECTORY
+            && offset != 0xFFFF_FFFF
+            && offset.checked_add(size)? <= record_at
+            && !zip64;
+        if !fits {
+            return None;
+        }
+    }
+    ends_the_file.then_some(())
 }
 
 /// One entry's bytes, read in full only when its declared and actual sizes are within `limit`.
