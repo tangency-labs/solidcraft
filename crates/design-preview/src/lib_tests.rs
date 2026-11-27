@@ -281,3 +281,32 @@ fn a_zip64_archive_behind_a_decoy_record_is_refused() {
     assert!(zip_crate_opens(&decoy));
     assert!(open_archive(std::io::Cursor::new(decoy)).is_none(), "a decoy record hides a ZIP64 archive");
 }
+
+/// A well-formed container whose directory holds more than [`MAX_DIRECTORY`] bytes: its three
+/// parts and 130 empty entries named with 65,000 bytes each.
+pub(crate) fn large_directory() -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let picture = png(240, 150);
+    for (name, bytes) in [("container.json", CONTAINER), ("document.json", DOCUMENT), ("cache/thumbnail.png", picture.as_slice())] {
+        writer.start_file(name, SimpleFileOptions::default()).unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+    let long = "x".repeat(65_000);
+    for i in 0..130 {
+        writer.start_file(format!("pad/{i:03}/{long}"), SimpleFileOptions::default()).unwrap();
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+#[test]
+fn a_directory_larger_than_its_record_says_is_refused() {
+    let bytes = large_directory();
+    let at = record(&bytes);
+    let size = u32::from_le_bytes(bytes[at + 12..at + 16].try_into().unwrap());
+    assert!(u64::from(size) > MAX_DIRECTORY);
+    assert!(!fits(&bytes), "an honest record is refused by its size");
+    // The record says the directory is one header long; the zip crate reads all 133 entries anyway.
+    let understated = with_field(&bytes, 12, &46_u32.to_le_bytes());
+    assert_eq!(zip::ZipArchive::new(std::io::Cursor::new(understated.clone())).map(|a| a.len()).ok(), Some(133));
+    assert!(open_archive(std::io::Cursor::new(understated)).is_none(), "the zip crate parsed more than 8 MiB of directory");
+}
