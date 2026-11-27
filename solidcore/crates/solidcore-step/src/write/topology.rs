@@ -498,9 +498,15 @@ fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
 
 /// Write `b`'s solids and sheets, each item named `name`.
 pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
+    brep_with_face_names(g, b, name, &|_| String::new())
+}
+
+/// Write the supplied name on each record face used by a shell.
+pub(super) fn brep_with_face_names(g: &mut GeomWriter<'_>, b: &Brep, name: &str, face_name: &dyn Fn(usize) -> String) -> R<Written> {
     let b = &*analytic_rounds(b)?;
     let layout = layout(b)?;
     let mut w = BrepWriter {
+        face_name,
         g,
         b,
         surfaces: vec![None; b.faces.len()],
@@ -560,6 +566,7 @@ fn index(i: usize) -> R<u32> {
 }
 
 struct BrepWriter<'g, 'w, 'b> {
+    face_name: &'b dyn Fn(usize) -> String,
     g: &'g mut GeomWriter<'w>,
     b: &'b Brep,
     /// Each face's STEP surface and parameter map, once worked out.
@@ -699,7 +706,8 @@ impl BrepWriter<'_, '_, '_> {
             bounds.push(r(self.g.w.add_distinct(kind, &[s(), r(lp), boolean(true)])));
         }
         let same_sense = side == map.keeps_normal();
-        let id = self.g.w.add_distinct("ADVANCED_FACE", &[s(), list(bounds), r(geometry), boolean(same_sense)]);
+        let name = Param::Str((self.face_name)(f as usize));
+        let id = self.g.w.add_distinct("ADVANCED_FACE", &[name, list(bounds), r(geometry), boolean(same_sense)]);
         if let Some(slot) = self.faces.get_mut(f as usize) {
             *slot = Some((id, side));
         }
