@@ -1252,7 +1252,10 @@ impl ShellRayTarget {
             return false;
         }
         match self.bbox {
-            Some(b) => b.is_init() && b.contains_point(point, tol),
+            Some(b) => {
+                !b.has_negative_volume()
+                    && (!tol.is_finite() || tol < 0.0 || b.contains_point(point, tol))
+            }
             None => true,
         }
     }
@@ -1290,7 +1293,15 @@ impl ShellRayTarget {
                 state: input.state,
             };
         };
-        ray_fire_with_shape(kernel, brep, self.brep_id, self.shell_id, shape, world, input)
+        ray_fire_with_shape(
+            kernel,
+            brep,
+            self.brep_id,
+            self.shell_id,
+            shape,
+            world,
+            input,
+        )
     }
 }
 
@@ -2477,8 +2488,8 @@ mod tests {
             .map(|(id, _)| id)
             .unwrap();
         let inner_shell = b.region(solid_region).unwrap().shells[0];
-        let mut target = ShellRayTarget::new(&mut k, &mut b, BrepId::from_index(0), inner_shell)
-            .unwrap();
+        let mut target =
+            ShellRayTarget::new(&mut k, &mut b, BrepId::from_index(0), inner_shell).unwrap();
 
         // Point outside the [0, 10]^3 box is culled without building the Shape.
         assert!(!target.may_contain(Point3::new(25.0, 5.0, 5.0), 1e-4));

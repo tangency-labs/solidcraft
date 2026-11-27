@@ -2260,8 +2260,8 @@ fn nest_shells(
         // `rays.inner`'s bounding box. If a vertex lies strictly outside, skip `shell_point`
         // (which evaluates binormal step-offs) and skip `ray_fire`.
         if let Some((vpt, vtol)) = shell_sample_vertex(brep, shell_id)? {
-            let v_margin = brep_zone_tol.max(vtol) * 4.0
-                + EFF_ZERO_SQRT * (1.0 + vpt.max_dimension());
+            let v_margin =
+                brep_zone_tol.max(vtol) * 4.0 + EFF_ZERO_SQRT * (1.0 + vpt.max_dimension());
             if !target.may_contain(vpt, v_margin) {
                 let found = split_link(brep.shell(rays.other)?.region)?;
                 let old = split_link(brep.shell(shell_id)?.region)?;
@@ -2426,7 +2426,7 @@ pub(crate) fn nest_closed_shells_as_cavities(
         let brep_zone_tol = brep.tolerance();
         let ray = Vec3::new(1.0, 1.0, 1.0);
         let ray = ray.unitize().unwrap_or(ray);
-        let mut targets: Vec<shell::ShellRayTarget> = Vec::with_capacity(solids.len());
+        let mut targets: Vec<shell::ShellRayTarget> = Vec::new();
         for &(_, inner, _) in &solids {
             targets.push(shell::ShellRayTarget::new(
                 k,
