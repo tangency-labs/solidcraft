@@ -846,6 +846,14 @@ impl<'t> TextEdit<'t> {
         let text_clip_rect = inner_rect;
         let painter = ui.painter_at(text_clip_rect.expand(1.0)); // expand to avoid clipping cursor
 
+        // SolidCraft: compute the optical lift once, so the preview cursor, the row and
+        // the caret all stand on the same lifted baseline (#22642).
+        let cap_ink_rise = if align.y() == Align::Center {
+            galley_cap_ink_rise(ui.painter(), &galley)
+        } else {
+            0.0
+        };
+
         if interactive && let Some(pointer_pos) = response.interact_pointer_pos() {
             if response.hovered() && text.is_mutable() {
                 ui.output_mut(|o| o.mutable_text_under_cursor = true);
@@ -863,7 +871,7 @@ impl<'t> TextEdit<'t> {
             {
                 // text cursor preview:
                 let cursor_rect = TSTransform::from_translation(
-                    inner_rect.min.to_vec2() - vec2(galley.rect.left(), 0.0),
+                    inner_rect.min.to_vec2() - vec2(galley.rect.left(), cap_ink_rise),
                 ) * cursor_rect(&galley, &cursor_at_pointer, row_height);
                 text_selection::visuals::paint_cursor_end(&painter, ui.visuals(), cursor_rect);
             }
@@ -944,7 +952,7 @@ impl<'t> TextEdit<'t> {
         // measured from a fixed probe glyph rather than the text itself, so the baseline never
         // moves while one types (SolidCraft #22642).
         if align.y() == Align::Center {
-            galley_pos.y -= galley_cap_ink_rise(ui.painter(), &galley);
+            galley_pos.y -= cap_ink_rise;
         }
         let align_offset = inner_rect.left_top() - galley_pos;
 
