@@ -399,7 +399,7 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     assert!(right_click_rows(&mut h, browser, body_menu), "a body row opens its menu");
     let target = h.app.menu.target.clone();
     let row = crate::context_menu::items(&h.app, &target).iter().position(|item| item.id == "ui.findTimeline");
-    h.app.menu.key_row = Some(row.expect("the body menu offers Find in Timeline"));
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, Some(row.expect("the body menu offers Find in Timeline")));
     send(browser, type_key(egui::Key::Enter, ""));
     frame(&mut h, Vec::new());
     frame(&mut h, Vec::new());

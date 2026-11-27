@@ -881,10 +881,10 @@ fn publish_button(ui: &Ui, response: &Response, label: &str) {
 }
 
 /// Nested action menu in a dense table. Tokens: scope control/font tokens.
-pub fn action_menu<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
-    let response = super::Menu::button(ui, solidcraft_ui_text::tr_label(label), |ui| super::scope(ui, add));
-    solidcraft_ui_registry::publish_target(&format!("dialog:menu:{label}"), response.response.rect);
-    response
+pub fn action_menu(ui: &mut Ui, label: &str, items: &[super::Item]) -> Option<super::Item> {
+    let button = super::text_button(ui, solidcraft_ui_text::tr_label(label), true);
+    solidcraft_ui_registry::publish_target(&format!("dialog:menu:{label}"), button.rect);
+    super::Menu::button_items(&button, items)
 }
 
 /// Borderless compact table actions. Existing star glyphs keep their identities; arrows

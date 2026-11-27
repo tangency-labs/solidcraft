@@ -2606,7 +2606,7 @@ fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
     let rows = context_menu::items(&h.app, &target);
     context_menu::open_for(&mut h.app, pos2(400.0, 180.0), target);
     let index = rows.iter().position(|i| i.id == "ui.appearance").unwrap();
-    h.app.menu.key_row = Some(index);
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, Some(index));
     h.frames(2);
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     let parent = rect_of("menu:ui.appearance").unwrap();
@@ -2742,7 +2742,7 @@ fn keys_walk_into_nested_flyouts_and_left_steps_back_one_level() {
     use crate::scenario::rect_of;
     let (mut h, _) = component_menu();
     let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
-    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.group.component");
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, rows.iter().position(|i| i.id == "ui.group.component"));
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     assert!(rect_of("menu:ui.rename:Rename").is_some(), "Right opens the Component flyout");
     let own = &find(&rows, "Component").children;
@@ -2785,11 +2785,11 @@ fn resting_on_another_row_of_a_flyout_closes_only_the_flyout_beyond_it() {
 fn left_from_a_hovered_flyout_chooses_the_row_that_opened_it() {
     let (mut h, _) = component_menu();
     let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
-    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.copy");
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, rows.iter().position(|i| i.id == "ui.copy"));
     h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
     h.frames(2);
     h.step(&json!({"key":"ArrowLeft"})).unwrap();
-    assert_eq!(h.app.menu.key_row, rows.iter().position(|i| i.id == "ui.group.component"));
+    assert_eq!(crate::ui_kit::Menu::cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0), rows.iter().position(|i| i.id == "ui.group.component"));
     assert!(crate::scenario::rect_of("menu:ui.rename:Rename").is_none(), "the flyout closed");
 }
 

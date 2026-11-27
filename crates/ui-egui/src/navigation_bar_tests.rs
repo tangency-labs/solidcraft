@@ -430,9 +430,9 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         assert_eq!(navigation_ink(&tokens, NavigationFill::Strong), tokens.on_accent);
         let frame = navigation_popup_frame();
         assert_eq!(frame.fill, tokens.dialog_body);
-        assert_eq!(frame.stroke, egui::Stroke::new(NAV_BORDER, tokens.dialog_border));
-        assert_eq!(frame.corner_radius, egui::CornerRadius::same(10));
-        assert_eq!(frame.inner_margin, egui::Margin::same(5));
+        assert_eq!(frame.stroke, Menu::frame().stroke);
+        assert_eq!(frame.corner_radius, Menu::frame().corner_radius);
+        assert_eq!(frame.inner_margin, Menu::frame().inner_margin);
         assert_eq!(frame.shadow, Container::menu_frame().shadow, "navigation inherits the shared popup elevation");
     }
     assert_eq!((NAV_POPUP_WIDTH, NAV_CONTEXT_WIDTH, NAV_MORE_WIDTH, NAV_POPUP_GAP), (244.0, 232.0, 200.0, 6.0));
@@ -455,17 +455,19 @@ fn navigation_board_popup_width_includes_its_border_and_padding() {
             crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
                 outer = ui
                     .scope(|ui| {
-                        navigation_menu(ui, width, |ui| {
-                            row = NavigationMenuRow::new("fit", "Fit", "fit").show(ui).rect;
+                        Menu::show(ui, width, |ui| {
+                            row = Menu::items(ui, egui::Id::unique("navigation_width_fixture"), &[Item::action("fit", "Fit", "fit")], false).rows[0]
+                                .1
+                                .rect;
                         })
                     })
                     .response
                     .rect;
             });
             assert_eq!(outer.width(), width);
-            assert_eq!(row.height(), NAV_MENU_ROW);
-            assert_eq!(row.left() - outer.left(), f32::from(NAV_POPUP_PADDING) + NAV_BORDER);
-            assert_eq!(outer.right() - row.right(), f32::from(NAV_POPUP_PADDING) + NAV_BORDER);
+            assert_eq!(row.height(), tokens.control_height + tokens.space_2);
+            assert_eq!(row.left() - outer.left(), f32::from(Menu::frame().inner_margin.left) + Menu::frame().stroke.width);
+            assert_eq!(outer.right() - row.right(), f32::from(Menu::frame().inner_margin.left) + Menu::frame().stroke.width);
         }
     }
 }
@@ -485,10 +487,10 @@ fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
     ] {
         let mut row = Rect::NOTHING;
         let output = crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-            navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
-                let mut item = NavigationMenuRow::new("row", label, "select");
-                item.selected = selected;
-                row = item.show(ui).rect;
+            Menu::show(ui, NAV_POPUP_WIDTH, |ui| {
+                let mut item = Item::action("row", label, "select");
+                item.checked = selected.then_some(true);
+                row = Menu::items(ui, egui::Id::unique("navigation_label_fixture"), &[item], false).rows[0].1.rect;
             });
         });
         let text = crate::ui_kit::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));

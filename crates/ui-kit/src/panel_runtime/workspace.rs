@@ -349,7 +349,6 @@ pub struct WorkspacePanelHost {
     restore_content_focus: bool,
     menu_opener: Option<egui::Id>,
     menu_entry: Option<egui::Id>,
-    menu_reveal: Option<egui::Id>,
     menu_items: Vec<egui::Id>,
     keyboard_shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>,
     pending: Option<PendingHostCommands>,
@@ -593,7 +592,6 @@ impl WorkspacePanelHost {
             restore_content_focus: false,
             menu_opener: None,
             menu_entry: None,
-            menu_reveal: None,
             menu_items: Vec::new(),
             keyboard_shortcuts: [
                 (ContextualPanelAction::ResizeLeft, egui::Key::ArrowLeft),
@@ -1530,7 +1528,6 @@ impl WorkspacePanelHost {
                 frame.preview = None;
                 pointer_events.clear();
             }
-            self.menu_keyboard(ui, &frame);
             for (action, shortcut) in &self.keyboard_shortcuts {
                 let pressed = ui.input(|input| {
                     input.events.iter().any(|event| {
@@ -1800,7 +1797,6 @@ impl WorkspacePanelHost {
                             self.menu_opener = Some(source);
                         }
                         self.menu_entry = Some(source);
-                        self.menu_reveal = None;
                         self.menu = Some(menu);
                         self.menu_anchor = Some(anchor);
                         // This pass still reports only the menu actually painted.
@@ -1924,68 +1920,7 @@ impl WorkspacePanelHost {
         self.menu_anchor = None;
         self.menu_opener = None;
         self.menu_entry = None;
-        self.menu_reveal = None;
         self.menu_items.clear();
-    }
-
-    fn menu_keyboard(&mut self, ui: &mut egui::Ui, frame: &HostFrame) {
-        let Some(_bounds) = frame.menu_bounds else {
-            return;
-        };
-        let items: Vec<_> =
-            self.menu_items.iter().copied().filter(|id| ui.ctx().read_response(*id).is_some_and(|response| response.enabled())).collect();
-        if items.is_empty() {
-            return;
-        }
-        let focused = ui.memory(|memory| memory.focused());
-        let index = items.iter().position(|control| Some(*control) == focused);
-        if let Some(source) = self.menu_entry.take()
-            && (focused == Some(source) || focused.is_none())
-        {
-            ui.memory_mut(|memory| memory.request_focus(items[0]));
-            self.menu_reveal = Some(items[0]);
-            ui.ctx().request_repaint();
-        }
-        let focused = ui.memory(|memory| memory.focused());
-        let index = index.or_else(|| items.iter().position(|control| Some(*control) == focused));
-        if let Some(index) = index {
-            ui.memory_mut(|memory| {
-                memory.set_focus_lock_filter(items[index], egui::EventFilter { vertical_arrows: true, escape: true, ..Default::default() })
-            });
-            let destination = ui.input_mut(|input| {
-                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    Some((index + 1) % items.len())
-                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                    Some((index + items.len() - 1) % items.len())
-                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
-                    Some(0)
-                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
-                    Some(items.len() - 1)
-                } else {
-                    None
-                }
-            });
-            if let Some(destination) = destination {
-                ui.memory_mut(|memory| memory.request_focus(items[destination]));
-                self.menu_reveal = Some(items[destination]);
-                // The next row paint requests scrolling while its ScrollArea
-                // is active; a request after ScrollArea::show is too late.
-                ui.ctx().request_repaint();
-            }
-            if self.pending_escape || ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                let opener = self.menu_opener;
-                self.clear_menu();
-                self.pending_escape = false;
-                if let Some(opener) = opener.filter(|opener| {
-                    frame.controls.iter().any(|control| control.id == *opener && control.enabled)
-                        && ui.ctx().read_response(*opener).is_some_and(|response| response.enabled())
-                }) {
-                    ui.memory_mut(|memory| memory.request_focus(opener));
-                    self.owned_focus = Some(opener);
-                }
-                ui.ctx().request_repaint();
-            }
-        }
     }
 
     fn input_rects(&self, frame: &HostFrame) -> Vec<LogicalRect> {
@@ -3524,173 +3459,173 @@ impl WorkspacePanelHost {
                 }
             }
         }
-        let has_shared = !groups.is_empty();
-        let has_content = !content_actions.is_empty();
-        let rows = groups.iter().map(Vec::len).sum::<usize>() + content_actions.len() + 2 * tabs.len() + usize::from(self.last_rejection.is_some());
-        let separators = (groups.len() + usize::from(has_content) + tabs.len()).saturating_sub(1);
-        let Some(bounds) = menu_geometry(frame.layout.capacity, anchor, rows, separators) else {
+        let id = panel_menu_id(runtime, &menu);
+        let mut items = Vec::new();
+        let mut bindings: Vec<(String, HostControlTarget, HostCommand)> = Vec::new();
+        if let Some(reason) = &self.last_rejection {
+            let mut item = ui_kit::Item::action("layout_rejection", locale.text(rule_key(reason.rule)), "").on_if(false);
+            item.danger = true;
+            items.push(item);
+        }
+        if let HostMenu::Panel(instance) = &menu {
+            let collapsed = layout.containing(instance).is_ok_and(|section| section.collapsed);
+            for group in groups {
+                if !items.is_empty() {
+                    items.push(ui_kit::Item::sep());
+                }
+                for (shared, action) in group {
+                    let target = HostControlTarget::Shared { instance: instance.clone(), action: shared.clone() };
+                    let label = shared_label(&shared, instance, runtime, metadata, locale);
+                    let widget = control_id(runtime, owners, &target);
+                    let mut item = panel_menu_item(widget, &label, true);
+                    item.icon = shared_menu_icon(&shared, collapsed, frame.layout.direction);
+                    bindings.push((item.id.clone(), target, HostCommand::WidgetLayout(action, widget)));
+                    items.push(item);
+                }
+            }
+            if !content_actions.is_empty() && !items.is_empty() {
+                items.push(ui_kit::Item::sep());
+            }
+            let spec = layout.instance(instance).and_then(|panel| runtime.layout().registry().get(&panel.kind)).ok();
+            for action in content_actions {
+                let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
+                let registered = spec.and_then(|spec| spec.header_actions.iter().find(|entry| entry.id == action.id));
+                let widget = control_id(runtime, owners, &target);
+                let mut item = panel_menu_item(widget, &action.label, action.enabled);
+                item.icon = registered.map_or("settings", |entry| entry.icon.as_str()).into();
+                item.checked = action.pressed;
+                item.tip.clone_from(&action.disabled_reason);
+                let command = if registered.is_some() {
+                    HostCommand::WidgetLayout(
+                        apply_action(frame.layout.revision, vec![Mutation::HeaderAction { instance: instance.clone(), action: action.id.clone() }]),
+                        widget,
+                    )
+                } else {
+                    HostCommand::Content(instance.clone(), action.id.clone(), widget)
+                };
+                bindings.push((item.id.clone(), target, command));
+                items.push(item);
+            }
+        }
+        for instance in tabs {
+            if !items.is_empty() {
+                items.push(ui_kit::Item::sep());
+            }
+            let presentation = metadata.get(instance);
+            let label = presentation.map_or_else(|| locale.text("ui.panel_host.tab"), |value| value.title.as_str());
+            let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
+            let widget = control_id(runtime, owners, &target);
+            let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
+            let check = runtime.layout().prepare(action.clone());
+            let accessible = locale.format("ui.panel_host.focus_target", &[("title", label)]);
+            let mut item = panel_menu_item(widget, &accessible, check.is_ok());
+            item.icon = presentation.map_or("list", |value| value.icon.as_str()).into();
+            if let Err(reason) = check {
+                item.tip = Some(locale.text(rule_key(reason.rule)).to_owned());
+            }
+            bindings.push((item.id.clone(), target, HostCommand::WidgetLayout(action, widget)));
+            items.push(item);
+            let target = HostControlTarget::PanelMenu { instance: instance.clone() };
+            let widget = control_id(runtime, owners, &target);
+            let label = format!("{label} — {}", locale.text("ui.panel_host.menu"));
+            let mut item = panel_menu_item(widget, &label, true);
+            item.icon = "dots".into();
+            bindings.push((
+                item.id.clone(),
+                target,
+                HostCommand::OpenMenu { menu: HostMenu::Panel(instance.clone()), anchor, source: widget, secondary: false },
+            ));
+            items.push(item);
+        }
+        if items.is_empty() {
             self.clear_menu();
             return;
-        };
-        let id = egui::Id::unique((
-            "universal_panel_menu",
-            &runtime.environment().workspace,
-            &runtime.environment().document,
-            &runtime.environment().window,
-            &runtime.environment().viewport,
-        ));
-        // Distinct menus retain their own scroll position. A long overflow
-        // list must not start its shorter nested panel menu at the old offset.
-        let scroll_id = match &menu {
-            HostMenu::Panel(instance) => egui::Id::unique(("panel", instance)),
-            HostMenu::Tabs(section) => egui::Id::unique(("tabs", section)),
-        };
-        self.menu_items.clear();
-        ui_kit::panel_host_popup(ui, id, bounds, |ui| {
-            if !ui.is_visible() || ui.is_sizing_pass() {
-                return;
+        }
+        let entry = self.menu_entry.take();
+        let keyboard_entry = entry.is_some_and(|source| ui.memory(|memory| memory.focused().is_none_or(|focused| focused == source)));
+        if self.pending_escape {
+            ui_kit::Menu::dismiss(ui.ctx(), id);
+            let opener = self.menu_opener;
+            self.clear_menu();
+            self.pending_escape = false;
+            if let Some(opener) = opener {
+                ui.memory_mut(|memory| memory.request_focus(opener));
+                self.owned_focus = Some(opener);
             }
-            frame.menu_bounds = Some(logical_rect(bounds));
-            egui::ScrollArea::vertical().id_salt(("items", scroll_id)).min_scrolled_height(0.0).max_height(ui.available_height()).show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 0.0;
-                if let Some(reason) = &self.last_rejection {
-                    ui.colored_label(solidcraft_theme::Tokens::get().form_error, locale.text(rule_key(reason.rule)));
+            return;
+        }
+        let output = ui_kit::Menu::popup(ui.ctx(), id, ui_kit::MenuAnchor::Rect(egui_rect(anchor)), &items, entry.is_some());
+        frame.menu_bounds = output.rect.map(logical_rect);
+        self.menu_items.clear();
+        for (item, response) in &output.rows {
+            if let Some((_, target, _)) = bindings.iter().find(|(id, _, _)| *id == item.id) {
+                if response.enabled() {
+                    self.menu_items.push(response.id);
                 }
-                if let HostMenu::Panel(instance) = &menu {
-                    for (index, group) in groups.into_iter().enumerate() {
-                        if index > 0 {
-                            ui_kit::Menu::separator(ui);
+                if let HostControlTarget::Shared { instance, action: HostSharedAction::Collapse } = target {
+                    let expanded = layout.containing(instance).is_ok_and(|section| !section.collapsed);
+                    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(expanded));
+                }
+                record_control(frame, response, target.clone(), &item.label, item.enabled, output.rect.unwrap_or(response.rect));
+            }
+        }
+        if keyboard_entry
+            && let Some((item, response)) = output.rows.iter().find(|(item, response)| item.enabled && response.enabled())
+            && let Some(index) = items.iter().position(|entry| entry.id == item.id)
+        {
+            ui_kit::Menu::set_cursor(ui.ctx(), id, 0, Some(index));
+            response.request_focus();
+            ui.ctx().request_repaint();
+        }
+        if let Some(picked) = output.picked {
+            if allow_actions && let Some((_, _, mut command)) = bindings.into_iter().find(|(id, _, _)| *id == picked.id) {
+                if let Some((_, response)) = output.rows.iter().find(|(item, _)| item.id == picked.id) {
+                    match &mut command {
+                        HostCommand::WidgetLayout(_, source) | HostCommand::Content(_, _, source) => *source = response.id,
+                        HostCommand::OpenMenu { anchor, source, .. } => {
+                            *anchor = logical_rect(response.rect);
+                            *source = response.id;
                         }
-                        for (shared, action) in group {
-                            let target = HostControlTarget::Shared { instance: instance.clone(), action: shared.clone() };
-                            let label = shared_label(&shared, instance, runtime, metadata, locale);
-                            let collapsed = layout.containing(instance).is_ok_and(|section| section.collapsed);
-                            let response = menu_row(
-                                ui,
-                                control_id(runtime, owners, &target),
-                                &label,
-                                shared_menu_icon(&shared, collapsed, frame.layout.direction),
-                                true,
-                                &mut self.menu_reveal,
-                            );
-                            self.menu_items.push(response.id);
-                            if shared == HostSharedAction::Collapse {
-                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(!collapsed));
-                            }
-                            record_control(frame, &response, target, &label, true, bounds.intersect(ui.clip_rect()));
-                            if allow_actions && response.clicked() {
-                                commands.push(HostCommand::WidgetLayout(action, response.id));
-                            }
-                        }
-                    }
-                    if has_content {
-                        if has_shared {
-                            ui_kit::Menu::separator(ui);
-                        }
-                        let spec = layout.instance(instance).and_then(|panel| runtime.layout().registry().get(&panel.kind)).ok();
-                        for action in content_actions {
-                            let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
-                            let registered = spec.and_then(|spec| spec.header_actions.iter().find(|entry| entry.id == action.id));
-                            let response = menu_row(
-                                ui,
-                                control_id(runtime, owners, &target),
-                                &action.label,
-                                registered.map_or("settings", |entry| entry.icon.as_str()).into(),
-                                action.enabled,
-                                &mut self.menu_reveal,
-                            );
-                            if response.enabled() {
-                                self.menu_items.push(response.id);
-                            }
-                            if let Some(pressed) = action.pressed {
-                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
-                            }
-                            record_control(frame, &response, target, &action.label, action.enabled, bounds.intersect(ui.clip_rect()));
-                            if allow_actions && response.clicked() {
-                                if registered.is_some() {
-                                    commands.push(HostCommand::WidgetLayout(
-                                        apply_action(
-                                            frame.layout.revision,
-                                            vec![Mutation::HeaderAction { instance: instance.clone(), action: action.id.clone() }],
-                                        ),
-                                        response.id,
-                                    ));
-                                } else {
-                                    commands.push(HostCommand::Content(instance.clone(), action.id.clone(), response.id));
-                                }
-                            }
-                            if let Some(reason) = &action.disabled_reason {
-                                response.backing_on_disabled_hover_text(reason);
-                            }
-                        }
+                        _ => {}
                     }
                 }
-                for (index, instance) in tabs.into_iter().enumerate() {
-                    if has_shared || has_content || index > 0 {
-                        ui_kit::Menu::separator(ui);
-                    }
-                    menu_instance(
-                        ui,
-                        runtime,
-                        owners,
-                        metadata,
-                        frame,
-                        commands,
-                        &mut self.menu_items,
-                        &mut self.menu_reveal,
-                        instance,
-                        bounds,
-                        allow_actions,
-                        locale,
-                    );
+                let opens_context = matches!(command, HostCommand::OpenMenu { .. });
+                commands.push(command);
+                if !opens_context {
+                    self.clear_menu();
                 }
-            });
-            self.menu_reveal = None;
-        });
+            }
+        } else if output.close {
+            let opener = self.menu_opener;
+            self.clear_menu();
+            if let Some(opener) = opener.filter(|opener| frame.controls.iter().any(|control| control.id == *opener && control.enabled)) {
+                ui.memory_mut(|memory| memory.request_focus(opener));
+                self.owned_focus = Some(opener);
+            }
+        }
     }
 }
 
-fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separators: usize) -> Option<egui::Rect> {
-    let capacity = egui_rect(capacity);
-    if rows == 0 || !capacity.is_positive() || !capacity.is_finite() {
-        return None;
-    }
-    let t = solidcraft_theme::Tokens::get();
-    if capacity.width() <= t.space_6 * 2.0 || capacity.height() <= t.space_6 * 2.0 {
-        return None;
-    }
-    let width = ui_kit::LIST_W.min(capacity.width());
-    let content_height = rows as f32 * (t.control_height + t.space_2) + separators as f32 * (t.space_10 + 1.0);
-    let height = (content_height.min((t.control_height + t.space_2) * 12.0) + t.space_12).min(capacity.height());
-    let left = anchor.origin.x.min(capacity.right() - width).max(capacity.left());
-    let top = (anchor.origin.y + anchor.size.height).min(capacity.bottom() - height).max(capacity.top());
-    Some(egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)))
+fn panel_menu_id(runtime: &PanelRuntime, menu: &HostMenu) -> egui::Id {
+    let target = match menu {
+        HostMenu::Panel(instance) => egui::Id::unique(("panel", instance)),
+        HostMenu::Tabs(section) => egui::Id::unique(("tabs", section)),
+    };
+    egui::Id::unique((
+        "universal_panel_menu",
+        &runtime.environment().workspace,
+        &runtime.environment().document,
+        &runtime.environment().window,
+        &runtime.environment().viewport,
+        target,
+    ))
 }
 
-fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, icon: ui_kit::Icon<'_>, enabled: bool, reveal: &mut Option<egui::Id>) -> egui::Response {
-    let response = ui
-        .push_id(id.with("menu"), |ui| {
-            ui.add_enabled_ui(enabled, |ui| {
-                let registry_id = format!("panel:{id:?}");
-                let mut row = ui_kit::MenuItem::new(&registry_id, label, icon);
-                row.enabled = enabled;
-                row.show(ui)
-            })
-            .inner
-        })
-        .inner;
-    ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::MenuItem));
-    let requested = *reveal == Some(response.id);
-    if requested {
-        *reveal = None;
-    }
-    // Native Tab/AccessKit can focus during paint; our late keyboard requests
-    // need the explicit one-shot token because gained_focus is false next pass.
-    if response.enabled() && response.has_focus() && (requested || response.gained_focus()) {
-        response.scroll_to_me(None);
-    }
-    response.backing_on_hover_text(label)
+fn panel_menu_item(widget: egui::Id, label: &str, enabled: bool) -> ui_kit::Item {
+    let mut item = ui_kit::Item::action(&format!("panel:{widget:?}"), label, "").on_if(enabled);
+    item.widget_id = Some(widget);
+    item.tip = Some(label.to_owned());
+    item
 }
 
 /// Paints the handles of one card in two passes: `header_side` ones before the header controls, the rest after content.
@@ -3757,63 +3692,13 @@ fn record_control(frame: &mut HostFrame, response: &egui::Response, target: Host
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn menu_instance(
-    ui: &mut egui::Ui,
-    runtime: &PanelRuntime,
-    owners: &BTreeMap<InstanceId, ContentOwner>,
-    metadata: &BTreeMap<InstanceId, PanelPresentation>,
-    frame: &mut HostFrame,
-    commands: &mut Vec<HostCommand>,
-    items: &mut Vec<egui::Id>,
-    reveal: &mut Option<egui::Id>,
-    instance: &InstanceId,
-    clip: egui::Rect,
-    allow_actions: bool,
-    locale: solidcraft_ui_text::Locale,
-) {
-    let presentation = metadata.get(instance);
-    let label = presentation.map_or_else(|| locale.text("ui.panel_host.tab"), |value| value.title.as_str());
-    let icon = presentation.map_or("list", |value| value.icon.as_str());
-    let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
-    let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
-    let check = runtime.layout().prepare(action.clone());
-    let accessible = locale.format("ui.panel_host.focus_target", &[("title", label)]);
-    let response = menu_row(ui, control_id(runtime, owners, &target), &accessible, icon.into(), check.is_ok(), reveal);
-    if response.enabled() {
-        items.push(response.id);
-    }
-    record_control(frame, &response, target, &accessible, check.is_ok(), clip.intersect(ui.clip_rect()));
-    if allow_actions && response.clicked() {
-        commands.push(HostCommand::WidgetLayout(action, response.id));
-    }
-    if let Err(reason) = check {
-        response.backing_on_disabled_hover_text(locale.text(rule_key(reason.rule)));
-    }
-    let target = HostControlTarget::PanelMenu { instance: instance.clone() };
-    let actions_label = format!("{label} — {}", locale.text("ui.panel_host.menu"));
-    let response = menu_row(ui, control_id(runtime, owners, &target), &actions_label, "dots".into(), true, reveal);
-    if response.enabled() {
-        items.push(response.id);
-    }
-    record_control(frame, &response, target, &actions_label, true, clip.intersect(ui.clip_rect()));
-    if allow_actions && response.clicked() {
-        commands.push(HostCommand::OpenMenu {
-            menu: HostMenu::Panel(instance.clone()),
-            anchor: logical_rect(response.rect),
-            source: response.id,
-            secondary: false,
-        });
-    }
-}
-
-fn shared_menu_icon(action: &HostSharedAction, collapsed: bool, direction: Direction) -> ui_kit::Icon<'static> {
+fn shared_menu_icon(action: &HostSharedAction, collapsed: bool, direction: Direction) -> ui_kit::ItemIcon {
     match action {
         HostSharedAction::Focus => "fit",
         HostSharedAction::Close => "close",
         HostSharedAction::ResetHeight => "panel_reset_height",
-        HostSharedAction::Collapse if collapsed => return ui_kit::Icon::Paint(&ui_kit::panel_expand_menu_icon),
-        HostSharedAction::Collapse => return ui_kit::Icon::Paint(&ui_kit::panel_collapse_menu_icon),
+        HostSharedAction::Collapse if collapsed => return ui_kit::ItemIcon::paint(ui_kit::panel_expand_menu_icon),
+        HostSharedAction::Collapse => return ui_kit::ItemIcon::paint(ui_kit::panel_collapse_menu_icon),
         HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) if matches!(direction.edge(*zone), Ok(PhysicalEdge::Left)) => "panel_dock_left",
         HostSharedAction::Move(Zone::Left | Zone::Right) => "panel_dock_right",
         HostSharedAction::Move(Zone::Bottom) => "panel_dock_bottom",

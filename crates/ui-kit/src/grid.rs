@@ -514,7 +514,7 @@ impl<'a> Grid<'a> {
         {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) {
+        if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) && !crate::Menu::any_open(&ctx) {
             navigate(ui, &mut state, source, &shown, &columns, &mut out);
         }
         if !source.cell_ranges() {

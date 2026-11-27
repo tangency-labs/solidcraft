@@ -1079,30 +1079,39 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     file_drop: "t:file_drop",
 };
 
-const VIEW_MENU: [TabMenuRow<'static>; 4] = [
-    TabMenuRow::new("move_to_window", "Move to window", "").for_local_view().with_children(&[TabMenuRow::new("move_new", "New window", "")]),
-    TabMenuRow::new("vclose", "Close view", "Ctrl+W"),
-    TabMenuRow::new("vothers", "Close other views", "").needing_others().separated(),
-    TabMenuRow::new("vright", "Close views to the right", "").needing_others(),
-];
-const PLUS_MENU: [TabMenuRow<'static>; 4] = [
-    TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
-    TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
-    TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
-];
-const SWITCHER_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("as_tabs", "Show views as tabs", "")];
-
-const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
-    TabMenuRow::new("layout.single", "Single view", ""),
-    TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
-    TabMenuRow::new("layout.stacked", "Two stacked", ""),
-    TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
-    TabMenuRow::new("layout.grid", "Two by two", ""),
-    TabMenuRow::new("fill.angle", "A new angle of this view", ""),
-    TabMenuRow::new("fill.standard", "Standard angles", ""),
-    TabMenuRow::new("fill.ask", "A choice in each empty cell", ""),
-];
+static VIEW_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::submenu("move_to_window", "Move to window", "", vec![crate::Item::action("move_new", "New window", "")])
+            .with(serde_json::json!({"_tab_menu":{"needs_local_view":true}})),
+        crate::Item::action("vclose", "Close view", "").key("Ctrl+W"),
+        crate::Item::sep(),
+        crate::Item::action("vothers", "Close other views", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+        crate::Item::action("vright", "Close views to the right", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+    ]
+});
+static PLUS_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::heading("Open as a view"),
+        crate::Item::action("plus_render", "Render", "render"),
+        crate::Item::sep(),
+        crate::Item::action("plus_dup", "Duplicate this view", "duplicate"),
+        crate::Item::action("plus_reopen", "Reopen closed view", "reopen").key("Ctrl+Shift+T"),
+    ]
+});
+static SWITCHER_MENU: std::sync::LazyLock<Vec<crate::Item>> =
+    std::sync::LazyLock::new(|| vec![crate::Item::action("as_tabs", "Show views as tabs", "")]);
+static LAYOUT_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::action("layout.single", "Single view", ""),
+        crate::Item::action("layout.side_by_side", "Two side by side", ""),
+        crate::Item::action("layout.stacked", "Two stacked", ""),
+        crate::Item::action("layout.large_and_two", "One large and two small", ""),
+        crate::Item::action("layout.grid", "Two by two", ""),
+        crate::Item::action("fill.angle", "A new angle of this view", ""),
+        crate::Item::action("fill.standard", "Standard angles", ""),
+        crate::Item::action("fill.ask", "A choice in each empty cell", ""),
+    ]
+});
 
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
@@ -1152,7 +1161,12 @@ const VIEWS: [ViewTab<'static>; 3] = [
     },
 ];
 
-const TAB_MENU: [TabMenuRow<'static>; 2] = [TabMenuRow::new("close", "Close", ""), TabMenuRow::new("others", "Close Others", "").needing_others()];
+static TAB_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::action("close", "Close", ""),
+        crate::Item::action("others", "Close Others", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+    ]
+});
 
 /// Three document tabs, the first selected, in a strip 600 wide.
 struct TabsRig {
@@ -1171,7 +1185,7 @@ struct TabsRig {
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
-    plus_rows: &'static [TabMenuRow<'static>],
+    plus_rows: &'static [crate::Item],
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
@@ -1373,17 +1387,23 @@ fn the_tab_strip_returns_what_was_clicked_and_dragged() {
 }
 
 fn file_item(id: &str, enabled: bool) -> FileItem {
-    FileItem { id: id.to_string(), label: format!("Item {id}"), key: String::new(), icon: "open".to_string(), enabled }
+    FileItem { id: id.to_string(), label: format!("Item {id}"), icon: "open".into(), enabled, ..Default::default() }
 }
 
 /// The File menu drawn for a frame with `events`: what it returned, and where each text was.
-fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
-    let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (crate::MenuOutput, Vec<(String, Pos2)>) {
+    let rows = vec![file_item("new", true), file_item("save", false), crate::Item::sep()];
     file_menu_frame_of(ctx, &rows, 600.0, time, events)
 }
 
 /// The File menu with `rows` in an 800 by `height` window, drawn for a frame with `events`.
-fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
+fn file_menu_frame_of(
+    ctx: &egui::Context,
+    rows: &[FileRow],
+    height: f32,
+    time: f64,
+    events: Vec<egui::Event>,
+) -> (crate::MenuOutput, Vec<(String, Pos2)>) {
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, height))),
         time: Some(time),
@@ -1391,9 +1411,9 @@ fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: 
         focused: true,
         ..Default::default()
     };
-    let mut out = FileMenuOut::default();
+    let mut out = crate::MenuOutput::default();
     let output = crate::test_support::raw_frame(ctx, input, |ui| {
-        out = file_menu(ui.ctx(), rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+        out = crate::Menu::popup(ui.ctx(), egui::Id::unique("test_file_menu"), crate::MenuAnchor::Point(pos2(100.0, HEIGHT)), rows, false);
     });
     let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
@@ -1403,11 +1423,11 @@ fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: 
 #[test]
 fn a_file_menu_taller_than_the_window_scrolls_its_rows() {
     let ctx = crate::test_support::context();
-    let rows: Vec<FileRow> = (0..40).map(|i| FileRow::Item(file_item(&format!("r{i}"), true))).collect();
+    let rows: Vec<FileRow> = (0..40).map(|i| file_item(&format!("r{i}"), true)).collect();
     let height = 360.0;
     file_menu_frame_of(&ctx, &rows, height, 0.0, Vec::new());
-    file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
-    let menu = ctx.memory(|m| m.area_rect(egui::Id::unique("test_file_menu"))).expect("the menu is laid out");
+    let (out, _) = file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
+    let menu = out.rect.expect("the menu is laid out");
     assert!(menu.bottom() <= height, "the menu ends at {} inside a {height} high window", menu.bottom());
     let shown = |texts: &[(String, Pos2)], text: &str| texts.iter().any(|(t, p)| t == text && menu.contains(*p));
     let over = menu.center();
@@ -1434,11 +1454,11 @@ fn the_file_menu_returns_the_row_chosen() {
     let mut time = 0.0;
     let mut click = |at: Pos2| {
         let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        let mut last = FileMenuOut::default();
+        let mut last = crate::MenuOutput::default();
         for events in [vec![egui::Event::PointerMoved(at)], vec![egui::Event::PointerMoved(at), press(true)], vec![press(false)]] {
             time += 0.5;
             let (out, _) = file_menu_frame(&ctx, time, events);
-            if out.chosen.is_some() || out.close {
+            if out.picked.is_some() || out.close {
                 last = out;
             }
         }
@@ -1449,9 +1469,13 @@ fn the_file_menu_returns_the_row_chosen() {
     let (_, texts) = file_menu_frame(&ctx, 0.1, Vec::new());
     let at = |text: &str| texts.iter().find(|(t, _)| t == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text} is painted"));
     let (new, save) = (at("Item new"), at("Item save"));
-    assert_eq!(click(save), FileMenuOut::default(), "a disabled row chooses nothing and the menu stays");
-    assert_eq!(click(new), FileMenuOut { chosen: Some("new".into()), close: true });
-    assert_eq!(click(pos2(700.0, 500.0)), FileMenuOut { chosen: None, close: true }, "a click elsewhere closes it");
+    let disabled = click(save);
+    assert!(disabled.picked.is_none() && !disabled.close, "a disabled row chooses nothing and the menu stays");
+    let picked = click(new);
+    assert_eq!(picked.picked.as_ref().map(|item| item.id.as_str()), Some("new"));
+    assert!(picked.close);
+    let outside = click(pos2(700.0, 500.0));
+    assert!(outside.picked.is_none() && outside.close, "a click elsewhere closes it");
 }
 
 /// The switcher returns its click and publishes where it is.
@@ -1770,8 +1794,14 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     assert_eq!(rig.press(rig.at("t:menu:plus_reopen"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_reopen".into() }]);
 }
 
-const SHEET_PLUS_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("sheet", "Sheet", "")
-    .with_children(&[TabMenuRow::new("sheet.new", "New sheet", ""), TabMenuRow::new("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")])];
+static SHEET_PLUS_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![crate::Item::submenu(
+        "sheet",
+        "Sheet",
+        "",
+        vec![crate::Item::action("sheet.new", "New sheet", ""), crate::Item::action("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")],
+    )]
+});
 
 #[test]
 fn plus_sheet_submenu_hover_survives_the_gap_and_returns_the_child_action() {
@@ -1833,12 +1863,13 @@ fn plus_sheet_submenu_arrow_right_and_enter_choose_the_child_action() {
 /// The row builders set only what they say, and the glyphs the menus use exist.
 #[test]
 fn menu_row_builders_and_glyphs() {
-    let plain = TabMenuRow::new("a", "A", "Ctrl+A");
-    assert!(!plain.heading && !plain.separator_before && !plain.needs_others && plain.icon.is_empty() && plain.accent.is_none());
-    let head = TabMenuRow::heading("H");
-    assert!(head.heading && head.id == "H" && head.label == "H");
-    let row = plain.separated().needing_others().with_icon("close", None);
-    assert!(row.separator_before && row.needs_others && row.icon == "close");
+    let plain = crate::Item::action("a", "A", "").key("Ctrl+A");
+    assert!(!plain.is_heading() && !plain.is_sep() && plain.icon.is_empty() && plain.accent.is_none());
+    let head = crate::Item::heading("H");
+    assert!(head.is_heading() && head.label == "H");
+    let row = crate::Item::action("a", "A", "close").with(serde_json::json!({"_tab_menu":{"needs_others":true}}));
+    assert_eq!(row.params.as_ref().and_then(|params| params.pointer("/_tab_menu/needs_others")).and_then(serde_json::Value::as_bool), Some(true));
+    assert!(row.icon == "close");
     for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }

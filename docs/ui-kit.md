@@ -434,7 +434,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | navigation: `NavigationMetrics`, `navigation_surface`, `navigation_button`, `navigation_separator` | Shared live/editor navigation painter, button states, upward menu chevron and separator; approved board dimensions below | `dialog_body/border`, `form_ink/dim/primary`, `control_border`, `selected_bg`, `nav_hover/press` |
 | `ReorderPayload<T>`, `insertion_marker`, `drop_index` | Typed drag origin, insertion chrome and horizontal gap selection shared by the ribbon and navigation editor | `accent` |
 | `navigation_button_editable`, `navigation_edit_outline` | The live navigation button with drag interaction, selection outline and dashed hidden-slot chrome | Navigation control tokens, `border/accent` |
-| navigation_menu: `navigation_menu`, `NavigationMenuRow`, `navigation_context`, `navigation_tooltip` | Upward menus, checked rows, headings, separators and the delayed shortcut tooltip; context menus retain kit popup hosts and Container's shared elevation | `dialog_body/border/rule`, `form_ink/dim/primary`, `selected_bg`, `nav_hover/tip/tip_ink/tip_key_border` |
+| navigation menus: `Item`, `Menu`, `navigation_tooltip` | The same shared menu rows, state and popup hosts as other menus; the delayed shortcut tooltip remains a separate tooltip | `dialog_body/border/rule`, `form_ink/dim/primary`, `selected_bg`, `nav_hover/tip/tip_ink/tip_key_border` |
 | navigation_settings: `navigation_stage`, `navigation_tile`, `navigation_drag_ghost` | Custom preview stage, draggable slot tiles and drag feedback. Ordinary preferences reuse `settings_section`, `settings_form`, `row`, default `segmented`, `checkbox`, `button`, `divider` and text hints | `dialog_border`, `control_border`, `form_ink/dim`, `nav_field/hover/viewport` |
 | `settings_card` | Full-width settings detail group; uses Container chrome and preserves its width with empty or changing content | `dialog_footer`, `border`, `radius_md`, `space_12/10` |
 | `settings_plugin_card`, `checkbox_at` | Installed plugin card with 36 pt content, 12 pt padding, 36 pt tile, 13 pt semibold title, 11 pt version, 12 pt description and 2 pt text gap. The unframed 24 pt folder action and 16 pt checkbox are centred; actions wrap on narrow cards. | `control_fill`, `dialog_border`, `radius_lg`, `space_12/16/24` |
@@ -772,16 +772,51 @@ of the approved fills. It only styles tab pills; global primary actions still us
 ink on the card and panel, ink on soft, and pill text on fill in both themes.
 Only Mesh separates ink from fill in the light theme.
 
-Context menu adapters retain item IDs, enabled logic and command parameters. `Menu`
-owns popup elevation (10 pt corners, 1 pt border), headings, separators, adjacent
-submenus and bounded arrow navigation. Enter opens a submenu or chooses its row;
-Right opens, Left returns, and Esc dismisses the menu. Appearance includes document
-swatches and Remove override through `appearance.assign`; its original action still
-opens the full editor. Workspace retains its descriptive cards and scenario handles
-on the shared surface. Ribbon rows reuse `MenuItem::paint` while owning drag, focus
-and pin interactions. History context menus and ribbon overflow use kit popup chrome.
-Rename uses the shared caption, field policy and Cancel/OK actions with its stable
-editor ID. No additional translation keys or colour roles are needed.
+All application menus use one recursive `Item` definition and the `Menu` component
+in `crates/ui-kit/src/menu_popup.rs`. Callers provide data and an opening anchor;
+they dispatch the returned `picked` item. They do not paint menu rows, position
+flyouts, or maintain their own menu cursor or dismissal logic.
+
+```rust
+let items = vec![
+    Item::action("save", "Save", "save").key("Ctrl+S"),
+    Item::sep(),
+    Item::submenu("export", "Export", "export", vec![
+        Item::action("export.step", "STEP…", "export"),
+        Item::action("export.stl", "STL…", "mesh_export"),
+    ]),
+];
+if let Some(picked) = Menu::context_items(&response, &items) {
+    dispatch(picked);
+}
+```
+
+Use `context_items` for right-click, `button_items` for button-anchored menus,
+and `popup` for an already-open menu at a `MenuAnchor::Point` or `Rect`.
+Their output variants return hover/open state and row responses for domain
+features such as selection previews, drag payloads and panel control recording.
+`items` embeds the same renderer in a searchable chooser. Pass `just_opened`
+on the opening frame so Enter cannot also activate its first action. A real search field,
+rename editor or other form remains an editor, not a separate menu renderer.
+`preview` paints the same definition without taking keyboard or pointer actions.
+The native operating-system menu bar adapts the same `Item` model.
+
+Every level uses the viewport menu's density: the shared row height is
+`control_height + space_2`, with no extra vertical gap. Font, icons, checks,
+radio state, separators, danger tone and icon accents all come from the common
+row component and theme tokens. The component owns measured widths, screen-edge
+flipping, scrolling, hover delay, focus, keyboard navigation and dismissal.
+Enter chooses a row or opens its children; Right enters, Left returns, and
+Escape dismisses. Popup state is scoped to its viewport. Lazy submenu definitions
+can query `branch_open` to enumerate expensive content only when required.
+
+File, app-bar and ribbon overflow, navigation, History, drawing sheets, panel
+menus, workspace choices and text-field context menus all use this path. Domain
+builders may choose commands and enabled states, but there is no File-only,
+navigation-only or ribbon-only menu renderer. Text editing retains its clipboard,
+selection and focus rules; ribbon dragging and pinning retain their command
+semantics. Rename uses the shared caption, field policy and Cancel/OK actions
+with its stable editor ID.
 
 The menu gallery includes normal, hovered, open, disabled, checked/unchecked,
 swatch and danger rows, a submenu and rename. Radial geometry tests measure the
@@ -1050,7 +1085,7 @@ PBR passes no opacity and remains opaque. All Hex parsing and draft state stay i
 `mixed_slider` pairs the standard slider with the mixed-aware scalar editor.
 `editor_section` uses a 24 pt heading and 6 pt field gaps.
 `workspace_chip`, `text_button`, `section_heading`, `pending_section`,
-`searchable_icon_dropdown` and `Menu::text` retain
+`searchable_icon_dropdown` and data-driven menu triggers retain
 shared token paint and hit targets. All are exercised in the kit gallery.
 
 | Shared editor component | Behaviour |

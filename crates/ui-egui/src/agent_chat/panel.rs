@@ -2207,26 +2207,12 @@ fn took_line(ui: &mut egui::Ui, stamp: &times::Stamp) {
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
     solidcraft_ui_registry::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
-    let opened = ui
-        .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
-    let mut copy = false;
-    Container::new(ui.ctx(), Surface::Popup)
-        .menu(response)
-        .at_pointer_fixed()
-        .frame(ui_kit::Menu::frame())
-        .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
-        .show(|ui| {
-            ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
-                let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
-                let row = item.show(ui);
-                solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
-                if row.clicked() {
-                    copy = true;
-                    ui.close();
-                }
-            });
-        });
-    if copy {
+    if !ui_kit::Menu::context_active(response) {
+        return;
+    }
+    let mut item = ui_kit::Item::action("copy_message", tr("ui.agent_chat_copy_message"), "copy");
+    item.aliases.push(format!("agent_chat:copy_menu:{n}"));
+    if ui_kit::Menu::context_items(response, &[item]).is_some() {
         ui.ctx().copy_text(text.to_owned());
     }
 }
@@ -3075,28 +3061,20 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
 /// the clipboard's picture.
 #[cfg(not(target_arch = "wasm32"))]
 fn add_menu(chat: &mut AgentChat, ui: &mut egui::Ui) {
-    let (mut choose, mut paste) = (false, false);
-    let r = ui_kit::action_menu(ui, "+", |ui| {
-        let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:add_file", a.rect.center());
-        let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:paste_picture", b.rect.center());
-        if a.clicked() {
-            choose = true;
-            ui.close();
+    let mut choose = ui_kit::Item::action("add_file", tr("ui.agent_chat_add_file"), "open");
+    choose.aliases.push("agent_chat:add_file".into());
+    let mut paste = ui_kit::Item::action("paste_picture", tr("ui.agent_chat_paste_picture"), "paste");
+    paste.aliases.push("agent_chat:paste_picture".into());
+    let response = ui_kit::button(ui, "+", ui_kit::Button::Small);
+    solidcraft_ui_registry::publish_handle("agent_chat:add", response.rect.center());
+    let picked = ui_kit::Menu::button_items(&response, &[choose, paste]);
+    response.backing_on_hover_text(tr("ui.agent_chat_add"));
+    if let Some(item) = picked {
+        match item.id.as_str() {
+            "add_file" => chat.actions.push(PanelAction::ChooseAttachment),
+            "paste_picture" => chat.actions.push(PanelAction::PastePicture),
+            _ => {}
         }
-        if b.clicked() {
-            paste = true;
-            ui.close();
-        }
-    });
-    solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
-    r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
-    if choose {
-        chat.actions.push(PanelAction::ChooseAttachment);
-    }
-    if paste {
-        chat.actions.push(PanelAction::PastePicture);
     }
 }
 

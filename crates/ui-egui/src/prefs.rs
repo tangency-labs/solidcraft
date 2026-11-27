@@ -14084,16 +14084,25 @@ pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => "ui.ground_shadow_ellipse",
     };
     let mut mode = before;
+    let items: Vec<_> = ["off", "ellipse", "projected"]
+        .into_iter()
+        .map(|value| {
+            let mut item = ui_kit::Item::action(value, app.tr(label(value)), "");
+            item.checked = Some(mode == value);
+            item.radio = true;
+            item.aliases.push(format!("view:ground_shadow:{value}"));
+            item
+        })
+        .collect();
+    let was_open = egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("ground_shadow_mode"));
     let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
-        for value in ["off", "ellipse", "projected"] {
-            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
-            row.selected = mode == value;
-            let choice = row.show(ui);
-            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
-            if choice.clicked() {
-                mode = value;
-                ui.close();
-            }
+        if let Some(picked) = ui_kit::Menu::items(ui, ui.make_persistent_id("ground_shadow_choices"), &items, !was_open).picked {
+            mode = match picked.id.as_str() {
+                "off" => "off",
+                "projected" => "projected",
+                _ => "ellipse",
+            };
+            ui.close();
         }
     });
     crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);

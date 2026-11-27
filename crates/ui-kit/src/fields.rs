@@ -1927,6 +1927,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             });
         response = shown.inner.with_new_rect(shown.response.rect);
         if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || crate::Menu::response_is_open(&response)
             || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
         {
             response.request_focus();

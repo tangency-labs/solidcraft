@@ -32,6 +32,7 @@ fn select_other_feedback_is_local_when_the_browser_hover_expires() {
         dialog: false,
         include_hidden: h.app.preferences.select_other_hidden,
         held: Default::default(),
+        shown: false,
     });
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
     h.ctx
@@ -876,7 +877,8 @@ fn approximate_long_click_reaches_profiles_and_shows_all_eight_rows() {
         h.frames(4);
     }
     let rect = crate::scenario::rect_of("select_other").unwrap();
-    assert!(rect.height() > 8.0 * super::ROW_HEIGHT, "all eight rows plus header: {rect:?}");
+    let tokens = solidcraft_theme::Tokens::get();
+    assert!(rect.height() > 8.0 * (tokens.control_height + tokens.space_2), "all eight shared rows plus header: {rect:?}");
     for i in 0..8 {
         assert!(rect.contains(crate::scenario::handle_at(&format!("select_other:{i}")).unwrap()), "row {i}: {rect:?}");
     }
