@@ -84,6 +84,8 @@ macro_rules! general_preferences {
             show_home_on_startup: bool = true, PAGE_GENERAL;
             /// Slicers that can load a file into the window that is already open do so (default on).
             slicer_single_instance: bool = true, 0;
+            /// File › Open shows SVG placement options first. Off opens directly with the file's coordinates.
+            svg_open_options: bool = true, PAGE_GENERAL => check_id_help("settings.svg_open_options", "settings.svg_open_options_tip");
         }
     };
 }

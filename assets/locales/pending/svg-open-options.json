@@ -1,0 +1,38 @@
+{
+  "en": {
+    "settings.svg_open_options": "Show placement options when opening an SVG",
+    "settings.svg_open_options_tip": "Turn this off to open SVG files directly using their original coordinates and size."
+  },
+  "ar": {
+    "settings.svg_open_options": "إظهار خيارات الموضع عند فتح ملف SVG",
+    "settings.svg_open_options_tip": "عطّل هذا الخيار لفتح ملفات SVG مباشرةً بإحداثياتها وحجمها الأصليين."
+  },
+  "de": {
+    "settings.svg_open_options": "Platzierungsoptionen beim Öffnen einer SVG-Datei anzeigen",
+    "settings.svg_open_options_tip": "Deaktiviere diese Option, um SVG-Dateien direkt mit ihren ursprünglichen Koordinaten und ihrer ursprünglichen Größe zu öffnen."
+  },
+  "he": {
+    "settings.svg_open_options": "הצגת אפשרויות מיקום בעת פתיחת קובץ SVG",
+    "settings.svg_open_options_tip": "כיבוי האפשרות יפתח קובצי SVG ישירות בקואורדינטות ובגודל המקוריים שלהם."
+  },
+  "ja": {
+    "settings.svg_open_options": "SVG を開くときに配置オプションを表示する",
+    "settings.svg_open_options_tip": "オフにすると、SVG ファイルを元の座標とサイズのまま直接開きます。"
+  },
+  "ko": {
+    "settings.svg_open_options": "SVG를 열 때 배치 옵션 표시",
+    "settings.svg_open_options_tip": "이 옵션을 끄면 SVG 파일을 원래 좌표와 크기 그대로 바로 엽니다."
+  },
+  "pt-BR": {
+    "settings.svg_open_options": "Mostrar opções de posicionamento ao abrir um SVG",
+    "settings.svg_open_options_tip": "Desative esta opção para abrir arquivos SVG diretamente com as coordenadas e o tamanho originais."
+  },
+  "vi": {
+    "settings.svg_open_options": "Hiện tùy chọn bố trí khi mở SVG",
+    "settings.svg_open_options_tip": "Tắt tùy chọn này để mở trực tiếp tệp SVG với tọa độ và kích thước ban đầu."
+  },
+  "zh": {
+    "settings.svg_open_options": "打开 SVG 时显示放置选项",
+    "settings.svg_open_options_tip": "关闭此选项后，将直接按原始坐标和大小打开 SVG 文件。"
+  }
+}
