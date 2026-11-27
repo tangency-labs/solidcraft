@@ -848,7 +848,7 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
 /// `tool`, a prism run on past the surface of `face` of `target`, cut at that surface carried on
 /// past the face's edges (a plane without end, a cylinder, cone, sphere or torus along its
 /// surface), keeping the pieces that start at `start`: no on-face test, as the whole profile ends
-/// on the extended surface (#827). `None` when a kept piece still has its end cap at `far`: the
+/// on the extended surface. `None` when a kept piece still has its end cap at `far`: the
 /// surface does not cross the prism's path over some of the profile (a cone's apex side, a plane
 /// running along the path), so that part has no end.
 ///

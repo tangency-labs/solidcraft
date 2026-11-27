@@ -526,7 +526,7 @@ pub struct Extent {
     pub from_ref: Option<ObjectRef>,
     /// To Object on a curved face: end every part of the profile on the face's surface carried
     /// on past its edges (a cylinder, cone or torus continued along its surface, a plane
-    /// without end) instead of refusing a profile that reaches past the face (#827). Off in a
+    /// without end) instead of refusing a profile that reaches past the face. Off in a
     /// design saved before it: they keep the refusal.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub extend_to_face: bool,

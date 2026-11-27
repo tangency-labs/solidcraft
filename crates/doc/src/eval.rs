@@ -17691,7 +17691,7 @@ fn trim_to_face(
 }
 
 /// Tools run to the To face's surface carried on past the face's edges (the Extend the To face
-/// option, #827): each tool's prism split by that surface (the kernel's
+/// option): each tool's prism split by that surface (the kernel's
 /// [`kernel::face_split_extended`], no on-face test), the pieces that start at `start` kept. Refused
 /// where the surface does not cross the tool's path over some of the profile (a cone's apex side,
 /// a plane that runs along the extrusion), which leaves that part with no end.

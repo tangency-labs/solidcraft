@@ -1287,13 +1287,13 @@ fn volume_of(s: &mut Session, name: &str) -> f64 {
     body(s, name)["volume_mm3"].as_f64().unwrap_or(f64::NAN)
 }
 
-/// #827: the area under the bar's underside z = 30 - sqrt(100 - y^2) over x in [-30, 30] (past the
+/// the area under the bar's underside z = 30 - sqrt(100 - y^2) over x in [-30, 30] (past the
 /// bar's ends at x = +-20: the cylinder is carried on along its axis) and y in [-4, 4]: 60 times
 /// the integral over y, which is 8 * 30 less F(4), F(a) = a sqrt(r^2 - a^2) + r^2 asin(a / r) (the
 /// integral of the circle's height over [-a, a]) for r = 10: 60 * (240 - (4 sqrt 84 + 100 asin 0.4)).
 const WIDE_POST: f64 = 9_731.262_590_016_273;
 
-/// #827: a profile past the bar's ends ends on the cylinder carried on along its axis, with the
+/// a profile past the bar's ends ends on the cylinder carried on along its axis, with the
 /// option and (as the To face is carried on where a profile overhangs it) without it.
 #[test]
 fn extend_the_to_face_ends_a_profile_wider_than_a_cylinder_on_its_surface() {
@@ -1305,7 +1305,7 @@ fn extend_the_to_face_ends_a_profile_wider_than_a_cylinder_on_its_surface() {
     }
 }
 
-/// #827: undo and redo of such an extrude, and a save and reload, keep the extended end.
+/// undo and redo of such an extrude, and a save and reload, keep the extended end.
 #[test]
 fn extend_the_to_face_survives_undo_redo_and_reload() {
     let (mut s, made) = bar_and_post([[-30.0, -4.0], [30.0, 4.0]], json!({"extend_to_face": true}));
@@ -1322,7 +1322,7 @@ fn extend_the_to_face_survives_undo_redo_and_reload() {
     assert!((v - WIDE_POST).abs() < 1e-4 * WIDE_POST, "reloaded: {v}");
 }
 
-/// #827: a design saved without the option (off) saves nothing new and keeps the refusal.
+/// a design saved without the option (off) saves nothing new and keeps the refusal.
 #[test]
 fn a_design_without_extend_the_to_face_saves_no_key() {
     let (s, made) = bar_and_post([[-4.0, -4.0], [4.0, 4.0]], json!({}));
@@ -1330,7 +1330,7 @@ fn a_design_without_extend_the_to_face_saves_no_key() {
     assert!(!s.doc.to_json().contains("extend_to_face"));
 }
 
-/// #827: a profile over a bore in the To face. The bar has a vertical bore of radius 3 through
+/// a profile over a bore in the To face. The bar has a vertical bore of radius 3 through
 /// its axis, so the face has a window under x, y in [-3, 3]; the profile x in [-5, 5], y in [-4, 4]
 /// spans it. With the option or without (a window in the face is already trimmed to the body), the
 /// post ends on the cylinder under it: 10 times the integral over y in [-4, 4] of
@@ -1355,7 +1355,7 @@ fn extend_the_to_face_ends_a_profile_over_a_bore_on_the_surface() {
     }
 }
 
-/// #827: a two-sided extrude with side one To the extended face and side two 5 mm the other way:
+/// a two-sided extrude with side one To the extended face and side two 5 mm the other way:
 /// the post plus 5 times the profile's area.
 #[test]
 fn extend_the_to_face_with_a_second_side_adds_side_two() {
@@ -1366,7 +1366,7 @@ fn extend_the_to_face_with_a_second_side_adds_side_two() {
     assert!((v - want).abs() < 1e-4 * want, "volume {v}, want {want}");
 }
 
-/// #827: a cone shell (inner face r = 4 + k |z| below z 0, ending at r 14; k = 10 / 17.32) under
+/// a cone shell (inner face r = 4 + k |z| below z 0, ending at r 14; k = 10 / 17.32) under
 /// a profile x 10 to 15, y 0 to 1, which reaches past the face's end (r 14). Each point ends on the
 /// cone's surface carried on, |z| = (rho - 4) / k, rho = sqrt(x^2 + y^2): the volume is that
 /// integrated over the profile (a Simpson rule to 1e-9).
@@ -1393,7 +1393,7 @@ fn extend_the_to_face_ends_a_profile_past_a_cones_end_on_its_surface() {
     assert!((v - want).abs() < 1e-3 * want, "volume {v}, want {want}");
 }
 
-/// #827: the repro of the issue, a profile partly over the cone's hole (x 3 to 4, inside the
+/// the repro of the issue, a profile partly over the cone's hole (x 3 to 4, inside the
 /// face's rim), where the cone's surface carried on inward only meets the line of each point
 /// behind the sketch plane (toward the apex, above z 0) and never ahead of it: refused by name,
 /// with a second distance as well.
@@ -1421,7 +1421,7 @@ fn extend_the_to_face_refuses_where_the_surface_never_meets_the_profile() {
     }
 }
 
-/// #827: a profile 24 across a bar 20 wide never meets the cylinder at its ends (y beyond the
+/// a profile 24 across a bar 20 wide never meets the cylinder at its ends (y beyond the
 /// radius): refused by name, not run on past.
 #[test]
 fn extend_the_to_face_refuses_a_profile_wider_than_the_cylinder_across_it() {
@@ -1429,7 +1429,7 @@ fn extend_the_to_face_refuses_a_profile_wider_than_the_cylinder_across_it() {
     assert!(r.expect_err("refused").to_string().contains("does not meet the whole profile"));
 }
 
-/// #827: a torus (a half ring of tube radius 2, its centre circle 8 from the axis and 8 below the
+/// a torus (a half ring of tube radius 2, its centre circle 8 from the axis and 8 below the
 /// sketch plane z 0) under a profile x 7 to 9, y -1 to 1 that reaches past the half ring's end at
 /// y 0: the torus is carried on round. Its top is z = -8 + sqrt(4 - (rho - 8)^2), and the post
 /// from z 0 down to it has the volume of 8 - sqrt(4 - (rho - 8)^2) integrated over the profile.
@@ -1461,7 +1461,7 @@ fn extend_the_to_face_ends_a_profile_past_a_half_torus_on_the_whole_torus() {
     assert!((v - want).abs() < 1e-3 * want, "volume {v}, want {want}");
 }
 
-/// #827: a flat To face is already carried on past its edges; the option changes nothing for one.
+/// a flat To face is already carried on past its edges; the option changes nothing for one.
 /// A box 20 square (z 0 to 10) under a profile 40 square from z 0 up To its top: 40 * 40 * 10, with
 /// and without the option.
 #[test]
@@ -1478,7 +1478,7 @@ fn extend_the_to_face_on_a_plane_face_is_what_the_plane_gave() {
     }
 }
 
-/// #827: a slanted flat face (a wedge whose top rises z = x / 2 over x 0 to 20) under a profile
+/// a slanted flat face (a wedge whose top rises z = x / 2 over x 0 to 20) under a profile
 /// x 0 to 30, y -10 to 0 that overhangs it: the plane carried on, so the post is the integral of
 /// x / 2 over the profile, 10 * 30^2 / 4 = 2250.
 #[test]
@@ -1496,7 +1496,7 @@ fn extend_the_to_face_on_a_slanted_plane_ends_the_whole_profile_on_it() {
     assert!((v - 2250.0).abs() < 1e-4 * 2250.0, "volume {v}");
 }
 
-/// #905: an `extend_to_face` that is not a boolean is refused, not counted as off.
+/// an `extend_to_face` that is not a boolean is refused, not counted as off.
 #[test]
 fn extend_the_to_face_must_be_a_boolean() {
     for bad in [json!("true"), json!(1)] {

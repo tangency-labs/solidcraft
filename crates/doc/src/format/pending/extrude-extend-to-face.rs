@@ -1,4 +1,4 @@
-//! An extrude or cut with To Object can save `extend_to_face: true` in its `extent` (#827): the
+//! An extrude or cut with To Object can save `extend_to_face: true` in its `extent`: the
 //! To face's surface is carried on past its edges (a plane without end; a cylinder, cone, sphere
 //! or torus along its surface) and the whole profile ends on it, where otherwise a profile that
 //! reaches past the face is refused. An older design saves no `extend_to_face` and reads as off,
