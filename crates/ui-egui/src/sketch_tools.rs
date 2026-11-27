@@ -2009,7 +2009,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if periodic_start_snap(app, tool, proj, pos).is_some() {
                 // Only this deliberate click selects periodic interpolation. A
                 // right-click finish and all previously saved splines stay natural.
-                let params = json!({"points":tool.pts.iter().map(arg).collect::<Vec<_>>(),"periodic":true});
+                // A stored click whose snap the Undo button took away goes as the place clicked.
+                let points: Vec<_> = tool.pts.iter().map(|p| arg(&crate::tools::standing(app, p))).collect();
+                let params = json!({"points": points, "periodic": true});
                 if app.run(cmd, params).is_ok() {
                     tool.pts.clear();
                     crate::sketch_dims::reset(tool);

@@ -1619,6 +1619,21 @@ fn a_point_tool_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
             failed.push(format!("{tool} after {} click(s): drawn {drawn}, ready {ready}, {error:?}", before.len()));
         }
     }
+    // A fit point spline closed by a click on its start, which snapped to the removed line: the
+    // start is found by its place, and the closed spline is drawn.
+    let mut h = clicked_then_undone("sketch.spline.fit_point", &[[20, 0, 0]]);
+    for at in [[40, 15, 0], [30, 25, 0], [20, 0, 0]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let closed = sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { periodic: true, .. }));
+    let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+    let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+    if error.is_some() || !closed || !ready {
+        failed.push(format!("closed fit point spline: closed {closed}, ready {ready}, {error:?}"));
+    }
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
