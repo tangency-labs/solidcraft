@@ -608,7 +608,8 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
 /// Shortcut keys, S box favourites, toolbar and navigation bar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
     json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(),
-        "navigation_bar": app.preferences.navigation_bar, "preview_reselect_modifier": app.preferences.preview_reselect_modifier })
+        "navigation_bar": app.preferences.navigation_bar, "preview_reselect_modifier": app.preferences.preview_reselect_modifier,
+        "keyboard_profile": app.preferences.keyboard_profile })
 }
 
 /// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
@@ -630,8 +631,17 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
         .map(|value| serde_json::from_value(value.clone()))
         .transpose()
         .map_err(|error| format!("preview modifier: {error}"))?;
+    // The keys a file changes are changes from its keyboard profile (#15302); older files have none.
+    let keyboard_profile = match v.get("keyboard_profile") {
+        None => None,
+        Some(Value::String(id)) if id.len() <= 64 => Some(id.clone()),
+        Some(_) => return Err("keyboard profile: not a profile name".into()),
+    };
     if let Some(bar) = navigation_bar {
         app.preferences.navigation_bar = bar;
+    }
+    if let Some(id) = keyboard_profile {
+        app.preferences.keyboard_profile = id;
     }
     if let Some(binding) = preview_modifier {
         app.preferences.preview_reselect_modifier = binding;
