@@ -348,8 +348,8 @@ impl Brep {
 
     /// The edges nearest to `edges` (each within `tolerance`), one tangent chain, rounded in one
     /// blend with the radius law of `degree`, `knots` and `radii` along the whole chain, 0 at its
-    /// end nearest `start`: each edge takes the part of the law its share of the chain's length
-    /// gives. Edges that are not one open chain are [`Error::Unported`], naming why.
+    /// end nearest `start`: each edge takes the part of the law its interval in the joined-curve parameterization
+    /// gives, scaled by endpoint-speed ratios so speed agrees at joints. Edges that are not one open chain are [`Error::Unported`], naming why.
     pub fn fillet_variable_chain(
         &self,
         edges: &[[f64; 3]],

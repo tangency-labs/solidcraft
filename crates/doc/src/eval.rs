@@ -1065,26 +1065,28 @@ fn law_by_law(
     let mut taken: Vec<usize> = Vec::new();
     for p in edges {
         if !tangent_chain {
-            picks.push((*p, false));
+            picks.push((*p, false, Vec::new(), Vec::new()));
             continue;
         }
         let chain = kernel::tangent_chain_edges(&input.body, &[*p])?;
-        if chain.iter().any(|e| taken.contains(e)) {
-            continue;
-        }
         let along = chain.len() > 1 && !kernel::tangent_chain_closes(&input.body, *p)?;
-        if along {
-            taken.extend(chain);
-        }
-        picks.push((*p, along));
+        let picked = kernel::pick_edges(&input.body, &[kernel::EdgePick::Point(*p)])?;
+        picks.push((*p, along, chain, picked));
     }
     let mut b = input;
     let mut from = None;
-    for (p, along) in picks {
+    for (p, along, chain, picked) in picks {
+        if picked.iter().any(|e| taken.contains(e)) {
+            continue;
+        }
         let chained =
             if along { Some(kernel::fillet_variable_spline_chain(&b.body, &kernel::tangent_chain(&b.body, &[p])?, start, law)) } else { None };
         let made = match chained {
-            Some(Ok(made)) => made,
+            Some(Ok(made)) => {
+                taken.extend(chain);
+                made
+            }
+            Some(Err(e @ kernel::KernelError::Internal(_))) => return Err(e.into()),
             Some(Err(e)) => {
                 let made = kernel::fillet_variable_spline(&b.body, p, start, law)?;
                 append_warning(
@@ -1098,6 +1100,7 @@ fn law_by_law(
             }
             None => kernel::fillet_variable_spline(&b.body, p, start, law)?,
         };
+        taken.extend(picked);
         let next = Traced::step(made, &[&b]);
         from = Some(std::mem::replace(&mut b, next));
     }
@@ -10354,11 +10357,15 @@ fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> kernel::Result<Vec<Vec<Vec
 /// blend those edges: a separate feature or tangent propagation may fail where they meet. When
 /// the check cannot run (`beyond` is the kernel's error, or the result's points cannot be
 /// classified) the note says so with the kernel's reason; the blend itself stands.
-fn left_sharp_note(blended: &Body, beyond: &kernel::Result<Vec<Vec<Vec3>>>, picked: usize, kind: &FeatureKind) -> Option<String> {
+fn left_sharp_note(blended: &Body, beyond: &kernel::Result<Vec<Vec<Vec3>>>, picked: usize, kind: &FeatureKind, closed_chain: bool) -> Option<String> {
     let (feature, why) = match kind {
         FeatureKind::Chamfer { .. } => ("chamfer", "tangent_chain: false chamfers only the picked edges"),
         FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, tangent_chain: true, .. } => {
-            ("fillet", "a variable or spline round takes its picked edge alone where the tangent chain closes on itself")
+            if closed_chain {
+                ("fillet", "a variable or spline round takes its picked edge alone where the tangent chain closes on itself")
+            } else {
+                ("fillet", "the round takes the picked edges alone")
+            }
         }
         _ => ("fillet", "tangent_chain: false rounds only the picked edges"),
     };
@@ -19166,6 +19173,15 @@ fn eval_feature_kind(
                 let ti = *ti;
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let picked = edges.len();
+                let closed_chain = matches!(
+                    &f.kind,
+                    FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, tangent_chain: true, .. }
+                ) && edges
+                    .iter()
+                    .map(|p| kernel::tangent_chain_closes(&mb.body, *p))
+                    .collect::<kernel::Result<Vec<_>>>()?
+                    .iter()
+                    .all(|closed| *closed);
                 let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, edges) };
                 let edges = if chain { kernel::tangent_chain(&mb.body, edges)? } else { edges.clone() };
                 let mut note = None;
@@ -19179,7 +19195,7 @@ fn eval_feature_kind(
                 if let Some(n) = note {
                     group_notes.push(n);
                 }
-                if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind) {
+                if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind, closed_chain) {
                     group_notes.push(n);
                 }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
@@ -21417,10 +21433,10 @@ mod chain_tests {
         let mesh = kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap();
         let beyond = chain_beyond_picks(&mesh, &[Vec3::new(0.5, 0.0, 0.0)]);
         let Err(e) = &beyond else { panic!("a mesh body has no tangent chain: {beyond:?}") };
-        let note = left_sharp_note(&mesh, &beyond, 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)).expect("a note");
+        let note = left_sharp_note(&mesh, &beyond, 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false), false).expect("a note");
         assert_eq!(note, format!("could not check whether the picked edge runs on smoothly into edges this fillet left sharp ({e})"));
         // A check that ran and found nothing beyond the picks still says nothing.
-        assert_eq!(left_sharp_note(&mesh, &Ok(Vec::new()), 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)), None);
+        assert_eq!(left_sharp_note(&mesh, &Ok(Vec::new()), 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false), false), None);
     }
 
     fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {

@@ -153,6 +153,12 @@ impl FilletLaw {
             lengths.push(share);
         }
         let total: f64 = lengths.iter().sum();
+        if !(total.is_finite() && total > 0.0) {
+            return Err(SolidError::invalid_input(
+                OP_CHAIN,
+                "chain parameter total is not finite and positive",
+            ));
+        }
         let mut laws: Vec<Option<Self>> = vec![None; edges.len()];
         let mut run = 0.0;
         for (n, (&(i, reversed), &length)) in path.iter().zip(&lengths).enumerate() {
@@ -165,17 +171,29 @@ impl FilletLaw {
                 run / total
             };
             let mut law = Self::of_radii(degree, knots, radii, reversed)?;
-            law.edge_map = if reversed {
-                Extent1d::from_min_max(1.0 - to, 1.0 - from)
-            } else {
-                Extent1d::from_min_max(from, to)
-            };
+            law.edge_map = chain_law_map(from, to, reversed)?;
             if let Some(slot) = laws.get_mut(i) {
                 *slot = Some(law);
             }
         }
         Ok(laws.into_iter().collect())
     }
+}
+
+/// Normalization and mirroring must both preserve a positive parameter width.
+fn chain_law_map(from: f64, to: f64, reversed: bool) -> Result<Extent1d> {
+    let (lo, hi) = if reversed {
+        (1.0 - to, 1.0 - from)
+    } else {
+        (from, to)
+    };
+    if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+        return Err(SolidError::invalid_input(
+            OP_CHAIN,
+            "tangent chain has an unrepresentable radius-law parameter interval",
+        ));
+    }
+    Ok(Extent1d::from_min_max(lo, hi))
 }
 
 /// The edges of `edges` (of `b`) as one open chain from its end nearest `start`: each edge's
@@ -240,6 +258,29 @@ fn chain_path(b: &Brep, edges: &[EdgeId], start: Vec3) -> Result<Option<Vec<(usi
 mod tests {
     use super::*;
     use crate::geom::extent1d::Extent1d;
+
+    #[test]
+    fn chain_radius_maps_reject_collapsed_normalization() {
+        // 56 shares 1, 1/2, ... are individually positive, but their running sum
+        // rounds to the total before the last two shares in binary64.
+        let shares: Vec<f64> = (0..56).map(|i| 2.0_f64.powi(-i)).collect();
+        let total: f64 = shares.iter().sum();
+        let mut run = 0.0;
+        let mut refused = 0;
+        for share in shares {
+            let from = run / total;
+            run += share;
+            if chain_law_map(from, run / total, false).is_err() {
+                refused += 1;
+            }
+        }
+        assert!(refused > 0);
+        assert!(chain_law_map(0.0, f64::EPSILON / 4.0, true).is_err());
+        for reversed in [false, true] {
+            let map = chain_law_map(0.25, 0.75, reversed).unwrap();
+            assert_eq!(map.length(), 0.5);
+        }
+    }
 
     /// A straight law's radius runs from its first radius to its last, reversed from the
     /// last; a bent one has its corner at the inner knot, mirrored when reversed.

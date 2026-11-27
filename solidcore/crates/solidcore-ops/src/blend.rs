@@ -3732,7 +3732,8 @@ pub fn fillet_variable_from_with(
 /// The edges of `body` at native edge-list indices `edges`, one tangent chain, rounded in one
 /// pass with one radius law along the whole chain: the law of [`fillet_variable`] running from
 /// the chain's end nearest `start` (0) to its other end (1), each edge taking the part of it
-/// its share of the chain's length gives (the kernel's `FilletLaw::chain_of_radii`), so the
+/// its interval in the joined-curve parameterization gives, scaled by endpoint-speed ratios
+/// so speed agrees at joints (the kernel's `FilletLaw::chain_of_radii`), so the
 /// radius agrees where two edges meet and the rounds run on into each other as a constant
 /// round's do. One edge is [`fillet_variable_from`]'s round. Like it, a law is not first
 /// checked against its band's room.

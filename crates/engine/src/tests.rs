@@ -8582,16 +8582,14 @@ fn variable_fillet_runs_its_radius_along_a_rounded_corner_chain() {
         let w = out["feature"].as_u64().and_then(|id| s.model.result(id)).and_then(|r| r.warning.clone()).unwrap_or_default();
         Some((before - volume(&mut s), w))
     };
-    let Some((alone, _)) = round(false) else {
-        // the picked line alone does not build here: nothing for the chain to fall back to
-        return;
-    };
+    let (alone, _) = round(false).expect("the fixed picked-edge control must build");
     let (chain, warning) = round(true).expect("the chain round fails where the picked edge alone builds");
     // the cut of an R round along a length L is (1 - pi/4) r^2 L
     let cut = |r: f64, l: f64| (1.0 - std::f64::consts::FRAC_PI_4) * r * r * l;
     assert!(alone > cut(1.0, 90.0) && alone < cut(2.0, 90.0), "{alone}");
     if warning.contains("could not run along the tangent chain") {
         assert!(rel(chain, alone) < 1e-9, "{chain} vs {alone}: {warning}");
+        assert!(!warning.contains("chain closes on itself"), "{warning}");
     } else {
         // the chain is 90 + 5 pi + 50 long
         let along = 90.0 + 5.0 * std::f64::consts::PI + 50.0;
