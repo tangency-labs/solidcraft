@@ -38,13 +38,17 @@ fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
 }
 
-/// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
-/// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
-/// what they refuse, so a design opened from it evaluates again.
-pub(super) const KERNEL: &str = "solidcore";
-
 pub(super) fn identity() -> Value {
-    json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
+    identity_for_kernel(solidcraft_kernel::active_backend())
+}
+
+/// Keep the normal import identity unchanged and separate caches from other kernels.
+pub(super) fn identity_for_kernel(kernel: &str) -> Value {
+    if kernel == "solidcore" {
+        json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
+    } else {
+        json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build(), kernel])
+    }
 }
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
@@ -591,7 +595,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
-            kernel: KERNEL,
+            kernel: solidcraft_kernel::active_backend(),
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -641,7 +645,7 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
-        && is("kernel", KERNEL)
+        && is("kernel", solidcraft_kernel::active_backend())
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
