@@ -2273,6 +2273,18 @@ fn a_components_further_placements_are_instances_that_list_its_contents_once() {
     assert!(h.app.tree.reveal.is_none(), "the found body's row was drawn and scrolled to");
     assert_eq!(body_rows(), 2, "the first placement's and the found one's: {:?}", drawn_rows());
 
+    // Find in Timeline on that body, with another design shown and this one back before its row
+    // is drawn: forgetting the last find keeps the placement the request is for listing its
+    // contents, so the Features row it asks for is drawn.
+    let state = h.app.session.world_state().unwrap();
+    let face = solidcraft_engine::doc::naming::face_names(state.body(&body).unwrap()).first().cloned().expect("a named face");
+    let feature: u64 = face.trim_start_matches('F').split(':').next().and_then(|id| id.parse().ok()).expect("the face's feature");
+    crate::browser::reveal_feature(&mut h.app, feature, &body);
+    crate::browser::forget_found(&mut h.app);
+    assert_eq!(h.app.tree.shown_instance.as_deref(), Some(&last[..]), "the request's placement still lists its contents");
+    h.frames(3);
+    assert!(h.app.tree.reveal_feature.is_none(), "the feature's row was drawn and scrolled to");
+
     // The old listing: one body row per placement, the badge kept.
     assert_eq!(h.call("ui.prefs", json!({"browser_instances_list_contents": true}))["ok"], true);
     h.settle();
@@ -2280,6 +2292,37 @@ fn a_components_further_placements_are_instances_that_list_its_contents_once() {
     assert_eq!(h.call("ui.prefs", json!({"browser_instances_list_contents": false}))["ok"], true);
     h.settle();
     assert_eq!(body_rows(), 2, "the placement the find reached into still lists its body");
+
+    // Render lists every placement's bodies, each taking its own look.
+    h.app.tree.shown_instance = None;
+    crate::render_workspace::enter(&mut h.app, true).expect("the Render workspace");
+    // Tall enough for the Render folders and every placement's rows.
+    h.call("ui.resize", json!({"width": 1400, "height": 1400}));
+    h.settle();
+    assert_eq!(body_rows(), 3, "a body row per placement in Render: {:?}", drawn_rows());
+}
+
+/// #21458: every placement of a linked component is a copy of the other file and none is its
+/// original, so a further placement keeps its link badge alone and lists its contents.
+#[test]
+fn a_linked_components_further_placements_carry_no_instance_badge() {
+    let mut h = Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    h.app.run("occurrence.copy", json!({"component": component, "translate": [0, 40, 0]})).unwrap();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    assert!(h.app.session.doc.links.contains_key(&component), "the component is linked");
+    let placements = drawn_occurrences();
+    assert_eq!(placements.len(), 2, "{placements:?}");
+    let cache = h.app.tree.cache.as_ref().expect("the Browser's rows");
+    for (path, name, ..) in &placements {
+        assert_eq!(cache.occurrences.get(path).expect("a cached placement row").instance_of, None, "{name} is a linked copy, no instance");
+    }
 }
 
 /// Frames until the link badges' answer is back.

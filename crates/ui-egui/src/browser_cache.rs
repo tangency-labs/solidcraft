@@ -203,8 +203,12 @@ impl Cache {
             Some(names?.join(" / "))
         };
         // A component whose first placement can't be named (none, or a broken path) has no
-        // placement to point to: its rows stay as they were.
-        let instance_of = if first || first_path.is_empty() { None } else { placement_name(first_path).map(|p| (definition.name.clone(), p)) };
+        // placement to point to: its rows stay as they were. Every placement of a linked
+        // component is a copy of the other file and none is its original, so those keep their
+        // link badge alone (#21458).
+        let linked = doc.links.contains_key(&component);
+        let instance_of =
+            if first || linked || first_path.is_empty() { None } else { placement_name(first_path).map(|p| (definition.name.clone(), p)) };
         let mut tooltip = format!("Component: {}\nPlacement: ", definition.name);
         tooltip.push_str(&placement_name(path)?);
         tooltip.push_str("\nGeometry edits apply to every instance of this component.");

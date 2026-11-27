@@ -246,7 +246,9 @@ fn find_occurrence_in_tree(app: &mut SolveApp, path: &[u64]) {
 pub(crate) fn forget_found(app: &mut SolveApp) {
     app.tree.found_rows.clear();
     app.tree.found = None;
-    app.tree.shown_instance = None;
+    // A Find in Timeline still to land in this design keeps its placement listing its Features,
+    // so the row it asks for is drawn and scrolled to.
+    app.tree.shown_instance = app.tree.reveal_feature.as_ref().map(|r| r.path.clone()).filter(|path| !path.is_empty());
 }
 
 /// The placement a body (by its world name) is in: its component, its name in that component and
@@ -2195,8 +2197,10 @@ fn occurrence_rows_inner(
     // A further placement of a component lists its own placements and joints but not the
     // component's contents, which its first placement lists (#21458), unless Preferences › Layout ›
     // Every placement lists its contents. A search lists what it finds under every placement, and
-    // the active placement and the one the last find reached into list theirs.
+    // the active placement and the one the last find reached into list theirs. Render lists every
+    // placement's bodies, a further one's too, as each takes its own look.
     let bare = placement.instance_of.is_some()
+        && !crate::render_workspace::active(app)
         && !app.preferences.browser_instances_list_contents
         && app.tree.search.hits().is_none()
         && app.session.active_occurrence_path.as_deref() != Some(path)
