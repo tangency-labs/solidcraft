@@ -1682,6 +1682,9 @@ fn intersect3(a: I3, b: I3) -> I3 {
     ]
 }
 
+/// Newton root and inverse Jacobian for `G(a, b) − mx0 − τ mu = 0`.
+type LineRoot = ([f64; 3], [[f64; 3]; 3]);
+
 /// Newton root and inverse Jacobian for `G(a, b) − mx0 − τ mu = 0`, warm-started from
 /// `guess` (falling back to the grid when Newton fails or jumps to a far branch).
 fn solve_line_root(
@@ -1689,7 +1692,7 @@ fn solve_line_root(
     mx0: Vec3,
     mu: Vec3,
     guess: &Cell<Option<[f64; 3]>>,
-) -> Result<Option<([f64; 3], [[f64; 3]; 3])>> {
+) -> Result<Option<LineRoot>> {
     let at = |y: [f64; 3]| -> Result<Linearised<3>> {
         let [a, b, tau] = y;
         Ok(net.at(a, b)?.map(|(p, su, sv)| {
@@ -2869,16 +2872,18 @@ mod tests {
             tau_mid.lo <= 0.0 && tau_mid.hi >= 0.0 && tau_mid.mag() < 1e-11,
             "tau_mid must tightly enclose 0: {tau_mid:?}"
         );
-        // Compare against plain box wrapping (without linear predictor): wrapping is O(h)
-        // (~r * half = 0.1), while linear-predictor residual is O(h^2) (~r * half^2 ≈ 0.005).
+        // Compare against plain box wrapping (without linear predictor): at `half = 0.05`,
+        // plain box wrapping either fails to certify altogether or produces a >=5x wider
+        // enclosure (O(h) wrapping vs O(h^2) linear-predictor residual).
         let guess_plain = Cell::new(None);
-        let tau_plain = line_meets(&n, (x0_over, u_over), (mid_x0, mid_u), &guess_plain)
-            .unwrap()
-            .expect("plain box Krawczyk certifies the piece");
-        assert!(
-            tau_piece.mag() * 5.0 < tau_plain.mag(),
-            "expected >=5x tighter tau bound: piece={tau_piece:?} vs plain={tau_plain:?}"
-        );
+        if let Some(tau_plain) =
+            line_meets(&n, (x0_over, u_over), (mid_x0, mid_u), &guess_plain).unwrap()
+        {
+            assert!(
+                tau_piece.mag() * 5.0 < tau_plain.mag(),
+                "expected >=5x tighter tau bound: piece={tau_piece:?} vs plain={tau_plain:?}"
+            );
+        }
     }
 
     /// `Net::push_bits` produces identical bits for equal nets and differs when geometry or

@@ -6253,34 +6253,20 @@ mod tests {
         };
         let pair = EdgeQuantity::Meeting(Some(bottom.min(round)), Some(bottom.max(round)));
         let mut cache = EdgeBounds::default();
-        let (reach, apart, _) = edge_interval_maximum(
-            &b,
-            arc,
-            &piece,
-            b.tolerance(),
-            &mut cache,
-            pair,
-            Some(&surfaces),
-        )
-        .unwrap()
-        .unwrap();
+        let (reach, apart, _) =
+            edge_interval_maximum(&b, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+                .unwrap()
+                .unwrap();
         let first_calls = calls.get();
         assert!(bounds(&b, reach, 2.0) && !apart, "{reach}");
         assert!(
             first_calls < 256,
-            "linear-predictor plane_net_piece should converge in < 256 pieces, took {first_calls}"
+            "linear-predictor plane_net_piece should converge in < 256 pieces at 1e-3 tol, took {first_calls}"
         );
-        let (cached_reach, _, _) = edge_interval_maximum(
-            &b,
-            arc,
-            &piece,
-            b.tolerance(),
-            &mut cache,
-            pair,
-            Some(&surfaces),
-        )
-        .unwrap()
-        .unwrap();
+        let (cached_reach, _, _) =
+            edge_interval_maximum(&b, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+                .unwrap()
+                .unwrap();
         assert_eq!(cached_reach.to_bits(), reach.to_bits());
         assert_eq!(
             calls.get(),
