@@ -2067,6 +2067,81 @@ fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
     assert_eq!(b.counts().unwrap()[0], 18);
 }
 
+/// tangency-labs/solidcraft#22796 (stress corpus S3514, S2598): the notched block of
+/// [`auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room`] with a 2 radius blind hole
+/// 10 deep at x = -26, y = 0 (2 of wall to the -X side), the top's outer loop rounded r 2.8. The
+/// round is past the notch's 2.4 side edges and into the hole at once; each alone builds. The
+/// hole is 20 from the notch, so it changes the mitred volume of that test only by the hole,
+/// less the part of it the -X round already takes off: in the round's section at x in
+/// [-28, -27.2] the round takes off z from 22.2 + sqrt(r^2 - (x + 27.2)^2) to 25, across the
+/// hole's chord 2 sqrt(4 - (x + 26)^2).
+#[test]
+fn a_round_past_a_short_notch_edge_and_into_a_hole_builds() {
+    all_fixes();
+    let r: f64 = 2.8;
+    let mitred =
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+    let taken = |x: f64| {
+        let c = 4.0 - (x + 26.0) * (x + 26.0);
+        let s = r * r - (x + 30.0 - r) * (x + 30.0 - r);
+        2.0 * c.max(0.0).sqrt() * (r - s.max(0.0).sqrt())
+    };
+    // composite Simpson's rule, the integrand smooth inside (-28, -27.2)
+    let (a, z, n) = (-28.0, -30.0 + r, 20_000);
+    let h = (z - a) / f64::from(n);
+    let sum: f64 = (0..=n)
+        .map(|i| {
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * taken(a + h * f64::from(i))
+        })
+        .sum();
+    let want = mitred - 40.0 * PI + sum * h / 3.0;
+    for turn in [Turn::Mitre, Turn::Auto] {
+        let b = built(|k| {
+            let block = create_box(k, Vec3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0)?;
+            let hole = create_cylinder(k, Vec3::new(-26.0, 0.0, 15.0), 2.0, 10.0)?;
+            let block = boolean_difference(k, block, hole)?;
+            let notch = create_box(k, Vec3::new(-2.4, 17.6, 12.5), 4.8, 4.8, 12.5)?;
+            boolean_difference(k, block, notch)
+        });
+        let edges: Vec<usize> = [
+            [0.0, -20.0, 25.0],
+            [30.0, 0.0, 25.0],
+            [-30.0, 0.0, 25.0],
+            [-15.0, 20.0, 25.0],
+            [15.0, 20.0, 25.0],
+            [0.0, 17.6, 25.0],
+            [-2.4, 18.8, 25.0],
+            [2.4, 18.8, 25.0],
+        ]
+        .into_iter()
+        .map(|p| edge_at(&b, p))
+        .collect();
+        blend_with(
+            &b,
+            Blend::Round,
+            &edges,
+            &[r],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, want) < 1e-9, "{turn:?}: {v} against {want}");
+    }
+}
+
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
 /// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
 /// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
