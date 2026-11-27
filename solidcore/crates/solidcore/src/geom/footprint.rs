@@ -14,11 +14,13 @@ use crate::geom::vector2d::Vec2;
 /// Each step of `path` is split where it meets the outline (where it crosses a loop, and level
 /// with each loop corner). It runs inside where a piece's middle lies in a region farther than
 /// `margin` from every loop, or where a run of pieces in a region, from one crossing of a loop to
-/// the next inside the step, has its middle farther from every loop than a quarter of the run's
-/// length: a run across a profile thinner than `margin` is as long as the profile is wide and its
-/// middle half that from the outline, while a sliver between a round wall's samples and the
-/// outline's lies far closer to the outline than that. A single point runs inside where it lies in
-/// a region farther than `margin` from every loop.
+/// the next, has its middle farther from every loop than a quarter of the run's length: a run
+/// across a profile thinner than `margin` is as long as the profile is wide and its middle half
+/// that from the outline, while a sliver between a round wall's samples and the outline's lies far
+/// closer to the outline than that. A run goes on over the samples of `path` (and, where `path`
+/// closes back to its first point within `margin`, over that seam); one that starts where `path`
+/// starts or ends where it ends crosses nothing. A single point runs inside where it lies in a
+/// region farther than `margin` from every loop.
 #[must_use]
 pub fn path_runs_inside(path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool {
     let edges: Vec<(Vec2, Vec2)> = regions
@@ -37,8 +39,11 @@ pub fn path_runs_inside(path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margi
     if let [q] = points[..] {
         return held(q) && clear(q) > margin;
     }
-    points.windows(2).any(|w| {
-        let (p, q) = (w[0], w[1]);
+    // The pieces of `path` between where it meets the outline, in order, each with whether it
+    // lies in a region.
+    let mut pieces: Vec<(Vec2, Vec2, bool)> = Vec::new();
+    for w in points.windows(2) {
+        let &[p, q] = w else { continue };
         let r = q - p;
         let len2 = r.length_squared();
         let mut ts = vec![0.0, 1.0];
@@ -55,27 +60,70 @@ pub fn path_runs_inside(path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margi
         }
         ts.retain(|t| (0.0..=1.0).contains(t));
         ts.sort_by(f64::total_cmp);
-        let at = |t: f64| p + r * t;
-        let run_inside = |t0: f64, t1: f64| {
-            let m = at((t0 + t1) / 2.0);
-            t0 > 0.0 && held(m) && clear(m) > ((t1 - t0) * len2.sqrt() / 4.0).max(1e-9)
-        };
-        let mut run: Option<f64> = None;
         for t in ts.windows(2) {
-            let m = at((t[0] + t[1]) / 2.0);
-            if held(m) {
-                if clear(m) > margin {
-                    return true;
-                }
-                run.get_or_insert(t[0]);
-            } else if let Some(t0) = run.take() {
-                if run_inside(t0, t[0]) {
-                    return true;
-                }
+            let &[t0, t1] = t else { continue };
+            let (a, b) = (p + r * t0, p + r * t1);
+            let m = (a + b) * 0.5;
+            let inside = held(m);
+            if inside && clear(m) > margin {
+                return true;
             }
+            pieces.push((a, b, inside));
         }
-        false
-    })
+    }
+    let closed = match (points.first(), points.last()) {
+        (Some(&first), Some(&last)) => first.distance(last) <= margin,
+        _ => false,
+    };
+    // A closed path is read from a piece outside every region, so no run is cut at its seam; an
+    // open one from its start, so a run that starts there has no crossing before it.
+    let from = if closed {
+        match pieces.iter().position(|&(_, _, inside)| !inside) {
+            Some(i) => i,
+            None => return false,
+        }
+    } else {
+        0
+    };
+    let mut run: Vec<(Vec2, Vec2)> = Vec::new();
+    let mut crossed = closed;
+    for &(a, b, inside) in pieces.iter().cycle().skip(from).take(pieces.len()) {
+        if inside {
+            run.push((a, b));
+        } else {
+            if crossed && run_crosses(&run, held, clear) {
+                return true;
+            }
+            run.clear();
+            crossed = true;
+        }
+    }
+    // A closed path's last run ends at the piece it was read from, outside every region.
+    closed && run_crosses(&run, held, clear)
+}
+
+/// Whether `run`, the pieces of a path in a region between two crossings of its outline, has its
+/// middle in the region farther from the outline than a quarter of the run's length.
+fn run_crosses(
+    run: &[(Vec2, Vec2)],
+    held: impl Fn(Vec2) -> bool,
+    clear: impl Fn(Vec2) -> f64,
+) -> bool {
+    let length: f64 = run.iter().map(|(a, b)| a.distance(*b)).sum();
+    let mut left = length / 2.0;
+    for &(a, b) in run {
+        let step = a.distance(b);
+        if left <= step {
+            let m = if step > 0.0 {
+                a + (b - a) * (left / step)
+            } else {
+                a
+            };
+            return held(m) && clear(m) > (length / 4.0).max(1e-9);
+        }
+        left -= step;
+    }
+    false
 }
 
 /// Each corner of `corners` with the next one, the last with the first.
