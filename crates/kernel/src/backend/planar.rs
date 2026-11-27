@@ -1,9 +1,9 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc};
+use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
-use solidcraft_kernel_api::planar::{Planar, PlanarRefused};
+use solidcraft_kernel_api::planar::{Planar, PlanarRefused, StrokeRun};
 
 use super::Solidcore;
 
@@ -74,6 +74,13 @@ impl Planar for Solidcore {
 
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
         paper_gaps::straight_length(a, b)
+    }
+
+    fn stroke_runs(&self, points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f64) -> Vec<StrokeRun> {
+        stroke_runs::runs(points, closed, min_step, smooth_turn_cos)
+            .into_iter()
+            .map(|run| StrokeRun { points: run.points, closed: run.closed })
+            .collect()
     }
 
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool {
