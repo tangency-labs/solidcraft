@@ -4645,6 +4645,37 @@ fn face_extrude_follows_edits() {
 }
 
 /// Appearances on faces, bodies and components: face > body > component > material.
+/// #22984: the appearance commands take a face by the name `model.faces` lists, as Shell does.
+#[test]
+fn appearance_commands_take_a_face_by_name() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"body_name": "Plate", "length": 40, "width": 30, "height": 6})).unwrap();
+    let faces = s.execute("model.faces", &json!({"body": "Plate"})).unwrap();
+    let top = faces["faces"].as_array().unwrap().iter().find(|f| f["point"][2] == 6.0).unwrap().clone();
+    let name = top["name"].as_str().unwrap();
+    // With and without `body`, and as `{point}` is still read.
+    for (params, color) in [(json!({"body": "Plate", "faces": [name]}), "#ff0000"), (json!({"faces": [name]}), "#00ff00")] {
+        let mut params = params;
+        params["color"] = json!(color);
+        let reply = s.execute("appearance.assign", &params).unwrap();
+        assert_eq!(reply["faces"][0]["body"], "Plate", "{reply}");
+        for face in [json!(name), top["index"].clone()] {
+            let chain = s.execute("appearance.chain", &json!({"target": {"body": "Plate", "face": face}})).unwrap();
+            assert_eq!(chain["active"], "face", "{chain}");
+            assert_eq!(chain["steps"][0]["look"]["color"], color, "{chain}");
+        }
+        let picked = s.execute("appearance.pick_up", &json!({"target": {"body": "Plate", "face": name}})).unwrap();
+        assert_eq!(picked["look"]["color"], color, "{picked}");
+    }
+    for (command, params) in [
+        ("appearance.assign", json!({"faces": ["F99:top"], "color": "#ff0000"})),
+        ("appearance.chain", json!({"target": {"body": "Plate", "face": "F99:top"}})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("no face is named `F99:top`"), "{error}");
+    }
+}
+
 #[test]
 fn appearances_by_face_body_and_component() {
     let mut s = Session::default();
