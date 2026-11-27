@@ -8452,7 +8452,7 @@ fn separate_curves_and_point_pairs_keep_none_member_identity_and_analytic_volume
 
 #[test]
 fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
-    use solidcraft_kernel::services::{ErrorClass, FailureCode, session};
+    use solidcraft_kernel::runtime::{ErrorClass, FailureCode, take_failure_code};
     use solidcraft_kernel::{PathFailure, PathRefusal, orient_stock, stock_line};
 
     let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember", class: ErrorClass::Unclassed };
@@ -8460,11 +8460,11 @@ fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
     let error = stock_line(origin, origin).unwrap_err();
     assert!(matches!(&error, PathFailure::Refused { why: PathRefusal::Line, .. }), "{error:?}");
     assert_eq!(error.to_string(), "the line has no length or has invalid coordinates");
-    assert_eq!(session::take_failure_code(), Some(expected_code));
+    assert_eq!(take_failure_code(), Some(expected_code));
 
     let first = stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
     let second = stock_line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
-    assert_eq!(session::take_failure_code(), None, "a successful query clears the previous refusal");
+    assert_eq!(take_failure_code(), None, "a successful query clears the previous refusal");
     let mut path = [first, second];
     let before = path;
     let error = orient_stock(&mut path).unwrap_err();
@@ -8472,10 +8472,10 @@ fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
     assert_eq!(*why, PathRefusal::Connection(1));
     assert_eq!(path, before, "a refused traversal leaves its input unchanged");
     assert_eq!(error.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
-    assert_eq!(session::take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
+    assert_eq!(take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
 
     stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
-    assert_eq!(session::take_failure_code(), None);
+    assert_eq!(take_failure_code(), None);
 }
 
 #[test]
@@ -9870,4 +9870,43 @@ fn saved_plate_planes_cannot_silently_ignore_a_wrapped_offset() {
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
     assert!(reopened.model.result(id).unwrap().error.as_deref().unwrap().contains("direct persistent planar face"));
     assert!(reopened.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn an_angled_channel_brace_reaches_the_far_face_at_both_ends_fitted_in_its_frame_or_to_an_earlier_one() {
+    // A 2800 x 1000 frame of 150 x 75 channel, webs out, with two parallel braces from its top rail to its bottom one
+    // at about 32°: one in the frame's own feature (a T at each end), one in a second feature fitted to the first (Fit
+    // Ends), turned half round. Each end is square to its brace, so one side of it trails its line's end by 31.6; it
+    // must still reach across the rail's open side to the inside of its web (y 1031.5 and -31.5) at both ends. Only
+    // the line's end was reached before: the first brace stopped 12.1 short at the bottom rail, the second (not
+    // extended at all) 49.6 short there.
+    for angle in ["0", "180"] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [2800, 0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.line", json!({"points": [[2800, 1000], [0, 1000]], "ids": ["l3"]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 1000], [0, 0]], "ids": ["l4"]}));
+        run(&mut s, "sketch.line", json!({"points": [[150, 1000], [1719.5, 0]], "ids": ["l5"]}));
+        run(&mut s, "sketch.line", json!({"points": [[1080.5, 1000], [2650, 0]], "ids": ["l6"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let profile = json!({"kind": "channel", "height": 150, "width": 75, "web": 6, "flange": 9.5, "root_radius": 10});
+        let frame = json!({"sketch": "S", "profile": profile, "corner": "auto", "coped": true, "fit_ends": true});
+        let mut first = frame.clone();
+        first["lines"] = json!(["l3", "l4", "l1", "l5"]);
+        run(&mut s, "frame.member", first);
+        let mut second = frame;
+        (second["lines"], second["angle"]) = (json!(["l6"]), json!(angle));
+        run(&mut s, "frame.member", second);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let braces: Vec<&Value> = m["bodies"].as_array().unwrap().iter().filter(|b| b["bbox"]["min"][0].as_f64().unwrap() > 100.0).collect();
+        assert_eq!(braces.len(), 2, "{m}");
+        for b in &braces {
+            let (lo, hi) = (b["bbox"]["min"][1].as_f64().unwrap(), b["bbox"]["max"][1].as_f64().unwrap());
+            assert!((lo + 31.5).abs() < 1e-6 && (hi - 1031.5).abs() < 1e-6, "angle {angle}: {} spans y {lo} to {hi}", b["name"]);
+        }
+        let vol = |b: &Value| b["volume_mm3"].as_f64().unwrap();
+        assert!((vol(braces[0]) - vol(braces[1])).abs() < 1e-3, "angle {angle}: the braces differ: {braces:?}");
+        let o = overlap_all(&mut s);
+        assert!(o < 1e-3, "angle {angle}: the members overlap by {o} mm³");
+    }
 }

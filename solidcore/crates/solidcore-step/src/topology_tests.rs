@@ -3540,6 +3540,11 @@ impl Trims for Projected {
                 let e = face.edges.get(u.edge as usize).ok_or("edge")?;
                 let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
                 let [t0, t1] = e.interval;
+                // The one curved edge written here ([`Run::Bulge`]): u = 0.8 t (1 - t), v = 1 - t.
+                if matches!(e.curve, BCurve::Spline { .. }) {
+                    pcs.push(Curve2::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[0.0, 1.0], [0.4, 0.5], [0.0, 0.0]] });
+                    continue;
+                }
                 let (a, b) = (eval.point(t0).ok_or("start")?, eval.point(t1).ok_or("end")?);
                 pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(a), at(b)] });
             }
@@ -4967,6 +4972,441 @@ fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
     let scale = scaled.last().unwrap() / 1e-7;
     assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
     assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
+}
+
+/// A kernel that counts the pcurves it is asked for and makes none.
+struct Counting(std::sync::atomic::AtomicUsize);
+
+impl Trims for Counting {
+    fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err("no trims".into())
+    }
+}
+
+/// A 10 x 10 x 5 block whose top is a bilinear patch twisted 1 mm at one corner (so 525 mm3 under it) (not a plane),
+/// its four top edges the straight lines between the block's own corners, and the patch's control
+/// points `off` mm above them: the edges lie `off` mm off the patch's boundary.
+fn block_with_a_twisted_patch(off: f64) -> p21::Exchange {
+    block_under_a_patch([off; 4], [false; 4], false)
+}
+
+/// [`block_with_a_twisted_patch`] with the patch's corner `k` (the top edges' ends, in the order
+/// (0, 0), (10, 0), (10, 10), (0, 10)) `offs[k]` mm above the block's, the top edge `i` (corner
+/// `i` to `i + 1`) written from `i + 1` to `i` where `reversed[i]` (the patch's loop then runs
+/// against it, its use `forward` false), and the patch's weights all 2 where `rational` (the same
+/// surface, not a polynomial net). The patch is on (u, v) = (x / 10, y / 10): edge 0 is v = 0,
+/// edge 1 is u = 1, edge 2 is v = 1 and edge 3 is u = 0.
+fn block_under_a_patch(offs: [f64; 4], reversed: [bool; 4], rational: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let top = [5.0, 5.0, 6.0, 5.0];
+    let bottom: Vec<(u64, V)> =
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().map(|p| (w.vertex([p[0], p[1], 0.0]), [p[0], p[1], 0.0])).collect();
+    let high: Vec<(u64, V)> =
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().zip(top).map(|(p, z)| (w.vertex([p[0], p[1], z]), [p[0], p[1], z])).collect();
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let low: Vec<u64> = (0..4).map(|i| edge(&mut w, bottom[i], bottom[(i + 1) % 4])).collect();
+    let up: Vec<u64> = (0..4).map(|i| edge(&mut w, bottom[i], high[i])).collect();
+    let rim: Vec<u64> =
+        (0..4).map(|i| if reversed[i] { edge(&mut w, high[(i + 1) % 4], high[i]) } else { edge(&mut w, high[i], high[(i + 1) % 4]) }).collect();
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&oes, true, true);
+        w.face(&[bound], surface, true)
+    };
+    let floor = w.plane([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let walls = [
+        w.plane([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        w.plane([10.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        w.plane([0.0, 10.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]),
+        w.plane([0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    ];
+    let mut faces = vec![face(&mut w, &[(low[3], false), (low[2], false), (low[1], false), (low[0], false)], floor)];
+    for i in 0..4 {
+        // Along the bottom edge, up one corner, back along the top edge, down the other.
+        faces.push(face(&mut w, &[(low[i], true), (up[(i + 1) % 4], true), (rim[i], reversed[i]), (up[i], false)], walls[i]));
+    }
+    // The patch's control points (i along u, that is x; j along v, that is y), `offs` above.
+    let mut at = |k: usize| w.pt([high[k].1[0], high[k].1[1], high[k].1[2] + offs[k]]);
+    let (p00, p01, p10, p11) = (at(0), at(3), at(1), at(2));
+    let patch = if rational {
+        w.add(format!(
+            "(BOUNDED_SURFACE()B_SPLINE_SURFACE(1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.)\
+             B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)GEOMETRIC_REPRESENTATION_ITEM()\
+             RATIONAL_B_SPLINE_SURFACE(((2.,2.),(2.,2.)))REPRESENTATION_ITEM('')SURFACE())"
+        ))
+    } else {
+        w.add(format!(
+            "B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+        ))
+    };
+    faces.push(face(&mut w, &[(rim[0], !reversed[0]), (rim[1], !reversed[1]), (rim[2], !reversed[2]), (rim[3], !reversed[3])], patch));
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file_with_uncertainty(&[solid], 1e-5)
+}
+
+/// A whole spline patch whose four edges lie within a few micrometres of its boundary curves
+/// (0, 20 and 75 micrometres, in a file that states 10) gets its pcurves from the closed form the
+/// proved gap allows, with no call to the kernel, and the edges' tolerances cover the gap; a patch
+/// whose edges stand 0.5 mm off it (past what a tolerance may be raised to) goes to the kernel.
+#[test]
+fn a_whole_spline_patch_with_edges_off_its_boundary_by_micrometres_needs_no_kernel() {
+    for off in [0.0, 2e-5, 7.5e-5] {
+        let ex = block_with_a_twisted_patch(off);
+        let kernel = Counting(Default::default());
+        let r = read_solids_with(&ex, &kernel);
+        assert!(r.failures.is_empty(), "{off}: {:?}", r.failures);
+        assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "{off}: the kernel was asked for pcurves");
+        // And with no kernel at all.
+        let s = one_solid(&ex);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8], "{off}");
+        // The top edges' tolerance covers the gap (with the margin that covers an analytic one).
+        if off > 0.0 {
+            let raised = s.brep.edges.iter().filter(|e| e.tolerance >= 3.0 * off).count();
+            assert_eq!(raised, 4, "{off}: only the patch's four edges are raised");
+        }
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        let volume = body.mass_properties(1e-6).unwrap().volume;
+        assert!((volume - 525.0).abs() < 0.05, "{off}: {volume}");
+    }
+    let ex = block_with_a_twisted_patch(0.5);
+    let kernel = Counting(Default::default());
+    let _ = read_solids_with(&ex, &kernel);
+    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "past the cap, the kernel is asked");
+}
+
+/// A kernel standing in for SMLib on [`block_under_a_patch`]'s patch, which is on (u, v) =
+/// (x / 10, y / 10): each pcurve it is asked for is the straight line between those of its edge's
+/// ends, and it counts them.
+struct OnPatch(std::sync::atomic::AtomicUsize);
+
+impl Trims for OnPatch {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                // The one curved edge written here ([`Run::Bulge`]): u = 0.8 t (1 - t), v = 1 - t.
+                if matches!(e.curve, BCurve::Spline { .. }) {
+                    pcs.push(Curve2::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[0.0, 1.0], [0.4, 0.5], [0.0, 0.0]] });
+                    continue;
+                }
+                let at = |t: f64| eval.point(t).map(|p| [p.x / 10.0, p.y / 10.0]).ok_or("a point");
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0)?, at(t1)?] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// The patch face's loop of [`block_under_a_patch`], each use's edge, whether it runs forward and
+/// the two ends of its pcurve; each pcurve is the straight line between the (u, v) of its edge's
+/// ends, along one of the patch's four boundaries (u or v 0 or 1). Returns the boundaries, as
+/// (the constant coordinate, 0 for u and 1 for v, and its value), and how many uses run against their edge.
+fn patch_lines(b: &Brep) -> (Vec<(usize, f64)>, usize) {
+    let face = b.faces.iter().find(|f| matches!(f.surface, BSurface::Spline { .. } | BSurface::RationalSpline { .. })).expect("the patch face");
+    let Loop::Edges { edges } = &face.loops[0] else { panic!("an edge loop") };
+    assert_eq!(edges.len(), 4);
+    let (mut sides, mut against) = (Vec::new(), 0);
+    for u in edges {
+        let Curve2::Spline { knots, points } = &u.pcurve else { panic!("{:?}", u.pcurve) };
+        let e = &b.edges[u.edge as usize];
+        let uv = |v: u32| [b.vertices[v as usize].point[0] / 10.0, b.vertices[v as usize].point[1] / 10.0];
+        // Between its edge's ends: exactly where the proof gave the line, or (where the tolerance
+        // already took it) where the closed form projects them, a few parts in 10⁶ off.
+        for (got, want) in points.iter().zip([uv(e.vertices[0]), uv(e.vertices[1])]) {
+            assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-5), "a straight line between its edge's ends: {points:?}");
+        }
+        assert_eq!(knots, &vec![e.interval[0], e.interval[0], e.interval[1], e.interval[1]]);
+        // The coordinate that does not change along it: v where u runs, else u.
+        let fixed = usize::from((points[0][0] - points[1][0]).abs() > 0.5);
+        assert!((points[0][fixed] - points[1][fixed]).abs() < 1e-5, "constant along its side");
+        let value = points[0][fixed].round();
+        assert!((points[0][fixed] - value).abs() < 1e-5 && (value == 0.0 || value == 1.0), "on a boundary: {value}");
+        sides.push((fixed, value));
+        against += usize::from(!u.forward);
+    }
+    sides.sort_by(|a, c| a.partial_cmp(c).unwrap());
+    (sides, against)
+}
+
+/// Every one of a whole patch's four boundaries gets its straight line with no call to the kernel:
+/// edge 0 is v = 0, edge 1 u = 1 (the u maximum), edge 2 v = 1 (the v maximum) and edge 3 u = 0,
+/// whichever way each edge is written against the patch's loop (a use that runs against its edge
+/// has the pcurve of the edge's own direction, `forward` false).
+#[test]
+fn every_boundary_of_a_whole_patch_gets_its_line_whichever_way_its_edge_runs() {
+    for reversed in [[false; 4], [true; 4], [true, false, true, false], [false, true, false, true], [false, false, true, true]] {
+        let ex = block_under_a_patch([2e-5; 4], reversed, false);
+        let kernel = OnPatch(Default::default());
+        let r = read_solids_with(&ex, &kernel);
+        assert!(r.failures.is_empty(), "{reversed:?}: {:?}", r.failures);
+        assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "{reversed:?}: the kernel was asked for pcurves");
+        let s = one_solid(&ex);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8], "{reversed:?}");
+        let (sides, against) = patch_lines(&s.brep);
+        // u = 0, u = 1, v = 0, v = 1.
+        assert_eq!(sides, [(0, 0.0), (0, 1.0), (1, 0.0), (1, 1.0)], "{reversed:?}: one use on each boundary");
+        // A use runs against its edge where the file wrote the edge the other way round.
+        let wrong = reversed.iter().filter(|r| **r).count();
+        assert!(against == wrong || against == 4 - wrong, "{reversed:?}: {against} uses against their edges");
+        let raised = s.brep.edges.iter().filter(|e| e.tolerance >= 3.0 * 2e-5).count();
+        assert_eq!(raised, 4, "{reversed:?}: the patch's four edges are covered");
+    }
+}
+
+/// A face whose adjacent edges lie on boundaries with different gaps (0, 20 and 75 micrometres at
+/// the corners) raises each edge to three times its own gap and each vertex to the largest of the
+/// edges that meet it, covering the shared corner of two raised edges by the larger; the solid is
+/// closed, the kernel is asked for nothing, and the block's other vertices are not touched.
+#[test]
+fn vertices_shared_by_raised_boundary_edges_hold_the_larger_tolerance() {
+    let offs = [0.0, 2e-5, 7.5e-5, 0.0];
+    let ex = block_under_a_patch(offs, [false; 4], false);
+    let kernel = OnPatch(Default::default());
+    let r = read_solids_with(&ex, &kernel);
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let s = one_solid(&ex);
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    let b = &s.brep;
+    let tolerance_at = |p: V| b.vertices.iter().find(|v| v.point == p).map(|v| v.tolerance).expect("a vertex");
+    // The edge from corner i to i + 1 stands off the patch by the larger of its two corners'.
+    let gap = |i: usize| offs[i].max(offs[(i + 1) % 4]);
+    let corners = [[0.0, 0.0, 5.0], [10.0, 0.0, 5.0], [10.0, 10.0, 6.0], [0.0, 10.0, 5.0]];
+    for (k, c) in corners.iter().enumerate() {
+        let wanted = 3.0 * gap(k).max(gap((k + 3) % 4));
+        let got = tolerance_at(*c);
+        assert!(got >= wanted * (1.0 - 1e-9) && got <= wanted * 1.01, "corner {k}: {got} for edges standing off by {wanted}");
+    }
+    for p in [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]] {
+        assert!(tolerance_at(p) < 2e-5, "{p:?}: {}", tolerance_at(p));
+    }
+    // The edge between two corners that stand 0 off is not raised past the file's.
+    let flat = b.edges.iter().filter(|e| e.tolerance < 2e-5).count();
+    assert!(flat >= 9, "{flat}: the edges not on the patch's boundaries keep the file's tolerance, as the edge between the 0 corners");
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    let volume = body.mass_properties(1e-6).unwrap().volume;
+    assert!((volume - 525.0).abs() < 0.05, "{volume}");
+}
+
+/// One edge of a [`patch_sheet`]'s loop: the line between two points on the patch, or the curved
+/// edge from (0, 10, 5) to (0, 0, 5) that bulges 2 mm in x: the patch's own curve u = 0.8 t (1 - t),
+/// v = 1 - t, exactly (a cubic).
+enum Run {
+    Line(V, V),
+    Bulge,
+}
+
+/// A sheet of one face on the twisted patch of [`block_under_a_patch`], (x, y, z) = (10 u, 10 v,
+/// 5 + u v) with its control points `off` mm above, whose loops (the first the outer one) are `loops`.
+fn patch_sheet(off: f64, loops: &[Vec<Run>]) -> p21::Exchange {
+    let mut w = W::default();
+    let mut vertices: Vec<(V, u64)> = Vec::new();
+    let mut vertex = |w: &mut W, p: V| -> (u64, V) {
+        if let Some((_, id)) = vertices.iter().find(|(q, _)| *q == p) {
+            return (*id, p);
+        }
+        let id = w.vertex(p);
+        vertices.push((p, id));
+        (id, p)
+    };
+    let mut bounds = Vec::new();
+    for (i, l) in loops.iter().enumerate() {
+        let mut oes = Vec::new();
+        for run in l {
+            let e = match run {
+                Run::Line(a, b) => {
+                    let (va, vb) = (vertex(&mut w, *a), vertex(&mut w, *b));
+                    w.line_edge(va, vb, true, len3(sub3(*b, *a)))
+                }
+                Run::Bulge => {
+                    let (va, vb) = (vertex(&mut w, [0.0, 10.0, 5.0]), vertex(&mut w, [0.0, 0.0, 5.0]));
+                    let poles = [[0.0, 10.0, 5.0], [8.0 / 3.0, 20.0 / 3.0, 5.0 + 0.8 / 3.0], [8.0 / 3.0, 10.0 / 3.0, 5.0], [0.0, 0.0, 5.0]];
+                    let ids: Vec<u64> = poles.iter().map(|p| w.pt(*p)).collect();
+                    let c = w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.)", list(&ids)));
+                    w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", va.0, vb.0))
+                }
+            };
+            oes.push(w.oe(e, true));
+        }
+        bounds.push(w.bound(&oes, i == 0, true));
+    }
+    let mut at = |x: f64, y: f64, z: f64| w.pt([x, y, z + off]);
+    let (p00, p01, p10, p11) = (at(0.0, 0.0, 5.0), at(0.0, 10.0, 5.0), at(10.0, 0.0, 5.0), at(10.0, 10.0, 6.0));
+    let patch = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+    ));
+    let face = w.face(&bounds, patch, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('patch',(#{open}))"));
+    w.file_with_uncertainty(&[model], 1e-5)
+}
+
+/// The four corners of [`patch_sheet`]'s patch, counter-clockwise in (u, v).
+const PATCH_CORNERS: [V; 4] = [[0.0, 0.0, 5.0], [10.0, 0.0, 5.0], [10.0, 10.0, 6.0], [0.0, 10.0, 5.0]];
+
+/// The patch's four sides, each a line between two corners.
+fn patch_sides() -> Vec<Run> {
+    (0..4).map(|k| Run::Line(PATCH_CORNERS[k], PATCH_CORNERS[(k + 1) % 4])).collect()
+}
+
+/// A sheet read with the stand-in kernel: its brep, and the number of pcurves the kernel made. How
+/// many edges the proof of a boundary raised to three times their gap (to `off`'s 3 times, to a
+/// hair): the raise the importer makes for the proof, where the kernel's own measure is 1.5 times.
+fn read_sheet(ex: &p21::Exchange, off: f64) -> (Brep, usize, usize) {
+    let kernel = OnPatch(Default::default());
+    let r = read_solids_with(ex, &kernel);
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    let b = r.solids.into_iter().next().expect("a sheet").brep;
+    let raised = b.edges.iter().filter(|e| e.tolerance >= 3.0 * off && e.tolerance <= 3.0 * off * 1.001).count();
+    (b, kernel.0.load(std::sync::atomic::Ordering::Relaxed), raised)
+}
+
+/// A face is raised for the proof only as a whole patch: exactly one loop of four uses on the
+/// patch's four sides. The whole patch is (no kernel, its four edges covered); three sides of it
+/// with a fourth that bulges 2 mm into the patch is not, and neither is a face of its four sides
+/// with a hole, or a face of two sides and a curve across: the kernel is asked and no edge is
+/// raised to the proved three times its gap (what the sides alone would be, one by one, as the
+/// proof of an edge was taken before it was asked of the face).
+#[test]
+fn a_boundary_gap_is_covered_only_where_the_face_is_the_whole_patch() {
+    let off = 2e-5;
+    let (b, calls, raised) = read_sheet(&patch_sheet(off, &[patch_sides()]), off);
+    assert_eq!((calls, raised, b.edges.len()), (0, 4, 4), "the whole patch: no kernel, four edges covered");
+
+    // Three sides and a fourth 2 mm inside the patch at its middle.
+    let mut trimmed: Vec<Run> = patch_sides().into_iter().take(3).collect();
+    trimmed.push(Run::Bulge);
+    let (b, calls, raised) = read_sheet(&patch_sheet(off, &[trimmed]), off);
+    assert!(calls > 0, "the kernel makes the pcurves of a trimmed face");
+    assert_eq!(raised, 0, "no edge of a trimmed face is raised for a proof: {:?}", b.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+
+    // The four sides and a hole of straight lines on the patch, clockwise about its middle.
+    let hole = [[4.0, 4.0, 5.16], [4.0, 6.0, 5.24], [6.0, 6.0, 5.36], [6.0, 4.0, 5.24]];
+    let inner = (0..4).map(|k| Run::Line(hole[k], hole[(k + 1) % 4])).collect();
+    let (_, calls, raised) = read_sheet(&patch_sheet(off, &[patch_sides(), inner]), off);
+    assert!(calls > 0);
+    assert_eq!(raised, 0, "a face with a hole is not the whole patch");
+
+    // Two sides whole and a diagonal across: three uses.
+    let triangle = vec![
+        Run::Line(PATCH_CORNERS[0], PATCH_CORNERS[1]),
+        Run::Line(PATCH_CORNERS[1], PATCH_CORNERS[2]),
+        Run::Line(PATCH_CORNERS[2], PATCH_CORNERS[0]),
+    ];
+    let (_, calls, raised) = read_sheet(&patch_sheet(off, &[triangle]), off);
+    assert!(calls > 0);
+    assert_eq!(raised, 0, "three uses are no whole patch");
+}
+
+/// A face that does not qualify is read as it was: a patch whose edges stand 0.5 mm off its
+/// boundary (past what a tolerance may be raised to) takes its pcurves from the kernel, exactly as
+/// the kernel makes them, and its edges' tolerance is the one the measured gap of those pcurves
+/// gives (1.5 times it), with no raise for a proof that did not hold. A rational patch (weights
+/// 2, the same surface) is no polynomial net: its pcurves are the kernel's too, with the tolerance
+/// their measured gap gives; and with no kernel neither is read.
+#[test]
+fn a_patch_that_does_not_qualify_is_read_as_before() {
+    let far = block_with_a_twisted_patch(0.5);
+    let kernel = OnPatch(Default::default());
+    let r = read_solids_with(&far, &kernel);
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 4, "the kernel made the patch's four pcurves");
+    let s = &r.solids[0];
+    let (sides, _) = patch_lines(&s.brep);
+    assert_eq!(sides.len(), 4);
+    let top: Vec<f64> = s.brep.edges.iter().filter(|e| e.tolerance > 1e-4).map(|e| e.tolerance).collect();
+    assert_eq!(top.len(), 4);
+    assert!(top.iter().all(|t| (t - 0.75).abs() < 1e-9), "{top:?}: 1.5 times the 0.5 mm the pcurves are measured off");
+    assert!(!read_solids(&far).failures.is_empty(), "no kernel, no pcurves");
+
+    // A rational patch, as a polynomial one (the same surface) 20 micrometres off the edges: no
+    // closed form takes the line at the file's tolerance, and nothing proves it.
+    let rational = block_under_a_patch([2e-5; 4], [false; 4], true);
+    let kernel = OnPatch(Default::default());
+    let r = read_solids_with(&rational, &kernel);
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 4, "a rational patch goes to the kernel");
+    let s = &r.solids[0];
+    assert_eq!(patch_lines(&s.brep).0.len(), 4);
+    let top: Vec<f64> = s.brep.edges.iter().filter(|e| e.tolerance > 2e-5).map(|e| e.tolerance).collect();
+    assert_eq!(top.len(), 4);
+    assert!(top.iter().all(|t| (t - 3e-5).abs() < 1e-8), "{top:?}: 1.5 times the 20 micrometres, not the 3 times a proof covers");
+    assert!(!read_solids(&rational).failures.is_empty(), "no kernel, no pcurves");
+    // The same gap on a polynomial patch is proved: no kernel, and 3 times the gap.
+    let proved = block_under_a_patch([2e-5; 4], [false; 4], false);
+    let kernel = OnPatch(Default::default());
+    assert!(read_solids_with(&proved, &kernel).failures.is_empty());
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+/// A pcurve kernel that must not be asked: it counts its calls and refuses them.
+struct RefusedTrims(std::sync::atomic::AtomicUsize);
+
+impl Trims for RefusedTrims {
+    fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err("the pcurve kernel was asked".into())
+    }
+}
+
+/// A 20 mm cube whose 12 edges and 8 corners are rounded with conics (rho 0.4, radius 3 mm): 6
+/// planes, 12 rational quadratic strips and 8 corner patches (a biquadratic net with one side
+/// collapsed to a point). Its 48 edges are curves of their own, the conic ones 30 nm off the
+/// boundary of the patch they bound, and the file carries no pcurves. Every face is read in
+/// closed form: the planes' own, and the strips' and corners' as the straight lines along their
+/// boundary curves, with the kernel never asked. (Before rational patches had the proof, 20
+/// of the 26 faces went to the kernel, 1.4 to 4 s in all.)
+#[test]
+fn a_cube_with_conic_rounded_edges_and_corners_is_read_without_the_pcurve_kernel() {
+    let ex = p21::parse(include_str!("../tests/fixtures/rounded-cube-conic-corners.step")).unwrap();
+    let trims = RefusedTrims(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&ex, &trims);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let s = &read.solids[0];
+    assert!(!s.sheet);
+    assert_eq!(s.brep.faces.len(), 26);
+    assert_eq!(s.brep.edges.len(), 48);
+    assert_eq!(trims.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the kernel was asked");
+    // The edges the proof covered hold their gap: raised past 30 nm, and still within a micrometre.
+    let raised = s.brep.edges.iter().filter(|e| e.tolerance > 3e-5).count();
+    assert!(raised >= 24, "{raised} edges raised");
+    assert!(s.brep.edges.iter().all(|e| e.tolerance < 1e-3));
+}
+
+/// A 40 x 10 mm block whose top is one ruled spline patch (cubic along, 40 poles), the two long
+/// edges of which are separate splines refitted through points of the patch's own boundary at a
+/// warped pace (`make_ruled_patch_fixture.py --poles 40 --period 20 --edge-warp 0.006`): they lie
+/// on the boundary to a few micrometres but are 0.16 mm from it at equal parameter, so no
+/// straight line in (u, v) is their pcurve. The reader gives each the line along the boundary at
+/// the edge's own pace, with the pcurve kernel never asked, and holds the edges' tolerance to the
+/// geometric gap, not the parametric one.
+#[test]
+fn an_edge_refitted_at_its_own_pace_along_a_patch_boundary_is_read_without_the_pcurve_kernel() {
+    let ex = p21::parse(include_str!("../tests/fixtures/ruled-spline-patch-reparametrised.step")).unwrap();
+    let trims = RefusedTrims(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&ex, &trims);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let s = &read.solids[0];
+    assert!(!s.sheet);
+    assert_eq!(s.brep.faces.len(), 6);
+    assert_eq!(trims.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the kernel was asked");
+    // Covered by the gap the proof found (a few micrometres), nowhere near the 0.16 mm at equal parameter.
+    let widest = s.brep.edges.iter().map(|e| e.tolerance).fold(0.0_f64, f64::max);
+    assert!(widest < 1e-3, "an edge tolerance of {widest} mm");
 }
 
 /// `text` with the reference direction of every conical surface's placement turned about its axis by `angle`.

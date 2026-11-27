@@ -207,9 +207,19 @@ const ERR_PICK_AMBIGUOUS: i32 = -1102;
 /// Runs `f`, a step of the entry point `call` on solidcore-ops, for `body`, the entry point's
 /// input ([`super::call::ops_as`]: the session's fixes, the stop token, the profiler span, the
 /// call running now, and `body` left in the dump folder should it fail), its refusal as
-/// SolidCraft's error ([`refused`]).
+/// SolidCraft's error ([`blend_refused`]).
 fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
-    super::call::ops_as(call, &[("brep", body)], refused, f)
+    super::call::ops_as(call, &[("brep", body)], blend_refused, f)
+}
+
+/// A refusal of a blend's own step as [`refused`] words it, except that what the kernel cannot
+/// build yet keeps the kernel's reason ([`Error::Unported`]) instead of the bare
+/// [`Error::Unsupported`], which the other callers of [`refused`] word in their own terms.
+fn blend_refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    match e {
+        solidcore_ops::Error::Unsupported(why) if why != MIXED_CORNER_RAILS_CROSS => Error::Unported(why),
+        e => refused(call, e, detail),
+    }
 }
 
 /// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
