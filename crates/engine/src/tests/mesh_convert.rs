@@ -1231,8 +1231,9 @@ fn open_names_the_design_a_lock_file_belongs_to() {
     std::fs::create_dir_all(&dir).unwrap();
     let design = dir.join("hemisphere.sc");
     let lock = design_lock::lock_path(&design);
+    let open_any = || Session::default().execute("doc.open", &json!({"path": lock.to_string_lossy()})).unwrap_err().to_string();
     let open = || {
-        let error = Session::default().execute("doc.open", &json!({"path": lock.to_string_lossy()})).unwrap_err().to_string();
+        let error = open_any();
         assert!(error.contains("lock file for hemisphere.sc") && error.contains("Open hemisphere.sc instead"), "{error}");
         assert!(!error.contains("export STEP") && !error.contains("importer plugin"), "{error}");
         error
@@ -1242,11 +1243,19 @@ fn open_names_the_design_a_lock_file_belongs_to() {
     design_lock::write(&design, &held).unwrap();
     let error = open();
     assert!(error.contains("open in SolidCraft on workshop-pc"), "{error}");
+    // Outside the folders the caller may use, the lock is not read to say who holds it.
+    let refused = solidcraft_io::vfs::scoped(Some(Default::default()), open_any);
+    assert!(!refused.contains("workshop-pc"), "{refused}");
     // A lock left by a crash says nothing about who has the design open now.
     held.refreshed = 0;
     design_lock::write(&design, &held).unwrap();
     let error = open();
     assert!(!error.contains("workshop-pc"), "{error}");
+    // Another program's file with such a name is not called SolidCraft's.
+    let other = dir.join(".~report.xlsx.lock");
+    std::fs::write(&other, b"someone").unwrap();
+    let error = Session::default().execute("doc.open", &json!({"path": other.to_string_lossy()})).unwrap_err().to_string();
+    assert!(error.contains("can't open .lock files"), "{error}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

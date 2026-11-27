@@ -2125,15 +2125,15 @@ fn reads_natively(path: &str) -> bool {
 }
 
 /// For SolidCraft's own lock file (`.~<design>.lock`, #5467): what it is and which design to open,
-/// with the computer that has that design open while the lock is fresh (#22924).
+/// with the computer that has that design open while the lock is fresh (#22924). `None` for any
+/// other file, one only named like a lock, or a path this caller may not read.
 fn lock_file_advice(path: &str) -> Option<EngineError> {
+    solidcraft_io::vfs::check(path).ok()?;
     let file = std::path::Path::new(path);
     let name = file.file_name()?.to_str()?.strip_prefix(".~")?.strip_suffix(".lock")?;
-    let design = file.with_file_name(name);
-    let holder = solidcraft_io::design_lock::read(&design)
-        .filter(|lock| !lock.is_stale(solidcraft_io::design_lock::now_secs()) && !lock.owner_is_gone())
-        .map(|lock| format!(" (open in SolidCraft on {})", lock.host))
-        .unwrap_or_default();
+    let lock = solidcraft_io::design_lock::read(&file.with_file_name(name))?;
+    let held = !lock.is_stale(solidcraft_io::design_lock::now_secs()) && !lock.owner_is_gone();
+    let holder = if held { format!(" (open in SolidCraft on {})", lock.host) } else { String::new() };
     Some(EngineError::Other(format!("{path}: this is SolidCraft's lock file for {name}{holder}. Open {name} instead.")))
 }
 
