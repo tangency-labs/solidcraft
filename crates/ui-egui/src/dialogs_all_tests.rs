@@ -18,6 +18,45 @@ fn repeated_profile_fixture() -> (Harness, u64, u64) {
     (h, sketch, path)
 }
 
+/// Twins picked by their numbers are saved by the sides of their curves (#22548). After a change
+/// of the sketch's regions the dialog refills with the regions the feature builds, not none: two
+/// circles of radius `r` and a fixed line through both centres, the halves of the lens and of
+/// the lower crescent picked on r = 3.04 mm; on 3.45 the line no longer cuts the lens.
+#[test]
+fn profile_refill_of_sided_twins_follows_a_change_of_the_regions() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "r", "expression": "3.04 mm"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "s"})).unwrap()["sketch"].as_u64().unwrap();
+    for (id, y) in [("c1", 19.4), ("c2", 20.0)] {
+        h.app.run("sketch.circle.center", json!({"center": [0, y], "radius": 3.04})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities": [id], "type": "diameter", "value": "2*r"})).unwrap();
+        h.app.run("sketch.constraint.fix", json!({"entity": format!("{id}.center"), "fixed": true})).unwrap();
+    }
+    h.app.run("sketch.line", json!({"points": [[0, 1.75], [0, 22.5]]})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "l1", "fixed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let picks = [(-1.26, 19.7), (1.26, 19.7), (-0.5, 16.5), (0.5, 16.5)].map(|(x, y)| solidcore_record::Vec2::new(x, y));
+    let at = |h: &Harness, points: &[solidcore_record::Vec2]| {
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(sketch).unwrap();
+        let mut found: Vec<usize> = points.iter().map(|q| solidcraft_engine::doc::sketch::profile_at_point(&ss.profiles, *q).unwrap()).collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    };
+    let indices = at(&h, &picks);
+    assert_eq!(indices.len(), 4);
+    let feature = h.app.run("solid.extrude", json!({"sketch": sketch, "profiles": indices, "distance": 2})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("parameters.change", json!({"name": "r", "expression": "3.45 mm"})).unwrap();
+    let Some(FeatureKind::Extrude { profiles, .. }) = h.app.session.doc.feature(feature).map(|f| f.kind.clone()) else { panic!("an extrude") };
+    assert!(matches!(profiles, ProfileSel::SidedCurves { .. }), "{profiles:?}");
+    let state = h.app.session.world_state().unwrap();
+    let mut refilled = profile_indices(state.sketch(sketch).unwrap(), &profiles);
+    refilled.sort_unstable();
+    assert_eq!(refilled, at(&h, &picks[1..]), "the lens and the crescent's two halves");
+}
+
 #[test]
 fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
     for command in ["solid.extrude", "solid.sweep"] {
@@ -2237,6 +2276,49 @@ fn rectangular_pattern_distance_type_sends_what_it_uses_and_reopens() {
         "{:?}",
         d.kind
     );
+}
+
+/// Quantity and List: the dialog shows a Spacing List row in place of Spacing and sends
+/// the gaps typed between semicolons as a list, each with its unit; a pattern made with them
+/// opens with them again, and with no canvas value (a list is no one length to drag).
+#[test]
+fn rectangular_pattern_spacing_list_sends_its_gaps_and_reopens() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.extra.insert("distance1".into(), json!("count_list"));
+    if let Kind::PatternRect { count, list, .. } = &mut d.kind {
+        *count = "5".into();
+        *list = " 50 mm;60;; 70,5 mm ".into();
+    }
+    assert!(d.primary().is_none(), "no canvas value for a spacing list");
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.pattern.rectangular");
+    assert_eq!(p["distance1"], json!("count_list"), "{p}");
+    assert_eq!(p["count1"], json!("5"), "{p}");
+    let gaps = p["spacing_list1"].as_array().cloned().unwrap_or_default();
+    assert_eq!(gaps.len(), 3, "empty entries are dropped: {p}");
+    assert_eq!(gaps[0], json!("50 mm"), "{p}");
+    assert!(p.get("spacing1").is_none() && p.get("extent1").is_none(), "only the values the type uses: {p}");
+    h.app.dialog = Some(d);
+    h.settle();
+    assert!(scenario::rect_of("dialog:row:ui.pattern_spacing_list").is_some(), "the Spacing List row is shown");
+    assert!(scenario::rect_of("dialog:row:Spacing").is_none(), "no Spacing row");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.settle();
+    h.app.run(id, p.clone()).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 5);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.call("ui.editFeature", json!({"feature": name}));
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern opens to edit");
+    assert_eq!(d.extra.get("distance1"), Some(&json!("count_list")));
+    let Kind::PatternRect { list, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(list.split(';').count(), 3, "{list}");
+    assert!(list.starts_with("50 mm; "), "{list}");
 }
 
 #[test]

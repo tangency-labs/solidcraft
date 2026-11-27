@@ -1241,13 +1241,65 @@ fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
     match *s {
         Seg2::Line { a, .. } => usize::from(counts(a.y, end.y) && a.x + (p.y - a.y) * (end.x - a.x) / (end.y - a.y) > p.x),
         Seg2::Arc { center, radius, start, sweep } => {
+            let start_y = s.start().y;
+            if radius >= 0.0 && radius.is_finite() {
+                let y_lo = (center.y - radius).min(start_y).min(end.y);
+                let y_hi = (center.y + radius).max(start_y).max(end.y);
+                let x_hi = center.x + radius * (1.0 + 1e-12) + 1e-12;
+                if p.y < y_lo || p.y >= y_hi || p.x > x_hi {
+                    return 0;
+                }
+            }
             // Pieces between the arc's ends and its circle's top and bottom.
             let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
-            let mut stops = vec![0.0];
-            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+            let y_at = |t: f64| match t {
+                t if t <= 0.0 => start_y,
+                t if t >= 1.0 => end.y,
+                t => center.y + radius * (start + sweep * t).sin(),
+            };
+            let count_stops = |stops: &mut [f64]| {
+                stops.sort_by(f64::total_cmp);
+                stops
+                    .windows(2)
+                    .filter(|w| {
+                        let &[t0, t1] = *w else { return false };
+                        // Along a piece the way across from the center keeps its side: x is on it.
+                        let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
+                        let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
+                        counts(y_at(t0), y_at(t1)) && x > p.x
+                    })
+                    .count()
+            };
             // A top or a bottom each half turn on. An arc whose angles are not finite has none
             // to stop at, nor one whose angles are so large that a half turn no longer moves
             // them: past either, the loop would never end.
+            if sweep.abs() <= TAU {
+                let mut buf = [0.0_f64; 6];
+                let mut n = 1usize;
+                let mut overflow = false;
+                let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+                while hi.is_finite() && turn < hi && turn + PI > turn {
+                    if turn > lo {
+                        if let Some(slot) = buf.get_mut(n) {
+                            *slot = (turn - start) / sweep;
+                            n += 1;
+                        } else {
+                            overflow = true;
+                            break;
+                        }
+                    }
+                    turn += PI;
+                }
+                if !overflow && let Some(slot) = buf.get_mut(n) {
+                    *slot = 1.0;
+                    n += 1;
+                    if let Some(slice) = buf.get_mut(..n) {
+                        return count_stops(slice);
+                    }
+                }
+            }
+            let mut stops = vec![0.0];
+            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
             while hi.is_finite() && turn < hi && turn + PI > turn {
                 if turn > lo {
                     stops.push((turn - start) / sweep);
@@ -1255,22 +1307,7 @@ fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
                 turn += PI;
             }
             stops.push(1.0);
-            stops.sort_by(f64::total_cmp);
-            let y_at = |t: f64| match t {
-                t if t <= 0.0 => s.start().y,
-                t if t >= 1.0 => end.y,
-                t => center.y + radius * (start + sweep * t).sin(),
-            };
-            stops
-                .windows(2)
-                .filter(|w| {
-                    let &[t0, t1] = *w else { return false };
-                    // Along a piece the way across from the center keeps its side: x is on it.
-                    let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
-                    let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
-                    counts(y_at(t0), y_at(t1)) && x > p.x
-                })
-                .count()
+            count_stops(&mut stops)
         }
         _ => {
             let Some(curve) = rational(s) else { return 0 };
@@ -2143,12 +2180,12 @@ fn bounded(q: &Query, frame: &Rigid3, group: &[usize], gone: &[Region2], near: f
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::{PI, SQRT_2};
+    use std::f64::consts::{FRAC_PI_2, PI, SQRT_2, TAU};
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
     use solidcraft_geom::prelude::*;
 
-    use super::{holds, loop_box_in, reaches, seg_box};
+    use super::{holds, loop_box_in, ray_crossings, reaches, seg_box};
 
     /// How near points are one, as a body reads them.
     const NEAR: f64 = 1e-6;
@@ -2304,5 +2341,61 @@ mod tests {
         let b = loop_box_in(&circle, |q| Vec3::new(5.0 + q.x * half, q.y, q.x * 0.5));
         let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-12;
         assert!(near(b.min, Vec3::new(5.0 - half, -1.0, -0.5)) && near(b.max, Vec3::new(5.0 + half, 1.0, 0.5)), "{b:?}");
+    }
+
+    #[test]
+    fn ray_crossings_arc_matches_reference_across_bands_and_multiturn() {
+        fn ref_arc_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
+            let counts = |y0: f64, y1: f64| (y0 > p.y) != (y1 > p.y);
+            let Seg2::Arc { center, radius, start, sweep } = *s else { return 0 };
+            let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
+            let mut stops = vec![0.0];
+            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+            while hi.is_finite() && turn < hi && turn + PI > turn {
+                if turn > lo {
+                    stops.push((turn - start) / sweep);
+                }
+                turn += PI;
+            }
+            stops.push(1.0);
+            stops.sort_by(f64::total_cmp);
+            let y_at = |t: f64| match t {
+                t if t <= 0.0 => s.start().y,
+                t if t >= 1.0 => end.y,
+                t => center.y + radius * (start + sweep * t).sin(),
+            };
+            stops
+                .windows(2)
+                .filter(|w| {
+                    let &[t0, t1] = *w else { return false };
+                    let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
+                    let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
+                    counts(y_at(t0), y_at(t1)) && x > p.x
+                })
+                .count()
+        }
+
+        let c = Vec2::new(10.0, 20.0);
+        let r = 4.0;
+        let arcs = [
+            Seg2::Arc { center: c, radius: r, start: 0.0, sweep: TAU },
+            Seg2::Arc { center: c, radius: r, start: 0.3, sweep: -TAU },
+            Seg2::Arc { center: c, radius: r, start: -0.5 * PI, sweep: PI },
+            Seg2::Arc { center: c, radius: r, start: 0.25 * PI, sweep: 0.5 * PI },
+            Seg2::Arc { center: c, radius: r, start: 0.1, sweep: 3.0 * TAU },
+            Seg2::Arc { center: c, radius: r, start: 0.0, sweep: f64::INFINITY },
+            Seg2::Arc { center: c, radius: r, start: 1e17, sweep: 1e3 },
+        ];
+        let xs = [2.0, 6.0, 8.0, 10.0, 12.0, 14.0, 14.0 + 1e-13, 18.0];
+        let ys = [14.0, 16.0 - 1e-12, 16.0, 18.0, 20.0, 22.0, 24.0, 24.0 + 1e-12, 26.0];
+        for s in arcs {
+            let end = s.end();
+            for &x in &xs {
+                for &y in &ys {
+                    let p = Vec2::new(x, y);
+                    assert_eq!(ray_crossings(&s, end, p), ref_arc_crossings(&s, end, p), "arc={s:?} p={p:?}");
+                }
+            }
+        }
     }
 }

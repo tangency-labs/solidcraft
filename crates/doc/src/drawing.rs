@@ -522,7 +522,8 @@ impl Drawing {
             return Self::read_value(v, Some(s));
         }
         Self::check_raw_streaming(s)?;
-        let wire: DrawingWire<'_> = crate::json_budget::from_str_bounded_typed(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES).map_err(damaged)?;
+        let wire: DrawingWire<'_> =
+            crate::json_budget::from_str_bounded_typed(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES).map_err(damaged_json)?;
         let mut d = wire.into_drawing()?;
         d = Self::finish_decode(d)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
@@ -1259,6 +1260,19 @@ impl DrawingWire<'_> {
 /// A file that breaks a rule of the record.
 fn damaged(e: impl std::fmt::Display) -> DocError {
     DocError::Invalid(format!("damaged drawing: {e}"))
+}
+
+/// Format a direct streaming `serde_json::Error` matching `serde_json::from_value`'s message (no
+/// trailing ` at line L column C` location suffix on data validation errors).
+fn damaged_json(e: serde_json::Error) -> DocError {
+    let text = e.to_string();
+    let msg = if e.is_data() {
+        let suffix = format!(" at line {} column {}", e.line(), e.column());
+        text.strip_suffix(&suffix).unwrap_or(&text)
+    } else {
+        &text
+    };
+    DocError::Invalid(format!("damaged drawing: {msg}"))
 }
 
 fn from_sheet(e: drawing_sheet::Invalid) -> DocError {

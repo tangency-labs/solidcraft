@@ -2528,6 +2528,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
@@ -2614,6 +2615,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2671,6 +2674,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -4678,6 +4683,15 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // Settle the heal and evaluate so the model carries the healed body.
     assert!(model.settle_import_checks_under(true));
     model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
     assert!(model.has_import_heals());
     assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
     let healed_fp = model.result(import).unwrap().fingerprint;
@@ -5688,6 +5702,8 @@ fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached()
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -5921,6 +5937,8 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -6042,6 +6060,8 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
             extent2: None,
             copy_at_end1: false,
             copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
         },
         bodies: Vec::new(),
         placements: Vec::new(),
@@ -6674,6 +6694,8 @@ fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
             angle: None,
             copy: true,
             copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
         },
         None,
     )
