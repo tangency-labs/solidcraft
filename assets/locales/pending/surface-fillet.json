@@ -1,0 +1,42 @@
+{
+  "en": {
+    "help.surface.fillet": "Rounds the seam between two surface bodies with a rolling ball: each surface is cut where the other meets it, the kept pieces are sewn together and the seam is filleted. The points you pick choose the side of each surface to keep.",
+    "cmd.surface_chamfer": "Surface Chamfer",
+    "help.surface.chamfer": "Bevels the seam between two surface bodies: each surface is cut where the other meets it, the kept pieces are sewn together and the seam is chamfered, by one distance, two distances or a distance and an angle. The points you pick choose the side of each surface to keep."
+  },
+  "de": {
+    "help.surface.fillet": "Rundet die Naht zwischen zwei Flächenkörpern mit einer rollenden Kugel: Jede Fläche wird dort geschnitten, wo die andere sie trifft, die behaltenen Teile werden vernäht und die Naht verrundet. Die gewählten Punkte bestimmen, welche Seite jeder Fläche bleibt.",
+    "cmd.surface_chamfer": "Flächenfase",
+    "help.surface.chamfer": "Fast die Naht zwischen zwei Flächenkörpern ab: Jede Fläche wird dort geschnitten, wo die andere sie trifft, die behaltenen Teile werden vernäht und die Naht gefast, mit einem Abstand, zwei Abständen oder Abstand und Winkel. Die gewählten Punkte bestimmen, welche Seite jeder Fläche bleibt."
+  },
+  "ar": {
+    "help.surface.fillet": "يدوّر الدرز بين جسمين سطحيين بكرة متدحرجة: يُقطع كل سطح حيث يلتقي به الآخر، وتُخاط القطع المتبقية معًا ثم يُدوَّر الدرز. تحدد النقاط التي تختارها الجانب المحتفظ به من كل سطح.",
+    "cmd.surface_chamfer": "شطف السطح",
+    "help.surface.chamfer": "يشطف الدرز بين جسمين سطحيين: يُقطع كل سطح حيث يلتقي به الآخر، وتُخاط القطع المتبقية معًا ثم يُشطف الدرز بمسافة واحدة أو مسافتين أو مسافة وزاوية. تحدد النقاط التي تختارها الجانب المحتفظ به من كل سطح."
+  },
+  "he": {
+    "help.surface.fillet": "מעגל את התפר בין שני גופי משטח בכדור מתגלגל: כל משטח נחתך במקום שבו השני פוגש אותו, החלקים שנשארו נתפרים והתפר מעוגל. הנקודות שבחרת קובעות איזה צד של כל משטח נשמר.",
+    "cmd.surface_chamfer": "שיפוע משטח",
+    "help.surface.chamfer": "משפע את התפר בין שני גופי משטח: כל משטח נחתך במקום שבו השני פוגש אותו, החלקים שנשארו נתפרים והתפר משופע במרחק אחד, שני מרחקים או מרחק וזווית. הנקודות שבחרת קובעות איזה צד של כל משטח נשמר."
+  },
+  "ja": {
+    "help.surface.fillet": "2つのサーフェスボディの継ぎ目を転がるボールで丸めます。各サーフェスは相手と交わる位置でカットされ、残った部分が縫い合わされて継ぎ目にフィレットがかかります。選んだ点で、各サーフェスの残す側が決まります。",
+    "cmd.surface_chamfer": "サーフェス面取り",
+    "help.surface.chamfer": "2つのサーフェスボディの継ぎ目を面取りします。各サーフェスは相手と交わる位置でカットされ、残った部分が縫い合わされ、1つの距離、2つの距離、または距離と角度で継ぎ目が面取りされます。選んだ点で、各サーフェスの残す側が決まります。"
+  },
+  "ko": {
+    "help.surface.fillet": "두 서피스 바디 사이의 이음새를 구르는 공으로 둥글게 만듭니다. 각 서피스는 다른 서피스와 만나는 곳에서 잘리고, 남은 조각이 꿰매져 이음새에 필렛이 만들어집니다. 선택한 점이 각 서피스에서 남길 쪽을 정합니다.",
+    "cmd.surface_chamfer": "서피스 모따기",
+    "help.surface.chamfer": "두 서피스 바디 사이의 이음새를 모따기합니다. 각 서피스는 다른 서피스와 만나는 곳에서 잘리고, 남은 조각이 꿰매진 뒤 이음새가 하나의 거리, 두 거리 또는 거리와 각도로 모따기됩니다. 선택한 점이 각 서피스에서 남길 쪽을 정합니다."
+  },
+  "vi": {
+    "help.surface.fillet": "Bo tròn đường nối giữa hai thân bề mặt bằng một quả cầu lăn: mỗi bề mặt được cắt tại nơi bề mặt kia gặp nó, các phần giữ lại được khâu lại và đường nối được bo tròn. Các điểm bạn chọn quyết định phía nào của mỗi bề mặt được giữ.",
+    "cmd.surface_chamfer": "Vát mép bề mặt",
+    "help.surface.chamfer": "Vát mép đường nối giữa hai thân bề mặt: mỗi bề mặt được cắt tại nơi bề mặt kia gặp nó, các phần giữ lại được khâu lại và đường nối được vát bằng một khoảng cách, hai khoảng cách hoặc một khoảng cách và một góc. Các điểm bạn chọn quyết định phía nào của mỗi bề mặt được giữ."
+  },
+  "zh": {
+    "help.surface.fillet": "用滚球对两个曲面体之间的接缝进行倒圆：每个曲面在另一曲面与其相交处被裁剪，保留的部分缝合在一起，再对接缝倒圆。所选的点决定每个曲面保留哪一侧。",
+    "cmd.surface_chamfer": "曲面倒角",
+    "help.surface.chamfer": "对两个曲面体之间的接缝进行倒角：每个曲面在另一曲面与其相交处被裁剪，保留的部分缝合在一起，再按一个距离、两个距离或距离加角度对接缝倒角。所选的点决定每个曲面保留哪一侧。"
+  }
+}

@@ -10,6 +10,7 @@ surface_revolve = { master = "revolve", accent = "surface" }
 surface_sweep = { master = "sweep", accent = "surface" }
 surface_loft = { master = "loft", accent = "surface" }
 surface_fillet = { master = "fillet", accent = "surface" }
+surface_chamfer = { master = "chamfer_surface", accent = "surface" }
 surface_patch = { master = "patch", accent = "surface" }
 surface_stitch = { master = "stitch", accent = "surface" }
 surface_unstitch = { master = "unstitch", accent = "surface" }

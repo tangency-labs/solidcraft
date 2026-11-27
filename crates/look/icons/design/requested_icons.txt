@@ -385,6 +385,7 @@ suppress	false
 surface	false
 surface_blend	false
 surface_boundary	false
+surface_chamfer	false
 surface_extend	false
 surface_extrude	false
 surface_fair	false

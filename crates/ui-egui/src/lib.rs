@@ -81,6 +81,7 @@ pub mod dialogs_save_mesh;
 pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
+pub(crate) mod dialogs_surface_fillet;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
@@ -258,6 +259,8 @@ mod file_load_ui_tests;
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
 pub mod mouse_gesture;
+#[cfg(test)]
+mod surface_fillet_dialog_tests;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
 pub use solidcraft_ui_kit::navigation_bar;

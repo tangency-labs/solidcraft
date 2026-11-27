@@ -579,6 +579,29 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
+/// The three faces of a surface body rounded between two surfaces, each as its own surface body:
+/// the face at `a`, the face at `b` and the round (the face the body's history says the fillet
+/// made from an edge), in that order. Their histories are over `[body]`. A point nearer the round
+/// than to its own face, or two points on one face, are refused.
+pub fn rounded_parts(body: &Body, a: Vec3, b: Vec3) -> Result<[Body; 3]> {
+    body.require_brep("rounded parts")?;
+    let r = body.record();
+    if r.faces.len() != 3 {
+        return Err(invalid("the body is not two surfaces and a round between them"));
+    }
+    let history = body.history().ok_or_else(|| invalid("the body has no history to tell its round by"))?;
+    let round = history
+        .faces
+        .iter()
+        .position(|f| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. })))
+        .ok_or_else(|| invalid("the body has no round"))?;
+    let (fa, fb) = (nearest_face(body, a)?, nearest_face(body, b)?);
+    if fa == round || fb == round || fa == fb {
+        return Err(invalid("pick a point on each surface that is farther from the seam than the radius"));
+    }
+    Ok([taken(body, r, &[(fa, false)])?, taken(body, r, &[(fb, false)])?, taken(body, r, &[(round, false)])?])
+}
+
 /// A body's faces taken apart: each picked face (by points on it; every face when none are given)
 /// its own surface body, and the faces left, if any, one surface body. A solid comes apart into
 /// surfaces. Histories are over `[body]`: each face is the body's.

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Surface chamfer</title>
+  <path d="M32 6L54.5 19L54.5 34.6L32 21.6Z" fill="#b8c3cf"/>
+  <path d="M23 37.2L45.5 50.2L32 58L9.5 45Z" fill="#e2e8ef"/>
+  <path d="M32 21.6L54.5 34.6L45.5 50.2L23 37.2Z" fill="#328bd3"/>
+  <path d="M32 6L54.5 19L54.5 34.6L45.5 50.2L32 58L9.5 45L23 37.2L32 21.6Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 21.6L54.5 34.6" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23 37.2L45.5 50.2" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

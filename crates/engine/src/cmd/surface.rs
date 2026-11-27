@@ -3,8 +3,8 @@
 
 use serde_json::Value;
 use solidcraft_doc::{
-    BlendSide, EdgeContinuity, Expr, ExtendMode, ExtendTo, FaceAt, FeatureKind, PatchContinuity, PlaneRef, ProfileSel, RuledCorners, RuledMode,
-    TrimCurves, expr::Kind,
+    BlendSide, EdgeContinuity, Expr, ExtendMode, ExtendTo, FaceAt, FeatureKind, FilletTrim, PatchContinuity, PlaneRef, ProfileSel, RuledCorners,
+    RuledMode, TrimCurves, expr::Kind,
 };
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -20,6 +20,7 @@ use crate::schema::surface::{
     ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_fillet::{SurfaceChamferParams, SurfaceFilletParams};
 use crate::schema::surface_midsurface::{
     MidsurfaceAnalysis, MidsurfaceAnalyzeParams, MidsurfaceCluster, MidsurfaceCompleteness, MidsurfaceLeftover, MidsurfacePair, MidsurfaceParams,
     MidsurfaceUncovered,
@@ -42,6 +43,8 @@ const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::n
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 const SURFACE_LOFT_CONTRACT: TypedContract<SurfaceLoftParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
+const SURFACE_CHAMFER_CONTRACT: TypedContract<SurfaceChamferParams> = TypedContract::new();
+const SURFACE_FILLET_CONTRACT: TypedContract<SurfaceFilletParams> = TypedContract::new();
 const SURFACE_RULED_CONTRACT: TypedContract<SurfaceRuledParams> = TypedContract::new();
 const SURFACE_EXTRUDE_CONTRACT: TypedContract<SurfaceExtrudeParams> = TypedContract::new();
 const SURFACE_REVOLVE_CONTRACT: TypedContract<SurfaceRevolveParams> = TypedContract::new();
@@ -157,10 +160,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FAIR_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; faces?: [[x,y,z]] points on the faces to fair (default: every face); strength?: number (0..1 of the full fairing step, default 1); iterations?: number (1..1000 steps, default 1); keep_edges?: bool (default true: hold the boundary row and the row next to it, so a face keeps meeting its neighbours in position and in tangent); tolerance?: expr mm (how far a control vertex may move, default 0.001 of the body's size). Moves the interior control vertices of each B-spline face to flatten its curvature variation while the boundary stays put: the face keeps its edges and the body its shape within the tolerance, and the warning in the reply carries the energy before and after; name?"),
-    planned!("surface.fillet", "Surface Fillet", "769")
+    CommandSpec::new("surface.fillet", "Surface Fillet", crate::checked!("surface.fillet", surface_fillet)).begins_edit()
         .at("SURFACE", "MODIFY")
         .icon("surface_fillet")
-        .params("planned: a, b: {body, point} (two faces of separate bodies that meet or cross; the points pick the side the ball rolls on); radius: expr; trim?: both|first|none"),
+        .contract(&SURFACE_FILLET_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept: the side the rolling ball stays on); radius: expr; trim?: both|first|none (default both: each surface is cut back to the round and sewn to it, one body; first: only a is cut back and sewn to the round, b is left as it was; none: neither changes and the round alone is a new surface body); extend?: bool (default false: a surface that stops short of the other is extended to meet it). Each surface is cut where the other meets it, the kept pieces are sewn into a's body (b's is gone, with trim both) and the seam is rounded with an exact fillet. A new surface body per undo step; nothing is made if the surfaces don't meet, or the ball does not fit"),
+    CommandSpec::new("surface.chamfer", "Surface Chamfer", crate::checked!("surface.chamfer", surface_chamfer)).begins_edit()
+        .at("SURFACE", "MODIFY")
+        .icon("surface_chamfer")
+        .contract(&SURFACE_CHAMFER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept); distance: expr (how far back along each surface the bevel reaches); distance2?: expr (a different distance along the second surface) or angle?: expr (the angle the bevel makes with the first surface), not both; flip?: bool (swap which surface is the first, by default the one facing up most); trim?: both|first|none (as surface.fillet: both: each surface is cut back and sewn to the bevel, one body; first: only a; none: the bevel alone as a new surface body); extend?: bool (default false: a surface that stops short of the other is extended to meet it). A new surface body per undo step; nothing is made if the surfaces don't meet, or the bevel does not fit"),
 ];
 
 fn patch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -830,6 +841,87 @@ fn midsurface_analyze(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// One face of `surface.fillet`: `key` is `{body, point}`, the body a surface.
+fn fillet_face(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<FaceAt> {
+    let side = p.get(key).ok_or_else(|| bad(cmd, format!("`{key}` must be {{body, point}}")))?;
+    let body = str_(side, "body").ok_or_else(|| bad(cmd, format!("`{key}.body` must name a body")))?.to_string();
+    let point =
+        side.get("point").and_then(vec3).filter(|q| q.is_finite()).ok_or_else(|| bad(cmd, format!("`{key}.point` must be [x, y, z] on the face")))?;
+    match s.model.state().body(&body) {
+        None => Err(bad(cmd, format!("no body `{body}`"))),
+        Some(b) if !b.body.is_surface() => {
+            Err(bad(cmd, format!("`{body}` is not a surface body: Surface Fillet rounds between surfaces (use Fillet for a solid's edges)")))
+        }
+        Some(_) => Ok(FaceAt { body: BodyName(body), point: Position(point) }),
+    }
+}
+
+/// The `trim` of `surface.fillet` and `surface.chamfer`.
+fn trim_param(p: &Value, cmd: &str) -> Result<FilletTrim> {
+    match p.get("trim") {
+        None | Some(Value::Null) => Ok(FilletTrim::Both),
+        Some(Value::String(s)) => match s.to_ascii_lowercase().as_str() {
+            "both" => Ok(FilletTrim::Both),
+            "first" => Ok(FilletTrim::First),
+            "none" => Ok(FilletTrim::None),
+            o => Err(bad(cmd, format!("unknown trim `{o}` (both, first or none)"))),
+        },
+        Some(_) => Err(bad(cmd, "`trim` must be both, first or none")),
+    }
+}
+
+/// `surface.chamfer`: a bevel between two surface bodies (#769).
+fn surface_chamfer(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "surface.chamfer";
+    let a = fillet_face(s, p, cmd, "a")?;
+    let b = fillet_face(s, p, cmd, "b")?;
+    if a.body == b.body {
+        return Err(bad(cmd, "`a` and `b` must be two different surface bodies"));
+    }
+    let distance = expr(p, "distance").ok_or_else(|| bad(cmd, "`distance` is required"))?;
+    check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    let distance2 = optional_expr(p, "distance2", cmd)?;
+    let angle = optional_expr(p, "angle", cmd)?;
+    if distance2.is_some() && angle.is_some() {
+        return Err(bad(cmd, "`distance2` and `angle` don't go together: give the second side by one of them"));
+    }
+    if let Some(e) = &distance2 {
+        check_expr(s, e, Kind::Length, cmd, "distance2")?;
+    }
+    if let Some(e) = &angle {
+        check_expr(s, e, Kind::Angle, cmd, "angle")?;
+    }
+    let trim = trim_param(p, cmd)?;
+    add_feature(
+        s,
+        p,
+        FeatureKind::SurfaceChamfer {
+            a,
+            b,
+            distance,
+            distance2,
+            angle,
+            flip: optional_flag(p, "flip", false, cmd)?,
+            trim,
+            extend: optional_flag(p, "extend", false, cmd)?,
+        },
+    )
+}
+
+/// `surface.fillet`: a rolling-ball fillet between two surface bodies (#769).
+fn surface_fillet(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "surface.fillet";
+    let a = fillet_face(s, p, cmd, "a")?;
+    let b = fillet_face(s, p, cmd, "b")?;
+    if a.body == b.body {
+        return Err(bad(cmd, "`a` and `b` must be two different surface bodies"));
+    }
+    let radius = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` is required"))?;
+    check_expr(s, &radius, Kind::Length, cmd, "radius")?;
+    let trim = trim_param(p, cmd)?;
+    add_feature(s, p, FeatureKind::SurfaceFillet { a, b, radius, trim, extend: optional_flag(p, "extend", false, cmd)? })
+}
+
 fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.ruled";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
@@ -1179,6 +1271,194 @@ mod tests {
 
     fn area(s: &Session, name: &str) -> f64 {
         solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().area
+    }
+
+    /// Surface Fillet (#769): two crossing sheets are cut at their seam, sewn into the first
+    /// body, and the seam rounded with an exact quarter cylinder.
+    #[test]
+    fn surface_fillet_rounds_the_seam_of_two_crossing_sheets() {
+        let mut s = Session::default();
+        // A in the XY plane (x -10..10, y -10..10); B in the XZ plane (x -10..10, z -10..10).
+        sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+        sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+        let p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": "2 mm"});
+        let r = run(&mut s, "surface.fillet", p.clone());
+        assert_eq!(r["removed_bodies"], json!(["B"]), "{r}");
+        let st = s.world_state().unwrap();
+        assert!(st.body("B").is_none() && st.body("A").unwrap().body.is_surface());
+        // Two flats of 20 x 8 (each lost the 2 mm the round takes) and a quarter cylinder of
+        // radius 2 and length 20.
+        let want = 2.0 * 20.0 * 8.0 + std::f64::consts::FRAC_PI_2 * 2.0 * 20.0;
+        let got = area(&s, "A");
+        assert!((got - want).abs() < 0.01 * want, "{got} vs {want}");
+        assert_eq!(st.body("A").unwrap().body.face_count(), 3);
+        // The round is named after the two faces it replaces, as a solid's fillet face is.
+        let faces = run(&mut s, "model.faces", json!({"body": "A"}));
+        let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
+        assert!(names.iter().any(|n| n.contains(":blend(")), "{names:?}");
+        // Undo brings both sheets back; redo and a cold reopen give the same body.
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.world_state().unwrap().body("B").is_some());
+        run(&mut s, "edit.redo", json!({}));
+        assert!((area(&s, "A") - got).abs() < 1e-9);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "A") - got).abs() < 1e-6);
+    }
+
+    /// Surface Fillet's `trim`: `first` cuts back and sews only the first surface, `none` leaves
+    /// both as they were and makes the round alone.
+    #[test]
+    fn surface_fillet_trim_first_and_none_leave_the_other_surfaces_alone() {
+        let round = std::f64::consts::FRAC_PI_2 * 2.0 * 20.0;
+        let mk = |trim: &str| {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            let p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": trim});
+            run(&mut s, "surface.fillet", p);
+            s
+        };
+        // First: A is cut back to the round (2 flats of 20 x 8 less one) and sewn to it; B whole.
+        let s = mk("first");
+        assert!((area(&s, "A") - (160.0 + round)).abs() < 0.01 * (160.0 + round), "{}", area(&s, "A"));
+        assert!((area(&s, "B") - 400.0).abs() < 1e-6, "{}", area(&s, "B"));
+        // None: both whole, and the round alone a new surface body.
+        let s = mk("none");
+        assert!((area(&s, "A") - 400.0).abs() < 1e-6 && (area(&s, "B") - 400.0).abs() < 1e-6);
+        let st = s.world_state().unwrap();
+        let made: Vec<_> = st.bodies.iter().filter(|b| b.name != "A" && b.name != "B").collect();
+        assert_eq!(made.len(), 1);
+        assert!(made.iter().all(|b| b.body.is_surface() && b.body.face_count() == 1));
+        let name = made.iter().map(|b| b.name.clone()).next().unwrap();
+        assert!((area(&s, &name) - round).abs() < 0.01 * round, "{}", area(&s, &name));
+        // Anything else is refused.
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+        sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+        let bad = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": "second"});
+        assert!(s.execute("surface.fillet", &bad).is_err());
+        // A point inside the round's reach (1 mm from the seam, radius 2) can't tell the surface from the round.
+        let near = json!({"a": {"body": "A", "point": [0, 1, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": "none"});
+        assert!(s.execute("surface.fillet", &near).is_err());
+    }
+
+    /// Surface Chamfer (#769): two crossing sheets bevelled at their seam, by one distance and
+    /// by two; `trim: none` makes the bevel alone; what it cannot bevel is refused.
+    #[test]
+    fn surface_chamfer_bevels_the_seam_of_two_crossing_sheets() {
+        let mk = |extra: Value| {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            let mut p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "distance": 2});
+            if let (Some(m), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+                m.extend(e.clone());
+            }
+            let r = s.execute("surface.chamfer", &p);
+            (s, r)
+        };
+        // Equal: two flats of 20 x 8 and a bevel 2 sqrt 2 wide.
+        let (s, r) = mk(json!({}));
+        r.unwrap();
+        let want = 2.0 * 20.0 * 8.0 + 2.0 * 2.0_f64.sqrt() * 20.0;
+        assert!((area(&s, "A") - want).abs() < 0.01 * want, "{} vs {want}", area(&s, "A"));
+        assert!(s.world_state().unwrap().body("B").is_none());
+        // Two distances: flats 8 and 7 deep, a bevel sqrt(4 + 9) wide (whichever surface is first).
+        let (s, r) = mk(json!({"distance2": 3}));
+        r.unwrap();
+        let want = 20.0 * 8.0 + 20.0 * 7.0 + 13.0_f64.sqrt() * 20.0;
+        assert!((area(&s, "A") - want).abs() < 0.01 * want, "{} vs {want}", area(&s, "A"));
+        // By an angle: the bevel still joins the two flats, and is no wider than the diagonal.
+        let (s, r) = mk(json!({"angle": "30 deg"}));
+        r.unwrap();
+        assert_eq!(s.world_state().unwrap().body("A").unwrap().body.face_count(), 3);
+        // None: both whole, the bevel alone a new body.
+        let (s, r) = mk(json!({"trim": "none"}));
+        r.unwrap();
+        assert!((area(&s, "A") - 400.0).abs() < 1e-6 && (area(&s, "B") - 400.0).abs() < 1e-6);
+        let st = s.world_state().unwrap();
+        let made: Vec<_> = st.bodies.iter().filter(|b| b.name != "A" && b.name != "B").collect();
+        assert_eq!(made.len(), 1);
+        let name = made.iter().map(|b| b.name.clone()).next().unwrap();
+        let want = 2.0 * 2.0_f64.sqrt() * 20.0;
+        assert!((area(&s, &name) - want).abs() < 0.01 * want, "{}", area(&s, &name));
+        // Refused, and nothing changes.
+        for extra in [json!({"distance2": 3, "angle": "30 deg"}), json!({"distance": 0}), json!({"distance": 500}), json!({"trim": "second"})] {
+            assert!(mk(extra.clone()).1.is_err(), "{extra}");
+        }
+    }
+
+    /// The example designs of the Surface Fillet and Chamfer dialogs' pull request, as their
+    /// scripts run them: two 20 x 20 sheets crossing at right angles. Planes and the round are
+    /// exact, so the areas match the closed forms to rounding.
+    #[test]
+    fn surface_fillet_and_chamfer_examples_match_their_closed_forms() {
+        let crossing = || {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            s
+        };
+        let sides = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}});
+        let with = |extra: Value| {
+            let mut p = sides.clone();
+            if let (Some(m), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+                m.extend(e.clone());
+            }
+            p
+        };
+        let close = |got: f64, want: f64| assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        // 1. Fillet radius 2, trim both: flats 2 x 20 x 8 and a quarter cylinder r 2, length 20.
+        let mut s = crossing();
+        run(&mut s, "surface.fillet", with(json!({"radius": "2 mm"})));
+        close(area(&s, "A"), 320.0 + 20.0 * std::f64::consts::PI);
+        assert_eq!(s.world_state().unwrap().body("A").unwrap().body.face_count(), 3);
+        // 2. Chamfer 2 and 3: flats 20 x 8 and 20 x 7, a bevel sqrt(13) wide.
+        let mut s = crossing();
+        run(&mut s, "surface.chamfer", with(json!({"distance": "2 mm", "distance2": "3 mm"})));
+        close(area(&s, "A"), 300.0 + 20.0 * 13.0_f64.sqrt());
+        // 3. Fillet radius 1.5, trim none: both sheets whole, the round alone 15 pi.
+        let mut s = crossing();
+        run(&mut s, "surface.fillet", with(json!({"radius": "1.5 mm", "trim": "none", "body_name": "Round"})));
+        close(area(&s, "A"), 400.0);
+        close(area(&s, "B"), 400.0);
+        close(area(&s, "Round"), 15.0 * std::f64::consts::PI);
+        // 4. Radius 500 is refused with the largest radius that fits, and nothing changes.
+        let mut s = crossing();
+        let before = s.doc.to_json();
+        let e = s.execute("surface.fillet", &with(json!({"radius": "500 mm"}))).unwrap_err().to_string();
+        assert!(e.contains("the largest radius that fits"), "{e}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+
+    /// Surface Fillet refuses what it cannot round, without changing the design.
+    #[test]
+    fn surface_fillet_refuses_what_it_cannot_round() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+        sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+        // A sheet in a plane parallel to A's never meets it.
+        sheet(&mut s, "XY", "Far", [-10.0, -10.0], [10.0, 10.0]);
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Solid"}));
+        let before = s.doc.features.len();
+        let face = |body: &str, at: [f64; 3]| json!({"body": body, "point": at});
+        for p in [
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0])}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": 0}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": -1}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("A", [0.0, 5.0, 0.0]), "radius": 1}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("Nope", [0.0, 0.0, 5.0]), "radius": 1}),
+            json!({"a": face("Solid", [5.0, 5.0, 10.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": 1}),
+            json!({"a": {"body": "A"}, "b": face("B", [0.0, 0.0, 5.0]), "radius": 1}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "radius": 1}),
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("Far", [0.0, 0.0, 0.0]), "radius": 1}),
+            // Far larger than the sheets leave room for.
+            json!({"a": face("A", [0.0, 5.0, 0.0]), "b": face("B", [0.0, 0.0, 5.0]), "radius": 500}),
+        ] {
+            assert!(s.execute("surface.fillet", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.features.len(), before);
+        assert!(s.world_state().unwrap().body("B").is_some());
     }
 
     /// Surface Extrude of open curves: a line and an arc joined end to end (listed in either
@@ -2830,7 +3110,7 @@ mod tests {
     /// as it was.
     #[test]
     fn planned_commands_refuse_and_leave_the_design_alone() {
-        let planned = ["surface.fillet"];
+        let planned: [&str; 0] = []; // none left: surface.fillet (#769) is built
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "B"}));
         let before = s.doc.features.len();

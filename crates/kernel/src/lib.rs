@@ -666,6 +666,7 @@ pub use surfaces::remove_faces;
 pub use surfaces::reverse_faces;
 pub use surfaces::revolve_sheet;
 pub use surfaces::revolve_sheet_legacy_sides;
+pub use surfaces::rounded_parts;
 pub use surfaces::stitch;
 pub use surfaces::sweep_sheet;
 pub use surfaces::sweep_sheet_point_path_with;
