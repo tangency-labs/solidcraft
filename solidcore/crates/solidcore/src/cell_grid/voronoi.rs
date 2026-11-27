@@ -53,9 +53,12 @@ pub(crate) const RINGS: i64 = 3;
 const START_REACH: f64 = 4.0;
 /// Smallest area (mm²) of an opening kept.
 const MIN_AREA: f64 = 1e-9;
-/// A corner radius is clamped this fraction below the largest the polygon takes, so no side of
-/// the rounded cell shrinks to nothing.
-const ROUND_SLACK: f64 = 1e-6;
+/// A corner radius is at most this fraction of the distance from a cell's centroid to its nearest
+/// side, so the cell keeps a core to round about.
+const ROUND_MOST: f64 = 0.9;
+/// Sides of a rounded cell's core shorter than this (mm), and corners turning less than this
+/// (radians), are left out: their arcs and lines would be too short to build.
+const ROUND_TOL: f64 = 1e-6;
 /// The mantissa bits of an `f64`: a hash's top 53 bits as a fraction in `[0, 1)`.
 const MANTISSA_BITS: u32 = 53;
 
@@ -135,40 +138,56 @@ pub(crate) fn cell_polygon_within(
     Some((s, poly))
 }
 
-/// `tan` of half the turn at `at` from `prev` to `next`: how far along each side a corner of
-/// radius 1 reaches.
-fn half_turn_tan(prev: Vec2, at: Vec2, next: Vec2) -> Option<f64> {
-    let u = (at - prev).normalized()?;
-    let v = (next - at).normalized()?;
-    let t = cross2(u, v) / (1.0 + u.dot(v));
-    t.is_finite().then_some(t)
-}
-
-/// The largest corner radius the convex polygon takes: the two corners of every side meet at most
-/// at its middle.
-fn max_radius(poly: &[Vec2]) -> f64 {
+/// The distance from the convex polygon's centroid to its nearest side.
+fn centroid_clearance(poly: &[Vec2]) -> f64 {
     let n = poly.len();
-    let tan = |k: usize| -> Option<f64> {
-        half_turn_tan(
-            *poly.get(ring_prev(k, n))?,
-            *poly.get(k)?,
-            *poly.get(ring_next(k, n))?,
-        )
-    };
+    let c = poly_centroid(poly);
     (0..n)
         .filter_map(|k| {
-            let len = poly.get(k)?.distance(*poly.get(ring_next(k, n))?);
-            let reach = tan(k)? + tan(ring_next(k, n))?;
-            (reach > 0.0).then(|| len / reach)
+            let (a, b) = (*poly.get(k)?, *poly.get(ring_next(k, n))?);
+            let d = (b - a).normalized()?;
+            Some(cross2(d, c - a))
         })
         .fold(f64::INFINITY, f64::min)
 }
 
+/// The polygon without the corners that end a side shorter than [`ROUND_TOL`] or turn less than
+/// [`ROUND_TOL`].
+fn without_slivers(poly: &[Vec2]) -> Vec<Vec2> {
+    let mut pts: Vec<Vec2> = Vec::with_capacity(poly.len());
+    for &p in poly {
+        if pts.last().is_none_or(|q| q.distance(p) > ROUND_TOL) {
+            pts.push(p);
+        }
+    }
+    while pts.len() > 1
+        && matches!((pts.first(), pts.last()), (Some(a), Some(b)) if a.distance(*b) <= ROUND_TOL)
+    {
+        pts.pop();
+    }
+    let n = pts.len();
+    (0..n)
+        .filter_map(|k| {
+            let (prev, at, next) = (
+                *pts.get(ring_prev(k, n))?,
+                *pts.get(k)?,
+                *pts.get(ring_next(k, n))?,
+            );
+            let (u, v) = ((at - prev).normalized()?, (next - at).normalized()?);
+            (cross2(u, v).atan2(u.dot(v)).abs() > ROUND_TOL).then_some(at)
+        })
+        .collect()
+}
+
 /// A convex polygon with its corners rounded: its core (the polygon moved in by `r` on every
-/// side), the radius, the outline as lines and arcs, and the area. `None` when the core
-/// collapses.
+/// side, so a side too short for the radius goes), the radius, the outline as lines and arcs (the
+/// points within `r` of the core), and the area. The radius is at most [`ROUND_MOST`] of the
+/// centroid's clearance. `None` when no core is left.
 fn rounded(poly: &[Vec2], r: f64) -> Option<(Convex, f64, Vec<Prim>, f64)> {
-    let r = r.min(max_radius(poly) * (1.0 - ROUND_SLACK));
+    let r = r.min(centroid_clearance(poly) * ROUND_MOST);
+    if !(r > ROUND_TOL) {
+        return None;
+    }
     let n = poly.len();
     let mut core = poly.to_vec();
     for k in 0..n {
@@ -177,7 +196,7 @@ fn rounded(poly: &[Vec2], r: f64) -> Option<(Convex, f64, Vec<Prim>, f64)> {
         let inward = Vec2::new(-d.y, d.x);
         core = clip_halfplane(&core, inward, inward.dot(a) + r);
     }
-    let core = Convex::new(core)?;
+    let core = Convex::new(without_slivers(&core))?;
     let m = core.pts.len();
     let mut prims = Vec::with_capacity(2 * m);
     let mut perimeter = 0.0;

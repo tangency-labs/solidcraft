@@ -3077,6 +3077,77 @@ fn voronoi_cells_with_rounded_corners_are_smaller_and_as_many() {
 }
 
 #[test]
+fn a_rounded_voronoi_cell_with_a_short_side_keeps_its_corner_radius() {
+    // Cells of this grid have sides far shorter than the radius: the radius must not follow them.
+    let field = [rect(8.0, 8.0, 152.0, 92.0)];
+    for (seed, irregularity) in [(0, 0.7), (7, 0.7), (0, 1.0), (3, 0.2)] {
+        let sharp = CellGridSpec {
+            size: 12.0,
+            web: 2.0,
+            ..voronoi(seed, irregularity, Clip::Whole)
+        };
+        let shortest = run(&field, &sharp)
+            .cells
+            .iter()
+            .flat_map(|c| {
+                let pts = corners(c);
+                let n = pts.len();
+                (0..n)
+                    .map(|k| pts[k].distance(pts[ring_next(k, n)]))
+                    .collect::<Vec<_>>()
+            })
+            .fold(f64::INFINITY, f64::min);
+        let plan = run(
+            &field,
+            &CellGridSpec {
+                corner_radius: 1.5,
+                ..sharp
+            },
+        );
+        assert!(plan.cells.len() > 20, "{}", plan.cells.len());
+        let mut full = 0;
+        for cell in &plan.cells {
+            let segs = &cell.loops[0].segs;
+            for seg in segs {
+                match *seg {
+                    Seg2::Arc { radius, sweep, .. } => {
+                        assert!(
+                            radius > 0.2 && radius <= 1.5,
+                            "{seed} {irregularity} {seg:?}"
+                        );
+                        assert!(sweep * radius > 1e-6, "{seg:?}");
+                        full += usize::from(radius == 1.5);
+                    }
+                    Seg2::Line { a, b } => {
+                        let (dx, dy) = (b.x - a.x, b.y - a.y);
+                        assert!(dx.hypot(dy) > 1e-6, "{seg:?}");
+                    }
+                    _ => panic!("{seg:?}"),
+                }
+            }
+            // The corners turn the outline once.
+            let turn: f64 = segs
+                .iter()
+                .map(|seg| match seg {
+                    Seg2::Arc { sweep, .. } => *sweep,
+                    _ => 0.0,
+                })
+                .sum();
+            assert!((turn - 2.0 * PI).abs() < 1e-9, "{turn}");
+            let area = cell.loops[0].signed_area().unwrap().value;
+            assert!((area - cell.area).abs() < 1e-6, "{area} {}", cell.area);
+        }
+        assert!(full > 0);
+        if (seed, irregularity) == (0, 0.7) {
+            assert!(
+                shortest < 0.5,
+                "the case needs a short side, not {shortest}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_voronoi_grid_snaps_as_whole_cells() {
     let field = [rect(0.0, 0.0, 40.0, 30.0)];
     let snap = run(&field, &voronoi(9, 0.5, Clip::Snap));
