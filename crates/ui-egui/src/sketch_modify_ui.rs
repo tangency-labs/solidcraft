@@ -543,6 +543,7 @@ pub fn edit_block(app: &mut SolveApp, id: &str) -> bool {
         input.items = members;
     }
     dialog.extra.insert("block".into(), json!(id));
+    dialog.extra.insert("members".into(), json!(block.curves));
     app.tool = None;
     app.dialog = Some(dialog);
     true
@@ -1310,9 +1311,16 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 ("sketch.block", p)
             } else {
                 let block = extra.get("block").and_then(Value::as_str).ok_or("Select the block to edit first")?;
-                let members = block_members(app, block).ok_or("That block is no longer in the sketch")?;
-                let add: Vec<&String> = curves.iter().filter(|c| !members.contains(c)).collect();
-                let remove: Vec<&String> = members.iter().filter(|m| !curves.contains(m)).collect();
+                let live = block_members(app, block).ok_or("That block is no longer in the sketch")?;
+                // Changes against the members the dialog showed: a member added since stays.
+                let shown: Vec<String> = extra.get("members").and_then(|m| serde_json::from_value(m.clone()).ok()).unwrap_or_else(|| live.clone());
+                let (live, shown_set, picked): (std::collections::HashSet<&str>, std::collections::HashSet<&str>, std::collections::HashSet<&str>) = (
+                    live.iter().map(String::as_str).collect(),
+                    shown.iter().map(String::as_str).collect(),
+                    curves.iter().map(String::as_str).collect(),
+                );
+                let add: Vec<&String> = curves.iter().filter(|c| !shown_set.contains(c.as_str()) && !live.contains(c.as_str())).collect();
+                let remove: Vec<&String> = shown.iter().filter(|m| !picked.contains(m.as_str()) && live.contains(m.as_str())).collect();
                 ("sketch.block_edit", json!({"scale": scale, "name": name.trim(), "add": add, "remove": remove, "show_constraints": show}))
             }
         }

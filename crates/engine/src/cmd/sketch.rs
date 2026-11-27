@@ -4829,6 +4829,16 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             }
             driven = true;
         }
+        // A closed block already holds its own sizes: with `if_redundant: "driven"`, a dimension
+        // wholly inside one at its current size measures it.
+        if !driven
+            && defines.is_none()
+            && p.get("value").is_none_or(Value::is_null)
+            && str_(p, "if_redundant").is_some_and(|m| m.eq_ignore_ascii_case("driven"))
+            && sk.locks_a_closed_block(&k)
+        {
+            driven = true;
+        }
         if driven {
             // A reference dimension: measures, no parameter.
             let name = k.name();
@@ -5805,6 +5815,9 @@ fn detach_point(s: &mut Session, p: &Value) -> Result<Value> {
                     let Some((ax_a, ax_b)) = line_pts(sk, l) else { continue };
                     let Some(mir_pos) = reflect_across_line(cur_new_pos, ax_a, ax_b) else { continue };
                     let Some(mir_ci) = find_mirrored_curve(sk, cur_ci, cur_new_idx, other_pi, l, &seen_curves) else { continue };
+                    if let Some(why) = sk.curves.get(mir_ci).and_then(|c| sk.block_refusal(&c.id)) {
+                        return Err(bad(cmd, why));
+                    }
                     let other_users = sk.curves.iter().filter(|c| c.kind.uses(other_pi)).count();
                     let other_protected =
                         other_pi == 0 || sk.points.get(other_pi).is_some_and(|pt| pt.fixed || pt.link.is_some() || pt.exprs.is_some());

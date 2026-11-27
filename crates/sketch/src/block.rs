@@ -214,13 +214,16 @@ fn check_block(b: &SketchBlock) -> Result<()> {
         return Err(SketchError::Invalid(format!("block `{}` has too long a name", b.id)));
     }
     let bounded = |v: f64| v.is_finite() && v.abs() < crate::MAX_COORD;
-    if !(bounded(b.length) && b.length > 0.0) {
-        return Err(SketchError::Invalid(format!("block `{}` has an invalid length", b.id)));
-    }
+    check_length(&b.id, b.length)?;
     if b.points.iter().any(|(_, uv)| !uv.iter().all(|v| bounded(*v))) || b.radii.iter().any(|(_, k)| !bounded(*k)) {
         return Err(SketchError::Invalid(format!("block `{}` lies too far from its axis for its size", b.id)));
     }
     Ok(())
+}
+
+/// Block `id`'s captured axis length `l` is finite, positive and in range.
+fn check_length(id: &str, l: f64) -> Result<()> {
+    if l.is_finite() && l > 0.0 && l < crate::MAX_COORD { Ok(()) } else { Err(SketchError::Invalid(format!("block `{id}` has an invalid length"))) }
 }
 
 /// A tidy length near `l`: 1, 2 or 5 times a power of ten.
@@ -356,10 +359,12 @@ impl Sketch {
     /// The constraints block `b` holds, or for an open block those it will hold when it closes
     /// as it is now.
     pub fn would_hold(&self, b: &SketchBlock) -> Vec<String> {
-        match &b.open {
-            None => b.held.clone(),
-            Some(open) => self.inside(&self.block_reach(b)).into_iter().filter(|c| !open.driving.contains(c)).collect(),
+        if !b.is_open() {
+            return b.held.clone();
         }
+        // Closing takes in what was drawn while it was open, so ask a copy that closes it.
+        let mut copy = self.clone();
+        copy.close_block(&b.id).ok().and_then(|closed| closed.made).map(|made| made.held).unwrap_or_default()
     }
 
     /// The block open for editing its contents, if one is.
@@ -479,6 +484,20 @@ impl Sketch {
 
     /// [`Sketch::make_block`] with its origin at `anchor` and its axis `angle` radians from +X.
     fn make_posed_block(&mut self, ids: &[String], scale: BlockScale, anchor: Anchor, angle: f64, name: Option<String>) -> Result<BlockMade> {
+        self.all_or_nothing(|sk| sk.make_posed_block_now(ids, scale, anchor, angle, name))
+    }
+
+    /// Run `f`, leaving the sketch as it was when `f` fails part way.
+    fn all_or_nothing<T>(&mut self, f: impl FnOnce(&mut Sketch) -> Result<T>) -> Result<T> {
+        let before = self.clone();
+        let out = f(self);
+        if out.is_err() {
+            *self = before;
+        }
+        out
+    }
+
+    fn make_posed_block_now(&mut self, ids: &[String], scale: BlockScale, anchor: Anchor, angle: f64, name: Option<String>) -> Result<BlockMade> {
         let members = self.block_members(ids, None)?;
         let points = self.member_points(&members);
         let (lo, hi) = self.members_box(&members).ok_or_else(|| SketchError::Invalid("the curves have no size to make a block of".into()))?;
@@ -541,6 +560,10 @@ impl Sketch {
     /// [`Sketch::make_block`] on an existing line as the axis (its start the block origin), as
     /// a paste of a whole block with its axis does.
     pub fn make_block_on(&mut self, ids: &[String], axis: &str, scale: BlockScale, name: Option<String>) -> Result<BlockMade> {
+        self.all_or_nothing(|sk| sk.make_block_on_now(ids, axis, scale, name))
+    }
+
+    fn make_block_on_now(&mut self, ids: &[String], axis: &str, scale: BlockScale, name: Option<String>) -> Result<BlockMade> {
         let members = self.block_members(ids, None)?;
         let a = self.curve_index(axis).ok_or_else(|| SketchError::Unknown(axis.into()))?;
         if members.contains(&a) || self.block_of(axis).is_some() {
@@ -600,6 +623,12 @@ impl Sketch {
         None
     }
 
+    /// Would a new driving constraint `k` lie wholly inside a closed block that does not hold it?
+    pub fn locks_a_closed_block(&self, k: &ConstraintKind) -> bool {
+        let c = Constraint { id: String::new(), kind: k.clone(), param: None, driven: false, text: None };
+        self.loose_inside_closed([&c]).is_some()
+    }
+
     /// Each closed block's member points and curves; with `axes`, its axis line and points too.
     pub fn block_members_now(&self, axes: bool) -> BlockMembers {
         let curves: HashMap<&str, usize> = self.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
@@ -612,7 +641,9 @@ impl Sketch {
                     if axes {
                         members.extend(curves.get(b.axis.as_str()));
                     }
-                    (self.member_points(&members).into_iter().collect(), members.into_iter().collect())
+                    let mut points: HashSet<usize> = self.member_points(&members).into_iter().collect();
+                    points.extend(b.loose.iter().filter_map(|p| self.point_index(p)));
+                    (points, members.into_iter().collect())
                 })
                 .collect(),
         )
@@ -667,9 +698,12 @@ impl Sketch {
         if factor == 1.0 {
             return Ok(());
         }
+        // Every new length is checked before any block changes.
+        for b in self.blocks.iter().filter(|b| ids.contains(&b.id)) {
+            check_length(&b.id, b.length * factor)?;
+        }
         for b in self.blocks.iter_mut().filter(|b| ids.contains(&b.id)) {
             b.length *= factor;
-            check_block(b)?;
         }
         Ok(())
     }
@@ -1037,12 +1071,15 @@ impl Sketch {
                 Err(_) => left_out.push(c.to_string()),
             }
         }
+        let others: HashSet<String> = check.owner.iter().filter(|(_, o)| o.id != id).map(|(c, _)| c.to_string()).collect();
         if kept.is_empty() {
             self.blocks.remove(index);
             self.remove_block_axes(vec![b.axis.clone()]);
             return Ok(BlockClosed { made: None, added, left_out });
         }
-        let members = self.with_guides(kept);
+        let mut members = self.with_guides(kept);
+        // Another block's guide line stays that block's.
+        members.retain(|c| self.curves.get(*c).is_some_and(|c| !others.contains(c.id.as_str())));
         if members.len() > MAX_BLOCK_CURVES {
             return Err(SketchError::TooLarge);
         }
@@ -1171,7 +1208,12 @@ impl Sketch {
                 members.push(check.member(self, id)?);
             }
         }
-        Ok(self.with_guides(members))
+        let members = self.with_guides(members);
+        // A guide line comes with its spline, and only when no other block has it.
+        for c in members.iter().filter_map(|c| self.curves.get(*c)).filter(|c| !seen.contains(c.id.as_str())) {
+            check.member(self, &c.id)?;
+        }
+        Ok(members)
     }
 
     /// `members` with the guide lines of the splines among them.
@@ -1232,12 +1274,14 @@ impl Sketch {
         let axis_ok = |axis: &str| curves.get(axis).is_some_and(|c| matches!(c.kind, CurveKind::Line { a, b } if a != b));
         let mut empty = Vec::new();
         let mut kept = Vec::with_capacity(self.blocks.len());
+        let mut shrunk = Vec::with_capacity(self.blocks.len());
         let mut loose = Vec::new();
         for mut b in std::mem::take(&mut self.blocks) {
             if !axis_ok(&b.axis) {
                 loose.extend(b.held);
                 continue;
             }
+            let before = (b.curves.len(), b.points.len());
             b.curves.retain(|c| curves.contains_key(c.as_str()));
             // The points the members that are left still use.
             let used: HashSet<&str> = b
@@ -1249,8 +1293,10 @@ impl Sketch {
                 .map(|p| p.id.as_str())
                 .collect();
             b.loose.retain(|p| existing.contains(p.as_str()));
-            b.points.retain(|(p, _)| used.contains(p.as_str()) || b.loose.contains(p));
-            b.radii.retain(|(c, _)| b.curves.contains(c));
+            let loose_now: HashSet<&str> = b.loose.iter().map(String::as_str).collect();
+            b.points.retain(|(p, _)| used.contains(p.as_str()) || loose_now.contains(p.as_str()));
+            let members: HashSet<&str> = b.curves.iter().map(String::as_str).collect();
+            b.radii.retain(|(c, _)| members.contains(c.as_str()));
             b.held.retain(|h| constraints.contains(h.as_str()));
             if let Some(open) = &mut b.open {
                 open.driving.retain(|h| constraints.contains(h.as_str()));
@@ -1258,14 +1304,35 @@ impl Sketch {
                 open.points.retain(|p| existing.contains(p.as_str()));
                 open.own.retain(|p| existing.contains(p.as_str()));
             }
+            let shrank = (b.curves.len(), b.points.len()) != before;
             // An open block stays while its contents are edited, even with no member left.
             if b.curves.is_empty() && !b.is_open() {
                 empty.push(b.axis);
             } else {
                 kept.push(b);
+                shrunk.push(shrank);
             }
         }
         self.blocks = kept;
+        // A closed block that lost members holds only what is still wholly inside it.
+        let kinds: HashMap<&str, &ConstraintKind> = self.constraints.iter().map(|c| (c.id.as_str(), &c.kind)).collect();
+        let mut leaving: Vec<(usize, Vec<String>)> = Vec::new();
+        for (i, b) in self.blocks.iter().enumerate() {
+            if !shrunk.get(i).copied().unwrap_or(false) || b.is_open() || b.held.is_empty() {
+                continue;
+            }
+            let reach = self.block_reach(b);
+            let out: Vec<String> = b.held.iter().filter(|h| kinds.get(h.as_str()).is_some_and(|k| !reach.holds(k))).cloned().collect();
+            if !out.is_empty() {
+                leaving.push((i, out));
+            }
+        }
+        for (i, out) in leaving {
+            if let Some(b) = self.blocks.get_mut(i) {
+                b.held.retain(|h| !out.contains(h));
+            }
+            loose.extend(out);
+        }
         // A block whose axis went is exploded: what it held drives again where it holds.
         self.release(&loose);
         empty
@@ -1297,6 +1364,14 @@ impl Sketch {
                 return Err(SketchError::Duplicate(b.id.clone()));
             }
             check_block(b)?;
+        }
+        // A closed block holds only constraints wholly inside it.
+        let kinds: HashMap<&str, &ConstraintKind> = self.constraints.iter().map(|c| (c.id.as_str(), &c.kind)).collect();
+        for b in self.blocks.iter().filter(|b| !b.is_open() && !b.held.is_empty()) {
+            let reach = self.block_reach(b);
+            if let Some(h) = b.held.iter().find(|h| kinds.get(h.as_str()).is_some_and(|k| !reach.holds(k))) {
+                return Err(SketchError::Invalid(format!("block {} holds `{h}`, which is not wholly inside it", b.label())));
+            }
         }
         Ok(())
     }

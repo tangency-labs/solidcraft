@@ -2158,24 +2158,35 @@ fn refuse_block_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
         return Ok(());
     }
     let named: Vec<usize> = ["a", "b"].iter().filter_map(|k| str_(p, k)).filter_map(|id| sk.curve_index(id)).collect();
-    let mut at: Vec<usize> = str_(p, "point").and_then(|r| sk.resolve_point(r)).into_iter().collect();
-    at.extend(named.iter().filter_map(|c| sk.curves.get(*c)).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]));
-    // The points held coincident with those, through any chain of coincidences.
-    loop {
-        let more: Vec<usize> = sk
-            .constraints
-            .iter()
-            .filter_map(|k| match k.kind {
-                ConstraintKind::Coincident { p, q } if at.contains(&p) && !at.contains(&q) => Some(q),
-                ConstraintKind::Coincident { p, q } if at.contains(&q) && !at.contains(&p) => Some(p),
-                _ => None,
-            })
-            .collect();
-        if more.is_empty() {
-            break;
+    // The points held coincident with `at`, through any chain of coincidences.
+    let joined = |mut at: Vec<usize>| {
+        loop {
+            let more: Vec<usize> = sk
+                .constraints
+                .iter()
+                .filter_map(|k| match k.kind {
+                    ConstraintKind::Coincident { p, q } if at.contains(&p) && !at.contains(&q) => Some(q),
+                    ConstraintKind::Coincident { p, q } if at.contains(&q) && !at.contains(&p) => Some(p),
+                    _ => None,
+                })
+                .collect();
+            if more.is_empty() {
+                return at;
+            }
+            at.extend(more);
         }
-        at.extend(more);
-    }
+    };
+    let ends = |c: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).map_or(Vec::new(), |(a, b)| vec![a, b]);
+    // The corner: the given point, else the end the two curves share, else (curves that only
+    // meet once extended) all their ends.
+    let at = match str_(p, "point").and_then(|r| sk.resolve_point(r)) {
+        Some(point) => joined(vec![point]),
+        None => {
+            let (a, b) = (named.first().map_or(Vec::new(), |c| ends(*c)), named.get(1).map_or(Vec::new(), |c| ends(*c)));
+            let shared: Vec<usize> = a.iter().copied().filter(|e| joined(vec![*e]).iter().any(|q| b.contains(q))).collect();
+            joined(if shared.is_empty() { a.into_iter().chain(b).collect() } else { shared })
+        }
+    };
     let curves: Vec<String> = sk
         .curves
         .iter()

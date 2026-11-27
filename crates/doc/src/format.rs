@@ -863,7 +863,7 @@ pub(crate) fn decode(
     for drawing in &mut d.drawings {
         if drawing.sketches.iter().any(|r| r.sketch.open_block_now().is_some()) {
             for r in &mut std::sync::Arc::make_mut(drawing).sketches {
-                if r.sketch.open_block_now().is_some() && r.sketch.validate_blocks().is_ok() {
+                if r.sketch.open_block_now().is_some() {
                     std::sync::Arc::make_mut(r).sketch.close_open_blocks_as_saved();
                 }
             }

@@ -1552,6 +1552,20 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     let cmds = apply_commands(&h.app, &d).unwrap();
     assert_eq!(cmds[0].0, "sketch.block_edit");
     assert_eq!((&cmds[0].1["block"], &cmds[0].1["remove"], &cmds[0].1["add"]), (&json!(block), &json!(["b4"]), &json!([])));
+    // Applied, b4 stays in the sketch, no longer a member.
+    h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    {
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let b = sk.blocks.iter().find(|b| b.id == block).unwrap();
+        assert!(sk.curve_index("b4").is_some() && !b.curves.iter().any(|c| c == "b4"), "{:?}", b.curves);
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    // A member added while the window is open is not removed by its OK: only what it showed is.
+    let mut d = h.app.dialog.clone().unwrap();
+    d.extra.insert("members".into(), json!(["b1", "b2", "b3"]));
+    let cmds = apply_commands(&h.app, &d).unwrap();
+    assert_eq!((&cmds[0].1["remove"], &cmds[0].1["add"]), (&json!([]), &json!([])), "b4 was added elsewhere and stays");
     h.app.dialog = None;
 
     // The glyph beside the block's origin opens Edit Block on a double-click.

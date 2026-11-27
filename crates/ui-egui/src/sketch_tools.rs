@@ -1266,7 +1266,11 @@ pub fn glyph_group(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<Stri
 /// midpoints together, so it would be left floating).
 pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<solidcraft_engine::Sel> {
     use solidcraft_engine::{Sel, sketch::ConstraintKind::Midpoint};
-    let group = glyph_group(sk, id);
+    // A block's own constraints are not the user's to delete here.
+    let held = crate::sketch_block_canvas::held_set(sk);
+    let all = glyph_group(sk, id);
+    let free: Vec<String> = all.iter().filter(|g| !held.contains(g.as_str())).cloned().collect();
+    let group = if free.is_empty() { all } else { free };
     let shared = match sk.constraints.iter().find(|c| c.id == id).map(|c| &c.kind) {
         Some(Midpoint { p, .. }) if group.len() > 1 => Some(*p),
         _ => None,
@@ -2679,7 +2683,13 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     let hidden = crate::sketch_block_canvas::hidden_set(&ss.sketch);
-    for c in glyph_constraints(&ss.sketch).filter(|c| !crate::sketch_block_canvas::held(&hidden, &glyph_group(&ss.sketch, &c.id))) {
+    // A glyph a block hides; only a MidPoint glyph stands for a group of constraints.
+    let hides = |c: &solidcraft_engine::sketch::Constraint| match c.kind {
+        _ if hidden.is_empty() => false,
+        solidcraft_engine::sketch::ConstraintKind::Midpoint { .. } => crate::sketch_block_canvas::held(&hidden, &glyph_group(&ss.sketch, &c.id)),
+        _ => hidden.contains(c.id.as_str()),
+    };
+    for c in glyph_constraints(&ss.sketch).filter(|c| !hides(c)) {
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.

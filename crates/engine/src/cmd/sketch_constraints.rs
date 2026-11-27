@@ -347,8 +347,17 @@ fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
     auto(s, p, "sketch.auto_constrain_from_datum")
 }
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
-    let r = auto(s, p, "sketch.finish_auto_constrain")?;
+    let id = sketch_store::active(s);
+    let open = id.is_some_and(|id| sketch_store::read(&s.doc, id).is_ok_and(|sk| sk.open_block_now().is_some()));
+    let mut r = auto(s, p, "sketch.finish_auto_constrain")?;
     super::sketch_block::close_on_leaving(s);
+    // Closing the block it left open changes the freedom the reply reports.
+    if open && let Some(id) = id {
+        let mut sk = sketch_store::read(&s.doc, id)?.clone();
+        let rep = super::sketch::solve_current(&mut sk, &s.doc)?;
+        r["dof"] = Value::from(rep.dof);
+        r["sketch"] = serde_json::to_value(super::sketch::solve_info(&rep)).unwrap_or(Value::Null);
+    }
     s.active_sketch = None;
     s.sketching_view = None;
     s.revision += 1;

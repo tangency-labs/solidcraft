@@ -9141,7 +9141,12 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                     match annotation {
                         Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
                         // A block's glyph selects its members, as its Browser row does.
-                        None if let Some(block) = block_glyph => crate::sketch_block_tree::select_members(app, &block),
+                        None if let Some(block) = block_glyph => {
+                            // One member stands for the block: picking it takes the whole block, with
+                            // Shift adding it and Ctrl toggling it as for any pick.
+                            let member = crate::sketch_block_tree::a_member(app, &block);
+                            select(app, member, add || pen_select, allow_toggle || pen_select);
+                        }
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
                         None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
@@ -9201,8 +9206,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.tool.is_none()
             && app.dialog.is_none()
             && (crate::sketch_modify_ui::double_click_pattern(app, p)
-                || crate::sketch_block_canvas::double_click(app, p)
                 || crate::dim_view::double_click(app, p)
+                || crate::sketch_block_canvas::double_click(app, p)
                 || crate::dim_view::model_double_click(app, p));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
         if resp.double_clicked()

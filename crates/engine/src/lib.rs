@@ -3788,6 +3788,8 @@ impl Session {
         }
         self.clear_selection();
         self.prune_sheet_sketch_edit();
+        // A sketch nobody edits now keeps no block open.
+        cmd::close_unedited(self);
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {

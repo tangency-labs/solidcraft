@@ -82,7 +82,7 @@ fn act(app: &mut SolveApp, sketch: u64, occurrence: Option<(u64, &[u64])>, patte
 /// above it), so its patterns fade with it.
 pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64, depth: usize, occurrence: Option<(u64, &[u64])>, dim: bool) {
     for pattern in patterns(app, sketch) {
-        let key = format!("pattern:{sketch}:{}", pattern.id);
+        let key = format!("pattern:{sketch}:{}:{}", crate::sketch_block_tree::placement_key(occurrence), pattern.id);
         let response = node_row(
             rows,
             Spec { key: &key, ..Default::default() },

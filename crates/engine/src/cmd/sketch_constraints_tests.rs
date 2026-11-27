@@ -2586,7 +2586,17 @@ fn every_way_out_of_a_sketch_closes_its_open_block() {
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 5]], "infer": false}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "sketch.finish", json!({}));
-    let _ = s.execute("edit.redo", &json!({}));
+    let redone = s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(redone["redone"], json!("Line"), "{redone}");
+    {
+        let sk = s.doc.sketch(id).unwrap();
+        let at = |p: &str| sk.point(sk.resolve_point(p).unwrap()).unwrap();
+        let line = sk.curves.iter().rev().find(|c| !c.construction).unwrap().id.clone();
+        assert!(
+            at(&format!("{line}.start")).dist(Vec2::new(0.0, 0.0)) < 1e-9 && at(&format!("{line}.end")).dist(Vec2::new(5.0, 5.0)) < 1e-9,
+            "the redo restores the line"
+        );
+    }
     assert!(s.active_sketch.is_none(), "the redo stays out of the sketch");
     assert!(s.doc.sketch(id).unwrap().blocks.iter().all(|b| !b.is_open()), "no block is left open outside its sketch's edit");
 
@@ -2694,7 +2704,9 @@ fn auto_constrain_leaves_a_blocks_insides_alone() {
     let out = run(&mut s, "sketch.auto_constrain", json!({}));
     let sk = sketch(&s);
     let insides = sk.block_members_now(true);
-    for id in ids(&out["constraints"]) {
+    let added = out["added"].as_array().unwrap_or_else(|| panic!("AutoConstrain names what it added: {out}"));
+    assert!(!added.is_empty(), "it adds something outside the block: {out}");
+    for id in ids(&out["added"]) {
         let c = sk.constraints.iter().find(|c| c.id == id).unwrap();
         assert!(!insides.hold(&c.kind), "{id}: {:?}, nothing among the members or on the axis", c.kind);
     }
@@ -2901,6 +2913,74 @@ fn a_block_point_is_tied_with_a_coincident_not_merged() {
     let sk = sketch(&s);
     assert!(sk.blocks[0].points.iter().all(|(id, _)| sk.resolve_point(id).is_some()), "every block point is still there");
     sk.validate_blocks().unwrap();
+}
+
+/// Edit Contents opens a block only in the sketch being edited.
+#[test]
+fn edit_contents_refuses_a_sketch_not_being_edited() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let why = refused(&mut s, "sketch.block_open", json!({"sketch": id, "block": made["block"]}));
+    assert!(why.contains("sketch being edited"), "{why}");
+    assert!(s.doc.sketch(id).unwrap().blocks.iter().all(|b| !b.is_open()));
+}
+
+/// A dimension wholly inside a closed block is refused, or with `if_redundant: "driven"` placed
+/// as a reference dimension that measures the block.
+#[test]
+fn a_dimension_inside_a_closed_block_can_measure_it() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["l3"]})).is_err());
+    let driven = |s: &Session| sketch(s).constraints.iter().filter(|c| c.driven).count();
+    let before = driven(&s);
+    run(&mut s, "sketch.dimension", json!({"entities": ["l3"], "if_redundant": "driven"}));
+    assert_eq!(driven(&s), before + 1, "a reference dimension on the block's top edge");
+}
+
+/// Rounding a corner refuses a block's curve only when the curve meets that corner, not when it
+/// meets the far end of one of the corner's lines.
+#[test]
+fn a_fillet_away_from_a_block_is_not_refused() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    let corner = at(&s, "l1.start");
+    let lines = ids(&run(&mut s, "sketch.line", json!({"points": [[corner.x, corner.y], [-20, 5], [-20, 30]], "infer": false}))["curves"]);
+    run(&mut s, "sketch.fillet", json!({"a": lines[0], "b": lines[1], "radius": 2}));
+    assert_eq!(sketch(&s).blocks[0].curves.len(), 5, "the block is as it was");
+    let why = refused(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l4", "radius": 2}));
+    assert!(why.contains("part of block Plate"), "{why}");
+}
+
+/// Make Block from the selection takes curves of the sketch being edited only.
+#[test]
+fn make_block_from_the_selection_ignores_another_sketchs_curves() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}));
+    let id = s.active_sketch.unwrap();
+    let make = crate::find_command("sketch.block").unwrap();
+    s.selection = vec![crate::Sel::SketchCurve { id: "l1".into(), sketch: Some(id) }];
+    assert!(make.for_selection(&s).is_some());
+    s.selection = vec![crate::Sel::SketchCurve { id: "l1".into(), sketch: Some(id + 1000) }];
+    assert!(make.for_selection(&s).is_none(), "l1 of another sketch is not this sketch's l1");
+}
+
+/// Detach Point follows a Symmetry to the mirrored curve, and refuses when that curve is a
+/// closed block's.
+#[test]
+fn detach_point_refuses_a_mirrored_curve_in_a_closed_block() {
+    let mut s = new_sketch();
+    let member = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 5]], "infer": false}))["curves"])[0].clone();
+    let x = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-20, 5]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-10, 10]], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, 10]], "infer": false}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{x}.start"), "b": format!("{member}.start"), "line": "y"}));
+    run(&mut s, "sketch.block", json!({"curves": [member]}));
+    let why = refused(&mut s, "sketch.detach_point", json!({"curve": x, "point": format!("{x}.start"), "distance": 2}));
+    assert!(why.contains("part of block"), "{why}");
 }
 
 /// Detach Point and Unlink From Group change one curve, so a closed block's member refuses them.

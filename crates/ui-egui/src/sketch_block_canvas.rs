@@ -70,8 +70,21 @@ pub(crate) fn paint(
         let free = |p: Pos2| {
             crate::sketch_tools::nearest_glyph(taken.iter().copied().chain(drawn.iter().map(|(_, q)| *q)).map(|q| ((), q)), p, glyph + 1.0).is_none()
         };
-        let start = base + egui::vec2(-0.7, 0.7) * (glyph * 1.1);
-        let at = (0..8).map(|k| start + egui::vec2(-(glyph + 2.0), 0.0) * k as f32).find(|p| free(*p)).unwrap_or(start);
+        // Below left of the origin and stepping left, as far as the view lets it; near an edge
+        // it steps right, or goes above the origin, so the whole glyph stays in view.
+        let fits = |p: Pos2| proj.rect.contains_rect(egui::Rect::from_center_size(p, egui::vec2(glyph, glyph)));
+        let step = egui::vec2(glyph + 2.0, 0.0);
+        let (below, above) = (base + egui::vec2(-0.7, 0.7) * (glyph * 1.1), base + egui::vec2(0.7, -0.7) * (glyph * 1.1));
+        let tries: Vec<Pos2> = [(below, -1.0), (below, 1.0), (above, 1.0), (above, -1.0)]
+            .into_iter()
+            .flat_map(|(from, side)| (0..8).map(move |k| from + step * (side * k as f32)))
+            .collect();
+        let at = tries
+            .iter()
+            .copied()
+            .find(|p| fits(*p) && free(*p))
+            .or_else(|| tries.iter().copied().find(|p| fits(*p)))
+            .unwrap_or_else(|| below.clamp(proj.rect.min + egui::Vec2::splat(glyph / 2.0), proj.rect.max - egui::Vec2::splat(glyph / 2.0)));
         drawn.push((block.id.clone(), at));
     }
     let on_glyph = hover.and_then(|h| crate::sketch_tools::nearest_glyph(drawn.iter().map(|(id, q)| (id.as_str(), *q)), h, glyph * 0.6));
@@ -128,5 +141,5 @@ pub(crate) fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// Double-click on a block's glyph: Edit Block.
 pub(crate) fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
-    glyph_at(pos).is_some_and(|id| crate::sketch_modify_ui::edit_block(app, &id))
+    crate::viewport::sketch_block_glyph_at(app, pos, None).is_some_and(|id| crate::sketch_modify_ui::edit_block(app, &id))
 }

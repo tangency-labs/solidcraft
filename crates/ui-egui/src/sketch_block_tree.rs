@@ -25,8 +25,6 @@ struct Entry {
     id: String,
     label: String,
     selected: bool,
-    /// What a click on it selects while its sketch is edited: its member curves.
-    members: Vec<Sel>,
 }
 
 /// A block's row label: its name, or "Block" and the number of its id.
@@ -56,9 +54,8 @@ fn entries(app: &SolveApp, sketch: u64) -> Vec<Entry> {
     sk.blocks
         .iter()
         .map(|block| {
-            let members: Vec<Sel> = block.curves.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
             let selected = active && !block.curves.is_empty() && block.curves.iter().all(|c| picked.contains(c.as_str()));
-            Entry { id: block.id.clone(), label: label(block), selected, members }
+            Entry { id: block.id.clone(), label: label(block), selected }
         })
         .collect()
 }
@@ -84,17 +81,20 @@ fn act(
             crate::sketch_modify_ui::edit_block(app, &entry.id);
         }
     } else if clicked {
-        select(app, sketch, entry.members);
+        select(app, sketch, &entry.id);
     }
     if let Some(at) = secondary {
         crate::context_menu::open_for(app, at, Target::SketchBlock { sketch, block: entry.id });
     }
 }
 
-/// Select a block's `members` while its sketch is edited, else the sketch.
-fn select(app: &mut SolveApp, sketch: u64, members: Vec<Sel>) {
-    let items = if app.session.active_sketch == Some(sketch) { members } else { vec![Sel::Feature { id: sketch }] };
-    let _ = app.run("select.set", json!({ "items": items }));
+/// Select block `block`'s members while its sketch is edited, else the sketch.
+fn select(app: &mut SolveApp, sketch: u64, block: &str) {
+    if app.session.active_sketch == Some(sketch) {
+        select_members(app, block);
+    } else {
+        let _ = app.run("select.set", json!({ "items": [Sel::Feature { id: sketch }] }));
+    }
 }
 
 /// Select every member of block `block` of the sketch being edited (Select Block, a click on its
@@ -113,11 +113,24 @@ pub(crate) fn select_members(app: &mut SolveApp, block: &str) {
     }
 }
 
+/// A member curve of block `block` in the sketch being edited, as a selection item.
+pub(crate) fn a_member(app: &SolveApp, block: &str) -> Option<Sel> {
+    let sketch = app.session.active_sketch?;
+    let sk = app.session.doc.sketch(sketch).ok()?;
+    let id = sk.blocks.iter().find(|b| b.id == block)?.curves.first()?.clone();
+    Some(Sel::SketchCurve { id, sketch: None })
+}
+
+/// The part of a sketch's child row key that tells its placements apart: the occurrence path.
+pub(crate) fn placement_key(occurrence: Option<(u64, &[u64])>) -> String {
+    occurrence.map(|(_, path)| path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")).unwrap_or_default()
+}
+
 /// The blocks under their sketch in the Browser. `dim`: the sketch is hidden (or a placement
 /// above it), so its blocks fade with it.
 pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64, depth: usize, occurrence: Option<(u64, &[u64])>, dim: bool) {
     for entry in entries(app, sketch) {
-        let key = format!("block:{sketch}:{}", entry.id);
+        let key = format!("block:{sketch}:{}:{}", placement_key(occurrence), entry.id);
         let hit = node_row(
             rows,
             Spec { key: &key, ..Default::default() },

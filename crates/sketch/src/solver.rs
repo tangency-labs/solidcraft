@@ -4293,11 +4293,14 @@ fn solve_inner(
     // is never `Solved` with a constraint in `failing`.
     let mut named: Vec<String> = Vec::new();
     // A component too large to solve is a failure, not an allocation.
-    let too_large = comps.iter().filter(|(_, vars, bis)| !bis.is_empty() && oversized(vars)).map(|(_, vars, _)| vars.len()).max();
+    // The largest such component: the report gives its size, and the block advice only when it
+    // holds a block.
+    let largest = comps.iter().filter(|(_, vars, bis)| !bis.is_empty() && oversized(vars)).max_by_key(|(_, vars, _)| vars.len());
+    let too_large = largest.map(|(_, vars, _)| vars.len());
     if too_large.is_some() {
         max_residual = f64::MAX;
     }
-    let oversized_block = comps.iter().filter(|(_, vars, _)| oversized(vars)).any(|(_, _, bis)| {
+    let oversized_block = largest.is_some_and(|(_, _, bis)| {
         bis.iter().any(|bi| {
             matches!(all_blocks.get(*bi), Some((Block::Frame { .. } | Block::FrameLength { .. } | Block::FrameRadius { .. } | Block::Carried(_), _)))
         })

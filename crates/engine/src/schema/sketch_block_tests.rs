@@ -28,6 +28,18 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BlockCloseParams>(), &["block", "sketch"]);
 }
 
+/// The curves of a new block, and the block every other command but Close Block acts on, are
+/// required; Close Block finds the open block by itself.
+#[test]
+fn the_schemas_name_what_each_command_requires() {
+    let required = |v: Value| v["required"].clone();
+    assert_eq!(required(input_schema_for::<BlockParams>().as_value().clone()), json!(["curves"]));
+    assert_eq!(required(input_schema_for::<ExplodeBlockParams>().as_value().clone()), json!(["block"]));
+    assert_eq!(required(input_schema_for::<BlockEditParams>().as_value().clone()), json!(["block"]));
+    assert_eq!(required(input_schema_for::<BlockOpenParams>().as_value().clone()), json!(["block"]));
+    assert_eq!(required(input_schema_for::<BlockCloseParams>().as_value().clone()), Value::Null);
+}
+
 /// A call that fails today gets the same message in strict.
 #[test]
 fn strict_keeps_todays_errors() {

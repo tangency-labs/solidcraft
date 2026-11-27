@@ -65,11 +65,12 @@ pub static COMMANDS: &[CommandSpec] = &[
 /// Make Block's parameters from the session's selection: its sketch curves, and a selected point
 /// as the origin.
 fn from_selection(s: &Session) -> Option<Value> {
-    super::sketch_store::active(s)?;
+    let receiver = if s.sheet_sketching() { s.active_sheet_sketch.as_ref().map(|entry| entry.sketch) } else { super::sketch_store::active(s) };
+    receiver?;
     let (mut curves, mut origin) = (Vec::new(), None);
     for sel in &s.selection {
         match sel {
-            Sel::SketchCurve { id, .. } => curves.push(id.clone()),
+            Sel::SketchCurve { id, sketch } if sketch.is_none() || *sketch == receiver => curves.push(id.clone()),
             Sel::SketchPoint { id } if origin.is_none() => origin = Some(id.clone()),
             _ => return None,
         }
@@ -109,7 +110,7 @@ fn text_param<'a>(cmd: &str, p: &'a Value, key: &str) -> Result<Option<&'a str>>
 }
 
 fn block_id<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
-    text_param(cmd, p, "block")?.ok_or_else(|| bad(cmd, "`block` must name a sketch block"))
+    text_param(cmd, p, "block")?.ok_or_else(|| bad(cmd, "`block` is required"))
 }
 
 fn reply(cmd: &str, value: impl serde::Serialize) -> Result<Value> {
@@ -165,6 +166,9 @@ fn explode_block(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(out)
     })?;
+    if model_edit {
+        s.doc_mut().prune_model_params();
+    }
     reply(cmd, ExplodeBlockResult { curves, restored: released.restored, dropped: released.dropped, sketch: info, param_warnings: Vec::new() })
 }
 
@@ -197,6 +201,9 @@ fn edit_block(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(out)
     })?;
+    if model_edit {
+        s.doc_mut().prune_model_params();
+    }
     block_reply(cmd, made, released.dropped, info)
 }
 
@@ -204,6 +211,10 @@ fn open_block(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.block_open";
     let block = block_id(cmd, p)?;
     let model_edit = !s.sheet_sketching();
+    // A block stays open only while its sketch is edited.
+    if model_edit && super::sketch_store::active(s) != Some(super::sketch_store::target(s, p, cmd)?) {
+        return Err(bad(cmd, "Edit Contents opens a block of the sketch being edited: edit that sketch first"));
+    }
     let ((released, closed), info) = edit(s, p, cmd, true, |sk, doc| {
         if !sk.blocks.iter().any(|b| b.id == block) {
             return Err(bad(cmd, format!("unknown sketch block `{block}`")));
@@ -214,6 +225,9 @@ fn open_block(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(out)
     })?;
+    if model_edit {
+        s.doc_mut().prune_model_params();
+    }
     reply(
         cmd,
         BlockOpenResult {
@@ -243,6 +257,9 @@ fn close_block(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((block, closed))
     })?;
+    if model_edit {
+        s.doc_mut().prune_model_params();
+    }
     let dof = info.get("dof").and_then(Value::as_u64).map_or(0, |d| d as usize);
     reply(
         cmd,
@@ -427,8 +444,14 @@ pub(crate) fn refuse_held_parameters(doc: &solidcraft_doc::Document, names: &[&s
                 }
             }
         }
-        let named_elsewhere =
-            doc.all_param_exprs().into_iter().any(|(other, e, _)| other != *name && solidcraft_doc::expr::references(&e).iter().any(|r| r == name));
+        let names = |e: &str| solidcraft_doc::expr::references(e).iter().any(|r| r == name);
+        // A sheet dimension keeps its own expression, which can name the parameter.
+        let on_a_sheet = doc
+            .drawings
+            .iter()
+            .flat_map(|d| &d.sketches)
+            .any(|r| r.sketch.constraints.iter().any(|c| c.param.as_deref().is_some_and(names) && !r.sketch.is_held(&c.id)));
+        let named_elsewhere = on_a_sheet || doc.all_param_exprs().into_iter().any(|(other, e, _)| other != *name && names(&e));
         if let (Some((id, block)), false, false) = (held, free, named_elsewhere) {
             return Err(bad(cmd, format!("`{name}` drives only `{id}`, which block {block} holds: open the block with Edit Contents to change it")));
         }

@@ -161,6 +161,8 @@ pub(super) fn carry<'a>(sk: &Sketch, lay: &Layout, blocks: Blocks<'a>, reads_con
                 let axis = [pv(o), pv(x)];
                 (rv(r).is_some_and(|u| mine(open, u, f)) && us.iter().all(|u| axis.contains(&Some(*u)) || mine(open, *u, f))).then_some(f)
             }
+            // A fixed point (a fixed centre) does not move with the frame, so the row still binds.
+            Block::Arc { .. } | Block::Closure { .. } if reads_constant.get(i).copied().unwrap_or(false) => None,
             Block::Arc { .. } | Block::Closure { .. } => {
                 let f = us.first().and_then(|u| owner.get(*u).copied().flatten())?;
                 us.iter().all(|u| mine(open, *u, f)).then_some(f)

@@ -569,7 +569,9 @@ enum Tie {
         b: usize,
     },
     /// `p` is at (u, v) in the frame of a sketch block's axis from `o` to `x`:
-    /// `p = o + u·d + v·perp(d)`, `d = x − o`. Any two of the three place the third.
+    /// `p = o + u·d + v·perp(d)`, `d = x − o`. `o` and `x` place `p`; `p` and one axis end place
+    /// the other only when `p` lies well away from the origin (not at u = v = 0), else another
+    /// rule or the numerical solve does.
     Frame {
         p: usize,
         o: usize,

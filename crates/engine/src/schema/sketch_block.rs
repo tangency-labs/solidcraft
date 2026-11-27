@@ -58,8 +58,7 @@ pub struct BlockParams {
     pub sketch: Option<SketchTarget>,
     /// The curves of the block, by id; a member spline brings its guide lines. Refused: curves
     /// already in a block, projected curves, text, offset outputs and pattern geometry.
-    #[serde(default)]
-    pub curves: Option<NameList>,
+    pub curves: NameList,
     /// fixed (default) or free.
     #[serde(default)]
     pub scale: Option<ScaleParam>,
@@ -112,8 +111,7 @@ pub struct ExplodeBlockParams {
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
     /// The block's id.
-    #[serde(default)]
-    pub block: Option<String>,
+    pub block: String,
 }
 
 /// What `sketch.explode_block` returns.
@@ -144,8 +142,7 @@ pub struct BlockEditParams {
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
     /// The block's id.
-    #[serde(default)]
-    pub block: Option<String>,
+    pub block: String,
     /// fixed or free. Default: as it is.
     #[serde(default)]
     pub scale: Option<ScaleParam>,
@@ -176,8 +173,7 @@ pub struct BlockOpenParams {
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
     /// The block's id.
-    #[serde(default)]
-    pub block: Option<String>,
+    pub block: String,
 }
 
 /// What `sketch.block_open` returns.

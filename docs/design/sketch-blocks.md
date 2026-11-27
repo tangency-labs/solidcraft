@@ -1,7 +1,7 @@
 # Sketch blocks: a set of sketch geometry that keeps its shape
 
-Status: proposal for #4069 (and the DXF case in #22102), decisions settled. Nothing here is built. Read at
-bbb925608b, not run.
+Status: built for #4069 and the DXF case in #22102, in pull request #22726. The steps at the end
+are how the work can be reviewed in parts.
 
 ## What the user gets
 
@@ -119,8 +119,8 @@ relations (`Closure`, `Arc`). With O and X the axis ends, d = X − O and n = pe
 | Block | Rows | Reads |
 |---|---|---|
 | `Frame { p, o, x, u, v }`, one per member point | `P − O − u·d − v·n = 0` (2 rows) | P, O, X |
-| `FrameLength { o, x, l0 }`, Fixed only | `|d| − L0 = 0` (1 row) | O, X |
-| `FrameRadius { r, o, x, k }`, per member circle or ellipse radius | Fixed: `r − k·L0 = 0`; Free: `r − k·|d| = 0` | r, O, X |
+| `FrameLength { o, x, l0 }`, Fixed only | `\|d\| − L0 = 0` (1 row) | O, X |
+| `FrameRadius { r, o, x, k }`, per member circle or ellipse radius | Fixed: `r − k·L0 = 0`; Free: `r − k·\|d\| = 0` | r, O, X |
 
 - **Counts.** N member points give 2N + 4 variables (2N + 1 radii) and 2N (+1) rows, so a rigid
   block has 3 degrees of freedom and a free one 4. That is what #4069 asks for, and it comes
@@ -178,9 +178,10 @@ dimension are not refused.
 
 ### Over-constraint and the refusals that come for free
 
-- **A rigid block.** A length or distance between two members disagrees with the shape, so it is
-  refused with the existing "would over-constrain" message. One that agrees with the shape is
-  kept and marked redundant, as today.
+- **A rigid block.** A length or distance between two members is refused, as above: one that
+  disagrees with the shape would also over-constrain the sketch. A dimension added with
+  `if_redundant: "driven"` is placed as a driven (reference) dimension instead, measuring the
+  block.
 - **Make Block on geometry the outside already pins.** Two fixed members can't both move, but the
   block holds them where they are, so nothing changes and the block reports the DOF that is left.
   Make Block never moves geometry. It captures (u, v) from the current solved positions.
