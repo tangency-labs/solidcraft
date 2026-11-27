@@ -1,0 +1,32 @@
+{
+  "en": {
+    "plugin_install.browse": "Browse…"
+  },
+  "ar": {
+    "plugin_install.browse": "تصفح…"
+  },
+  "de": {
+    "plugin_install.browse": "Durchsuchen…"
+  },
+  "he": {
+    "plugin_install.browse": "עיון…"
+  },
+  "ja": {
+    "plugin_install.browse": "参照…"
+  },
+  "ko": {
+    "plugin_install.browse": "찾아보기…"
+  },
+  "uk": {
+    "plugin_install.browse": "Огляд…"
+  },
+  "vi": {
+    "plugin_install.browse": "Duyệt…"
+  },
+  "zh": {
+    "plugin_install.browse": "浏览…"
+  },
+  "fr": {
+    "plugin_install.browse": "Parcourir…"
+  }
+}

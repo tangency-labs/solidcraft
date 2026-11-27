@@ -17,6 +17,7 @@ The UI is thin: it reads engine state and acts through `app.run(id, params)` or 
 ## Controls and colour
 - Colours, typography, dimensions and spacing come from `theme::Tokens` (`crates/ui-egui/src/theme.rs`). No literal colours in feature code.
 - Sliders only through `ui_kit::slider`. Form rows use `row`, `expr_row`, `text_row`, `choice_row` and `count_row` from `crate::ui_kit` (`crates/ui-kit/src/`).
+- File previews: only `ui_kit::file_preview` (`docs/ui-kit.md`).
 - Confirmations use `ui_kit::Confirm`; the old `Prompt` element is gone.
 
 ## One set of camera controls
@@ -27,6 +28,9 @@ Command icons are original SVG masters compiled by the look crate (`crates/look/
 
 ## Text
 Every label, tooltip and message goes through the catalogs: `.agents/skills/solidcraft-ui-text/SKILL.md`. A new behaviour that is on by default: `.agents/skills/solidcraft-preferences/SKILL.md`.
+
+## Drawing workspace
+Follow `docs/design/drawing-ui/README.md` and `docs/design/drawing-ui/decisions.md` for layout, ribbon, panel footers and state words. Cite the boards and decision numbers in the PR; explain deviations.
 
 ## Look at the result
 Run the app, drive it and read the screenshot: `.agents/skills/solidcraft-agent-tools/SKILL.md`. A UI scenario (`crates/ui-egui/tests/scenarios/*.json`) covers the clicks; see `.agents/skills/solidcraft-tests/SKILL.md`. Work that takes long must not block the window: `.agents/skills/solidcraft-performance/SKILL.md`.

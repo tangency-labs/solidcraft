@@ -1,0 +1,101 @@
+{
+  "ar": {
+    "REDUCE MESH": "تقليل الشبكة",
+    "Retained percentage": "النسبة المئوية المحتفظ بها",
+    "Triangle count": "عدد المثلثات",
+    "cmd.mesh_reduce": "تقليل الشبكة",
+    "help.mesh.reduce": "ينشئ نسخة من الشبكة بعدد مثلثات أقل وفقًا للنسبة المئوية أو عدد المثلثات المحدد. تبقى الشبكة الأصلية دون تغيير، ويمكن استخدام النتيجة في أمر تحويل الشبكة.",
+    "ui.feature_kind.mesh_reduce": "تقليل الشبكة",
+    "ui.mesh_reduce_result": "الشبكة المُقلّلة: {original} مثلثًا في الأصل، والهدف {target}، والنتيجة {achieved}.",
+    "ui.mesh_reduce_shortfall": "الشبكة المُقلّلة: {original} مثلثًا في الأصل، والهدف {target}، والنتيجة {achieved}؛ لم يتحقق الهدف في هذه العملية.",
+    "prefs.legacy_surface_toolbar_hint": "تختفي تخصيصات لوحة الشبكة في الوضع السابق، وتعود عند إيقافه."
+  },
+  "de": {
+    "REDUCE MESH": "NETZ VEREINFACHEN",
+    "Retained percentage": "Verbleibender Anteil",
+    "Triangle count": "Dreiecksanzahl",
+    "cmd.mesh_reduce": "Netz vereinfachen",
+    "help.mesh.reduce": "Erstellt eine vereinfachte Kopie des Netzes anhand eines Prozentsatzes oder einer Dreiecksanzahl. Das Original bleibt unverändert. Das Ergebnis kann mit „Netz konvertieren“ verwendet werden.",
+    "ui.feature_kind.mesh_reduce": "Netz vereinfachen",
+    "ui.mesh_reduce_result": "Netz vereinfacht: {original} Dreiecke ursprünglich, {target} als Ziel, {achieved} erreicht.",
+    "ui.mesh_reduce_shortfall": "Netz vereinfacht: {original} Dreiecke ursprünglich, {target} als Ziel, {achieved} erreicht. Das Ziel wurde bei diesem Durchlauf nicht erreicht.",
+    "prefs.legacy_surface_toolbar_hint": "Anpassungen des Netz-Bereichs sind im bisherigen Layout verborgen und erscheinen wieder, wenn es ausgeschaltet wird."
+  },
+  "en": {
+    "REDUCE MESH": "REDUCE MESH",
+    "Retained percentage": "Retained percentage",
+    "Triangle count": "Triangle count",
+    "cmd.mesh_reduce": "Reduce Mesh",
+    "help.mesh.reduce": "Creates a reduced copy of a mesh using a retained percentage or triangle count. The original stays unchanged and the result can be used by Convert Mesh.",
+    "ui.feature_kind.mesh_reduce": "Reduce Mesh",
+    "ui.mesh_reduce_result": "Reduced mesh: {original} original triangles, {target} target, {achieved} achieved.",
+    "ui.mesh_reduce_shortfall": "Reduced mesh: {original} original triangles, {target} target, {achieved} achieved; this run did not reach the target.",
+    "prefs.legacy_surface_toolbar_hint": "Mesh panel customizations are hidden in legacy mode and reappear when you turn it off."
+  },
+  "he": {
+    "REDUCE MESH": "פישוט רשת",
+    "Retained percentage": "אחוז המשולשים לשימור",
+    "Triangle count": "מספר משולשים",
+    "cmd.mesh_reduce": "פישוט רשת",
+    "help.mesh.reduce": "יצירת עותק מפושט של הרשת לפי אחוז המשולשים לשימור או מספר משולשים יעד. הרשת המקורית אינה משתנה, וניתן להשתמש בתוצאה בפקודה „המרת רשת משולשים”.",
+    "ui.feature_kind.mesh_reduce": "פישוט רשת",
+    "ui.mesh_reduce_result": "רשת מפושטת: {original} משולשים במקור, {target} ביעד, {achieved} בתוצאה.",
+    "ui.mesh_reduce_shortfall": "רשת מפושטת: {original} משולשים במקור, {target} ביעד, {achieved} בתוצאה. היעד לא הושג בהרצה זו.",
+    "prefs.legacy_surface_toolbar_hint": "התאמות חלונית הרשת מוסתרות במצב הקודם ומופיעות שוב כשמכבים אותו."
+  },
+  "ja": {
+    "REDUCE MESH": "メッシュを削減",
+    "Retained percentage": "保持率",
+    "Triangle count": "三角形数",
+    "cmd.mesh_reduce": "メッシュを削減",
+    "help.mesh.reduce": "保持率または三角形数を指定して、メッシュの削減されたコピーを作成します。元のメッシュは変更されず、結果をメッシュの変換に使用できます。",
+    "ui.feature_kind.mesh_reduce": "メッシュを削減",
+    "ui.mesh_reduce_result": "メッシュを削減: 元の三角形数 {original}、目標 {target}、結果 {achieved}。",
+    "ui.mesh_reduce_shortfall": "メッシュを削減: 元の三角形数 {original}、目標 {target}、結果 {achieved}。今回の処理では目標に達しませんでした。",
+    "prefs.legacy_surface_toolbar_hint": "従来の表示ではメッシュパネルのカスタマイズは非表示になり、従来の表示をオフにすると再表示されます。"
+  },
+  "ko": {
+    "REDUCE MESH": "메쉬 단순화",
+    "Retained percentage": "유지 비율",
+    "Triangle count": "삼각형 수",
+    "cmd.mesh_reduce": "메쉬 단순화",
+    "help.mesh.reduce": "유지할 비율이나 목표 삼각형 수를 지정해 단순화된 메쉬 사본을 만듭니다. 원본은 변경되지 않으며 결과는 메쉬 변환에 사용할 수 있습니다.",
+    "ui.feature_kind.mesh_reduce": "메쉬 단순화",
+    "ui.mesh_reduce_result": "메쉬 단순화: 원본 삼각형 {original}개, 목표 {target}개, 결과 {achieved}개.",
+    "ui.mesh_reduce_shortfall": "메쉬 단순화: 원본 삼각형 {original}개, 목표 {target}개, 결과 {achieved}개. 이번 실행에서는 목표에 도달하지 못했습니다.",
+    "prefs.legacy_surface_toolbar_hint": "이전 모드에서는 메쉬 패널 사용자 설정이 숨겨지며, 이전 모드를 끄면 다시 표시됩니다."
+  },
+  "vi": {
+    "REDUCE MESH": "ĐƠN GIẢN HÓA LƯỚI",
+    "Retained percentage": "Tỷ lệ giữ lại",
+    "Triangle count": "Số tam giác",
+    "cmd.mesh_reduce": "Đơn giản hóa lưới",
+    "help.mesh.reduce": "Tạo bản sao lưới đơn giản hơn theo tỷ lệ giữ lại hoặc số tam giác mục tiêu. Lưới gốc không thay đổi; có thể dùng kết quả với lệnh Chuyển đổi lưới.",
+    "ui.feature_kind.mesh_reduce": "Đơn giản hóa lưới",
+    "ui.mesh_reduce_result": "Đã đơn giản hóa lưới: {original} tam giác ban đầu, mục tiêu {target}, kết quả {achieved}.",
+    "ui.mesh_reduce_shortfall": "Đã đơn giản hóa lưới: {original} tam giác ban đầu, mục tiêu {target}, kết quả {achieved}. Lần chạy này chưa đạt mục tiêu.",
+    "prefs.legacy_surface_toolbar_hint": "Các tùy chỉnh bảng Lưới bị ẩn trong chế độ cũ và xuất hiện lại khi tắt chế độ đó."
+  },
+  "zh": {
+    "REDUCE MESH": "简化网格",
+    "Retained percentage": "保留比例",
+    "Triangle count": "三角形数量",
+    "cmd.mesh_reduce": "简化网格",
+    "help.mesh.reduce": "按保留比例或目标三角形数量创建简化后的网格副本。原始网格保持不变，简化结果可用于转换网格。",
+    "ui.feature_kind.mesh_reduce": "简化网格",
+    "ui.mesh_reduce_result": "已简化网格：原有 {original} 个三角形，目标 {target} 个，结果 {achieved} 个。",
+    "ui.mesh_reduce_shortfall": "已简化网格：原有 {original} 个三角形，目标 {target} 个，结果 {achieved} 个。本次运行未达到目标。",
+    "prefs.legacy_surface_toolbar_hint": "旧版模式会隐藏网格面板的自定义设置，关闭旧版模式后将重新显示。"
+  },
+  "fr": {
+    "REDUCE MESH": "RÉDUIRE LE MAILLAGE",
+    "Retained percentage": "Pourcentage conservé",
+    "Triangle count": "Nombre de triangles",
+    "cmd.mesh_reduce": "Réduire le maillage",
+    "help.mesh.reduce": "Crée une copie simplifiée d’un maillage en fonction d’un pourcentage conservé ou d’un nombre de triangles. L’original reste inchangé et le résultat peut être utilisé par Convertir le maillage.",
+    "ui.feature_kind.mesh_reduce": "Réduction du maillage",
+    "ui.mesh_reduce_result": "Maillage réduit : {original} triangles d’origine, {target} visés, {achieved} obtenus.",
+    "ui.mesh_reduce_shortfall": "Maillage réduit : {original} triangles d’origine, {target} visés, {achieved} obtenus ; cette opération n’a pas atteint l’objectif.",
+    "prefs.legacy_surface_toolbar_hint": "Les personnalisations du panneau Maillage sont masquées en mode hérité et réapparaissent lorsque vous le désactivez."
+  }
+}

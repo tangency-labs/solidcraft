@@ -47,6 +47,20 @@ pub(super) struct BoundaryEnd {
     pub(super) point: Point3,
 }
 
+/// Record one observation in a group already keyed by source face and seam
+/// edge. The two chart-side uses may observe the same event, but a different
+/// support or root is an additional constraint the planner must see.
+pub(super) fn record_boundary_end(events: &mut Vec<BoundaryEnd>, event: BoundaryEnd) {
+    if !events.iter().any(|e| {
+        e.edgeuse == event.edgeuse
+            && e.vertex == event.vertex
+            && e.across == event.across
+            && e.point == event.point
+    }) {
+        events.push(event);
+    }
+}
+
 // Keep the missing relation in the diagnostic without allocating or discarding
 // the typed Result. These are construction invariants, not projection candidates.
 macro_rules! required {
@@ -240,12 +254,7 @@ impl OffsetExecutive {
                 let f = required!(eu::face(original, event.seam)?)?;
                 let seam = edge_of(original, event.seam)?;
                 let events = groups.entry((f, seam)).or_default();
-                if !events
-                    .iter()
-                    .any(|e| e.edgeuse == event.edgeuse && e.vertex == event.vertex)
-                {
-                    events.push(*event);
-                }
+                record_boundary_end(events, *event);
             }
             let mut plans = Vec::new();
             let mut faces = BTreeSet::new();

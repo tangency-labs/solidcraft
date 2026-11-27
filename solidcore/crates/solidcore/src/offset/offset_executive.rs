@@ -17,6 +17,7 @@ mod consumed;
 mod crossing_loops;
 mod edgeuse;
 mod empty;
+mod empty_lens;
 mod extinct_branches;
 mod face;
 mod isolated;

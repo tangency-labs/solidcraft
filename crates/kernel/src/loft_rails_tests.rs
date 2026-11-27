@@ -1,7 +1,8 @@
 //! Guide rails on lofts (#201), checked against analytic solids: a rail bulging out from a loft
 //! between two equal circles makes the solid of revolution of the rail, a stretching rail widens
 //! squares one way only, two rails carry the sections between them, a sheet loft of lines follows
-//! its rail; and rails the loft cannot follow are refused.
+//! its rail, six rails around a cylinder make their solid of revolution, six rails carry a square
+//! into a slot; and rails the loft cannot follow are refused.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -27,6 +28,11 @@ fn square(h: f64) -> Loop2 {
 /// The bulge of the rails: 0 at both ends, 1 halfway up the 40 mm loft.
 fn bulge(z: f64) -> f64 {
     (PI * z / 40.0).sin()
+}
+
+/// A rail at angle `a` about the z axis, `r(z)` out from it, from z = 0 to z = 40.
+fn around(a: f64, r: impl Fn(f64) -> f64) -> Vec<Vec3> {
+    (0..=80).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(r(z) * a.cos(), r(z) * a.sin(), z)).collect()
 }
 
 /// A rail in the XZ plane at `x(z)`, from z = 0 to z = 40.
@@ -203,7 +209,8 @@ fn a_line_section_drawn_in_a_rails_plane_still_takes_the_rail() {
 }
 
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,
-/// one that stops short of the last, three rails, and one up the middle of a sheet loft's lines.
+/// one that stops short of the last, two of three rails on one point, seventeen rails, a third
+/// rail off a section, and one up the middle of a sheet loft's lines.
 #[test]
 fn rails_the_loft_cannot_follow_are_refused() {
     let sections = [(at(0.0), circle(10.0)), (at(40.0), circle(10.0))];
@@ -215,11 +222,70 @@ fn rails_the_loft_cannot_follow_are_refused() {
     let short: Vec<Vec3> = rail(|_| 10.0).into_iter().filter(|p| p.z <= 30.0).collect();
     let m = refused(&[short]);
     assert!(m.contains("does not reach section 2"), "{m}");
-    assert!(refused(&[rail(|_| 10.0), rail(|_| -10.0), rail(|_| 10.0)]).contains("one or two"));
+    let m = refused(&[rail(|_| 10.0), rail(|_| -10.0), rail(|_| 10.0)]);
+    assert!(m.contains("the guide rails meet a section at the same point"), "{m}");
+    let many: Vec<Vec<Vec3>> = (0..17).map(|k| around(f64::from(k) * 2.0 * PI / 17.0, |_| 10.0)).collect();
+    let m = refused(&many);
+    assert!(m.contains("1…16"), "{m}");
+    // With three or more, solidcore words the refusal (the rail is not numbered).
+    let m = refused(&[around(0.0, |_| 10.0), around(2.0, |_| 10.0), around(4.0, |_| 12.0)]);
+    assert!(m.contains("a guide rail crosses a section's plane away from its curves"), "{m}");
     let line = vec![Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) }];
     match loft_sheet_with_rails(&[(at(0.0), line.clone()), (at(40.0), line)], &[rail(|_| 0.0)], RailFit::Scale) {
         Err(KernelError::Invalid(m)) => assert!(m.contains("middle"), "{m}"),
         other => panic!("{other:?}"),
+    }
+}
+
+/// Six rails around a loft between equal circles, all bulging out to radius 15 halfway up: the
+/// rails' solid of revolution (as one rail makes it), and every rail on the loft.
+#[test]
+fn six_rails_around_a_cylinder_make_their_solid_of_revolution() {
+    let want = 4500.0 * PI + 8000.0;
+    let sections = [(at(0.0), circle(10.0)), (at(40.0), circle(10.0))];
+    let rails: Vec<Vec<Vec3>> = (0..6).map(|k| around(f64::from(k) * PI / 3.0, |z| 10.0 + 5.0 * bulge(z))).collect();
+    let b = loft_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    assert!(close(volume(&b), want, 1e-3), "volume {} vs {want}", volume(&b));
+    for (k, r) in rails.iter().enumerate() {
+        let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 1e-3, "rail {} is {worst} mm off the loft", k + 1);
+    }
+}
+
+/// A 40 mm square into an 18 × 6 mm slot, guided by six rails (from its corners and the middles
+/// of two sides, each bowing out 3 mm on the way): the loft passes within 0.01 mm of every rail.
+#[test]
+fn six_rails_carry_a_square_into_a_slot() {
+    let slot = Loop2::polygon(&[Vec2::new(-9.0, -3.0), Vec2::new(9.0, -3.0), Vec2::new(9.0, 3.0), Vec2::new(-9.0, 3.0)]);
+    let sections = [(at(0.0), square(20.0)), (at(40.0), slot)];
+    let ends = [
+        ((20.0, 20.0), (9.0, 3.0)),
+        ((-20.0, 20.0), (-9.0, 3.0)),
+        ((-20.0, -20.0), (-9.0, -3.0)),
+        ((20.0, -20.0), (9.0, -3.0)),
+        ((0.0, 20.0), (0.0, 3.0)),
+        ((0.0, -20.0), (0.0, -3.0)),
+    ];
+    let rails: Vec<Vec<Vec3>> = ends
+        .iter()
+        .map(|&((x0, y0), (x1, y1))| {
+            (0..=80)
+                .map(|i| {
+                    let z = f64::from(i) * 0.5;
+                    let f = z / 40.0;
+                    let (x, y) = (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+                    let out = Vec2::new(x, y).normalized().unwrap_or(Vec2::ZERO) * (3.0 * bulge(z));
+                    Vec3::new(x + out.x, y + out.y, z)
+                })
+                .collect()
+        })
+        .collect();
+    let b = loft_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    let m = measure(&b).unwrap();
+    assert!(m.volume > 0.0 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{m:?}");
+    for (k, r) in rails.iter().enumerate() {
+        let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 0.01, "rail {} is {worst} mm off the loft", k + 1);
     }
 }
 
@@ -290,6 +356,100 @@ fn sections_of_an_arc_and_a_line_take_rails() {
     assert!(m.bbox.max.y > 15.0 - 1e-2 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
 }
 
+/// Sections whose curves differ in kind take three or more rails (#12512): the half-disc of the
+/// test above to its rectangle, guided by four straight rails (the arc's top, its two shoulders
+/// and the line's middle, each to the rectangle's edge). Every rail is within 0.01 mm of the loft.
+#[test]
+fn sections_of_an_arc_and_a_line_take_four_rails() {
+    let half = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) },
+        ],
+    };
+    let rect = Loop2::polygon(&[Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 10.0), Vec2::new(-20.0, 10.0)]);
+    let sections = [(at(0.0), half), (at(40.0), rect)];
+    let c = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let ends = [((0.0, 10.0), (0.0, 10.0)), ((c, c), (c, 10.0)), ((-c, c), (-c, 10.0)), ((5.0, 0.0), (5.0, -10.0))];
+    let rails: Vec<Vec<Vec3>> = ends
+        .iter()
+        .map(|&((x0, y0), (x1, y1))| {
+            (0..=80)
+                .map(|i| {
+                    let f = f64::from(i) / 80.0;
+                    Vec3::new(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, 40.0 * f)
+                })
+                .collect()
+        })
+        .collect();
+    let b = loft_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    let m = measure(&b).unwrap();
+    let worst = rails.iter().flatten().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "a rail is {worst} mm off the loft");
+    assert!(m.volume > 40.0 * 50.0 * PI && m.volume < 40.0 * 800.0, "volume {}", m.volume);
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
+}
+
+/// A cubic section and an arc section, guided by three rails (from the cubic's ends and its top to
+/// the arc's ends and top): the cubic is not a line, so it may not take the arc's weights. Either
+/// the loft is refused as curves that do not pair, or it passes through the drawn cubic.
+#[test]
+fn a_cubic_section_and_an_arc_section_take_three_rails() {
+    let bow = Loop2 {
+        segs: vec![
+            cubics(&[[[-10.0, 0.0], [-5.0, 12.0], [5.0, 12.0], [10.0, 0.0]]]).remove(0),
+            Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(-10.0, 0.0) },
+        ],
+    };
+    let half = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) },
+        ],
+    };
+    let sections = [(at(0.0), bow), (at(40.0), half)];
+    let ends = [((-10.0, 0.0), (-10.0, 0.0)), ((10.0, 0.0), (10.0, 0.0)), ((0.0, 9.0), (0.0, 10.0))];
+    let rails: Vec<Vec<Vec3>> = ends
+        .iter()
+        .map(|&((x0, y0), (x1, y1))| {
+            (0..=80)
+                .map(|i| {
+                    let f = f64::from(i) / 80.0;
+                    Vec3::new(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, 40.0 * f)
+                })
+                .collect()
+        })
+        .collect();
+    match loft_with_rails(&sections, &rails, RailFit::Scale) {
+        Err(KernelError::Invalid(m)) => assert!(m.contains("do not pair"), "{m}"),
+        Err(e) => panic!("{e:?}"),
+        Ok(b) => {
+            for i in 0..=50 {
+                let t = f64::from(i) / 50.0;
+                let s = 1.0 - t;
+                let x = s * s * s * -10.0 + 3.0 * s * s * t * -5.0 + 3.0 * s * t * t * 5.0 + t * t * t * 10.0;
+                let y = 3.0 * s * s * t * 12.0 + 3.0 * s * t * t * 12.0;
+                // The cap at z = 0 is planar and holds the cubic whatever the loft's curved faces
+                // do there, so only the curved faces count.
+                let worst = b
+                    .record()
+                    .faces
+                    .iter()
+                    .filter(|f| {
+                        !matches!(f.surface, solidcore_record::brep::Surface::Plane { .. } | solidcore_record::brep::Surface::PlaneThrough { .. })
+                    })
+                    .filter_map(|f| {
+                        let s = solidcraft_geom::brep::eval::SurfaceEval::new(&f.surface).ok()?;
+                        let uv = s.project(Vec3::new(x, y, 0.0), None, f64::INFINITY)?;
+                        Some(s.point(uv)?.dist(Vec3::new(x, y, 0.0)))
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                assert!(worst < 2e-5, "the drawn cubic at t = {t} is {worst} mm off the loft's curved faces");
+            }
+        }
+    }
+}
+
 /// A square lofted to the same square with a vertex in the middle of its top side, along a
 /// straight rail up that vertex (scaled to fit): the vertex splits the first square's top side
 /// where it lines up, so every station is the square and the loft is the 20 x 20 x 40 box. (When
@@ -326,7 +486,7 @@ fn arcs_of_different_turns_take_rails() {
 /// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
 /// enough for the normals.
 fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
-    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new() }
+    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new(), segs: Vec::new() }
 }
 
 /// The sections' oriented normals, with the loft's direction `d(v)` at each section.
@@ -495,4 +655,95 @@ fn control_box(b: &crate::Body) -> (Vec3, Vec3) {
         }
     }
     (lo, hi)
+}
+
+/// A rail to the apex of a loft to a point (#20985), from the section at z = 0 to (0, 0, 30), at
+/// `x(z)` in the XZ plane.
+fn rail_to_apex(x: impl Fn(f64) -> f64) -> Vec<Vec3> {
+    (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(if z >= 30.0 { 0.0 } else { x(z) }, 0.0, z)).collect()
+}
+
+/// A circle of radius 20 lofted to a point 30 mm above its centre along a straight rail up the
+/// cone's side changes nothing: the cone, π r² h / 3 = 4000π, the base as drawn.
+#[test]
+fn a_straight_rail_to_the_apex_leaves_the_cone() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - z / 30.0));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 4000.0 * PI;
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    let m = measure(&b).unwrap();
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{:?}", m.bbox);
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-3, "the rail is {worst} mm off the loft");
+}
+
+/// A rail curving in to the apex, r = 20 (1 − (z/30)²), makes the rail's solid of revolution:
+/// π∫₀³⁰ r² dz = 12000π ∫₀¹ (1 − t²)² dt = 6400π.
+#[test]
+fn a_curved_rail_to_the_apex_makes_the_solid_of_revolution_of_the_rail() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - (z / 30.0).powi(2)));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 6400.0 * PI;
+    assert!(close(volume(&b), want, 1e-3), "volume {} vs {want}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
+/// Two straight rails up opposite corners of a square of half side 10 to the point 30 mm up: the
+/// pyramid, 20² · 30 / 3 = 4000. The rails meet at the apex, which is where they have to.
+#[test]
+fn two_rails_to_the_apex_of_a_pyramid() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let edge = |s: f64| -> Vec<Vec3> {
+        (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(s * 10.0 * (1.0 - t), s * 10.0 * (1.0 - t), 30.0 * t)).collect()
+    };
+    let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, &[edge(1.0), edge(-1.0)], RailFit::Scale).unwrap();
+    assert!(close(volume(&b), 4000.0, 1e-4), "volume {}", volume(&b));
+}
+
+/// A rail that ends beside the apex does not reach the point the loft goes to: refused.
+#[test]
+fn a_rail_that_misses_the_apex_is_refused() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(20.0 - z * 0.5, 0.0, z)).collect();
+    let e = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, &[r], RailFit::Scale).unwrap_err();
+    assert!(matches!(e, KernelError::Invalid(_)), "{e:?}");
+}
+
+/// A square of half side 10 lofted to a point 30 up along a rail from the middle of one side
+/// curving in as x = 10 (1 − t²), t = z / 30. Stretching widens each section only across to the
+/// rail: 2 · 10 (1 − t²) by 2 · 10 (1 − t), volume 12000 ∫₀¹ (1 − t²)(1 − t) dt = 5000. Scaling
+/// grows it both ways: (2 · 10 (1 − t²))², volume 12000 ∫₀¹ (1 − t²)² dt = 6400.
+#[test]
+fn a_stretching_rail_to_the_apex_widens_one_way_and_a_scaling_one_both() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 10.0 * (1.0 - (z / 30.0).powi(2)));
+    for (fit, want) in [(RailFit::Stretch, 5000.0), (RailFit::Scale, 6400.0)] {
+        let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, std::slice::from_ref(&r), fit).unwrap();
+        assert!(close(volume(&b), want, 1e-3), "{fit:?}: volume {} vs {want}", volume(&b));
+        let m = measure(&b).unwrap();
+        assert!((m.bbox.max.y - 10.0).abs() < 1e-6 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{fit:?}: {:?}", m.bbox);
+    }
+}
+
+/// A closed loop of two cubic Béziers lofted to a point along a straight rail from one of its
+/// points to the apex: the rail lies on the cone over the loop, so the loft is that cone, the
+/// loft to the point without rails (exact ruled walls), area × h / 3.
+#[test]
+fn a_spline_profile_follows_a_straight_rail_to_the_apex() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let (a, b) = (Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0));
+    let lp = Loop2 {
+        segs: vec![
+            Seg2::Cubic { p0: a, p1: Vec2::new(-10.0, 12.0), p2: Vec2::new(10.0, 12.0), p3: b },
+            Seg2::Cubic { p0: b, p1: Vec2::new(10.0, -12.0), p2: Vec2::new(-10.0, -12.0), p3: a },
+        ],
+    };
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(10.0 * (1.0 - t), 0.0, 30.0 * t)).collect();
+    let railed = crate::loft_to_point_with_rails(&at(0.0), &lp, apex, &[r], RailFit::Scale).unwrap();
+    let plain = crate::loft_to_point(&at(0.0), &lp, apex).unwrap();
+    let (v, want) = (volume(&railed), volume(&plain));
+    assert!(close(v, want, 1e-6), "railed {v} vs plain {want}");
 }

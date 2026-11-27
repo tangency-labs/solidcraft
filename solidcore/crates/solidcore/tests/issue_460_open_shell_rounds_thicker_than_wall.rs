@@ -138,15 +138,11 @@ fn issue_460_closed_shell_by_round_set() {
 
 /// tangency-labs/solidcraft#15108: a 40 x 30 x 20 box centred at `c`, all twelve edges
 /// rounded r5 and shelled 2 inward with the top open, with the options SolidCraft's
-/// `smlib_shell` passes and SolidCraft's fix set: every opt-in fix but the two its backend
-/// holds back (`fixes()` less `HELD_BACK` in SolidCraft's `crates/smlib/src/core.rs`;
-/// mirrored here, as solidcore cannot depend on the app). Returns the shell's volume.
+/// `smlib_shell` passes and SolidCraft's fix set: every opt-in fix. Returns the shell's
+/// volume.
 fn shell_15108(c: [f64; 3]) -> f64 {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let corner = Point3::new(c[0] - 20.0, c[1] - 15.0, c[2] - 10.0);
@@ -212,11 +208,8 @@ fn issue_15108_open_shell_of_a_rounded_box_is_independent_of_position() {
 /// the rib's two top edges rounded r0.75, shelled `t` inward open at the bottom, with
 /// SolidCraft's fix set (as [`shell_15108`]). Returns the shell's volume.
 fn shell_ribbed_box(t: f64) -> f64 {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let base = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 20.0, 10.0).unwrap();
@@ -286,11 +279,8 @@ fn issue_16983_a_rib_thinner_than_two_walls_stays_solid() {
 /// area, so loop orientation alone cannot identify the vanished cavity branch.
 #[test]
 fn issue_18801_closed_shell_absorbs_square_bosses() {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let block = create_box(&mut k, Point3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0).unwrap();

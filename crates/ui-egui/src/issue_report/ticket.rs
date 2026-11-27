@@ -273,15 +273,18 @@ fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
         {
             let name: String = entry.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).take(80).collect();
             let name = format!("{}.sc", if name.trim().is_empty() { "recovered" } else { name.trim() });
-            let bytes = solidcraft_engine::io::write_design(&doc);
-            return (
-                Some((name, bytes)),
-                Some("report.design_from_recovery"),
-                Some("the design kept for recovery when the last run ended, not opened"),
-            );
+            // A container, as the design's own file is: it carries binary data a JSON design can't.
+            if let Ok(bytes) = solidcraft_engine::io::write_design_container(&doc) {
+                return (
+                    Some((name, bytes)),
+                    Some("report.design_from_recovery"),
+                    Some("the design kept for recovery when the last run ended, not opened"),
+                );
+            }
         }
     }
-    (Some((design_name(app), solidcraft_engine::io::write_design(&app.session.doc))), None, None)
+    // A container, as the design's own file is: it carries binary data a JSON design can't.
+    (solidcraft_engine::io::write_design_container(&app.session.doc).ok().map(|bytes| (design_name(app), bytes)), None, None)
 }
 
 /// A failed importer reads a separate file; its error does not require the open design.
@@ -359,7 +362,7 @@ pub fn evidence(
 
 /// The failed operation a draft was made for: its command and parameters as the command API
 /// took them, and its error.
-fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+fn failing_of(app: &SolveApp, draft: &Draft) -> Option<payload::Failing> {
     if let Some((id, json)) = &draft.crash {
         let v: Value = serde_json::from_str(json).unwrap_or_default();
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
@@ -374,11 +377,22 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
             _ => None,
         };
         let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
-        return Some(payload::Failing { command, params, error, origin, code });
+        return Some(payload::Failing { command, params, error, origin, code, failure_code: None });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
-    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+    // The kernel call the error was made from, by its stable code: as a failed command or a
+    // preview gave it, else as a feature of the timeline that fails with this error keeps it.
+    let failure_code = solidcraft_engine::failure_code_of(error).or_else(|| {
+        let error = error.trim();
+        app.session
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.as_deref().is_some_and(|e| !e.is_empty() && error.contains(e)))
+            .and_then(|r| r.error_code.clone())
+    });
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None, failure_code })
 }
 
 /// The description a failed operation's report starts with: what failed, how, and a line
@@ -437,7 +451,7 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
 
 /// The form for a draft, pre-filled with what the app knows.
 pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
-    let failing = failing_of(draft);
+    let failing = failing_of(app, draft);
     let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
     let label = draft.title_prefix.trim_end_matches(": ").to_string();
     let (title, description) = match &failing {
@@ -601,9 +615,17 @@ pub fn without_unanswered(description: &str) -> String {
 /// What the dialog shows instead of the form once Send was pressed.
 enum Phase {
     Form,
-    Sending { done: usize, total: usize },
+    Sending {
+        done: usize,
+        total: usize,
+    },
     Opened(String),
-    Error { why: String, kept: bool },
+    /// The same report was sent a few minutes ago: its page, offered instead of a second one.
+    AlreadySent(String),
+    Error {
+        why: String,
+        kept: bool,
+    },
 }
 
 fn phase(app: &SolveApp, id: u64) -> Phase {
@@ -615,6 +637,7 @@ fn phase(app: &SolveApp, id: u64) -> Phase {
     }
     match &app.tickets.outcome {
         Some(Outcome::Opened(url)) => Phase::Opened(url.clone()),
+        Some(Outcome::AlreadySent(url)) => Phase::AlreadySent(url.clone()),
         Some(Outcome::Queued(why)) => Phase::Error { why: why.clone(), kept: true },
         Some(Outcome::Failed(why)) => Phase::Error { why: why.clone(), kept: false },
         _ => Phase::Form,
@@ -656,6 +679,16 @@ fn after_send(app: &mut SolveApp, ui: &mut Ui, id: u64, phase: Phase) {
         Phase::Opened(url) => {
             ui_kit::text(ui, tr("report.thanks"), ui_kit::Text::Heading("report.thanks"));
             note(ui, "report.opened", tr("report.opened"));
+            link_with_copy(ui, &url);
+            let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
+            crate::scenario::publish_target("report:open_again", r.rect);
+            if r.clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+        }
+        Phase::AlreadySent(url) => {
+            ui_kit::text(ui, tr("report.already_sent_title"), ui_kit::Text::Heading("report.already_sent_title"));
+            note(ui, "report.already_sent", tr("report.already_sent"));
             link_with_copy(ui, &url);
             let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:open_again", r.rect);
@@ -784,7 +817,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     if retake {
         // Retake brings the whole report up to date, not only its picture; what was typed and
         // ticked stays.
-        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
+        ticket.evidence = evidence(app, Some(ctx), failing_of(app, draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.

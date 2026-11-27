@@ -239,6 +239,19 @@ impl Curve {
         (self.n, self.m)
     }
 
+    /// Not upstream: the same curve by definition. The degree, the indices in use, and
+    /// every control point and knot in use are equal (IEEE `==`, so a NaN anywhere
+    /// refuses; storage past the indices is not compared). Equal definitions evaluate
+    /// to the same points at every parameter, exactly.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.p == other.p
+            && self.n == other.n
+            && self.m == other.m
+            && self.cpts() == other.cpts()
+            && self.knots() == other.knots()
+    }
+
     /// The control points in use, `Pw[0..=n]` (`N_CrvGetCPts`).
     #[must_use]
     pub fn cpts(&self) -> &[CPoint] {
@@ -1345,6 +1358,21 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
         }
     }
     Ok(())
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]): the control points, the
+/// degree and the knots, the storage beyond the indices in use too.
+impl crate::geom::content::Content for Curve {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self { pw, n, p, u, m } = self;
+        d.tag(0xC0);
+        pw.as_slice().content(d)?;
+        d.usize(*n);
+        d.usize(*p);
+        d.f64s(u);
+        d.usize(*m);
+        Some(())
+    }
 }
 
 #[cfg(test)]

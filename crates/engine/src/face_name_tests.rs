@@ -595,6 +595,51 @@ fn an_extrude_to_a_face_keeps_its_names_when_only_the_distance_is_edited() {
     assert_eq!(shell_error(&s, id), None);
 }
 
+/// Regression (#21380): an edit to a Fillet or Chamfer that omits `edges` (such as changing
+/// `radius` or `distance`) keeps its stored `edge_names` and `edge_refs`, whereas sending `edges`
+/// — even at the exact same coordinates (#16661) — reselects broken edge references now.
+#[test]
+fn fillet_and_chamfer_reselect_broken_edges_when_timeline_edit_sends_edges() {
+    for (cmd, size_key) in [("solid.fillet", "radius"), ("solid.chamfer", "distance")] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10}));
+        let pick = [20.0, 0.0, 10.0];
+        let id = run(&mut s, cmd, json!({"edges": [pick], size_key: 1.5}))["feature"].as_u64().unwrap();
+        let real_names = s.doc.feature(id).map(|f| f.edge_names.clone()).unwrap_or_default();
+        let real_refs = s.doc.feature(id).map(|f| f.edge_refs.clone()).unwrap_or_default();
+        assert!(!real_names.is_empty() && real_names.iter().all(|n| !n.is_empty()), "{cmd}: {real_names:?}");
+        assert!(!real_refs.is_empty(), "{cmd}: {real_refs:?}");
+
+        // Editing only the radius/distance keeps the stored edge names and refs intact.
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {size_key: 2.0}}));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(real_names.clone()));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_refs.clone()), Some(real_refs.clone()));
+        assert_eq!(shell_error(&s, id), None);
+
+        // Simulate stale edge metadata pointing to a missing edge name/ref.
+        let stale_names = vec!["F99:stale|F99:edge".to_string()];
+        if let Some(f) = s.doc_mut().feature_mut(id) {
+            f.edge_names = stale_names.clone();
+            f.edge_refs.clear();
+        }
+        s.execute("timeline.edit", &json!({"feature": id, "set": {size_key: 1.2}})).ok();
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(stale_names));
+        assert!(shell_error(&s, id).is_some(), "{cmd}: stale reference should still fail when `edges` is omitted");
+
+        // Re-sending the same coordinates refreshes `edge_names` and `edge_refs` and clears the error.
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {"edges": [pick]}}));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(real_names));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_refs.clone()), Some(real_refs));
+        assert_eq!(shell_error(&s, id), None);
+
+        let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+        assert_eq!(shell_error(&reopened, id), None);
+    }
+}
+
 /// A design saved by 0.30.1 numbered the pieces of each peg's round side (`F3:side#1`, `F4:side#2`),
 /// which the kernel now builds whole. A chamfer on the pegs' top edges saved under those names is
 /// found again on the edge each pick lies on (#16535): the same edges the chamfer had when picked,
@@ -686,4 +731,129 @@ fn a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_p
         let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
         assert!(result.error.as_deref().is_some_and(|e| e.contains(&asked)), "{at:?}: {:?}", result.error);
     }
+}
+
+/// 0.40 rc.3 saved a chamfer's face as `F3:blend:F2:side:l1|F2:top`. Ordinary face
+/// lookup already understood that spelling, but the sketch's lineage anchor compared text
+/// and lost the face when names started using parentheses (#20186).
+#[test]
+fn a_sketch_saved_on_a_chamfer_in_either_name_form_reopens_on_its_face() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Block"}));
+    let chamfer = run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 10]], "distance": 3, "name": "Chamfer1"}))["feature"].as_u64().unwrap();
+    let current = format!("F{chamfer}:blend(F2:side:l1|F2:top)");
+    let old = format!("F{chamfer}:blend:F2:side:l1|F2:top");
+    let before = faces(&mut s, "Block");
+    assert_eq!(before.iter().filter(|face| face["name"] == current).count(), 1, "{before:?}");
+
+    // The bevel lies in z - y = 7, with outward normal (0, -1, 1) / sqrt(2).
+    let point = Vec3::new(20.0, 1.5, 8.5);
+    let made = run(&mut s, "sketch.create", json!({"plane": {"face": [point.x, point.y, point.z]}, "project_edges": false, "name": "OnChamfer"}));
+    assert_eq!(made["attachment"], "exact_face", "{made}");
+    let sketch = made["sketch"].as_u64().unwrap();
+    let local = s.model.state().sketches.iter().find(|solved| solved.feature == sketch).unwrap().plane.to_local(point);
+    run(&mut s, "sketch.circle.center", json!({"center": [local.x, local.y], "radius": 0.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boss = run(&mut s, "solid.extrude", json!({"sketch": "OnChamfer", "distance": 2, "operation": "new", "body_name": "Boss"}))["feature"]
+        .as_u64()
+        .unwrap();
+    let original = s.model.state().sketches.iter().find(|solved| solved.feature == sketch).unwrap().plane;
+
+    for name in [&current, &old] {
+        let mut saved = (*s.doc).clone();
+        let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { name: stored, anchor, .. }, .. } =
+            &mut saved.feature_mut(sketch).unwrap().kind
+        else {
+            panic!("a sketch attached to the chamfer face")
+        };
+        let anchor = anchor.as_mut().unwrap();
+        assert_eq!(anchor.target.name, current);
+        assert!(matches!(anchor.target.certificate, Some(solidcraft_doc::config::FaceCertificate::Lineage)));
+        *stored = Some(name.clone());
+        anchor.target.name = name.clone();
+
+        // No saved model cache: reading the document must rebuild the chamfer and its sketch.
+        let mut reopened = Session::opened_at(solidcraft_doc::format::read(&saved.to_json()).unwrap(), None, None);
+        for feature in [chamfer, sketch, boss] {
+            let result = reopened.model.result(feature).unwrap();
+            assert!(!result.skipped && result.error.is_none(), "{name}: {result:?}");
+        }
+        let state = reopened.model.state();
+        let plane = &state.sketches.iter().find(|solved| solved.feature == sketch).unwrap().plane;
+        assert!((plane.origin.z - plane.origin.y - 7.0).abs() < 1e-9, "{name}: {plane:?}");
+        assert!(plane.normal().dot(Vec3::new(0.0, -1.0, 1.0).normalized().unwrap()) > 1.0 - 1e-9, "{name}: {plane:?}");
+        assert!(plane.origin.dist(original.origin) < 1e-9 && plane.x.dist(original.x) < 1e-9 && plane.y.dist(original.y) < 1e-9);
+        assert!(state.body("Boss").is_some(), "the extrude on the attached sketch rebuilds");
+        // Compatibility changes lookup only: newly listed faces keep today's names.
+        let names = |all: Vec<Value>| {
+            let mut names: Vec<String> = all.iter().map(|face| face["name"].as_str().unwrap().to_string()).collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(faces(&mut reopened, "Block")), names(before.clone()));
+    }
+
+    // The same saved point cannot rescue the name of an edge the chamfer never replaced.
+    let mut missing = (*s.doc).clone();
+    let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor, .. }, .. } =
+        &mut missing.feature_mut(sketch).unwrap().kind
+    else {
+        panic!("a sketch attached to the chamfer face")
+    };
+    anchor.as_mut().unwrap().target.name = format!("F{chamfer}:blend:F2:side:l2|F2:top");
+    let reopened = Session::opened_at(solidcraft_doc::format::read(&missing.to_json()).unwrap(), None, None);
+    assert!(reopened.model.result(sketch).unwrap().error.as_deref().is_some_and(|error| error.contains("no longer exists")));
+}
+
+/// A face that `model.faces` marks `exact` has its exact area. On a 30 x 30 x 5 plate with a
+/// radius 5 hole the hole's wall reads 156.83 for 2π·5·5 = 157.08 and the top face 821.97 for
+/// 900 - 25π = 821.46, both marked exact, because they come from the mesh
+/// ([T-93](https://tickets.solidcraft.io/t/93), #17588).
+#[test]
+fn faces_marked_exact_report_their_exact_area() {
+    let mut s = Session::default();
+    plate_with_hole(&mut s, 30.0, 30.0, 5.0);
+    let mut checked = 0;
+    for f in faces(&mut s, "Plate") {
+        let want = if f.get("cylinder").is_some() {
+            2.0 * PI * 5.0 * 5.0
+        } else if f["plane_normal"][2].as_f64().is_some_and(|z| z.abs() > 0.99) {
+            900.0 - 25.0 * PI
+        } else {
+            30.0 * 5.0
+        };
+        if f["exact"] == true {
+            let got = f["area"].as_f64().unwrap();
+            assert!((got - want).abs() < 1e-6 * want, "{}: {got} vs {want}", f["name"]);
+            checked += 1;
+        }
+    }
+    // The four sides, at least, are exact.
+    assert!(checked >= 4, "{checked}");
+}
+
+/// #21192: renaming a body of a design opened from its saved model keeps its faces' history
+/// names. They came only from the saved model, and the rename dropped them for `<name>:face:<k>`,
+/// which a later feature then stored and a full evaluation no longer found.
+#[test]
+fn renaming_a_body_opened_from_its_saved_model_keeps_its_face_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 20, "body_name": "Block"}));
+    let name = |f: &Value| f["name"].as_str().unwrap_or_default().to_string();
+    let before: Vec<String> = faces(&mut s, "Block").iter().map(name).collect();
+    assert!(before.iter().all(|n| !n.contains(":face:")), "{before:?}");
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Renamed"}));
+    let after: Vec<String> = faces(&mut s, "Renamed").iter().map(name).collect();
+    assert_eq!(after, before);
+    run(&mut s, "solid.hole", json!({"position": [25, 25, 20], "direction": [0, 0, -1], "diameter": 5, "depth": 10, "name": "Hole1"}));
+    s.model = solidcraft_doc::Model::new();
+    s.model.evaluate(&s.doc);
+    let hole = s.model.state().bodies.iter().find(|b| b.name == "Renamed").map(|b| b.feature);
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?} (body by {hole:?})");
 }

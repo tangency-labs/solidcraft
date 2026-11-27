@@ -7,7 +7,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
 use solidcore_record::{Region2, Seg2, Vec3};
-use solidcraft_doc::sheet::ReliefShape;
+use solidcraft_doc::sheet::{BendReliefShape, ReliefShape};
 use solidcraft_doc::{ConvertRule, SheetFaces, SurfaceConversion, convert_surfaces};
 use solidcraft_geom::Aabb3;
 
@@ -82,6 +82,7 @@ const TEST: ConvertRule = ConvertRule {
     corner_relief_size: 8.0,
     relief_width: 2.0,
     relief_depth: 1.0,
+    bend_relief: BendReliefShape::Rectangular,
 };
 
 /// A channel whose bends are modeled with the rule's radius, one thickness inside: recognized
@@ -249,7 +250,7 @@ fn a_conversion_shows_in_the_flat_pattern() {
     let size = |f: &Value| (f["flat_size_mm"][0].as_f64().unwrap_or(0.0), f["flat_size_mm"][1].as_f64().unwrap_or(0.0));
     let (w, h) = size(&flat);
     assert!(same_size((w.max(h), w.min(h)), (across, 60.0), 1e-6), "{flat}");
-    assert!(flat["surfaces"] == json!(true) && flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
+    assert!(flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
     assert_eq!(flat["roll_lines"].as_array().map(Vec::len), Some(6), "each roll's start, end and middle: {flat}");
     let saved = s.doc.to_json();
     assert!(saved.contains("\"sheet_recognize\""), "the feature saves as a recognition");
@@ -675,6 +676,7 @@ fn a_tombstone_rips_along_its_round_as_along_its_sides() {
         corner_relief_size: 10.0,
         relief_width: 0.1,
         relief_depth: 1.25,
+        bend_relief: BendReliefShape::Rectangular,
     };
     let outside = tombstone_body("Outside", 27.5, -23.0, 0.0, 36.0);
     let inside = tombstone_body("Inside", 25.0, -20.5, 2.5, 33.5);

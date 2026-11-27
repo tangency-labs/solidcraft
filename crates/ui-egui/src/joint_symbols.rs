@@ -62,7 +62,7 @@ fn construction(s: &Session) -> u64 {
         let held = s.doc.assembly.joints.iter().find(|j| j.id == l.b).and_then(|j| j.limits.get(l.ib).copied().flatten());
         format!("{held:?}").hash(&mut h);
     }
-    for o in &s.doc.occurrences {
+    for o in s.doc.active_occurrences() {
         (o.id, o.parent, o.grounded).hash(&mut h);
     }
     h.finish()

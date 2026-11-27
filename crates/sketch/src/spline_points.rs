@@ -149,9 +149,18 @@ impl Sketch {
     /// the spline would no longer end where it is joined.
     pub fn remove_spline_point(&mut self, ci: usize, p: usize) -> Result<bool> {
         let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
-        let CurveKind::Spline { pts, periodic, .. } = &curve.kind else {
+        let CurveKind::Spline { pts, periodic, control, nurbs, .. } = &curve.kind else {
             return Err(SketchError::WrongKind(curve.id.clone(), "only a spline has points to remove".into()));
         };
+        if *control && self.curves.iter().any(|guide| guide.spline_control_polygon_of.as_deref() == Some(curve.id.as_str())) {
+            return Err(SketchError::Invalid("remove the control polygon before removing a spline point".into()));
+        }
+        if *control && *periodic {
+            return Err(SketchError::Invalid("not supported yet: removing a control point from a closed control spline".into()));
+        }
+        if nurbs.is_some() {
+            return Err(SketchError::Invalid("a spline with its own knots keeps every control point: its knots would no longer fit the rest".into()));
+        }
         let (pts, periodic) = (pts.clone(), *periodic);
         if curve.link.is_some() {
             return Err(SketchError::Invalid("a projected spline follows its source; its points can't be removed".into()));
