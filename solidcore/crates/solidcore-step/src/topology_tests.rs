@@ -5514,3 +5514,77 @@ fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
     brep.edges[3].tolerance = 10.0;
     assert!(!fine_read_holds(&brep, shortest));
 }
+
+/// A 10 mm box whose top steps up by `step` along y = 5, as a file stating `uncertainty`, with
+/// the corner at (10, 0, 0) written `gap` above where its three edges' LINEs and the bottom's
+/// PLANE put it.
+fn hair_step_with_a_corner_off(step: f64, gap: f64, uncertainty: f64) -> p21::Exchange {
+    let h = 10.0 + step;
+    let corners: [V; 12] = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    // Each face's corners counter-clockwise seen from outside.
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    let mut w = W::default();
+    let vertices: Vec<u64> = corners.iter().enumerate().map(|(i, &p)| w.vertex(if i == 1 { [p[0], p[1], gap] } else { p })).collect();
+    let mut edges: std::collections::HashMap<(usize, usize), u64> = Default::default();
+    let mut faces = Vec::new();
+    for cycle in cycles {
+        let mut oes = Vec::new();
+        for (k, &a) in cycle.iter().enumerate() {
+            let z = cycle[(k + 1) % cycle.len()];
+            let (lo, hi) = (a.min(z), a.max(z));
+            let e = *edges.entry((lo, hi)).or_insert_with(|| w.line_edge((vertices[lo], corners[lo]), (vertices[hi], corners[hi]), true, 1.0));
+            oes.push(w.oe(e, a == lo));
+        }
+        let [p, q, r] = [corners[cycle[0]], corners[cycle[1]], corners[cycle[2]]];
+        let x = sub3(q, p);
+        let normal = crate::geom::cross(x, sub3(r, q));
+        let bound = w.bound(&oes, true, true);
+        let plane = w.plane(p, normal, x);
+        faces.push(w.face(&[bound], plane, true));
+    }
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('stepped',#{shell})"));
+    w.file_with_uncertainty(&[solid], uncertainty)
+}
+
+/// tangency-labs/solidcraft#22579: a solid with an edge shorter than the tolerance its file
+/// states is read again at a quarter of that edge, and a vertex off its edges' curves takes a
+/// tolerance from its gap. 1.5 times the gap was less than the kernel's check asks (it holds a
+/// vertex's gap to half its zone, and its zone is half the record's tolerance), so a gap the
+/// stated tolerance covers failed the check once the solid was read finer, as SolidCraft's own
+/// export of a bent strip did. Read finer, the gap stays covered up to what the file states; a
+/// gap past a quarter of that is no more covered than as stated, and the check still fails it.
+#[test]
+fn a_vertex_gap_the_stated_tolerance_covers_stays_covered_when_read_finer() {
+    let check = |gap: f64, uncertainty: f64| {
+        let s = one_solid(&hair_step_with_a_corner_off(3e-4, gap, uncertainty));
+        assert!(s.notes.iter().any(|n| n.ends_with("read at 7.500e-5 mm")), "{:?}", s.notes);
+        // Trusted, so the kernel's healer leaves the tolerances as the reader made them.
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, true).unwrap();
+        // The box and the riser: 10 x 10 x 10 + 10 x 5 x 3e-4 (the corner's gap moves no face).
+        let volume = body.mass_properties(1e-9).unwrap().volume;
+        assert!((volume - 1000.015).abs() < 1e-9, "{gap} {uncertainty}: {volume}");
+        body.check(solidcore_ops::check::CheckLevel::All).unwrap()
+    };
+    for (gap, uncertainty) in [(0.0, 1e-3), (1e-4, 1e-3), (2.4e-4, 1e-3), (1e-4, 5e-4)] {
+        let report = check(gap, uncertainty);
+        assert!(report.is_valid(), "{gap} {uncertainty}: {report}");
+    }
+    for (gap, uncertainty) in [(2.6e-4, 1e-3), (1.3e-4, 5e-4)] {
+        assert!(!check(gap, uncertainty).is_valid(), "{gap} {uncertainty}");
+    }
+}

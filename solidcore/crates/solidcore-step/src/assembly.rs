@@ -59,6 +59,18 @@ pub(crate) const MAX_SPLINE_DEGREE: usize = 16;
 pub(crate) const MAX_TOLERANCE: f64 = 1.0;
 /// A vertex's tolerance over its largest gap from its curves and surfaces.
 pub(crate) const VERTEX_GAP_MARGIN: f64 = 1.5;
+/// A record tolerance over the largest vertex gap SMLib's check passes: the kernel takes half a
+/// record tolerance as its zone (`convert.rs`) and holds a vertex's gaps to half its zone
+/// (`SmBrep::UpdateAndValidateTolerances`).
+pub(crate) const CHECKED_GAP_FACTOR: f64 = 4.0;
+
+/// The tolerance a vertex `gap` mm off its curve or surface needs, read at a tolerance finer than
+/// the `stated` one ([`Assembly::stated`]): [`VERTEX_GAP_MARGIN`] of the gap, and as much as
+/// SMLib's check asks of it ([`CHECKED_GAP_FACTOR`]) up to what the file states. A gap the stated
+/// tolerance covers stays covered when the solid is read finer; one it does not stays a gap.
+pub(crate) fn vertex_cover(gap: f64, stated: f64) -> f64 {
+    (VERTEX_GAP_MARGIN * gap).max((CHECKED_GAP_FACTOR * VERTEX_GAP_MARGIN * gap).min(stated))
+}
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// The least span of a face's parameter box along a direction of its surface that is not
@@ -204,6 +216,9 @@ pub enum SweptSurface {
 #[derive(Clone)]
 pub struct Assembly<'t> {
     pub(crate) tol: f64,
+    /// The tolerance the file states, when the solid is read at a finer one (`tol`) for edges
+    /// shorter than it: a vertex's gap is covered up to it ([`vertex_cover`]). Else `tol`.
+    pub(crate) stated: f64,
     /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
     pub(crate) trims: Option<&'t dyn Trims>,
     pub(crate) vertices: Vec<Vertex>,
@@ -250,6 +265,7 @@ impl<'t> Assembly<'t> {
     pub fn new(tolerance: f64, trims: Option<&'t dyn Trims>) -> Self {
         Assembly {
             tol: tolerance,
+            stated: tolerance,
             trims,
             vertices: Vec::new(),
             edges: Vec::new(),
@@ -515,7 +531,7 @@ impl<'t> Assembly<'t> {
             return Err(format!("edge #{edge}: a vertex lies {gap} mm off its curve"));
         }
         if let Some(x) = self.vertices.get_mut(v as usize) {
-            x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+            x.tolerance = x.tolerance.max(vertex_cover(gap, self.stated));
         }
         Ok(())
     }
@@ -1156,7 +1172,7 @@ impl<'t> Assembly<'t> {
                     if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
                         return Err(format!("face #{}: a vertex loop's vertex lies {gap} mm off its surface", face.origin));
                     }
-                    x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+                    x.tolerance = x.tolerance.max(vertex_cover(gap, self.stated));
                 }
             }
         }
