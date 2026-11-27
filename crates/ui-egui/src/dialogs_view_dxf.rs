@@ -203,6 +203,14 @@ mod tests {
         export_to(&mut h, "cut.dxf");
         let (lo, hi) = entity_bounds(&std::fs::read_to_string(h.dir.join("cut.dxf")).unwrap());
         assert!(near(lo, -20., -15.) && near(hi, 0., 15.), "half the plate: {lo:?} {hi:?}");
+        // A script's export with no planes of its own runs on the export worker, cut the same way.
+        let path = h.dir.join("script.dxf").to_string_lossy().into_owned();
+        let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ExportDxf);
+        request.options = json!({"camera": h.app.cam, "path": path}).as_object().cloned().unwrap_or_default();
+        let _ = crate::file_load::begin_request(&mut h.app, request);
+        wait_for_export(&mut h);
+        let (lo, hi) = entity_bounds(&std::fs::read_to_string(h.dir.join("script.dxf")).unwrap());
+        assert!(near(lo, -20., -15.) && near(hi, 0., 15.), "half the plate: {lo:?} {hi:?}");
     }
 
     /// #17917: the dialog writes a round hole as one `CIRCLE`, not as a ring of line chords, and has

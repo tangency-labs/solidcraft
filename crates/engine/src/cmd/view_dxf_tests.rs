@@ -653,6 +653,13 @@ fn view_dxf_exports_the_view_as_the_section_cuts_it() {
     assert!((width(&cut) - 20.).abs() < 1e-3, "{}", width(&cut));
     assert!((width(&run(&mut s, CMD, json!({"camera":top,"section":[]}))) - 40.).abs() < 1e-3);
     run(&mut s, "inspect.section", json!({"clear":true}));
+    // Cut across y at 12, the side toward -y left out: from above, 40 by 18 of the plate is left.
+    let height = |v: &Value| {
+        let ys: Vec<f64> = lines(v).iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) - ys.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    let across_y = run(&mut s, CMD, json!({"camera":top,"section":[{"origin":[0,12,0],"normal":[0,-1,0]}]}));
+    assert!((width(&across_y) - 40.).abs() < 1e-3 && (height(&across_y) - 18.).abs() < 1e-3, "{} by {}", width(&across_y), height(&across_y));
     // From the front, the blind hole is hidden in the plate; cut through its axis, its section shows:
     // a line across the hole's top, 4 mm up, from x = 7 to 13 (the view is centred on (20, 15, 5)).
     let front = camera(StandardView::Front);
