@@ -321,6 +321,10 @@ fn inset_loop(lp: &Loop, w: f64) -> Option<Loop> {
         } else if lines && joined && turn > -MITER_MOST {
             // Both lines moved by `w`: they meet on the corner's bisector.
             let (nu, nv) = (Vec2::new(-u.y, u.x), Vec2::new(-v.y, v.x));
+            // A corner that turns back on itself has no meeting point.
+            if 1.0 + nu.dot(nv) <= 1e-9 {
+                return None;
+            }
             let x = corner + (nu + nv) * (w / (1.0 + nu.dot(nv)));
             (x, None, x)
         } else if turn > 0.0 || !joined {
@@ -350,10 +354,11 @@ fn inset_loop(lp: &Loop, w: f64) -> Option<Loop> {
 /// The loops with the fields' outlines (`fields`) and the keep-outs' (`keepouts`) moved by `w`
 /// into the field, each as asked; the others as they are. `None` when one cannot be moved.
 fn inset_loops(loops: &[Loop], (fields, keepouts): (bool, bool), w: f64) -> Option<Vec<Loop>> {
-    loops
+    let roles = keepout_loops(loops);
+    let moved: Vec<Loop> = loops
         .iter()
-        .zip(keepout_loops(loops))
-        .map(|(lp, keepout)| {
+        .zip(&roles)
+        .map(|(lp, &keepout)| {
             if !(if keepout { keepouts } else { fields }) {
                 return Some(lp.clone());
             }
@@ -362,7 +367,23 @@ fn inset_loops(loops: &[Loop], (fields, keepouts): (bool, bool), w: f64) -> Opti
             // An outline that turns inside out has no field left.
             ((moved.signed_area() > 0.0) != keepout).then_some(moved)
         })
-        .collect()
+        .collect::<Option<_>>()?;
+    // A moved loop that crosses another, or nests differently, would turn a keep-out into field.
+    let crossed = moved
+        .iter()
+        .enumerate()
+        .any(|(i, a)| moved.iter().skip(i + 1).any(|b| loops_cross(a, b)));
+    (!crossed && keepout_loops(&moved) == roles).then_some(moved)
+}
+
+/// Whether two loops cross or touch.
+fn loops_cross(a: &Loop, b: &Loop) -> bool {
+    a.bounds().overlaps(&b.bounds(), 0.0)
+        && a.prims.iter().any(|p| {
+            b.prims
+                .iter()
+                .any(|q| p.bounds().overlaps(&q.bounds(), 0.0) && !intersections(p, q).is_empty())
+        })
 }
 
 /// A trimmed cell's piece as a convex polygon, when it is one of straight sides.
@@ -383,7 +404,7 @@ fn convex_piece(prims: &[Prim]) -> Option<Vec<Vec2>> {
 }
 
 /// Whether every piece keeps `w` clear of the outline as drawn (measured at each of its pieces'
-/// ends and middles), for the fields' outlines (`fields`) and the keep-outs' (`keepouts`) as asked.
+/// ends and middles and at the outline's corners, and never crossing it), for the fields' outlines (`fields`) and the keep-outs' (`keepouts`) as asked.
 fn keeps_rim(
     outline: &Region,
     (fields, keepouts): (bool, bool),
@@ -392,15 +413,22 @@ fn keeps_rim(
 ) -> bool {
     pieces.iter().flat_map(|p| p.0.iter()).all(|p| {
         let near = outline.near(&p.bounds().grown(w));
-        [p.start(), p.mid()].iter().all(|&x| {
-            near.iter()
-                .filter(|&&i| match outline.keepout.get(i) {
-                    Some(true) => keepouts,
-                    _ => fields,
-                })
-                .filter_map(|&i| outline.prims.get(i))
-                .all(|o| o.distance(x) >= w - RIM_TOL)
-        })
+        near.iter()
+            .filter(|&&i| match outline.keepout.get(i) {
+                Some(true) => keepouts,
+                _ => fields,
+            })
+            .filter_map(|&i| outline.prims.get(i))
+            .all(|o| {
+                // The piece's ends and middle against the outline, the outline piece's start
+                // against the piece (the nearest point of a piece passing a corner lies between
+                // its samples), and no crossing.
+                [p.start(), p.mid()]
+                    .iter()
+                    .all(|&x| o.distance(x) >= w - RIM_TOL)
+                    && p.distance(o.start()) >= w - RIM_TOL
+                    && intersections(p, o).is_empty()
+            })
     })
 }
 
@@ -420,6 +448,12 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
         if let Some(moved) = inset_loops(&loops, fills, lat.w) {
             rim = Some(Region::from_loops(loops, lat.p));
             loops = moved;
+            if spec.margin > 0.0 {
+                warnings.push(
+                    "the margin is not used where the field is filled up to a rim of one web"
+                        .into(),
+                );
+            }
         } else {
             warnings.push(
                 "the field's outline could not be moved in by the web, so only whole cells were \
