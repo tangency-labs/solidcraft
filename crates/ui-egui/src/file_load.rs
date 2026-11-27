@@ -304,6 +304,10 @@ impl From<solidcraft_engine::EngineError> for LoadFailure {
 }
 
 type Job = Result<Made, LoadFailure>;
+
+/// The worker reads configuration metadata before starting the file operation.
+const READING_CONFIGURATIONS: u8 = 3;
+
 struct Running {
     request: Request,
     base: Arc<Document>,
@@ -1093,7 +1097,7 @@ fn start(app: &mut SolveApp) {
     }
     let base = app.session.doc.clone();
     let base_revision = app.session.revision;
-    let phase = Arc::new(AtomicU8::new(0));
+    let phase = Arc::new(AtomicU8::new(if request.choose_configuration { READING_CONFIGURATIONS } else { 0 }));
     let worker_phase = phase.clone();
     let progress = Arc::new(Progress::default());
     #[cfg(test)]
@@ -1604,6 +1608,8 @@ fn compute(
         if command == "component.relink" {
             return Err(solidcraft_ui_text::tr("insert_design.no_saved_configurations").to_string().into());
         }
+        // There is no choice to make. The ordinary insert now owns the progress display.
+        phase.store(0, Ordering::Relaxed);
     }
     session.plugin_state.defer_user_settings();
     // The timeline's rebuild reports each feature and stops at the next one after Cancel. An
@@ -2164,6 +2170,7 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
     Some(match (r.staged.is_some(), r.phase.load(Ordering::Relaxed)) {
         (true, 0) => "reading the file (staged)",
         (_, 0) => "reading the file",
+        (_, READING_CONFIGURATIONS) => "reading configurations",
         (_, 1) => "preparing the view",
         _ => "finishing the open",
     })
@@ -2231,6 +2238,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => std::path::Path::new(&r.request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     };
     let phase = r.phase.load(Ordering::Relaxed);
+    let reading_configurations = phase == READING_CONFIGURATIONS;
     let (done, total) = r.features();
     // Long work inside one feature (a large STEP file) has progress of its own.
     let export = r.request.kind.exports();
@@ -2271,7 +2279,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         solidcraft_ui_text::tr_label("dxf.cancelling")
     } else if cancelled {
         solidcraft_ui_text::tr("file_load.waiting")
-    } else if r.request.choose_configuration {
+    } else if reading_configurations {
         solidcraft_ui_text::tr("insert_design.configuration_loading")
     } else {
         solidcraft_ui_text::tr(match r.request.kind {
@@ -2313,7 +2321,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
-            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
+            let stepped = !cancelled
+                && !reading_configurations
+                && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
             if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
