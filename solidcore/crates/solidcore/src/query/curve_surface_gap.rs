@@ -3414,6 +3414,7 @@ fn patch_speeds(
 
 /// Pascal's triangle up to [`COMPOSED_MAX_DEGREE`] (`C(32, 16)` is below `2^53`, so each is
 /// exact as an `f64`).
+#[allow(clippy::indexing_slicing)] // const evaluation: an index out of range fails the build
 const BINOMIALS: [[u64; COMPOSED_MAX_DEGREE + 1]; COMPOSED_MAX_DEGREE + 1] = {
     let mut t = [[0_u64; COMPOSED_MAX_DEGREE + 1]; COMPOSED_MAX_DEGREE + 1];
     let mut n = 0;
