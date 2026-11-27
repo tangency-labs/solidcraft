@@ -431,8 +431,9 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 
 /// Delete's two modes, side by side at the top of Remove and Delete Face (#22513): Bodies removes
 /// whole bodies, Faces takes faces out and heals the gap. Choosing the other mode turns the dialog
-/// into the other command, its picks starting again. An edit of either feature keeps its command.
-fn delete_mode_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+/// into the other command, its picks starting again, and Repeat then repeats that command. An edit
+/// of either feature keeps its command.
+fn delete_mode_row(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     let faces = match d.kind {
         Kind::Remove => false,
         Kind::DeleteFaces => true,
@@ -446,7 +447,11 @@ fn delete_mode_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     if !changed || selected == usize::from(faces) {
         return;
     }
-    let Some(other) = Dialog::for_command(app, if selected == 1 { "face.delete" } else { "solid.remove" }) else { return };
+    let command = if selected == 1 { "face.delete" } else { "solid.remove" };
+    let Some(other) = Dialog::for_command(app, command) else { return };
+    if let Some(spec) = solidcraft_engine::find_command(command) {
+        app.last_command = Some((spec.id.to_string(), spec.label.to_string()));
+    }
     d.kind = other.kind;
     d.inputs = other.inputs;
     d.active = 0;

@@ -3213,7 +3213,7 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
 
 /// #22513: Delete offers Bodies and Faces side by side. Modify ▸ Delete with nothing selected opens
 /// it in its Bodies mode (Remove); Faces turns it into Delete Face, which heals the gap, its pick
-/// taking faces; Bodies turns it back.
+/// taking faces; Bodies turns it back. Repeat repeats the mode the dialog is in.
 #[test]
 fn delete_switches_between_bodies_and_faces() {
     let mut h = Harness::new();
@@ -3227,7 +3227,10 @@ fn delete_switches_between_bodies_and_faces() {
     let d = h.app.dialog.as_ref().expect("still open");
     assert!(matches!(d.kind, Kind::DeleteFaces), "Faces is Delete Face");
     assert!(d.inputs.first().is_some_and(|i| i.accept & crate::selection::FACES != 0), "it picks faces");
+    let repeats = |h: &Harness| h.app.last_command.as_ref().map(|(id, _)| id.clone());
+    assert_eq!(repeats(&h).as_deref(), Some("face.delete"), "Repeat repeats Delete Face");
     h.step(&json!({"click": {"handle": "dialog:ui.delete_mode:Bodies"}})).unwrap();
     h.frames(3);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Remove)), "and back to Bodies");
+    assert_eq!(repeats(&h).as_deref(), Some("solid.remove"), "and Repeat repeats Remove");
 }
