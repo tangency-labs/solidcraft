@@ -11726,7 +11726,8 @@ fn feature_tools_with_constructor(
             // The face names follow `face_points`: To, then From.
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
-            let to_face = extent.to.and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
+            // To / From Object on a construction plane or point has no face (#8527).
+            let to_face = extent.to.filter(|_| extent.to_ref.is_none()).and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
             // A vertex or an edge point where a plane the extrusion runs along meets another face:
             // its own level is the end (#12968), not the surface of one of the faces there.
             let to_end_face = to_face.filter(|face| !extent.to.is_some_and(|p| on_edge_without_cap(&tst, *face, p.0, n)));
@@ -11738,17 +11739,28 @@ fn feature_tools_with_constructor(
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
                 ss.plane.to_world(c)
             };
-            let from_face = extent.from.and_then(|p| object_face_at_level(&tst, from_name, p.0, &ss.plane));
-            let from = match extent.from {
-                Some(p) => height_at(&tst, from_face, &ss.plane, centre, p.0),
-                None => 0.0,
+            // To / From Object on a construction plane or point is found where it is now (#8527):
+            // its point stands for the level through it, and a slanted plane for the end itself.
+            let ctx = crate::construct::Ctx { doc, vals, st: &tst, depth: 0, component: f.component };
+            let to_at = extent.to_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane, centre, &regions)).transpose()?;
+            let from_at = extent.from_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane, centre, &regions)).transpose()?;
+            let from_face = extent.from.filter(|_| extent.from_ref.is_none()).and_then(|p| object_face_at_level(&tst, from_name, p.0, &ss.plane));
+            let from = match (&from_at, extent.from) {
+                (Some(ReferenceEnd::Level(h)), _) => *h,
+                (Some(ReferenceEnd::Slanted(pl)), _) => level_on(&ss.plane, centre, pl)?,
+                (None, Some(p)) => height_at(&tst, from_face, &ss.plane, centre, p.0),
+                (None, None) => 0.0,
             };
             // From Object on a flat face at a slant starts on the face, so both ends follow its
             // slope, unless the design was built when it started at the face's level. With To
             // Object on a curved face, through all or a taper, or on a face within 5 degrees of
             // running along the extrusion (where the profile's shadow on it is long and thin), it
-            // still starts at that level, and the feature's warning says so.
-            let slanted_from = from_face.filter(|_| !extent.from_level).and_then(|face| slanted_plane(&tst, face, n));
+            // still starts at that level, and the feature's warning says so. A slanted plane
+            // From Object starts on the plane the same way.
+            let slanted_from = match &from_at {
+                Some(end) => end.slanted(),
+                None => from_face.filter(|_| !extent.from_level).and_then(|face| slanted_plane(&tst, face, n)),
+            };
             // A design kept on the level start with To Object still says why it starts at the
             // level: one saved before From + To on flat faces ran between them, or before format
             // 58, when every From started at the level.
@@ -11760,7 +11772,26 @@ fn feature_tools_with_constructor(
             // The plane To Object ends on, when it is flat: a face's plane, square to the
             // extrusion or at a slant to it (but not within 5 degrees of running along it), or
             // the plane parallel to the sketch through a point or an edge (#18825).
-            let to_end_plane = extent.to.and_then(|p| flat_to_end(&tst, to_end_face, &ss.plane, centre, p.0));
+            let to_end_plane = match &to_at {
+                Some(ReferenceEnd::Level(h)) => Some(ss.plane.offset(*h)),
+                Some(ReferenceEnd::Slanted(pl)) => Some(*pl),
+                None => extent.to.and_then(|p| flat_to_end(&tst, to_end_face, &ss.plane, centre, p.0)),
+            };
+            // A slanted To plane is reached the way a From Object on a slanted face runs to a flat
+            // end: between two planes, here the start's level and the To plane.
+            let to_slanted = to_at.as_ref().and_then(ReferenceEnd::slanted);
+            if to_slanted.is_some() && tapered {
+                return Err(DocError::Invalid(
+                    "not supported yet: a taper to a plane at a slant to the sketch; use a plane parallel to the sketch or a point".into(),
+                ));
+            }
+            // The run between the two planes has no second side.
+            if to_slanted.is_some() && extent.distance2.is_some() {
+                return Err(DocError::Invalid(
+                    "not supported yet: two sides with a plane at a slant to the sketch; use one side, or a plane parallel to the sketch or a point"
+                        .into(),
+                ));
+            }
             let ends = ExtrudeEnds {
                 to: extent.to.map(|_| to_end_plane.is_some()),
                 through_all: extent.through_all,
@@ -11786,11 +11817,12 @@ fn feature_tools_with_constructor(
                 );
             }
             let from_slope = slanted_from.filter(|_| level_because.is_none());
+            let from_plane = from_slope.or_else(|| to_slanted.map(|_| ss.plane.offset(from)));
             // From a slanted face To a flat face or a point: the extrude runs from the From
             // face's plane to the To one's, each moved along the extrusion by its offset, and the
             // way it runs is read where they meet the line through the profiles' middle (#18825).
             // The planes and the signed distance between them there.
-            let from_to = match (&from_slope, &to_end_plane) {
+            let from_to = match (&from_plane, &to_end_plane) {
                 (Some(fp), Some(tp)) if extent.to.is_some() => {
                     let start_offset = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     let to_offset = extent.to_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
@@ -11823,7 +11855,10 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
-                    let h = height_at(&tst, to_end_face, &ss.plane, centre, p.0);
+                    let h = match &to_at {
+                        Some(ReferenceEnd::Level(h)) => *h,
+                        _ => height_at(&tst, to_end_face, &ss.plane, centre, p.0),
+                    };
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     // Past the face by the offset, in the direction travelled.
                     let to = h + if h >= start { off } else { -off };
@@ -12156,7 +12191,8 @@ fn feature_tools_with_constructor(
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`surface_sheet_join`), which takes the sketch's
             // regions.
-            if (untrimmed || (*operation == Operation::Join && curved.is_none() && from_slope.is_none())) && !is_symmetric_offset {
+            if (untrimmed || (*operation == Operation::Join && curved.is_none() && from_slope.is_none() && from_to.is_none())) && !is_symmetric_offset
+            {
                 *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo + off, hi + off) });
             }
             // A Join tool's faces outlive the boolean where they stay on the result, so they are
@@ -16427,6 +16463,42 @@ fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -
     st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
 }
 
+/// Where a To / From Object reference ([`crate::ObjectRef`]) ends an extrude on `plane`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ReferenceEnd {
+    /// This far along the plane's normal: a point, or a plane parallel to the sketch.
+    Level(f64),
+    /// A plane at a slant to the sketch: the end lies on it.
+    Slanted(Plane),
+}
+
+impl ReferenceEnd {
+    fn slanted(&self) -> Option<Plane> {
+        match self {
+            ReferenceEnd::Slanted(pl) => Some(*pl),
+            ReferenceEnd::Level(_) => None,
+        }
+    }
+}
+
+/// [`ReferenceEnd`] of `r` for profiles `regions` around `centre` on `plane` (#8527). A plane
+/// that keeps one level over the profiles is parallel to the sketch. A plane the extrusion runs
+/// along never meets the profiles, so it is refused.
+fn reference_end(ctx: &crate::construct::Ctx, r: &crate::ObjectRef, plane: &Plane, centre: Vec3, regions: &[Region2]) -> Result<ReferenceEnd> {
+    Ok(match crate::construct::object_at(ctx, r)? {
+        crate::construct::ObjectAt::Point(q) => ReferenceEnd::Level(level_along(plane, q)),
+        crate::construct::ObjectAt::Plane(pl) => {
+            let Ok(level) = level_on(plane, centre, &pl) else {
+                return Err(DocError::Invalid(
+                    "the plane runs along the extrusion, so it gives no end; pick a plane parallel to the sketch or at a slant to it".into(),
+                ));
+            };
+            let (lo, hi) = kernel::plane_rise(plane, &pl, regions)?;
+            if hi - lo < 1e-9 { ReferenceEnd::Level(level) } else { ReferenceEnd::Slanted(pl) }
+        }
+    })
+}
+
 /// [`object_height`] of the point `p` on `face` (`(body index, face index)`, see [`object_face`]).
 fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     let n = plane.normal();
@@ -20357,7 +20429,12 @@ pub fn world_state_moved_reusing(
 /// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
 /// of a component placed differently. A captured construction plane is resolved directly in its
 /// saved frame by `resolve_plane_in`, keeping assembly motion out of the sketch's definition.
-fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
+pub(crate) fn construction_planes_in_frame<'a>(
+    doc: &Document,
+    st: &ModelState,
+    comp: u64,
+    plane: &'a PlaneRef,
+) -> Result<std::borrow::Cow<'a, PlaneRef>> {
     use std::borrow::Cow;
     // The component of a feature, read from the timeline without `Document::feature`'s search counter.
     fn owner_of(doc: &Document, id: u64) -> Option<u64> {

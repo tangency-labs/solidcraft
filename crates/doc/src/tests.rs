@@ -137,6 +137,8 @@ fn plate_doc() -> (Document, u64) {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -250,6 +252,8 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1821,6 +1825,8 @@ fn box_fillet_cut_timeline() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -2902,6 +2908,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -3414,6 +3422,8 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
+            to_ref: None,
+            from_ref: None,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -3506,6 +3516,39 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
+}
+
+/// An extrude To Object on the construction plane of another component ends where that
+/// component puts the plane, not where the plane's numbers fall in the extrude's own, placed
+/// component (#8527, as #11734 for sketches).
+#[test]
+fn an_extrude_to_the_construction_plane_of_another_component_ends_on_it() {
+    let (mut doc, sketch) = plate_doc();
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "25 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Target")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    // The plane comes first in the timeline, then the sketch and the extrude of the part.
+    let at = doc.features.iter().position(|f| f.id == plane).unwrap();
+    let moved = doc.features.remove(at);
+    doc.features.insert(0, moved);
+    let extrude = doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Extrude { .. })).unwrap().id;
+    doc.feature_mut(sketch).unwrap().component = part;
+    let f = doc.feature_mut(extrude).unwrap();
+    f.component = part;
+    let FeatureKind::Extrude { extent, .. } = &mut f.kind else { panic!("an extrude") };
+    extent.to = Some(crate::FacePick(Vec3::new(0.0, 0.0, 25.0)));
+    extent.to_ref =
+        Some(crate::ObjectRef(crate::construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: plane.into(), placement: None } }));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // The part sits 10 mm up, so the plane at 25 mm is 15 mm above its sketch.
+    let body = &model.state().bodies[0];
+    assert!(rel(measure(&body.body).unwrap().volume, 1200.0 * 15.0) < 1e-9, "{}", measure(&body.body).unwrap().volume);
 }
 
 /// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
@@ -5091,6 +5134,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     to_offset2: None,
                     picked_placements: Vec::new(),
                     one_sided_direction: None,
+                    to_ref: None,
+                    from_ref: None,
                 },
                 operation: Operation::NewBody,
                 targets: Vec::new(),
@@ -5433,6 +5478,8 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
