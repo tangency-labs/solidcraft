@@ -916,7 +916,7 @@ pub(crate) fn face_feature(app: &SolveApp, body: &ModelBody, index: usize) -> Op
         return None;
     }
     let doc = &app.session.doc;
-    doc.feature(id).filter(|f| f.component == doc.model_body_component(body) || moved_from(doc, &body.name, f.component)).map(|f| f.id)
+    doc.feature(id).filter(|f| f.component == doc.model_body_component(body) || moved_from(doc, body.definition_name(), f.component)).map(|f| f.id)
 }
 
 /// Whether a transfer moves `body` out of `component`: its faces keep the names the features

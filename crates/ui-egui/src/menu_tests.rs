@@ -2310,11 +2310,12 @@ fn pick_face(app: &SolveApp, body: &str, prefix: &str) -> solidcraft_engine::Sel
 
 /// A body moved into a component keeps Edit Feature, Edit Profile Sketch and Find in Timeline on
 /// its faces, and the History lights the face's feature: the features stay in this design's
-/// timeline wherever the body sits now (#23190).
+/// timeline wherever the body sits now, also on a second placement of the component and after a
+/// rename (#23190).
 #[test]
 fn faces_of_a_body_moved_into_a_component_still_open_their_features() {
     use solidcraft_engine::Sel;
-    for moved in ["root", "component.from_bodies", "component.move_bodies"] {
+    for moved in ["root", "component.from_bodies", "component.move_bodies", "second placement", "renamed"] {
         let mut app = SolveApp::new(Session::default(), Services::default());
         app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
         app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
@@ -2325,22 +2326,34 @@ fn faces_of_a_body_moved_into_a_component_still_open_their_features() {
         let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
         app.run("solid.fillet", json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
         let fillet = app.session.doc.features.last().unwrap().id;
-        match moved {
-            "component.from_bodies" => {
-                app.run(moved, json!({"bodies": [b]})).unwrap();
+        let b = match moved {
+            "component.from_bodies" | "second placement" | "renamed" => {
+                let made = app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+                if moved == "second placement" {
+                    let component = made["components"][0]["component"].clone();
+                    app.run("occurrence.copy", json!({"component": component, "translate": [0, 60, 0]})).unwrap();
+                    let state = app.session.world_state().unwrap();
+                    let copy = state.bodies.iter().find(|p| p.definition_name() == b && p.name != b).map(|p| p.name.clone());
+                    copy.unwrap_or_else(|| panic!("no second copy of {b}"))
+                } else if moved == "renamed" {
+                    app.run("body.rename", json!({"body": b, "name": "Renamed"})).unwrap();
+                    "Renamed".to_string()
+                } else {
+                    b
+                }
             }
             "component.move_bodies" => {
                 let made = app.run("component.create", json!({"name": "Holder"})).unwrap();
                 app.run(moved, json!({"bodies": [b], "component": made["component"]})).unwrap();
+                b
             }
-            _ => {}
-        }
+            _ => b,
+        };
         let state = app.session.world_state().unwrap();
         let placed = state.body(&b).unwrap();
         assert_eq!(app.session.doc.model_body_component(placed) == 0, moved == "root", "{moved}: the body's component");
         for (prefix, feature, profile) in [(format!("F{fillet}:"), fillet, None), (format!("F{block}:"), block, Some(sketch))] {
-            let pick = pick_face(&app, &b, &prefix);
-            app.session.selection = vec![pick.clone()];
+            app.session.selection = vec![pick_face(&app, &b, &prefix)];
             let items = context_menu::items(&app, &Target::Viewport);
             for label in ["Edit Feature", "Find in Timeline"] {
                 let item = find(&items, label);
@@ -2355,11 +2368,11 @@ fn faces_of_a_body_moved_into_a_component_still_open_their_features() {
             assert_eq!(crate::timeline::picked_feature(&app), Some(feature), "{moved}: the History lights {prefix}'s feature");
             act(&mut app, &Target::Viewport, "Find in Timeline");
             assert_eq!(app.session.selection, vec![Sel::Feature { id: feature }], "{moved}");
-            app.session.selection = vec![pick];
-            act(&mut app, &Target::Viewport, "Edit Feature");
-            assert_eq!(app.dialog.as_ref().unwrap().editing.unwrap().0, feature, "{moved}");
-            app.dialog = None;
         }
+        // Last: the editor rolls the timeline back to the feature it edits.
+        app.session.selection = vec![pick_face(&app, &b, &format!("F{block}:"))];
+        act(&mut app, &Target::Viewport, "Edit Feature");
+        assert_eq!(app.dialog.as_ref().unwrap().editing.unwrap().0, block, "{moved}");
     }
 }
 
