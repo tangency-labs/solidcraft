@@ -512,6 +512,9 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Show only constraints of selected geometry in the Sketch Palette (view-only).
+    #[serde(skip)]
+    pub constraint_glyphs_selected_only: bool,
     /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
     /// The saved design and Preferences remain unchanged.
     #[serde(skip)]
@@ -565,6 +568,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            constraint_glyphs_selected_only: false,
             sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
