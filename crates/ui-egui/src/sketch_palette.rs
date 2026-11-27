@@ -16,6 +16,7 @@ use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
@@ -23,6 +24,32 @@ use crate::SolveApp;
 use solidcraft_theme::Tokens;
 
 pub(crate) const INSTANCE_ID: &str = "sketch-options";
+
+/// Which last editing view, if any, an existing sketch reuses when reopened (#18998).
+/// Chosen from the Sketch Palette; remembered cameras stay scoped to the open design.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SketchOpenView {
+    /// The existing behaviour: turn to face the sketch if the separate look-at option is on.
+    #[default]
+    Face,
+    /// Use the view left at Finish or Cancel.
+    Last,
+    /// Use only the last view left at Finish; Cancel does not replace it.
+    LastFinished,
+}
+
+impl SketchOpenView {
+    pub const ALL: [Self; 3] = [Self::Face, Self::Last, Self::LastFinished];
+
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Face => "ui.palette_sketch_open_view.face",
+            Self::Last => "ui.palette_sketch_open_view.last",
+            Self::LastFinished => "ui.palette_sketch_open_view.last_finished",
+        }
+    }
+}
 
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
@@ -437,6 +464,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let open_view = app.ui.sketch_open_view;
+    let mut chosen_open_view = None;
     let mut linetype = None;
     let mut construction = false;
     let mut look = false;
@@ -564,6 +593,20 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     set = Some((key.to_string(), !shown(key)));
                 }
             }
+            // A tool option, not a Preferences row. Face preserves the existing
+            // reopen behaviour; remembered cameras are only kept while the design is open.
+            crate::ui_kit::row(ui, solidcraft_ui_text::tr("ui.palette_sketch_open_view"), |ui| {
+                let mut selected = SketchOpenView::ALL.iter().position(|choice| *choice == open_view).unwrap_or(0);
+                let choices = SketchOpenView::ALL.map(|choice| solidcraft_ui_text::tr(choice.label_id()));
+                let response = crate::ui_kit::dropdown(ui, "sketch_open_view", &mut selected, &choices)
+                    .backing_on_hover_text(solidcraft_ui_text::tr("ui.palette_sketch_open_view_note"));
+                crate::scenario::publish_target("sketch_palette:open_view", response.rect);
+                if let Some(&choice) = SketchOpenView::ALL.get(selected)
+                    && choice != open_view
+                {
+                    chosen_open_view = Some(choice);
+                }
+            });
         });
         section_alias("sketch_palette:options_fold", more);
     };
@@ -606,6 +649,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if let Some(choice) = chosen_open_view {
+        app.ui.sketch_open_view = choice;
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();
@@ -667,6 +713,18 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_sketch_open_view_is_a_palette_option_with_face_default() {
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").expect("more sketch options");
+        h.call("ui.click", json!({"x": more.x, "y": more.y}));
+        assert!(crate::scenario::handle_at("sketch_palette:open_view").is_some());
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
+    }
 
     #[test]
     fn card_uses_design_dimensions_and_all_options_still_run_commands() {

@@ -12,6 +12,8 @@ use crate::{DocError, Result};
 
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMS: usize = 10_000;
+/// Limit the quadratic number of pair checks in a finger-joint feature.
+pub const MAX_FINGER_JOINT_BODIES: usize = 32;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
@@ -204,6 +206,10 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Every letter of these sketch texts (their links), counters left open: found again from the
+    /// text on every evaluation, so the pick follows new words (#727). A letter that other curves
+    /// of the sketch cut into is an error, never a guess.
+    TextRegions { links: Vec<String> },
     /// Profiles that the curves around them can't tell apart (twins, such as the halves of a lens
     /// a line cuts), each saved as the curves of its outer loop with the side of each it lies on
     /// (#22548). Found again on every evaluation; after a change of the regions, the profile that
@@ -1209,6 +1215,18 @@ pub enum FeatureKind {
         #[walk(length = "Offset radius")]
         offset_radius: Option<Expr>,
     },
+    /// Alternating rectangular cuts in the intersection of two crossing rectangular blocks.
+    FingerJoint {
+        bodies: Vec<BodyName>,
+        count: usize,
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inverted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge offset")]
+        edge_offset: Option<Expr>,
+    },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by
     /// component id; the occurrence ids they make are kept so a count change keeps survivors (#12116).
@@ -1908,9 +1926,43 @@ pub enum FeatureKind {
         /// The centres' grid for circles and polygons.
         #[serde(default = "default_cell_dot_grid")]
         dot_grid: solidcore_record::cell_grid::DotGrid,
-        /// A cell's inscribed diameter.
+        /// A cell's inscribed diameter. Not used by a sketched cell (`cell_sketch`), which has
+        /// its own outline and is laid out by `pitch_x` and `pitch_y`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Cell size")]
-        size: Expr,
+        size: Option<Expr>,
+        /// The sketch holding the cell, with exactly one closed profile (#21722): the cells are
+        /// that profile repeated on a lattice, instead of one of the built-in `shape`s (which is
+        /// then not used). Saved by designs of a newer format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell_sketch: Option<SketchId>,
+        /// A sketched cell's distance between origins along a row.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch X")]
+        pitch_x: Option<Expr>,
+        /// A sketched cell's distance between rows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch Y")]
+        pitch_y: Option<Expr>,
+        /// How far each row shifts along the row, as a fraction of `pitch_x` (0 to 1; default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Stagger")]
+        stagger: Option<Expr>,
+        /// A sketched cell's turn about its own origin, apart from the grid's `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Cell angle")]
+        cell_angle: Option<Expr>,
+        /// Mirror every other sketched cell (those with `i + j` odd).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// A sketched cell's origin in its sketch's own coordinates (default: the profile's
+        /// centroid); both or neither.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin X")]
+        cell_origin_x: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin Y")]
+        cell_origin_y: Option<Expr>,
         /// The wall between neighbouring cells.
         #[walk(length = "Web")]
         web: Expr,
@@ -4173,6 +4225,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Cone { .. } => "ConeFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
+            FeatureKind::FingerJoint { .. } => "FingerJointFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
@@ -4275,6 +4328,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "torus",
             FeatureKind::Cone { .. } => "cone",
             FeatureKind::Combine { .. } => "combine",
+            FeatureKind::FingerJoint { .. } => "finger_joint",
             FeatureKind::Pattern { .. } => "pattern",
             FeatureKind::Mirror { .. } => "mirror",
             FeatureKind::Hole { .. } => "hole",
@@ -4373,6 +4427,7 @@ impl FeatureKind {
             "TorusFeature" => "torus",
             "ConeFeature" => "cone",
             "CombineFeature" => "combine",
+            "FingerJointFeature" => "finger_joint",
             "RectangularPatternFeature" | "PathPatternFeature" | "CircularPatternFeature" => "pattern",
             "MirrorFeature" => "mirror",
             "ConstructionPlane" => "construction_plane",
@@ -4470,6 +4525,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Cone { .. } => "Cone",
             FeatureKind::Combine { .. } => "Combine",
+            FeatureKind::FingerJoint { .. } => "FingerJoint",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
             FeatureKind::Pattern { .. } => "CircularPattern",

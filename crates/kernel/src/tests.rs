@@ -2631,6 +2631,127 @@ fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
     assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
 }
 
+/// #21608: a shelled D, three sides of a 60 × 40 rectangle closed by an arc that meets them at
+/// sharp corners, bulging out (s = 1) or biting in (s = −1). The band's far edge moves the lines
+/// by the width and the arc's radius by it, so it closes where they cross. Both bands, inside and
+/// outside, add their area times the height and keep the counts of the lip's faces.
+#[test]
+fn raise_band_where_an_arc_meets_lines_at_sharp_corners() {
+    let (w, h, t) = (1.5, 2.0, 3.0);
+    let half = (20.0f64 / 30.0).atan();
+    let big = (30.0f64 * 30.0 + 20.0 * 20.0).sqrt();
+    for s in [1.0, -1.0] {
+        let cx = 30.0 * s;
+        let d_shape = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::ZERO, b: Vec2::new(60.0, 0.0) },
+                Seg2::Line { a: Vec2::new(60.0, 0.0), b: Vec2::new(60.0, 40.0) },
+                Seg2::Line { a: Vec2::new(60.0, 40.0), b: Vec2::new(0.0, 40.0) },
+                Seg2::Arc { center: Vec2::new(cx, 20.0), radius: big, start: 20f64.atan2(-cx), sweep: 2.0 * s * half },
+            ],
+        };
+        let b = extrude(&Plane::XY, &[Region2 { outer: d_shape, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+        let sh = shell(&b, &[Vec3::new(30.0, 20.0, 15.0)], t).unwrap();
+        let v0 = measure(&sh).unwrap().volume;
+        // The D moved in by d: lines y = d, x = 60 − d, y = 40 − d, and the circle of radius
+        // big − s·d meeting y = d at x₁; a rectangle from x₁, with the circle's segment beyond
+        // the chord x = x₁ added (bulging out) or taken away (biting in).
+        let area = |d: f64| {
+            let rho = big - s * d;
+            let x1 = cx - s * (rho * rho - (20.0 - d) * (20.0 - d)).sqrt();
+            let theta = 2.0 * ((20.0 - d) / rho).asin();
+            (60.0 - d - x1) * (40.0 - 2.0 * d) + s * rho * rho / 2.0 * (theta - theta.sin())
+        };
+        for outside in [false, true] {
+            let lip = raise_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, h, outside).unwrap();
+            assert!(lip.validity().is_empty(), "s {s}, outside {outside}: {:?}", lip.validity());
+            let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+            let v = measure(&lip).unwrap().volume;
+            assert!(rel(v, v0 + band * h) < 1e-6, "s {s}, outside {outside}: {v} vs {}", v0 + band * h);
+            // The shell's 11 faces less the rim, the rim's rest, 4 walls on each side and the top;
+            // 4 new edges round the band's edge, 4 up from it and from the loop, 8 on the top.
+            assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (20, 44, 28), "s {s}, outside {outside}");
+            // A groove's profile is the same band: its area, as a slab 1 thick.
+            let (plane, region) = rim_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, 0.0, outside).unwrap();
+            let slab = extrude(&plane, &[region], 0.0, 1.0).unwrap().pop().unwrap();
+            let want = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+            let got = measure(&slab).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "groove s {s}, outside {outside}: {got} vs {want}");
+        }
+    }
+}
+
+/// #21608: a shelled lens, two arcs of radius 25 about (±15, 0) meeting at sharp corners (0, ±20):
+/// the band's far edge closes where the two moved circles cross. Moved in by d, the lens is two
+/// segments of radius 25 − d on the chord x = 0. A band wider than 25 − 15 parts the circles
+/// at the corners, and is refused.
+#[test]
+fn raise_band_where_two_arcs_meet_at_sharp_corners() {
+    let (big, c, t, w, h) = (25.0f64, 15.0f64, 3.0, 1.5, 2.0);
+    let half = (20.0f64 / c).atan();
+    let lens = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(-c, 0.0), radius: big, start: -half, sweep: 2.0 * half },
+            Seg2::Arc { center: Vec2::new(c, 0.0), radius: big, start: PI - half, sweep: 2.0 * half },
+        ],
+    };
+    let b = extrude(&Plane::XY, &[Region2 { outer: lens, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&b, &[Vec3::new(0.0, 0.0, 15.0)], t).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    let area = |d: f64| {
+        let rho = big - d;
+        let theta = 2.0 * ((rho * rho - c * c).sqrt() / rho).asin();
+        rho * rho * (theta - theta.sin())
+    };
+    let at = Vec3::new(10.0 - 1.5, 0.0, 15.0);
+    for outside in [false, true] {
+        let lip = raise_band(&sh, at, w, h, outside).unwrap();
+        assert!(lip.validity().is_empty(), "outside {outside}: {:?}", lip.validity());
+        let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+        let v = measure(&lip).unwrap().volume;
+        assert!(rel(v, v0 + band * h) < 1e-6, "outside {outside}: {v} vs {}", v0 + band * h);
+        // The shell's 7 faces less the rim, the rim's rest, 2 walls on each side and the top.
+        assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (12, 22, 14), "outside {outside}");
+    }
+    let text = raise_band(&sh, at, 11.0, h, true).unwrap_err().to_string();
+    assert!(text.contains("can't go round"), "{text}");
+}
+
+/// A plate shaped as two 20 × 20 squares joined by a neck 10 long and 4 wide, with a hole in one
+/// square. A band 1.5 wide along the outer loop still fits through the neck: it adds its area
+/// (840 − 591) times its height and 25 faces, 60 edges and 36 vertices. A band 3 wide moves the
+/// neck's two sides past each other, so its far edge crosses itself: refused.
+#[test]
+fn raise_band_refuses_a_band_whose_far_edge_crosses_itself_at_a_neck() {
+    let dumbbell = Loop2::polygon(&[
+        Vec2::new(0.0, -10.0),
+        Vec2::new(20.0, -10.0),
+        Vec2::new(20.0, -2.0),
+        Vec2::new(30.0, -2.0),
+        Vec2::new(30.0, -10.0),
+        Vec2::new(50.0, -10.0),
+        Vec2::new(50.0, 10.0),
+        Vec2::new(30.0, 10.0),
+        Vec2::new(30.0, 2.0),
+        Vec2::new(20.0, 2.0),
+        Vec2::new(20.0, 10.0),
+        Vec2::new(0.0, 10.0),
+    ]);
+    let plate = Region2 { outer: dumbbell, holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 3.0)] };
+    let plate = extrude(&Plane::XY, &[plate], 0.0, 5.0).unwrap().pop().unwrap();
+    let v0 = measure(&plate).unwrap().volume;
+    let at = Vec3::new(45.0, 0.0, 5.0);
+    let lip = raise_band(&plate, at, 1.5, 2.0, true).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + 249.0 * 2.0) < 1e-6, "{v} vs {}", v0 + 249.0 * 2.0);
+    let counts = |b: &Body| (b.face_count(), b.edge_count(), b.vertex_count());
+    let (f, e, n) = counts(&plate);
+    assert_eq!(counts(&lip), (f + 25, e + 60, n + 36));
+    let text = raise_band(&plate, at, 3.0, 2.0, true).unwrap_err().to_string();
+    assert!(text.contains("crosses itself"), "{text}");
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {

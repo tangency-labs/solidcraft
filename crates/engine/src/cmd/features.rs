@@ -17,10 +17,13 @@ use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams,
-    ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
+    ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, FingerJointParams, MirrorParams, MoveParams, MoveResult, NoticeAction,
+    OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams,
+    TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
+use crate::schema::features::{ThreadFeatureResult, ThreadParams};
+use crate::schema::inspect::ModelThread;
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -53,6 +56,8 @@ const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const FINGER_JOINT_CONTRACT: TypedContract<FingerJointParams> = TypedContract::new();
+const THREAD_CONTRACT: TypedContract<ThreadParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude)).begins_edit()
@@ -234,6 +239,19 @@ pub static COMMANDS: &[CommandSpec] = &[
             "offset_radius?: expr (with offset_edges: round: the radius of the rounds, default the offset's size; one too large for the faces round an edge is refused as a fillet's is, naming the largest that fits); ",
             "new_component?: bool (the result goes into a new component; component_name?)",
         )),
+    CommandSpec::new("solid.finger_joint", "Finger Joint", crate::checked!("solid.finger_joint", finger_joint)).begins_edit()
+        .at("SOLID", "MODIFY")
+        .icon("finger_joint")
+        .contract(&FINGER_JOINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(concat!(
+            "bodies?: [2 to 32 body names] (default: selected plates, in selection order; the first plate is joined to each later plate in order; failed pairs are unchanged and reported); ",
+            "count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); ",
+            "clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); ",
+            "inverted?: bool (default false; starts with a tab instead of a slot without changing which plate supplies tabs); ",
+            "edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); ",
+            "name?",
+        )),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -362,9 +380,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
-    CommandSpec::new("solid.thread", "Thread", thread).begins_edit()
+    CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("thread")
+        .contract(&THREAD_CONTRACT)
+        .output(output_schema_for::<ThreadFeatureResult>)
         .params(concat!(
             "face: [x,y,z] on a cylindrical face OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); ",
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
@@ -434,7 +454,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-            "base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; ",
+            "base?: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?} (omitted with a body edge as axis: a flat face that meets the edge, so the plane goes through it); ",
             "axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); ",
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
@@ -509,7 +529,10 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
         ProfileSel::All => ps.first()?.region.interior_point(),
         ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
         ProfileSel::Points { points } => *points.first()?,
-        selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
+        selection @ (ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
             ps.get(*indices.first()?)?.region.interior_point()
         }
@@ -806,7 +829,10 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 *sel = selection;
                 continue;
             }
-            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
+            ProfileSel::OffsetBoundaries { .. }
+            | ProfileSel::WholeBoundaries { .. }
+            | ProfileSel::TextRegions { .. }
+            | ProfileSel::SidedCurves { .. } => {
                 // Explicit identities retain the caller's semantics. Validate through the
                 // same resolver as recomputation, including reserved-role precedence.
                 solidcraft_doc::profile_selection_indices(ss, sel)?;
@@ -944,6 +970,9 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
         Value::Object(fields) => {
             if fields.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
                 return solidcraft_doc::whole_profile_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("text_regions") {
+                return solidcraft_doc::text_regions_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
             }
             if fields.get("type").and_then(Value::as_str) == Some("sided_curves") {
                 return solidcraft_doc::sided_curves_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
@@ -3071,6 +3100,64 @@ pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     Ok(Some(out))
 }
 
+fn finger_joint(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.finger_joint";
+    let bodies = match p.get("bodies") {
+        None | Some(Value::Null) => s
+            .selection
+            .iter()
+            .filter_map(|selection| match selection {
+                crate::Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect(),
+        Some(_) => string_list(cmd, p, "bodies")?,
+    };
+    if bodies.len() < 2 || bodies.len() > solidcraft_doc::MAX_FINGER_JOINT_BODIES {
+        return Err(bad(cmd, format!("`bodies` must name 2 to {} different bodies", solidcraft_doc::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if bodies.iter().any(|name| !seen.insert(name)) {
+        return Err(bad(cmd, "`bodies` must not repeat a body"));
+    }
+    let count = match p.get("count") {
+        None | Some(Value::Null) => 3,
+        Some(value) => value
+            .as_u64()
+            .filter(|count| (1..=64).contains(count))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or_else(|| bad(cmd, "`count` must be an integer from 1 to 64"))?,
+    };
+    let state = s.model.state();
+    for name in &bodies {
+        let body = state.body(name).ok_or_else(|| bad(cmd, format!("body `{name}` does not exist")))?;
+        if s.doc.model_body_component(body) != s.active_component {
+            return Err(bad(cmd, format!("body `{name}` does not belong to the active component")));
+        }
+    }
+    let clearance = match p.get("clearance") {
+        None | Some(Value::Null) => "0".into(),
+        Some(_) => req_expr(cmd, p, "clearance")?,
+    };
+    let edge_offset = match p.get("edge_offset") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(req_expr(cmd, p, "edge_offset")?),
+    };
+    for (key, length) in std::iter::once(("clearance", &clearance)).chain(edge_offset.as_ref().map(|length| ("edge_offset", length))) {
+        check_expr(s, length, Kind::Length, cmd, key)?;
+        let value = s.doc.eval(length, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(bad(cmd, format!("{key} must be a non-negative length")));
+        }
+    }
+    let inverted = match p.get("inverted") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`inverted` must be true or false")),
+    };
+    add_feature(s, p, FeatureKind::FingerJoint { bodies: bodies.into_iter().map(BodyName).collect(), count, clearance, inverted, edge_offset })
+}
+
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let normalized = move_matrix_params(p)?;
     let p = normalized.as_ref().unwrap_or(p);
@@ -4498,14 +4585,33 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         direction_only,
         pivot: pivot.clone(),
     };
+    // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
+    // plane goes through the edge and the angle is measured from that face (#20233).
+    let found;
+    let base = match p.get("base").filter(|b| !b.is_null()) {
+        Some(base) => base,
+        None => {
+            let face = match line.as_deref() {
+                Some(edge @ solidcraft_doc::construct::GeoRef::Edge { .. }) => {
+                    solidcraft_doc::construct::flat_face_at_edge(&s.model.state(), edge).map_err(|e| bad(cmd, e.to_string()))?
+                }
+                _ => return Err(bad(cmd, "`base` is required unless `axis` is a body edge: give the plane the angle is measured from")),
+            };
+            let (body, index, at) =
+                face.ok_or_else(|| bad(cmd, "no flat face runs along this edge: give `base`, the plane the angle is measured from"))?;
+            found = json!({"face": [at.x, at.y, at.z], "body": body, "index": index});
+            &found
+        }
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
-    if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
+    if base.get("face").is_some() {
+        let face = base;
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
         // The capture is already in the authoring frame.
         return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) }, false);
     }
-    let base = plane_param(s, p.get("base"), cmd)?;
+    let base = plane_param(s, Some(base), cmd)?;
     add_feature(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) })
 }
 
@@ -5960,17 +6066,19 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let v = add_feature(s, p, kind)?;
     let st = s.model.state();
-    let feature = v.get("feature").and_then(Value::as_u64);
-    let threads: Vec<_> = st.threads.iter().filter(|t| Some(t.feature) == feature).collect();
-    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": threads.first()});
-    if grouped {
-        reply["threads"] = json!(threads);
-    }
-    // A hole narrowed to the thread's minor diameter says so.
-    if let Some(w) = v.get("warning").filter(|w| !w.is_null()) {
-        reply["warning"] = w.clone();
-    }
-    Ok(reply)
+    let feature = v.get("feature").and_then(Value::as_u64).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no id".into()))?;
+    let name = v.get("name").and_then(Value::as_str).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no name".into()))?;
+    let threads: Vec<ModelThread> = st.threads.iter().filter(|t| t.feature == feature).map(ModelThread::from).collect();
+    let reply = ThreadFeatureResult {
+        feature,
+        name: name.to_string(),
+        thread: st.threads.iter().find(|t| t.feature == feature).map(ModelThread::from),
+        threads: grouped.then_some(threads),
+        // A hole narrowed to the thread's minor diameter says so.
+        warning: v.get("warning").and_then(Value::as_str).map(str::to_string),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Internal(cmd.into(), e.to_string()))
 }
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
@@ -6184,6 +6292,11 @@ mod thin_extrude_tests;
 #[cfg(test)]
 #[path = "extrude_convention_tests.rs"]
 mod extrude_convention_tests;
+
+#[cfg(test)]
+#[path = "finger_joint_tests.rs"]
+mod finger_joint_tests;
+
 /// `solid.fillet corner?: rolling|g2`: the default keeps the rolling ball's sphere corner, `g2`
 /// sets the corner back and fills it with the G2 patch (`solidcraft_kernel::fillet_g2_corners`),
 /// with `setbacks` naming its distance, and an unknown word is refused.

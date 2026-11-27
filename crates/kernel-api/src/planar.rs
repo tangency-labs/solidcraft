@@ -1,7 +1,8 @@
 //! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the side of a sketch
 //! curve a region lies on, the turn between two path directions, a frame section's corners, paper
-//! strokes, where a board's drilled hole reaches, and a sketch plane's normal and points as a sketch
-//! solver holds them. Plain numbers and the record's values in, plain numbers out.
+//! strokes and the runs a round-joined line is stroked in, where a board's drilled hole reaches,
+//! and a sketch plane's normal and points as a sketch solver holds them. Plain numbers and the
+//! record's values in, plain numbers out.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 
@@ -11,6 +12,17 @@ use crate::Backend;
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct PlanarRefused(pub String);
+
+/// One run of a stroked line ([`Planar::stroke_runs`]): the points from one sharp turn or line end
+/// to the next, or a whole loop that has no sharp turn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrokeRun {
+    /// The run's points in order. A sharp turn is the last point of one run and the first of the
+    /// next.
+    pub points: Vec<[f64; 2]>,
+    /// Whether the run is a loop without ends: its last point joins its first.
+    pub closed: bool,
+}
 
 /// The planar helpers of one kernel ([`crate::OpKind::Planar`]).
 pub trait Planar: Backend {
@@ -68,6 +80,11 @@ pub trait Planar: Backend {
     fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64>;
     /// The length of a straight paper stroke from `a` to `b`.
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64;
+    /// The runs a paper line through `points` is stroked in so that its sharp turns get round
+    /// joins: cut at every turn sharper than the angle whose cosine is `smooth_turn_cos`. Points
+    /// closer than `min_step` are one point, and so are the two ends of a `closed` line that
+    /// repeats its start; a `closed` line without a sharp turn is one closed run.
+    fn stroke_runs(&self, points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f64) -> Vec<StrokeRun>;
     /// Whether a line's endpoints project to distinct points in the view plane `basis`.
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool;
     /// The direction from `from` to `to`, in radians anticlockwise from +X; `0` where the points
@@ -77,6 +94,11 @@ pub trait Planar: Backend {
     /// `center`, `size[0]` wide along `angle` (radians anticlockwise from +X) and `size[1]`
     /// across; a non-finite or negative input reaches nothing.
     fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool;
+    /// Whether a side of a board's outline lies on the wall of the drilled hole of
+    /// `hole_reaches_loops`: every one of `points` is, within `chord` (the sag of a wall drawn as
+    /// chords) or 0.6 % of the hole's radius, whichever is larger. No points, or a non-finite or
+    /// negative input, is on no wall.
+    fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool;
     /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
     /// `c`, at `radius` and starting `from` radians.
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3];

@@ -32,7 +32,7 @@ pub enum HostResizeEdge {
 }
 
 impl HostResizeEdge {
-    pub(super) fn is_corner(self) -> bool {
+    pub fn is_corner(self) -> bool {
         matches!(self, Self::TopLeft | Self::TopRight | Self::BottomLeft | Self::BottomRight)
     }
 

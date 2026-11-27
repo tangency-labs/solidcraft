@@ -43,8 +43,10 @@ const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Out
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
-/// Rule fields the manager edits (parameter name, label).
-pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
+/// Rule fields the manager edits (parameter name, label). The 90° value comes last, so the others
+/// keep their places; it is drawn in place of the K Factor row when the rule unfolds by bend
+/// deduction or allowance.
+pub(crate) const RULE_FIELDS: [(&str, &str); 9] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -53,7 +55,13 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("corner_relief", "Corner Relief"),
     ("hem_gap", "Hem Gap"),
     ("gap", "Flange Gap"),
+    ("unfold_value", "Bend Deduction at 90°"),
 ];
+/// Where the manager's rule gets its K-factor (the rule's `unfold_method`) and their labels.
+pub(crate) const UNFOLD_METHODS: [&str; 3] = ["k_factor", "deduction", "allowance"];
+const UNFOLD_METHOD_LABELS: [&str; 3] = ["K Factor", "Bend Deduction", "Bend Allowance"];
+/// The 90° value's label, by the unfold method (none for the K-factor).
+const UNFOLD_VALUE_LABELS: [&str; 3] = ["", "Bend Deduction at 90°", "Bend Allowance at 90°"];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
@@ -64,6 +72,60 @@ const BEND_RELIEF_SHAPE_LABELS: [&str; 3] = ["Rectangular", "Obround", "Tear"];
 /// and their labels.
 pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
 const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
+/// The manager's unfold choice for a rule's `unfold_method` (the K-factor for an unknown one).
+pub(crate) fn unfold_index(method: &str) -> usize {
+    let method = solidcraft_engine::doc::sheet::UnfoldMethod::parse(method).unwrap_or_default();
+    UNFOLD_METHODS.iter().position(|m| *m == method.name()).unwrap_or(0)
+}
+/// Switching the manager's Unfold choice keeps the part as it is, whichever way it goes, so the
+/// user starts from the equivalent and types their chart's value over it, with no error before
+/// they have typed:
+/// - K Factor to Bend Deduction or Bend Allowance: the 90° field gets the value the K Factor field
+///   gives now. A value left there by an earlier choice is replaced unless it already says that
+///   K-factor for the new choice (so a typed `3.2 mm` comes back as typed).
+/// - Deduction to allowance, or back: the value is converted.
+/// - A chart choice to K Factor: the K Factor field gets the K-factor the 90° value works out to.
+///
+/// `main` holds the rule's fields in `RULE_FIELDS` order (thickness, K Factor, bend radius, …) and
+/// `extra` the 90° value. `Thickness` in the bend radius is the rule's thickness, as the rule
+/// itself reads it. A field that does not evaluate leaves everything as typed.
+pub(crate) fn switch_unfold(doc: &solidcraft_engine::doc::Document, main: &mut [String], extra: &mut [String], from: usize, to: usize) {
+    use solidcraft_engine::doc::{expr::Kind as Ek, sheet::UnfoldMethod};
+    /// Two K-factors that give the same flat pattern to well under a nanometre.
+    const SAME_K: f64 = 1e-9;
+    let method = |i: usize| UNFOLD_METHODS.get(i).and_then(|m| UnfoldMethod::parse(m));
+    let length = |text: &str| crate::length_input::eval(doc, text, Ek::Length).ok().filter(|v| v.is_finite());
+    let (Some(from), Some(to), Some(field)) = (method(from), method(to), extra.first_mut()) else { return };
+    let Some(thickness) = main.first().and_then(|t| length(t)) else { return };
+    let Some(radius) = crate::sheet_rule_library::radius_mm(main, doc, thickness).filter(|r| r.is_finite()) else { return };
+    let typed_k = main.get(1).and_then(|t| doc.eval(t, Ek::Unitless).ok()).filter(|k| k.is_finite());
+    let chart_k = |chart: UnfoldMethod, field: &str| length(field).and_then(|v| chart.k_factor(v, thickness, radius)).filter(|k| k.is_finite());
+    match (from, to) {
+        (UnfoldMethod::KFactor, chart) => {
+            let Some(k) = typed_k else { return };
+            let says_k = chart_k(chart, field).is_some_and(|have| (have - k).abs() < SAME_K);
+            if !says_k && let Some(value) = chart.value(k, thickness, radius).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
+        (chart, UnfoldMethod::KFactor) => {
+            // A value outside 0 to 1 is the rule's own error to report: the K Factor field stays.
+            let Some(k) = chart_k(chart, field).filter(|k| (0.0..=1.0).contains(k)) else { return };
+            if typed_k.is_none_or(|have| (have - k).abs() >= SAME_K)
+                && let Some(k_field) = main.get_mut(1)
+            {
+                let text = format!("{k:.12}");
+                let text = text.trim_end_matches('0').trim_end_matches('.');
+                *k_field = if text.is_empty() { "0".into() } else { text.into() };
+            }
+        }
+        (chart, other) => {
+            if let Some(value) = chart_k(chart, field).and_then(|k| other.value(k, thickness, radius)).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
+    }
+}
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
 /// Which way a further bend turns, against the bend before it.
@@ -377,6 +439,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 bend_relief: usize,
                 /// How bend angles read (index into `ANGLE_DISPLAYS`).
                 angles: usize,
+                /// Where the K-factor comes from (index into `UNFOLD_METHODS`).
+                unfold: usize,
                 active: bool,
                 loaded: Option<usize>,
                 /// The material the rule is for (a label; #18304).
@@ -488,6 +552,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                     relief: 0,
                     bend_relief: 0,
                     angles: 0,
+                    unfold: 0,
                     active: true,
                     loaded: None,
                     material: String::new(),
@@ -907,7 +972,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             rule_combo(app, ui, "sm_rec_rule", rule);
             enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
         }
-        Sm::Rules { pick, name, values, relief, bend_relief, angles, active, loaded, material } => {
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, unfold, active, loaded, material } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -924,16 +989,27 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         crate::length_input::stored(&app.session.doc, &base.corner_relief),
                         crate::length_input::stored(&app.session.doc, &base.hem_gap),
                         crate::length_input::stored(&app.session.doc, &base.gap),
+                        if base.unfold_value.trim().is_empty() {
+                            String::new()
+                        } else {
+                            crate::length_input::stored(&app.session.doc, &base.unfold_value)
+                        },
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
                     *bend_relief = BEND_RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.bend_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
+                    *unfold = unfold_index(&base.unfold_method);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                     material.clone_from(&base.material);
                 },
                 fields: {
                     crate::ui_kit::text_row(ui, "Material", material, "Material");
-                    for ((key, label), v) in RULE_FIELDS.iter().zip(values.iter_mut()) {
+                    // The 90° value (the last field) takes the K Factor row's place when the rule
+                    // unfolds by bend deduction or allowance.
+                    let split = values.len().min(RULE_FIELDS.len() - 1);
+                    let (main, extra) = values.split_at_mut(split);
+                    let mut switched_from = None;
+                    for ((key, label), v) in RULE_FIELDS.iter().zip(main.iter_mut()) {
                         if *key == "relief_width" {
                             // The bend relief's shape goes with its size, the two rows below.
                             choice_row(ui, "Bend Relief Shape", "sm_bend_relief_shape", bend_relief, &BEND_RELIEF_SHAPE_LABELS);
@@ -942,7 +1018,18 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             // The shape goes with its size, the row below.
                             choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
                         }
+                        if *key == "k_factor" {
+                            switched_from = Some(*unfold);
+                            choice_row(ui, "Unfold", "sm_unfold_method", unfold, &UNFOLD_METHOD_LABELS);
+                            if let (Some(value_label), Some(value)) = (UNFOLD_VALUE_LABELS.get(*unfold).filter(|l| !l.is_empty()), extra.first_mut()) {
+                                enter |= expr_row(ui, value_label, value);
+                                continue;
+                            }
+                        }
                         enter |= expr_row(ui, label, v);
+                    }
+                    if let Some(before) = switched_from.filter(|before| before != unfold) {
+                        switch_unfold(&app.session.doc, main, extra, before, *unfold);
                     }
                     choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);
                 }
@@ -1169,8 +1256,9 @@ fn export_flat_with_profile(app: &mut SolveApp, body: &str, dxf: Option<DxfExpor
             }
             match app.run(command, params) {
                 Ok(_) => {
-                    app.set_status(format!("Exported {path}"), false);
-                    format!("Saved {path}")
+                    let shown = crate::display_user_path(&path);
+                    app.set_status(format!("Exported {shown}"), false);
+                    format!("Saved {shown}")
                 }
                 Err(e) => e,
             }
@@ -1739,7 +1827,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, bend_relief, angles, active, material, .. } => {
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, unfold, active, material, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
@@ -1752,6 +1840,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
             p["bend_relief_shape"] = json!(BEND_RELIEF_SHAPES.get(*bend_relief).copied().unwrap_or("rectangular"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
+            p["unfold_method"] = json!(UNFOLD_METHODS.get(*unfold).copied().unwrap_or("k_factor"));
             ("sheet.manage_rules", p)
         }
         Sm::FlatPattern { .. } | Sm::ExportDxf { .. } => return Ok(Vec::new()),
