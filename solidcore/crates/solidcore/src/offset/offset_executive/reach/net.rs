@@ -29,13 +29,15 @@
 //! and nothing past it is enclosed.
 //!
 //! A surface of revolution is the net of its generator turned and weighted, exactly. The
-//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`; one
-//! whose generator is an arc of one circle it turns on, and the reach does not count on
-//! that); past them its end span continued is the surface turned on (a rational quadratic piece
-//! continued stays on its conic, the circle each row's point sweeps), which Krawczyk's boxes
-//! may straddle. A meeting is taken only where the box proved to hold it is within the
-//! B-rep's tolerance of the side as built ([`Net::jet_as_built`]): one past the turn's end
-//! by more is not on the executive's surfaces, and is not proved. Its partials are enclosed
+//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`), but
+//! for one whose generator is an arc of one circle (a torus but for its label), which it
+//! turns on as a torus's, up to a quarter of the turn it leaves open; past them its end span
+//! continued is the surface turned on (a rational quadratic piece continued stays on its
+//! conic, the circle each row's point sweeps), which Krawczyk's boxes may straddle. A meeting
+//! is taken only where the box proved to hold it is within the B-rep's tolerance of the side
+//! as built ([`Net::jet_as_built`]): one past the turn's end by more is not proved, though on
+//! a revolved circle it may be on the executive's turned-on surface (the reach then falls
+//! short of it: the operation is refused, it builds nothing wrong). Its partials are enclosed
 //! about a point near the box ([`Net::jet_near`]): its rows' weights vary round the axis,
 //! and taken about the origin the quotient's enclosure grows with the point's distance from
 //! it.
@@ -962,8 +964,8 @@ impl Net {
     /// ([`Part::Beyond`]) is not within [`Net::tolerance`] of the side ([`Net::near_as_built`]).
     /// Krawczyk's boxes are taken over the continuation (the net's end span continued is the
     /// surface's own, a revolution turned on), and only the box it proves is asked to be
-    /// built: a meeting past the side by more than the tolerance is one the executive's
-    /// surfaces do not hold.
+    /// built: a meeting past the side by more than the tolerance is not taken, whether or not
+    /// the executive's surface holds it (a revolved circle's, turned on, may).
     ///
     /// # Errors
     ///
