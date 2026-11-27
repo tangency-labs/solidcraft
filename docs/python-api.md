@@ -448,10 +448,11 @@ On Sonnet 5.5 (3 runs per setup, $9.07 in all):
   maintainer's decision.
 - CI runs the Python tests on an approved pull request or a merge group whose diff touches
   `python/`, `xtask/src/python.rs`, `packaging/python/`, `crates/mcp/` or
-  `crates/engine/src/schema/`, and on no other: `ci.yml`'s Reference tests job builds the
-  `ci`-profile `solidcraft-cli` it already builds, then runs `cargo xtask python` and `pytest`
-  against it. pytest is installed from `python/tests/requirements.txt` (exact versions, with
-  hashes). The release's `python` job runs them again against the Linux x86_64 wheel.
+  `crates/engine/src/schema/`, and on no other. `scripts/ci/python-client.sh` runs
+  `cargo xtask python` and `pytest` against the `ci`-profile `solidcraft-cli` that Native Linux
+  tests already builds on its warm disk (about 15 seconds), or, for a change to `python/` alone,
+  the one Reference tests builds. pytest is installed from `python/tests/requirements.txt` (exact
+  versions, with hashes). The release's `python` job runs them again against the Linux x86_64 wheel.
 
 ## Decisions needed
 

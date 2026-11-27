@@ -172,8 +172,10 @@ jobs:
       quick: ${{ steps.paths.outputs.quick }}
       packages: ${{ steps.paths.outputs.packages }}
       oracle: ${{ steps.paths.outputs.oracle }}
-      # The Python client's tests (in the Reference tests job): approved pull requests and merge
-      # groups that touch the client, its generator, its packaging or the command schemas.
+      # The Python client's tests: approved pull requests and merge groups that touch the client, its
+      # generator, its packaging or the command schemas. They run in Native Linux tests, against the
+      # CLI that job builds on its warm disk; when the native checks don't run (a change to python/
+      # alone), in Reference tests.
       python: ${{ steps.paths.outputs.python }}
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
@@ -1035,6 +1037,14 @@ jobs:
             esac
           fi
           cargo xtask i18n --check --cli "$cli"
+      # The Python client's bindings and tests (Select checks' `python`), against the CLI the test
+      # build made: about 15 seconds. Built here only when the build above did not make it.
+      - name: Python client tests
+        if: needs.changes.outputs.warm != 'true' && needs.changes.outputs.python == 'true'
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          [ -x "$cli" ] || cargo build -p solidcraft-cli --profile ci --locked
+          scripts/ci/python-client.sh "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -1344,10 +1354,10 @@ jobs:
   oracle:
     name: Reference tests
     needs: changes
-    # Also the Python client's tests (Select checks' `python`): they need the same CLI this job
-    # builds, so they reuse its build and caches instead of a job of their own. On a pull request
-    # that is all it runs (the replay is on main and in the queue only).
-    if: needs.changes.outputs.oracle == 'true' || needs.changes.outputs.python == 'true'
+    # Also the Python client's tests (Select checks' `python`) when the native checks don't run
+    # (a change to python/ alone): they need the CLI this job builds, so they reuse its build and
+    # caches. With the native checks, Native Linux tests runs them against its own build instead.
+    if: needs.changes.outputs.oracle == 'true' || (needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
@@ -1392,17 +1402,9 @@ jobs:
       - name: Replay tests/oracle and compare with expected.json
         if: needs.changes.outputs.oracle == 'true'
         run: cargo xtask oracle --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
-      # The bindings generated from this CLI (a command or tool name the generator refuses fails
-      # here), then the client's tests against it. pytest: exact versions with their hashes.
       - name: Python client tests
-        if: needs.changes.outputs.python == 'true'
-        run: |
-          cli="$(realpath "${CARGO_TARGET_DIR:-target}")/ci/solidcraft-cli"
-          cargo xtask python --cli "$cli"
-          python3 -m venv "$RUNNER_TEMP/python-client"
-          "$RUNNER_TEMP/python-client/bin/pip" install --quiet --require-hashes --only-binary :all: -r python/tests/requirements.txt
-          SOLIDCRAFT_CLI="$cli" PYTHONPATH="$GITHUB_WORKSPACE/python/src" \
-            "$RUNNER_TEMP/python-client/bin/python" -m pytest -q -p no:cacheprovider python/tests
+        if: needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true'
+        run: scripts/ci/python-client.sh "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
       - name: Upload the report
         if: always() && needs.changes.outputs.oracle == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1709,7 +1711,8 @@ jobs:
           if [ "$DOCTESTS" = true ]; then
             test "$DOCS" = success
           fi
-          if [ "$ORACLE_RUN" = true ] || [ "$PYTHON_RUN" = true ]; then
+          # The Python client's tests run in Reference tests only without the native checks.
+          if [ "$ORACLE_RUN" = true ] || { [ "$PYTHON_RUN" = true ] && [ "$NATIVE" != true ]; }; then
             test "$ORACLE" = success
           fi
           if [ "$WINDOWS" = true ]; then
