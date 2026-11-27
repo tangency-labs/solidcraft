@@ -3190,3 +3190,29 @@ fn a_dimension_is_refused_on_a_body_its_view_leaves_out() {
     run(&mut s, "edit.undo", json!({}));
     assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
 }
+
+/// A view that shows only what the design shows (#22107) leaves out a body hidden in the browser: a
+/// dimension on it is refused in words that say so, and one added before warns until the body is
+/// shown again. A view of every body still takes it.
+#[test]
+fn a_dimension_is_refused_on_a_body_the_design_hides() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Door"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    let across = json!({"view": v, "kind": {"linear": {"a": [80, 0, 0], "b": [100, 0, 0], "direction": "horizontal"}}});
+    let added = run(&mut s, ADD, across.clone());
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"shows": "design"}}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null(), "nothing hidden yet");
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    let words = "it's hidden in the design and the view shows only what the design shows";
+    let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let e = refused(&mut s, across.clone());
+    assert!(e.ends_with(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"shows": "all"}}));
+    run(&mut s, ADD, across);
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
+}

@@ -1054,6 +1054,8 @@ pub struct Session {
     /// the features nor the model's results (a joint drag frame) has no new body to pin.
     names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
+    /// [`Session::design_hidden`]'s last answer (#22107).
+    design_hidden_cache: std::sync::Mutex<Option<occurrences::DesignHiddenCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
     /// that walked the hidden lists made a frame cost grow with the size of the design.
@@ -1168,6 +1170,10 @@ pub struct Session {
     /// Body-name pinning passes that walked the features (`pin_body_names`), for tests.
     #[cfg(test)]
     pub(crate) body_name_passes: usize,
+    /// Document and model state just refreshed during the current `execute` call, so the
+    /// post-command `refresh_from` skips a redundant second full evaluation when the command
+    /// itself (e.g. `add_feature`) already refreshed the exact same document.
+    refreshed_doc: Option<(usize, std::sync::Weak<solidcraft_doc::ModelState>, solidcraft_doc::kernel::Validation, bool)>,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
@@ -1553,6 +1559,7 @@ impl Session {
             joints_settled: None,
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
@@ -1595,6 +1602,7 @@ impl Session {
             evaluations: 0,
             #[cfg(test)]
             body_name_passes: 0,
+            refreshed_doc: None,
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
@@ -1994,6 +2002,7 @@ impl Session {
         self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
+        self.refreshed_doc = None;
     }
 
     /// Whose steps undo and redo go through: the open drawing's (by id), or the model's (`None`),
@@ -2486,9 +2495,12 @@ impl Session {
     /// and when they healed parts the design does not show yet, evaluate it again: except during
     /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
     pub fn settle_import_checks(&mut self) -> bool {
-        if self.model.settle_import_checks() && self.live_links.is_none() {
-            self.refresh();
-            return true;
+        if self.model.settle_import_checks() {
+            self.refreshed_doc = None;
+            if self.live_links.is_none() {
+                self.refresh();
+                return true;
+            }
         }
         false
     }
@@ -2683,7 +2695,47 @@ impl Session {
             self.sketching_view = None;
         }
         self.release_left();
+        self.refreshed_doc = (!self.model.is_stale()
+            && !self.model.no_cache
+            && self.model.primed_count() == 0
+            && !self.model.checking_features()
+            && !self.model.has_pending_import_checks()
+            && self.pending_moves.is_empty()
+            && self.pending_move_records.is_empty()
+            && self.active_sketch.is_none()
+            && self.model.fingerprinted_for(&self.doc))
+        .then(|| {
+            (
+                Arc::as_ptr(&self.doc) as usize,
+                Arc::downgrade(&self.model.state()),
+                self.model.validation(),
+                solidcraft_doc::kernel::heals_tolerance_defects(),
+            )
+        });
         solved
+    }
+
+    /// Whether [`Session::refresh_with_joint_report`] just finished refreshing this exact
+    /// document and model state during the current command, so `execute`'s post-command
+    /// [`Session::refresh_from`] need not evaluate the timeline a second time.
+    pub(crate) fn already_refreshed(&self) -> bool {
+        self.refreshed_doc.as_ref().is_some_and(|(doc_ptr, state_weak, validation, heal)| {
+            *doc_ptr == Arc::as_ptr(&self.doc) as usize
+                && state_weak.strong_count() > 0
+                && std::sync::Weak::as_ptr(state_weak) == Arc::as_ptr(&self.model.state())
+                && !self.sketch_finish_pending
+                && !self.model.is_stale()
+                && !self.model.no_cache
+                && self.model.primed_count() == 0
+                && !self.model.checking_features()
+                && !self.model.has_pending_import_checks()
+                && self.pending_moves.is_empty()
+                && self.pending_move_records.is_empty()
+                && self.active_sketch.is_none()
+                && self.model.validation() == *validation
+                && solidcraft_doc::kernel::heals_tolerance_defects() == *heal
+                && self.model.fingerprinted_for(&self.doc)
+        })
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
@@ -2756,7 +2808,9 @@ impl Session {
             self.revision += 1;
             return;
         }
-        self.refresh();
+        if !self.already_refreshed() {
+            self.refresh();
+        }
     }
 
     /// Pin the name of every body the features made, as if the body had been renamed to it, and
@@ -3402,6 +3456,7 @@ impl Session {
             crash::command_begin(self, spec.id, given);
         }
         let scope = crash::Scope::enter();
+        self.refreshed_doc = None;
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match live {
             Some(run) => run(self, params),
             None => (spec.run)(self, params).map(|v| (v, None)),
@@ -3629,6 +3684,7 @@ impl Session {
         };
         // Refresh/pinning preserve the authored state just committed. A failure
         // restored its immutable snapshot and pre-call token; saves keep their token.
+        self.refreshed_doc = None;
         self.follow_design_token();
         // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
         // lost link marked, so it can be repaired from inside it (#12085).
@@ -3903,6 +3959,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
@@ -3946,6 +4003,7 @@ impl Session {
             evaluations: 0,
             #[cfg(test)]
             body_name_passes: 0,
+            refreshed_doc: None,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
@@ -4878,6 +4936,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         materials,
         print_faces,
         collision_shapes,
+        edgeless_bodies,
         user_materials,
         appearances,
         body_components,
@@ -4924,6 +4983,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *materials == b.materials
         && *print_faces == b.print_faces
         && *collision_shapes == b.collision_shapes
+        && *edgeless_bodies == b.edgeless_bodies
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
