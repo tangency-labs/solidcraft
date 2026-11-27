@@ -21,6 +21,8 @@ use crate::schema::features::{
     PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
+use crate::schema::features::{ThreadFeatureResult, ThreadParams};
+use crate::schema::inspect::ModelThread;
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -53,6 +55,7 @@ const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const THREAD_CONTRACT: TypedContract<ThreadParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude)).begins_edit()
@@ -362,9 +365,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
-    CommandSpec::new("solid.thread", "Thread", thread).begins_edit()
+    CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("thread")
+        .contract(&THREAD_CONTRACT)
+        .output(output_schema_for::<ThreadFeatureResult>)
         .params(concat!(
             "face: [x,y,z] on a cylindrical face OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); ",
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
@@ -434,7 +439,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-            "base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; ",
+            "base?: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?} (omitted with a body edge as axis: a flat face that meets the edge, so the plane goes through it); ",
             "axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); ",
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
@@ -4498,14 +4503,33 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         direction_only,
         pivot: pivot.clone(),
     };
+    // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
+    // plane goes through the edge and the angle is measured from that face (#20233).
+    let found;
+    let base = match p.get("base").filter(|b| !b.is_null()) {
+        Some(base) => base,
+        None => {
+            let face = match line.as_deref() {
+                Some(edge @ solidcraft_doc::construct::GeoRef::Edge { .. }) => {
+                    solidcraft_doc::construct::flat_face_at_edge(&s.model.state(), edge).map_err(|e| bad(cmd, e.to_string()))?
+                }
+                _ => return Err(bad(cmd, "`base` is required unless `axis` is a body edge: give the plane the angle is measured from")),
+            };
+            let (body, index, at) =
+                face.ok_or_else(|| bad(cmd, "no flat face runs along this edge: give `base`, the plane the angle is measured from"))?;
+            found = json!({"face": [at.x, at.y, at.z], "body": body, "index": index});
+            &found
+        }
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
-    if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
+    if base.get("face").is_some() {
+        let face = base;
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
         // The capture is already in the authoring frame.
         return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) }, false);
     }
-    let base = plane_param(s, p.get("base"), cmd)?;
+    let base = plane_param(s, Some(base), cmd)?;
     add_feature(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) })
 }
 
@@ -5960,17 +5984,19 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let v = add_feature(s, p, kind)?;
     let st = s.model.state();
-    let feature = v.get("feature").and_then(Value::as_u64);
-    let threads: Vec<_> = st.threads.iter().filter(|t| Some(t.feature) == feature).collect();
-    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": threads.first()});
-    if grouped {
-        reply["threads"] = json!(threads);
-    }
-    // A hole narrowed to the thread's minor diameter says so.
-    if let Some(w) = v.get("warning").filter(|w| !w.is_null()) {
-        reply["warning"] = w.clone();
-    }
-    Ok(reply)
+    let feature = v.get("feature").and_then(Value::as_u64).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no id".into()))?;
+    let name = v.get("name").and_then(Value::as_str).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no name".into()))?;
+    let threads: Vec<ModelThread> = st.threads.iter().filter(|t| t.feature == feature).map(ModelThread::from).collect();
+    let reply = ThreadFeatureResult {
+        feature,
+        name: name.to_string(),
+        thread: st.threads.iter().find(|t| t.feature == feature).map(ModelThread::from),
+        threads: grouped.then_some(threads),
+        // A hole narrowed to the thread's minor diameter says so.
+        warning: v.get("warning").and_then(Value::as_str).map(str::to_string),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Internal(cmd.into(), e.to_string()))
 }
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {

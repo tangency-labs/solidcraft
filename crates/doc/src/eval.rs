@@ -1709,6 +1709,8 @@ struct Primed {
     results: Arc<std::collections::HashMap<u64, FeatureResult>>,
     /// The pose each of its pose-only features was evaluated at.
     poses: Arc<std::collections::HashMap<u64, u64>>,
+    /// The reached-component digest each feature was evaluated at.
+    component_keys: Arc<std::collections::HashMap<u64, u64>>,
 }
 
 /// Where a model keeps its results besides the cache ([`Model::keep`]). A copy of the model
@@ -2096,9 +2098,10 @@ pub struct Model {
     /// The document context the last `evaluate` ran in ([`context_digest`]).
     context: u64,
     /// The last active result of each feature hidden by the history marker, with its document
-    /// context. These share the existing states, so rolling back does not surrender them to
-    /// the bounded cache. A result leaves this map when its feature is active again or removed.
-    rolled_results: std::collections::HashMap<u64, (u64, FeatureResult)>,
+    /// context and reached-component digest. These share the existing states, so rolling back does
+    /// not surrender them to the bounded cache. A result leaves this map when its feature is active
+    /// again or removed.
+    rolled_results: std::collections::HashMap<u64, (u64, Option<u64>, FeatureResult)>,
     /// Results other copies of this model evaluated (ahead, off the window thread, or for
     /// another configuration row) that `evaluate` takes for features they match
     /// ([`Model::prime`], [`Model::prime_also`]), each with that copy's context and the poses
@@ -2122,6 +2125,8 @@ pub struct Model {
     /// The [`placement_digest`] each [`pose_only`] feature was last evaluated at, by feature id.
     /// Their fingerprints leave it out, so a pose change doesn't reach the features after them.
     poses: std::collections::HashMap<u64, u64>,
+    /// The reached-component digest each feature was last evaluated at, by feature id.
+    component_keys: std::collections::HashMap<u64, u64>,
     /// `evaluate` returns without waiting for the SMLib checks of its last features still running
     /// ([`Model::set_background_checks`]).
     background_checks: bool,
@@ -2822,27 +2827,29 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
     if named { h.finish() } else { 0 }
 }
 
-/// Document-level inputs any feature may read: sheet metal and plastic rules (and the
-/// parameters they use), components and body placement. Construction geometry is not among
-/// them: each feature reads only the constructions it names ([`construct_digest`]).
+/// Document-level inputs any feature may read: units, sheet metal and plastic rules (and the
+/// parameters they use), and body-to-component overrides. Component definitions themselves are
+/// hashed per feature from the components it can reach ([`ComponentDigests`]), so adding an
+/// unrelated component or toggling display metadata (`history_hidden`, `identification_color`)
+/// never invalidates cached features (#22662). Construction geometry is not among them: each
+/// feature reads only the constructions it names ([`construct_digest`]).
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     digest_context(doc, vals, true)
 }
 
-/// [`context_digest`] without the design's components: units and the sheet metal and plastic
+/// [`context_digest`] without body-to-component overrides: units and the sheet metal and plastic
 /// rules. A change told by what a feature read ([`Relative`]) takes the feature's own components
 /// instead ([`EvalKey`]), and is placed in the components as they are when it is reused.
 fn shared_context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     digest_context(doc, vals, false)
 }
 
-fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, components: bool) -> u64 {
+fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, body_components: bool) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
-    if components {
-        serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
+    if body_components {
         serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
     }
     for e in doc.sheet.rules.iter().flat_map(|r| r.fields().map(|(_, e, _)| e)) {
@@ -2858,6 +2865,142 @@ fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, components: bo
         }
     }
     h.finish()
+}
+
+/// The fields of a component that feature evaluation may read: its identity, name (for world
+/// placement names and target error messages) and parent. Display and metadata fields never
+/// affect geometry evaluation (#22662).
+fn hash_eval_component(c: &crate::Component, h: &mut impl Hasher) {
+    let crate::Component {
+        id,
+        name,
+        parent,
+        identification_color: _,
+        identification_color_index: _,
+        metadata: _,
+        properties: _,
+        name_split: _,
+        history_hidden: _,
+        physical_override: _,
+    } = c;
+    (id, name, parent).hash(h);
+}
+
+/// Precomputed per-component ancestor-chain digests for one evaluation pass, hashing only the
+/// evaluation-relevant fields of each component ([`hash_eval_component`]).
+pub(super) struct ComponentDigests {
+    chains: std::collections::HashMap<u64, u64>,
+    missing_chain: u64,
+    feature_component: std::collections::HashMap<u64, u64>,
+}
+
+impl ComponentDigests {
+    pub(super) fn of(doc: &Document) -> Self {
+        let mut by_id: std::collections::HashMap<u64, &crate::Component> = std::collections::HashMap::with_capacity(doc.components.len());
+        for c in &doc.components {
+            by_id.entry(c.id).or_insert(c);
+        }
+        let mut missing_h = std::collections::hash_map::DefaultHasher::new();
+        0u8.hash(&mut missing_h);
+        let missing_chain = missing_h.finish();
+
+        let mut chains: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(by_id.len());
+        for &id in by_id.keys() {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let mut c = id;
+            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
+                match by_id.get(&c) {
+                    Some(comp) => {
+                        1u8.hash(&mut h);
+                        hash_eval_component(comp, &mut h);
+                        if comp.id != 0 && comp.parent != comp.id {
+                            c = comp.parent;
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        0u8.hash(&mut h);
+                        break;
+                    }
+                }
+            }
+            chains.insert(id, h.finish());
+        }
+
+        let mut feature_component: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(doc.features.len());
+        for f in &doc.features {
+            feature_component.entry(f.id).or_insert(f.component);
+        }
+        Self { chains, missing_chain, feature_component }
+    }
+
+    fn chain(&self, id: u64) -> u64 {
+        self.chains.get(&id).copied().unwrap_or(self.missing_chain)
+    }
+
+    /// Digest of the component ancestor chains reachable by `f` from `st`: `f`'s own component,
+    /// any source/destination components named by a `BodyTransfer`, and every component owning a
+    /// body, sketch or construction in `st`. Components created later or holding nothing in `st`
+    /// are excluded.
+    fn reachable_digest(&self, doc: &Document, f: &Feature, st: &ModelState) -> u64 {
+        let mut ids = std::collections::BTreeSet::new();
+        ids.insert(f.component);
+        if let FeatureKind::BodyTransfer { from, to, .. } = &f.kind {
+            ids.insert(*from);
+            ids.insert(*to);
+        }
+        for b in &st.bodies {
+            ids.insert(b.component);
+            if !b.transferred
+                && let Some(&c) = doc.body_components.get(&b.name)
+            {
+                ids.insert(c);
+            }
+        }
+        for s in &st.sketches {
+            if let Some(&c) = self.feature_component.get(&s.feature) {
+                ids.insert(c);
+            }
+        }
+        for c in &st.construct {
+            if let Some(&comp) = self.feature_component.get(&c.feature) {
+                ids.insert(comp);
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for id in ids {
+            (id, self.chain(id)).hash(&mut h);
+        }
+        h.finish()
+    }
+
+    /// Digest of the component ancestor chains read by `f` via `read`: `f`'s own component and the
+    /// components owning the bodies and sketches `read` names.
+    fn reads_digest(&self, doc: &Document, f: &Feature, st: &ModelState, read: &Reads) -> u64 {
+        let mut ids = std::collections::BTreeSet::new();
+        ids.insert(f.component);
+        for &i in &read.bodies {
+            if let Some(b) = st.bodies.get(i) {
+                ids.insert(b.component);
+                if !b.transferred
+                    && let Some(&c) = doc.body_components.get(&b.name)
+                {
+                    ids.insert(c);
+                }
+            }
+        }
+        for id in &read.sketches {
+            if let Some(&c) = self.feature_component.get(id) {
+                ids.insert(c);
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for id in ids {
+            (id, self.chain(id)).hash(&mut h);
+        }
+        h.finish()
+    }
 }
 
 /// What the validation mode adds to the context digest: nothing for checking every step (how
@@ -3202,6 +3345,8 @@ impl PlacementReads {
 struct EvalKey {
     /// From the whole model before it ([`cache_key`]).
     whole: u64,
+    /// Digest of the component ancestor chains reachable by this feature at its input state.
+    reached: u64,
     /// From what it reads alone, with that ([`Feature::reads`]); `None` when it may read
     /// anything.
     reads: Option<(u64, Reads)>,
@@ -3251,6 +3396,7 @@ impl EvalKey {
         shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
+        components: &ComponentDigests,
     ) -> EvalKey {
         // A frame member is built turned by the Rotate steps after it.
         let local = fingerprint(doc, 0, f, vals, false, steps)
@@ -3258,7 +3404,8 @@ impl EvalKey {
             ^ construct_digest(doc, vals, f, Some(st))
             ^ turns_digest(doc, vals, f).unwrap_or(0)
             ^ depth_digest(st);
-        let whole = cache_key(f, fp, local, ctx, st);
+        let reached = components.reachable_digest(doc, f, st);
+        let whole = cache_key(f, fp, local, ctx ^ reached, st);
         let read = f.reads(doc, st);
         let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
         let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
@@ -3275,7 +3422,7 @@ impl EvalKey {
                 return (h.finish(), read);
             }
             "reads".hash(&mut h);
-            own_inputs(doc, vals, f, local, ctx, steps, &mut h);
+            own_inputs(doc, vals, f, local, ctx ^ components.reads_digest(doc, f, st, &read), steps, &mut h);
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
@@ -3308,17 +3455,10 @@ impl EvalKey {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             "relative".hash(&mut h);
             own_inputs(doc, vals, f, local, shared, steps, &mut h);
-            // Its own component and those it lies in, not every component of the design: a
-            // component deleted or added elsewhere changes nothing it reads.
-            let mut c = f.component;
-            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
-                let comp = doc.components.iter().find(|x| x.id == c);
-                serde_json::to_string(&comp).unwrap_or_default().hash(&mut h);
-                match comp {
-                    Some(comp) if comp.id != 0 && comp.parent != comp.id => c = comp.parent,
-                    _ => break,
-                }
-            }
+            // Its own component (and any component whose body or sketch it reads) with its
+            // ancestors, not every component of the design: a component deleted or added
+            // elsewhere, or a display-only change, changes nothing it reads.
+            components.reads_digest(doc, f, st, read).hash(&mut h);
             // The bodies it reads by name, not by where they stand: bodies before them come and go.
             let mut names = Vec::with_capacity(read.bodies.len());
             for &i in &read.bodies {
@@ -3346,7 +3486,7 @@ impl EvalKey {
             }
             h.finish()
         });
-        EvalKey { whole, reads, relative }
+        EvalKey { whole, reached, reads, relative }
     }
 }
 
@@ -5819,7 +5959,12 @@ impl Model {
     /// it places moved (another configuration row's).
     pub fn prime_also(&mut self, ahead: &Model) {
         let results = ahead.results.iter().filter(|r| !r.skipped && !r.stale).map(|r| (r.id, r.clone())).collect();
-        self.primed.push(Primed { context: ahead.context, results: Arc::new(results), poses: Arc::new(ahead.poses.clone()) });
+        self.primed.push(Primed {
+            context: ahead.context,
+            results: Arc::new(results),
+            poses: Arc::new(ahead.poses.clone()),
+            component_keys: Arc::new(ahead.component_keys.clone()),
+        });
     }
 
     /// How many models' results are offered ([`Model::prime_also`]).
@@ -5910,12 +6055,9 @@ impl Model {
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == base_ctx).cloned().collect();
-        // Each feature's component, for `Document::legacy_body_component` on every body after
-        // every feature without searching the timeline for each (the first feature with an id).
-        let mut feature_component: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(doc.features.len());
-        for f in &doc.features {
-            feature_component.entry(f.id).or_insert(f.component);
-        }
+        // Per-component ancestor-chain digests and feature->component map, built once per pass.
+        let component_digests = ComponentDigests::of(doc);
+        let feature_component = &component_digests.feature_component;
         // The component envelopes' features: the bodies they made are marked after every feature.
         let envelopes: std::collections::HashSet<u64> =
             doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
@@ -5923,16 +6065,16 @@ impl Model {
         let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
         let prepared_imports = parallel::prefetch_imports(
             doc,
-            &vals,
+            &base_vals,
             &self.results,
             &prev_import_digests,
             &self.import_digests,
             &self.cache,
             &primed,
             &rolled_results,
-            ctx,
+            base_ctx,
             previous_context,
-            shared_ctx,
+            base_shared_ctx,
             self.no_cache,
             prefetch_limit,
             watched.cancelled(),
@@ -5946,7 +6088,7 @@ impl Model {
             &self.frame_bodies,
             &self.cache,
             &self.import_digests,
-            &feature_component,
+            &component_digests,
             &envelopes,
             carried.as_ref(),
             &prepared_imports,
@@ -5960,6 +6102,7 @@ impl Model {
             watched.cancelled(),
         );
         let mut poses = std::collections::HashMap::new();
+        let mut component_keys = std::collections::HashMap::with_capacity(doc.features.len());
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
         // replace the old ones in the results reused after them (#12139).
         let mut moved: Vec<(u64, Vec<ModelBody>)> = Vec::new();
@@ -5988,6 +6131,7 @@ impl Model {
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
+                component_keys = s.component_keys;
                 moved = s.moved;
                 failed = s.failed;
                 rolled_results = s.rolled_results;
@@ -6032,7 +6176,7 @@ impl Model {
                 {
                     failed.insert(r.id, (r.name.clone(), e.clone()));
                 }
-                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, &feature_component);
+                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, feature_component);
                 let rolled_back = i >= marker;
                 // Retain at most one active result per rolled-back feature, even across several
                 // marker moves. Build the map anew so deleted features release their states too.
@@ -6041,12 +6185,12 @@ impl Model {
                     None
                 } else if rolled_back {
                     let active = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && !r.stale && !r.unkept);
-                    if let Some(saved) = active.map(|r| (previous_context, r.clone())).or(rolled) {
+                    if let Some(saved) = active.map(|r| (previous_context, self.component_keys.get(&f.id).copied(), r.clone())).or(rolled) {
                         self.rolled_results.insert(f.id, saved);
                     }
                     None
                 } else {
-                    rolled.filter(|(context, _)| *context == base_ctx).map(|(_, r)| r)
+                    rolled.filter(|(context, _, _)| *context == base_ctx).map(|(_, comp, r)| (comp, r))
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
@@ -6072,10 +6216,13 @@ impl Model {
                         .results
                         .get(i)
                         .filter(current)
-                        .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, &feature_component))
+                        .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, feature_component))
                         .filter(|old| old.skipped || legacy_current(eval_doc, f, &state, &old.state))
                 {
                     let before_reuse = state.clone();
+                    if let Some(&k) = self.component_keys.get(&f.id) {
+                        component_keys.insert(f.id, k);
+                    }
                     if moved.is_empty() {
                         if !old.skipped {
                             state = old.state.clone();
@@ -6152,7 +6299,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let mut key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                let mut key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -6187,6 +6334,7 @@ impl Model {
                         reuse = true;
                     }
                     let ok = c.error.is_none();
+                    component_keys.insert(f.id, key.reached);
                     // Not kept in the cached result: its notes follow the sketches as they are now.
                     let warning = if ok { with_retained_notes(doc, c.warning, f, &state) } else { c.warning };
                     out.push(FeatureResult {
@@ -6216,17 +6364,21 @@ impl Model {
                 if let Some(r) = rolled
                     .as_ref()
                     .filter(|_| moved.is_empty())
+                    .filter(|(comp, _)| *comp == Some(key.reached))
+                    .map(|(_, r)| r)
                     .filter(current)
                     .or_else(|| {
                         primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
                             // posed where that model evaluated it, not only here
                             let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
-                            p.results.get(&f.id).filter(current).filter(|_| posed_there)
+                            let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
+                            p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
                         })
                     })
                     .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
                 {
                     restored += 1;
+                    component_keys.insert(f.id, key.reached);
                     let before_rolled = state.clone();
                     if r.error.is_none() {
                         state = r.state.clone();
@@ -6262,7 +6414,7 @@ impl Model {
                     self.import_digests.heals.remove(&f.id);
                     fp = chain_fingerprint(eval_doc, vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state));
                     prev_fp = fp;
-                    key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                    key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
                 }
                 let reads = key
                     .reads
@@ -6407,6 +6559,7 @@ impl Model {
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
+                        component_keys: component_keys.clone(),
                         moved: moved.clone(),
                         failed: failed.clone(),
                         rolled_results: rolled_results.clone(),
@@ -6553,6 +6706,7 @@ impl Model {
                     moved.push((f.id, bodies));
                     reuse = true;
                 }
+                component_keys.insert(f.id, key.reached);
                 out.push(FeatureResult {
                     id: f.id,
                     name: f.name.clone(),
@@ -6591,6 +6745,7 @@ impl Model {
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
+        self.component_keys = component_keys;
         self.results = out;
         self.note_states();
         // A cached import's result is as its check left it, not as the import first showed.
@@ -7367,7 +7522,7 @@ fn join_pattern_copies(st: &mut ModelState, f: &Feature, features: &[FeatureId],
     }
     let Some(kept) = st.bodies.get(*first).cloned() else { return Ok(()) };
     let others: Vec<Traced> = rest.iter().filter_map(|i| st.bodies.get(*i).map(ModelBody::traced)).collect();
-    let joined = join_union_batch(&kept.traced(), &others, true).map_err(|e| DocError::Invalid(format!("joining the pattern's copies: {e}")))?;
+    let (joined, _) = join_union_batch(&kept.traced(), &others, true).map_err(|e| DocError::Invalid(format!("joining the pattern's copies: {e}")))?;
     let pieces = joined.body.lumps()?;
     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
     // The joined bodies go; the first piece takes the first one's place and name.
@@ -8254,9 +8409,9 @@ fn apply_traced_with(
     match op {
         Operation::Join => {
             let joined = join(state, tools, &target_idx)?;
-            if f.touching == crate::Touching::Separate {
+            if f.touching == crate::Touching::Separate && !joined.all_apart {
                 let mut kept = None;
-                for name in joined {
+                for name in joined.names {
                     kept = kept.max(separate_touching(state, &name)?);
                 }
                 if let Some(k) = kept {
@@ -8414,6 +8569,14 @@ fn apply_traced_with(
     Ok(())
 }
 
+/// Result of [`join`]: the target bodies that took tools, and whether every output lump is
+/// already known to lie apart from every other (no two operands touched and none held multiple
+/// lumps, so [`separate_touching`] has no contact to separate).
+struct Joined {
+    names: Vec<String>,
+    all_apart: bool,
+}
+
 /// The exact box of a B-rep body, or `None` for a mesh or unmeasurable body.
 fn join_tool_bounds(body: &Body) -> Option<solidcraft_geom::Aabb3> {
     if body.is_mesh() {
@@ -8426,7 +8589,8 @@ fn join_tool_bounds(body: &Body) -> Option<solidcraft_geom::Aabb3> {
 /// Union `base` with `others` (all in `base`'s frame), batching multiple operands in one kernel
 /// call and falling back to sequential `flush_join::join_bodies` on error. When `try_apart` is
 /// set, bodies whose boxes do not meet are joined directly without intersection work.
-fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result<Traced> {
+/// Returns the unioned body and whether every output lump is already known to lie apart.
+fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result<(Traced, bool)> {
     // Each union keeps the lineage of what it joins, so the joined body's faces keep
     // their names (the tool's new faces are named by their roles).
     let union = |a: &Traced, b: &Traced| -> Result<Traced> {
@@ -8436,14 +8600,17 @@ fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result
         Ok(Traced::step(u, &[a, b]))
     };
     match others {
-        [] => Ok(base.clone()),
-        [one] => union(base, one),
+        [] => Ok((base.clone(), false)),
+        [one] => Ok((union(base, one)?, false)),
         _ => {
             let operands: Vec<&Traced> = std::iter::once(base).chain(others).collect();
             // Bodies that are all apart need no intersection work: they are one body of several
             // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
             if try_apart && let Some(acc) = union_all_apart(&operands) {
-                return Ok(acc);
+                // When every operand is a single material region and their grown exact boxes are
+                // mutually disjoint, no two lumps in the result can touch.
+                let all_apart = operands.iter().all(|o| o.body.record().material_regions().len() <= 1);
+                return Ok((acc, all_apart));
             }
             // The kernel's union pairs the tools with each other before the target. Fins whose
             // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
@@ -8451,10 +8618,11 @@ fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result
             // Falling back to pairwise `union` also preserves `flush_join::join_bodies` retry.
             #[cfg(test)]
             cost_tests::count(|c| c.join_unions += 1);
-            match union_all(&operands) {
-                Ok(acc) => Ok(acc),
-                Err(e) => others.iter().try_fold(base.clone(), |acc, other| union(&acc, other)).map_err(|_| e),
-            }
+            let acc = match union_all(&operands) {
+                Ok(acc) => acc,
+                Err(e) => others.iter().try_fold(base.clone(), |acc, other| union(&acc, other)).map_err(|_| e)?,
+            };
+            Ok((acc, false))
         }
     }
 }
@@ -8497,7 +8665,7 @@ fn flush_pending_join(state: &mut ModelState, batch: PendingJoin) -> Result<()> 
     // The tools go into the kept body's frame, where it is shown (#3383).
     let into_keep = tool_frame(&batch.keep);
     let placed = batch.tools.iter().map(|(tool, _)| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
-    let acc = join_union_batch(&base, &placed, batch.all_missed)?;
+    let (acc, _) = join_union_batch(&base, &placed, batch.all_missed)?;
     if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == batch.keep) {
         *mb = mb.remade(acc);
     }
@@ -8508,25 +8676,30 @@ fn flush_pending_join(state: &mut ModelState, batch: PendingJoin) -> Result<()> 
 /// body, kept under the first one's name; a tool that meets none joins the first target as a
 /// separate piece. A sheet metal body keeps its own identity: only the first body met may be
 /// one. The names of the bodies the tools went into.
-fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Vec<String>> {
+fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Joined> {
     let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
     if live.is_empty() || tools.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Joined { names: Vec::new(), all_apart: false });
     }
     // One target takes every tool, whichever it meets: the result is the union of all of
     // them in one kernel call, checked once.
     if let [keep] = live.as_slice() {
-        let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(Vec::new()) };
+        let Some(base) = state.body(keep).map(ModelBody::traced) else {
+            return Ok(Joined { names: Vec::new(), all_apart: false });
+        };
         // The tools go into the kept body's frame, where it is shown (#3383).
         let into_keep = tool_frame(keep);
         let placed = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
-        let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
+        let (acc, all_apart) = join_union_batch(&base, &placed, placed.len() > 1)?;
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
-        return Ok(vec![keep.clone()]);
+        return Ok(Joined { names: vec![keep.clone()], all_apart });
     }
     let mut joined = Vec::new();
+    // Retain fine contact meshes per unchanged live target across tools (invalidated whenever a
+    // target is remade or absorbed), so overlapping pairs don't re-mesh the same target per tool.
+    let mut target_meshes: std::collections::HashMap<String, Body> = std::collections::HashMap::new();
     let mut pending: Vec<PendingJoin> = Vec::new();
     let mut target_boxes: std::collections::HashMap<String, Option<solidcraft_geom::Aabb3>> = std::collections::HashMap::new();
     let mut rest = tools.into_iter();
@@ -8540,10 +8713,12 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             }
             batch_tools.push(tool);
             batch_tools.extend(rest);
-            let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(joined) };
+            let Some(base) = state.body(keep).map(ModelBody::traced) else {
+                return Ok(Joined { names: joined, all_apart: false });
+            };
             let into_keep = tool_frame(keep);
             let placed = batch_tools.iter().map(|t| tool_in(t, into_keep)).collect::<Result<Vec<_>>>()?;
-            let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
+            let (acc, _) = join_union_batch(&base, &placed, placed.len() > 1)?;
             if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
                 *mb = mb.remade(acc);
             }
@@ -8554,6 +8729,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         }
         let mut met: Vec<String> = Vec::new();
         let mut tool_box: Option<Option<solidcraft_geom::Aabb3>> = None;
+        let mut world_tool: Option<Body> = None;
         // Which bodies the tool meets picks the one it joins and those joined with it. A single
         // body takes the tool whether it meets it or not, so it is not asked: the test meshes
         // the body finely, and that took longer than the join itself on a part of a few hundred
@@ -8571,7 +8747,10 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
                     placed_storage = tool_in(&tool, Some(m))?;
                     (&placed_storage.body, join_tool_bounds(&placed_storage.body))
                 }
-                None => (&tool.body, *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body))),
+                None => (
+                    world_tool.get_or_insert_with(|| tool.body.keeping_meshes()) as &Body,
+                    *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body)),
+                ),
             };
             // Distant targets whose inflated exact boxes cannot reach the tool never pay for
             // `Body::meets`'s fine (`1e-4` chord) contact tessellation.
@@ -8589,7 +8768,8 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             } else {
                 #[cfg(test)]
                 cost_tests::count(|c| c.contact_tests += 1);
-                mb.body.meets(placed_body)?
+                let target_body = target_meshes.entry(name.clone()).or_insert_with(|| mb.body.keeping_meshes());
+                target_body.meets(placed_body)?
             };
             if !hit && let Some(batch) = pending.iter().find(|p| p.keep == *name) {
                 hit = tool_meets_pending(mb.body.size(), &tool, &mut tool_box, batch)?;
@@ -8598,7 +8778,9 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
                 met.push(name.clone());
             }
         }
-        let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(joined) };
+        let Some(keep) = met.first().or(live.first()).cloned() else {
+            return Ok(Joined { names: joined, all_apart: false });
+        };
         if state.body(&keep).is_none() {
             continue;
         }
@@ -8643,8 +8825,12 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
                 }
             }
         }
-        let acc = join_union_batch(&base, &operands, false)?;
+        let (acc, _) = join_union_batch(&base, &operands, false)?;
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
+        target_meshes.remove(&keep);
+        for name in &absorbed {
+            target_meshes.remove(name);
+        }
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
             *mb = mb.remade(acc);
         }
@@ -8661,7 +8847,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     for batch in pending {
         flush_pending_join(state, batch)?;
     }
-    Ok(joined)
+    Ok(Joined { names: joined, all_apart: false })
 }
 
 /// With `Touching::Separate`: the joined body `name` never keeps two pieces that touch only
@@ -8767,24 +8953,49 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
 /// within the larger of their record tolerances. A distance only the meshes give is not trusted
 /// to say they touch.
 fn unrecorded_touches(pieces: &[Body], touches: &[Vec<usize>]) -> Result<Vec<[usize; 2]>> {
-    let meshes = pieces
+    // Prefilter candidate pairs in the kernel using tolerance-grown exact bounding boxes before
+    // building any fine meshes: pieces whose boxes do not meet cannot have exact distance within
+    // `max(tol_a, tol_b)`.
+    let candidates: Vec<[usize; 2]> =
+        kernel::overlapping_piece_pairs(pieces).into_iter().filter(|&[a, b]| !touches.get(a).is_some_and(|t| t.contains(&b))).collect();
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Only mesh the pieces that actually participate in a candidate overlapping pair.
+    let mut needed = vec![false; pieces.len()];
+    for &[a, b] in &candidates {
+        if let Some(slot) = needed.get_mut(a) {
+            *slot = true;
+        }
+        if let Some(slot) = needed.get_mut(b) {
+            *slot = true;
+        }
+    }
+    let meshes: Vec<Option<(solidcraft_geom::Mesh, f64)>> = pieces
         .iter()
-        .map(|p| {
+        .zip(&needed)
+        .map(|(p, &need)| {
+            if !need {
+                return Ok(None);
+            }
             let chord = (p.size() * 1e-4).max(1e-6);
-            Ok((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord))
+            Ok(Some((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord)))
         })
         .collect::<Result<Vec<_>>>()?;
-    let shapes: Vec<kernel::DistanceShape> = pieces.iter().zip(&meshes).map(|(p, (m, chord))| kernel::DistanceShape::new(p, m, *chord)).collect();
+    let shapes: Vec<Option<kernel::DistanceShape>> =
+        pieces.iter().zip(&meshes).map(|(p, m)| m.as_ref().map(|(mesh, chord)| kernel::DistanceShape::new(p, mesh, *chord))).collect();
     let mut out = Vec::new();
-    for (a, (sa, pa)) in shapes.iter().zip(pieces).enumerate() {
-        for (b, (sb, pb)) in shapes.iter().zip(pieces).enumerate().skip(a + 1) {
-            if touches.get(a).is_some_and(|t| t.contains(&b)) || !sa.bounds().meets(&sb.bounds()) {
-                continue;
-            }
-            let tol = pa.record().tolerance.max(pb.record().tolerance);
-            if kernel::body_distance(sa, sb, tol)?.is_some_and(|d| d.exact && d.distance <= tol) {
-                out.push([a, b]);
-            }
+    for [a, b] in candidates {
+        let (Some(Some(sa)), Some(Some(sb)), Some(pa), Some(pb)) = (shapes.get(a), shapes.get(b), pieces.get(a), pieces.get(b)) else {
+            continue;
+        };
+        if !sa.bounds().meets(&sb.bounds()) {
+            continue;
+        }
+        let tol = pa.record().tolerance.max(pb.record().tolerance);
+        if kernel::body_distance(sa, sb, tol)?.is_some_and(|d| d.exact && d.distance <= tol) {
+            out.push([a, b]);
         }
     }
     Ok(out)
@@ -11639,6 +11850,20 @@ fn feature_tools_with_constructor(
             // To Object gives a signed distance from the start: one side only.
             let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
             let (a, b) = extent_sides(vals, extent, d, direction, second_end)?;
+            // To a curved face with a second distance: the face ends side one only, the way the
+            // To object lies (`d`'s sign). Side two keeps its own extent, built apart from the
+            // prism that runs through the target and is cut back to the face. A second
+            // distance on side one's side of the sketch has no meaning with that face.
+            let mut side_two: Option<(f64, f64)> = None;
+            let (a, b) = if curved.is_some() && extent.distance2.is_some() {
+                if a * b >= 0.0 {
+                    return Err(DocError::Invalid("the second distance must run the other way from the To object".into()));
+                }
+                side_two = Some(if a < 0.0 { (a, 0.0) } else { (0.0, a) });
+                (0.0, b)
+            } else {
+                (a, b)
+            };
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
@@ -11769,6 +11994,41 @@ fn feature_tools_with_constructor(
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
                 tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
+            }
+            if let Some((s_lo, s_hi)) = side_two {
+                let mut second = Vec::new();
+                for r in &regions {
+                    second.extend(
+                        centered_extrude(&ss.plane, r, s_lo + off, s_hi + off, Some(&ss), thin_roles.as_ref(), CapRoles::TwoSided, None).map_err(|e| match e {
+                            // An internal error keeps its class, so the evaluator retries it.
+                            e @ DocError::Kernel(solidcraft_kernel::KernelError::Internal(_)) => e,
+                            e => DocError::Invalid(format!(
+                                "the second side of the extrude, {} mm thick, cannot be built (a distance this thin is too thin for the kernel): {e}",
+                                s_hi - s_lo
+                            )),
+                        })?,
+                    );
+                }
+                // A new body is one body: side two is fused with the side-one pieces it shares the
+                // sketch plane's face; a join or a cut fuses them in its target.
+                if *operation == Operation::NewBody {
+                    for t2 in second {
+                        let mut group = vec![t2];
+                        let mut rest = Vec::new();
+                        for t in std::mem::take(&mut tools) {
+                            let first = group.first().map(|g| g.body.clone());
+                            match first {
+                                Some(g) if !kernel::apart(&t.body, &g)? => group.push(t),
+                                _ => rest.push(t),
+                            }
+                        }
+                        let fused = if group.len() > 1 { union_all(&group.iter().collect::<Vec<_>>())? } else { group.remove(0) };
+                        rest.push(fused);
+                        tools = rest;
+                    }
+                } else {
+                    tools.extend(second);
+                }
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`surface_sheet_join`), which takes the sketch's

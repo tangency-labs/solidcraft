@@ -2867,13 +2867,16 @@ fn coil_revolutions_arrows_step_whole_turns() {
     set(&mut h, "2.5");
     click(&mut h, "down");
     assert_eq!(sent(&h), json!("2"));
-    // From 1 to the helix's 200 turns.
+    // From 1 to the helix's 1500 turns (the kernel's span bound; #22577: no longer 200).
     set(&mut h, "1");
     click(&mut h, "down");
     assert_eq!(sent(&h), json!("1"));
-    set(&mut h, "200");
+    set(&mut h, "202");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("201"));
+    set(&mut h, "1500");
     click(&mut h, "up");
-    assert_eq!(sent(&h), json!("200"));
+    assert_eq!(sent(&h), json!("1500"));
     set(&mut h, "turns");
     click(&mut h, "up");
     assert_eq!(sent(&h), json!("turns + 1"));
