@@ -2375,13 +2375,13 @@ fn the_fold_option_is_a_row_of_the_browser_menu() {
     let mut h = Harness::new();
     assert!(!h.app.preferences.browser_fold_other_components, "off by default");
     assert!(
-        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("fold-other-components", "prefs.browser_fold_other_components", false)),
+        crate::browser::menu_toggles(&h.app).contains(&("fold-other-components", "prefs.browser_fold_other_components", false)),
         "a row of the menu, unticked"
     );
     crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
     assert!(h.app.preferences.browser_fold_other_components, "a click turns it on");
     assert!(
-        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("fold-other-components", "prefs.browser_fold_other_components", true)),
+        crate::browser::menu_toggles(&h.app).contains(&("fold-other-components", "prefs.browser_fold_other_components", true)),
         "ticked"
     );
     crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
