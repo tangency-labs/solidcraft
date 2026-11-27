@@ -288,6 +288,11 @@ fn queue_hook(app: &mut SolveApp, workspace: Workspace, entering: bool) {
 }
 
 #[cfg(test)]
+pub(crate) fn queued_commands(app: &SolveApp) -> Vec<(String, String)> {
+    app.plugin_workspaces.commands.borrow().iter().cloned().collect()
+}
+
+#[cfg(test)]
 pub(crate) fn pending_hooks(app: &SolveApp) -> Vec<(String, bool)> {
     app.plugin_workspaces.hooks.iter().map(|hook| (hook.workspace.id.clone(), hook.entering)).collect()
 }
