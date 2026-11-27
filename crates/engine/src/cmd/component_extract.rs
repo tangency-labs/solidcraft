@@ -191,11 +191,17 @@ fn compatible_face_surface(old: &ModelBody, old_face: usize, new: &ModelBody, ne
     use solidcraft_kernel::FaceSurface;
     const MIN_COS: f64 = 0.5;
     match (solidcraft_kernel::face_surface(&old.body, old_face), solidcraft_kernel::face_surface(&new.body, new_face)) {
-        (Some(FaceSurface::Plane { normal: a, .. }), Some(FaceSurface::Plane { normal: b, .. })) => a.vec().dot(b.vec()) >= MIN_COS,
+        (Some(FaceSurface::Plane { normal: a, .. }), Some(FaceSurface::Plane { normal: b, .. })) => {
+            let (a, b) = (a.vec(), b.vec());
+            solidcraft_kernel::directions_aligned([a.x, a.y, a.z], [b.x, b.y, b.z], MIN_COS, false)
+        }
         (
             Some(FaceSurface::Cylinder { axis: a, .. } | FaceSurface::Cone { axis: a, .. }),
             Some(FaceSurface::Cylinder { axis: b, .. } | FaceSurface::Cone { axis: b, .. }),
-        ) => a.vec().dot(b.vec()).abs() >= MIN_COS,
+        ) => {
+            let (a, b) = (a.vec(), b.vec());
+            solidcraft_kernel::directions_aligned([a.x, a.y, a.z], [b.x, b.y, b.z], MIN_COS, true)
+        }
         (Some(FaceSurface::Plane { .. }), Some(FaceSurface::Cylinder { .. } | FaceSurface::Cone { .. }))
         | (Some(FaceSurface::Cylinder { .. } | FaceSurface::Cone { .. }), Some(FaceSurface::Plane { .. })) => false,
         _ => true,

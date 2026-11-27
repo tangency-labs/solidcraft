@@ -4130,22 +4130,12 @@ fn snapshot_occurrence_poses(s: &Session) -> Vec<(u64, String, solidcraft_doc::M
 
 /// How far two resolved origin frames differ: (origin shift mm, Z-axis angle deg).
 fn frame_deviation(before: &solidcraft_doc::Mat, after: &solidcraft_doc::Mat) -> (f64, f64) {
-    use solidcore_record::Vec3;
-    let shift = Vec3::new(after[3][0] - before[3][0], after[3][1] - before[3][1], after[3][2] - before[3][2]).len();
-    let bz = Vec3::new(before[2][0], before[2][1], before[2][2]);
-    let az = Vec3::new(after[2][0], after[2][1], after[2][2]);
-    let angle_deg = bz.cross(az).len().atan2(bz.dot(az)).to_degrees();
-    (shift, angle_deg)
+    solidcraft_kernel::frame_z_deviation(before, after)
 }
 
 /// How far two rigid world transforms differ: (translation mm, rotation deg).
 fn pose_delta(a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat) -> (f64, f64) {
-    use solidcore_record::Vec3;
-    let t = Vec3::new(a[3][0] - b[3][0], a[3][1] - b[3][1], a[3][2] - b[3][2]).len();
-    let c = |i: usize, k: usize| (0..3).map(|n| a[i][n] * b[k][n]).sum::<f64>();
-    let sin2 = Vec3::new(c(1, 2) - c(2, 1), c(2, 0) - c(0, 2), c(0, 1) - c(1, 0)).len();
-    let angle_deg = sin2.atan2(c(0, 0) + c(1, 1) + c(2, 2) - 1.0).to_degrees();
-    (t, angle_deg)
+    solidcraft_kernel::rigid_pose_delta(a, b)
 }
 
 /// Per-joint frame deviations after `component.relink`: records every snapshotted joint side that
