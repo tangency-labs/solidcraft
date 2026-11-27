@@ -822,6 +822,11 @@ pub fn resolve(spec: &str) -> Option<Slicer> {
     resolve_for(TargetKind::Slicer, spec)
 }
 
+/// The ids of the known slicers, in the order they are listed (`prusa`, `bambu`, ...).
+pub fn ids() -> impl Iterator<Item = &'static str> {
+    TARGETS.iter().filter(|t| t.kind == TargetKind::Slicer).map(|t| t.id)
+}
+
 /// [`resolve`] among the targets of one kind.
 pub fn resolve_for(kind: TargetKind, spec: &str) -> Option<Slicer> {
     let chosen = CHOSEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
