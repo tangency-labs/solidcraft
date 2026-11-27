@@ -123,6 +123,8 @@ macro_rules! design_preferences {
             /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
             /// keyboard after a pick instead, and nothing covers the model (#9479).
             value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+            /// Convention for new Weld graphics; existing weld settings keep their convention.
+            weld_symbol_standard: String = "iso2553_2019_a".into(), PAGE_DESIGN;
         }
     };
 }

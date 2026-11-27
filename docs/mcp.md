@@ -208,6 +208,25 @@ solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+### Structured results
+
+`solidcraft-cli mcp --structured` is for programs that call the tools, such as a Python client,
+rather than for chat clients. Every tool result then also carries its reply as data, in MCP's
+`structuredContent`:
+
+```json
+{"result": <the reply as JSON, or its text when the reply is a message>, "notes": ["<a notice>", "<the selection>"]}
+```
+
+`result` is read from the first text block, the one the tool itself returns; `notes` holds the
+text blocks the server adds after it and is left out when there are none. An image result keeps
+its image block, and its text block is the `result`. An error keeps `isError: true`, and keys an
+error already carries (`panel_error`, `plugin_error`) stay. The text blocks are unchanged, so the
+same tools, current and future, reach a program and an agent alike.
+
+It is off by default, and only the command line turns it on: some chat clients show the model both
+the text and the structured copy, which would double what it reads.
+
 ### Desktop app management
 
 External MCP clients connected to the desktop app can also use:

@@ -304,7 +304,14 @@ impl Assembly {
                 (true, Some((label, iv, Some((nurbs, interval))))) => {
                     FormedEdge { label: label.clone(), label_interval: iv, nurbs: Some(nurbs), interval }
                 }
-                _ => FormedEdge { label: a.curve.clone(), label_interval: a.interval, nurbs: a.nurbs.clone(), interval: a.interval },
+                // A kept edge's interval is on its form where it has one (a circle's arc length):
+                // its label's (the circle's angles) is what the face forms are measured on.
+                _ => FormedEdge {
+                    label: a.curve.clone(),
+                    label_interval: solidcore_ops::label::curve_interval(&a.curve, a.nurbs.as_ref(), a.interval).unwrap_or(a.interval),
+                    nurbs: a.nurbs.clone(),
+                    interval: a.interval,
+                },
             });
         }
         Ok(Formed { faces: takes, edges })
@@ -379,6 +386,7 @@ struct Formed {
 
 struct FormedEdge {
     label: Curve,
+    /// The edge's interval on `label` (angles on a circle), not on its form.
     label_interval: [f64; 2],
     nurbs: Option<Curve>,
     interval: [f64; 2],
