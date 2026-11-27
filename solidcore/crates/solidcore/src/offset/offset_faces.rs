@@ -37,7 +37,11 @@
 //!   Besides planes, a face round a group may lie on a whole sphere (#22811): the group's
 //!   edges then lie on that sphere's own surface, so the extension is never what the
 //!   result keeps. Blends of one group that come off onto the same sharp edge (the halves
-//!   of a round split where its rim was split) put back one blend on it.
+//!   of a round split where its rim was split) put back one blend on it. Not in the
+//!   fork (#22810): a face round a group may also lie on a cone or cylinder, which the
+//!   defeature continues on its own analytic surface; and a blend alone that neither
+//!   removal takes (a hole, a notch or a boss's wall cutting its rails or ends) comes off
+//!   the same way, as a group of one, its own seam no edge to another face.
 //! - **Cached topology.** After each removal and before [`OffsetFacesExecutive::offset_faces`]
 //!   returns, the port's cached topology fields are refreshed (upstream has none).
 //! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
@@ -1193,15 +1197,21 @@ impl OffsetFacesExecutive {
 /// whose definition is the whole sphere, all round and from pole to pole (#22811). Such a
 /// sphere's domain holds every point of the sphere, so the sharp edges the face gets, where
 /// the sphere meets the faces beside it, lie within it: the defeature's extension past its
-/// domain is never the part the result keeps. A partial sphere, a cylinder, a cone or a
-/// torus ends somewhere a sharp edge could lie past, so it is not taken.
+/// domain is never the part the result keeps. Or a cone or cylinder (#22810): the
+/// defeature extends it with [`Surface::extended_sides`], which continues a cone by its own
+/// net on its analytic surface (certified), along its rulings never past its apex, so the
+/// sharp edges the face gets lie on the cone itself; an extension that stops short of
+/// them leaves the defeature unable to close the body, which is refused. A partial sphere
+/// or a torus is not taken yet.
 fn grows_exactly(s: &Surface) -> Result<bool> {
     if s.is_kind_of(Plane::TYPE)? {
         return Ok(true);
     }
-    Ok(
-        matches!(s.kind(), SurfaceKind::Sphere(sphere) if sphere.is_closed_u() && sphere.is_closed_v()),
-    )
+    Ok(match s.kind() {
+        SurfaceKind::Sphere(sphere) => sphere.is_closed_u() && sphere.is_closed_v(),
+        SurfaceKind::Cone(_) => true,
+        _ => false,
+    })
 }
 
 impl OffsetFacesExecutive {
@@ -1209,9 +1219,10 @@ impl OffsetFacesExecutive {
     /// edge it replaced (`SmRingFilletRemoval` for a ring, `SmFilletRemoval` exact only
     /// otherwise), in rounds while any comes off; the sharp edge marked [`MARK_SHARP`].
     /// Blends that meet each other at their ends (mitred rounds, or the pieces of one
-    /// round) come off afterwards, each connected group at once, through
-    /// [`FeatureExecutive`] (the faces round the group extended until they meet), where
-    /// every face round the group is a plane or a whole sphere; the
+    /// round), and a blend neither removal takes (its rails or ends cut by other faces: a
+    /// hole, a notch, a boss's wall), come off afterwards, each connected group at once,
+    /// through [`FeatureExecutive`] (the faces round the group extended until they meet),
+    /// where every face round the group is a plane, a whole sphere or a cone; the
     /// extended faces are joined again across the group's edges, and each blend's sharp
     /// edge is found where its two faces meet.
     ///
@@ -1299,7 +1310,10 @@ impl OffsetFacesExecutive {
         // by one exactly: each one's end lies on the next one's surface. Each connected
         // group of them comes off at once (SmFeatureExecutive: the faces round the group
         // extended until they meet), where every face round it continues exactly: a
-        // plane, or a whole sphere (`grows_exactly`).
+        // plane, a whole sphere or a cone (`grows_exactly`). So does a blend alone that
+        // neither removal took: one whose contact edges or ends are cut by other faces (a
+        // hole drilled through it, a notch, a boss's wall), which are extended or trimmed
+        // to the sharp body with the blend's own two faces (#22810).
         let left: Vec<usize> = (0..blends.len())
             .filter(|&i| blends.get(i).is_some_and(|x| !x.taken_off))
             .collect();
@@ -1336,9 +1350,12 @@ impl OffsetFacesExecutive {
                 }
                 gg += 1;
             }
-            if group.len() < 2 {
-                continue;
-            }
+            // what the refusals below name
+            let (what, together, they) = if group.len() > 1 {
+                ("mitred blends on a moved face", " together", "they")
+            } else {
+                ("a blend on a moved face cut by other faces", "", "it")
+            };
             let faces: Vec<FaceId> = group
                 .iter()
                 .filter_map(|&i| blends.get(i).and_then(|x| x.blend))
@@ -1348,6 +1365,8 @@ impl OffsetFacesExecutive {
             'faces: for &f in &faces {
                 for e in face_edges(b, f)? {
                     match face_across(b, e, f)? {
+                        // its own seam: no face round it
+                        None if edge::faces(b, e, None)?.iter().all(|&g| g == f) => {}
                         None => {
                             exact = false;
                             break 'faces;
@@ -1416,7 +1435,7 @@ impl OffsetFacesExecutive {
             if !applied {
                 return Err(self.refuse_after(
                     OffsetFacesRefusal::Unsupported,
-                    "mitred blends on a moved face could not be taken off together",
+                    &format!("{what} could not be taken off{together}"),
                     None,
                     refused,
                 ));
@@ -1442,7 +1461,7 @@ impl OffsetFacesExecutive {
             if !valid || !crate::topology::brep::p2::is_manifold_solid(b)? {
                 return Err(self.refuse(
                     OffsetFacesRefusal::Unsupported,
-                    "mitred blends on a moved face came off leaving no valid solid",
+                    &format!("{what} came off leaving no valid solid"),
                     None,
                 ));
             }
@@ -1478,7 +1497,7 @@ impl OffsetFacesExecutive {
                 if !found {
                     return Err(self.refuse(
                         OffsetFacesRefusal::Unsupported,
-                        "mitred blends on a moved face came off without the edges they rounded",
+                        &format!("{what} came off without the edges {they} rounded"),
                         None,
                     ));
                 }

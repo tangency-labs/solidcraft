@@ -412,3 +412,139 @@ fn no_faces_or_no_distance_is_invalid() {
     assert!(ex.offset_faces(&mut k, &mut b, &[f], 0.0).is_err());
     assert!(ex.offset_faces(&mut k, &mut b, &[f], f64::NAN).is_err());
 }
+
+/// A cylinder of radius `radius` and height `height` on the XY plane, its top edge rounded
+/// `round`.
+fn rim_rounded(k: &mut Kernel, radius: f64, height: f64, round: f64) -> Brep {
+    let mut b = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), radius, height).unwrap();
+    let rim = b
+        .edges()
+        .ids()
+        .find(|&e| {
+            let v = edge::start_vertex(&b, e).unwrap().unwrap();
+            edge::is_closed(&b, e).unwrap()
+                && (vertex::point(&b, v).unwrap().z - height).abs() < 1e-9
+        })
+        .unwrap();
+    fillet_edges(k, &mut b, &[rim], round, 1, 1, 1.0).unwrap();
+    b
+}
+
+/// The top of a rim-rounded cylinder at `z`: the plane face there with the most edges (a
+/// boss's foot on the round is a plane there too).
+fn top_at(b: &Brep, z: f64) -> FaceId {
+    b.face_list()
+        .iter()
+        .copied()
+        .filter(|&f| is_plane(b, f) && face_points(b, f).iter().all(|p| (p.z - z).abs() < 1e-9))
+        .max_by_key(|&f| face_points(b, f).len())
+        .unwrap()
+}
+
+/// A cylinder of radius `radius` and height `height`, its top edge rounded `round`: the
+/// round leaves out the r x r square at the rim (its centroid at R - r/2) less the quarter
+/// disc of the round's section (its centroid at R - r + 4r/(3 pi)), each turned about the
+/// axis (Pappus).
+fn rim_rounded_volume(radius: f64, height: f64, round: f64) -> f64 {
+    let (big, r) = (radius, round);
+    PI * big * big * height
+        - 2.0
+            * PI
+            * (r * r * (big - r / 2.0) - (PI * r * r / 4.0) * (big - r + 4.0 * r / (3.0 * PI)))
+}
+
+/// What a rim round of radius `round` on a cylinder of radius `radius` leaves out under its
+/// top plane, over the part of a region whose angular width at radius rho is `width(rho)`:
+/// the integral over rho in [lo, hi] (within the round, R - r <= lo < hi <= R) of
+/// (r - sqrt(r^2 - (rho - (R - r))^2)) width(rho) rho, by the midpoint rule after
+/// rho = hi - (hi - lo) u^2 (which takes the square-root end at hi out of the integrand).
+fn round_gap(radius: f64, round: f64, lo: f64, hi: f64, width: impl Fn(f64) -> f64) -> f64 {
+    let inner = radius - round;
+    let n = 200_000;
+    let mut sum = 0.0;
+    for i in 0..n {
+        let u = (f64::from(i) + 0.5) / f64::from(n);
+        let rho = hi - (hi - lo) * u * u;
+        let drho = 2.0 * (hi - lo) * u / f64::from(n);
+        let gap = round - (round * round - (rho - inner).powi(2)).max(0.0).sqrt();
+        sum += gap * width(rho) * rho * drho;
+    }
+    sum
+}
+
+/// A cylinder r 20, 60 high, its rim rounded r 2, with a 4 wide notch cut through the rim
+/// at +Y down to z 50 (x in [-2, 2], y from 16 out), its top moved up 2 (#22810). The cut
+/// leaves the round in two pieces split at its seam, between the notch's walls, on the top
+/// and the cylinder; they come off together, the cylinder continued on itself. The result
+/// is the part modelled 2 taller: the rounded cylinder 62 high less the notch, 12 deep
+/// inside the round's contact circle (rho 18) and down to the round outside it.
+#[test]
+fn a_rim_round_a_notch_cuts_follows_the_top() {
+    let mut k = Kernel::default();
+    let part = rim_rounded(&mut k, 20.0, 60.0, 2.0);
+    let notch = create_box(&mut k, Point3::new(-2.0, 16.0, 50.0), 4.0, 6.0, 11.0).unwrap();
+    let mut b = solidcore::boolean::api_brep::boolean_difference(&mut k, part, notch).unwrap();
+    let top = top_at(&b, 60.0);
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[top], 2.0);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert_eq!(ex.followed_blends(), 2);
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    // the notch's footprint in the disc: x in [-2, 2], 16 <= y <= sqrt(400 - x^2)
+    let footprint = 2.0 * 396f64.sqrt() + 400.0 * 0.1f64.asin() - 64.0;
+    let gap = round_gap(20.0, 2.0, 18.0, 20.0, |rho| 2.0 * (2.0 / rho).asin());
+    let want = rim_rounded_volume(20.0, 62.0, 2.0) - (12.0 * footprint - gap);
+    let got = volume(&k, &mut b);
+    assert!(near(got, want, 1e-9), "volume {got}, want {want}");
+}
+
+/// The same cylinder with a hole r 2 at x 17 down to z 50, its wall cutting the round (it
+/// spans rho 15 to 19 across the contact circle at rho 18), the top moved up 2 (#22810).
+/// The round is one face whose top rail and ends the hole's wall cuts: it comes off alone,
+/// the hole's wall continued up to the sharp top. The part modelled 2 taller: the rounded
+/// cylinder 62 high less the hole, 12 deep but where the round dips under the top.
+#[test]
+fn a_rim_round_a_hole_cuts_follows_the_top() {
+    let mut k = Kernel::default();
+    let part = rim_rounded(&mut k, 20.0, 60.0, 2.0);
+    let tool = create_cylinder(&mut k, Point3::new(17.0, 0.0, 50.0), 2.0, 11.0).unwrap();
+    let mut b = solidcore::boolean::api_brep::boolean_difference(&mut k, part, tool).unwrap();
+    let top = top_at(&b, 60.0);
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[top], 2.0);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert_eq!(ex.followed_blends(), 1);
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    // the hole's angular width at rho: rho^2 + 17^2 - 34 rho cos(phi) <= 4
+    let gap = round_gap(20.0, 2.0, 18.0, 19.0, |rho| {
+        2.0 * ((rho * rho + 285.0) / (34.0 * rho)).clamp(-1.0, 1.0).acos()
+    });
+    let want = rim_rounded_volume(20.0, 62.0, 2.0) - (PI * 4.0 * 12.0 - gap);
+    let got = volume(&k, &mut b);
+    assert!(near(got, want, 1e-9), "volume {got}, want {want}");
+}
+
+/// #18277's script: a cylinder r 1, 3 high, its rim rounded r 0.1, a hole r 0.12 at x 0.85
+/// down to z 2 reaching into the round (rho 0.73 to 0.97, the contact circle at 0.9), the
+/// top moved up 0.8.
+#[test]
+fn a_small_hole_into_the_rim_round_follows_the_top_up() {
+    let mut k = Kernel::default();
+    let part = rim_rounded(&mut k, 1.0, 3.0, 0.1);
+    let tool = create_cylinder(&mut k, Point3::new(0.85, 0.0, 2.0), 0.12, 1.5).unwrap();
+    let mut b = solidcore::boolean::api_brep::boolean_difference(&mut k, part, tool).unwrap();
+    let top = top_at(&b, 3.0);
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[top], 0.8);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let (c, h) = (0.85, 0.12);
+    let gap = round_gap(1.0, 0.1, 0.9, c + h, |rho| {
+        2.0 * ((rho * rho + c * c - h * h) / (2.0 * c * rho))
+            .clamp(-1.0, 1.0)
+            .acos()
+    });
+    let want = rim_rounded_volume(1.0, 3.8, 0.1) - (PI * h * h * 1.8 - gap);
+    let got = volume(&k, &mut b);
+    assert!(near(got, want, 1e-9), "volume {got}, want {want}");
+}
