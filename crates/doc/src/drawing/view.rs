@@ -51,7 +51,7 @@ use super::dimension::{ModelEdge, check_edge};
 use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose,
+    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, Shows,
     TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
@@ -509,6 +509,8 @@ pub struct ResolvedView {
     pub hide: Setting<Option<OccurrencePaths>>,
     /// The bodies of its parts it leaves out, each on its own: none when None.
     pub hide_bodies: Setting<Option<HiddenBodies>>,
+    /// Which bodies it draws: every one, or only those the design shows (#22107).
+    pub shows: Setting<Shows>,
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
@@ -873,6 +875,7 @@ impl Drawing {
             occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
             hide_bodies: or_default(&chain, |s| s.hide_bodies.clone().map(Some), None),
+            shows: or_default(&chain, |s| s.shows, Shows::All),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),

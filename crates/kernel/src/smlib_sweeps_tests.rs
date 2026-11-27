@@ -113,12 +113,12 @@ fn a_revolution_names_its_walls_by_segment_and_skips_the_axis() {
         ],
     };
     let r = region(half);
-    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&r), Vec3::ZERO, Vec3::Y, TAU).unwrap();
+    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&r), Vec3::ZERO, Vec3::Y, TAU, false).unwrap();
     close(volume(&b), 4.0 / 3.0 * PI * 125.0, 1e-3, "sphere (measured on a mesh)");
     assert!(origins(&b).iter().all(|o| *o == profile(1)), "{:?}", origins(&b));
     // A quarter turn of a square off the axis: two caps and four walls.
     let sq = region(Loop2::polygon(&[Vec2::new(6.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(8.0, 2.0), Vec2::new(6.0, 2.0)]));
-    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&sq), Vec3::ZERO, Vec3::Y, PI / 2.0).unwrap();
+    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&sq), Vec3::ZERO, Vec3::Y, PI / 2.0, false).unwrap();
     close(volume(&b), PI / 2.0 * 7.0 * 4.0, 1e-3, "quarter ring");
     let mut want = vec![cap(false), cap(true), profile(0), profile(1), profile(2), profile(3)];
     want.sort();
