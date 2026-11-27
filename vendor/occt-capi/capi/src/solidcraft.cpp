@@ -168,6 +168,9 @@ API uint32_t occt_thicken(uint32_t h, double thickness, int32_t symmetric) {
     maker.Initialize(shape, thickness, 1e-7, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection, Standard_True);
     maker.MakeOffsetShape();
     if (!maker.IsDone()) throw std::runtime_error("thicken failed");
+    ShapeMap solids;
+    TopExp::MapShapes(maker.Shape(), TopAbs_SOLID, solids);
+    if (solids.Extent() == 0) throw std::runtime_error("thicken made no solid");
     return put_shape(maker.Shape());
   });
 }
