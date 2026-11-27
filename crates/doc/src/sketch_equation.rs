@@ -391,6 +391,19 @@ mod tests {
         assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
     }
 
+    /// A bare number beside an area or a volume is in the design's unit squared or cubed, as a
+    /// parameter's is (`Defaults::for_unit`): beside a square inch, 3 is 3 in², not 3 mm².
+    #[test]
+    fn a_design_in_inches_reads_bare_areas_and_volumes_in_square_and_cubic_inches() {
+        let vals = with_a(25.4, Some(25.4));
+        let area = fit(&vals, &eq(Some("t"), "sqrt(a * a + 3)", "0", "1")).unwrap();
+        let volume = fit(&vals, &eq(Some("t"), "(a * a * a + 7) / (a * a)", "0", "1")).unwrap();
+        for (fit, y) in [(area, 50.8), (volume, 203.2)] {
+            let last = *fit.points.last().unwrap();
+            assert!((last - Vec2::new(25.4, y)).len() < 1e-9, "{last:?}");
+        }
+    }
+
     /// Plain numbers read degrees in the formulas' trig calls, constants as well as the variable
     /// (#19630): the same `cos(0.5)` a sketch point reads in degrees, now here too; `rad`
     /// spells radians out. A curve saved before the change keeps its radians.
