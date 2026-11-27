@@ -14,6 +14,8 @@ mod backend;
 mod mesh_warnings;
 mod options;
 mod plugin_tools;
+mod prompts;
+mod resources;
 mod server;
 mod skill_reference;
 mod tools;
