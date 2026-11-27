@@ -28,56 +28,100 @@ fn height(plane: &Plane, p: CPoint) -> Option<Vec<f64>> {
 
 fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamType, f64)> {
     let net = spline.gw_nurb()?;
-    let (direction, knots, last) = match (net.p(), net.n(), net.q(), net.m()) {
-        (1, 1, degree, last) if degree > 1 => (SurfParamType::U, net.u_knots(), last),
-        (degree, last, 1, 1) if degree > 1 => (SurfParamType::V, net.v_knots(), last),
+    let (direction, knots, rows, last) = match (net.p(), net.n(), net.q(), net.m()) {
+        (1, rows, degree, last) if rows >= 1 && degree > 1 => {
+            (SurfParamType::U, net.u_knots(), rows, last)
+        }
+        (degree, last, 1, rows) if rows >= 1 && degree > 1 => {
+            (SurfParamType::V, net.v_knots(), rows, last)
+        }
         _ => return None,
     };
-    let &[lo, start, end, hi] = knots else {
-        return None;
-    };
-    if lo != start || hi != end || lo >= hi {
+    // A clamped degree-1 knot vector with `rows + 1` control rows has length `rows + 3`:
+    // `[k_0, k_0, k_1, ..., k_{rows-1}, k_rows, k_rows]`, with strictly increasing spans.
+    if knots.len() != rows.checked_add(3)? {
         return None;
     }
-    let pair = |i| {
-        let at = |row| {
-            if direction == SurfParamType::U {
-                net.cpt(row, i)
-            } else {
-                net.cpt(i, row)
-            }
-        };
-        Some((at(0).ok()?, at(1).ok()?))
+    #[allow(clippy::float_cmp)] // clamped end knots repeated as stored
+    let clamped = knots.first() == knots.get(1) && knots.get(rows + 1) == knots.get(rows + 2);
+    if !clamped {
+        return None;
+    }
+    let span_knots = knots.get(1..=rows + 1)?;
+    if !span_knots.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+        return None;
+    }
+    let at = |row: usize, i: usize| -> Option<CPoint> {
+        if direction == SurfParamType::U {
+            net.cpt(row, i).ok()
+        } else {
+            net.cpt(i, row).ok()
+        }
     };
-    let (first, other) = pair(0)?;
-    let a = height(plane, first)?;
-    let b = height(plane, other)?;
-    // The profile and its translate have the same knots and derivatives. On a
+    // The profile and its translates have the same knots and derivatives. On a
     // twisted ruled surface the rails used to construct adjoining rounds also
     // depend on the surface parameterization; keep their usual intersection.
     let displacement = |p: CPoint, q: CPoint| {
         [(p.x, q.x), (p.y, q.y), (p.z, q.z)].map(|(x, y)| exact::sub(&[y], &[x]))
     };
-    let shift = displacement(first, other);
-    for i in 1..=last {
-        let (p, q) = pair(i)?;
-        if (q.w != NOW && q.w != 1.0)
-            || q.z == NOZ
-            || !exact::is_zero(&exact::sub(&height(plane, p)?, &a))
-            || !displacement(p, q)
-                .iter()
-                .zip(&shift)
-                .all(|(delta, reference)| exact::is_zero(&exact::sub(delta, reference)))
-        {
+    let mut heights: Vec<Vec<f64>> = Vec::with_capacity(rows + 1);
+    for row in 0..=rows {
+        heights.push(height(plane, at(row, 0)?)?);
+    }
+    let first_h = heights.first()?;
+    let last_h = heights.last()?;
+    if exact::sign(first_h) * exact::sign(last_h) != -1 {
+        return None;
+    }
+    let overall = exact::sign(&exact::sub(last_h, first_h));
+    if overall == 0 {
+        return None;
+    }
+    for w in heights.windows(2) {
+        let [a, b] = w else {
+            return None;
+        };
+        if exact::sign(&exact::sub(b, a)) != overall {
             return None;
         }
     }
-    if exact::sign(&a) * exact::sign(&b) != -1 {
-        return None;
+    for row in 0..rows {
+        let h_row = heights.get(row)?;
+        let shift = displacement(at(row, 0)?, at(row + 1, 0)?);
+        for i in 1..=last {
+            let p = at(row, i)?;
+            let q = at(row + 1, i)?;
+            if (q.w != NOW && q.w != 1.0)
+                || q.z == NOZ
+                || !exact::is_zero(&exact::sub(&height(plane, p)?, h_row))
+                || !displacement(p, q)
+                    .iter()
+                    .zip(&shift)
+                    .all(|(delta, reference)| exact::is_zero(&exact::sub(delta, reference)))
+            {
+                return None;
+            }
+        }
     }
-    let fraction = exact::to_f64(&a) / exact::to_f64(&exact::sub(&a, &b));
-    let t = (hi - lo).mul_add(fraction, lo);
-    (t > lo && t < hi).then_some((direction, t))
+    let lo = *span_knots.first()?;
+    let hi = *span_knots.last()?;
+    for row in 0..rows {
+        let a = heights.get(row)?;
+        let b = heights.get(row + 1)?;
+        let sa = exact::sign(a);
+        let sb = exact::sign(b);
+        let k0 = *span_knots.get(row)?;
+        let k1 = *span_knots.get(row + 1)?;
+        if sa == 0 {
+            return (k0 > lo && k0 < hi).then_some((direction, k0));
+        }
+        if sa * sb == -1 {
+            let fraction = exact::to_f64(a) / exact::to_f64(&exact::sub(a, b));
+            let t = (k1 - k0).mul_add(fraction, k0);
+            return (t > k0 && t < k1).then_some((direction, t));
+        }
+    }
+    None
 }
 
 pub(crate) fn intersect(

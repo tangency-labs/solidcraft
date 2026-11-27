@@ -2044,6 +2044,102 @@ mod tests {
             row[1].z += 0.125;
         }
         assert!(defers(&rows));
+
+        // Multi-span degree-1 translated spline extrusion (such as a wall extended during
+        // `local_operation` face offset): the exact isocurve is extracted in both UV orders,
+        // both strictly inside a span and at an interior knot, while non-monotone heights
+        // still defer to general SSI.
+        let multi_rows = vec![row(-2.0, 0.0), row(0.0, 0.5), row(4.0, 1.5)];
+        let mut multi = BSplineSurface::from_data(
+            2,
+            2,
+            1,
+            2,
+            4,
+            5,
+            &multi_rows,
+            &[0.0, 0.0, 1.0, 3.0, 3.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let lifted_dom = Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0);
+        let mut lifted = Plane::new(
+            Vec3::new(0.0, 0.0, 2.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &lifted_dom,
+        );
+        lifted.make_nurb().unwrap();
+        for swap in [false, true] {
+            if swap {
+                multi.swap_uv().unwrap();
+            }
+            let dom = multi.natural_uv_domain();
+            // Strictly inside the second linear span (z = 2 lies halfway between z = 0 and z = 4).
+            let section = spline_section::intersect(&k, &multi, &dom, &lifted, &lifted_dom, 1e-6)
+                .unwrap()
+                .unwrap();
+            assert_eq!(section.curve_types, [TsectCurveType::Crossing]);
+            let c = &section.curves_3d[0];
+            let iv = c.natural_interval();
+            for t in [0.0, 0.5, 1.0] {
+                let expected = Vec3::new(2.0 * t - 1.0, 1.0 + 2.0 * t * (1.0 - t), 2.0);
+                assert!(
+                    c.evaluate_point(&k, iv.evaluate(t))
+                        .unwrap()
+                        .distance(expected)
+                        < 1e-12
+                );
+            }
+            // Exactly at the interior knot (z = 0 lies on row 1).
+            let at_knot = spline_section::intersect(
+                &k,
+                &multi,
+                &dom,
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(at_knot.curve_types, [TsectCurveType::Crossing]);
+            let c0 = &at_knot.curves_3d[0];
+            let iv0 = c0.natural_interval();
+            for t in [0.0, 0.5, 1.0] {
+                let expected = Vec3::new(2.0 * t - 1.0, 0.5 + 2.0 * t * (1.0 - t), 0.0);
+                assert!(
+                    c0.evaluate_point(&k, iv0.evaluate(t))
+                        .unwrap()
+                        .distance(expected)
+                        < 1e-12
+                );
+            }
+        }
+        // Non-monotone multi-span heights (plane crosses twice) must defer.
+        let folded_rows = vec![row(-1.0, 0.0), row(2.0, 0.5), row(-1.0, 1.0)];
+        let folded = BSplineSurface::from_data(
+            2,
+            2,
+            1,
+            2,
+            4,
+            5,
+            &folded_rows,
+            &[0.0, 0.0, 1.0, 2.0, 2.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert!(spline_section::intersect(
+            &k,
+            &folded,
+            &folded.natural_uv_domain(),
+            &plane,
+            &plane.natural_uv_domain(),
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]

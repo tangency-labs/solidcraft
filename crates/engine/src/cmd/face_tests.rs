@@ -899,3 +899,42 @@ fn offset_face_half_torus_flat_face_outward_inward_and_past_minor_radius() {
     let err = past.execute("solid.offset_face", &json!({"faces": [[15, 0, 0]], "distance": 5})).unwrap_err();
     assert!(!err.to_string().is_empty(), "expected refusal for distance past minor radius");
 }
+
+/// #22808: timing benchmark for moving the top face of a periodic spline extrusion with a
+/// rounded top edge (`cargo test --release -p solidcraft-engine bench_issue_22808_offset_face_rounded_spline -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing benchmark for #22808"]
+fn bench_issue_22808_offset_face_rounded_spline() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(
+        &mut s,
+        "sketch.spline.fit_point",
+        json!({
+            "points": [[30, 0], [20, 15], [0, 20], [-20, 15], [-30, 0], [-20, -15], [0, -20], [20, -15]],
+            "periodic": true
+        }),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 20, "operation": "new", "body_name": "Part"}));
+    let (v_extrude, top_extrude) = volume_and_top(&mut s);
+    assert!((top_extrude - 20.0).abs() < 1e-4, "extrude top {top_extrude}");
+    let base_area = v_extrude / 20.0;
+
+    let t_fillet = std::time::Instant::now();
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -20, 20]], "radius": 2}));
+    let fillet_ms = t_fillet.elapsed().as_secs_f64() * 1000.0;
+    let (v_fillet, top_fillet) = volume_and_top(&mut s);
+    assert!((top_fillet - 20.0).abs() < 1e-4, "fillet top {top_fillet}");
+
+    let t_offset = std::time::Instant::now();
+    run(&mut s, "solid.offset_face", json!({"faces": [[0, 0, 20]], "distance": 2}));
+    let offset_ms = t_offset.elapsed().as_secs_f64() * 1000.0;
+    let (v_offset, top_offset) = volume_and_top(&mut s);
+
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((top_offset - 22.0).abs() < 1e-4, "offset top {top_offset}");
+    let expected_vol = v_fillet + 2.0 * base_area;
+    assert!((v_offset - expected_vol).abs() < expected_vol * 1e-4, "volume {v_offset} vs expected {expected_vol}");
+    eprintln!("issue #22808 rounded periodic spline: fillet={fillet_ms:.1} ms, offset_face={offset_ms:.1} ms, vol={v_offset:.3}");
+}
