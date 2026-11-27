@@ -14,9 +14,10 @@ refusal is a `PanelError` with a machine-readable `Rule`.
 
 | Item | What it is |
 |---|---|
-| `PanelKind`, `InstanceId`, `SectionId`, `ColumnId`, `WorkspaceId`, `DocumentId`, `ViewportId`, `HostId`, `ControlId` | Validated ids (`new`, at most `MAX_ID_BYTES`; `valid_id`) |
+| `PanelKind`, `InstanceId`, `SectionId`, `ColumnId`, `DocumentId`, `ViewportId`, `HostId`, `ControlId` | Validated ids (`new`, at most `MAX_ID_BYTES`; `valid_id`) |
 | `Zone` | Where a section sits: `Left`, `Right`, `Bottom`, `Floating`, `Window` (the sides are logical, a host mirrors them for right-to-left) |
 | `PanelSpec`, `PanelFeatures`, `HeaderActionSpec`, `EdgeRule`, `PanelSurface`, `SideHeightPolicy` | What a host registers for one kind of panel: title key, icon, allowed and default zones, least, default and greatest sizes, header actions |
+| `WorkspaceId` | Flat host ids or `plugin:<package>/<workspace>` (`valid_workspace_id`, at most `MAX_WORKSPACE_ID_BYTES` = 136) |
 | `PanelRegistry` | The registered kinds: `register`, `get`, `specs`, `set_side_widths`, `is_side_strip` |
 | `Layout`, `Section`, `Column`, `PanelInstance`, `SectionLocation`, `PlacementMemory`, `DockReturn`, `ReturnTab` | The arrangement: open panels, the sections (tab groups) they sit in, side columns, and where a panel returns to. `Layout::empty(workspace)` starts one; `validate` checks one |
 | `LayoutService` | The one owner of the live layout: `new(registry, layout, capabilities)`, `prepare` and `commit` (a validated candidate, then the change), `set_availability`, and the `ActionSink` trait's `dispatch`, `inspect` and `project` |

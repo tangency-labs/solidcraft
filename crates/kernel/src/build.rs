@@ -165,7 +165,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle, None)
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -173,7 +173,13 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle, None)
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
+}
+
+/// Revolve with contiguous pieces of the same circle joined before turning each profile.
+pub fn revolve_joining_arcs(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_joining_arcs");
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinArcs)
 }
 
 /// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
@@ -188,7 +194,7 @@ pub fn revolve_whole_sides(
     one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
 ) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
-    revolved(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinFreeForm(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -197,16 +203,14 @@ pub fn revolve_whole_sides(
 /// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
 const AXIS_SNAP: f64 = 1e-4;
 
-/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]), with the runs of segments `one_curve`
-/// says are one curve turned as one curve each (none: each segment on its own).
-fn revolved(
-    plane: &Plane,
-    regions: &[Region2],
-    axis_origin: Vec2,
-    axis_dir: Vec2,
-    angle: f64,
-    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
-) -> Result<Vec<Body>> {
+enum RevolveProfile<'a> {
+    AsDrawn,
+    JoinArcs,
+    JoinFreeForm(&'a dyn Fn(&Seg2, &Seg2) -> bool),
+}
+
+/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
+fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64, profile: RevolveProfile<'_>) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -271,8 +275,10 @@ fn revolved(
         let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-        let Some(one_curve) = one_curve else {
-            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+        let RevolveProfile::JoinFreeForm(one_curve) = profile else {
+            let pieces = crate::smlib_sweeps::pieces(given.oriented().loops());
+            let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
+            out.push(crate::smlib_sweeps::revolve(plane, &pieces, o, axis, angle, join_arcs)?);
             continue;
         };
         // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
@@ -291,7 +297,7 @@ fn revolved(
             }
             k += l.lp.segs.len();
         }
-        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle)?);
+        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle, false)?);
     }
     Ok(out)
 }

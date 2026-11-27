@@ -577,6 +577,74 @@ fn join_to_a_round_the_profile_overhangs_ends_at_its_extended_surface() {
     assert!((added - want).abs() < want * 1e-3, "added {added}, want {want}");
 }
 
+/// #23158: a Join To Object down to the round of a shell's cavity ends on that round. A cylinder
+/// r 20, 20 tall, its bottom rim rounded r 5 and shelled 2 in from the top: the cavity's round is
+/// the torus of major radius 15 and tube radius 3 about (0, 0, 5), z = 5 - sqrt(9 - u^2) at
+/// rho = 15 + u. The ring r 16 to 17 on the top plane, joined down to it, adds the tube between
+/// z = 20 and the round: 2 pi times the integral of (15 + sqrt(9 - u^2)) (15 + u) over u in
+/// [1, 2]. The round keeps its definition, which a split tool can't evaluate: the extrude was
+/// refused ("a blend's label"), and designs from 0.45 that ended on such a round stopped
+/// rebuilding in 0.47. A New Body from below up to the outer round (tube radius 5) of the
+/// cylinder, not shelled, was refused the same way: it holds 2 pi times the integral of
+/// (15 - sqrt(25 - u^2)) (15 + u) over u in [1, 2], from z = -10.
+#[test]
+fn extrude_to_a_round_along_a_curved_edge_ends_on_it_shelled_or_not() {
+    // The integrals of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2), over u in [1, 2].
+    let f = |r: f64| {
+        let p = |u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        p(2.0) - p(1.0)
+    };
+    let g = |r: f64| ((r * r - 1.0).powf(1.5) - (r * r - 4.0).powf(1.5)) / 3.0;
+    // The integral of 15 + u over u in [1, 2].
+    let ring = 16.5;
+    let cup = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Cup"}));
+        run(s, "solid.fillet", json!({"body": "Cup", "edges": [[20, 0, 0]], "radius": 5}));
+    };
+    let ring_sketch = |s: &mut Session, z: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Ring"}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 16}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 17}));
+        run(s, "sketch.finish", json!({}));
+    };
+    // A point of the torus of tube radius r about the axis at 45 degrees, half way round its arc.
+    let on_round = |r: f64| {
+        let (rho, z) = (15.0 + r / 2f64.sqrt(), 5.0 - r / 2f64.sqrt());
+        [rho / 2f64.sqrt(), rho / 2f64.sqrt(), z]
+    };
+
+    let mut s = Session::default();
+    cup(&mut s);
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": 2}));
+    let before = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0);
+    ring_sketch(&mut s, 20.0);
+    let to = on_round(3.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "negative", "to": to, "operation": "join"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert_eq!(s.model.state().bodies.len(), 1, "the post joins the cup");
+    let added = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0) - before;
+    let want = 2.0 * PI * (15.0 * ring + g(3.0) + 15.0 * f(3.0));
+    assert!((added - want).abs() < want * EXACT, "added {added}, want {want}");
+
+    let mut s = Session::default();
+    cup(&mut s);
+    ring_sketch(&mut s, -10.0);
+    let to = on_round(5.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "positive", "to": to, "operation": "new_body", "body_name": "Post"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let got = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let want = 2.0 * PI * (15.0 * ring - g(5.0) - 15.0 * f(5.0));
+    assert!((got - want).abs() < want * EXACT, "post {got}, want {want}");
+}
+
 /// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
 /// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
 /// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the

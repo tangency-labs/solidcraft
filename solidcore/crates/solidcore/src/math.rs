@@ -1229,6 +1229,13 @@ pub fn is_square_to_radius_2d(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> b
     unit_between_2d(centre, p).is_some_and(|radial| dot_2d(dir, radial).abs() <= 1e-6)
 }
 
+/// Not upstream: whether `p` lies on the line through `origin` along `dir`, within `tol` of it.
+/// `false` where `dir` is of no length or not finite.
+#[must_use]
+pub fn on_line_2d(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    unit_2d(dir).is_some_and(|u| dot_2d(left_2d(u), sub_2d(p, origin)).abs() <= tol)
+}
+
 /// Not upstream: the centre of the circle through `a`, `b` and `c`. `None` for points on one
 /// line (or not finite).
 #[must_use]

@@ -7,7 +7,8 @@
 //! nothing, so the Cut does what it did before. Once the user changes a tick, OK sends the ticked
 //! bodies as the feature's `targets`, whichever component each is in. With every body in one
 //! component there is no list. Extrude has its own Target Bodies pick and is left alone. A feature
-//! being edited keeps the targets it was saved with.
+//! being edited keeps the targets it was saved with, except a saved New Body changed to Join, Cut
+//! or Intersect, which takes the shown bodies as a new feature does (`op_auto::scope_targets`).
 
 use serde_json::{Value, json};
 
