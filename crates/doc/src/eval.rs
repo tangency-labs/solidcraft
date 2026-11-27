@@ -12765,6 +12765,10 @@ fn feature_tools_with_constructor(
                     Some(crate::lineage::extrude_cap_role(base)),
                     Some(crate::lineage::extrude_cap_role(if sign < 0.0 { base - len } else { base + len })),
                 ];
+                // Each cap also answers to the end it closes, as a straight extrude's do
+                // (`centered_extrude`): the start cap lies at `base`, the other one `len` along `sign`.
+                let ends = if sign < 0.0 { ["cap:high", "cap:low"] } else { ["cap:low", "cap:high"] };
+                let cap_synonyms = ends.map(|end| vec![end.to_string()]);
                 // How far a tool grows past its profile, at most: its sides' run over its length.
                 let growth = len * taper.tan().abs();
                 let mut notes = Vec::new();
@@ -12775,7 +12779,7 @@ fn feature_tools_with_constructor(
                             sketch: Some(&ss),
                             region: Some(r),
                             caps: caps.clone(),
-                            cap_synonyms: Default::default(),
+                            cap_synonyms: cap_synonyms.clone(),
                             thin: thin_roles.as_ref(),
                         };
                         let corner = match extent.corner {
