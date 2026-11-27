@@ -1815,46 +1815,12 @@ const DOME_SECTIONS: [(f64, [[f64; 2]; 16]); 4] = [
     ),
 ];
 
-/// The closed uniform cubic spline of the control points `cvs` on the plane y = `y`, as one
-/// curve of its 16 Bézier pieces (knots 0..16, each inner one triple), the form SolidCraft
-/// lofts. It starts at the spline's point at control point 2 and runs towards control point
-/// 1; the spline's points at control points 4 and 12, on x = 0, are joints of its pieces.
-fn dome_section(y: f64, cvs: &[[f64; 2]; 16]) -> Vec<crate::sweep::Curve> {
-    // the control points from 2 backwards: q(j) = P(2 - j), periodically
-    let q = |j: usize| {
-        let [x, z] = cvs[(18 - j % 16) % 16];
-        [x, y, z]
-    };
-    let mix = |w: [f64; 3], p: [[f64; 3]; 3]| -> [f64; 4] {
-        let s = w[0] + w[1] + w[2];
-        let c = |i: usize| (w[0] * p[0][i] + w[1] * p[1][i] + w[2] * p[2][i]) / s;
-        [c(0), c(1), c(2), 1.0]
-    };
-    let mut points = Vec::new();
-    for j in 0..16 {
-        // piece j between the knots of q(j) and q(j + 1): its first three Bézier points
-        let (before, here, after) = (q(j + 15), q(j), q(j + 1));
-        points.push(mix([1.0, 4.0, 1.0], [before, here, after]));
-        points.push(mix([0.0, 2.0, 1.0], [before, here, after]));
-        points.push(mix([0.0, 1.0, 2.0], [before, here, after]));
-    }
-    points.push(points[0]);
-    let mut knots = vec![0.0; 4];
-    for i in 1..16 {
-        knots.extend([f64::from(i); 3]);
-    }
-    knots.extend([16.0; 4]);
-    vec![crate::sweep::Curve::Nurbs {
-        degree: 3,
-        points,
-        knots,
-    }]
-}
-
-/// #23139's dome: the cubic loft through the four [`DOME_SECTIONS`], one closed face with its
-/// seam at x > 0.
+/// #23139's dome: the cubic loft through the four [`DOME_SECTIONS`], each a
+/// [`closed_spline_section`] (it starts at control point 2, and the spline's points at
+/// control points 4 and 12, on x = 0, are joints of its Bézier pieces): one closed face with
+/// its seam at x > 0.
 fn dome() -> Body {
-    let sections = DOME_SECTIONS.map(|(y, cvs)| dome_section(y, &cvs));
+    let sections = DOME_SECTIONS.map(|(y, cvs)| closed_spline_section(&cvs, y));
     crate::sweep::loft_sheet(&sections, 3).unwrap().0
 }
 
