@@ -10,7 +10,9 @@
 //! * line 1: `{"unit": <id>, "format": 1}`;
 //! * then one line per case: `{"case", "error", "deferred", "rejected", "values", "ints",
 //!   "topology"}`. A non-rejected case omits `"rejected"`; a rejection stores its exact
-//!   reason, including an empty string, and is compared exactly.
+//!   reason, including an empty string, and is compared exactly. New or re-blessed
+//!   rows also record `input_hash`, a fingerprint of their case inputs. Legacy rows without
+//!   that field can still be checked; blessing a unit records the inputs for future comparisons.
 //!
 //! A float array of at most [`FULL`] entries is stored in full. A longer one is stored as
 //! `{"n": N, "blocks": [[sum, abs_sum, weighted_sum], ...]}`, one triple per [`BLOCK`] entries
@@ -320,6 +322,20 @@ fn block_agrees(golden: &Value, now: &Value, floor: Option<f64>) -> bool {
 
 /// How `now` differs from `golden`; `None` when they agree.
 pub fn diff(golden: &Value, now: &Value, floors: &[AbsFloor]) -> Option<Change> {
+    // A changed input is not an output regression on the same case. Do not compare
+    // the outputs of two different operands as though they were interchangeable.
+    if let Some(hash) = golden.get("input_hash").filter(|hash| {
+        now.get("input_hash")
+            .is_some_and(|current| current != *hash)
+    }) {
+        return Some(Change {
+            count: 1,
+            details: vec![format!(
+                "inputs changed (output not comparable): {hash} -> {}",
+                now["input_hash"]
+            )],
+        });
+    }
     let mut d = Differ {
         floors,
         change: Change::default(),
@@ -386,7 +402,14 @@ pub fn check_unit(
     let floors = unit.abs_floors();
     let walked = each_rust_output(unit, ctx, opts, reverse, |case, rust| {
         let line = match rust {
-            Ok(out) => encode(&case.name, &out),
+            Ok(out) => {
+                let mut line = encode(&case.name, &out);
+                line["input_hash"] = json!(format!(
+                    "{:016x}",
+                    crate::rng::fnv1a64(&crate::json::to_canonical_string(&case.inputs))
+                ));
+                line
+            }
             Err(e) => {
                 res.broken.push((case.name.clone(), e));
                 return;
@@ -436,8 +459,8 @@ pub fn check_unit(
 /// The golden a bless writes: `old` with every case [`check_unit`] reported as changed
 /// replaced, every added case added, and, for an unfiltered run, the cases the run no longer
 /// produces dropped. A case the check found unchanged (its output agrees with its golden line
-/// under [`diff`]) keeps its old line byte for byte, so a blessed diff holds exactly the
-/// changed and added cases the check listed and no rounding noise.
+/// under [`diff`]) keeps its old output fields byte for byte, so a blessed diff has no
+/// rounding noise. A legacy line also acquires its first input fingerprint.
 pub fn blessed(old: &Golden, res: &GoldenResult, filtered: bool) -> Golden {
     let mut out = if filtered { old.clone() } else { Golden::new() };
     let changed: std::collections::BTreeSet<&str> =
@@ -447,7 +470,13 @@ pub fn blessed(old: &Golden, res: &GoldenResult, filtered: bool) -> Golden {
             .get(name)
             .filter(|_| !changed.contains(name.as_str()))
             .unwrap_or(line);
-        out.insert(name.clone(), kept.clone());
+        let mut kept = kept.clone();
+        // Preserve the previous output (including its rounding) when only the
+        // fingerprint is new. No old fingerprint is silently overwritten.
+        if let Some(hash) = line.get("input_hash") {
+            kept["input_hash"] = hash.clone();
+        }
+        out.insert(name.clone(), kept);
     }
     out
 }
@@ -575,6 +604,32 @@ mod tests {
         fn run_rust(&self, _case: &crate::Case) -> Result<Output, HarnessError> {
             Ok(out(&[1.0]))
         }
+    }
+
+    #[test]
+    fn a_changed_input_is_reported_even_when_the_output_is_identical() {
+        let ctx = CaseContext {
+            root: std::env::temp_dir(),
+            seeds: 0,
+        };
+        let opts = RunOptions::default();
+        let unit = Named(vec!["a"]);
+        let known = KnownFailing::new();
+        let legacy = Golden::from([("a".into(), encode("a", &out(&[1.0])))]);
+        let first = check_unit(&unit, &ctx, &opts, &legacy, &known, false);
+        assert!(first.passed(), "{first:?}");
+        let recorded = blessed(&legacy, &first, false);
+        assert!(recorded["a"]["input_hash"].is_string());
+        let same = check_unit(&unit, &ctx, &opts, &recorded, &known, true);
+        assert!(same.passed(), "{same:?}");
+        let mut previous = recorded.clone();
+        previous.get_mut("a").unwrap()["input_hash"] =
+            json!(format!("{:016x}", crate::rng::fnv1a64(r#"{"other":1}"#)));
+        let changed = check_unit(&unit, &ctx, &opts, &previous, &known, false);
+        assert!(!changed.passed());
+        assert_eq!(changed.changed.len(), 1);
+        assert!(changed.changed[0].1.details[0].contains("inputs changed (output not comparable)"));
+        assert_eq!(blessed(&previous, &changed, false), recorded);
     }
 
     #[test]
@@ -822,7 +877,7 @@ mod tests {
         }
     }
 
-    /// Blessing keeps the old line of a case the check calls unchanged, byte for byte, and
+    /// Blessing keeps the old output of a case the check calls unchanged, and
     /// rewrites only the cases it reports as changed (plus the added ones).
     #[test]
     fn bless_rewrites_only_the_cases_the_check_reports_changed() {
@@ -836,7 +891,7 @@ mod tests {
         g.insert("a".into(), encode("a", &out(&[1.0])));
         g.insert("b".into(), encode("b", &out(&[2.0 * (1.0 + 1e-13)])));
         g.insert("gone".into(), encode("gone", &out(&[3.0])));
-        let old_b = g["b"].to_string();
+        let old_b = g["b"].clone();
 
         let res = check_unit(&Values(vec![1.0 + 1e-6]), &ctx, &opts, &g, &none, false);
         let changed: Vec<&str> = res.changed.iter().map(|(n, _)| n.as_str()).collect();
@@ -845,11 +900,13 @@ mod tests {
         assert_eq!(res.removed, ["gone"]);
 
         let new = blessed(&g, &res, false);
-        assert_eq!(
-            new["b"].to_string(),
-            old_b,
-            "within tolerance: old text kept"
-        );
+        let mut actual_b = new["b"].clone();
+        assert!(actual_b
+            .as_object_mut()
+            .unwrap()
+            .remove("input_hash")
+            .is_some());
+        assert_eq!(actual_b, old_b, "within tolerance: old output kept");
         assert_ne!(
             new["b"], res.now["b"],
             "the run's own value differed in its last bits"
@@ -872,7 +929,9 @@ mod tests {
                 .unwrap_or_default()
                 .to_string()
         };
-        assert_eq!(line_of(&after), line_of(&before));
+        let mut after_b: Value = serde_json::from_str(&line_of(&after)).unwrap();
+        after_b.as_object_mut().unwrap().remove("input_hash");
+        assert_eq!(after_b.to_string(), line_of(&before));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
