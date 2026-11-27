@@ -35,7 +35,7 @@ fn fail(s: &str) -> KernelError {
     KernelError::Invalid(format!("cylinder emboss: {s}"))
 }
 /// Why an emboss onto a picked face is refused when a profile lies off it, and what to do.
-const NOT_FITTING: &str = "the text is not fitting the selected target face. Either scale the face up or the text down";
+const NOT_FITTING: &str = "the sketch is not fitting the selected target face. Either scale the face up or the sketch down";
 /// A refusal of an emboss onto a picked face.
 fn refuse(s: &str) -> KernelError {
     KernelError::Invalid(format!("emboss: {s}"))
