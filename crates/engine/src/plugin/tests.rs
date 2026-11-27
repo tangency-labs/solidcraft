@@ -4773,6 +4773,9 @@ mod exporters {
         assert_eq!(slot["output"], "files");
         let tools = s.execute("plugin.tools", &json!({"name":"smp.zip"})).unwrap();
         assert!(tools["tools"][0]["input_schema"]["properties"]["path"]["description"].as_str().unwrap().contains("destination folder"));
+        let schema = &tools["tools"][0]["input_schema"];
+        assert_eq!(schema["properties"]["overwrite"]["type"], "boolean", "a tool call can replace an earlier export's files");
+        assert_eq!(schema["additionalProperties"], false);
         let reply = s.execute("file.export", &json!({"path":at(&root,"sheets"),"format":"smp.zip"})).unwrap();
         let destination = std::path::PathBuf::from(at(&root, "sheets"));
         assert_eq!(reply["files"], json!([destination.join("parts/side.dxf").to_string_lossy(), destination.join("cutlist.csv").to_string_lossy(),]));
@@ -4794,6 +4797,11 @@ mod exporters {
         assert_eq!(unpacked.len(), 2);
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(files(&root), ["sheets", "sheets.ZIP"]);
+        // A folder that already exists receives the files, even when its name ends with .zip.
+        std::fs::create_dir(at(&root, "folder.zip")).unwrap();
+        let reply = s.execute("file.export", &json!({"path":at(&root,"folder.zip"),"format":"smp.zip"})).unwrap();
+        assert_eq!(reply["files"].as_array().unwrap().len(), 2);
+        assert_eq!(std::fs::read(at(&root, "folder.zip/parts/side.dxf")).unwrap(), b"side");
     }
 
     fn install_archive(root: &Path, bytes: &[u8]) {

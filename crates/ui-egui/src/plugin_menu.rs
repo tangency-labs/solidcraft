@@ -1357,6 +1357,8 @@ pub(crate) struct EntryDialog {
     /// A multi-file exporter offers a folder and the original zip.
     pub(crate) files_output: bool,
     pub(crate) zip_target: bool,
+    /// The folder export's **Replace files** checkbox: the request carries `overwrite: true`.
+    pub(crate) replace_existing: bool,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -1738,6 +1740,7 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
         writes,
         files_output,
         zip_target: false,
+        replace_existing: false,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -2641,9 +2644,10 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     if let Some(extensions) = dialog.writes.clone() {
         let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
         if dialog.files_output && !dialog.zip_target {
+            let overwrite = dialog.replace_existing;
             app.pick_folder("", move |app, path| {
                 let Some(path) = path else { return };
-                let request = json!({"command":"file.export","params":{"path":path,"format":format,"options":params}});
+                let request = json!({"command":"file.export","params":{"path":path,"format":format,"options":params,"overwrite":overwrite}});
                 queue(app, id, request, None);
             });
             return Ok(());
@@ -2997,6 +3001,13 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
                 }
             }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
+            if dialog.files_output {
+                // Without it an export that would replace a file in the folder is refused and
+                // changes nothing; with it only the files the export writes are replaced.
+                let replace =
+                    ui.add_enabled_ui(!running, |ui| ui_kit::checkbox(ui, app.tr("plugin_export.replace"), &mut dialog.replace_existing)).inner;
+                crate::scenario::publish_target("plugin_dialog:replace", replace.rect);
+            }
             if dialog.opens.is_some() && dialog.fields.is_some() {
                 ui.horizontal_wrapped(|ui| {
                     let reset = ui

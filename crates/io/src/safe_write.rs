@@ -424,9 +424,7 @@ pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrit
     }
     directory.create(&staging_path)?;
     let staging = Staging(staging_path);
-    if existing {
-        stage_existing(path, &staging.0)?;
-    }
+    let staged_from = if existing { stage_existing(path, &staging.0)? } else { Vec::new() };
     for file in files {
         if cancelled() {
             return Err(cancelled_error());
@@ -440,6 +438,8 @@ pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrit
         }
         write_atomic_no_follow(&target, &file.bytes)?;
     }
+    #[cfg(test)]
+    tests::after_staging();
     if cancelled() {
         return Err(cancelled_error());
     }
@@ -450,10 +450,23 @@ pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrit
             return Err(Error::new(ErrorKind::AlreadyExists, "the export backup folder already exists"));
         }
         fs::rename(path, &old)?;
+        // Put the old folder back, naming both failures if that fails too.
+        let restore = |error: Error| match fs::rename(&old, path) {
+            Ok(()) => error,
+            Err(restore) => Error::new(restore.kind(), format!("{error}; restoring {} failed: {restore}", old.display())),
+        };
+        // Something saved into the folder after it was copied is not in the staged copy. The
+        // folder is now out of reach of other writers, so check it is what was copied: if not,
+        // put it back untouched rather than publish the stale copy over it.
+        match seen_in(&old) {
+            Ok(now) if now == staged_from => {}
+            Ok(_) => {
+                return Err(restore(Error::other("the folder changed while the export was being prepared; nothing was replaced, export again")));
+            }
+            Err(error) => return Err(restore(error)),
+        }
         if let Err(error) = fs::rename(&staging.0, path) {
-            fs::rename(&old, path)
-                .map_err(|restore| Error::new(restore.kind(), format!("{error}; restoring {} failed: {restore}", old.display())))?;
-            return Err(error);
+            return Err(restore(error));
         }
         // All new bytes are committed; backup cleanup cannot turn a successful export into a
         // reported write failure. The old directory contains no links or special files.
@@ -465,15 +478,24 @@ pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrit
     Ok(())
 }
 
-/// Copy the directory structure without following links, with bounded traversal and stack use.
+/// What was seen of one entry of a folder: where, how big and when it was last changed.
 #[cfg(not(target_arch = "wasm32"))]
-fn stage_existing(source: &Path, destination: &Path) -> std::io::Result<()> {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Seen {
+    path: PathBuf,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+/// Visit every entry below `source` without following links, with bounded traversal and stack
+/// use, as `(folder relative to source, entry)`. A link or special file is refused.
+#[cfg(not(target_arch = "wasm32"))]
+fn walk(source: &Path, mut each: impl FnMut(&Path, &fs::DirEntry, bool) -> std::io::Result<()>) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
-    fs::set_permissions(destination, fs::metadata(source)?.permissions())?;
-    let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
+    let mut pending = vec![(source.to_path_buf(), PathBuf::new())];
     let mut count = 0usize;
-    while let Some((source, destination)) = pending.pop() {
-        for entry in fs::read_dir(source)? {
+    while let Some((folder, relative)) = pending.pop() {
+        for entry in fs::read_dir(&folder)? {
             if cancelled() {
                 return Err(cancelled_error());
             }
@@ -484,21 +506,72 @@ fn stage_existing(source: &Path, destination: &Path) -> std::io::Result<()> {
             }
             let entry = entry?;
             let kind = entry.file_type()?;
-            let target = destination.join(entry.file_name());
-            if kind.is_dir() {
-                fs::create_dir(&target)?;
-                fs::set_permissions(&target, entry.metadata()?.permissions())?;
-                pending.push((entry.path(), target));
-            } else if kind.is_file() {
-                if fs::hard_link(entry.path(), &target).is_err() {
-                    fs::copy(entry.path(), &target)?;
-                }
-            } else {
+            if !kind.is_dir() && !kind.is_file() {
                 return Err(Error::new(ErrorKind::InvalidInput, "the destination folder contains a link or special file"));
+            }
+            each(&relative, &entry, kind.is_dir())?;
+            if kind.is_dir() {
+                pending.push((entry.path(), relative.join(entry.file_name())));
             }
         }
     }
     Ok(())
+}
+
+/// Copy the directory structure of `source` into the empty `destination`, and return what was
+/// seen of it (sorted), so a change made meanwhile can be told.
+#[cfg(not(target_arch = "wasm32"))]
+fn stage_existing(source: &Path, destination: &Path) -> std::io::Result<Vec<Seen>> {
+    copy_permissions(destination, &fs::metadata(source)?.permissions())?;
+    let mut seen = Vec::new();
+    walk(source, |relative, entry, directory| {
+        let target = destination.join(relative).join(entry.file_name());
+        let meta = entry.metadata()?;
+        if directory {
+            fs::create_dir(&target)?;
+            copy_permissions(&target, &meta.permissions())?;
+        } else if fs::hard_link(entry.path(), &target).is_err() {
+            fs::copy(entry.path(), &target)?;
+        }
+        seen.push(Seen {
+            path: relative.join(entry.file_name()),
+            len: if directory { 0 } else { meta.len() },
+            modified: meta.modified().ok().filter(|_| !directory),
+        });
+        Ok(())
+    })?;
+    seen.sort();
+    Ok(seen)
+}
+
+/// What is in the folder `root` now, in the form [`stage_existing`] returns it.
+#[cfg(not(target_arch = "wasm32"))]
+fn seen_in(root: &Path) -> std::io::Result<Vec<Seen>> {
+    let mut seen = Vec::new();
+    walk(root, |relative, entry, directory| {
+        let meta = entry.metadata()?;
+        seen.push(Seen {
+            path: relative.join(entry.file_name()),
+            len: if directory { 0 } else { meta.len() },
+            modified: meta.modified().ok().filter(|_| !directory),
+        });
+        Ok(())
+    })?;
+    seen.sort();
+    Ok(seen)
+}
+
+/// Give `path` the permissions of the folder it copies. A share that refuses a permission change
+/// (EPERM, or not supported) keeps its own, as saving a file there does.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_permissions(path: &Path, permissions: &fs::Permissions) -> std::io::Result<()> {
+    match set_path_permissions(path, permissions) {
+        Err(e) if refused_by_the_drive(&e) => {
+            log::debug!("ignoring permission copy refused by filesystem: {e}");
+            Ok(())
+        }
+        result => result,
+    }
 }
 
 /// Write `bytes` to the file named `path` itself, atomically: a link at `path` is never followed,
@@ -641,6 +714,8 @@ mod tests {
         pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// This thread's permission sets fail with EPERM, as on an SMB or gvfs mount without unix extensions (#20552).
         pub(super) static CHMOD_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// A file this thread's folder export saves into the folder just after copying it, as another program would.
+        pub(super) static LATE_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
         /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
         /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
         /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
@@ -662,6 +737,13 @@ mod tests {
                 error()
             })
         })
+    }
+
+    /// The hook [`write_files_atomic`] calls after copying the folder.
+    pub(super) fn after_staging() {
+        if let Some(late) = LATE_FILE.with(|l| l.borrow_mut().take()) {
+            fs::write(late, b"late").unwrap();
+        }
     }
 
     /// What a drive that takes neither a no-replace rename nor a hard link answers.
@@ -713,6 +795,44 @@ mod tests {
         assert_eq!(fs::read(target.join("parts/side.dxf")).unwrap(), b"side");
         assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_folder_export_keeps_what_another_program_saved_meanwhile_and_stops() {
+        let dir = fresh_dir("folder-late");
+        let target = dir.join("sheets");
+        let files = vec![crate::safe_zip::File { path: "cutlist.csv".into(), bytes: b"list".to_vec() }];
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+        LATE_FILE.with(|l| *l.borrow_mut() = Some(target.join("late.txt")));
+        let error = write_files_atomic(&target, &files, true).unwrap_err();
+        assert!(error.to_string().contains("changed while the export was being prepared"), "{error}");
+        assert_eq!(fs::read(target.join("late.txt")).unwrap(), b"late", "the other program's file is where it put it");
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        assert!(!target.join("cutlist.csv").exists(), "nothing was published");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no staging or backup folder remains");
+        write_files_atomic(&target, &files, true).unwrap();
+        assert_eq!(fs::read(target.join("late.txt")).unwrap(), b"late");
+        assert_eq!(fs::read(target.join("cutlist.csv")).unwrap(), b"list");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[test]
+    fn a_folder_export_works_where_the_filesystem_refuses_chmod() {
+        let dir = fresh_dir("folder-chmod");
+        let target = dir.join("sheets");
+        fs::create_dir_all(target.join("parts")).unwrap();
+        fs::write(target.join("parts/old.dxf"), b"old").unwrap();
+        let files = vec![crate::safe_zip::File { path: "cutlist.csv".into(), bytes: b"list".to_vec() }];
+        CHMOD_REFUSED.with(|r| r.set(true));
+        let result = write_files_atomic(&target, &files, true);
+        CHMOD_REFUSED.with(|r| r.set(false));
+        result.unwrap();
+        assert_eq!(fs::read(target.join("parts/old.dxf")).unwrap(), b"old");
+        assert_eq!(fs::read(target.join("cutlist.csv")).unwrap(), b"list");
         fs::remove_dir_all(dir).unwrap();
     }
 

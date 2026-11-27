@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read as _, Write as _};
 
+use unicode_normalization::UnicodeNormalization as _;
+
 /// Ceilings for [`read`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -94,7 +96,9 @@ impl Names {
         while let Some(part) = parts.next() {
             let last = parts.peek().is_none();
             let is_dir = !last || directory;
-            let node = names.entry(part.to_lowercase()).or_insert_with(|| Name {
+            // Case and canonical equivalence: `\u{e9}` and `e\u{301}` are one name on some drives.
+            let key: String = part.to_lowercase().nfc().collect();
+            let node = names.entry(key).or_insert_with(|| Name {
                 spelling: part.to_string(),
                 directory: is_dir,
                 declared: false,
@@ -244,7 +248,9 @@ mod tests {
 
     #[test]
     fn refuses_case_collisions_and_file_directory_conflicts() {
-        for names in [["part.dxf", "PART.dxf"], ["a", "a/part.dxf"], ["A/x", "a/y"]] {
+        for names in
+            [["part.dxf", "PART.dxf"], ["a", "a/part.dxf"], ["A/x", "a/y"], ["\u{e9}.dxf", "e\u{301}.dxf"], ["d/\u{c9}.dxf", "d/e\u{301}.dxf"]]
+        {
             let zip = write(&[(names[0], b"one"), (names[1], b"two")]).unwrap();
             assert!(matches!(read(&zip, LIMITS), Err(Error::UnsafeEntry { .. })), "{names:?}");
         }

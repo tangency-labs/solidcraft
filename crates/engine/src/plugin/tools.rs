@@ -133,7 +133,7 @@ fn format_schema(entry: &Entry) -> Value {
     } else {
         format!("The file to {action} ({})", extensions.join(", "))
     };
-    json!({
+    let mut schema = json!({
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": destination},
@@ -141,7 +141,17 @@ fn format_schema(entry: &Entry) -> Value {
         },
         "required": ["path"],
         "additionalProperties": false,
-    })
+    });
+    if entry.kind == EntryKind::Exporter
+        && entry.output == ExportOutput::Files
+        && let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut)
+    {
+        properties.insert(
+            "overwrite".into(),
+            json!({"type": "boolean", "description": "Replace files the folder already holds under the names this export writes. Without it such an export is refused and the folder is left as it was. Other files in the folder are kept."}),
+        );
+    }
+    schema
 }
 
 /// The refusal of a call that needs a grant `plugin` does not have.

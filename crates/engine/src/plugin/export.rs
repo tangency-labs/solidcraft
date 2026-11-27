@@ -165,7 +165,9 @@ fn write_archive(path: &str, bytes: &[u8], overwrite: bool) -> Result<Vec<String
         _ => HostError::InvalidInput { field: "output".into(), reason: error.to_string() },
     })?;
     let path = Path::new(path);
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+    // A folder that already exists is a folder, whatever its name ends with.
+    let folder = std::fs::metadata(path).is_ok_and(|m| m.is_dir());
+    if !folder && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
         solidcraft_io::write_atomic(path, bytes, false).map_err(|e| EngineError::Other(e.to_string()))?;
         Ok(vec![path.to_string_lossy().into_owned()])
     } else {

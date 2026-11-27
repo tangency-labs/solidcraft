@@ -2734,6 +2734,7 @@ fn a_files_export_dialog_offers_folder_and_zip_pickers_and_queues_file_export() 
         assert!(crate::scenario::handle_at("dialog:apply").is_some());
         let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
         dialog.zip_target = zip_target;
+        dialog.replace_existing = !zip_target;
         let id = dialog.id;
         run_dialog(&mut h.app, id).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
@@ -2742,6 +2743,12 @@ fn a_files_export_dialog_offers_folder_and_zip_pickers_and_queues_file_export() 
         assert_eq!(request.params["command"], "file.export");
         assert_eq!(request.params["params"]["format"], "cabinet.sheets");
         assert_eq!(request.params["params"]["path"], if zip_target { "/tmp/sheets.zip" } else { "/tmp/sheets" });
+        // Only a folder export the user chose to replace into carries the consent.
+        if zip_target {
+            assert!(request.params["params"].get("overwrite").is_none());
+        } else {
+            assert_eq!(request.params["params"]["overwrite"], true);
+        }
     }
 }
 
