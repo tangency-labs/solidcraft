@@ -2589,6 +2589,7 @@ fn curved_setback_growth_uncertified_within_rail_reach_is_refused_as_data() {
             .iter()
             .map(|&p| pick(&k, &b, p))
             .collect();
+        let v = vertex_at(&b, v_pt);
         let flat_tol = edge::tolerance(&b, edges[0]).unwrap();
         let want = (20.0 - cfg.x_min - cfg.radii[3]) - 1000.0 * flat_tol;
         let r = round_set_back(
@@ -2603,9 +2604,24 @@ fn curved_setback_growth_uncertified_within_rail_reach_is_refused_as_data() {
         );
         assert!(!r.ok, "{}: built", cfg.label);
         assert_eq!(r.fit, 0.0, "{}: fit_setback", cfg.label);
+        match r.refusal {
+            Some(BlendRefusal::SetbackUncertifiedWithinRails { vertex, reach }) => {
+                assert_eq!(vertex, v, "{}", cfg.label);
+                assert!(
+                    reach <= want && want - reach <= 1e-9,
+                    "{}: reach {reach:.12} against closed form {want:.12} (diff {:+.3e})",
+                    cfg.label,
+                    reach - want
+                );
+            }
+            other => panic!(
+                "{}: expected SetbackUncertifiedWithinRails, got {other:?}: {}",
+                cfg.label, r.reason
+            ),
+        }
         assert!(
-            r.refusal.is_some(),
-            "{}: untyped refusal (want reach {want:.6}): {}",
+            r.reason.contains("far corner cuts a round"),
+            "{}: missing rail-cut reason: {}",
             cfg.label,
             r.reason
         );
@@ -2615,6 +2631,23 @@ fn curved_setback_growth_uncertified_within_rail_reach_is_refused_as_data() {
             cfg.label,
             r.reason
         );
+        if cfg.asked.is_none() {
+            // Per-edge rail reach: only the cut edge is capped at `want`; the uncut upright
+            // and arc edges still grow up to twice their base setbacks (4.75 and 6.0).
+            assert_eq!(r.setbacks.len(), 3, "{}: setbacks len", cfg.label);
+            assert!(
+                r.setbacks[0] <= want && want - r.setbacks[0] <= 1e-9,
+                "{}: cut edge setback {} vs reach {want}",
+                cfg.label,
+                r.setbacks[0]
+            );
+            assert!(
+                r.setbacks[1] > 4.5 && r.setbacks[2] > 5.5,
+                "{}: uncut edges wrongly capped by cut edge's reach: {:?}",
+                cfg.label,
+                r.setbacks
+            );
+        }
     }
 }
 
@@ -2760,6 +2793,62 @@ fn curved_setback_asked_growth_bounded_by_arc_rail_reach_names_and_builds() {
     graded(&mut k2, &mut b2, &case2, 3);
     kept_definitions(&k2, &b2, &case2, 3);
     springs_are_the_fills(&k2, &b2, &r2, case2.name, 3);
+}
+
+/// #13647: moving the far Mitre cut on `double_d_prism` (`R = 30`, `d = 2.5`, `r_far = 2.78`,
+/// `asked = 2.18`) below the certifying threshold (`L_cut = 2.202903`, certified arc-length
+/// reach `want ~ 2.192903 < 2.2154`) refuses with `SetbackUncertifiedWithinRails` naming the
+/// certified arc-length reach.
+#[test]
+fn curved_setback_asked_growth_uncertified_within_arc_rail_reach_is_refused() {
+    let (rr, d, x_back, hh) = (30.0f64, 2.5f64, 20.0f64, 15.0f64);
+    let (r_flat, r_up, r_arc, r_far_tight) = (1.0f64, 1.5f64, 2.0f64, 2.78f64);
+    let alpha = (d / rr).asin();
+    let x_end = (rr * rr - d * d).sqrt();
+    let x_pick = 0.5 * (x_back + x_end);
+    let phi_tight = ((d - r_far_tight) / (rr - r_arc)).asin();
+    let l_cut_tight = rr * (alpha + phi_tight);
+
+    let mut k = all_fixes();
+    let mut b = double_d_prism(&mut k, [0.0, 0.0, 0.0], rr, d, x_back, hh);
+    let edges: Vec<EdgeId> = [
+        [x_pick, -d, hh],
+        [x_end, -d, 0.5 * hh],
+        [rr, 0.0, hh],
+        [x_pick, d, hh],
+    ]
+    .iter()
+    .map(|&p| pick(&k, &b, p))
+    .collect();
+    let v_pt = Point3::new(x_end, -d, hh);
+    let v = vertex_at(&b, v_pt);
+    let arc_tol = edge::tolerance(&b, edges[2]).unwrap();
+    let want_tight = l_cut_tight - 1000.0 * arc_tol;
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[r_flat, r_up, r_arc, r_far_tight],
+        v_pt,
+        Some(2.18),
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "tight arc reach built");
+    assert_eq!(r.fit, 0.0, "tight arc reach fit_setback");
+    match r.refusal {
+        Some(BlendRefusal::SetbackUncertifiedWithinRails { vertex, reach }) => {
+            assert_eq!(vertex, v);
+            assert!(
+                reach <= want_tight && want_tight - reach <= 1e-9,
+                "arc reach {reach:.12} against closed form {want_tight:.12} (diff {:+.3e})",
+                reach - want_tight
+            );
+        }
+        other => panic!(
+            "expected SetbackUncertifiedWithinRails on tight arc reach, got {other:?}: {}",
+            r.reason
+        ),
+    }
 }
 
 /// #13647: an automatic curved Setback corner whose rule setbacks need growth and whose near
