@@ -960,6 +960,9 @@ fn appearance_reads_and_scopes_take_a_placed_copys_name() {
     s.execute("occurrence.copy", &json!({"component":"K","translate":[30,0,0]})).unwrap();
     let world: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!(world.iter().any(|n| n == "KB (K:2)"), "{world:?}");
+    // With no assigned look, a pick-up falls back to what the body shows, under either name.
+    let pick = |s: &mut Session, body: &str| s.execute("appearance.pick_up", &json!({"target":{"body":body}})).unwrap()["look"].clone();
+    assert_eq!(pick(&mut s, "KB (K:2)"), pick(&mut s, "KB"));
     s.execute("appearance.assign", &json!({"bodies":["KB"],"appearance":"ABS - Red"})).unwrap();
     s.execute("appearance.assign", &json!({"components":["K"],"appearance":"ABS - Blue"})).unwrap();
 

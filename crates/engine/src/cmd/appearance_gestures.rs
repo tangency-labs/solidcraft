@@ -30,7 +30,9 @@ fn resolved(s: &mut Session, p: &Value) -> Result<Look> {
     let body = p
         .pointer("/target/body")
         .and_then(Value::as_str)
-        .and_then(|name| state.body(name))
+        // A placed copy's name means the body it shows, as the chain takes it (#9740).
+        .and_then(|name| s.own_body_name(name))
+        .and_then(|name| state.body(&name))
         .ok_or_else(|| bad("appearance.pick_up", "target has no resolved look"))?;
     // The chain above accepted the target, so a face given by name finds its index again.
     let face = match p.pointer("/target/face") {
