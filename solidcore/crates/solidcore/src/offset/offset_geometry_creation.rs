@@ -77,6 +77,13 @@
 //!   and on one circle (a capped footprint split where it touches its face's rim) they
 //!   coincide and crossed at thousands of points within the tolerance. Solidcore-native, no
 //!   fork commit.
+//! - **A smooth vertex, at its image.** `trim_extended_edge` takes the vertex's image as an
+//!   end candidate, as for a lamina edge, at a vertex where every edge is a tangent sector
+//!   and every face moves by the one distance (no local operation, no face the shell keeps
+//!   unmoved: `smooth_vertex`): every face's offset passes through that one image, and a
+//!   neighbour's offset meets the curve there tangentially, so its crossing is only found
+//!   to about the square root of the residual along the curve. Solidcore-native, no fork
+//!   commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
@@ -5006,6 +5013,16 @@ impl OffsetGeometryCreation {
             // touches its face's rim) their extensions, each wound round the circle many
             // times, coincide and cross within the tolerance at thousands of points, each
             // then weighed for moving to a curve end.
+            // Not upstream: the same end candidate at a smooth vertex, where every edge is a
+            // tangent sector (a round's rail meeting the tangent edge between its support
+            // and the next round: a drafted box's top round over its corner rounds), in an
+            // offset that moves every face there by the one distance. Every face there has
+            // one tangent plane, so every face's offset passes through the vertex's one
+            // image, and each offset edge's end is that image. A neighbour's
+            // offset meets the curve there tangentially: the crossing is found only to about
+            // the square root of the residual along the curve (3e-5 mm at a 2 mm wall on an
+            // R10 round), and an end placed there leaves the faces' trims a sliver past
+            // their corner, which the validity check refuses as a cusp.
             let vertex_image = !tan_eus.is_empty()
                 && (brep.edge_is_lamina(base_edge)?
                     || Self::runs_on_between_planes(
@@ -5014,7 +5031,8 @@ impl OffsetGeometryCreation {
                         base_edgeuse,
                         other_base_edgeuse,
                         &tan_eus,
-                    )?);
+                    )?
+                    || self.smooth_vertex(k, brep, executive, base_vertex, tan_tol_deg)?);
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -5892,6 +5910,81 @@ impl OffsetGeometryCreation {
                 .ok_or(dangling("face without surface"))?;
             if !matches!(surface_of(brep, sur)?.kind(), SurfaceKind::Plane(_)) {
                 return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Not upstream: whether `vertex` is smooth and every face at it moves by the one
+    /// distance to the one point: it has edges, none lamina, it joins two faces or more
+    /// (a vertex of one face only, a sphere's pole or a seam's end, has no neighbour's offset
+    /// to graze), every use of each is a tangent sector within `tol_deg`, the operation is no local operation (whose faces move by
+    /// their own distances, or not at all), no face at it is one the shell keeps unmoved,
+    /// and every face's own image of it, `V + d n(V)` with that face's normal
+    /// ([`Self::offset_vertex_image`]), lies within the body's tolerance at the vertex of
+    /// the first. Faces tangent only within `tol_deg` have images up to about `d` times
+    /// the angle apart, no one point for the offset edges to end at; only where the images
+    /// meet is that image the end of each offset edge at the vertex.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries, the tangent sector test and the images.
+    fn smooth_vertex<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &impl OffsetExecutive<O>,
+        vertex: O,
+        tol_deg: f64,
+    ) -> Result<bool> {
+        if executive.is_local_operation() {
+            return Ok(false);
+        }
+        let edges = brep.vertex_edges(vertex)?;
+        if edges.is_empty() {
+            return Ok(false);
+        }
+        let shell_faces = executive.shell_faces();
+        let mut uses = Vec::new();
+        for edge in edges {
+            if brep.edge_is_lamina(edge)? {
+                return Ok(false);
+            }
+            for eu in brep.edge_edgeuses(edge)? {
+                let unmoved = brep
+                    .edgeuse_face(eu)?
+                    .is_some_and(|face| contains(&shell_faces, &face));
+                if unmoved || !brep.edgeuse_is_tangent_sector(k, eu, tol_deg)? {
+                    return Ok(false);
+                }
+                // the uses the offset carries (a face's other use, below it, has the image
+                // on the other side)
+                if executive.offset_edgeuse(eu).is_some() {
+                    uses.push(eu);
+                }
+            }
+        }
+        // a vertex of one face only (a sphere's pole, a seam's end) has no two faces whose
+        // offsets could graze each other there
+        let mut faces: Vec<O> = Vec::new();
+        for &eu in &uses {
+            if let Some(face) = brep.edgeuse_face(eu)? {
+                if !contains(&faces, &face) {
+                    faces.push(face);
+                }
+            }
+        }
+        if faces.len() < 2 {
+            return Ok(false);
+        }
+        let tol = brep.brep_tolerance(vertex)?;
+        let mut first: Option<Point3> = None;
+        for eu in uses {
+            let image = self.offset_vertex_image(k, brep, eu, vertex)?;
+            match first {
+                None => first = Some(image),
+                Some(p) if p.distance(image) > tol => return Ok(false),
+                Some(_) => {}
             }
         }
         Ok(true)
