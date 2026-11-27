@@ -2368,6 +2368,39 @@ fn a_saved_designs_linked_component_shows_its_badge() {
     assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
 }
 
+/// The option is a ticked or unticked row in the View section of the Browser panel's ⋯ menu,
+/// and a click on the row turns the saved setting over.
+#[test]
+fn the_hide_folder_options_are_rows_of_the_browser_menu() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.browser_hide_sketches_folder, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
+    assert!(h.app.preferences.browser_hide_sketches_folder, "a click turns it on");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", true)),
+        "ticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
+    assert!(!h.app.preferences.browser_hide_sketches_folder, "a second click turns it off");
+    assert!(!h.app.preferences.browser_hide_construction_folder, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("hide-construction-folder", "prefs.browser_hide_construction_folder", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
+    assert!(h.app.preferences.browser_hide_construction_folder, "a click turns it on");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("hide-construction-folder", "prefs.browser_hide_construction_folder", true)),
+        "ticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
+    assert!(!h.app.preferences.browser_hide_construction_folder, "a second click turns it off");
+}
+
 /// "Hide the Sketches folder": the History lists the sketches, so the Browser leaves its Sketches
 /// folder out, except while searching.
 #[test]
@@ -2406,17 +2439,22 @@ fn the_construction_folder_hides_when_the_preference_is_on() {
 }
 
 /// With the Construction folder hidden, Find in Browser on a plane goes to its History row instead
-/// of waiting for a folder that is not drawn; and a Construction folder hidden by its own eye
-/// stays listed, so that eye can show its planes again.
+/// of waiting for a folder that is not drawn, with the History in the Browser or in its own panel;
+/// and a Construction folder hidden by its own eye stays listed, so that eye can show its planes again.
 #[test]
 fn a_hidden_construction_folder_leaves_find_and_its_eye_working() {
     let mut h = Harness::new();
     let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Lid plane"})).unwrap()["feature"].as_u64().unwrap();
     h.app.preferences.browser_hide_construction_folder = true;
-    h.settle();
-    reveal_construction(&mut h.app, plane);
-    assert!(h.app.tree.reveal_construction.is_none(), "no request left waiting for the hidden folder");
-    h.settle();
+    for dock in ["left", "browser"] {
+        h.app.run("view.history_layout", json!({ "dock": dock })).unwrap();
+        h.settle();
+        reveal_construction(&mut h.app, plane);
+        assert!(h.app.tree.reveal_construction.is_none(), "{dock}: no request left waiting for the hidden folder");
+        h.frames(8);
+        assert!(h.app.tree.reveal_feature.is_none(), "{dock}: the plane's History row in the Browser was reached");
+        assert!(h.app.tree.timeline_reveal.is_none(), "{dock}: the plane's History row was reached");
+    }
 
     h.app.run("browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false})).unwrap();
     h.settle();

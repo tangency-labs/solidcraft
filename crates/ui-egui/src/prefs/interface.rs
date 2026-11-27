@@ -687,20 +687,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "browser_eye_left",
                         value: |p| &mut p.browser_eye_left,
                     },
-                    // Construction geometry listed once, in the History.
-                    Check {
-                        label: "prefs.browser_hide_construction_folder",
-                        help: "prefs.browser_hide_construction_folder_note",
-                        key: "browser_hide_construction_folder",
-                        value: |p| &mut p.browser_hide_construction_folder,
-                    },
-                    // Sketches listed once, in the History.
-                    Check {
-                        label: "prefs.browser_hide_sketches_folder",
-                        help: "prefs.browser_hide_sketches_folder_note",
-                        key: "browser_hide_sketches_folder",
-                        value: |p| &mut p.browser_hide_sketches_folder,
-                    },
                     Check {
                         label: "prefs.browser_body_features",
                         help: "prefs.browser_body_features_note",

@@ -198,10 +198,18 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     }
     let (component, sel) = (f.component, solidcraft_engine::browser_find::construction_sel(f));
     let _ = app.run("select.set", json!({ "items": [sel] }));
-    // With the Construction folder hidden ("Hide the Construction folder"), the History lists it.
+    // With the Construction folder hidden ("Hide the Construction folder"), the History lists it:
+    // in the Browser, or in its own panel, as Find in History goes.
     if folder_hidden_by_preference(app, "construction") {
         app.tree.reveal_construction = None;
-        reveal_in_history(app, id);
+        if app.preferences.history_in_browser {
+            reveal_in_history(app, id);
+        } else {
+            app.ui.show_timeline = true;
+            crate::timeline_left::reveal_feature(app, id);
+            request_timeline_reveal(app, id);
+            reveal_shared_panel(app, "history");
+        }
         return;
     }
     app.ui.show_browser = true;
@@ -1676,6 +1684,30 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     } else {
         show_search(app);
     }
+}
+
+/// The Browser's view options, as on/off rows of its panel's ⋯ menu: (action id, label id, on).
+/// Each is a saved setting, off by default.
+pub(crate) fn menu_toggles(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)> {
+    vec![
+        ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", app.preferences.browser_hide_sketches_folder),
+        ("hide-construction-folder", "prefs.browser_hide_construction_folder", app.preferences.browser_hide_construction_folder),
+    ]
+}
+
+/// A row of the Browser panel's header or ⋯ menu: the search's magnifier, or one of
+/// [`menu_toggles`], which turns its setting over.
+pub(crate) fn menu_action(app: &mut SolveApp, action: &str) -> Result<(), String> {
+    let setting = match action {
+        "hide-sketches-folder" => "browser_hide_sketches_folder",
+        "hide-construction-folder" => "browser_hide_construction_folder",
+        _ => {
+            magnifier(app);
+            return Ok(());
+        }
+    };
+    let on = menu_toggles(app).iter().any(|(id, _, on)| *id == action && *on);
+    crate::prefs::set(app, &json!({ setting: !on })).map(|_| ())
 }
 
 /// In the compact layout with the History shown in the Browser, the Browser is the only side panel

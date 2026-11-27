@@ -1,50 +1,34 @@
 {
   "en": {
     "prefs.browser_hide_construction_folder": "Hide the Construction folder",
-    "prefs.browser_hide_construction_folder_note": "The Browser shows no Construction folder, so construction planes, axes and points are listed once, in the History. A search still shows the folder.",
-    "prefs.browser_hide_sketches_folder": "Hide the Sketches folder",
-    "prefs.browser_hide_sketches_folder_note": "The Browser shows no Sketches folder, so sketches are listed once, in the History (under their feature with Sketches in History set to Under their feature). A search still shows the folder."
+    "prefs.browser_hide_sketches_folder": "Hide the Sketches folder"
   },
   "de": {
     "prefs.browser_hide_construction_folder": "Ordner Konstruktionsgeometrie ausblenden",
-    "prefs.browser_hide_construction_folder_note": "Der Browser zeigt keinen Ordner Konstruktionsgeometrie, sodass Konstruktionsebenen, -achsen und -punkte nur einmal aufgeführt sind, im Verlauf. Eine Suche zeigt den Ordner weiterhin.",
-    "prefs.browser_hide_sketches_folder": "Ordner Skizzen ausblenden",
-    "prefs.browser_hide_sketches_folder_note": "Der Browser zeigt keinen Ordner Skizzen, sodass Skizzen nur einmal aufgeführt sind, im Verlauf (unter ihrem Feature, wenn Skizzen im Verlauf auf Unter dem zugehörigen Feature steht). Eine Suche zeigt den Ordner weiterhin."
+    "prefs.browser_hide_sketches_folder": "Ordner Skizzen ausblenden"
   },
   "ja": {
     "prefs.browser_hide_construction_folder": "構築ジオメトリフォルダーを非表示",
-    "prefs.browser_hide_construction_folder_note": "ブラウザに構築ジオメトリフォルダーを表示しないため、構築平面、軸、点は履歴に一度だけ表示されます。検索中はフォルダーが表示されます。",
-    "prefs.browser_hide_sketches_folder": "スケッチフォルダーを非表示",
-    "prefs.browser_hide_sketches_folder_note": "ブラウザにスケッチフォルダーを表示しないため、スケッチは履歴に一度だけ表示されます(「履歴のスケッチ」が「フィーチャーの下」の場合はフィーチャーの下)。検索中はフォルダーが表示されます。"
+    "prefs.browser_hide_sketches_folder": "スケッチフォルダーを非表示"
   },
   "zh": {
     "prefs.browser_hide_construction_folder": "隐藏构造几何文件夹",
-    "prefs.browser_hide_construction_folder_note": "浏览器不显示构造几何文件夹，因此构造平面、轴和点只在历史中列出一次。搜索时仍显示该文件夹。",
-    "prefs.browser_hide_sketches_folder": "隐藏草图文件夹",
-    "prefs.browser_hide_sketches_folder_note": "浏览器不显示草图文件夹，因此草图只在历史中列出一次（当“历史中的草图”设为“位于其特征下”时列在特征下）。搜索时仍显示该文件夹。"
+    "prefs.browser_hide_sketches_folder": "隐藏草图文件夹"
   },
   "ko": {
     "prefs.browser_hide_construction_folder": "구성 형상 폴더 숨기기",
-    "prefs.browser_hide_construction_folder_note": "브라우저에 구성 형상 폴더를 표시하지 않으므로 구성 평면, 축, 점은 히스토리에 한 번만 나열됩니다. 검색 중에는 폴더가 계속 표시됩니다.",
-    "prefs.browser_hide_sketches_folder": "스케치 폴더 숨기기",
-    "prefs.browser_hide_sketches_folder_note": "브라우저에 스케치 폴더를 표시하지 않으므로 스케치는 히스토리에 한 번만 나열됩니다(히스토리의 스케치가 해당 피처 아래로 설정된 경우 피처 아래). 검색 중에는 폴더가 계속 표시됩니다."
+    "prefs.browser_hide_sketches_folder": "스케치 폴더 숨기기"
   },
   "vi": {
     "prefs.browser_hide_construction_folder": "Ẩn thư mục Hình học dựng",
-    "prefs.browser_hide_construction_folder_note": "Trình duyệt không hiển thị thư mục Hình học dựng, nên các mặt phẳng, trục và điểm dựng chỉ được liệt kê một lần, trong Lịch sử. Khi tìm kiếm, thư mục vẫn hiển thị.",
-    "prefs.browser_hide_sketches_folder": "Ẩn thư mục Các phác thảo",
-    "prefs.browser_hide_sketches_folder_note": "Trình duyệt không hiển thị thư mục Các phác thảo, nên các phác thảo chỉ được liệt kê một lần, trong Lịch sử (dưới tính năng của chúng khi Các bản phác trong Lịch sử đặt là Dưới tính năng tương ứng). Khi tìm kiếm, thư mục vẫn hiển thị."
+    "prefs.browser_hide_sketches_folder": "Ẩn thư mục Các phác thảo"
   },
   "ar": {
     "prefs.browser_hide_construction_folder": "إخفاء مجلد الهندسة المساعدة",
-    "prefs.browser_hide_construction_folder_note": "لا يعرض المستعرض مجلد الهندسة المساعدة، فتُدرج المستويات والمحاور والنقاط المساعدة مرة واحدة في السجل. يظل المجلد ظاهرًا أثناء البحث.",
-    "prefs.browser_hide_sketches_folder": "إخفاء مجلد الرسومات",
-    "prefs.browser_hide_sketches_folder_note": "لا يعرض المستعرض مجلد الرسومات، فتُدرج الرسومات مرة واحدة في السجل (تحت ميزتها عندما يكون إعداد الرسومات في السجل تحت ميزتها). يظل المجلد ظاهرًا أثناء البحث."
+    "prefs.browser_hide_sketches_folder": "إخفاء مجلد الرسومات"
   },
   "he": {
     "prefs.browser_hide_construction_folder": "הסתרת תיקיית גאומטריית העזר",
-    "prefs.browser_hide_construction_folder_note": "עץ התכן אינו מציג תיקיית גאומטריית עזר, כך שמישורי, צירי ונקודות העזר מופיעים פעם אחת, בציר הזמן. בזמן חיפוש התיקייה עדיין מוצגת.",
-    "prefs.browser_hide_sketches_folder": "הסתרת תיקיית הסקיצות",
-    "prefs.browser_hide_sketches_folder_note": "עץ התכן אינו מציג תיקיית סקיצות, כך שהסקיצות מופיעות פעם אחת, בציר הזמן (מתחת לפיצ׳ר שלהן כאשר סקיצות בציר הזמן מוגדר למתחת לפיצ׳ר שלהן). בזמן חיפוש התיקייה עדיין מוצגת."
+    "prefs.browser_hide_sketches_folder": "הסתרת תיקיית הסקיצות"
   }
 }
