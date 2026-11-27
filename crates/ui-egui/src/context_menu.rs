@@ -273,6 +273,9 @@ pub struct MenuState {
     /// The construction axis under the cursor when the viewport menu opened. A right-click leaves
     /// it unselected, as it does a plane; the menu offers Find in Browser for it (#15355).
     pub axis: Option<String>,
+    /// The model line under the cursor when the sheet's menu opened: its view and the body that
+    /// drew it, which Hide in This View leaves out of that view (#22107).
+    pub drawing_line: Option<(u64, solidcraft_engine::drawing_view::Shown)>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -630,11 +633,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
             // A selected browser body hands every selected body to Export, the mesh dialogs
-            // (#18902), Isolate, and Show/Hide. A row outside the selection still targets only
-            // that row.
+            // (#18902), Isolate, Show/Hide and Edge Lines. A row outside the selection still
+            // targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 let all_hidden = selected.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+                let all_edgeless = selected.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
                 for item in &mut v {
                     match item.id.as_str() {
                         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.isolate" => {
@@ -643,6 +647,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         "ui.hide" | "ui.show" => {
                             item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
                             item.params = Some(json!({ "bodies": selected }));
+                        }
+                        "body.edge_lines" => {
+                            item.label = if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" }.into();
+                            item.params = Some(json!({ "bodies": selected, "show": all_edgeless }));
                         }
                         _ => {}
                     }
@@ -1022,6 +1030,13 @@ fn drawing_items(app: &SolveApp) -> Vec<Item> {
                 tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
                     .with(json!({"parent": encode(*one)})),
             );
+            // A right-click on one of the view's model lines leaves that line's body out of it.
+            if let Some((view, shown)) = app.menu.drawing_line.as_ref().filter(|(view, _)| view == one) {
+                v.push(
+                    act("ui.drawingHideBody", "Hide in This View", "eye")
+                        .with(json!({"view": encode(*view), "path": shown.path, "body": shown.body})),
+                );
+            }
         } else if drawing.dimension(*one).is_some() {
             v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
         } else if drawing.notes.by_id(*one).is_some() {
@@ -1294,6 +1309,9 @@ fn construction_feature(app: &SolveApp, name: &str) -> Option<u64> {
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let names = json!(bodies);
     let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    // Hide Edge Lines draws the bodies without their outlines in every visual style (#21975);
+    // once every one of them is set so, the item puts them back.
+    let all_edgeless = bodies.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
@@ -1321,6 +1339,8 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
+        cmd(app, "body.edge_lines", if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" })
+            .with(json!({ "bodies": names, "show": all_edgeless })),
         isolate_bodies_item(app, bodies),
     ];
     if browser {
@@ -2395,6 +2415,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::drawing_workspace::edit(app, object, at);
             }
         }
+        "ui.drawingHideBody" => {
+            if let Some(view) = p.get("view").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode)
+                && let Ok(body) =
+                    serde_json::from_value::<solidcraft_engine::doc::drawing_view::HiddenBody>(json!({"path": p["path"], "body": p["body"]}))
+                && let Err(error) = crate::drawing_workspace::hide_body_in_view(app, view, body)
+            {
+                app.set_status(error, true);
+            }
+        }
         "drawing.view.projected.planned" if item.params.is_some() => {
             if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
                 crate::drawing_workspace::start_projected(app, parent);
@@ -3353,7 +3382,15 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     }
     if crate::drawing_workspace::active(app) {
         let under = crate::drawing_sheet_page::hovered(app);
-        return open_on_sheet(app, at, held, under);
+        // Over a view on the sheet, the model line under the cursor (Hide in This View, #22107).
+        let over_view = match &under {
+            Some(Sel::Drawing { object, .. }) => app.session.drawing("drawing.inspect").is_ok_and(|drawing| drawing.view(*object).is_some()),
+            _ => false,
+        };
+        let line = if over_view { crate::drawing_sheet_page::line_under(app, at) } else { None };
+        open_on_sheet(app, at, held, under);
+        app.menu.drawing_line = line;
+        return;
     }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
@@ -3420,6 +3457,7 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
     app.menu.section_plane = None;
     app.menu.face = None;
     app.menu.plane = None;
+    app.menu.drawing_line = None;
     crate::select_other::close(app);
     if let Some(sel) = under {
         let before = app.session.selection.clone();
@@ -5463,6 +5501,21 @@ mod tests {
         assert_eq!(show.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
         run_item(&mut h.app, &show, Pos2::ZERO);
         assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+
+        // Edge lines (#21975) also go to the whole selection, and the label reads all of it: with
+        // only BoxB drawn without them, the row offers to hide them on both.
+        h.app.run("body.edge_lines", json!({ "body": "BoxB", "show": false })).unwrap();
+        let edge_item = |h: &Harness| {
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.id == "body.edge_lines").expect("body menu offers Edge Lines")
+        };
+        let hide_edges = edge_item(&h);
+        assert_eq!(hide_edges.label, "Hide Edge Lines");
+        assert_eq!(hide_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": false })));
+        run_item(&mut h.app, &hide_edges, Pos2::ZERO);
+        assert!(["BoxA", "BoxB"].iter().all(|b| h.app.session.doc.edgeless_bodies.contains(*b)));
+        let show_edges = edge_item(&h);
+        assert_eq!(show_edges.label, "Show Edge Lines");
+        assert_eq!(show_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": true })));
 
         // A body outside the selection still targets only itself.
         let other =

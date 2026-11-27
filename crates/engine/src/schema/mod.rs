@@ -70,6 +70,7 @@ pub mod construct;
 pub mod delete;
 pub mod diagnostics;
 pub mod documents;
+pub mod dogbone;
 pub mod drawing;
 pub mod drawing_auto_mark;
 pub mod drawing_balloon;
@@ -194,6 +195,7 @@ pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
+pub mod weld;
 
 pub use check::Contract;
 pub use check::Issue;
