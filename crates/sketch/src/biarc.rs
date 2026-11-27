@@ -4,9 +4,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism;
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::planar as prism;
 
 use crate::model::{Result, Sketch, SketchError, in_range, radius_in_range};
 use crate::{Curve, CurveKind};
@@ -163,9 +163,9 @@ impl SpanGeometry {
     fn compute((a, da): (Vec2, Vec2), (b, db): (Vec2, Vec2), ratio: f64, mode: BiarcSpanMode, index: usize) -> Result<Self> {
         let label = || format!("biarc span {}", index + 1);
         let (joint, pieces) = match mode {
-            BiarcSpanMode::Auto => solidcore_ops::curve::biarc(a, da, b, db, ratio),
+            BiarcSpanMode::Auto => solidcraft_kernel::curves::biarc(a, da, b, db, ratio),
             BiarcSpanMode::StraightStart | BiarcSpanMode::StraightEnd => {
-                solidcore_ops::curve::biarc_with_straight_piece(a, da, b, db, ratio, mode == BiarcSpanMode::StraightStart)
+                solidcraft_kernel::curves::biarc_with_straight_piece(a, da, b, db, ratio, mode == BiarcSpanMode::StraightStart)
             }
         }
         .map_err(|error| invalid(format!("{}: {error}", label())))?;

@@ -2,11 +2,11 @@
 
 use egui::{Painter, Stroke};
 use serde_json::json;
-use solidcore_ops::prism::chord;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{BiarcSpline, MAX_BIARC_NODES, Sketch};
+use solidcraft_kernel::planar::chord;
 use solidcraft_ui_text::tr;
 
 use crate::SolveApp;

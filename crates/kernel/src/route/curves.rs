@@ -184,6 +184,28 @@ pub fn seg_curve(seg: &Seg2, plane: &Plane) -> Result<Option<Curve>, CurveRefuse
     }
 }
 
+/// The biarc from `start` along `start_tangent` to `end` along `end_tangent`, joined where
+/// `ratio` splits the tangent distances: the join and the two pieces.
+pub fn biarc(start: Vec2, start_tangent: Vec2, end: Vec2, end_tangent: Vec2, ratio: f64) -> Result<(Vec2, [Seg2; 2]), CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.biarc(start, start_tangent, end, end_tangent, ratio),
+    }
+}
+
+/// [`biarc`] with one straight piece, at the start when `straight_start`.
+pub fn biarc_with_straight_piece(
+    start: Vec2,
+    start_tangent: Vec2,
+    end: Vec2,
+    end_tangent: Vec2,
+    ratio: f64,
+    straight_start: bool,
+) -> Result<(Vec2, [Seg2; 2]), CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.biarc_with_straight_piece(start, start_tangent, end, end_tangent, ratio, straight_start),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

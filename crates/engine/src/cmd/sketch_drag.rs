@@ -127,7 +127,7 @@ impl Path {
         match self {
             Path::Slide { pts, d } => {
                 for &(q, at) in pts {
-                    set(q, solidcore_ops::prism::translate_point(at, *d, t));
+                    set(q, solidcraft_kernel::planar::translate_point(at, *d, t));
                 }
             }
             Path::ArcRadius { o, ends, from, to } => {
@@ -249,7 +249,7 @@ pub(super) fn drag_entity(
                 && let Some(from) = guide.translated_from
                 && let Some(point) = sk.points.get_mut(guide.other)
             {
-                point.pos = solidcore_ops::prism::translate_point(from, *d, t);
+                point.pos = solidcraft_kernel::planar::translate_point(from, *d, t);
             }
         };
         path.apply(sk, t);

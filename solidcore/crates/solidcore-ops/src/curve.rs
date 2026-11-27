@@ -1208,7 +1208,7 @@ pub fn plane_crossings(
     curve: &Curve,
     interval: [f64; 2],
     plane: &solidcore_record::Plane,
-) -> Result<Vec<solidcore_record::Vec2>> {
+) -> Result<Vec<Vec2>> {
     Ok(match plane_section(curve, interval, plane)? {
         PlaneSection::InPlane => Vec::new(),
         PlaneSection::Meets { points, .. } => points,
@@ -1273,10 +1273,7 @@ pub fn plane_section(
             });
         }
         Ok(Ok(PlaneSection::Meets {
-            points: points
-                .into_iter()
-                .map(|p| solidcore_record::Vec2::new(p.x, p.y))
-                .collect(),
+            points: points.into_iter().map(|p| Vec2::new(p.x, p.y)).collect(),
             in_plane,
         }))
     })?

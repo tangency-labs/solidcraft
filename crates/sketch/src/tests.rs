@@ -419,7 +419,7 @@ fn a_biarc_refuses_a_ratio_that_loses_its_stored_tangent() {
     let ratio = 1e-9;
     // The kernel can represent both pieces by retaining their angles. The sketch
     // reconstructs them from three rounded points, which can lose the join tangent.
-    assert!(solidcore_ops::curve::biarc(start, nodes[0].1, end, nodes[1].1, ratio).is_ok());
+    assert!(solidcraft_kernel::curves::biarc(start, nodes[0].1, end, nodes[1].1, ratio).is_ok());
     let mut sk = Sketch::new();
     let spline = sk.add_biarc_spline(&nodes, None, false).unwrap();
     let before = sk.clone();

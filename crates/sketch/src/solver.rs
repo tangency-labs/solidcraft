@@ -14,9 +14,9 @@
 //! analysis runs only on what remains.
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism;
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::planar as prism;
 use std::cell::Cell;
 
 use crate::biarc::BiarcSpanPlan;

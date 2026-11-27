@@ -2,13 +2,13 @@
 
 use egui::{CursorIcon, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2 as ScreenVec, vec2};
 use serde_json::json;
-use solidcore_ops::prism::{self, chord_point, ray_chord_parameter};
-use solidcore_ops::{affine, measure};
 use solidcore_record::{Plane, Seg2, Vec2};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::{SamplingBudget, sample_segment};
 use solidcraft_engine::sketch::{BiarcSpanMode, BiarcSpanPreview, Profile};
+use solidcraft_kernel::planar::{self as prism, chord_point, ray_chord_parameter};
+use solidcraft_kernel::{affine, points as measure};
 use solidcraft_theme::Tokens;
 
 use crate::SolveApp;

@@ -674,6 +674,8 @@ crates/engine/src/view.rs:sketch_grid_frame dot
 crates/geom/src/arcfit.rs:Seg2::dist_on_span dot
 crates/geom/src/arcfit.rs:Seg2::tangent_in normalized
 crates/geom/src/arcfit.rs:Seg2::tangent_out normalized
+crates/geom/src/arcfit.rs:arc_from dot
+crates/geom/src/arcfit.rs:biarc cross,dot
 crates/geom/src/arcfit.rs:dist_to dot
 crates/geom/src/ball.rs:circumcentre3 cross
 crates/geom/src/ball.rs:circumcentre4 cross,dot

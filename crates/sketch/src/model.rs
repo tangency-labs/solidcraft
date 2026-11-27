@@ -2156,7 +2156,7 @@ impl Sketch {
                 None => Vec::new(),
             },
             CurveKind::Arc { c, a, b } => match (self.point(c), self.point(a), self.point(b)) {
-                (Some(c), Some(a), Some(b)) => vec![solidcore_ops::prism::stored_arc(c, a, b, false)],
+                (Some(c), Some(a), Some(b)) => vec![solidcraft_kernel::planar::stored_arc(c, a, b, false)],
                 _ => Vec::new(),
             },
             _ => Vec::new(),
