@@ -33,6 +33,17 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### 2D Timeline
+
+A view of the timeline that draws each feature in the row of the component it changes, with one
+column for each step.
+
+- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+  behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
+- **Don't use:** 2D history, matrix timeline.
+- **Elsewhere:** multi-track timeline.
+- **For translators:** not a 2D sketch. Keep "2D" as written.
+
 ### abbe number
 
 Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
@@ -69,6 +80,55 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Don't use:** look, colour (for the whole appearance), render material.
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
+
+### assembly track
+
+The part of the 2D Timeline that lists a design's joints in order, with a row for each component.
+
+- **In SolidCraft:** the "Assembly & Joints" heading of the 2D Timeline.
+- **Don't use:** joint timeline, assembly history.
+- **Elsewhere:** joint track.
+- **For translators:** not an assembly, which is a design with several components.
+
+### base feature
+
+A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
+
+A base feature has no parameters to edit. Its bodies are changed by direct edits after it, such as
+Press Pull, Delete Face and Move Face.
+
+- **In SolidCraft:** the Import feature that `file.insert_step` adds, and the one Remove History
+  (`body.remove_history`) puts in place of the features that built only that body. Its B-rep is
+  kept in the design file as a STEP part of its own.
+- **Don't use:** dumb solid, frozen feature.
+- **Elsewhere:** base feature, dumb solid, imported body.
+- **For translators:** not a base flange of sheet metal, and not a base sketch.
+
+### bend allowance
+
+The flat length a bend takes in a sheet's flat pattern, measured along the bend's neutral axis.
+
+For bend angle θ, inner radius R, thickness T and K-factor K, it is θ · (R + K·T). A press brake
+chart often gives it for a 90° bend. Compare *bend deduction*.
+
+- **In SolidCraft:** `allowance_mm` in `sheet.export_bend_table`; the `allowance` value of a sheet
+  metal rule's `unfold_method` (Sheet Metal Rules › Unfold › Bend Allowance), with the 90° value
+  in `unfold_value`.
+- **Elsewhere:** BA.
+- **For translators:** a length added for the bend, not a permission or a tolerance.
+
+### bend deduction
+
+How much shorter a sheet's flat blank is than its flange lengths measured to the outside of the
+bend.
+
+At 90° it is 2·(R + T) less the bend allowance, for inner radius R and thickness T. A press brake
+chart often gives it for a 90° bend. Compare *bend allowance*.
+
+- **In SolidCraft:** the `deduction` value of a sheet metal rule's `unfold_method` (Sheet Metal
+  Rules › Unfold › Bend Deduction), with the 90° value in `unfold_value`.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
 
 ### bill of materials
 
@@ -147,6 +207,32 @@ Variation of refractive index with wavelength that can separate colours along re
 
 - **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
+### centre line
+
+A patterned line that shows a feature's centre or axis in a drawing view.
+
+The initial command joins two named model points and extends beyond each end by a distance in
+paper millimetres. This selection and extent interface is proposed in issue #9419.
+
+- **In SolidCraft:** `drawing.center_line.add`, `drawing.center_line.inspect`, and the drawing's
+  `centre_lines` records.
+- **Don't use:** construction line (for this drawing annotation).
+- **Elsewhere:** centerline, centreline.
+- **For translators:** not a sketch construction entity and not an axis in the model.
+
+### centre mark
+
+Two crossing patterned lines that show the centre of a circular feature in a drawing view.
+
+A manual mark follows a named model edge. Its extension beyond the circle is measured in paper
+millimetres, so changing the view scale does not change that extension.
+
+- **In SolidCraft:** `drawing.center_mark.add`, `drawing.center_mark.inspect`, and the drawing's
+  `centre_marks` records.
+- **Don't use:** crosshair (for this saved drawing annotation).
+- **Elsewhere:** center mark, centermark.
+- **For translators:** a mark printed on the drawing, not the mouse pointer.
+
 ### component
 
 A named container of bodies, sketches, construction geometry and other components that can be
@@ -201,6 +287,33 @@ They are listed together in the browser's *Construction* folder.
 - **Don't use:** "construction" on its own where it could mean a *construction entity*; work plane.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
+
+### continuous member
+
+One physical length of structural stock following a connected tangent path of straight lines
+and circular bends.
+
+- **In SolidCraft:** `frame.member` with `continuous: true`; the selected curves are saved in
+  path order and produce one body, with its name pinned to the feature's `$path` key.
+- **For translators:** a member group can contain several separate stock pieces; selecting a
+  group does not join those pieces into one length of stock.
+
+### cope
+
+A shaped member end that fits against the outside of one or more mating members.
+
+- **In SolidCraft:** `frame.cope` saves the round-tube member, mating members and original path
+  end in a `FrameCope` feature. The mating bores do not leave material inside the joint.
+- **Elsewhere:** fishmouth, saddle cut, tube notch.
+- **For translators:** a physical end treatment, rather than a drawing of nominal uncut stock.
+
+### cope template
+
+A full-size development of a member's actual end-cut profile onto its outer cylindrical surface.
+
+- **In SolidCraft:** `frame.export_cope_dxf` writes a millimetre DXF with an explicit seam,
+  axial datum, inward direction and scale check.
+- **For translators:** a printable cutting guide; it does not flatten the tube's bends.
 
 ### curve
 
@@ -336,6 +449,13 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -373,6 +493,16 @@ its provenance, not its place.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
 
+### master spline
+
+One tooth left out, or one space filled, in a shaft spline, so that the hub goes on in one position only.
+
+- **In SolidCraft:** the `master_spline` parameter of `shaft_spline.insert` (`none`, `tooth_out`,
+  `wide_tooth`) and its `master_angle`.
+- **Don't use:** key, keyway (for the odd tooth).
+- **Elsewhere:** master spline, indexing spline.
+- **For translators:** not a sketch spline, which is a curve through points.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -402,6 +532,16 @@ library can't be changed.
 - **Elsewhere:** material library, material database, appearance library.
 - **For translators:** a collection of materials; not a code library or a book library.
 
+### modeling track
+
+The part of the 2D Timeline that lists a design's features in timeline order, with a row for each
+component.
+
+- **In SolidCraft:** the "Modeling Features" heading of the 2D Timeline.
+- **Don't use:** feature track, feature lane.
+- **Elsewhere:** feature track.
+- **For translators:** not the Model workspace or its toolbar tab.
+
 ### moment of inertia
 
 How a body's mass resists turning about an axis: the mass times the square of its distance from
@@ -417,6 +557,32 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### motion model
+
+What a 3D mouse's cap moves: the model, or a camera that looks at the point the view turns about.
+
+With **Object** the model goes the way the cap is pushed, tilted or twisted. With **Target camera**
+the camera goes that way, so the model goes the other way along every axis.
+
+- **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
+  Preferences › Input › 3D mouse › Motion model.
+- **Don't use:** navigation mode (the mouse mappings), camera mode.
+- **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
+- **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
+
+### movable corridor
+
+The range of timeline steps where the selected feature can move without coming before a feature
+it depends on or after a feature that depends on it.
+
+- **In SolidCraft:** the green `[ ... ]` brackets of the 2D Timeline; a feature dropped on a step
+  outside its movable corridor stays where it was, and the target cell turns red while the pointer
+  is over such a step. A pointer past either end of the grid counts as the first or last step, so a
+  drop there moves the feature to that step when it is inside the corridor.
+- **Don't use:** safe range, drop range, corridor on its own in labels.
+- **Elsewhere:** reorder range.
+- **For translators:** not a path, a sweep or a hallway.
 
 ### multi-trim
 
@@ -496,6 +662,17 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
+
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
+
 ### pattern instance
 
 One copy that a pattern makes of its features, bodies or sketch entities.
@@ -521,6 +698,14 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Don't use:** preset, template, library rule.
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
+
+### press-in hardware
+
+A nut, stud or standoff that is pressed into a punched hole in sheet metal and holds there without welding or a loose nut.
+
+- **In SolidCraft:** `sheet.hardware` cuts its mounting hole and records it in a Hole's `hardware` (`kind`: `nut`, `flush_nut`, `stud`, `standoff`; `thread`; `length`; `part`); sizes in `docs/hardware-catalogue.md`.
+- **Don't use:** insert, and a maker's product names.
+- **For translators:** a fastener fixed in the sheet itself, not a loose screw or a standard part inserted as a component (`parts.fastener`).
 
 ### print face
 
@@ -564,6 +749,17 @@ feature follows its edges when the part changes.
 - **Elsewhere:** reference edge, edge offset, distance from edge.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
+
+### restore state
+
+The unsuppress mode in which unsuppressing a feature in the 2D Timeline leaves suppressed the
+dependents that were suppressed separately there in the same session.
+
+- **In SolidCraft:** `timeline_2d_unsuppress_mode: "restore_state"` (the default); **Unsuppress:
+  Restore State** behind the 2D Timeline's settings button. The other mode is `unsuppress_all`.
+- **Don't use:** restore, undo suppression.
+- **Elsewhere:** keep suppression state.
+- **For translators:** not Undo and not opening a saved version of a design.
 
 ### rollback marker
 
@@ -611,6 +807,19 @@ computer (the 3D mouse, graphics, units) stay out. It is an app setting, not par
 - **For translators:** not a sketch profile and not a frame profile (see *Words with more than
   one meaning*, "Profile"), and not a design configuration.
 
+### shaft spline
+
+A ring of teeth along a round shaft that fits spaces in a hub, so that the hub turns with the shaft.
+
+A shaft spline is one feature that cuts the teeth into a picked shaft or bore, or makes a new
+splined shaft and hub.
+
+- **In SolidCraft:** `shaft_spline.insert` ("Shaft Spline"); the `shaft_spline` feature kind.
+- **Don't use:** gear (for a spline), keyed shaft.
+- **Elsewhere:** spline shaft, splined shaft, spline.
+- **For translators:** not a sketch spline, which is a curve through points, and not a gear that
+  transmits motion between two shafts.
+
 ### sketch
 
 A set of points and curves, with their constraints, on one plane, that features use as profiles,
@@ -657,6 +866,16 @@ flange slope.
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
 
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -677,13 +896,19 @@ The ordered list of a design's features, which SolidCraft computes from first to
 
 How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
 as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
-edge as a torus.
+edge as a torus, where the rolling ball can pass the edge and the rounds are one radius round a
+straight edge square to them.
 
-- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
-  (the default) or `swept`; the Fillet dialog's Turns row.
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key: `auto` (the
+  default for a new fillet, "Auto": swept where the swept turn is built, mitred
+  elsewhere), `mitre` (a fillet saved without the key, as older designs are) or `swept`; the
+  Fillet dialog's Turns row. A fillet at per-edge radii (`radii`) is the exception: it is
+  mitred when it names no turn, since a swept turn takes one radius, so a caller that wants
+  Auto there says `turn: auto`.
 - **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
-- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel;
+  "Auto" names the choice between them, made at each corner.
 
 ### view angles
 
@@ -732,6 +957,26 @@ The space left between frame members where they meet, for a weld to fill.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
 
+### weld symbol
+
+A mark identifying the type of weld required at a joint.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Kind` and the elementary strokes drawn by
+  `Weld::draw`.
+- **For translators:** ISO calls this an elementary symbol; it forms part of a *welding symbol*.
+
+### welding symbol
+
+A drawing annotation giving the location and requirements for joining parts by welding.
+
+The arrow side and other side describe joint requirements; the selected convention controls
+their placement. The backend record needs no modelled weld bead. A leader and sheet/view
+placement complete the annotation later.
+
+- **In SolidCraft:** `solidcraft_geom::weld::Weld` backend records; see the
+  [supported subset and limits](../../../weld-symbols.md).
+- **For translators:** the whole annotation, including its reference line and any elementary marks.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -744,7 +989,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
-| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker", "Remove History" (`body.remove_history`) |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
@@ -757,6 +1002,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
@@ -806,3 +1052,7 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Gusset
+
+A reinforcing plate fitted between two structural support faces. SolidCraft keeps it as a separate fabrication body with its own dimensions and persistent attachments.

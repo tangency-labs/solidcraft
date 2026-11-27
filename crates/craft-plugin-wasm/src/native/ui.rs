@@ -323,17 +323,23 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: Vec::new(),
         effect: Effect::Read,
+        user_storage: false,
         folders: BTreeMap::new(),
+        input_folders: BTreeMap::new(),
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: false,
         forms: false,
         limits: store_limits(limits, 10_000),
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls: limits.host_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         import: None,
         panels: None,
     };
@@ -353,11 +359,11 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         validate(declarations(result), runtime)
     })();
     host = store.into_data().host;
-    (host, outcome.map_err(|error| with_limits(error, limits)))
+    (host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }

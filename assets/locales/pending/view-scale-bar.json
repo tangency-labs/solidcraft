@@ -1,0 +1,54 @@
+{
+  "en": {
+    "cmd.view.scale_bar": "Scale Bar",
+    "view.scale_bar": "Scale bar",
+    "view.scale_bar_at_centre": "{length} at the view's center",
+    "view.scale_bar_help": "A bar in the view's bottom left corner and the length it stands for, a round number in the design's units. It changes as you zoom. In a perspective view, nearer things look larger, so the bar gives the scale at the center of the view."
+  },
+  "en-GB": {
+    "view.scale_bar_at_centre": "{length} at the view's centre",
+    "view.scale_bar_help": "A bar in the view's bottom left corner and the length it stands for, a round number in the design's units. It changes as you zoom. In a perspective view, nearer things look larger, so the bar gives the scale at the centre of the view."
+  },
+  "ar": {
+    "cmd.view.scale_bar": "مقياس الرسم",
+    "view.scale_bar": "مقياس الرسم",
+    "view.scale_bar_at_centre": "{length} عند مركز العرض",
+    "view.scale_bar_help": "شريط في الركن السفلي الأيسر من العرض مع الطول الذي يمثله، وهو رقم مُقرَّب بوحدات التصميم. يتغير مع التكبير والتصغير. في العرض المنظوري تبدو الأشياء الأقرب أكبر، لذا يعطي الشريط المقياس عند مركز العرض."
+  },
+  "de": {
+    "cmd.view.scale_bar": "Maßstabsleiste",
+    "view.scale_bar": "Maßstabsleiste",
+    "view.scale_bar_at_centre": "{length} in der Mitte der Ansicht",
+    "view.scale_bar_help": "Eine Leiste unten links in der Ansicht und die Länge, für die sie steht, als runde Zahl in den Einheiten des Designs. Sie ändert sich beim Zoomen. In einer perspektivischen Ansicht wirkt Näheres größer, daher gibt die Leiste den Maßstab in der Mitte der Ansicht an."
+  },
+  "he": {
+    "cmd.view.scale_bar": "סרגל קנה מידה",
+    "view.scale_bar": "סרגל קנה מידה",
+    "view.scale_bar_at_centre": "{length} במרכז התצוגה",
+    "view.scale_bar_help": "סרגל בפינה השמאלית התחתונה של התצוגה והאורך שהוא מייצג, מספר עגול ביחידות של העיצוב. הוא משתנה כשמבצעים זום. בתצוגה פרספקטיבית דברים קרובים נראים גדולים יותר, ולכן הסרגל מציג את קנה המידה במרכז התצוגה."
+  },
+  "ja": {
+    "cmd.view.scale_bar": "スケールバー",
+    "view.scale_bar": "スケールバー",
+    "view.scale_bar_at_centre": "ビュー中央で {length}",
+    "view.scale_bar_help": "ビューの左下にバーと、それが表す長さをデザインの単位のきりのよい数値で表示します。ズームに合わせて変わります。透視ビューでは手前のものほど大きく見えるため、バーはビュー中央での縮尺を示します。"
+  },
+  "ko": {
+    "cmd.view.scale_bar": "축척 막대",
+    "view.scale_bar": "축척 막대",
+    "view.scale_bar_at_centre": "뷰 중앙에서 {length}",
+    "view.scale_bar_help": "뷰의 왼쪽 아래에 막대와 그 막대가 나타내는 길이를 디자인 단위의 어림수로 표시합니다. 확대/축소하면 바뀝니다. 원근 뷰에서는 가까운 것이 더 크게 보이므로 막대는 뷰 중앙에서의 축척을 나타냅니다."
+  },
+  "vi": {
+    "cmd.view.scale_bar": "Thước tỷ lệ",
+    "view.scale_bar": "Thước tỷ lệ",
+    "view.scale_bar_at_centre": "{length} tại tâm khung nhìn",
+    "view.scale_bar_help": "Một thanh ở góc dưới bên trái của khung nhìn cùng độ dài nó biểu thị, là một số tròn theo đơn vị của thiết kế. Nó thay đổi khi bạn thu phóng. Trong khung nhìn phối cảnh, vật ở gần trông lớn hơn, nên thanh cho biết tỷ lệ tại tâm khung nhìn."
+  },
+  "zh": {
+    "cmd.view.scale_bar": "比例尺",
+    "view.scale_bar": "比例尺",
+    "view.scale_bar_at_centre": "视图中心处 {length}",
+    "view.scale_bar_help": "在视图左下角显示一个比例条及其代表的长度，为设计单位下的整数值，会随缩放变化。在透视视图中，近处的物体看起来更大，因此比例条给出的是视图中心处的比例。"
+  }
+}

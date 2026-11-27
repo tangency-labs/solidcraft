@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::expr::Value;
-use crate::{DocError, Document, FeatureKind, MAX_PARAMS, Result};
+use crate::{DocError, Document, MAX_PARAMS, Result};
 
 /// The unit that marks a text parameter where parameters are listed, added or imported.
 pub const TEXT_UNIT: &str = "text";
@@ -226,6 +226,8 @@ pub fn show_number(v: f64, len: i8, ang: i8, units: &str, show: Show) -> Result<
 
 /// The parameters a words expression names (none when it does not parse).
 pub fn references(s: &str) -> Vec<String> {
+    #[cfg(test)]
+    crate::params::param_rows_tests::count_words_read();
     let mut out: Vec<String> = Vec::new();
     for (t, _, _) in terms(s).unwrap_or_default() {
         if let Term::Name(n) | Term::Number { name: n, .. } = t
@@ -327,18 +329,6 @@ impl Document {
         self.text_params.retain(|p| p.name != name);
         self.favorites.remove(name);
         Ok(())
-    }
-
-    /// The sketches whose texts' words read one of `names`.
-    pub(crate) fn features_reading_texts(&self, names: &std::collections::BTreeSet<String>) -> Vec<u64> {
-        self.features
-            .iter()
-            .filter(|f| match &f.kind {
-                FeatureKind::Sketch { sketch, .. } => sketch.text_word_exprs().iter().any(|e| references(e).iter().any(|r| names.contains(r))),
-                _ => false,
-            })
-            .map(|f| f.id)
-            .collect()
     }
 }
 

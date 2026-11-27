@@ -48,38 +48,48 @@ fn parameter_columns_fit_controls_and_headers_share_cell_left_edges() {
         h.frames(4);
         let output = painted_frame(&mut h);
         for label in ["Name", "Unit", "Expression", "Value", "Comment"] {
-            let header = scenario::rect_of(&format!("dialog:column:user:{label}")).unwrap();
-            let cell = scenario::rect_of(&format!("dialog:table:user:width:cell:{label}")).unwrap();
+            let header = scenario::rect_of(&format!("dialog:column:parameters:{label}")).unwrap();
+            let cell = scenario::rect_of(&format!("dialog:table:parameters:user:width:cell:{label}")).unwrap();
             assert_eq!(header.left(), cell.left(), "{label}: {layout:?}");
             assert_eq!(header.width(), cell.width());
             let text = painted_text(&output, label, header);
             assert!((text.pos.x - cell.left()).abs() <= 0.5, "{label}: painted header starts at {:?}, cell {cell:?}", text.pos);
             assert!(!text.galley.elided);
         }
-        let unit = scenario::rect_of("dialog:table:user:width:cell:Unit").unwrap();
+        let unit = scenario::rect_of("dialog:table:parameters:user:width:cell:Unit").unwrap();
         let mm = painted_text(&output, "mm", unit);
         assert!(!mm.galley.elided, "mm must be painted without an ellipsis");
         let spacing = egui::style::Spacing::default();
         assert!(unit.width() >= mm.galley.size().x + 2.0 * Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing);
         assert!(mm.pos.x + mm.galley.size().x + Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing <= unit.right());
-        let actions = scenario::rect_of("dialog:table:user:width:cell:Actions").unwrap();
+        let actions = scenario::rect_of("dialog:table:parameters:user:width:cell:Actions").unwrap();
         assert!(actions.contains_rect(scenario::rect_of("dialog:button:Actions:Delete").unwrap()));
         // More content widens the scroll area, never the card.
         h.call("ui.resize", json!({"width":640,"height":1000}));
         h.frames(4);
         assert!(h.ctx.content_rect().contains_rect(scenario::rect_of("dialog:header").unwrap()));
-        assert_eq!(scenario::rect_of("dialog:column:user:Unit").unwrap().width(), unit.width());
+        assert_eq!(scenario::rect_of("dialog:column:parameters:Unit").unwrap().width(), unit.width());
     }
 }
 
 #[test]
 fn configuration_columns_align_values_status_and_remove_actions() {
+    fn rounded_selection(shape: &egui::Shape, row: egui::Rect) -> bool {
+        match shape {
+            egui::Shape::Rect(shape) => shape.rect == row && shape.fill == Tokens::get().selected_bg && shape.corner_radius.nw > 0,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| rounded_selection(shape, row)),
+            _ => false,
+        }
+    }
+
     let mut h = fixture();
     h.app.run("parameters.change", json!({"name":"width","expression":"80 mm"})).unwrap();
     h.app.run("config.configure", json!({"params":["width"]})).unwrap();
     h.app.start("config.table");
     h.frames(4);
     let output = painted_frame(&mut h);
+    let selected = scenario::rect_of("dialog:table:configuration_table:Default").unwrap();
+    assert!(output.shapes.iter().any(|shape| rounded_selection(&shape.shape, selected)), "the active configuration uses the rounded table selection");
     for label in ["Configuration", "width"] {
         let header = scenario::rect_of(&format!("dialog:column:configuration_table:{label}")).unwrap();
         let cell = scenario::rect_of(&format!("dialog:table:configuration_table:Default:cell:{label}")).unwrap();
@@ -92,6 +102,9 @@ fn configuration_columns_align_values_status_and_remove_actions() {
     let active = painted_text(&output, "Active", name);
     assert!(!active.galley.elided);
     assert!(active.pos.x + active.galley.size().x <= name.right());
+    let pill = scenario::rect_of("dialog:inline:Active").unwrap();
+    assert!(name.contains_rect(pill), "the Active pill stays within the configuration cell");
+    assert!((pill.center().y - name.center().y).abs() <= 0.5, "the Active pill is centred in the selected row");
     let value = scenario::rect_of("dialog:table:configuration_table:Default:cell:width").unwrap();
     assert!(!painted_text(&output, "80 mm", value).galley.elided);
     let remove_cell = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
@@ -321,7 +334,7 @@ fn parameters_are_dense_and_keep_inline_edits_order_and_undo() {
     h.frames(4);
     chrome(&h);
     for label in ["Name", "Unit", "Expression", "Value", "Comment", "Actions"] {
-        assert!(scenario::rect_of(&format!("dialog:column:user:{label}")).is_some());
+        assert!(scenario::rect_of(&format!("dialog:column:parameters:{label}")).is_some());
     }
     h.step(&json!({"click":{"handle":"param:height"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -391,11 +404,11 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
-    for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters", "Model Parameters"] {
+    for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters"] {
         assert!(h.widget(label).is_some(), "missing inventory control {label}");
     }
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
-    assert_eq!(scenario::rect_of("dialog:table:user:new").unwrap().height(), crate::ui_kit::table_row_height());
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+    assert_eq!(scenario::rect_of("dialog:table:parameters:new").unwrap().height(), crate::ui_kit::table_row_height());
     for label in ["name", "unit", "expression", "comment"] {
         assert!(scenario::handle_at(&format!("param:new:{label}")).is_some());
     }
@@ -407,7 +420,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("pitch").unwrap().expr, "10 mm");
     assert!(h.app.params.is_some());
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:new:unit"}})).unwrap();
     for unit in ["mm", "cm", "m", "in", "ft", "deg", "rad", "none", "um"] {
         assert!(scenario::handle_at(&format!("dialog:Unit:{unit}")).is_some(), "unit {unit}");
@@ -610,7 +623,7 @@ fn draft_bins_do_not_delete_saved_rows_named_new() {
         }
         h.app.start(command);
         h.frames(4);
-        let add = if command == "config.table" { "dialog:table:configuration_table:add" } else { "dialog:table:user:add" };
+        let add = if command == "config.table" { "dialog:table:configuration_table:add" } else { "dialog:table:parameters:add" };
         h.step(&json!({"click":{"handle":add}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:button:Actions:Delete"}})).unwrap();
         assert!(h.app.session.doc.param("new").is_some());
@@ -627,7 +640,7 @@ fn invalid_named_parameter_draft_stays_pending_until_the_expression_is_valid() {
     let mut h = fixture();
     h.app.start("parameters.change");
     h.frames(4);
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"missing_parameter"})).unwrap();
@@ -676,7 +689,7 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         assert_card_top();
         let viewport = scenario::rect_of("dialog:body:viewport").unwrap();
         assert!(viewport.contains_rect(scenario::rect_of("dialog:row:Filter").unwrap()));
-        assert!(viewport.contains_rect(scenario::rect_of("dialog:section:Favorites").unwrap()));
+        assert!(viewport.contains_rect(scenario::rect_of("dialog:table:parameters:group:fav").unwrap()));
         assert!(!h.app.params.as_ref().unwrap().adding);
         assert!(h.ctx.memory(|m| m.focused().is_none()));
         scroll_card(&mut h, -400.0);
@@ -690,10 +703,10 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         assert_card_top();
         // Put the add prompt at the bottom edge. The taller draft must be revealed only
         // after clicking it, with focus on Name even inside the horizontal table scroller.
-        let prompt = scenario::rect_of("dialog:table:user:add").unwrap();
+        let prompt = scenario::rect_of("dialog:table:parameters:add").unwrap();
         scroll_card(&mut h, viewport.bottom() - prompt.bottom() - 1.0);
         let before = scenario::count_of("dialog:body:scroll_y").unwrap();
-        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
         h.frames(40);
         assert!(h.app.params.as_ref().unwrap().adding);
         let name = scenario::handle_at("param:new:name").unwrap();
@@ -1003,6 +1016,58 @@ fn physical_material_draft_rejects_invalid_constants_and_stale_edits_atomically(
     assert!(editor.save(&mut h.app, &mut 0).is_err());
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
     assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+}
+
+/// #12219: on a new engineering property card, an added Density property starts at the
+/// material's assigned density (g/cm³ in kg/m³), and the card's first property brings a User
+/// supplied source with it, so the card can be saved without looking one up first.
+#[test]
+fn a_new_cards_density_takes_the_assigned_density_and_can_be_saved() {
+    let h = fixture();
+    let doc = h.app.session.doc.clone();
+    let mut editor = crate::material_editor::Editor::default();
+    editor.begin(&doc, None, false);
+    let draft = editor.draft.as_mut().unwrap();
+    draft.name = "V4A stainless steel".into();
+    draft.density = "7.85".into();
+    draft.card_enabled = true;
+    draft.card.designation = "1.4401".into();
+    assert!(draft.card.sources.is_empty());
+    draft.card.add_property("density", &draft.density);
+    let density = draft.card.properties.iter().find(|p| p.kind == "density").expect("a density property");
+    assert_eq!(density.values, vec!["7850".to_string()]);
+    assert_eq!(draft.card.sources.len(), 1, "{:?}", draft.card.sources);
+    let source = &draft.card.sources[0];
+    assert_eq!(source.kind, solidcraft_engine::doc::physical_material::SourceKind::UserSupplied);
+    assert_eq!(density.source_id, source.id);
+    assert!(!source.title.trim().is_empty());
+    assert!(draft.command(&doc).is_ok(), "{:?}", draft.command(&doc));
+    // A second property uses the same source; no second source is made.
+    draft.card.add_property("yield_strength", &draft.density);
+    assert_eq!(draft.card.sources.len(), 1);
+    assert!(draft.card.properties.iter().all(|p| p.source_id == source_id(&draft.card)));
+    // Without an assigned density the Density property starts empty, as before.
+    let mut empty = crate::material_editor::Editor::default();
+    empty.begin(&doc, None, false);
+    let draft = empty.draft.as_mut().unwrap();
+    draft.card.add_property("density", &draft.density);
+    assert_eq!(draft.card.properties[0].values, vec![String::new()]);
+    // A tiny density is not rounded to 0 kg/m³, which no card accepts.
+    let mut tiny = crate::material_editor::Editor::default();
+    tiny.begin(&doc, None, false);
+    let draft = tiny.draft.as_mut().unwrap();
+    draft.name = "Aerogel trace".into();
+    draft.density = "0.0000000001".into();
+    draft.card_enabled = true;
+    draft.card.designation = "trace".into();
+    draft.card.add_property("density", &draft.density);
+    let value: f64 = draft.card.properties[0].values[0].parse().unwrap();
+    assert!(value > 0.0, "{value}");
+    assert!(draft.command(&doc).is_ok(), "{:?}", draft.command(&doc));
+}
+
+fn source_id(card: &crate::material_editor::CardDraft) -> String {
+    card.sources.first().map(|s| s.id.clone()).unwrap_or_default()
 }
 
 fn configuration_cells() -> Harness {

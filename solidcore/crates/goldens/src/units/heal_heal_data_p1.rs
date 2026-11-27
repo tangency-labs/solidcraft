@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::heal::heal_data::p1::api_heal_brep;
-use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::SolidError;
@@ -101,7 +100,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             p2_rust(s)
         }
         Inputs::Api { api } => {
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             // Upstream heals a box made by `SmApiCreateBox(origin, dx, dy, dz)`;
             // the output is `create_status heal_status`.
             let mut create_status = 0.0;

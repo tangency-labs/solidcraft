@@ -135,7 +135,12 @@ requests, for a backend that runs tools in process). Two backends exist:
   for the connection only and is refused over plain HTTP to another computer. The two protocols
   differ only in their wire shape: OpenAI sends the system note as a message, function tools
   and one `tool` message per result; Anthropic sends it as `system`, `input_schema` tools and
-  all of a round's `tool_result` blocks in one user message.
+  all of a round's `tool_result` blocks in one user message. Validated MCP tool-result images
+  (from `screenshot` and `compare_picture`) are passed through to the model in each protocol's
+  image format (native `image` blocks inside Anthropic `tool_result`, `input_image` inside
+  OpenAI Responses `function_call_output`, `inlineData` alongside Gemini `functionResponse`,
+  and an immediately following `user` message with `image_url` data URIs for OpenAI Chat
+  Completions), with older views pruned to `MAX_HISTORY_IMAGES`.
 
 Another kind of backend slots in the same way without reshaping the panel.
 
@@ -225,10 +230,26 @@ behavior.
 
 ACP lets the client offer a file system and a terminal; the chat offers neither, and starts the
 agent in an empty working folder of SolidCraft's own (`<data>/agent-chat/work`), not the
-design's folder. The Claude Code adapter has shell, file and web tools of its own anyway: the
-session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) and not to offer
-"bypass permissions". Other agents' own permission requests appear in the panel with their
-options.
+design's folder. The Claude Code adapter has shell, file and web tools of its own anyway, and
+loads the user's claude.ai connectors and their own MCP servers (#19554). The session's
+`_meta.claudeCode.options`, which the adapter spreads over its own defaults, close all of that:
+- `tools: ["ExitPlanMode"]` (`acp::CLAUDE_TOOLS`): the only built-in tools. A list of what is
+  allowed, so a tool a later Claude Code adds stays off. `ExitPlanMode` ends the plan mode the
+  mode picker offers; without it the agent stays in plan mode.
+- `disallowedTools` (`acp::CLAUDE_DISALLOWED_TOOLS`): the shell, file and web tools, a second
+  guard.
+- `strictMcpConfig: true`: only the servers in `session/new`'s `mcpServers`, that is
+  `solidcraft-app`, or none.
+- `allowDangerouslySkipPermissions: false`: no "bypass permissions".
+
+The user's own Claude Code settings still load (`settingSources` is the adapter's default):
+leaving them out removed nothing more and would drop a settings file's `env` (Bedrock, Vertex or
+a proxy). Plugins synced from the user's claude.ai organisation still load too; with no `Skill`
+tool their skills can't run, but their hooks do. Checked with `claude-agent-acp` 0.107.0, from the
+session's `init` event and with `ToolSearch` over ACP after the connectors had time to load:
+before, 39 connector tools, the user's own servers and 21 built-in tools outside the disallowed
+list; after, `solidcraft-app`'s tools and `ExitPlanMode`. Other agents' own permission requests
+appear in the panel with their options.
 
 ### Processes
 
@@ -272,4 +293,4 @@ returns the whole state, for tests and screenshots.
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
 | Packaging | Make sure every desktop package ships `solidcraft-cli` next to `solidcraft` (Flatpak, AppImage, macOS bundle, Windows zip), or serve MCP from the app binary itself |
 | Windows | Job objects instead of `taskkill /T` once there's a safe API for them |
-| API backend | Streaming answers; images in tool results |
+| API backend | Streaming answers |

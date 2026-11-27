@@ -16,7 +16,7 @@
 [![Download for Windows][badge-windows]][windows-msi]
 [![Download for macOS][badge-macos]][macos-dmg]
 [![Download for Linux][badge-linux]][linux-appimage]
-[![Get it from the Snap Store][badge-snap]][snap-store]
+[![Download Snap package][badge-snap]][snap-install]
 [![Try it in your browser][badge-web]][web-app]
 
 </div>
@@ -54,7 +54,8 @@
 
 - **Windows:** the [installer][windows-msi].
 - **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel).
-- **Linux:** the [AppImage][linux-appimage], or `sudo snap install solidcraft` ([Snap Store][snap-store]).
+- **Linux:** the [AppImage][linux-appimage], or a [Snap package][linux-snap]
+  ([installation instructions][snap-install], including ARM64).
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
@@ -184,13 +185,14 @@ a package never grants access to another folder.
 
 The invocation defaults remain **10,000,000 fuel, 64 MiB of guest memory and 5000 ms**.
 The default host ceilings remain **100,000,000,000 fuel and 128 MiB**. A package can declare
-larger fuel or memory budgets, but execution is refused until you explicitly raise the host
+larger fuel, memory, command host-call or guest compute time budgets, but execution is refused until you explicitly raise the host
 ceilings and approve that exact package content. `plugin.inspect` is inert and reports the
 requested limits, current `host_limits`, `within_host_limits` and any `limits_error` even when
 a request is too large.
 
-In the native GUI, open **Preferences > Plugins**, enter **Max plugin fuel** and
-**Max plugin memory (MiB)**, then choose **Apply** or **OK**. Enter also accepts both values;
+In the native GUI, open **Preferences > Plugins**, enter **Max plugin fuel**,
+**Max plugin memory (MiB)**, **Max plugin host calls** and **Max plugin guest time (ms)**,
+then choose **Apply** or **OK**. Enter also accepts the values;
 **Cancel** reverts changes since the last Apply and **Restore defaults** resets this page.
 The settings persist in your user preferences and do not travel with saved designs.
 
@@ -198,7 +200,7 @@ For standalone CLI or headless MCP sessions, create a UTF-8 JSON file, for examp
 `plugin-limits.json` containing:
 
 ```json
-{"max_fuel": 200000000000, "max_memory_mib": 512}
+{"max_fuel": 200000000000, "max_memory_mib": 512, "max_host_calls": 2000, "max_deadline_ms": 120000}
 ```
 
 Pass it explicitly when starting the process:
@@ -209,14 +211,18 @@ solidcraft-cli --plugin-limits plugin-limits.json mcp --headless --allow-path /p
 ```
 
 Missing fields use the original host ceilings. Connected desktop sessions use the GUI's
-preferences; CLI settings cannot override them. Positive integer fuel values up to `u64::MAX`
+preferences; CLI settings cannot override them. Positive integer fuel, host-call and guest
+deadline millisecond values up to `u64::MAX`
 are accepted without rounding. Guest memory is limited to 4096 MiB by the current Wasm32 ABI;
-that technical boundary requires a different runtime ABI to change. Neither setting changes
+that technical boundary requires a different runtime ABI to change. These settings do not change
 a package's declared budget, executes it, adds permissions, or retries a failed invocation.
 Review its manifest and component, obtain the content approval hash, and explicitly invoke it.
 A changed manifest budget requires a fresh approval hash. Keep the selected ceilings within your
 machine's available resources; they are limits on guest execution, not total SolidCraft memory
-or native CAD work. The independent maximum execution deadline stays 30 seconds.
+or native CAD work. The guest compute deadline pauses during native host work. Its command
+ceiling defaults to 30 seconds, and the command host-call ceiling defaults to 256;
+larger approved requests need these ceilings raised. Existing requests still default to
+256 calls and 5 seconds of guest compute.
 
 Standalone CLI runs and headless MCP use the plugins installed for the desktop app; approvals
 given there last for the run. Add `--keep-plugin-approvals` to keep them between runs, shared
@@ -304,11 +310,12 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [badge-windows]: https://img.shields.io/badge/Windows-Download-0078D6?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0yIDJoOS41djkuNUgyek0xMi41IDJIMjJ2OS41aC05LjV6TTIgMTIuNWg5LjVWMjJIMnpNMTIuNSAxMi41SDIyVjIyaC05LjV6Ii8%2BPC9zdmc%2B
 [badge-macos]: https://img.shields.io/badge/macOS-Download-333333?style=for-the-badge&logo=apple&logoColor=white
 [badge-linux]: https://img.shields.io/badge/Linux-AppImage-E95420?style=for-the-badge&logo=linux&logoColor=white
-[badge-snap]: https://img.shields.io/badge/Snap-Snap_Store-82BEA0?style=for-the-badge&logo=snapcraft&logoColor=white
+[badge-snap]: https://img.shields.io/badge/Snap-Download-82BEA0?style=for-the-badge&logo=snapcraft&logoColor=white
 [badge-web]: https://img.shields.io/badge/Web-Try_in_browser-2EA44F?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwYXRoIGQ9Ik0yIDEyaDIwTTEyIDJhMTUgMTUgMCAwIDEgMCAyME0xMiAyYTE1IDE1IDAgMCAwIDAgMjAiLz48L3N2Zz4%3D
 [windows-msi]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-windows-x64.msi
 [macos-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-universal.dmg
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
-[snap-store]: https://snapcraft.io/solidcraft
+[linux-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap
+[snap-install]: https://docs.solidcraft.io/guide/getting-started.html#linux-snap
 [web-app]: https://solidcraft.io/app
 

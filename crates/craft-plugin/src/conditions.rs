@@ -13,6 +13,8 @@ pub const DEFAULTS: &str = "x-solidcraft-defaults";
 /// A structured condition, compiled only after its references and values have been checked.
 #[derive(Clone, Debug, PartialEq)]
 enum Condition {
+    FileEq(String, Value),
+    FileIn(String, Vec<Value>),
     Eq(String, Value),
     In(String, Vec<Value>),
     All(Vec<Self>),
@@ -22,6 +24,7 @@ enum Condition {
 impl Condition {
     fn fields<'a>(&'a self, fields: &mut BTreeSet<&'a str>) {
         match self {
+            Self::FileEq(_, _) | Self::FileIn(_, _) => {}
             Self::Eq(field, _) | Self::In(field, _) => {
                 fields.insert(field);
             }
@@ -34,12 +37,17 @@ impl Condition {
         }
     }
     fn matches(&self, values: &Map<String, Value>) -> bool {
+        self.matches_with_file(values, None)
+    }
+    fn matches_with_file(&self, values: &Map<String, Value>, file: Option<&Map<String, Value>>) -> bool {
         match self {
+            Self::FileEq(name, value) => file.and_then(|f| f.get(name)).is_some_and(|v| scalar_equal(v, value)),
+            Self::FileIn(name, options) => file.and_then(|f| f.get(name)).is_some_and(|v| options.iter().any(|option| scalar_equal(v, option))),
             Self::Eq(field, value) => values.get(field).is_some_and(|v| scalar_equal(v, value)),
             Self::In(field, options) => values.get(field).is_some_and(|v| options.iter().any(|option| scalar_equal(v, option))),
-            Self::All(conditions) => conditions.iter().all(|c| c.matches(values)),
-            Self::Any(conditions) => conditions.iter().any(|c| c.matches(values)),
-            Self::Not(condition) => !condition.matches(values),
+            Self::All(conditions) => conditions.iter().all(|c| c.matches_with_file(values, file)),
+            Self::Any(conditions) => conditions.iter().any(|c| c.matches_with_file(values, file)),
+            Self::Not(condition) => !condition.matches_with_file(values, file),
         }
     }
 }
@@ -72,7 +80,8 @@ impl FieldConditions {
     pub fn enabled(&self, values: &Map<String, Value>) -> bool {
         self.enabled.as_ref().is_none_or(|c| c.matches(values))
     }
-    pub(crate) fn has_choice_filter(&self) -> bool {
+    /// Whether any choice has an availability condition to evaluate.
+    pub fn has_choice_filter(&self) -> bool {
         self.options.iter().any(Option::is_some)
     }
     pub fn option_available(&self, index: usize, values: &Map<String, Value>) -> bool {
@@ -242,6 +251,32 @@ fn parse_condition(
     }
     if object.len() != 2 {
         return Err(invalid(path, "condition needs field and eq/in, or all/any/not"));
+    }
+    if let Some(fact) = object.get("file") {
+        let fact = fact.as_str().ok_or_else(|| invalid(path, "file needs a fact name"))?;
+        let property = match fact {
+            "name" => serde_json::json!({"type":"string","maxLength":255}),
+            "extension" => serde_json::json!({"type":"string","maxLength":32}),
+            "format" => serde_json::json!({"type":"string","maxLength":161}),
+            "size" => serde_json::json!({"type":"integer","minimum":0,"maximum":crate::MAX_IMPORT_INPUT_BYTES}),
+            _ => return Err(invalid(path, "file fact is name, extension, size or format")),
+        };
+        let possible = |v: &Value| crate::input::check_value(&property, v).map_err(|_| invalid(path, "invalid file fact value"));
+        if let Some(value) = object.get("eq") {
+            possible(value)?;
+            return Ok(Condition::FileEq(fact.into(), value.clone()));
+        }
+        if let Some(values) = object.get("in").and_then(Value::as_array) {
+            if values.len() > *budget {
+                return Err(invalid(path, "condition is too large"));
+            }
+            *budget -= values.len();
+            for value in values {
+                possible(value)?;
+            }
+            return Ok(Condition::FileIn(fact.into(), values.clone()));
+        }
+        return Err(invalid(path, "file condition needs eq or in"));
     }
     let field = object.get("field").and_then(Value::as_str).ok_or_else(|| invalid(path, "condition needs a sibling field name"))?;
     let property = properties.get(field).ok_or_else(|| invalid(path, format!("condition names missing field {field}")))?;
@@ -505,4 +540,96 @@ pub fn validate_conditions(schema: &Value) -> Result<()> {
         validate_visibility_combinations(&[schema], "input_schema", 0, &mut budget)?;
     }
     Ok(())
+}
+
+/// Resolve host-owned file facts to constant conditions. User inputs cannot override facts.
+/// Binding before the shared validator also covers nested objects and composition branches.
+pub fn bind_file_conditions(schema: &Value, file: Option<&crate::dialog::FileFacts>) -> Result<Value> {
+    validate_conditions(schema)?;
+    fn condition(value: &mut Value, file: Option<&Map<String, Value>>) {
+        let Some(object) = value.as_object_mut() else { return };
+        if let Some(key) = object.get("file").and_then(Value::as_str) {
+            let actual = file.and_then(|f| f.get(key));
+            let matches = actual.is_some_and(|actual| {
+                object.get("eq").is_some_and(|v| scalar_equal(actual, v))
+                    || object.get("in").and_then(Value::as_array).is_some_and(|vs| vs.iter().any(|v| scalar_equal(actual, v)))
+            });
+            *value = if matches { serde_json::json!({"all":[]}) } else { serde_json::json!({"any":[]}) };
+            return;
+        }
+        for key in ["all", "any"] {
+            if let Some(children) = object.get_mut(key).and_then(Value::as_array_mut) {
+                for child in children {
+                    condition(child, file);
+                }
+            }
+        }
+        if let Some(child) = object.get_mut("not") {
+            condition(child, file);
+        }
+    }
+    fn schema_node(value: &mut Value, file: Option<&Map<String, Value>>, depth: usize) {
+        if depth > 32 {
+            return;
+        }
+        for key in [VISIBLE_WHEN, ENABLED_WHEN, OPTION_WHEN] {
+            if let Some(rule) = value.get_mut(key) {
+                condition(rule, file);
+            }
+        }
+        if let Some(defaults) = value.get_mut(DEFAULTS).and_then(Value::as_array_mut) {
+            for rule in defaults {
+                if let Some(when) = rule.get_mut("when") {
+                    condition(when, file);
+                }
+            }
+        }
+        if let Some(properties) = value.get_mut("properties").and_then(Value::as_object_mut) {
+            for property in properties.values_mut() {
+                schema_node(property, file, depth + 1);
+            }
+        }
+        for key in ["items", "additionalProperties"] {
+            if let Some(child) = value.get_mut(key) {
+                schema_node(child, file, depth + 1);
+            }
+        }
+        for key in ["oneOf", "anyOf", "allOf"] {
+            if let Some(children) = value.get_mut(key).and_then(Value::as_array_mut) {
+                for child in children {
+                    schema_node(child, file, depth + 1);
+                }
+            }
+        }
+    }
+    let facts = file.map(|f| f.values());
+    let mut schema = schema.clone();
+    schema_node(&mut schema, facts.as_ref(), 0);
+    Ok(schema)
+}
+
+/// Whether a schema refers to host file facts, without following defaults or other input data.
+pub fn uses_file_facts(schema: &Value) -> bool {
+    if validate_conditions(schema).is_err() {
+        return true;
+    }
+    fn condition(value: &Value) -> bool {
+        value.get("file").is_some()
+            || ["all", "any"].iter().any(|key| value.get(key).and_then(Value::as_array).is_some_and(|cs| cs.iter().any(condition)))
+            || value.get("not").is_some_and(condition)
+    }
+    fn visit(schema: &Value, depth: usize) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        [VISIBLE_WHEN, ENABLED_WHEN, OPTION_WHEN].iter().any(|key| schema.get(key).is_some_and(condition))
+            || schema.get(DEFAULTS).and_then(Value::as_array).is_some_and(|ds| ds.iter().any(|d| d.get("when").is_some_and(condition)))
+            || schema.get("properties").and_then(Value::as_object).is_some_and(|ps| ps.values().any(|p| visit(p, depth + 1)))
+            || ["items", "additionalProperties"].iter().any(|key| schema.get(key).is_some_and(|s| visit(s, depth + 1)))
+            || ["oneOf", "anyOf", "allOf"]
+                .iter()
+                .any(|key| schema.get(key).and_then(Value::as_array).is_some_and(|ss| ss.iter().any(|s| visit(s, depth + 1))))
+    }
+    // Loading has already validated the depth and node budget.
+    visit(schema, 0)
 }

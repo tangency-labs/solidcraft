@@ -126,6 +126,8 @@ pub fn reach_frame(doc: &Document, st: &ModelState, r: &Reach, carry: &mut Frame
 /// [`reach`] (no `frame`: the nearest pose there is, with what stopped it short) or
 /// [`reach_frame`] (a frame's effort from what the drag carries, nothing explained).
 fn reach_with(doc: &Document, st: &ModelState, r: &Reach, frame: Option<&mut FrameCarry>) -> Result<Reached, String> {
+    let active = doc.active_assembly();
+    let doc = &*active;
     let explain = frame.is_none();
     let asm = &doc.assembly;
     let vals = joint_values(asm);

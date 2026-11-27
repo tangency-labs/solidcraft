@@ -152,6 +152,81 @@ fn closes_design(key: &str, command: bool, shift: bool, alt: bool, design_shown:
     design_shown && command && !shift && !alt && key.eq_ignore_ascii_case("w")
 }
 
+/// The Leave journal keeps the most recent intents in a fixed number of slots.
+#[cfg(any(target_arch = "wasm32", test))]
+const RECOVERY_LEAVE_SLOTS: usize = 64;
+
+/// Page ids come from `keep::page_id`; browser storage is untrusted.
+#[cfg(any(target_arch = "wasm32", test))]
+fn valid_recovery_owner(owner: &str) -> bool {
+    !owner.is_empty() && owner.len() <= 64 && owner.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn recovery_owner(meta: &serde_json::Value) -> Option<&str> {
+    meta.get("recovery_owner").and_then(serde_json::Value::as_str).filter(|owner| valid_recovery_owner(owner))
+}
+
+/// Exact payload identity keeps a new payload with older metadata recoverable after a partial
+/// write. This is browser metadata, not a change to the design container.
+#[cfg(any(target_arch = "wasm32", test))]
+fn recovery_digest(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    format!("{:x}", sha2::Sha256::digest(bytes))
+}
+
+/// Whether this browser explicitly opted out of offering the single autosave after departure.
+#[cfg(any(target_arch = "wasm32", test))]
+fn suppress_recovery_after_leave(prefs: &solidcraft_ui_egui::prefs::Prefs) -> bool {
+    !prefs.recover_after_browser_leave && !prefs.keep_unsaved_in_browser
+}
+
+/// Suppress only coherent recovery from the page that left. No files are deleted: another tab
+/// may write the shared recovery while this page is starting. Reload exempts only its own prior
+/// page, identified by this tab's session storage, rather than every abandoned recovery.
+#[cfg(any(target_arch = "wasm32", test))]
+fn autosave_given_up(meta: &serde_json::Value, bytes: &[u8], left: Option<&str>, reload_owner: Option<&str>, suppress: bool) -> bool {
+    let Some(owner) = recovery_owner(meta) else { return false };
+    suppress
+        && left == Some(owner)
+        && reload_owner != Some(owner)
+        && meta.get("recovery_sha256").and_then(serde_json::Value::as_str) == Some(recovery_digest(bytes).as_str())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LeaveMarker {
+    owner: String,
+    order: u64,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl LeaveMarker {
+    fn parse(text: &str) -> Option<Self> {
+        if text.len() > 256 {
+            return None;
+        }
+        let value: serde_json::Value = serde_json::from_str(text).ok()?;
+        let owner = value.get("owner")?.as_str().filter(|owner| valid_recovery_owner(owner))?;
+        Some(Self { owner: owner.to_string(), order: value.get("order")?.as_u64()? })
+    }
+}
+
+/// Reuse this page's record, an empty slot, or the oldest observed record. Losing an old intent
+/// can cause an extra prompt, but must never hide recovery belonging to a different page.
+#[cfg(any(target_arch = "wasm32", test))]
+fn next_leave_marker(markers: &[Option<LeaveMarker>], owner: &str) -> Option<(usize, LeaveMarker)> {
+    if !valid_recovery_owner(owner) {
+        return None;
+    }
+    let slots = markers.iter().take(RECOVERY_LEAVE_SLOTS);
+    let slot = slots.clone().position(|m| m.as_ref().is_some_and(|m| m.owner == owner)).or_else(|| slots.clone().position(Option::is_none)).or_else(
+        || slots.clone().enumerate().filter_map(|(i, m)| m.as_ref().map(|m| (i, m.order))).min_by_key(|(_, order)| *order).map(|(i, _)| i),
+    )?;
+    let order = slots.flatten().map(|m| m.order).max().unwrap_or(0).saturating_add(1);
+    Some((slot, LeaveMarker { owner: owner.to_string(), order }))
+}
+
 /// The settings a tab last wrote to the browser's storage, or loaded from another tab (#8644).
 /// Every open tab of the app shares that storage, and eframe saves each tab's whole copy every
 /// 30 s and when the page loses focus, so a tab still holding old settings put them back over a
@@ -285,6 +360,20 @@ mod web {
         on_unload.forget();
     }
 
+    /// Record non-cached departures only when recovery was disabled by the user. Browsers do
+    /// not reveal whether their Leave prompt was shown, so this also applies when it was skipped.
+    fn give_up_autosave_on_leave(window: &web_sys::Window, files: Rc<Files>) {
+        let on_hide = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            let kept = js_sys::Reflect::get(&e, &"persisted".into()).ok().and_then(|p| p.as_bool()).unwrap_or(false);
+            if !kept {
+                files::leaving(&files);
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        // The listener lives as long as the page.
+        on_hide.forget();
+    }
+
     /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
     /// to date when it is hidden or goes (`pagehide`, `visibilitychange`): the browser may not
     /// wait for that write, so the copies are written shortly after each change as well
@@ -379,7 +468,7 @@ mod web {
         files: Rc<Files>,
         /// When the last autosave was (seconds), and the revision it holds (none stored: `None`).
         autosaved_at: f64,
-        autosaved: Option<u64>,
+        autosaved: Option<(u64, u64)>,
         /// A stored design being renamed: (its name, the new name).
         renaming: Option<(String, String)>,
         /// The rename field takes the keyboard when it appears.
@@ -563,12 +652,19 @@ mod web {
             }
             // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
             if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
-                let s = &self.app.session;
-                let changed = s.is_dirty() && self.autosaved != Some(s.revision);
+                // A clean tab must not remove the previous tab's recovery copy while its
+                // design is still unsaved. A different dirty tab still gets its regular turn.
+                let owner = self
+                    .autosaved
+                    .filter(|_| !self.app.session.is_dirty())
+                    .and_then(|(uid, _)| solidcraft_ui_egui::documents::open_sessions(&self.app).into_iter().find(|s| s.uid == uid && s.is_dirty()));
+                let s = owner.unwrap_or(&self.app.session);
+                let key = (s.uid, s.revision);
+                let changed = s.is_dirty() && self.autosaved != Some(key);
                 let wait = AUTOSAVE_S - (now - self.autosaved_at);
                 if changed && wait <= 0.0 {
                     files::autosave(&self.files, Some((&s.design(), s.path.as_deref())));
-                    self.autosaved = Some(s.revision);
+                    self.autosaved = Some(key);
                     self.autosaved_at = now;
                 } else if changed {
                     // Come back for it even when nothing else happens.
@@ -629,7 +725,13 @@ mod web {
                     if now || keep::due(time, first, t.last_change) {
                         match solidcraft_engine::io::write_design_container(&s.design()) {
                             Ok(bytes) => {
-                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                let entry = keep::Entry {
+                                    id,
+                                    name: s.doc.name.clone(),
+                                    path: s.path.clone(),
+                                    changed_at: t.last_change,
+                                    preserve_from_save: solidcraft_ui_egui::save_job::protects_host_recovery(app, s),
+                                };
                                 files::write_kept(files, &entry, bytes, s.revision);
                                 t.first_unwritten = None;
                             }
@@ -933,6 +1035,16 @@ mod web {
             }
             let Some((what, name)) = act else { return };
             let path = format!("{}{name}", files::OPFS);
+            if matches!(what, "delete" | "rename")
+                && (solidcraft_ui_egui::save_job::host_path_pending(&self.app, &path)
+                    || self
+                        .renaming
+                        .as_ref()
+                        .is_some_and(|(from, _)| solidcraft_ui_egui::save_job::host_path_pending(&self.app, &format!("{}{from}", files::OPFS))))
+            {
+                self.app.set_status("a save to this file is in progress", true);
+                return;
+            }
             match what {
                 "open" => {
                     self.app.open_path_async(&path);
@@ -1203,9 +1315,10 @@ mod web {
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            // First: what the browser did with the last right-click (#20011). A browser may take
-            // a right-click for itself and open its own menu; the app then opens none of its own.
-            self.app.menu.browser_menu = self.mouse_buttons.borrow().menu();
+            // First: what the browser did with the last right-click (#20011, #21229). A browser may
+            // take a right-click for itself and open its own menu; the app then closes or skips
+            // its own menu once.
+            self.app.menu.browser_menu = self.mouse_buttons.borrow_mut().take_menu();
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);
@@ -1214,13 +1327,15 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
             let taps = crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
-            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+            // The browser's buttons are already right: a focus move inside the page lets go of none.
+            solidcraft_ui_egui::window_chrome::release_stale_input_with_tracked_buttons(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now, self.app.preferences.browser_scroll_wheel) {
                 ctx.request_repaint_after(delay);
@@ -1252,6 +1367,7 @@ mod web {
             }
             self.app.ui(ui);
             self.app.retain_view_pictures(frame.wgpu_render_state());
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);
@@ -1383,11 +1499,8 @@ mod web {
                     Box::new(move |cc| {
                         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
                         let files = Rc::new(Files::default());
-                        if launch.persists() {
-                            files::start(&files);
-                        }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
-                        let (restorable, restorer) = (files.clone(), files.clone());
+                        let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
@@ -1409,12 +1522,13 @@ mod web {
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
-                                        saver.say("This browser can't save to a folder: the design is kept in this browser. File > Download design saves a file.", false);
+                                        saver.say("This browser saves designs in browser storage. File > Download design makes a copy on your computer.", false);
                                         Box::pin(std::future::ready(Some(format!("{}{name}", files::OPFS))))
                                     }
                                     SaveTarget::Download => Box::pin(std::future::ready(Some(format!("{}{name}", files::DOWNLOADS)))),
                                 }
                             })),
+                            persist_design: Some(Box::new(move |path, bytes| files::persist_design(&writer, path, bytes))),
                             // A recent design on the disk, from an earlier session, opens by asking
                             // the browser for its remembered file.
                             can_restore: Some(Box::new(move |path: &str| {
@@ -1446,6 +1560,10 @@ mod web {
                         }
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
+                        }
+                        if launch.persists() {
+                            files::start(&files, crate::suppress_recovery_after_leave(&app.preferences));
+                            give_up_autosave_on_leave(&window, files.clone());
                         }
                         #[cfg(feature = "usage-stats")]
                         if launch.persists() {
@@ -1540,7 +1658,7 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    eprintln!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
+    solidcraft_engine::note!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
 }
 
 #[cfg(test)]
@@ -1673,6 +1791,97 @@ mod tests {
         assert!(!closes_design("w", true, false, true, true));
         assert!(!closes_design("w", false, false, false, true));
         assert!(!closes_design("s", true, false, false, true));
+    }
+
+    #[test]
+    fn browser_leave_recovery_requires_an_explicit_opt_in_even_for_old_markers() {
+        let mut prefs = solidcraft_ui_egui::prefs::Prefs::default();
+        let meta = serde_json::json!({"recovery_owner": "a1", "recovery_sha256": recovery_digest(b"abc")});
+        assert!(!suppress_recovery_after_leave(&prefs));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.recover_after_browser_leave = false;
+        assert!(suppress_recovery_after_leave(&prefs));
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = true;
+        assert!(!suppress_recovery_after_leave(&prefs), "per-design kept copies have a separate recovery policy");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = false;
+        prefs.recover_after_browser_leave = true;
+        assert!(
+            !autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)),
+            "turning recovery back on ignores a prior departure"
+        );
+    }
+
+    /// With recovery explicitly disabled, a non-cached departure suppresses its own autosave offer.
+    #[test]
+    fn leaving_without_saving_gives_up_the_autosave() {
+        // SHA-256("abc"), independently specified by the standard test vector.
+        let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert_eq!(recovery_digest(b"abc"), digest);
+        let meta = serde_json::json!({"saved_at": 1, "recovery_owner": "a1", "recovery_sha256": digest});
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, true));
+        // A later attempted write can fail: the earlier committed payload has the same owner.
+        let mut earlier = meta.clone();
+        earlier["saved_at"] = serde_json::json!(0);
+        assert!(autosave_given_up(&earlier, b"abc", Some("a1"), None, true));
+        assert!(!autosave_given_up(&meta, b"abc", None, None, true), "Cancel or a crash leaves no intent");
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, true), "another page's Leave cannot hide this one");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), true), "reload keeps its own prior page's recovery");
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), Some("b2"), true), "reloading a different tab grants no exemption");
+        // A new payload and old metadata may remain after an interrupted two-file write.
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, true));
+        // A newer coherent payload from another page is still offered.
+        let newer = serde_json::json!({"recovery_owner": "b2", "recovery_sha256": digest});
+        assert!(!autosave_given_up(&newer, b"abc", Some("a1"), None, true));
+        for legacy in [serde_json::json!({"saved_at": 1}), serde_json::json!(null), serde_json::json!({})] {
+            assert!(!autosave_given_up(&legacy, b"abc", Some("a1"), None, true));
+        }
+        let long_owner = "a".repeat(65);
+        for owner in ["", "../a1", "NaN", "a1\n", &long_owner] {
+            let hostile = serde_json::json!({"recovery_owner": owner, "recovery_sha256": digest});
+            assert!(!autosave_given_up(&hostile, b"abc", Some(owner), None, true));
+        }
+        for invalid in [serde_json::json!(null), serde_json::json!(2), serde_json::json!("bad"), serde_json::json!(digest.to_uppercase())] {
+            let mut hostile = meta.clone();
+            hostile["recovery_sha256"] = invalid;
+            assert!(!autosave_given_up(&hostile, b"abc", Some("a1"), None, true));
+        }
+    }
+
+    #[test]
+    fn leave_intents_have_a_bounded_owner_journal() {
+        let mut markers = vec![None; RECOVERY_LEAVE_SLOTS];
+        let (slot, first) = next_leave_marker(&markers, "a1").unwrap();
+        assert_eq!(slot, 0);
+        assert_eq!(first.order, 1);
+        markers[slot] = Some(first);
+        assert_eq!(next_leave_marker(&markers, "a1").unwrap().0, 0);
+        assert_eq!(next_leave_marker(&markers, "b2").unwrap().0, 1);
+        // More than one lifetime of slots still records new Leave intents, evicting oldest.
+        for n in 0..RECOVERY_LEAVE_SLOTS * 3 {
+            let owner = format!("c{n:x}");
+            let (slot, marker) = next_leave_marker(&markers, &owner).unwrap();
+            assert!(slot < RECOVERY_LEAVE_SLOTS);
+            assert_eq!(marker.owner, owner);
+            markers[slot] = Some(marker);
+        }
+        assert_eq!(markers.iter().flatten().count(), RECOVERY_LEAVE_SLOTS);
+        assert!(!markers.iter().flatten().any(|m| m.owner == "a1"));
+        assert!(markers.iter().flatten().any(|m| m.owner == format!("c{:x}", RECOVERY_LEAVE_SLOTS * 3 - 1)));
+        // A hostile maximum order must not overflow or grow the journal.
+        markers[0] = Some(LeaveMarker { owner: "a1".into(), order: u64::MAX });
+        assert_eq!(next_leave_marker(&markers, "d1").unwrap().1.order, u64::MAX);
+        markers.push(None);
+        assert!(next_leave_marker(&markers, "d1").unwrap().0 < RECOVERY_LEAVE_SLOTS);
+        assert_eq!(next_leave_marker(&markers, "invalid"), None);
+        assert_eq!(LeaveMarker::parse(r#"{"owner":"a1","order":2}"#), Some(LeaveMarker { owner: "a1".into(), order: 2 }));
+        for text in ["null", "{}", r#"{"owner":"a1","order":-1}"#, r#"{"owner":"../a1","order":1}"#] {
+            assert_eq!(LeaveMarker::parse(text), None);
+        }
     }
 
     /// A tab writes its settings when they change, and not again while they stay the same; the

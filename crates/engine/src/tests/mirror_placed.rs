@@ -230,7 +230,7 @@ fn a_placement_leading_to_another_component_is_reported_lost() {
     }
     s.refresh();
     let e = s.model.result(mirror).and_then(|r| r.error.clone()).unwrap_or_else(|| panic!("mirrored at the wrong placement"));
-    assert!(e.contains("no longer exists"), "{e}");
+    assert!(e.contains("no longer shows it"), "{e}");
     assert!(s.world_state().unwrap().body(&copy).is_none());
 }
 
@@ -597,4 +597,151 @@ fn a_revolve_about_a_mirrored_copys_edge_follows_a_joint_drive() {
         let after = block(&s);
         assert_ne!(after, before, "the cut turned about the old axis at {angle}°");
     }
+}
+
+/// An assembly with an unrelated component owning `Bolt` and a component `Part` owning `Bolt (2)`
+/// placed at two root occurrences (`Part:1` and `Part:2`). Returns `(other_occ, occ1, occ2)`.
+fn shared_body_two_occurrences(s: &mut Session) -> (u64, u64, u64) {
+    let other = run(s, "component.create", json!({"name": "Other"}))["occurrence"].as_u64().unwrap();
+    run(s, "solid.box", json!({"corner": [100, 0, 0], "length": 4, "width": 4, "height": 4, "body_name": "Bolt"}));
+    run(s, "component.activate", json!({"component": 0}));
+    let part = run(s, "component.create", json!({"name": "Part", "grounded": false}));
+    let (comp, occ1) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+    run(s, "solid.box", json!({"corner": [10, 0, 0], "length": 8, "width": 6, "height": 4, "body_name": "Bolt (2)"}));
+    run(s, "component.activate", json!({"component": 0}));
+    run(s, "occurrence.move", json!({"occurrence": occ1, "translate": [20, 10, 0]}));
+    let occ2 = run(s, "occurrence.copy", json!({"component": comp, "translate": [0, 50, 0]}))["occurrence"].as_u64().unwrap();
+    let world = s.world_state().unwrap();
+    assert!(world.body("Bolt (2)").is_some(), "first placement world name");
+    assert!(world.body("Bolt (2) (Part:2)").is_some(), "second placement world name");
+    (other, occ1, occ2)
+}
+
+#[test]
+fn mirror_refuses_duplicate_bare_body_name_across_occurrences() {
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let e = s.execute("solid.mirror", &json!({"bodies": ["Bolt (2)", "Bolt (2)"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e.contains("Bolt (2) (Part:1)") && e.contains("Bolt (2) (Part:2)") && e.contains("placements"), "{e}");
+    let e2 = s.execute("solid.mirror", &json!({"bodies": ["Bolt (2)", "Bolt (2) (Part:1)"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e2.contains("Bolt (2) (Part:1)") && e2.contains("Bolt (2) (Part:2)"), "{e2}");
+    let e3 = s
+        .execute("solid.pattern.rectangular", &json!({"bodies": ["Bolt (2)", "Bolt (2)"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}))
+        .unwrap_err()
+        .to_string();
+    assert!(e3.contains("Bolt (2) (Part:1)") && e3.contains("Bolt (2) (Part:2)"), "{e3}");
+}
+
+#[test]
+fn mirror_warns_when_bare_name_picks_first_of_multiple_occurrences() {
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2)"], "plane": "YZ"}));
+    let warning = r["warning"].as_str().unwrap_or("");
+    assert!(warning.contains("Bolt (2) (Part:1)") && warning.contains("Bolt (2) (Part:2)") && warning.contains("Part:1"), "{r}");
+    let copy = created(&r);
+    assert_box(world_box(&s, &copy), mirrored_yz(&s, "Bolt (2)"));
+}
+
+#[test]
+fn mirror_accepts_qualified_occurrence_names_for_first_and_second_placements() {
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let r1 = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2) (Part:1)"], "plane": "YZ"}));
+    assert!(r1["warning"].is_null(), "{r1}");
+    assert_box(world_box(&s, &created(&r1)), mirrored_yz(&s, "Bolt (2)"));
+
+    let r2 = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2) (Part:2)"], "plane": "YZ"}));
+    assert!(r2["warning"].is_null(), "{r2}");
+    assert_box(world_box(&s, &created(&r2)), mirrored_yz(&s, "Bolt (2) (Part:2)"));
+
+    let mut both = Session::default();
+    shared_body_two_occurrences(&mut both);
+    let r = run(&mut both, "solid.mirror", json!({"bodies": ["Bolt (2) (Part:1)", "Bolt (2) (Part:2)"], "plane": "YZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
+    assert_eq!(copies.len(), 2, "{r}");
+    assert_box(world_box(&both, &copies[0]), mirrored_yz(&both, "Bolt (2)"));
+    assert_box(world_box(&both, &copies[1]), mirrored_yz(&both, "Bolt (2) (Part:2)"));
+
+    let p = run(&mut both, "solid.pattern.rectangular", json!({"bodies": ["Bolt (2) (Part:1)"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 20}));
+    assert!(p["warning"].is_null(), "{p}");
+}
+
+#[test]
+fn mirror_accepts_explicit_placements_and_refuses_invalid_ones() {
+    let mut s = Session::default();
+    let (other, occ1, occ2) = shared_body_two_occurrences(&mut s);
+
+    // Mirror only the second occurrence via bare body name + explicit placements.
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2)"], "placements": [[occ2]], "plane": "YZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    assert_box(world_box(&s, &created(&r)), mirrored_yz(&s, "Bolt (2) (Part:2)"));
+
+    // Mirror both occurrences in one feature via repeated bare name + distinct placements.
+    let mut both = Session::default();
+    let (_, b_occ1, b_occ2) = shared_body_two_occurrences(&mut both);
+    let r = run(&mut both, "solid.mirror", json!({"bodies": ["Bolt (2)", "Bolt (2)"], "placements": [[b_occ1], [b_occ2]], "plane": "YZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
+    assert_eq!(copies.len(), 2, "{r}");
+    assert_box(world_box(&both, &copies[0]), mirrored_yz(&both, "Bolt (2)"));
+    assert_box(world_box(&both, &copies[1]), mirrored_yz(&both, "Bolt (2) (Part:2)"));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&both.doc.to_json()).unwrap());
+    assert_box(world_box(&reopened, &copies[0]), mirrored_yz(&reopened, "Bolt (2)"));
+    assert_box(world_box(&reopened, &copies[1]), mirrored_yz(&reopened, "Bolt (2) (Part:2)"));
+
+    // Invalid placement specifications are refused without mutating the design.
+    let before = s.doc.features.len();
+    for bad_call in [
+        json!({"bodies": ["Bolt (2)"], "placements": [[occ1], [occ2]], "plane": "YZ"}),
+        json!({"bodies": ["Bolt (2)"], "placements": [[999_999]], "plane": "YZ"}),
+        json!({"bodies": ["Bolt (2)"], "placements": [[other]], "plane": "YZ"}),
+        json!({"bodies": ["Bolt (2)", "Bolt (2)"], "placements": [[occ1], [occ1]], "plane": "YZ"}),
+        json!({"bodies": ["Bolt (2) (Part:2)"], "placements": [[occ1]], "plane": "YZ"}),
+        json!({"features": ["Box1"], "placements": [[occ1]], "plane": "YZ"}),
+    ] {
+        assert!(s.execute("solid.mirror", &bad_call).is_err(), "{bad_call}");
+        assert_eq!(s.doc.features.len(), before, "{bad_call}");
+    }
+
+    // An uncaptured move on the explicitly targeted placement is refused.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ2, "translate": [0, 5, 0], "capture": false}));
+    let e = s.execute("solid.mirror", &json!({"bodies": ["Bolt (2)"], "placements": [[occ2]], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e.contains("Capture Position"), "{e}");
+}
+
+#[test]
+fn mirror_refuses_duplicate_single_placement_and_root_bodies() {
+    // Root body with no occurrences in the design.
+    let mut root = Session::default();
+    run(&mut root, "solid.box", json!({"corner": [10, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Base"}));
+    let e = root.execute("solid.mirror", &json!({"bodies": ["Base", "Base"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e.contains("listed more than once"), "{e}");
+    let ep = root
+        .execute("solid.pattern.rectangular", &json!({"bodies": ["Base", "Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}))
+        .unwrap_err()
+        .to_string();
+    assert!(ep.contains("listed more than once"), "{ep}");
+
+    // Single-occurrence component body (`Other:1` owning `Bolt`).
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let e1 = s.execute("solid.mirror", &json!({"bodies": ["Bolt", "Bolt"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e1.contains("listed more than once"), "{e1}");
+    let e2 = s.execute("solid.mirror", &json!({"bodies": ["Bolt", "Bolt (Other:1)"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(e2.contains("listed more than once"), "{e2}");
+}
+
+#[test]
+fn mirror_warns_for_bare_pick_even_when_another_placement_is_qualified() {
+    let mut s = Session::default();
+    shared_body_two_occurrences(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Bolt (2)", "Bolt (2) (Part:2)"], "plane": "YZ"}));
+    let warning = r["warning"].as_str().unwrap_or("");
+    assert!(warning.contains("Bolt (2) (Part:1)") && warning.contains("Bolt (2) (Part:2)") && warning.contains("Part:1"), "{r}");
+    let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
+    assert_eq!(copies.len(), 2, "{r}");
+    assert_box(world_box(&s, &copies[0]), mirrored_yz(&s, "Bolt (2)"));
+    assert_box(world_box(&s, &copies[1]), mirrored_yz(&s, "Bolt (2) (Part:2)"));
 }

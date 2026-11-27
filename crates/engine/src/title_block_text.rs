@@ -20,6 +20,7 @@ use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::fields::{Component, Documented, SHEET_METAL, SheetBody, SheetMetal, Values};
 use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
+use solidcraft_geom::drawing_sheet::{LabelAlign, SheetLayout};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
 use solidcraft_geom::{Aabb2, EPS, Seg2Geom};
@@ -58,6 +59,9 @@ pub struct Laid {
 #[derive(Clone, Debug, Default)]
 pub struct Set {
     pub runs: Vec<TextRun>,
+    /// The frame's text, set apart from the block's ([`lay_frame`]): it belongs to the border, which
+    /// a sheet has with no title block.
+    pub frame: Vec<TextRun>,
     pub fonts: Vec<Font>,
 }
 
@@ -166,10 +170,18 @@ fn documented<'a>(
     sheet_metal: Option<&'a SheetMetal>,
 ) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass, sheet_metal });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, name_split: None, material, mass, sheet_metal });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass, sheet_metal })
+    Some(Component {
+        name: &c.name,
+        metadata: &c.metadata,
+        properties: Some(&c.properties),
+        name_split: c.name_split.as_ref(),
+        material,
+        mass,
+        sheet_metal,
+    })
 }
 
 /// What the sheet metal bodies component `id` (0: the design) of `design` owns agree on, as
@@ -247,6 +259,29 @@ fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &st
         .map_err(|e| SketchError::Invalid(e.to_string()))?;
     notes.extend(height.map(Note::Fit));
     Ok((lines, at))
+}
+
+/// The frame's labels on `sheet` ([`SheetLayout::frame_labels`]: the zone letters and numbers and the
+/// sheet's size), each as one line in the drawing's lettering (`fonts`), centred or left on its place.
+/// A label no font can set is left off and goes unnoted: the frame's text is never a reason to refuse
+/// a sheet.
+pub fn lay_frame(sheet: &SheetLayout, fonts: &PaperFonts) -> Laid {
+    let mut out = Laid::default();
+    for label in sheet.frame_labels() {
+        let align = match label.align {
+            LabelAlign::Centre => TextAlign::Center,
+            LabelAlign::Left => TextAlign::Left,
+        };
+        let style = TextStyle { align, ..TextStyle::default() };
+        // The anchor is the first baseline's start: the capitals are centred on the label's place.
+        let at = Vec2::new(label.at.x, label.at.y - label.cap_mm / 2.0);
+        match Outcome::from(fonts.lines(&label.text, label.cap_mm, None, &style).map(|lines| (lines, at))) {
+            Outcome::Set(text) => out.texts.push(text),
+            Outcome::Pending => out.pending = true,
+            Outcome::Refused(_) => {}
+        }
+    }
+    out
 }
 
 impl Laid {
