@@ -443,8 +443,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Bodies",
                 ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
             },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.tab_slot"] },
+            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone", "solid.tab_slot"] },
         ],
         _ => &[],
     }
