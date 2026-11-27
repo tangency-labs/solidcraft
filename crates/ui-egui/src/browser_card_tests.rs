@@ -2368,6 +2368,26 @@ fn a_saved_designs_linked_component_shows_its_badge() {
     assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
 }
 
+/// The option is a ticked or unticked row in the View section of the Browser panel's ⋯ menu,
+/// and a click on the row turns the saved setting over.
+#[test]
+fn the_fold_option_is_a_row_of_the_browser_menu() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.browser_fold_other_components, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("fold-other-components", "prefs.browser_fold_other_components", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
+    assert!(h.app.preferences.browser_fold_other_components, "a click turns it on");
+    assert!(
+        crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("fold-other-components", "prefs.browser_fold_other_components", true)),
+        "ticked"
+    );
+    crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
+    assert!(!h.app.preferences.browser_fold_other_components, "a second click turns it off");
+}
+
 /// "Fold other components on activate": activating one component folds every other placement's
 /// row and opens the active one's; off, activating leaves the rows as they are.
 #[test]

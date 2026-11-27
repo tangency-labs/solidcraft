@@ -1,34 +1,26 @@
 {
   "en": {
-    "prefs.browser_fold_other_components": "Fold other components on activate",
-    "prefs.browser_fold_other_components_note": "Making a component active folds the rows of every other component in the Browser and opens the rows down to the active one. Off: activating leaves the rows as they are."
+    "prefs.browser_fold_other_components": "Fold other components on activate"
   },
   "de": {
-    "prefs.browser_fold_other_components": "Andere Komponenten beim Aktivieren einklappen",
-    "prefs.browser_fold_other_components_note": "Wird eine Komponente aktiviert, klappt der Browser die Zeilen aller anderen Komponenten ein und öffnet die Zeilen bis zur aktiven. Aus: Das Aktivieren lässt die Zeilen, wie sie sind."
+    "prefs.browser_fold_other_components": "Andere Komponenten beim Aktivieren einklappen"
   },
   "ja": {
-    "prefs.browser_fold_other_components": "アクティブ化時に他のコンポーネントを折りたたむ",
-    "prefs.browser_fold_other_components_note": "コンポーネントをアクティブにすると、ブラウザで他のすべてのコンポーネントの行を折りたたみ、アクティブなコンポーネントまでの行を開きます。オフ: アクティブ化しても行はそのままです。"
+    "prefs.browser_fold_other_components": "アクティブ化時に他のコンポーネントを折りたたむ"
   },
   "zh": {
-    "prefs.browser_fold_other_components": "激活时折叠其他组件",
-    "prefs.browser_fold_other_components_note": "激活某个组件时，浏览器会折叠其他所有组件的行，并展开到当前激活组件的各行。关闭：激活时各行保持原样。"
+    "prefs.browser_fold_other_components": "激活时折叠其他组件"
   },
   "ko": {
-    "prefs.browser_fold_other_components": "활성화할 때 다른 구성요소 접기",
-    "prefs.browser_fold_other_components_note": "구성요소를 활성화하면 브라우저에서 다른 모든 구성요소의 행을 접고 활성 구성요소까지의 행을 엽니다. 끄기: 활성화해도 행은 그대로입니다."
+    "prefs.browser_fold_other_components": "활성화할 때 다른 구성요소 접기"
   },
   "vi": {
-    "prefs.browser_fold_other_components": "Thu gọn các thành phần khác khi kích hoạt",
-    "prefs.browser_fold_other_components_note": "Khi kích hoạt một thành phần, Trình duyệt thu gọn các hàng của mọi thành phần khác và mở các hàng dẫn đến thành phần đang hoạt động. Tắt: kích hoạt giữ nguyên các hàng."
+    "prefs.browser_fold_other_components": "Thu gọn các thành phần khác khi kích hoạt"
   },
   "ar": {
-    "prefs.browser_fold_other_components": "طي المكونات الأخرى عند التنشيط",
-    "prefs.browser_fold_other_components_note": "عند تنشيط مكون، يطوي المستعرض صفوف كل المكونات الأخرى ويفتح الصفوف وصولًا إلى المكون النشط. إيقاف: يترك التنشيط الصفوف كما هي."
+    "prefs.browser_fold_other_components": "طي المكونات الأخرى عند التنشيط"
   },
   "he": {
-    "prefs.browser_fold_other_components": "קיפול רכיבים אחרים בהפעלה",
-    "prefs.browser_fold_other_components_note": "הפעלת רכיב מקפלת בעץ התכן את השורות של כל שאר הרכיבים ופותחת את השורות עד לרכיב הפעיל. כבוי: ההפעלה משאירה את השורות כפי שהן."
+    "prefs.browser_fold_other_components": "קיפול רכיבים אחרים בהפעלה"
   }
 }

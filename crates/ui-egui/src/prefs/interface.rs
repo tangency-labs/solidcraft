@@ -687,13 +687,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "browser_eye_left",
                         value: |p| &mut p.browser_eye_left,
                     },
-                    // Only the active component's rows stay open.
-                    Check {
-                        label: "prefs.browser_fold_other_components",
-                        help: "prefs.browser_fold_other_components_note",
-                        key: "browser_fold_other_components",
-                        value: |p| &mut p.browser_fold_other_components,
-                    },
                     Check {
                         label: "prefs.browser_body_features",
                         help: "prefs.browser_body_features_note",

@@ -5473,7 +5473,6 @@ mod tests {
             ("browser_components_open", "prefs.browser_components_open"),
             ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
             ("browser_eye_left", "prefs.browser_eye_left"),
-            ("browser_fold_other_components", "prefs.browser_fold_other_components"),
             ("browser_body_features", "prefs.browser_body_features"),
             ("history_folder_kind_icon", "prefs.history_folder_kind_icon"),
             ("history_steps_component", "prefs.history_steps_component"),
@@ -5557,7 +5556,7 @@ mod tests {
                 "history_last_stops_at_component",
                 "feature_menus_act_on_selection",
             ],
-            &["browser_components_open", "browser_rows_start_closed", "browser_eye_left", "browser_fold_other_components", "browser_body_features"],
+            &["browser_components_open", "browser_rows_start_closed", "browser_eye_left", "browser_body_features"],
             &[
                 "sketch_tab_always",
                 "persistent_ribbon_pressed",
