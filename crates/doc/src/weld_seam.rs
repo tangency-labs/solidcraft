@@ -245,6 +245,13 @@ pub struct SeamSite {
 /// [`SeamRefusal::PastFaceEdge`] and [`SeamRefusal::EdgeNotMeasured`] where the stack does not
 /// take the seam. The errors of the kernel calls otherwise.
 pub fn seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64) -> Result<SeamSite> {
+    site(sheets, picked, face, start, path, width, MARKS.edge * width / 2.0)
+}
+
+/// [`seam_site`] for a weld along the path whose widest part reaches `widest` from it: every arc
+/// of the path must turn wider than that, by more than the zone tolerance, so the site never
+/// takes an arc the weld's build refuses.
+pub(crate) fn site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64, widest: f64) -> Result<SeamSite> {
     if path.is_empty() {
         return bad("a seam with no path");
     }
@@ -265,13 +272,12 @@ pub fn seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], 
     let tol = profiles::zone_tolerance()?;
     let n = first.normal;
     let laid = lay(start, path, n, tol)?;
-    // an arc the build refuses: tighter than the edge zone
-    let edge = MARKS.edge * width / 2.0;
+    // an arc the build refuses: tighter than the weld's widest part
     for (i, piece) in laid.iter().enumerate() {
         if let Laid::Arc { radius, .. } = *piece
-            && radius - edge <= tol
+            && radius - widest <= tol
         {
-            return Err(SeamRefusal::ArcTighterThanSeam { piece: i, fits: 2.0 * radius / MARKS.edge });
+            return Err(SeamRefusal::ArcTighterThanSeam { piece: i, fits: radius * width / widest });
         }
     }
 
@@ -408,7 +414,7 @@ impl Laid {
     /// How far the piece reaches from the origin along any axis, at most: a line's largest end
     /// coordinate; an arc's largest centre coordinate plus its radius, which bounds an arc that
     /// bulges past its ends.
-    fn reach(&self) -> f64 {
+    pub(crate) fn reach(&self) -> f64 {
         let largest = |p: [f64; 3]| p.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
         match *self {
             Self::Line { a, b, .. } => largest(a).max(largest(b)),
