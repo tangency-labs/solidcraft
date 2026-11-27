@@ -6,6 +6,10 @@ If Cargo reports that resolver `3` is invalid, it is too old to read the
 workspace manifest. When using rustup on Linux or macOS, check that
 `$HOME/.cargo/bin` comes before the system Cargo directory in `PATH`.
 
+On Linux the desktop app records dictation from the microphone through ALSA, so it needs the ALSA
+development files (`libasound2-dev` on Debian and Ubuntu, `alsa-lib-devel` on Fedora). The CLI
+does not.
+
 For a headless build, run `cargo build --locked --release -p solidcraft-cli`
 from the repository root.
 

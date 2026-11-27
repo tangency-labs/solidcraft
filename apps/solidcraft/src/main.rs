@@ -33,6 +33,7 @@ mod desktop_theme;
 mod desktop_transparency;
 mod device_lost;
 mod gpu_startup;
+mod microphone;
 #[cfg(target_os = "windows")]
 mod native_crash;
 #[cfg(target_os = "macos")]
@@ -1174,8 +1175,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(DialogKind::Open, future.await) })
         })),
-        pick_program: Some(Box::new(move || {
-            let dialog = program_parent.clone().set_title("Choose your slicer");
+        pick_program: Some(Box::new(move |title: &str| {
+            let dialog = program_parent.clone().set_title(title);
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
@@ -1243,6 +1244,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
+        recorder: Some(std::sync::Arc::new(microphone::Microphone)),
         tickets_http: Some(std::sync::Arc::new(tickets_http)),
         #[cfg(feature = "usage-stats")]
         usage_http: Some(std::sync::Arc::new(usage_http)),

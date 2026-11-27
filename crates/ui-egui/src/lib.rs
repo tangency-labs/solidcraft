@@ -629,10 +629,13 @@ pub struct Services {
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
-    pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    pub pick_program: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Lazy background observation; `needed` arms polling, the return is cached only.
     pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
+    /// The microphone, for dictating a message in the Assistant (#10883); None: no microphone
+    /// button (the browser build).
+    pub recorder: Option<std::sync::Arc<dyn agent_chat::dictation::Recorder>>,
     /// Bring such a design back and open it when it arrives (asks the user for access, so call it
     /// in the click that chose it).
     pub restore_file: Option<Box<dyn Fn(&str)>>,

@@ -14,5 +14,11 @@
 	     not map its code with MAP_JIT. Without it, Run Plugin ends the app at once (#16141). -->
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>
+	<!-- Dictation in the Assistant (#10883) records from the microphone (apps/solidcraft/src/
+	     microphone.rs). Under the hardened runtime the microphone gives silence without this
+	     entitlement; without NSMicrophoneUsageDescription in Info.plist macOS ends the app when it
+	     asks for the microphone. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

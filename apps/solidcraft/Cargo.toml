@@ -68,6 +68,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # API keys of the agent chat's API agents (docs/agent-chat.md) live in the system keychain:
 # Keychain on macOS, Credential Manager on Windows, the Secret Service (pure-Rust D-Bus) elsewhere.
 keyring = { version = "3.6", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
+# Dictation in the Assistant (#10883): the default microphone (ALSA on Linux, Core Audio on macOS,
+# WASAPI on Windows). No default features: no JACK, PulseAudio or ASIO backends.
+cpal = { version = "0.18", default-features = false }
 
 # Opening a design while SolidCraft runs hands it to that window (src/single_instance.rs): a Unix
 # domain socket on Linux and macOS, a named pipe on Windows, both local to the user.
