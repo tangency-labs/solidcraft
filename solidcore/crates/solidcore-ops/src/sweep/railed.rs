@@ -179,8 +179,7 @@ pub fn loft_rails_to_point(
             Err(e) => return Ok(Err(e)),
         };
         let n = section.curves.len();
-        let (Some(curves), Some(rail_curves)) = (made.curves.get(..n), made.curves.get(n..))
-        else {
+        let (Some(curves), Some(rail_curves)) = (made.curves.get(..n), made.curves.get(n..)) else {
             return Ok(Err(Error::Argument));
         };
         let base = KernelSection {

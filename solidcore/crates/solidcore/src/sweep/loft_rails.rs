@@ -802,9 +802,7 @@ impl<'a> Loft<'a> {
     fn anchor_rails(&self, k: &Kernel) -> Result<Vec<Vec<Anchor>>> {
         let tol = k.tolerances.zone_tol_3d;
         let mut out = Vec::new();
-        let tip = self
-            .to_point
-            .then(|| self.sources.len().saturating_sub(1));
+        let tip = self.to_point.then(|| self.sources.len().saturating_sub(1));
         for rail in self.rails {
             let mut anchors: Vec<Anchor> = Vec::new();
             for (si, (s, curves)) in self.sources.iter().zip(&self.sections).enumerate() {
@@ -1065,7 +1063,9 @@ pub fn loft_rails_to_point(
         .unitize()
         .map_err(|_| invalid("a section plane's normal of no length"))?;
     if (apex - base.origin).dot(normal).abs() <= k.tolerances.zone_tol_3d {
-        return Err(invalid("the apex of a loft to a point lies in the base's plane"));
+        return Err(invalid(
+            "the apex of a loft to a point lies in the base's plane",
+        ));
     }
     let tip_curves = base
         .curves
@@ -1119,7 +1119,12 @@ pub fn loft_rails_to_point(
     let params: Vec<f64> = wires.iter().map(|w| w.f).collect();
     let mut rows = Vec::new();
     for w in wires.iter().take(wires.len().saturating_sub(1)) {
-        rows.push(w.curves.iter().map(Plain::curve).collect::<Result<Vec<_>>>()?);
+        rows.push(
+            w.curves
+                .iter()
+                .map(Plain::curve)
+                .collect::<Result<Vec<_>>>()?,
+        );
     }
     Ok(RailedToPoint {
         rows,
@@ -1459,14 +1464,8 @@ fn skin_and_certify<S>(
         }
         wires.sort_by(|a, b| a.span.cmp(&b.span).then(a.f.total_cmp(&b.f)));
         let skin = skin_of(k, &wires)?;
-        let (bounds, failing) = certify(
-            k,
-            &surfaces_of(&skin),
-            &wires,
-            rails,
-            tolerance,
-            to_point,
-        )?;
+        let (bounds, failing) =
+            certify(k, &surfaces_of(&skin), &wires, rails, tolerance, to_point)?;
         reached = bounds.iter().copied().fold(0.0_f64, f64::max);
         if failing.is_empty() {
             return Ok((skin, wires, bounds));
