@@ -1,77 +1,104 @@
-//! Contracts and result types for the generator commands (`generator.parse`, `generator.build`,
-//! `generator.check`, `generator.list`): a manufacturer's ordering code to a part, from a
-//! data-only generator package (docs/formats/generator-package.md).
+//! Contracts and result types for the generator commands (`generator.list`, `generator.parse`,
+//! `generator.code`, `generator.template`, `generator.insert`, `generator.check`): a
+//! manufacturer's ordering code to a parametric part and back (docs/formats/generator.md).
+
+use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-/// Read an ordering code against a generator package and say what it means, without changing
-/// the design. A code the package refuses is an answer (`ok` false), not an error.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct GeneratorParseParams {
-    /// The package: the path of a `.generator.json` file, or the id of an installed package. Give
-    /// this or `package_json`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<String>,
-    /// The package itself, as an object or as its JSON text, instead of `package`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package_json: Option<serde_json::Value>,
-    /// The ordering code, at most 128 characters.
-    pub code: String,
-}
-
-/// Build a part from an ordering code: parse it, expand the package's command template and run
-/// the commands in a new component, as one undo step. A code the package refuses is an error
-/// that says why; a failing step leaves the design as it was.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct GeneratorBuildParams {
-    /// The package: the path of a `.generator.json` file, or the id of an installed package. Give
-    /// this or `package_json`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<String>,
-    /// The package itself, as an object or as its JSON text, instead of `package`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package_json: Option<serde_json::Value>,
-    /// The ordering code, at most 128 characters.
-    pub code: String,
-    /// Save the design to this path after building, as `file.save` does.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub save: Option<String>,
-}
-
-/// Run the checks a package carries (expected volume, bounding box, face count, dimensions and
-/// refusals per code), each in a scratch design. The open design is not changed.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct GeneratorCheckParams {
-    /// The package: the path of a `.generator.json` file, or the id of an installed package. Give
-    /// this or `package_json`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<String>,
-    /// The package itself, as an object or as its JSON text, instead of `package`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package_json: Option<serde_json::Value>,
-}
+use serde_json::{Map, Value};
 
 /// List the generator packages installed for this user.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct GeneratorListParams {}
 
-/// One source a package cites.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorSource {
-    pub id: String,
-    pub title: String,
-    /// Where it can be read; empty when the package gives none.
-    pub url: String,
-    /// The pages used; empty when the package gives none.
-    pub pages: String,
+/// Read an ordering code with a generator and say what it means, without changing the design. A
+/// code the generator refuses is an answer (`ok` false), not an error.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneratorParseParams {
+    /// The generator: an installed package's id, or the path of its folder (or its
+    /// `generator.toml`).
+    pub generator: String,
+    /// The ordering code, at most 128 characters. Case and separators are ignored.
+    pub code: String,
 }
 
-/// What a package says about itself.
+/// Print parameters as an ordering code.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneratorCodeParams {
+    /// The generator: an installed package's id, or the path of its folder.
+    pub generator: String,
+    /// The field values, by name (the `fields` a parse gives): text, numbers or true/false.
+    pub parameters: Map<String, Value>,
+    /// Print with this template (its pattern as written); default: the first that can say them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+}
+
+/// Try a field template alone: read a code into fields, or print fields as a code. Every field
+/// needs its own spec, as `{length: int 40..2000}`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneratorTemplateParams {
+    /// The template, at most 256 characters.
+    pub template: String,
+    /// A code to read. Give this or `parameters`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Field values to print. Give this or `code`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Map<String, Value>>,
+}
+
+/// Insert a generator's part: a component linked to the package's parametric design, built for
+/// an ordering code (or for field values) with its configuration row and parameters, as one undo
+/// step. The part stays parametric: `component.set_link_parameters` changes its values later.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneratorInsertParams {
+    /// The generator: an installed package's id, or the path of its folder.
+    pub generator: String,
+    /// The ordering code. Give this or `parameters`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Field values, as a parse gives them, instead of a code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Map<String, Value>>,
+    /// Where to put it: any of `parent`, `translate`, `axis`, `angle`, `origin`, `matrix`,
+    /// `to_matrix`, `tolerance`, as `component.insert_design` takes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Map<String, Value>>,
+}
+
+/// Run the checks a package declares (its `[[example]]` codes): each must read, print back, insert
+/// in a scratch design and measure as declared; refusals must refuse. The open design is not
+/// changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GeneratorCheckParams {
+    /// The generator: an installed package's id, or the path of its folder.
+    pub generator: String,
+}
+
+/// Where a configuration row's numbers come from.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeneratorProvenance {
+    /// The configuration row.
+    pub row: String,
+    /// The source document or catalogue.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    /// `verified`, `needs_review` or `not_modelled`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+/// One installed generator.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GeneratorSummary {
     pub id: String,
@@ -79,174 +106,132 @@ pub struct GeneratorSummary {
     pub description: String,
     pub license: String,
     pub author: String,
-    /// The package's own claim: `checked`, `reviewed` or `drawing-matched`. Only a label until
-    /// the Workshop index verifies it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub guarantee: Option<String>,
-    /// The provenance text the package shows beside its parts.
-    pub provenance: String,
-    pub sources: Vec<GeneratorSource>,
-    /// Who checked the package and against what, when it says. Evidence for the guarantee, not
-    /// proof: the Workshop index verifies the level.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review: Option<GeneratorReview>,
+    /// The package folder.
+    pub path: String,
+    /// Its ordering-code templates, as written.
+    pub templates: Vec<String>,
+    /// What every code starts with, for an index.
+    pub prefixes: Vec<String>,
 }
 
-/// The package's `review` object.
+/// What `generator.list` returns.
 #[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorReview {
-    pub reviewer: String,
-    /// `person`, `ai` or `automatic`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviewer_kind: Option<String>,
-    /// `YYYY-MM-DD`, or empty.
-    pub date: String,
-    /// A hash of the sources the review read, as the package gives it.
-    pub sources_hash: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub level: Option<String>,
-    pub notes: String,
-}
-
-/// A named value: a field of the code or a variable.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorValue {
-    pub name: String,
-    /// A number, text, true or false, or a list of text.
-    pub value: serde_json::Value,
-}
-
-/// A table row a code used, with its provenance.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorRow {
-    /// The name the package gave the lookup.
-    pub lookup: String,
-    pub table: String,
-    /// The key values.
-    pub key: Vec<String>,
-    /// The id of the source the row cites.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub page: Option<String>,
-    /// The status of the row's columns that have none of their own: `published`, `labelled`,
-    /// `measured`, `derived` or `approximate`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    /// The columns that have a status of their own, by column name.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub column_status: std::collections::BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+pub struct GeneratorListResult {
+    pub generators: Vec<GeneratorSummary>,
+    /// Folders that are not valid packages, with why.
+    pub skipped: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `generator.parse` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GeneratorParseResult {
-    /// Whether the package accepts the code.
+    /// Whether the code was accepted.
     pub ok: bool,
-    /// When refused: `invalid` (not a code of this series, or a combination it does not offer) or
-    /// `not_modelled` (a real code this generator does not model).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// When refused: `invalid`, `not_modelled`, `limit` or `error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// When refused: the package's own words.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// When refused: the generator's own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    pub generator: GeneratorSummary,
-    /// The code as read (trimmed).
+    /// The generator's id.
+    pub generator: String,
+    /// The code in the template's own spelling (as typed when refused).
     pub code: String,
-    /// The fields the grammar and defaults gave, by name.
+    /// The template that read it, as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    /// What the code says, field by field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Map<String, Value>>,
+    /// The configuration row to select.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<String>,
+    /// The values for the design's parameters, as expressions.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, String>,
+    /// The part's description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<GeneratorProvenance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fields: Vec<GeneratorValue>,
-    /// The package's variables, in order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variables: Vec<GeneratorValue>,
-    /// The table rows the code used, with their provenance.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rows: Vec<GeneratorRow>,
-    /// How many commands a build would run.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub commands: Option<usize>,
-    /// The name of the component a build would make.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub component: Option<String>,
-    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// What `generator.build` returns.
+/// What `generator.code` returns.
 #[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorBuildResult {
-    pub generator: GeneratorSummary,
+pub struct GeneratorCodeResult {
     pub code: String,
-    /// The component the part is in; absent when the package builds in the active component.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub component: Option<String>,
-    /// How many commands ran.
-    pub commands: usize,
-    /// The bodies the build made.
-    pub bodies: Vec<String>,
-    /// Their total volume (mm³), when they enclose one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub volume_mm3: Option<f64>,
-    /// The size of their bounding box (mm), x, y, z.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bbox_mm: Option<[f64; 3]>,
-    /// Their total face count.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub faces: Option<u64>,
-    /// The fields and the table rows the build used, as `generator.parse` gives them.
-    pub fields: Vec<GeneratorValue>,
-    pub rows: Vec<GeneratorRow>,
-    /// The path the design was saved to, when `save` was given.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub saved: Option<String>,
-    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    /// The template that printed it, as written.
+    pub template: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// One check of a package, run.
+/// What `generator.template` returns: the fields of a code, or a code for fields.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeneratorTemplateResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// What every code of the template starts with.
+    pub prefixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `generator.insert` made.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeneratorInsertResult {
+    pub generator: String,
+    /// The ordering code, printed back; it is the component's part number.
+    pub code: String,
+    /// The new component, by id.
+    pub component: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<String>,
+    pub parameters: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<GeneratorProvenance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// The bodies the part brought in.
+    pub bodies: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume_mm3: Option<f64>,
+    /// The part's bounding-box size in mm, `[x, y, z]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bbox_mm: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faces: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One checked code.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GeneratorCheckRow {
     pub code: String,
     pub ok: bool,
-    /// What did not match, or empty.
+    /// What was wrong; empty when `ok`.
     pub problems: Vec<String>,
 }
 
 /// What `generator.check` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GeneratorCheckResult {
-    pub generator: GeneratorSummary,
-    /// Whether every check and every declared example held.
+    pub generator: String,
     pub passed: bool,
     pub results: Vec<GeneratorCheckRow>,
-    /// In the warn parameter-check mode: what the call's parameters got wrong.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub param_warnings: Vec<String>,
-}
-
-/// One installed package.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct InstalledGenerator {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub guarantee: Option<String>,
-    /// Where the file is.
-    pub path: String,
-}
-
-/// What `generator.list` returns.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct GeneratorListResult {
-    pub generators: Vec<InstalledGenerator>,
-    /// Files in the folder that are not valid packages, with why.
-    pub skipped: Vec<String>,
-    /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

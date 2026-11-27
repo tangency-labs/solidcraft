@@ -1,152 +1,156 @@
-//! `generator.parse`, `generator.build`, `generator.check` and `generator.list`: an ordering
-//! code becomes a part through the normal command path, and what cannot be built changes nothing.
+//! The generator commands: an ordering code inserts a parametric part through the normal command
+//! path, the part keeps its parameters and rebuilds within the design's declared limits, and what
+//! cannot be built changes nothing.
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::Session;
-
-const EXAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/generators/slot-nut-20.generator.json");
-
-fn run(s: &mut Session, id: &str, params: Value) -> Value {
-    match s.execute(id, &params) {
-        Ok(v) => v,
-        Err(e) => panic!("{id} {params}: {e}"),
-    }
-}
+use crate::generator::tests::{nut_package, run};
 
 fn body_count(s: &mut Session) -> usize {
     run(s, "inspect.measure", json!({"names_only": true}))["body_count"].as_u64().unwrap() as usize
 }
 
+fn volume(s: &mut Session) -> f64 {
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+fn path(dir: &tempfile::TempDir) -> String {
+    dir.path().to_string_lossy().into_owned()
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-6 * b.abs().max(1.0)
+}
+
 #[test]
-fn a_code_builds_a_component_with_the_figures_the_package_expects() {
+fn a_code_inserts_a_part_with_the_figures_its_row_and_length_give() {
+    let dir = nut_package(None);
     let mut s = Session::default();
-    let r = run(&mut s, "generator.build", json!({"package": EXAMPLE, "code": "TN20-M4"}));
-    assert_eq!(r["component"], "TN20-M4");
-    assert_eq!(r["commands"], 2);
-    assert_eq!(r["generator"]["id"], "example-slot-nut-20");
-    assert_eq!(r["rows"][0]["status"], "approximate");
-    let volume = r["volume_mm3"].as_f64().unwrap();
-    assert!((volume - 365.788).abs() < 0.01, "{volume}");
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "tn m4 40"}));
+    assert_eq!(r["code"], "TN-M4-40");
+    assert_eq!(r["configuration"], "M4");
+    assert_eq!(r["parameters"], json!({"length": "40 mm"}));
+    assert_eq!(r["provenance"]["status"], "verified");
+    // 7 x 3.2 x 40 plate, and 2 pegs of 8 mm3 (the count follows the length).
+    assert!(close(r["volume_mm3"].as_f64().unwrap(), 912.0), "{r}");
     let size: Vec<f64> = r["bbox_mm"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
-    for (got, want) in size.iter().zip([10.0, 10.0, 4.0]) {
-        assert!((got - want).abs() < 1e-6, "{size:?}");
-    }
-    assert_eq!(body_count(&mut s), 1);
+    assert!(close(size[0], 40.0 + 0.0) || size[0] >= 40.0, "{size:?}");
     // One undo step takes the whole part away.
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(body_count(&mut s), 0);
 }
 
 #[test]
-fn a_package_can_be_given_inline_and_a_second_hole_is_a_repeat() {
-    let text = std::fs::read_to_string(EXAMPLE).unwrap();
-    let object: Value = serde_json::from_str(&text).unwrap();
-    for package_json in [object, Value::String(text)] {
-        let mut s = Session::default();
-        let r = run(&mut s, "generator.build", json!({"package_json": package_json, "code": "tn20-m5-2"}));
-        assert_eq!(r["commands"], 3);
-        let volume = r["volume_mm3"].as_f64().unwrap();
-        assert!((volume - 469.31).abs() < 0.05, "{volume}");
-    }
+fn the_inserted_part_stays_parametric_and_stays_within_its_limits() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let component = r["component"].as_u64().unwrap();
+    assert!(close(volume(&mut s), 912.0));
+    // A longer part: the plate grows and the row of pegs gets a third peg.
+    run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": {"length": "60 mm"}}));
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0), "{}", volume(&mut s));
+    // Out of the declared range: refused, naming the rule, and nothing changes.
+    let e = s
+        .execute("component.set_link_parameters", &json!({"component": component, "parameters": {"length": "120 mm"}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("Length range"), "{e}");
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
+    // A name the design does not have is refused too.
+    assert!(s.execute("component.set_link_parameters", &json!({"component": component, "parameters": {"nope": "1 mm"}})).is_err());
+    // Undo goes back to 40 mm; clearing the parameters goes back to the row's own length.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(close(volume(&mut s), 912.0));
+    run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": null}));
+    assert!(close(volume(&mut s), 912.0));
+}
+
+#[test]
+fn parameters_are_kept_by_the_link_and_saved_with_the_design() {
+    let dir = nut_package(None);
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("assembly.sc");
+    let mut s = Session::default();
+    run(&mut s, "generator.insert", json!({"generator": path(&dir), "parameters": {"size": "M6", "length": 80}}));
+    let want = 10.0 * 5.0 * 80.0 + 4.0 * 8.0;
+    assert!(close(volume(&mut s), want), "{}", volume(&mut s));
+    run(&mut s, "file.save", json!({"path": file}));
+    let mut again = Session::default();
+    run(&mut again, "file.open", json!({"path": file}));
+    assert!(close(volume(&mut again), want), "{}", volume(&mut again));
+    let component = run(&mut again, "component.links", json!({}))["links"][0]["component"].as_u64().unwrap();
+    // Update Links builds it again with the saved values.
+    run(&mut again, "component.update_links", json!({"component": component}));
+    assert!(close(volume(&mut again), want));
+}
+
+#[test]
+fn parse_code_and_template_answer_without_changing_the_design() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M5-20-S"}));
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["fields"], json!({"size": "M5", "length": 20, "grade": "steel"}));
+    assert_eq!(r["configuration"], "M5");
+    assert_eq!(r["warnings"].as_array().unwrap().len(), 1);
+    let refused = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M8-40"}));
+    assert_eq!((refused["ok"].clone(), refused["reason"].clone()), (json!(false), json!("not_modelled")));
+    assert!(refused["message"].as_str().unwrap().contains("not modelled"));
+    let c = run(&mut s, "generator.code", json!({"generator": path(&dir), "parameters": r["fields"]}));
+    assert_eq!(c["code"], "TN-M5-20-S");
+    assert!(s.execute("generator.code", &json!({"generator": path(&dir), "parameters": {"size": "M9", "length": 20}})).is_err());
+    let t = run(&mut s, "generator.template", json!({"template": "MGN{size: 7|9|12|15}R{length: int 40..2000}", "code": "mgn15r600"}));
+    assert_eq!(t["parameters"], json!({"size": "15", "length": 600}));
+    assert_eq!(t["prefixes"], json!(["MGN7", "MGN9", "MGN12", "MGN15"]));
+    assert_eq!(body_count(&mut s), 0);
 }
 
 #[test]
 fn a_refused_code_is_an_error_that_changes_nothing() {
+    let dir = nut_package(None);
     let mut s = Session::default();
-    for (code, words) in [("TN20-M3-2", "not offered"), ("TN20-M6-2", "not modelled"), ("TN20-M9", "not a TN20 ordering code"), ("", "not a TN20")] {
-        let e = s.execute("generator.build", &json!({"package": EXAMPLE, "code": code})).unwrap_err().to_string();
+    for (code, words) in [("TN-M8-40", "not modelled"), ("TN-M4-45", "ordering code"), ("", "ordering code")] {
+        let e = s.execute("generator.insert", &json!({"generator": path(&dir), "code": code})).unwrap_err().to_string();
         assert!(e.contains(words), "{code}: {e}");
     }
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir)})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40", "parameters": {}})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40", "placement": {"colour": 1}})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": "no-such-generator", "code": "TN-M4-40"})).is_err());
     assert_eq!(body_count(&mut s), 0);
 }
 
 #[test]
-fn a_failing_step_leaves_the_design_as_it_was() {
+fn the_part_is_placed_and_named_from_the_code() {
+    let dir = nut_package(None);
     let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
-    let package = json!({
-        "format": "solidcraft-generator/1", "id": "failing-test", "name": "Failing",
-        "grammar": {"alternatives": [[{"lit": "F"}]]},
-        "steps": [
-            {"command": "solid.box", "params": {"length": 3, "width": 3, "height": 3}},
-            {"command": "solid.box", "params": {"length": "not a length", "width": 3, "height": 3}}
-        ]
-    });
-    let e = s.execute("generator.build", &json!({"package_json": package, "code": "F"})).unwrap_err().to_string();
-    assert!(e.contains("step 2") && e.contains("solid.box"), "{e}");
-    assert_eq!(body_count(&mut s), 1, "the first step was undone with the rest");
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M6-30", "placement": {"translate": [100, 0, 0]}}));
+    assert_eq!(r["description"], "T-nut M6 x 30 mm, zinc");
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"].as_array().unwrap().len(), 1);
+    let comps = run(&mut s, "component.list", json!({}));
+    assert!(comps.to_string().contains("TN-M6-30"), "{comps}");
 }
 
 #[test]
-fn parse_answers_a_refusal_instead_of_failing() {
+fn check_runs_the_declared_examples_and_reports_a_wrong_figure() {
+    let dir = nut_package(None);
     let mut s = Session::default();
-    let ok = run(&mut s, "generator.parse", json!({"package": EXAMPLE, "code": "TN20-M5-2"}));
-    assert_eq!(ok["ok"], true);
-    assert_eq!(ok["commands"], 3);
-    assert_eq!(ok["component"], "TN20-M5-2");
-    let holes = ok["fields"].as_array().unwrap().iter().find(|f| f["name"] == "holes").unwrap();
-    assert_eq!(holes["value"], 2);
-    assert_eq!(ok["rows"][0]["source"], "S1");
-    let no = run(&mut s, "generator.parse", json!({"package": EXAMPLE, "code": "TN20-M6-2"}));
-    assert_eq!((no["ok"].clone(), no["reason"].clone()), (json!(false), json!("not_modelled")));
-    let long = "TN20-M4".to_string() + &"9".repeat(5000);
-    let no = run(&mut s, "generator.parse", json!({"package": EXAMPLE, "code": long}));
-    assert_eq!(no["ok"], false);
-    assert_eq!(no["reason"], "error");
-    // Parsing builds nothing.
-    assert_eq!(body_count(&mut s), 0);
-}
-
-#[test]
-fn the_packages_own_checks_pass_in_scratch_designs() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
-    let r = run(&mut s, "generator.check", json!({"package": EXAMPLE}));
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
     assert_eq!(r["passed"], true, "{r}");
-    assert!(r["results"].as_array().unwrap().len() >= 6);
-    assert_eq!(body_count(&mut s), 1, "the open design is not touched");
-    // A wrong expectation is reported, not hidden.
-    let mut package: Value = serde_json::from_str(&std::fs::read_to_string(EXAMPLE).unwrap()).unwrap();
-    package["checks"] = json!([{"code": "TN20-M4", "volume_mm3": 1.0}, {"code": "TN20-M7", "invalid": true, "message_contains": "nonsense"}]);
-    let r = run(&mut s, "generator.check", json!({"package_json": package}));
+    assert_eq!(r["results"].as_array().unwrap().len(), 2);
+    let wrong = std::fs::read_to_string(dir.path().join("generator.toml")).unwrap().replace("volume_mm3 = 912.0", "volume_mm3 = 900.0");
+    std::fs::write(dir.path().join("generator.toml"), wrong).unwrap();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
     assert_eq!(r["passed"], false);
-    assert!(r["results"].as_array().unwrap().iter().filter(|row| row["ok"] == false).count() >= 2);
+    assert!(r["results"][0]["problems"][0].as_str().unwrap().contains("volume"), "{r}");
 }
 
 #[test]
-fn hostile_parameters_are_errors_never_panics() {
-    let mut s = Session::default();
-    let junk = [
-        json!({}),
-        json!({"code": "TN20-M4"}),
-        json!({"package": EXAMPLE}),
-        json!({"package": EXAMPLE, "package_json": {}, "code": "x"}),
-        json!({"package_json": 5, "code": "x"}),
-        json!({"package_json": [], "code": "x"}),
-        json!({"package_json": "not json", "code": "x"}),
-        json!({"package": "/nonexistent/none.generator.json", "code": "x"}),
-        json!({"package": "../../etc/passwd", "code": "x"}),
-        json!({"package": "Bad Id!", "code": "x"}),
-        json!({"package": "no-such-installed-id", "code": "x"}),
-        json!({"package": EXAMPLE, "code": 5}),
-        json!({"package": EXAMPLE, "code": "x", "extra": 1}),
-        json!({"package": "/dev/null", "code": "x"}),
-        json!({"package": "/", "code": "x"}),
-    ];
-    for id in ["generator.parse", "generator.build", "generator.check"] {
-        for p in &junk {
-            let _ = s.execute(id, p);
-        }
-    }
-    assert!(s.execute("generator.build", &json!({"package": EXAMPLE, "code": "x".repeat(1 << 20)})).is_err());
-    assert_eq!(body_count(&mut s), 0);
-}
-
-#[test]
-fn list_reads_the_installed_folder_and_never_fails() {
+fn list_answers_with_the_installed_generators_and_what_it_skipped() {
     let mut s = Session::default();
     let r = run(&mut s, "generator.list", json!({}));
-    assert!(r["generators"].is_array() && r["skipped"].is_array());
-    assert!(s.execute("generator.list", &json!({"x": 1})).is_err());
+    assert!(r["generators"].is_array() && r["skipped"].is_array(), "{r}");
 }

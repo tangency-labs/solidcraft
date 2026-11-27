@@ -1,13 +1,12 @@
-//! Installed generator packages: the `.generator.json` files in the user's `generators` folder.
-//! This is the only place generator code touches the file system, and it only reads: one folder
-//! (`generators` in the per-user data folder, or the one `SOLIDCRAFT_GENERATORS_DIR` names) and
-//! the one file a command is given, each at most one package's size.
+//! Installed generator packages: folders in the user's `generators` folder, each holding a
+//! `generator.toml`. This is the only place generator code looks for packages, and it only reads:
+//! one folder (`generators` in the per-user data folder, or the one `SOLIDCRAFT_GENERATORS_DIR`
+//! names) and the one folder a command is given.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::{Generator, MAX_PACKAGE_BYTES};
+use super::package::Package;
 
 /// The most packages listed from the folder.
 const MAX_LISTED: usize = 256;
@@ -20,49 +19,61 @@ pub fn dir() -> Option<PathBuf> {
     }
 }
 
-/// A package file's text, never more than the package limit (a longer file comes back one byte
-/// over it, which [`Generator::load`] refuses).
-pub fn read_text(path: &Path) -> Result<String, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("cannot open the generator package `{}`: {e}", path.display()))?;
-    let mut text = String::new();
-    file.take(MAX_PACKAGE_BYTES as u64 + 1)
-        .read_to_string(&mut text)
-        .map_err(|e| format!("cannot read the generator package `{}`: {e}", path.display()))?;
-    Ok(text)
-}
-
 /// One installed package.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Installed {
     pub path: PathBuf,
-    pub generator: Arc<Generator>,
+    pub package: Arc<Package>,
 }
 
-/// Load the package at `path`.
-pub fn load_file(path: &Path) -> Result<Generator, String> {
-    let text = read_text(path)?;
-    Generator::load(&text, env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())
+impl std::fmt::Debug for Installed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Installed").field("path", &self.path).field("id", &self.package.id).finish()
+    }
 }
 
-/// The packages in the folder, by file name, and a line for each file that is not a valid one.
+/// A package folder, from what a command was given: the folder, its `generator.toml`, or the id
+/// of an installed package.
+pub fn locate(given: &str) -> Result<PathBuf, String> {
+    let named_path = given.contains('/') || given.contains('\\') || given.starts_with('.');
+    if named_path {
+        let p = Path::new(given);
+        let folder = if p.file_name().is_some_and(|n| n == "generator.toml") { p.parent().unwrap_or(p).to_path_buf() } else { p.to_path_buf() };
+        return Ok(folder);
+    }
+    if given.is_empty() || given.len() > 64 || !given.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err(format!("`{given}` is neither a package folder nor an installed package id"));
+    }
+    let base = dir().ok_or_else(|| "there is no folder for installed generators on this system".to_string())?;
+    Ok(base.join(given))
+}
+
+/// Load the package `given` names.
+pub fn load(given: &str) -> Result<Package, String> {
+    let folder = locate(given)?;
+    Package::load(&folder).map_err(|e| e.to_string())
+}
+
+/// The packages in the folder, by name, and a line for each folder that is not a valid one.
 pub fn list() -> (Vec<Installed>, Vec<String>) {
-    let mut files: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = dir()
-        && let Ok(entries) = std::fs::read_dir(&dir)
-    {
-        files = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|f| f.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".generator.json")))
-            .take(MAX_LISTED)
-            .collect();
-        files.sort();
+    match dir() {
+        Some(base) => list_in(&base),
+        None => (Vec::new(), Vec::new()),
+    }
+}
+
+/// The packages in `base`, as [`list`] gives them.
+pub fn list_in(base: &Path) -> (Vec<Installed>, Vec<String>) {
+    let mut folders: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(base) {
+        folders = entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("generator.toml").is_file()).take(MAX_LISTED).collect();
+        folders.sort();
     }
     let mut installed = Vec::new();
     let mut skipped = Vec::new();
-    for path in files {
-        match load_file(&path) {
-            Ok(g) => installed.push(Installed { path, generator: Arc::new(g) }),
+    for path in folders {
+        match Package::load(&path) {
+            Ok(p) => installed.push(Installed { path, package: Arc::new(p) }),
             Err(e) => skipped.push(format!("{}: {e}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
         }
     }

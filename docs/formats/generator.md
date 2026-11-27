@@ -27,7 +27,7 @@ has today and what this work adds; sections 2 to 8 define the new pieces.
 
 ## 2. Package layout
 
-A generator is a **folder** (or a zip of it, extension `.scgen`) named by its id (lower-case
+A generator is a **folder** named by its id (lower-case
 letters, digits, dashes, 3..64 chars):
 
 ```
@@ -43,10 +43,11 @@ mgn-rail/
   columns). Its **rules** hold the declared limits (`parameter_range`) and conditional
   suppression. Nothing generator-specific is stored in the `.sc`, so the format does not change
   for the model itself.
-- A package totals <= 4 MiB, <= 64 files; unknown keys in `generator.toml` are refused except
-  `x-` keys; `format = "solidcraft-generator/2"`; `min_solidcraft = "0.52.0"` (an older build
+- Limits: `generator.toml` <= 256 KiB, the script <= 32 KiB, each table <= 256 KiB, <= 32 tables,
+  <= 32 templates, <= 512 examples; unknown keys in `generator.toml` are refused except `x-` keys; `format = "solidcraft-generator/2"`; `min_solidcraft = "0.52.0"` (an older build
   says which version it needs).
-- No file is read outside the folder. No network, no other program.
+- No file is read outside the folder (a path with `..`, an absolute path or a link out of the
+  folder is refused). No network, no other program. A zipped form (`.scgen`) is not read yet; use the folder.
 
 `generator.toml`:
 
@@ -56,26 +57,37 @@ id = "mgn-rail"
 name = "HIWIN MGN linear guide set"
 license = "CC0-1.0"
 model = "mgn-rail.sc"
+row_from = ["block", "size"]         # no script: the row is named by these fields joined with "-"
 
-[parameters]                     # which user parameters a code can set, with limits and units
+[parameters]                         # what a template's bare {name} means; units for numbers sent to the design
 size   = { type = "choice", values = ["7", "9", "12", "15"] }
-length = { type = "int", min = 40, max = 2000, unit = "mm" }
-blocks = { type = "int", min = 1, max = 4 }
-block  = { type = "choice", values = ["C", "H"], labels = { C = "standard", H = "heavy" } }
+length = { type = "int", min = 40, max = 2000, step = 1, unit = "mm" }   # also: type = "decimal" (min, max, step, digits)
+blocks = { type = "int", min = 1, max = 4, default = 1 }
+block  = { type = "map", codes = { C = "standard", H = "heavy" } }         # letters to values
+id     = { type = "text", min = 1, max = 8, escape = "[A-Za-z0-9/]" }      # free text and its extra characters
 
-[[template]]                     # one or more; the first that matches wins
-pattern = "MGN{size}{block}[E]{blocks}R{length}"
-escape  = "[A-Za-z0-9-]+"        # per-field escape pattern (section 3); optional
+[[template]]                         # one or more; the first that matches wins
+pattern = "MGN{size}{block}[E:long]{blocks}R{length}"
+description = "MGN{size} rail, {length} mm"     # {field} filled in; becomes the component's description
+fields = { shape = "rail" }                      # values this template adds when it matches (optional)
 
-[[template]]
-pattern = "MGN{size}{block}{blocks}R{length}"
-fields  = { E = false }
-
-[rows."C-15"]                    # provenance per configuration row (section 6)
-source = "HIWIN MGN catalogue, p. 14, table MGN15"
+[rows."C-15"]                        # provenance for configuration row "C-15"
+source = "HIWIN MGN catalogue, table MGN15"
 page = 14
-status = "verified"              # verified | needs_review | not_modelled
+status = "verified"                  # verified | needs_review | not_modelled
+note = ""
+description = "MGN15 standard block"            # per-row description; beats the template's
+
+[[example]]                          # checked by generator.check
+code = "MGN15C1R600"
+volume_mm3 = 12345.0
+bbox_mm = [600.0, 15.0, 16.0]
 ```
+
+`[parameters]` `type`s: `choice` (`values`), `map` (`codes`), `int` and `decimal` (`min`, `max`,
+`step`, `digits`, `unit`), `text` (`min`, `max`, `escape`). `default` is the value an omitted
+optional part gives. `unit` is written after a number sent to the design (`600 mm`). `labels`
+may give display text for choice values.
 
 ## 3. Field-template syntax
 
@@ -88,15 +100,18 @@ A template is a string of **literals**, **fields** `{name}` / `{name: spec}`, **
 | Choice field | `{size}` with `size` a `choice` in `[parameters]`, or `{size: 7\|9\|12\|15}` | the longest listed value that fits |
 | Letter to value map | `{block: C=standard, H=heavy}` | the code letter stands for a value; printing writes the letter back |
 | Typed number | `{length: int 40..2000}`, `{w: decimal 0.5..9 step 0.5 digits 1}` | range, optional step counted from min, no leading zeros (an int) |
-| Optional part | `[E]`, `[-{coat}]` | may be left out. Optional literal `E` sets nothing; a name `[E:flag]` sets boolean `flag`. Defaults come from `[parameters]` (`default = ...`) |
-| Free text | `{id: text 1..8}` | 1..8 characters matching the escape pattern |
-| Separators and case | `-`, space, `_`, `/`, `.` | ignored when parsing; case ignored; printing uses the template's own spelling |
+| Optional part | `[E]`, `[-{coat}]` | may be left out. `[E]` alone sets nothing; `[E:flag]` sets boolean `flag` (true when present, false when not). Fields inside get their `[parameters]` `default` when the part is left out, and the part is printed only when a field differs from its default |
+| Free text | `{id: text 1..8}` | 1..8 letters and digits; extra characters come from the declared parameter's `escape` |
+| Option set | `{opts: set(-LTP, -RTP, -SC:int 0..99)}` | options in any order, each at most once, some with an argument. The value is an object (`{"LTP": true, "SC": 12}`); printing uses the declared order |
+| Free tail | `[+{tail: rest}]` | everything left of the code as typed (1..64 characters); put it last |
+| Required separator | `E-SFJ{d: int 1..99}\-{l: int 1..99}` | `\-` must be present as written, so `E-SFJ12-5` reads and `E-SFJ125` does not |
+| Separators and case | `-`, space, `_`, `/`, `.` | ignored when parsing (except a required one); case ignored; printing uses the template's own spelling |
 
 Several `[[template]]` entries are tried in order; the first complete match wins (ambiguity
-between templates that both match is a check-time error in `generator.check`). One **escape
-pattern** per field is allowed: a regular-expression-free character class language
-(`[A-Za-z0-9-]`, `+`, `*`, `{n,m}` only) for characters not otherwise legal in a free-text field;
-it is checked for ReDoS (no nesting, no alternation) and matched by hand-written code.
+between templates that both match is a check-time error in `generator.check`). A free-text
+parameter may declare one **escape pattern** (`escape = "[A-Za-z0-9/]"`): a character-class
+list (ranges and single characters) for the extra characters the field accepts; there is no
+regular-expression engine, so it cannot run away.
 
 Round trip: `parse(print(p)) == p` for every parameter set a template can print, and
 `print(parse(c))` returns the canonical spelling of `c`. Printing a parameter set a template
@@ -105,10 +120,11 @@ cannot express (a value outside its map or range) is a refusal naming the field.
 Hostile-input limits: a code is at most 128 characters, a template at most 256, 32 fields,
 matching is bounded to 20,000 steps; any breach is a typed refusal, never a panic.
 
-Rust API (`crates/engine/src/generator/template.rs`):
-`Template::parse(&str) -> Result<Template, TemplateError>`,
-`Template::match_code(&self, code, &Fields) -> Result<ParamValues, Refusal>`,
-`Template::print(&self, &ParamValues) -> Result<String, Refusal>`.
+Rust API (`crates/engine/src/generator/code_template.rs`):
+`Template::parse(&str, &Declared) -> Result<Template, TemplateError>`,
+`Template::match_code(&self, &str) -> Result<Option<Params>, TemplateError>`,
+`Template::print(&self, &Params) -> Result<String, TemplateError>`, `Template::prefixes()` (the
+literal prefix of every code, for an index) and `match_any(&[Template], &str)`.
 Command forms: `generator.parse` and `generator.code` below. A tool-callable template-only form
 is `generator.template {template, code?, parameters?}` -> `{parameters}` or `{code}`, for
 trying a template before a package exists.
@@ -175,7 +191,7 @@ All are normal commands with input and output schemas (optional fields use
 | `generator.insert` | `{generator, code}` or `{generator, parameters, configuration?}`, plus `placement?` (the `component.insert_design` placement keys) | `{component, occurrence, code, configuration, parameters, provenance}`. One undo step. A refusal is an error and leaves the design unchanged |
 | `generator.template` | `{template, code?, parameters?}` | `{parameters}` or `{code}` |
 | `generator.check` | `{generator}` | `{passed, results: [{code, ok, problems}]}` from the package's declared `[[example]]` codes: each parses, round-trips, inserts into a scratch design and its measurements match `[[example]] volume_mm3 / bbox_mm / faces` |
-| `component.set_link_parameters` | `{component, occurrence?, parameters}` | `{updated}`; rebuilds within limits |
+| `component.set_link_parameters` | `{component, parameters}` (an object; `null` clears) | `{component, parameters, updated}`; replaces the link's parameters and rebuilds within limits; one undo step. All placements of the component follow |
 
 Measurement for a `generator.check` or a harness: `measure {body, summary: true}` or
 `document.inspect {bodies: true, timeline: "summary"}` on the inserted component, and

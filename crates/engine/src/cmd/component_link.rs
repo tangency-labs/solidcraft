@@ -25,13 +25,17 @@ use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
     InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
-    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    ReplaceWithLinkParams, ReplaceWithLinkResult, SetLinkParametersParams, SetLinkParametersResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
 mod extract;
+
+#[path = "link_parameters.rs"]
+mod link_parameters;
+use link_parameters::{LinkParameters, link_parameters, parameters_json, parameters_map, with_parameters};
 
 #[cfg(test)]
 #[path = "component_relink_tests.rs"]
@@ -42,6 +46,7 @@ const INSERT_DESIGN_CONTRACT: TypedContract<InsertDesignParams> = TypedContract:
 const UPDATE_LINKS_CONTRACT: TypedContract<UpdateLinksParams> = TypedContract::new();
 const RELINK_CONTRACT: TypedContract<RelinkParams> = TypedContract::new();
 const BREAK_LINK_CONTRACT: TypedContract<BreakLinkParams> = TypedContract::new();
+const SET_LINK_PARAMETERS_CONTRACT: TypedContract<SetLinkParametersParams> = TypedContract::new();
 const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
 const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
@@ -56,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "path: a .sc design, or a file an installed importer plugin reads (format?: its plugin.entry, default the importer that claims the extension; options?: its declared options) → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          document?: the design itself, as its JSON, for a design open in the session that has no file yet: its bodies come in as they are and the link names no file (not with path); \
-         configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
+         configuration?: a row name or id (null or omitted: the saved source state); parameters?: {name: expression} values to build the design with on top of the row (kept with the link; refused outside the limits the design declares); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
          matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
@@ -81,7 +86,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file); parameters?: {name: expression} (omitted: keep the link's for the same file; null clears them) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+    ),
+    CommandSpec::new(
+        "component.set_link_parameters",
+        "Set Link Parameters",
+        crate::checked!("component.set_link_parameters", link_parameters::set_link_parameters),
+    )
+    .begins_edit()
+    .icon("update")
+    .contract(&SET_LINK_PARAMETERS_CONTRACT)
+    .output(output_schema_for::<SetLinkParametersResult>)
+    .params(
+        "component: id or name of a component linked to a design; parameters: the design's parameter names to expressions ({\"length\": \"800 mm\"}; null or {} clears them) → component, parameters, updated. Replaces the link's parameters and builds the part again with them on top of its configuration row, as one undo step; a value outside the limits the design declares (a parameter_range or allowed-values configuration rule) is refused naming the rule and nothing changes",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -304,7 +321,7 @@ type LeftOut = (solidcraft_io::StepFeature, Vec<Vec<String>>, bool, Vec<MeshData
 /// Cache key for a linked design read during one open ([`Reading::read`]): target path,
 /// configuration selection, allowed folder root, and current nesting depth (`opening.len()`) so a
 /// shallow read is never reused at a depth where nested links would exceed [`OPENING_DEPTH`].
-type ReadKey = (PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>, usize);
+type ReadKey = (PathBuf, Option<(Option<u64>, Option<u64>, Option<&'static LinkParameters>)>, Option<PathBuf>, usize);
 
 /// Cache key for a linked STEP file read during one open: `(absolute_path, flat, step_names)`,
 /// so a STEP file linked into many components is read, parsed and hashed once per open.
@@ -829,7 +846,7 @@ pub(super) fn read_left_out_bodies(
                 continue;
             }
             let configuration = selected_configuration(link);
-            let key: ReadKey = (target, configuration.map(|c| (c.row, c.identity)), allowed_by.clone(), depth);
+            let key: ReadKey = (target, configuration.map(|c| (c.row, c.identity, c.parameters)), allowed_by.clone(), depth);
             if reading_read_get(&key).is_some() {
                 continue;
             }
@@ -1139,7 +1156,7 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
         let reading = reading.borrow();
         (reading.which == LinkedRead::Folder).then(|| reading.opening.get(1).cloned().flatten()).flatten()
     });
-    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by, depth);
+    let key = (target, configuration.map(|c| (c.row, c.identity, c.parameters)), allowed_by, depth);
     let read = match reading_read_acquire(&key) {
         ReadAcquire::Ready(read) => *read,
         acquired => {
@@ -1240,12 +1257,17 @@ const READS_SIZE: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct SelectedConfiguration {
-    row: u64,
+    /// The source's configuration row, when the link selects one.
+    row: Option<u64>,
     identity: Option<u64>,
+    /// The values the part is built with on top of the row ([`LinkParameters`]).
+    parameters: Option<&'static LinkParameters>,
 }
 
 fn selected_configuration(link: &DesignLink) -> Option<SelectedConfiguration> {
-    link.configuration.map(|row| SelectedConfiguration { row, identity: link.configuration_identity })
+    let parameters = LinkParameters::intern(&link.parameters);
+    (link.configuration.is_some() || parameters.is_some())
+        .then(|| SelectedConfiguration { row: link.configuration, identity: link.configuration_identity, parameters })
 }
 
 struct LinkRead {
@@ -1439,7 +1461,7 @@ fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<Sele
     let doc = solidcraft_io::read_design(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
     doc.configs
         .row(key)
-        .map(|row| Some(SelectedConfiguration { row: row.id, identity: doc.configs.row_identity(row.id) }))
+        .map(|row| Some(SelectedConfiguration { row: Some(row.id), identity: doc.configs.row_identity(row.id), parameters: None }))
         .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))
 }
 
@@ -1737,9 +1759,10 @@ fn evaluate_parsed_design(
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = source.shown();
     if let Some(selected) = configuration
-        && doc.configs.row_identity(selected.row) != selected.identity
+        && let Some(row) = selected.row
+        && doc.configs.row_identity(row) != selected.identity
     {
-        return Err(EngineError::Other(format!("{shown}: configuration `{}` was replaced; select a configuration again", selected.row)));
+        return Err(EngineError::Other(format!("{shown}: configuration `{row}` was replaced; select a configuration again")));
     }
     let file = source.file();
     let store = if reuse && saved.is_none() && configuration.is_none() && doc.links.is_empty() {
@@ -1774,9 +1797,21 @@ fn evaluate_parsed_design(
         super::file::write_import_cache(&cache, key, &part.doc, model, pending, &json!({}));
     }
     if let Some(selected) = configuration {
-        // Use the same rule, rebuild and style validation as an interactive activation.
-        // Its scratch evaluation cannot use the saved geometry of another row.
-        part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+        if let Some(row) = selected.row {
+            // Use the same rule, rebuild and style validation as an interactive activation.
+            // Its scratch evaluation cannot use the saved geometry of another row.
+            part.execute("config.activate", &json!({"row": row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+        }
+        if let Some(values) = selected.parameters {
+            // The link's values on top of the row, within the limits the part declares.
+            let mut next = part.doc.clone();
+            next.set_parameters_within_limits(values.pairs()).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+            *part.doc_mut() = next;
+            part.refresh();
+            if let Some(failed) = part.model.results.iter().find_map(|r| r.error.clone()) {
+                return Err(EngineError::Other(format!("{shown}: with the link's parameters the part fails to build: {failed}")));
+            }
+        }
     }
     let (name, feature, faces, metadata, properties, meshes) = session_bodies(&part, &shown)?;
     if let Some(file) = source.file() {
@@ -2480,6 +2515,7 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
+    let given_parameters = link_parameters(p, &Default::default(), cmd)?;
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {
@@ -2501,8 +2537,8 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if held.is_some() && p.get("format").is_some_and(|f| !f.is_null()) {
         return Err(bad(cmd, "`format` applies to a file an importer plugin reads, not to `document`"));
     }
-    if importer.is_some() && selection.is_some() {
-        return Err(bad(cmd, "`configuration` selects a row of a design; a file an importer reads has none"));
+    if importer.is_some() && (selection.is_some() || !given_parameters.is_empty()) {
+        return Err(bad(cmd, "`configuration` and `parameters` apply to a design; a file an importer reads has neither"));
     }
     let options = match p.get("options") {
         None | Some(Value::Null) => json!({}),
@@ -2538,6 +2574,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(bytes) => configuration_id(bytes, selection).map_err(|e| bad(cmd, e.to_string()))?,
         None => None,
     };
+    let configuration = with_parameters(configuration, &given_parameters);
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
         // A design in memory has no file to be found by: every link to a file is another design.
         let existing = match &source {
@@ -2651,8 +2688,9 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         DesignLink {
             path: link_path,
             feature: id,
-            configuration: configuration.map(|c| c.row),
+            configuration: configuration.and_then(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
+            parameters: parameters_map(configuration),
             inherited: Vec::new(),
             inherited_metadata: metadata,
             file_sha256: Some(read),
@@ -2830,8 +2868,9 @@ fn apply_link_threads(s: &mut Session, feature: u64, sources: &[SourceProperties
 
 fn eval_job_sequential(job: &EvalJob, validation: solidcraft_kernel::Validation) -> std::result::Result<EvaluatedLink, String> {
     let probe = DesignLink {
-        configuration: job.configuration.map(|c| c.row),
+        configuration: job.configuration.and_then(|c| c.row),
         configuration_identity: job.configuration.and_then(|c| c.identity),
+        parameters: parameters_map(job.configuration),
         step_names: job.step_names.clone(),
         ..Default::default()
     };
@@ -3914,7 +3953,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
     let bytes = read_link(&file, s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
-    if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
+    let configuration = with_parameters(configuration, &link_parameters(p, if same_source { &link.parameters } else { &Default::default() }, cmd)?);
+    if same_source && p.get("configuration").is_none() && p.get("parameters").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }
     if let Some(occurrence) = lone_placement(s, p, comp, cmd)? {
@@ -3992,8 +4032,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         DesignLink {
             path: file.to_string_lossy().into_owned(),
             file_sha256: Some(read),
-            configuration: configuration.map(|c| c.row),
+            configuration: configuration.and_then(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
+            parameters: parameters_map(configuration),
             inherited,
             ..link.clone()
         },
@@ -4347,7 +4388,7 @@ fn relink_placement(
     let old_mesh_feature = link_mesh_feature(s, comp, link.feature).map(|(id, _)| id);
     let old_solid_bodies = linked_body_entries(s, link.feature);
     let old_mesh_bodies = old_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
-    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
+    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.and_then(|c| c.row), "parameters": parameters_json(configuration)}))?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));

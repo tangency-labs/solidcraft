@@ -135,6 +135,11 @@ fn component_required(schema: &mut Schema) {
     require(schema, "component");
 }
 
+fn component_and_parameters_required(schema: &mut Schema) {
+    require(schema, "component");
+    require(schema, "parameters");
+}
+
 fn component_and_path_required(schema: &mut Schema) {
     require(schema, "component");
     require(schema, "path");
@@ -209,6 +214,13 @@ pub struct InsertDesignKeys {
     /// saved state. The link stores the resolved id, so renaming the row keeps the selection.
     #[serde(default, deserialize_with = "configuration")]
     pub configuration: Option<RowRef>,
+    /// Values to build the design with on top of the selected row: its parameter names to
+    /// expressions (`{"length": "600 mm"}`; a number is in the design's unit). The link keeps
+    /// them, so Update Links builds the part with them again. A value outside the limits the
+    /// design declares (a range or allowed-values rule) is refused, naming the rule. Not with a
+    /// file an importer reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, Value>>,
     /// The component's name. Default: the design's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -476,6 +488,10 @@ pub struct RelinkParams {
     /// the same source file; a different file follows its saved state. Null clears the selection.
     #[serde(default, deserialize_with = "configuration")]
     pub configuration: Option<RowRef>,
+    /// Values to build the design with, as `component.insert_design` takes them. Omitted keeps
+    /// the link's for the same source file; null clears them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, Value>>,
     /// One of its placements, by id. When the component has other placements, only this one
     /// comes to show the design, as a placement of the component already linked to it or of a
     /// new one under the same parent, keeping its position, grounding and joints.
@@ -868,3 +884,33 @@ pub struct ReplaceWithLinkResult {
 #[cfg(test)]
 #[path = "component_link_tests.rs"]
 mod tests;
+
+/// `component.set_link_parameters` parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_and_parameters_required)]
+pub struct SetLinkParametersParams {
+    // Optional in the type and required in the schema (`component_and_parameters_required`).
+    /// The linked component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// The new values: the design's parameter names to expressions (`{"length": "800 mm"}`).
+    /// They replace the link's earlier ones; null or an empty object clears them. Values outside
+    /// the limits the design declares are refused and nothing changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, Value>>,
+}
+
+/// What `component.set_link_parameters` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SetLinkParametersResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The parameters the link keeps now.
+    pub parameters: std::collections::BTreeMap<String, String>,
+    /// What Update Links reported for the component.
+    pub updated: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

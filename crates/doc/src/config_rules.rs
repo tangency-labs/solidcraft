@@ -295,6 +295,18 @@ impl Document {
         switched
     }
 
+    /// Build the design as a design link asks: set `values` (existing parameters, name to
+    /// expression), then apply the ordered rules and enforce every matched restriction, so a
+    /// value outside a declared range or allowed list is refused naming the rule (generators,
+    /// docs/formats/generator.md). Atomic: an error leaves `self` as it was.
+    pub fn set_parameters_within_limits(&mut self, values: &[(String, String)]) -> Result<Vec<RuleTrace>> {
+        let mut next = self.clone();
+        next.change_params_atomic(values)?;
+        let trace = next.evaluate_configuration_rules()?;
+        *self = next;
+        Ok(trace)
+    }
+
     /// Apply ordered drives, then enforce all matched restrictions on the final state.
     /// Running on a scratch document makes a failing rule fully atomic for callers.
     pub(super) fn evaluate_configuration_rules(&mut self) -> Result<Vec<RuleTrace>> {
@@ -584,6 +596,23 @@ mod tests {
         assert_eq!(doc, before);
         doc.configs.rules[0].effect = RuleEffect::ParameterRange { parameter: "width".into(), minimum: "1 deg".into(), maximum: "90 deg".into() };
         assert!(doc.apply_configuration("Default").is_err());
+    }
+    #[test]
+    fn link_values_are_set_within_the_declared_limits_or_refused_atomically() {
+        let mut doc = design();
+        doc.configs.rules = vec![rule(
+            "length-range",
+            RuleCondition::Always,
+            RuleEffect::ParameterRange { parameter: "width".into(), minimum: "5 mm".into(), maximum: "40 mm".into() },
+        )];
+        let trace = doc.set_parameters_within_limits(&[("width".into(), "30 mm".into())]).unwrap();
+        assert!(trace[0].matched);
+        assert_eq!(doc.param_values().0["width"].v, 30.0);
+        let before = doc.clone();
+        let e = doc.set_parameters_within_limits(&[("width".into(), "41 mm".into())]).unwrap_err().to_string();
+        assert!(e.contains("length-range"), "{e}");
+        assert_eq!(doc, before);
+        assert!(doc.set_parameters_within_limits(&[("nope".into(), "1 mm".into())]).is_err());
     }
     #[test]
     fn rule_references_follow_rename_and_prevent_delete() {

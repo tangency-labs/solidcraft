@@ -32,6 +32,10 @@ pub enum RefusalKind {
     Invalid,
     /// A real code this generator does not model.
     NotModelled,
+    /// A bound was exceeded (reading the code, or the script's sandbox).
+    Limit,
+    /// The package or its script could not answer.
+    Error,
 }
 
 impl RefusalKind {
@@ -39,6 +43,8 @@ impl RefusalKind {
         match self {
             RefusalKind::Invalid => "invalid",
             RefusalKind::NotModelled => "not_modelled",
+            RefusalKind::Limit => "limit",
+            RefusalKind::Error => "error",
         }
     }
 }

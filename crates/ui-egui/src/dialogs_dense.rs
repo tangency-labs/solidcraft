@@ -104,7 +104,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FramePlate(_) => Some("frame.plate"),
         Kind::CapturePosition(_) => Some("component.capture_position"),
         Kind::Pulley(_) => Some("pulley.insert"),
-        Kind::Generator(_) => Some("generator.build"),
+        Kind::Generator(_) => Some("generator.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
