@@ -1467,32 +1467,12 @@ impl ShellRayTarget {
         O: crate::geom::solution_array::SolutionObject + crate::intersect::point_class::ClassObject,
         W: ShellRayWorld<O>,
     {
-        if self.shape.is_none() {
-            match world.shell_ray_shape(kernel, (self.brep_id, &*brep), &self.faces) {
-                Ok(shape) => self.shape = Some(shape),
-                Err(err) => {
-                    return ShellRayAttempt {
-                        status: Err(err),
-                        state: input.state,
-                    };
-                }
-            }
-        }
-        let Some(shape) = self.shape.as_ref() else {
-            return ShellRayAttempt {
-                status: Err(SolidError::invalid_input(
-                    "topology::shell::ShellRayTarget::ray_fire",
-                    "missing prepared shell shape",
-                )),
-                state: input.state,
-            };
-        };
-        ray_fire_with_shape(
+        ray_fire_inner(
             kernel,
             brep,
             self.brep_id,
             self.shell_id,
-            shape,
+            Some((&self.faces, &mut self.shape)),
             world,
             input,
         )
@@ -1563,26 +1543,15 @@ where
     O: crate::geom::solution_array::SolutionObject + crate::intersect::point_class::ClassObject,
     W: ShellRayWorld<O>,
 {
-    let shape = match ray_faces(kernel, brep, brep_id, shell_id)
-        .and_then(|faces| world.shell_ray_shape(kernel, (brep_id, &*brep), &faces))
-    {
-        Ok(shape) => shape,
-        Err(err) => {
-            return ShellRayAttempt {
-                status: Err(err),
-                state: input.state,
-            };
-        }
-    };
-    ray_fire_with_shape(kernel, brep, brep_id, shell_id, &shape, world, input)
+    ray_fire_inner(kernel, brep, brep_id, shell_id, None, world, input)
 }
 
-fn ray_fire_with_shape<O, W>(
+fn ray_fire_inner<O, W>(
     kernel: &mut Kernel,
     brep: &mut Brep,
     brep_id: crate::topology::BrepId,
     shell_id: ShellId,
-    shape: &Shape,
+    cached: Option<(&[crate::geom::object::FaceKey], &mut Option<Shape>)>,
     world: &W,
     input: ShellRayInput<O>,
 ) -> ShellRayAttempt<O>
@@ -1628,6 +1597,18 @@ where
                     .caused_by(e)
                     .into_error()
             })?;
+        let owned_shape;
+        let shape: &Shape = if let Some((faces, slot)) = cached {
+            if slot.is_none() {
+                *slot = Some(world.shell_ray_shape(kernel, (brep_id, &*brep), faces)?);
+            }
+            slot.as_ref()
+                .ok_or_else(|| SolidError::invalid_input(OP, "missing prepared shell shape"))?
+        } else {
+            let faces = ray_faces(kernel, brep, brep_id, shell_id)?;
+            owned_shape = world.shell_ray_shape(kernel, (brep_id, &*brep), &faces)?;
+            &owned_shape
+        };
         let vectors = [direction];
         let solutions = world.solve_shape_ray(
             &*kernel,
