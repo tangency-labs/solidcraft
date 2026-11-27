@@ -27,6 +27,40 @@ pub fn whole_profile_selection_from_value(value: &Value) -> Result<ProfileSel> {
     serde_json::from_value(value.clone()).map_err(|_| invalid())
 }
 
+/// Validate a sided profile reference (`sided_curves`: each profile's curves with the side of each
+/// it lies on) before decoding it.
+pub fn sided_curves_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_sided_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_sided_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "loops"])?;
+    if value.get("type").and_then(Value::as_str) != Some("sided_curves") {
+        return Err(invalid());
+    }
+    let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
+    if loops.is_empty() || loops.len() > 128 {
+        return Err(invalid());
+    }
+    for sided in loops {
+        let curves = sided.as_array().ok_or_else(invalid)?;
+        if curves.is_empty() || curves.len() > 512 {
+            return Err(invalid());
+        }
+        let mut seen = BTreeSet::new();
+        for curve in curves {
+            exact_keys(curve, &["curve", "side"])?;
+            if !seen.insert(id(curve.get("curve").ok_or_else(invalid)?)?)
+                || !matches!(curve.get("side").and_then(Value::as_str), Some("inside" | "outside" | "left" | "right"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_whole_reference(value: &Value) -> Result<()> {
     exact_keys(value, &["type", "profiles"])?;
     if value.get("type").and_then(Value::as_str) != Some("whole_boundaries") {
@@ -185,6 +219,9 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
     fn references(value: &Value) -> Result<()> {
         if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
             return validate_whole_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("sided_curves") {
+            return validate_sided_reference(value);
         }
         if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
             exact_keys(value, &["type", "associations"])?;
@@ -484,6 +521,9 @@ mod tests {
                             to_offset: None,
                             from: None,
                             to_body_apart: false,
+                            through_all2: false,
+                            to2: None,
+                            to_offset2: None,
                             from_level: false,
                             picked_placements: Vec::new(),
                             one_sided_direction: None,

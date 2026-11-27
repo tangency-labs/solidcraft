@@ -846,6 +846,12 @@ pub fn allowing_hosts<T>(hosts: &[String], f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The network hosts temporarily allowed on this thread via [`allowing_hosts`], to propagate to
+/// worker threads started for the same action.
+pub fn current_allowed_hosts() -> Vec<String> {
+    ONCE_HOSTS.with(|h| h.borrow().clone())
+}
+
 /// The network host of a path, when it names one (`\\host\share\x` → `host`).
 pub fn network_host(path: &str) -> Option<String> {
     match remote(path) {
@@ -906,9 +912,15 @@ pub fn design_path_stamp(path: &str, design: Option<&str>) -> Option<(std::time:
 }
 
 /// The checks the layers below ask before reading a file a design names (sketch text's font
-/// files). Done once; every session and agent scope does it.
+/// files), and how the worker threads an evaluation starts keep this thread's scope and the
+/// servers allowed for its action. Done once; every session and agent scope does it.
 pub fn install_checks() {
     solidcraft_doc::sketch::set_font_file_check(|p| check_design_path(&p.to_string_lossy(), None).map_err(|e| e.to_string()));
+    solidcraft_doc::worker_scope::set_carrier(|| {
+        let scope = current_scope();
+        let hosts = current_allowed_hosts();
+        std::sync::Arc::new(move |f: &mut dyn FnMut()| scoped(scope.clone(), || allowing_hosts(&hosts, &mut *f)))
+    });
 }
 
 /// File system calls made on this thread through this module (tests: a refused path made none).
@@ -1024,6 +1036,26 @@ pub fn current_scope() -> Option<PathScope> {
     SCOPE.with(|s| s.borrow().clone())
 }
 
+/// Thread-local file access rules (`PathScope` and one-action allowed network hosts) captured
+/// from a calling thread so helper threads running parallel reads enforce the exact same rules.
+#[derive(Clone, Default)]
+pub struct ThreadContext {
+    scope: Option<PathScope>,
+    once_hosts: Vec<String>,
+}
+
+impl ThreadContext {
+    /// Capture this thread's active scope and one-action allowed network hosts.
+    pub fn current() -> Self {
+        Self { scope: current_scope(), once_hosts: ONCE_HOSTS.with(|h| h.borrow().clone()) }
+    }
+
+    /// Run `f` under this captured context on the current thread.
+    pub fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        scoped(self.scope.clone(), || if self.once_hosts.is_empty() { f() } else { allowing_hosts(&self.once_hosts, f) })
+    }
+}
+
 /// Refuse `path` if a scope is active and it lies outside. Code that reaches the disk without
 /// going through this module calls it first. In the browser files are the host's, never the
 /// disk, so there is nothing to confine.
@@ -1034,6 +1066,34 @@ pub fn check(path: &str) -> Result<()> {
         return Ok(());
     }
     SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check(path)))
+}
+
+/// Read `path` although an agent's scope would refuse it, when it is a file of one of the
+/// `libraries` (folders the machine itself names, such as KiCad's 3D model library) whose
+/// extension is one of `extensions`. `None` when it is not: the caller keeps the scope's refusal.
+///
+/// The path is resolved first, so `..` and links that lead out of a library are not in it; a
+/// network, device or Windows-refused path never is; and only a file with one of the named
+/// extensions is read, so a library folder that is too wide (a variable set to `/`) still opens
+/// nothing but model files. The scope is lifted for this one read only.
+pub fn read_in_library(path: &str, libraries: &[std::path::PathBuf], extensions: &[&str], max: usize) -> Option<Result<Vec<u8>>> {
+    if cfg!(target_arch = "wasm32") || remote(path).is_some() || (cfg!(windows) && windows_refusal(path).is_some()) {
+        return None;
+    }
+    let resolved = resolve(std::path::Path::new(path)).ok()?;
+    // Judged on the resolved path: a link named like a model that leads to another kind of file,
+    // or to a network or device location, is not served.
+    if cfg!(windows) && !local_drive_path(&resolved) {
+        return None;
+    }
+    let extension = resolved.extension().and_then(|e| e.to_str())?;
+    if !extensions.iter().any(|x| x.eq_ignore_ascii_case(extension)) {
+        return None;
+    }
+    if !libraries.iter().filter_map(|l| canonical(l)).any(|l| resolved.starts_with(&l)) {
+        return None;
+    }
+    Some(scoped(None, || read(&resolved.to_string_lossy(), max)))
 }
 
 /// Authorize a destination before creating its missing parents. This grants no additional roots.
@@ -1189,6 +1249,45 @@ mod tests {
         assert_eq!(PathScope::new_strict([missing.clone()]).unwrap_err().len(), 1);
         assert!(PathScope::new_strict([missing.clone(), root.clone()]).is_ok());
         assert!(PathScope::new_strict([]).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A library folder the machine names (KiCad's 3D models) is readable for the files of the
+    /// extensions asked for, through a scope that holds nothing of it; links and `..` that leave
+    /// the library, other extensions, other folders and a scope-free call are not served.
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[test]
+    fn a_library_file_is_read_through_a_scope_that_does_not_hold_it() {
+        use super::{PathScope, read_in_library, scoped};
+        let base = std::env::temp_dir().join(format!("solidcraft-vfs-library-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, library, out) = (base.join("root"), base.join("library"), base.join("out"));
+        for dir in [&root, &library, &out] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(library.join("a.wrl"), "model").unwrap();
+        std::fs::write(library.join("a.txt"), "text").unwrap();
+        std::fs::write(out.join("b.wrl"), "elsewhere").unwrap();
+        std::os::unix::fs::symlink(out.join("b.wrl"), library.join("link.wrl")).unwrap();
+        std::os::unix::fs::symlink(library.join("a.txt"), library.join("text.wrl")).unwrap();
+        let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+        let libraries = [library.clone()];
+        let read = |p: &str| read_in_library(p, &libraries, &["wrl", "STEP"], 64);
+        scoped(Some(PathScope::new([root.clone()])), || {
+            let a = s(library.join("a.wrl"));
+            assert!(super::read(&a, 64).is_err(), "the scope refuses it on its own");
+            assert_eq!(read(&a).unwrap().unwrap(), b"model");
+            // The scope is back after the read.
+            assert!(super::read(&a, 64).is_err());
+            for refused in
+                [library.join("a.txt"), out.join("b.wrl"), library.join("link.wrl"), library.join("text.wrl"), library.join("../out/b.wrl")]
+            {
+                assert!(read(&s(refused.clone())).is_none(), "{}", refused.display());
+            }
+            assert!(read_in_library(&s(library.join("a.wrl")), &[], &["wrl"], 64).is_none(), "no library, nothing served");
+            // A file of the library that is too big for the cap is the caller's error, not a refusal.
+            assert!(read_in_library(&a, &libraries, &["wrl"], 2).unwrap().is_err());
+        });
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1681,6 +1780,44 @@ mod tests {
         let e = solidcraft_doc::sketch::font_data(Some(r"\\evil.example\fonts\x.ttf")).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(e.contains(r"network location \\evil.example"), "{e}");
         assert_eq!(super::file_calls(), calls);
+    }
+
+    /// Components evaluated side by side on worker threads keep the caller's scope: in an empty
+    /// one, the font file each component's sketch text names is refused on every worker, as it
+    /// is on the calling thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn worker_threads_keep_the_callers_file_scope() {
+        use solidcraft_doc::{Document, FeatureKind, Model, PlaneRef};
+        let dir = std::env::temp_dir().join(format!("solidcraft-vfs-worker-scope-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let font = dir.join("Outside.ttf");
+        let bundled = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
+        std::fs::copy(&bundled, &font).unwrap();
+        let font = font.to_string_lossy().replace('\\', "/");
+        let mut doc = Document::new("worker scope");
+        for k in 0..4 {
+            let comp = doc.add_component(Some(&format!("C{k}")), 0).unwrap();
+            let json = format!(
+                r#"{{"points": [], "curves": [], "constraints": [], "links": [{{"id": "j1", "kind": "text", "source": {{"type": "text", "text": "A{k}", "at": [0, 0], "height": 6, "angle": 0, "font": "{font}"}}}}]}}"#
+            );
+            let sketch = serde_json::from_str(&json).unwrap();
+            let id =
+                doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, Some(&format!("Text{k}"))).unwrap();
+            doc.feature_mut(id).unwrap().component = comp;
+        }
+        let said = |m: &Model| m.results.iter().map(|r| format!("{:?} {:?}", r.error, r.warning)).collect::<Vec<_>>();
+        // Unconfined, the font is read.
+        let mut open = Model::new();
+        open.evaluate(&doc);
+        assert!(said(&open).iter().all(|s| !s.contains("font file")), "{:?}", said(&open));
+        // In an empty scope, no worker reads it.
+        let mut confined = Model::new();
+        super::scoped(Some(super::PathScope::default()), || confined.evaluate(&doc));
+        let said = said(&confined);
+        assert_eq!(said.len(), 4, "{said:?}");
+        assert!(said.iter().all(|s| s.contains("font file")), "a worker read a file outside the scope: {said:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A directory is not a file either.

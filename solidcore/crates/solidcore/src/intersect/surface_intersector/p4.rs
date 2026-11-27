@@ -531,6 +531,17 @@ pub trait IntersectorVirtuals<'s> {
     fn station_step(&mut self, _k: &Kernel, _from: &TsectPnt, _step: f64) -> Result<StationStep> {
         Err(no_stations())
     }
+
+    /// Not upstream (#21179): whether the traced point `next` is the through point
+    /// `through` because the override's step landed on it, whatever the span's own test
+    /// says. The default has no such steps.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn landed_on_through_point(&mut self, _next: TsectId, _through: TsectId) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// The error of an intersector asked for stations its solver does not have.

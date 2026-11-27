@@ -3492,6 +3492,25 @@ where
             None => StationStep::NotFound,
         })
     }
+
+    /// Not upstream (#21179): a step that ends at a corner of the radius law
+    /// ([`FilletIntersector::land_on_radius_corner`]) ends on the through point made at that
+    /// corner: both points lie at a corner of the law, within the trace's tolerance of each
+    /// other (which corner) and within half the domains' sizes in UV (which turn of a closed
+    /// surface).
+    fn landed_on_through_point(&mut self, next: TsectId, through: TsectId) -> Result<bool> {
+        let si = &self.intersector.base.base;
+        let (next, through) = (si.point(next)?, si.point(through)?);
+        if !(self.solver.is_at_radius_corner(next) && self.solver.is_at_radius_corner(through)) {
+            return Ok(false);
+        }
+        Ok(next
+            .crv_pos()
+            .closer_than(si.this_approx_tol_3d, through.crv_pos())
+            && SRFS.iter().zip(&si.uv_domains).all(|(&s, domain)| {
+                next.uv_pos(s).distance(through.uv_pos(s)) < domain.size().length() / 2.0
+            }))
+    }
 }
 
 /// The 3D Hermite rail span of a UV span on its surface: the end points and
