@@ -116,6 +116,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn translated_blend_code_survives_continuation_and_restored_error() {
+        use crate::KernelError;
+        use solidcore_record::Vec3;
+
+        clear();
+        let code = ErrorCode::from(FailureCode { call: "blend", kind: 6, operation: "blend::original", class: ErrorClass::Refusal });
+        let original = remember(KernelError::Failed("original refusal".into()), Some(code.clone()));
+        let saved = code_for(&original);
+        let fallback_code = ErrorCode::from(FailureCode { call: "blend", kind: 7, operation: "blend::fallback", class: ErrorClass::Refusal });
+        let fallback = remember(KernelError::Failed("fallback refusal".into()), Some(fallback_code.clone()));
+        assert_eq!(code_for(&fallback), Some(fallback_code));
+        let restored = remember(original, saved);
+        assert_eq!(code_for(&restored), Some(code.clone()));
+        assert!(code_for(&fallback).is_none());
+        let continued = crate::blend::with_continuation(restored, Some(Vec3::new(1.0, 2.0, 3.0)));
+        assert_eq!(code_for(&continued), Some(code));
+        assert!(continued.to_string().contains("continues tangentially"));
+        clear();
+        assert!(code_for(&continued).is_none());
+    }
+
     /// A code saved before #22148 has no `class`: it still reads, as `unclassed`.
     #[test]
     fn a_code_saved_before_the_class_still_reads_as_unclassed() {

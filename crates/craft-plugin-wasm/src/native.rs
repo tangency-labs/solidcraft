@@ -562,7 +562,12 @@ impl<H: PluginHost> files::Host for State<H> {
         let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+            // Reject named pipes without waiting for a writer before checking the opened handle.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let file = match folder.dir.open_with(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)), &options) {
                 Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 opened => opened?,
             };

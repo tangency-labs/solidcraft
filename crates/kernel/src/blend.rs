@@ -314,9 +314,13 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
         // Just past the largest round that fits, SMLib fails it as an operation (its status 1001)
         // rather than sizing it as too large, as it does the chamfer ([`chamfer_carrying_face`]).
         Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => match edges {
-            [pick] => concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))?
-                .map(|b| (b, Vec::new()))
-                .ok_or(e),
+            [pick] => {
+                let code = crate::failure::code_for(&e);
+                match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))? {
+                    Some(b) => Ok((b, Vec::new())),
+                    None => Err(crate::failure::remember(e, code)),
+                }
+            }
             _ => Err(e),
         },
         Err(e) => Err(e),
@@ -1804,17 +1808,19 @@ fn concave_round_centre(rec: &Faces, e: usize, r: Option<f64>) -> Option<(Vec3, 
 /// blend there, so the reason and the way out are named.
 pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelError {
     let Some(p) = next else { return e };
+    let code = crate::failure::code_for(&e);
     let why = format!(
         " (a picked edge continues tangentially into the edge at ({:.3}, {:.3}, {:.3}), which is not blended with it, and the blend \
          cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
         p.x, p.y, p.z
     );
-    match e {
+    let error = match e {
         KernelError::Invalid(m) => KernelError::Invalid(m + &why),
         KernelError::Failed(m) => KernelError::Failed(m + &why),
         KernelError::TooLarge(m) => KernelError::TooLarge(m + &why),
         e => e,
-    }
+    };
+    crate::failure::remember(error, code)
 }
 
 #[cfg(test)]
