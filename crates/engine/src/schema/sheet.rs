@@ -24,6 +24,81 @@ use solidcraft_doc::FlangeEdge;
 use super::check::whole;
 use super::types::{AngleExpr, FaceRef, FeatureCommon, IdOrName, LengthExpr, Point3, ProfilesParam, SketchRef, StringList, feature_common, present};
 
+/// A persistent central edge name, obtained from the built body's naming engine.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct SheetRimName(pub solidcraft_doc::SheetEdgeName);
+
+impl JsonSchema for SheetRimName {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetRimName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A central edge name from the built flange: <face>|<face>.",
+            "type": "string",
+            "pattern": "^[^|]+(?:\\|[^|]+)+$"
+        })
+    }
+}
+
+/// The way two flanges meet at a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct CornerJoinType(pub solidcraft_doc::CornerJoinKind);
+
+impl JsonSchema for CornerJoinType {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerJoinType".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "enum": ["butt", "partial_overlap", "full_overlap"]})
+    }
+}
+
+/// Join two edge flanges by their centrally named cap/bend boundaries.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CornerJoinParams {
+    /// The central edge name of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The central edge name of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    /// Sheet body. Without it, the two source names must identify exactly one sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// One corner choice made with an edge flange, without a separate feature or body target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeCornerParams {
+    /// The source rim of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The source rim of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+}
+
 /// Points on sheet edges, as the `edges` of a hem and the `bends` of a conversion: 1 to 1000
 /// points `[x, y, z]`, `{x, y, z}` or `{point}` (read by `sheet::sheet_points`).
 #[derive(Clone, Debug, PartialEq)]
@@ -218,6 +293,14 @@ word!(
     ["inside", "outside", "bend_outside", "middle", "material_outside", "tangent"]
 );
 word!(
+    /// A conversion's `direction` (read by `sheet::material_side`).
+    MaterialSide,
+    crate::cmd::material_side,
+    "must be inside or outside",
+    "inside or outside, in any case.",
+    ["inside", "outside"]
+);
+word!(
     /// A fold's `position` (read by `sheet::fold_position`).
     FoldPosition,
     crate::cmd::fold_position,
@@ -225,6 +308,37 @@ word!(
     "centerline, start, end or mould (or mold), in any case.",
     ["centerline", "start", "end", "mould", "mold"]
 );
+word!(
+    /// A fold's `stays` (read by `sheet::fold_stays`).
+    FoldStays,
+    crate::cmd::fold_stays,
+    "must be left or right",
+    "left or right of the fold line as drawn, seen from the sheet's surface, in any case.",
+    ["left", "right"]
+);
+
+/// Where a contour flange's chain lies across the sheet thickness: center, side1 or side2, lower
+/// case (read by `sheet::flange`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourOrientation(pub String);
+
+impl<'de> Deserialize<'de> for ContourOrientation {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str() {
+            Some(w @ ("center" | "side1" | "side2")) => Ok(ContourOrientation(w.to_string())),
+            _ => Err(D::Error::custom("must be center, side1 or side2")),
+        }
+    }
+}
+
+impl JsonSchema for ContourOrientation {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourOrientation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "center, side1 or side2, lower case.", "enum": ["center", "side1", "side2"]})
+    }
+}
 
 /// A corner relief's shape: notch, round, rectangular or tear, in any case and with blanks
 /// around it (read by `ReliefShape::parse`).
@@ -250,6 +364,33 @@ impl JsonSchema for ReliefShapeParam {
             "description": "notch, round, rectangular or tear, in any case (blanks around it are ignored).",
             "type": "string",
             "pattern": format!("^{blank}({words}){blank}$", blank = blanks(), words = "[Nn][Oo][Tt][Cc][Hh]|[Rr][Oo][Uu][Nn][Dd]|[Rr][Ee][Cc][Tt][Aa][Nn][Gg][Uu][Ll][Aa][Rr]|[Tt][Ee][Aa][Rr]")
+        })
+    }
+}
+
+/// A rule's bend relief shape, checked by the same parser as the handler.
+#[derive(Debug)]
+pub struct BendReliefShapeParam(pub solidcraft_doc::sheet::BendReliefShape);
+
+impl<'de> Deserialize<'de> for BendReliefShapeParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_doc::sheet::BendReliefShape::parse)
+            .map(BendReliefShapeParam)
+            .ok_or_else(|| D::Error::custom("must be rectangular, obround or tear"))
+    }
+}
+
+impl JsonSchema for BendReliefShapeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "BendReliefShape".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "rectangular, obround or tear, in any case (blanks around it are ignored).",
+            "type": "string",
+            "pattern": format!("^{blank}({words}){blank}$", blank = blanks(), words = "[Rr][Ee][Cc][Tt][Aa][Nn][Gg][Uu][Ll][Aa][Rr]|[Oo][Bb][Rr][Oo][Uu][Nn][Dd]|[Tt][Ee][Aa][Rr]")
         })
     }
 }
@@ -370,7 +511,8 @@ pub struct FlangeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "IdOrName")]
     pub sketch: Option<IdOrName>,
-    /// Base: which of the sketch's profiles become the sheet. Default: all of them.
+    /// Base: which of the sketch's profiles become the sheet. When omitted, nested loops
+    /// alternate material and holes, as for Extrude. Explicit "all" includes every profile.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfilesParam")]
     pub profiles: Option<ProfilesParam>,
@@ -392,6 +534,13 @@ pub struct FlangeParams {
     /// Contour: the flange runs from the sketch plane the other way. Default: false.
     #[serde(default)]
     pub reverse: Option<bool>,
+    /// Contour: where the chain lies across the sheet thickness. Default: side1.
+    #[serde(default)]
+    pub orientation: Option<ContourOrientation>,
+    /// Contour: the flange runs `distance` each way across the sketch plane (twice as wide).
+    /// Default: false.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
     /// Edge: the edges that get a flange.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FlangeEdges")]
@@ -429,6 +578,16 @@ pub struct FlangeParams {
     /// Refused on a base or contour flange.
     #[serde(default)]
     pub corner_relief: Option<LengthExpr>,
+    /// Edge: the shape of the bend relief beside these flanges' bend ends where the sheet runs on
+    /// past them (rectangular, obround or tear), in place of the rule's. Refused on a base or
+    /// contour flange.
+    #[serde(default)]
+    pub bend_relief_shape: Option<BendReliefShapeParam>,
+    /// Edge: corner choices by source rim names, applied after these flanges are made.
+    /// Each corner must include one of this feature's bends. Refused on base and contour flanges.
+    #[serde(default)]
+    #[schemars(length(max = 2000))]
+    pub corners: Option<Vec<FlangeCornerParams>>,
     /// Edge: further bends, each a flange on the far edge of the one before (at most 16). Refused
     /// on a base or contour flange.
     #[serde(default)]
@@ -439,6 +598,91 @@ pub struct FlangeParams {
     pub segments: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What press-in hardware a mounting hole is for (`sheet.hardware`'s `kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HardwareKindParam {
+    /// A self-clinching nut.
+    Nut,
+    /// A self-clinching nut that ends flush with the sheet on its far side.
+    FlushNut,
+    /// A self-clinching stud; needs `length`.
+    Stud,
+    /// A self-clinching standoff; needs `length`.
+    Standoff,
+}
+
+/// Cut the mounting hole of press-in hardware (a self-clinching nut, flush nut, stud or standoff)
+/// in a sheet metal part, at the points of a sketch on a face of the sheet or at a point on it,
+/// and record the hardware on the hole. The hole is a plain through hole of the hardware's size
+/// (`docs/hardware-catalogue.md`), in the folded part, the flat pattern and the DXF. A sheet
+/// thinner than the hardware's minimum is refused; a hole centre closer to an edge, a cut-out or a
+/// bend than the hardware's minimum is a warning.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct HardwareParams {
+    /// The kind of hardware.
+    pub kind: HardwareKindParam,
+    /// The thread, an ISO metric coarse size the table has for the kind (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length, more than 0; refused for a nut. It does not change the hole.
+    #[serde(default)]
+    pub length: Option<LengthExpr>,
+    /// The mounting hole's diameter, from the table's size to 0.08 mm over it. Default: the table's.
+    #[serde(default)]
+    pub diameter: Option<LengthExpr>,
+    /// A sketch, by id or name, whose points are the holes' centres (as `solid.hole`'s `sketch`).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+    /// The sketch's point ids; default: every point of the sketch.
+    #[serde(default)]
+    pub points: Option<StringList>,
+    /// One hole at one sketch point, drilled into the face there, that follows the point.
+    #[serde(default)]
+    pub single: Option<bool>,
+    /// Sketch points: drill to the other side of the sketch.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// A point [x, y, z] on the sheet's face, in place of a sketch.
+    #[serde(default)]
+    pub position: Option<Point3>,
+    /// The way into the sheet (single holes and positions). Default: against the face's normal.
+    #[serde(default)]
+    pub direction: Option<Point3>,
+    /// The bodies to drill (as `solid.hole`'s `targets`). Default: the sheet the points lie on.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// A hardware feature's reply: the feature's (`FeatureResult`) and the hardware it recorded.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct HardwareResult {
+    #[serde(flatten)]
+    pub feature: super::features::FeatureResult,
+    /// What the hole is the mounting hole of.
+    pub hardware: HardwareInfo,
+}
+
+/// The hardware recorded on a hole, with the table's numbers it was checked against (mm).
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct HardwareInfo {
+    pub kind: HardwareKindParam,
+    pub thread: String,
+    /// A stud's or standoff's length.
+    pub length: Option<f64>,
+    /// The part id a component or a drawing can name it by (`nut.m3`).
+    pub part: String,
+    /// The table's mounting hole size (the hole may be up to 0.08 mm over it).
+    pub hole_diameter: f64,
+    /// The thinnest sheet the hardware is made for.
+    pub min_sheet_thickness: f64,
+    /// The least distance from the hole's centre to an edge, a cut-out or a bend.
+    pub min_edge_distance: f64,
 }
 
 /// Add a field of round perforations over a whole flat sheet, or inside a sketch's outline: holes
@@ -477,6 +721,92 @@ pub struct PerforateParams {
     pub common: FeatureCommon,
 }
 
+/// Add a tab to a sheet metal body: the closed profiles of a sketch drawn on a flat face of the
+/// sheet (either side, or in a plane level with one) join that panel through the sheet's
+/// thickness, part of its outline. The body stays one sheet: the tab unfolds with its panel (the
+/// flat pattern and DXF carry it), and later flanges, hems and folds can use its edges. Refused
+/// when the profile doesn't touch or overlap the face's outline, adds nothing to it, reaches into
+/// a bend zone, or would overlap another panel once folded or in the flat pattern, and while the
+/// sheet is unfolded. Makes no body.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabParams {
+    /// The tab's sketch, by id or name, drawn on a flat face of the sheet. Default: the active
+    /// sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's closed profiles make the tab. Default: all of them.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick in `profiles` is exactly the region it names. Without it, a pick
+    /// on a drawn profile that reference geometry (the face's projected outline) cuts into
+    /// regions takes the whole drawn profile. The dialogs send `true`.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// The sheet metal body to add the tab to. Default: the first sheet with a face in the
+    /// sketch's plane that the profile meets.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Press formed beads (stiffening ribs) into a sheet along straight sketch lines on a face of one
+/// of its planar panels: each keeps the sheet's thickness, is in the folded solid, and is listed
+/// in the flat pattern and drawn in its DXF (the flat blank stays flat).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BeadParams {
+    /// The sketch holding the centrelines, by id or name: on a face of a planar panel of the
+    /// sheet. Default: the active sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// The centrelines: straight sketch lines (curve ids), 1 to 200; each makes one bead from
+    /// end to end (its ends are where the end ramps meet the face).
+    pub curves: StringList,
+    /// The cross-section: trapezoid (the only one so far). Default: trapezoid.
+    #[serde(default)]
+    pub shape: Option<String>,
+    /// From the face the bead stands out of to its crown on that side, more than 0.
+    pub depth: LengthExpr,
+    /// Across, between the flanks' virtual sharps on the face it stands out of, more than 0.
+    pub width: LengthExpr,
+    /// The flanks' angle to the face, between 0 and 90 deg. Give it or `crown_width`, not both.
+    /// Default: 45 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Across the crown, between the flanks' virtual sharps there: sets the angle instead.
+    #[serde(default)]
+    pub crown_width: Option<LengthExpr>,
+    /// The inner radius of the bends at the base. Default: the rule's bend radius.
+    #[serde(default)]
+    pub base_radius: Option<LengthExpr>,
+    /// The inner radius of the bends at the crown. Default: the rule's bend radius.
+    #[serde(default)]
+    pub crown_radius: Option<LengthExpr>,
+    /// Along the centreline, how long each end's ramp is between its virtual sharps. Default: 3 ×
+    /// the depth.
+    #[serde(default)]
+    pub end_length: Option<LengthExpr>,
+    /// How near the bead may come to edges, cut-outs, bends and other beads before the feature
+    /// warns. Default: 3 × the thickness.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
+    /// The bead stands out of the other face of the sheet. Default: false (out of the face the
+    /// sketch is on).
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The sheet metal body. Default: the one sheet with a planar panel the first centreline
+    /// lies on.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Add hems: the sheet folded back on itself along edges. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -485,7 +815,8 @@ pub struct HemParams {
     pub edges: SheetPoints,
     /// The hem's length, to its outer face.
     pub length: LengthExpr,
-    /// The gap inside the hem (its inner radius). Default: the sheet's rule's hem gap.
+    /// The gap between the hem's leg and the face it folds over, twice the bend's inner radius.
+    /// Default: the sheet's rule's hem gap.
     #[serde(default)]
     pub gap: Option<LengthExpr>,
     /// Hem to the other side. Default: false.
@@ -527,11 +858,21 @@ pub struct FoldParams {
     /// centerline.
     #[serde(default)]
     pub position: Option<FoldPosition>,
-    /// A point on the side that stays, on the sheet. Default: the larger side (on a flange, the
-    /// side toward its own bend).
+    /// A point on the side that stays, on the sheet. The fold is made with the side it lies on,
+    /// kept in `stays`: the point is converted, so a later edit that moves the line past it
+    /// keeps that side. Ignored where `stays` is given: neither checked against the sheet nor
+    /// kept.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FixedPoint")]
     pub fixed: Option<FixedPoint>,
+    /// The side of the fold line that stays put: left or right of the line as drawn (from its
+    /// first point to its second, or along the sketch line), seen from the sheet's surface.
+    /// Decided once, as the fold is made, and kept with it: every rebuild folds the other side,
+    /// wherever the line moves. Default: the side `fixed` lies on, else the side with more of
+    /// the sheet joined to it (on a panel bent from another, the side toward that bend; on a
+    /// lone panel, the larger side).
+    #[serde(default)]
+    pub stays: Option<FoldStays>,
     /// Fold the other way. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
@@ -551,34 +892,110 @@ pub struct UnfoldParams {
     /// (refold).
     #[serde(default)]
     pub body: Option<String>,
+    /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its plane.
+    /// Default: the largest flat panel, or the one an earlier unfold of the sheet fixed.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FixedPoint")]
+    pub fixed: Option<FixedPoint>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
 
-/// Turn a body into sheet metal. Without `bends`, a plate of even thickness: its large flat face
-/// becomes the sheet, holes become cut-outs and recesses in one face up to half the thickness
-/// deep (an engraved label) become pockets. With `bends`, a solid or shelled body: `face` stays
-/// put and the flat faces reached from it across those edges become the sheet; a shell keeps its
-/// thickness, a solid takes the rule's inward, and edges between two of those faces that are no
-/// bends are cut open with the rule's gap. `participants` changes nothing.
+/// Convert to Sheet Metal (#6748): surfaces become the rule's sheet. The surfaces are the faces
+/// of a solid or a surface body: every face but the `skip`ped ones, or with `face` (and `faces`)
+/// those and every face a bend joins to them, each a panel however thin the body (Recognize reads
+/// a body that is sheet metal already). The sharp edges at `bends` become bends, and every other
+/// sharp edge between two faces of the sheet is cut open with the rule's gap; a cylinder modelled
+/// between two planes is a bend, and other cylinders and cones are rolls. The faces of a recess
+/// picked to `engrave` are a pocket of the panel round it. The thickness, radius and reliefs are
+/// the rule's, whatever the body's; the material lies on the faces' `direction` side, and panels
+/// whose material would overlap are refused. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConvertParams {
-    /// The body to convert.
+    /// The body to convert: a solid or a surface body.
     pub body: String,
-    /// Its large flat face (a plate), or the face that stays put (with `bends`).
-    pub face: FaceRef,
-    /// The sharp edges that become bends of the rule's radius at their virtual sharp. A point in
-    /// the middle of a chamfer between two faces, or on a bend modelled with its radius (a
-    /// cylinder tangent to two flat faces, either skin), makes it one bend. Default: none (a
-    /// plate).
+    /// A face of the sheet: the sheet is this face, `faces`, and every face a bend joins to them.
+    /// Default: every face but `skip`.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+    /// More faces of the sheet, with `face`.
+    #[serde(default)]
+    pub faces: Option<Vec<FaceRef>>,
+    /// The faces left out of the sheet, where no face is picked.
+    #[serde(default)]
+    pub skip: Option<Vec<FaceRef>>,
+    /// The walls and floors of recesses in faces of the sheet, kept as engravings: each recess a
+    /// pocket of the panel round it, as deep as its floor lies, not panels of its own. Default:
+    /// none (a recess's faces are panels).
+    #[serde(default)]
+    pub engrave: Option<Vec<FaceRef>>,
+    /// The sharp edges that become bends of the rule's radius at their virtual sharp. A point on
+    /// a bend modelled with its radius (a cylinder tangent to two flat faces) picks that bend.
+    /// Default: none.
     #[serde(default)]
     pub bends: Option<SheetPoints>,
-    /// The sheet metal rule, by name. Default: the active rule. A plate keeps its own thickness.
+    /// The sheet metal rule, by name. Default: the active rule.
     #[serde(default)]
     pub rule: Option<String>,
+    /// The side of the faces the material lies on: inside (default) or outside.
+    #[serde(default)]
+    pub direction: Option<MaterialSide>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// Recognize Sheet Metal (#6748): a body that is sheet metal already (a shell, a plate, an
+/// imported part) becomes the rule's sheet with no picks: its surface is the side of `face`, or
+/// of its largest face; its bends modelled with their radius are bends, its other cylinders and
+/// cones rolls, and its sharp edges are cut open but the `bends`. A body of walls of more than one
+/// thickness is refused. `new_rule` first makes a rule from the body (its thickness and the
+/// radius most of its modelled bends have; the rest the active rule's), and the sheet takes it.
+/// `participants` changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RecognizeParams {
+    /// The body that is sheet metal already.
+    pub body: String,
+    /// A face whose side is the sheet's surface. Default: the body's largest face's side.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+    /// The faces left out of the sheet.
+    #[serde(default)]
+    pub skip: Option<Vec<FaceRef>>,
+    /// Sharp edges that become bends of the rule's radius at their virtual sharp. Default: none.
+    #[serde(default)]
+    pub bends: Option<SheetPoints>,
+    /// The sheet metal rule, by name. Default: the active rule.
+    #[serde(default)]
+    pub rule: Option<String>,
+    /// The name of a new rule made from the body, which the sheet takes (not with `rule`).
+    #[serde(default)]
+    pub new_rule: Option<RuleName>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Measure a body as sheet metal (#6748), as Recognize reads it. Reads only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeasureBodyParams {
+    /// The body to measure.
+    pub body: String,
+    /// A face whose side is the sheet's surface. Default: the body's largest face's side.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+}
+
+/// A body measured as sheet metal (#6748): its own thickness, the inside radius of each bend
+/// modelled with its radius, and a point on a face of its surface side.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct SheetBodyMeasure {
+    pub thickness_mm: f64,
+    pub bend_radii_mm: Vec<f64>,
+    pub surface: [f64; 3],
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// List the design's sheet metal rules (the built-in steel rule if none are saved).
@@ -609,6 +1026,8 @@ pub struct ManageRulesParams {
     pub corner_relief: Option<LengthExpr>,
     /// Corner relief shape. Ignored when deleting.
     pub corner_relief_shape: Option<ReliefShapeParam>,
+    /// Bend relief shape: rectangular (default), obround or tear. Ignored when deleting.
+    pub bend_relief_shape: Option<BendReliefShapeParam>,
     /// Inner radius of flat hems. Ignored when deleting.
     pub hem_gap: Option<LengthExpr>,
     /// Gap between meeting flanges. Ignored when deleting.
@@ -616,12 +1035,80 @@ pub struct ManageRulesParams {
     /// How DXF bend notes show angles: bend or included, ignoring case and surrounding blanks.
     /// Ignored when deleting.
     pub angle_display: Option<AngleDisplayParam>,
+    /// Where the bends' K-factor comes from: k_factor (the rule's `k_factor`), or deduction or
+    /// allowance (worked out from `unfold_value`), ignoring case and surrounding blanks.
+    /// Ignored when deleting.
+    pub unfold_method: Option<UnfoldMethodParam>,
+    /// The 90° bend deduction or allowance a press brake chart gives for the rule's thickness and
+    /// bend radius; read only when `unfold_method` is deduction or allowance. Ignored when deleting.
+    pub unfold_value: Option<LengthExpr>,
     /// Make this the active rule. Default: true if there is no saved active rule, otherwise false.
     /// False leaves the active choice unchanged; ignored when deleting.
     pub active: Option<bool>,
     /// Delete the named saved rule instead of editing it. Default: false. Deleting the active
     /// rule clears that choice; listing then uses the first remaining rule, else built-in steel.
     pub delete: Option<bool>,
+    /// The material the rule is for: a label of at most 128 characters on one line, saved with
+    /// the rule; empty clears it. With `gauge`, a material of the standard library
+    /// (`sheet.rule_library`). Ignored when deleting.
+    pub material: Option<String>,
+    /// A gauge or metric thickness of `material` in the standard library (`16`, `16 ga`,
+    /// `1.5 mm`): the rule takes its
+    /// thickness and keeps its own bend radius; its K-factor is the bend model's estimate, unless
+    /// `k_factor` is given. Needs `material`. Ignored when deleting.
+    pub gauge: Option<String>,
+    /// With `gauge`, the bend method the K-factor estimate is for: air (default), bottoming or
+    /// coining. Ignored otherwise.
+    pub bend_method: Option<String>,
+}
+
+/// The standard library of sheet metal materials and gauges, each value with its sources.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RuleLibraryParams {
+    /// Only this material's gauges (ignoring case). Default: every material.
+    pub material: Option<String>,
+}
+
+/// A source of the library's values.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibrarySource {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+}
+
+/// One material in one gauge: the rule `sheet.manage_rules` makes from `material` and `gauge`.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibraryRule {
+    pub name: String,
+    pub material: String,
+    pub gauge: String,
+    /// Whose gauge chart `gauge` is from.
+    pub chart: String,
+    /// The thickness as the rule takes it, and in millimetres.
+    pub thickness: String,
+    pub thickness_mm: f64,
+    /// The column of the generic K-factor chart the material reads: soft, medium or hard.
+    pub hardness: Option<String>,
+    /// The material's published minimum inside radius at this thickness (an expression, and in
+    /// millimetres), when there is one. The working radius is the tooling's.
+    pub min_bend_radius: Option<String>,
+    pub min_bend_radius_mm: Option<f64>,
+    /// Ids of the sources of these values.
+    pub sources: Vec<String>,
+}
+
+/// The library and where its values come from.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleLibraryResult {
+    pub name: String,
+    pub note: String,
+    pub materials: Vec<String>,
+    pub sources: Vec<LibrarySource>,
+    pub rules: Vec<LibraryRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// A rule name, checked by the handler's reader.
@@ -668,8 +1155,32 @@ impl JsonSchema for AngleDisplayParam {
     }
 }
 
-/// A saved rule's expressions, including the default bend-angle display which the saved
-/// design omits. These are expressions, not evaluated values.
+/// A rule's unfold method, checked by the same parser as the handler.
+#[derive(Debug)]
+pub struct UnfoldMethodParam(pub solidcraft_doc::sheet::UnfoldMethod);
+
+impl<'de> Deserialize<'de> for UnfoldMethodParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_doc::sheet::UnfoldMethod::parse)
+            .map(UnfoldMethodParam)
+            .ok_or_else(|| D::Error::custom("must be k_factor, deduction or allowance"))
+    }
+}
+
+impl JsonSchema for UnfoldMethodParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetUnfoldMethod".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "description": "k_factor, deduction or allowance, ignoring case and surrounding blanks \
+            (also k-factor, k factor, kfactor, bend_deduction and bend_allowance)."})
+    }
+}
+
+/// A saved rule's expressions, including the default bend-angle display and unfold method which
+/// the saved design omits. These are expressions, not evaluated values.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct RuleReply {
     pub name: String,
@@ -680,9 +1191,16 @@ pub struct RuleReply {
     pub relief_depth: String,
     pub corner_relief: String,
     pub corner_relief_shape: String,
+    pub bend_relief_shape: String,
     pub hem_gap: String,
     pub gap: String,
     pub angle_display: String,
+    /// The material the rule is for; left out when none is set.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub material: String,
+    pub unfold_method: String,
+    /// Empty unless the rule has a 90° bend deduction or allowance.
+    pub unfold_value: String,
 }
 
 impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
@@ -696,14 +1214,19 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             relief_depth: r.relief_depth.clone(),
             corner_relief: r.corner_relief.clone(),
             corner_relief_shape: r.corner_relief_shape.clone(),
+            bend_relief_shape: r.bend_relief_shape.clone(),
             hem_gap: r.hem_gap.clone(),
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
+            material: r.material.clone(),
+            unfold_method: r.unfold_method.clone(),
+            unfold_value: r.unfold_value.clone(),
         }
     }
 }
 
 /// Evaluated rule values: lengths in millimetres, dimensionless K-factor and canonical choices.
+/// A rule that unfolds by bend deduction or allowance gives the K-factor its 90° value works out to.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct RuleValuesReply {
     pub thickness: f64,
@@ -713,6 +1236,7 @@ pub struct RuleValuesReply {
     pub relief_depth: f64,
     pub corner_relief: f64,
     pub corner_relief_shape: String,
+    pub bend_relief_shape: String,
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: String,
@@ -728,6 +1252,7 @@ impl From<solidcraft_doc::sheet::RuleValues> for RuleValuesReply {
             relief_depth: r.relief_depth,
             corner_relief: r.corner_relief,
             corner_relief_shape: r.corner_relief_shape.name().into(),
+            bend_relief_shape: r.bend_relief_shape.name().into(),
             hem_gap: r.hem_gap,
             gap: r.gap,
             angle_display: r.angle_display.name().into(),
@@ -766,6 +1291,10 @@ pub enum ManageRulesResult {
         rule: Box<RuleReply>,
         values: RuleValuesReply,
         errors: Vec<RuleFeatureError>,
+        /// What a standard library pick estimated or found (#18304): a K-factor from the bend
+        /// model, a radius under the material's published minimum.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         param_warnings: Vec<String>,
     },
@@ -821,8 +1350,9 @@ pub struct PathFlangeParams {
 }
 
 /// Read a sheet's flat pattern: its size, outline, cut-outs, pockets, bends and perforations, in
-/// flat coordinates (mm, on the base panel's bottom face). Refused while a feature that is not
-/// sheet metal (a fillet, a join) has changed the body.
+/// flat coordinates (mm, in the sheet's flat: the plane its surface is laid out in, where the
+/// feature that made the sheet put it, its sketch's plane or the converted face's). Refused while
+/// a feature that is not sheet metal (a fillet, a join) has changed the body.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct FlatPatternParams {
@@ -860,6 +1390,11 @@ pub struct ExportDxfParams {
     /// `per_body`, one file per sheet body, `<path>-<body>.dxf`.
     #[serde(default)]
     pub path: Option<String>,
+    /// mm: the drawing in millimetres ($INSUNITS 4). inches: every coordinate, radius and text
+    /// height in inches ($INSUNITS 1, $MEASUREMENT 0), the bend notes' radii and the pocket
+    /// layers' depths in inches too. Default: mm.
+    #[serde(default)]
+    pub units: Option<DxfUnitsParam>,
     /// exact: an ellipse as ELLIPSE, splines, text outlines and the other Béziers as SPLINE.
     /// arcs: tangent arcs and lines within 0.001 mm, for machines that read only those.
     /// Default: exact.
@@ -877,17 +1412,52 @@ pub struct ExportDxfParams {
     /// it, but a value out of range is refused either way.
     #[serde(default)]
     pub note_height: Option<DxfNoteHeight>,
+    /// A note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as
+    /// `note_height`; not with `layers: single`. Default: false, so the file for a shop is the
+    /// sheet and its mounting holes only.
+    #[serde(default)]
+    pub hardware_notes: Option<bool>,
     /// The bend lines on layers BEND_UP and BEND_DOWN. Default: true; false leaves them out, for
     /// a cutter that would cut them.
     #[serde(default)]
     pub bend_lines: Option<bool>,
-    /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
+    /// The markings: the letters' contours on TEXT/ETCH and the bend notes. Default: true; false
+    /// leaves them out, for a cutter that would etch them.
+    #[serde(default)]
+    pub markings: Option<bool>,
+    /// roles: the layer for each role (and, with `hardware_notes`, layer HARDWARE).
+    /// single: every entity on layer 0, with no hardware notes. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,
+    /// A DXF profile: which layer, colour and linetype each role is written with, and the roles
+    /// left out. A profile file's path, or the profile itself as an object
+    /// (`docs/formats/dxf-profiles.md`). Default: the standard layers. Not with `layers: single`.
+    #[serde(default)]
+    pub profile: Option<DxfProfileParam>,
     /// A file for every sheet body, or their DXF texts when there is no `path`. Not with `body`.
     /// Default: false.
     #[serde(default)]
     pub per_body: Option<bool>,
+}
+
+/// A DXF export's `units`: millimetres or inches, in any case (read by `sheet::dxf_units`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfUnitsParam(pub(crate) crate::cmd::DxfUnits);
+
+impl<'de> Deserialize<'de> for DxfUnitsParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::dxf_units).map(DxfUnitsParam).ok_or_else(|| D::Error::custom("must be mm or inches"))
+    }
+}
+
+impl JsonSchema for DxfUnitsParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfUnits".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "mm or inches, in any case.", "type": "string", "pattern": "^([Mm][Mm]|[Ii][Nn][Cc][Hh][Ee][Ss])$"})
+    }
 }
 
 /// A DXF export's `curves`: exact or arcs, in any case (read by `sheet::dxf_curves`).
@@ -948,6 +1518,39 @@ impl JsonSchema for DxfLayersParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "roles or single, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"})
+    }
+}
+
+/// A DXF export's `profile`: the path of a profile file, or the profile as an object. The export
+/// reads and checks it (`sheet::dxf_profile`), so its refusals name the role and the value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DxfProfileParam {
+    Path(String),
+    Profile(serde_json::Map<String, Value>),
+}
+
+impl<'de> Deserialize<'de> for DxfProfileParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(path) if !path.trim().is_empty() => Ok(DxfProfileParam::Path(path)),
+            Value::Object(profile) => Ok(DxfProfileParam::Profile(profile)),
+            _ => Err(D::Error::custom("must be a DXF profile file's path or a profile object")),
+        }
+    }
+}
+
+impl JsonSchema for DxfProfileParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfProfile".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A DXF profile file's path, or the profile itself: {format: \"solidcraft-dxf-profile\", version?, name?, note?, roles?: {<role>: {on?, layer?, color?, linetype?}}}.",
+            "anyOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "object", "required": ["format"]}
+            ]
+        })
     }
 }
 
@@ -1155,6 +1758,26 @@ pub enum FlatPerforationPattern {
     Square,
 }
 
+/// The mounting hole of press-in hardware (a nut, stud or standoff) in the flat pattern
+/// (`sheet.hardware`, #17752).
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatHardware {
+    /// The hole feature's id (a pattern's or mirror's, for a copy).
+    pub feature: u64,
+    /// The kind of hardware.
+    pub kind: HardwareKindParam,
+    /// The thread (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length, in mm; null for a nut.
+    pub length: Option<f64>,
+    /// The part id a component or a drawing can name it by (`nut.m3`).
+    pub part: String,
+    /// The hole's centre in the flat pattern, in mm.
+    pub position: FlatPoint,
+    /// The hole's diameter, in mm.
+    pub hole_diameter: f64,
+}
+
 /// A perforation field: round holes in the flat pattern, not cut into the solid.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct FlatPerforation {
@@ -1184,8 +1807,45 @@ pub struct FlatBore {
     pub length: f64,
 }
 
-/// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, on the
-/// base panel's bottom face). The `json` form of `sheet.export_bend_table` is this as text.
+/// Which side a formed bead stands out of: up out of the sheet's surface, the side the flat is
+/// drawn from, or down out of the other.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlatBeadDirection {
+    Up,
+    Down,
+}
+
+/// A formed bead (`sheet.bead`): pressed after cutting, not in the outline (the blank is flat).
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatBead {
+    /// The `sheet.bead` feature's id, and the sketch curve its centreline is.
+    pub feature: u64,
+    pub curve: String,
+    pub direction: FlatBeadDirection,
+    /// Its centreline's ends, where the end ramps meet the face, and its footprint's four corners.
+    pub start: FlatPoint,
+    pub end: FlatPoint,
+    pub footprint: [FlatPoint; 4],
+    /// Its depth and width on the side it stands out of, in mm, and its flanks' angle to the
+    /// face, in degrees.
+    pub depth: f64,
+    pub width: f64,
+    pub angle_deg: f64,
+    /// Its crown's width and length between the virtual sharps, in mm.
+    pub crown_width: f64,
+    pub crown_length: f64,
+    /// The inner radii of its bends at the base and at the crown, and each end ramp's length, in
+    /// mm.
+    pub base_radius: f64,
+    pub crown_radius: f64,
+    pub end_length: f64,
+}
+
+/// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, in the
+/// sheet's flat: the plane its surface is laid out in, where the feature that made the sheet put
+/// it, its sketch's plane or the converted face's). The `json` form of `sheet.export_bend_table`
+/// is this as text.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct FlatPatternResult {
     /// The sheet metal body.
@@ -1209,11 +1869,18 @@ pub struct FlatPatternResult {
     /// Whether the sheet is unfolded now.
     pub unfolded: bool,
     pub perforations: Vec<FlatPerforation>,
+    /// The mounting holes of press-in hardware the flat has, in the order they were cut. Left out
+    /// when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hardware: Vec<FlatHardware>,
     /// Each bend zone's bounding box, `[min x, max x, min y, max y]` in mm.
     pub bend_zones: Vec<[f64; 4]>,
     /// Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bores: Vec<FlatBore>,
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<FlatBead>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

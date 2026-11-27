@@ -17,6 +17,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::{edge_at, kernel_copy, rel, volume};
@@ -46,11 +49,7 @@ const CORPUS: &str = concat!(
 
 /// The case's entry and its operand.
 fn case(name: &str) -> (Value, Body) {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let entry = std::fs::read_to_string(format!("{CORPUS}/{name}.json")).unwrap();
     let e: Value = serde_json::from_str(&entry).unwrap();
     let gz = std::fs::File::open(format!("{CORPUS}/{name}.bodies.json.gz")).unwrap();

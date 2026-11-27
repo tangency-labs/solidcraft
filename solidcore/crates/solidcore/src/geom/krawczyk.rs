@@ -99,6 +99,21 @@ pub(crate) fn krawczyk<const N: usize>(
     value: &dyn Fn([Ivl; N]) -> Result<Option<[Ivl; N]>>,
     jacobian: &dyn Fn([Ivl; N]) -> Result<Option<[[Ivl; N]; N]>>,
 ) -> Result<Option<[Ivl; N]>> {
+    Ok(krawczyk_region(mid, c, value, jacobian)?.map(|(root, _)| root))
+}
+
+/// [`krawczyk`]'s box and the box its test ran on, `Y`, in which the root it holds is the
+/// only one (Krawczyk's strict inclusion `K(Y) ⊂ int Y` proves it unique there).
+///
+/// # Errors
+///
+/// As [`krawczyk`].
+pub(crate) fn krawczyk_region<const N: usize>(
+    mid: [f64; N],
+    c: [[f64; N]; N],
+    value: &dyn Fn([Ivl; N]) -> Result<Option<[Ivl; N]>>,
+    jacobian: &dyn Fn([Ivl; N]) -> Result<Option<[[Ivl; N]; N]>>,
+) -> Result<Option<([Ivl; N], [Ivl; N])>> {
     let Some(f) = value(mid.map(Ivl::from))? else {
         return Ok(None);
     };
@@ -136,7 +151,7 @@ pub(crate) fn krawczyk<const N: usize>(
             for (o, b) in out.iter_mut().zip(&y) {
                 *o = Ivl::new(o.lo.max(b.lo), o.hi.min(b.hi));
             }
-            return Ok(Some(out));
+            return Ok(Some((out, y)));
         }
         for ((r, ki), &m) in radius.iter_mut().zip(&k).zip(&mid) {
             let reach = (ki.lo - m).abs().max((ki.hi - m).abs());

@@ -374,6 +374,10 @@ pub fn preset_card(
 /// Enter or Space, so a click, a touch or the keyboard reaches it too. Assistive technology reads
 /// the same text. A click on the icon or outside the popover, or Escape, closes the popover.
 pub fn help_icon(ui: &mut Ui, text: &str) -> Response {
+    // The search hid the setting just before this icon, so the icon goes too (#16115).
+    if super::settings_search::follows_hidden(ui) {
+        return super::settings_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let size = t.space_12 + 1.0;
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
@@ -398,10 +402,20 @@ pub fn help_icon(ui: &mut Ui, text: &str) -> Response {
     if open { response } else { response.backing_on_hover_text(text) }
 }
 
-/// The host's text on a plugin card: its folder action and the enable check's name.
+/// The host's text on a plugin card: its folder action, the enable check's name and, when a
+/// newer version is offered, the Update button beside the check.
 pub struct PluginCardLabels<'a> {
     pub show_in_folder: &'a str,
     pub enabled: &'a str,
+    pub update: Option<&'a str>,
+}
+
+/// Inert plugin metadata displayed by the host's card.
+pub struct PluginCardContent<'a> {
+    pub key: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub description: &'a str,
 }
 
 /// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
@@ -414,6 +428,21 @@ pub fn settings_plugin_card(
     enabled: &mut bool,
     labels: &PluginCardLabels<'_>,
 ) -> egui::InnerResponse<(Response, Response)> {
+    let card = settings_plugin_card_with_actions(ui, PluginCardContent { key, name, version, description }, enabled, labels, |_| ());
+    let (folder, check, _) = card.inner.0;
+    egui::InnerResponse { inner: (folder, check), response: card.response }
+}
+
+/// Installed plugin card with host-owned actions inside its existing frame.
+/// The returned pair contains the folder/check/update responses and the host action result.
+pub fn settings_plugin_card_with_actions<R>(
+    ui: &mut Ui,
+    content: PluginCardContent<'_>,
+    enabled: &mut bool,
+    labels: &PluginCardLabels<'_>,
+    host_actions: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<((Response, Response, Option<Response>), R)> {
+    let PluginCardContent { key, name, version, description } = content;
     let t = Tokens::get();
     let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
     let frame = container
@@ -432,7 +461,9 @@ pub fn settings_plugin_card(
         let folder_font = FontId::proportional(t.font_body);
         let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
         let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
-        let actions_width = folder_width + t.space_12 + t.space_16;
+        let update_galley = labels.update.map(|label| ui.painter().layout_no_wrap(label.into(), FontId::proportional(t.font_body), t.form_ink));
+        let update_width = update_galley.as_ref().map_or(0.0, |galley| galley.size().x + t.space_12 * 2.0 + t.space_8);
+        let actions_width = folder_width + t.space_12 + super::switch_size().x + update_width;
         let beside = width >= tile_side + t.space_12 * 2.0 + actions_width + t.form_label_width;
         let text_width = (width - tile_side - t.space_12 - if beside { actions_width + t.space_12 } else { 0.0 }).max(1.0);
         let version_galley = ui.painter().layout_no_wrap(version.into(), FontId::proportional(t.font_small), t.form_dim);
@@ -463,9 +494,16 @@ pub fn settings_plugin_card(
             ui.painter().galley(at + vec2(0.0, header_height + t.space_2), body, t.form_dim);
         }
         let center_y = if beside { rect.center().y } else { rect.bottom() - t.space_12 };
-        let check_rect = Rect::from_center_size(pos2(rect.right() - t.space_8, center_y), vec2(t.space_16, t.space_16));
-        let folder_rect =
-            Rect::from_min_size(pos2(check_rect.left() - t.space_12 - folder_width, center_y - t.space_12), vec2(folder_width, t.space_24));
+        let switch = super::switch_size();
+        let check_rect = Rect::from_center_size(pos2(rect.right() - switch.x / 2.0, center_y), switch);
+        let update_rect = Rect::from_min_size(
+            pos2(check_rect.left() - t.space_12 - (update_width - t.space_8), center_y - t.control_height / 2.0),
+            vec2((update_width - t.space_8).max(0.0), t.control_height),
+        );
+        let folder_rect = Rect::from_min_size(
+            pos2(check_rect.left() - t.space_12 - update_width - folder_width, center_y - t.space_12),
+            vec2(folder_width, t.space_24),
+        );
         let folder = ui.interact(folder_rect, ui.make_persistent_id("plugin_folder"), Sense::click());
         // Quiet actions retain their focus affordance without a button surface.
         if folder.has_focus() {
@@ -478,7 +516,21 @@ pub fn settings_plugin_card(
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", labels.enabled), enabled);
-        (folder, check)
+        // The switch reads on or off at full strength on a dimmed (turned-off) card.
+        let check = ui
+            .scope(|ui| {
+                ui.set_opacity(1.0);
+                super::switch_at(ui, check_rect, &format!("{name}: {}", labels.enabled), enabled)
+            })
+            .inner;
+        // A turned-off card is dimmed; its Update button is not.
+        let update = labels.update.map(|label| {
+            ui.scope(|ui| {
+                ui.set_opacity(1.0);
+                super::button_at(ui, "plugin_update", update_rect, label, super::Button::Primary)
+            })
+            .inner
+        });
+        ((folder, check, update), host_actions(ui))
     })
 }

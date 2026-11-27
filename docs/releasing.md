@@ -186,6 +186,24 @@ change release infrastructure does not itself request publication of the applica
 retry that creates/updates a draft, use `--ref release -f draft=true`. Draft creation from
 another branch is rejected. A rerun must still use an unpublished, untagged version.
 
+## Test builds
+
+For a one-off build of any branch, tag, SHA or pull request, without a release: `test-build.yml`
+builds on Blacksmith, unsigned, in about ten minutes, and keeps the result as a workflow artifact
+for 7 days (`solidcraft-<shortsha>-<platform>`).
+
+- Actions > Test build > Run workflow: a `ref` (default `main`) and a platform (`windows-portable`,
+  `linux-appimage`, `macos-dmg` or `all`), or `gh workflow run test-build.yml -f ref=<ref> -f platform=<platform>`.
+- On a pull request, a maintainer adds `build:windows`, `build:linux`, `build:macos` or `build:all`.
+  The PR's head is built (fork PRs too, with no secrets), one comment on the PR is edited with the
+  artifact link and the SHA, and the label comes off so it can be added again.
+
+The packaging is the release's own scripts. The Windows build is just the portable zip
+(`solidcraft.exe` and the CLI), Linux is the x86_64 AppImage, macOS is an ad-hoc signed Apple Silicon
+dmg (first launch needs right-click > Open). The version is `<Cargo.toml version>-test+<shortsha>`,
+so About shows a test build and the in-app updater treats it like a development build and never
+offers an update. One build per ref and platform runs at a time; a newer request cancels the older.
+
 ## Flatpak repository coordination
 
 The Flatpak repository proposed in PR #39 consumes **published** releases, not these drafts.
@@ -198,6 +216,12 @@ Pages assembles the documentation, browser app, and Flatpak repository together.
 docs updates include the latest stable Flatpak release too. Verify the resulting Pages run,
 not only the dispatch job, so a release cannot erase the docs or app and docs updates cannot
 erase the package repository.
+
+Only one Pages run waits at a time, so a later push to `main` cancels the release's own Pages
+request; that later run includes the release, but if it fails nothing deploys. The Flatpak workflow
+therefore also runs hourly: when `flatpak/index.html` names an older release than the latest stable
+one and no Pages run is queued, it requests one for the latest tag, once per commit on `main`. If
+that run fails too, the hourly check fails until a Pages run succeeds.
 
 ## Snap package and Snap Store
 
@@ -285,9 +309,75 @@ To enable it once (owner):
 3. Keep the fork `bherbruck/winget-pkgs` (Komac pushes its branches there). Its default branch
    doesn't need syncing.
 
+**Install scope.** The MSI installs for all users by default and just for the user with
+`ALLUSERS=2 MSIINSTALLPERUSER=1`. WinGet doesn't pass either by itself: a manifest that only
+says `Scope: machine` (as the winget-pkgs one does) keeps installing for all users, unchanged.
+To offer `winget install --scope user`, the manifest needs a second installer entry per
+architecture, with the same URL, hash and product code, plus:
+
+```yaml
+  Scope: user
+  InstallerSwitches:
+    Custom: ALLUSERS=2 MSIINSTALLPERUSER=1
+```
+
+and the existing entries `Scope: machine`. That first edit is made by hand in the winget-pkgs
+pull request of the first release with the scope choice. Komac copies the other fields from the
+previous manifest, so later updates should keep both entries; check the next one does.
+
 When the token expires, create a new one the same way and run step 2 again. If a release was
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
+
+## Python packages
+
+`release.yml`'s `python` job turns each platform's released `solidcraft-cli` into a wheel of the
+Python client (`python/`, [python-api.md](python-api.md)) with `packaging/python/wheels.sh`. It
+repackages the binaries that the Linux, macOS and Windows jobs built and signed; it never rebuilds
+them. The wheels are:
+
+| Package | Wheel platform tag |
+|---|---|
+| `solidcraft-<version>-linux-<arch>.tar.gz` | `manylinux_2_<glibc>_x86_64`, `manylinux_2_<glibc>_aarch64` (the newest glibc symbol the binary needs) |
+| `solidcraft-cli-<version>-macos-universal.zip` | `macosx_11_0_universal2` |
+| `solidcraft-<version>-windows-<arch>-portable.zip` | `win_amd64`, `win32`, `win_arm64` |
+| none | `py3-none-any`, with no binary: it finds `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI` |
+
+The job installs the Linux x86_64 wheel into a clean environment and runs the client's tests
+against the binary inside it. It then uploads the wheels as `release-python`, so they are attached
+to the draft and listed in `SHA256SUMS.txt` like every other asset. Wheel versions follow PEP 440:
+`0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a nightly.
+
+`pypi.yml` uploads the release's wheels with PyPI trusted publishing, so no token is stored.
+Publishing a pre-release sends its wheels to TestPyPI only. The release reaches PyPI when it becomes
+a full release: flipping the pre-release to a release (or publishing one as a release) uploads its
+wheels to PyPI with no manual run, and the flip doesn't upload to TestPyPI again. A pre-release
+never goes to PyPI. Like `winget.yml`, an event made with `GITHUB_TOKEN` (every nightly) doesn't
+trigger it, so flip the release as yourself;
+to upload one by hand, run `gh workflow run pypi.yml -R tangency-labs/solidcraft --ref v<version> -f tag=v<version>`
+(from the tag: the environments deploy from `v*` tags only, step 2).
+A release with no wheels uploads nothing. PyPI refuses to replace a file it already has, so a
+version is uploaded once.
+
+The workflow does nothing until the owner turns it on, once:
+
+1. Create the `solidcraft` project's trusted publisher on <https://pypi.org/manage/account/publishing/>
+   (a "pending publisher" before the first upload): owner `tangency-labs`, repository `solidcraft`,
+   workflow `pypi.yml`, environment `pypi`. Do the same on <https://test.pypi.org> with environment
+   `testpypi`.
+2. Create the repository environments `pypi` and `testpypi` (Settings > Environments), and under
+   each one's "Deployment branches and tags" choose "Selected branches and tags" with the tag rule
+   `v*` only. PyPI trusts the workflow file name and the environment, not the ref it ran from, and
+   `workflow_dispatch` runs from any ref: without the rule, anyone who can push a branch could
+   dispatch a changed `pypi.yml` from it and publish under the project's name. A release event runs
+   from its tag, so releases are unaffected. Requiring a reviewer on `pypi` adds a manual approval
+   before each upload.
+3. Set the repository variable: `gh variable set PYTHON_PUBLISH -R tangency-labs/solidcraft --body true`.
+
+A platform wheel holds the whole `solidcraft-cli`. PyPI's default limit is 100 MB per file, and the
+universal macOS binary may come close to it: the `python` job's log lists every wheel's size. If one
+is over the limit, ask PyPI for a larger limit for the project
+(<https://github.com/pypi/support>), and upload the wheels again with `pypi.yml` once it is granted.
 
 ## macOS signing and notarization
 
@@ -332,7 +422,7 @@ and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSU
 When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
 workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
 (organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
-sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+sends two signing requests: `solidcraft.exe` and `solidcraft-cli.exe` first,
 so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
 request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
 that every file came back signed. Without the secret (forks) the jobs build unsigned as before.

@@ -78,7 +78,7 @@ fn step_index(step: LookStep) -> usize {
 pub(super) fn targets(app: &SolveApp, step: LookStep) -> Targets {
     let mut targets = Targets::default();
     let state = crate::open_meshing::session_world(&app.session);
-    for selection in &app.session.selection {
+    for selection in &app.session.selected_items().unwrap_or_default() {
         let body = match selection {
             Sel::Body { name } | Sel::Face { body: name, .. } => state.body(name),
             _ => None,
@@ -282,7 +282,7 @@ pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui)
 }
 
 pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
-    let enabled = !app.session.selection.is_empty();
+    let enabled = app.session.has_selection();
     let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
         let label = app.tr("render.inspector_save_library");
         let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
@@ -314,7 +314,7 @@ pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui,
 
 /// Returns false only when the explicit-target fallback should be shown.
 pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
-    if app.session.selection.is_empty() {
+    if !app.session.has_selection() {
         app.render_workspace.view.inspector.selection_appearance = View::default();
         return false;
     }
@@ -323,7 +323,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         return true;
     }
     let mut view = std::mem::take(&mut app.render_workspace.view.inspector.selection_appearance);
-    let pick_mode = if app.ui.pick_components { 2 } else { usize::from(!app.ui.pick_bodies) };
+    let pick_mode = if app.picks_components() { 2 } else { usize::from(!app.picks_bodies()) };
     if view.selection == app.session.selection && view.pick_mode != pick_mode {
         view.mode = pick_mode;
         view.inspected = None;
@@ -334,7 +334,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
     view.pick_mode = pick_mode;
     if view.selection != app.session.selection {
         view.selection = app.session.selection.clone();
-        view.mode = if app.ui.pick_components || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. })) {
+        view.mode = if app.picks_components() || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. })) {
             2
         } else if view.selection.iter().any(|s| matches!(s, Sel::Face { .. })) {
             1

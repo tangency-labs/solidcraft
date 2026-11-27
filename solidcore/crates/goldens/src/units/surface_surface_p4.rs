@@ -1105,6 +1105,101 @@ mod tests {
         }
     }
 
+    /// The `thin####` global point solves WR-57's retirement moved (#17856): each case's
+    /// name, main's row (3740d2254) and the new row (`[status, count, (value, u, v)...]`).
+    #[rustfmt::skip]
+    const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
+        ("thin0020", &[0.0, 1.0, 1.1452643513429935e-09, -7.4413038111358905, -8.133138099997177], &[0.0, 1.0, 9.234592953519264e-10, -4.287564350031044, -8.133138100112944]),
+        ("thin0033", &[0.0, 1.0, 0.9421959663289098, -7.529224615244873, -0.3405249617975371], &[0.0, 1.0, 0.9421951564421657, -1.7540402416036214, -0.340524158441172]),
+        ("thin0038", &[0.0, 1.0, 0.10608476605018104, -0.6061038175828922, 6.850180261404336], &[0.0, 1.0, 0.10608476073221633, -0.6061038186225611, -5.655008220853681]),
+        ("thin0039", &[0.0, 1.0, 1.3934118163854431e-09, -7.2017053544156315, 11.303176576206415], &[0.0, 1.0, 1.1450434313198965e-09, -7.201705354323701, 3.4359256821231487]),
+        ("thin0040", &[0.0, 1.0, 0.04422045841151463, -6.753964182160903, 3.1729139982293253], &[0.0, 1.0, 0.04421937017153863, 7.756366157095814, 3.1729136494998924]),
+        ("thin0041", &[0.0, 1.0, 1.4972950016185036e-07, 0.26189574483623446, -12.981837521022197], &[0.0, 1.0, 1.9164874564762072e-08, 0.261895856535119, -11.596120049506974]),
+        ("thin0042", &[0.0, 1.0, 3.822433970455119e-09, -2.0840170275521537, -6.368269434721294], &[0.0, 1.0, 5.157487195707641e-10, -1.5399264231309435, -6.368269436263146]),
+        ("thin0048", &[0.0, 1.0, 4.6861556701848833e-07, -6.983354653472857, -8.608445814645819], &[0.0, 1.0, 4.326814148786936e-08, -6.9833544985615825, -4.908196270033985]),
+        ("thin0055", &[0.0, 1.0, 5.1399330247848315e-05, -5.044404099952267, -14.499185392123671], &[0.0, 1.0, 5.1398191662077944e-05, -0.5570542317401594, -14.499185391707208]),
+        ("thin0061", &[0.0, 1.0, 0.05840398847843383, -4.678419243127683, -5.55384352243953], &[0.0, 1.0, 0.0584039879710731, -4.678419256561581, 3.9921504221463646]),
+        ("thin0069", &[0.0, 1.0, 2.8460552103155818e-09, -12.773538364297751, -5.7503300225411405], &[0.0, 1.0, 1.0532766655703642e-09, -12.77353836449972, -2.9732414300282244]),
+        ("thin0084", &[0.0, 1.0, 5.759589319429135, -10.386749833934463, -13.461761173009148], &[0.0, 1.0, 5.759589319376998, -10.386749833957895, -12.226082250832281]),
+        ("thin0087", &[0.0, 1.0, 9.080178519798764e-06, -5.602627398579584, -8.84001088365232], &[0.0, 1.0, 9.078097090608197e-06, 1.65952842534284, -8.840010889963901]),
+        ("thin0098", &[0.0, 1.0, 1.0300441883741392e-06, -5.333594887426149, -10.741281499214853], &[0.0, 1.0, 4.5811312693545384e-10, -5.333594232908261, -4.057261982364255]),
+        ("thin0104", &[0.0, 1.0, 3.6939348377238915e-05, 9.366274301703566, 2.7129190576283477], &[0.0, 1.0, 3.693299296302416e-05, 1.0054287020629822, 2.7129190553881184]),
+        ("thin0120", &[0.0, 1.0, 8.490463652687677e-07, -9.47679740623711, 4.447323416424816], &[0.0, 1.0, 3.4937742028080256e-10, -3.944805452665941, 4.447323576458435]),
+        ("thin0124", &[0.0, 1.0, 0.0711693600180271, -7.528943423251498, -4.560065325292197], &[0.0, 1.0, 0.07116934943102839, -5.186904537570512, -4.560065327248988]),
+        ("thin0128", &[0.0, 1.0, 1.057905330836104e-09, -1.8007535339241452, -12.819770720658743], &[0.0, 1.0, 3.192390970238067e-10, -1.8007535343976389, -4.861042944922472]),
+        ("thin0133", &[0.0, 1.0, 1.4782348249534292, -12.448274767552174, -3.6295589517085327], &[0.0, 1.0, 1.4782348247292214, -12.448274762096172, 2.568824439938906]),
+        ("thin0145", &[0.0, 1.0, 3.2765961179821543e-10, 8.168513378506187, -1.9508731155744883], &[0.0, 1.0, 2.0899636112870885e-10, 8.16851337744371, -1.3819734391350407]),
+        ("thin0158", &[0.0, 1.0, 4.234433651608638, -13.518231979986146, -6.583037807245013], &[0.0, 1.0, 4.234433644493968, -13.51823197772014, -0.8753820499375875]),
+    ];
+
+    /// WR-57 (#17856): every `thin####` row that moved from main is replayed (the row
+    /// agrees with the golden: the code checked is the code that blessed) and certified:
+    /// a closest-point (`sop` 3) or intersection (`sop` 0) solve with one answer in both, the new answer's point lies
+    /// in the solve's domain wherever main's does and is not proven farther from the test point than main's
+    /// (its certified distance's lower end at most main's upper end, the evaluation's
+    /// rounding [`crate::certify::evaluation_slack_at`], grown past the knots, and the
+    /// distance's own charged). The rows proven nearer (the enclosures part) are counted and
+    /// the count asserted; a row past a rational net's knots has no enclosure and is listed
+    /// as unproven, the list asserted.
+    #[test]
+    fn wr57_moved_thin_solves_are_not_farther() {
+        let k = Kernel::default();
+        let (mut proven_nearer, mut outside) = (0usize, 0usize);
+        let mut unproven: Vec<&str> = Vec::new();
+        for &(name, main, new) in WR57_MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert!(
+                row.len() == new.len()
+                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not the new row"
+            );
+            let OpIn::Gps { dom, sop, p, .. } = &i.op else {
+                panic!("{name}: not a global point solve");
+            };
+            // (an intersection with the point is a closest-point solve that must reach it)
+            assert!(*sop == 3 || *sop == 0, "{name}: not a closest-point or intersection solve");
+            assert!(main.len() == 5 && new.len() == 5 && main[1] == 1.0 && new[1] == 1.0, "{name}: not one answer each");
+            let s = surface_of(&i.surface).expect("surface");
+            let p = v3(*p);
+            let at = |r: &[f64]| {
+                let uv = solidcore::geom::vector2d::Point2::new(r[3], r[4]);
+                let q = s.evaluate_point(&k, uv).expect("evaluate");
+                let d = solidcore::geom::certified::distance(q, p);
+                let slack = crate::certify::evaluation_slack_at(&k, &s, uv)?;
+                Some((d.value - d.bound - slack, d.value + d.bound + slack))
+            };
+            let [u0, v0, u1, v1] = *dom;
+            let inside = |r: &[f64]| (u0..=u1).contains(&r[3]) && (v0..=v1).contains(&r[4]);
+            assert!(
+                inside(new) || !inside(main),
+                "{name}: the new answer {new:?} is outside the domain {dom:?}, main's inside"
+            );
+            if !inside(new) {
+                // (main's answer is outside too: the solve's parameters along the thin
+                // direction are not pinned by the distance; recorded, not WR-57's)
+                outside += 1;
+                eprintln!("{name}: main {main:?} and new {new:?} outside the domain {dom:?}");
+            }
+            let (Some(m), Some(n)) = (at(main), at(new)) else {
+                unproven.push(name);
+                eprintln!("{name}: unproven (past a rational net's knots), main {main:?} new {new:?}");
+                continue;
+            };
+            assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
+            if n.1 < m.0 {
+                proven_nearer += 1;
+            }
+            eprintln!("{name}: main {m:?} new {n:?}");
+        }
+        eprintln!(
+            "{proven_nearer} answers proven nearer than main's, {outside} outside the domain as main's, \
+             unproven {unproven:?}"
+        );
+        assert_eq!((proven_nearer, unproven.as_slice()), (21, &[] as &[&str]), "the certified counts moved");
+    }
+
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
@@ -1135,5 +1230,43 @@ mod tests {
         }
         eprintln!("classify (type, found): {classes:?}");
         assert!(stats.len() >= 13, "{}", stats.len());
+    }
+
+    /// The global solves the target distance bounded out (#20438): each named case's solve
+    /// now answers no solution, where before the candidate beyond the target was returned.
+    #[rustfmt::skip]
+    const TARGET_BOUNDED: &[&str] = &[
+        "gen0337", "gen0437", "gen0594", "gen0687", "gen1022", "gen1119", "gen1125",
+        "gen1128", "gen1400", "gen1470", "gen1507", "gen1639", "gen1670", "gen1783",
+        "gen1816", "gen1919", "gen1955", "gen2023", "gen2239", "gen2342", "gen2355",
+        "gen2573", "gen2736", "gen2776", "gen2875", "gen2892",
+    ];
+
+    /// #20438: every solve the target bounded out is replayed (it answers no solution) and
+    /// certified empty, as the tree solve culls (`AddSortedSolution`): each is a minimize
+    /// whose surface is proven farther than `|target| + tol` over the whole solve domain
+    /// ([`crate::certify::domain_lower_bound`]), so no point of it is within the target.
+    #[test]
+    fn target_bounded_solves_are_certified_empty() {
+        let k = Kernel::default();
+        let mut unproven = Vec::new();
+        for &name in TARGET_BOUNDED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert_eq!(row, [0.0, 0.0], "{name}: not answered empty");
+            let OpIn::Gps { dom, sop, p, tol, target: Some(target), .. } = &i.op else {
+                panic!("{name}: not a global point solve with a target");
+            };
+            assert_eq!(sop_of(*sop).unwrap(), SolverOperation::Minimize, "{name}");
+            let s = surface_of(&i.surface).expect("surface");
+            let want = target.abs() + tol;
+            let lo = crate::certify::domain_lower_bound(&k, &s, &dom_of(*dom), v3(*p), want);
+            eprintln!("{name}: target {target:e} tol {tol:e} lower bound {lo:?}");
+            if !lo.is_some_and(|lo| lo > want) {
+                unproven.push(name);
+            }
+        }
+        assert!(unproven.is_empty(), "not certified empty: {unproven:?}");
     }
 }

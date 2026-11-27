@@ -168,6 +168,31 @@ fn wr_619_keeps_closed_edges_on_a_vertex() {
     }
 }
 
+/// WR-306 (#1058): a closed intersection curve on one vertex is absorbed into it only when
+/// a certified hull of the curve lies within the vertex definition's tolerance. Circles of
+/// radius 1e-3, 2e-3 and 3e-3 (circumferences 6.3e-3 to 1.9e-2) all lie inside the
+/// Boolean's 0.01 capture ball, and the fork's bound (twice that ball's radius, 0.02) dropped
+/// each of them, leaving the cylinder beside the box (9 faces, 2 solid regions). Each is
+/// imprinted: 8 faces, 15 edges, 10 vertices, one valid manifold solid of volume
+/// 64 + pi r^2.
+#[test]
+fn wr_306_keeps_small_closed_curves_inside_the_capture_ball() {
+    for radius in [1e-3, 2e-3, 3e-3] {
+        let mut k = Kernel::default();
+        let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0, 4.0).unwrap();
+        let b = create_cylinder(&mut k, Point3::new(2.0, 2.0, 4.0), radius, 1.0).unwrap();
+        let mut u = boolean_union(&mut k, a, b).unwrap();
+        assert_valid(&mut k, &mut u, "union");
+        assert_eq!(shape(&u), (8, 15, 10, 1, true), "radius {radius}");
+        let want = 64.0 + std::f64::consts::PI * radius * radius;
+        let v = volume(&k, &mut u);
+        assert!(
+            (v - want).abs() <= ACCURACY * want,
+            "radius {radius}: volume {v}, want {want}"
+        );
+    }
+}
+
 /// 1.5e-5 apart the speck reaches 1.25e-5 from B-rep 1's vertex, past its definition's
 /// tolerance (1e-5), so it is not skipped (skipping it there would leave edges 1.25e-5 from
 /// the vertex, past half its tolerance). The union, difference and intersection are still

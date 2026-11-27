@@ -695,3 +695,152 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod representational_continuity_tests {
+    use super::*;
+
+    /// The continuity a knot of multiplicity `mult` gives a direction of degree `deg`:
+    /// `C^(deg - mult)`, and discontinuous when `mult > deg` (a negative order permits
+    /// a jump, #17549). Past `C3`, the finest class the enum has, it is `CInfinity`: a
+    /// limit of the type, not the true class.
+    fn knot_class(deg: usize, mult: usize) -> ContinuityType {
+        let Some(cont) = deg.checked_sub(mult) else {
+            return ContinuityType::Discontinuous;
+        };
+        match cont {
+            0 => ContinuityType::C0,
+            1 => ContinuityType::C1,
+            2 => ContinuityType::C1C2,
+            3 => ContinuityType::C1C2C3,
+            _ => ContinuityType::CInfinity,
+        }
+    }
+
+    /// Checks one direction against the closed form. The distinct knots and their
+    /// multiplicities are `BSplineVolume::knots` (`GetKnots`, the tolerance grouping
+    /// both the pinned and the fixed path read, which WR-49 does not touch). Both ends
+    /// must be discontinuous, each interior knot `knot_class(deg, mult)`, and the lowest
+    /// class the lowest interior one (`CInfinity` when there is none).
+    fn check_dir(
+        name: &str,
+        v: &Volume,
+        param: VolumeParam,
+        deg: usize,
+        d: &DirectionDiscontinuities,
+    ) {
+        let VolumeKind::BSpline(b) = v.kind() else {
+            panic!("{name}: not a B-spline volume");
+        };
+        let (params, mults) = b.knots(param, None).unwrap();
+        let n = params.len();
+        assert!(n >= 2, "{name}: {n} knots");
+        assert_eq!(d.params, params, "{name}: knots");
+        let mut conts = vec![ContinuityType::Discontinuous; n];
+        let mut min = ContinuityType::CInfinity;
+        for i in 1..n - 1 {
+            let c = knot_class(deg, mults[i]);
+            conts[i] = c;
+            if (c as i32) < (min as i32) {
+                min = c;
+            }
+        }
+        assert_eq!(d.conts, conts, "{name}: continuities (multiplicities {mults:?})");
+        assert!(!d.unaligned, "{name}: aligned");
+        assert_eq!(d.min_cont, min, "{name}: lowest");
+    }
+
+    /// Replays every representational (`geom == false`) continuity case: each direction
+    /// is the closed form of `check_dir`, and the volume has discontinuities exactly
+    /// when a direction's lowest interior class is below `G1` (WR-49: upstream left the
+    /// last knot `Undefined` and took knot `0` as `C0`).
+    #[test]
+    fn representational_continuities_are_the_closed_form() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let (mut conts, mut has) = (0, 0);
+        for c in Runner.cases(&ctx).unwrap() {
+            match c.parse::<Inputs>().unwrap() {
+                Inputs::Conts {
+                    vol,
+                    e,
+                    geom: false,
+                } => {
+                    let v = build(&vol).unwrap();
+                    let param = VolumeParam::from_code(e).unwrap();
+                    let mut d = DirectionDiscontinuities {
+                        unaligned: false,
+                        min_cont: ContinuityType::G1,
+                        params: vec![],
+                        conts: vec![],
+                    };
+                    let r = v.calculate_continuities_simple(&k, param, &mut d, false);
+                    // `BSplineVolume::degree`: the direction's own degree, the highest
+                    // for any other code (whose knots are `W`'s)
+                    let deg = match param {
+                        VolumeParam::U => vol.deg[0],
+                        VolumeParam::V => vol.deg[1],
+                        VolumeParam::W => vol.deg[2],
+                        _ => vol.deg.into_iter().max().unwrap_or(0),
+                    };
+                    if r.is_ok() {
+                        check_dir(&c.name, &v, param, deg, &d);
+                        conts += 1;
+                    } else {
+                        assert!(d.params.len() < 2, "{}: refused with knots", c.name);
+                    }
+                }
+                Inputs::HasDisc {
+                    vol,
+                    given,
+                    geom: false,
+                } => {
+                    // as the runner calls it: a record made unaligned first, passed only
+                    // when the case gives one
+                    let v = build(&vol).unwrap();
+                    let mut d = Discontinuities3d::new();
+                    d.set_unaligned();
+                    let r = v
+                        .has_discontinuities_simple(&k, given.then_some(&mut d), false)
+                        .unwrap();
+                    // the closed form of each direction, whether or not it is stored
+                    let mut probe = Discontinuities3d::new();
+                    let rp = v.has_discontinuities_simple(&k, Some(&mut probe), false).unwrap();
+                    assert_eq!(r, rp, "{}: the result does not depend on the record", c.name);
+                    let mut below = false;
+                    let dirs = [
+                        (VolumeParam::U, &probe.u),
+                        (VolumeParam::V, &probe.v),
+                        (VolumeParam::W, &probe.w),
+                    ];
+                    for (e, (param, dir)) in dirs.into_iter().enumerate() {
+                        if dir.params.len() >= 2 {
+                            check_dir(&c.name, &v, param, vol.deg[e], dir);
+                        } else {
+                            // fewer than two knots: refused, no continuities
+                            assert!(dir.conts.is_empty(), "{}", c.name);
+                            assert_eq!(dir.min_cont, ContinuityType::CInfinity, "{}", c.name);
+                        }
+                        assert!(!dir.unaligned, "{}: direction {e} aligned", c.name);
+                        below |= (dir.min_cont as i32) < (ContinuityType::G1 as i32);
+                    }
+                    assert_eq!(r, below, "{}", c.name);
+                    if given {
+                        // the stored record is the probe: `Init` resets the record (not
+                        // the unaligned state the runner made) and the simple map never
+                        // sets its own flag or lowest continuity
+                        assert_eq!(d, probe, "{}: stored record", c.name);
+                        assert!(!d.has_discontinuities, "{}", c.name);
+                        assert_eq!(d.min_continuity, ContinuityType::CInfinity, "{}", c.name);
+                    }
+                    has += 1;
+                }
+                _ => {}
+            }
+        }
+        assert!(conts > 0 && has > 0, "{conts} {has}");
+    }
+}

@@ -90,6 +90,8 @@ SolidCraft compares the answer with its own version on your computer.
 - Turning off **Check for updates automatically** stops the checks; only **Check now** asks.
 - Setting the environment variable `SOLIDCRAFT_UPDATE_CHECK=0` turns all checks off, for
   example on managed machines.
+- On Windows an organization can turn the checks off, or keep them on, for everyone with a
+  policy: see [Managing SolidCraft in an organization](managed-deployment.md).
 
 Builds you compile yourself, the Flatpak and the browser app never check, and Preferences shows
 no check controls for them. The browser app updates itself: reload the page to get the latest
@@ -128,7 +130,7 @@ and SolidCraft picks the one matching how it was installed:
 | `.deb` | under `/usr`, dpkg knows `solidcraft` | `solidcraft-linux-<arch>.deb` | `sudo apt install ./solidcraft-linux-<arch>.deb` |
 | `.rpm` | under `/usr`, an rpm database exists | `solidcraft-linux-<arch>.rpm` | `sudo dnf install ./solidcraft-linux-<arch>.rpm` |
 | `.tar.gz` | anywhere else on Linux | `solidcraft-<version>-linux-<arch>.tar.gz` | Unpack over the old copy |
-| Windows installer | under Program Files, or in the folder the installer recorded | `solidcraft-windows-<arch>.msi` | Run the installer |
+| Windows installer | under Program Files, or in the folder the installer recorded (an install just for you is updated just for you, with no administrator) | `solidcraft-windows-<arch>.msi` | Run the installer |
 | Windows portable | `solidcraft-cli.exe` beside it | `solidcraft-windows-<arch>-portable.zip` | Unzip over the old copy |
 | Windows `.exe` | anywhere else on Windows | `SolidCraft-<version>-windows-x64.exe` | Replace the old `.exe` |
 | macOS | inside `SolidCraft.app` | `solidcraft-macos-universal.dmg` | Quit SolidCraft, then drag the new app to Applications |

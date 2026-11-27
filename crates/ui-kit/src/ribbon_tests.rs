@@ -161,6 +161,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
         name: id,
         icon: "box",
         size: ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
+        planned: false,
         enabled,
         pressed: false,
         exit: false,
@@ -318,11 +319,16 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles { tab: "t:tab:", tab_rect: "
 struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
+    width: f32,
 }
 
 impl TabsRig {
     fn new() -> TabsRig {
-        let rig = TabsRig { ctx: crate::test_support::context(), time: std::cell::Cell::new(0.0) };
+        TabsRig::with_width(900.0)
+    }
+
+    fn with_width(width: f32) -> TabsRig {
+        let rig = TabsRig { ctx: crate::test_support::context(), time: std::cell::Cell::new(0.0), width };
         rig.frame(Vec::new());
         rig
     }
@@ -356,7 +362,7 @@ impl TabsRig {
         };
         let mut actions = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, TAB_ROW_HEIGHT))).actions;
+            actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(self.width, TAB_ROW_HEIGHT))).actions;
         });
         actions
     }
@@ -392,6 +398,30 @@ fn the_tab_row_returns_what_was_clicked() {
     assert_eq!(rig.click("t:add"), vec![TabAction::Add { rect: add }]);
     assert_eq!(rig.click("t:action:go"), vec![TabAction::Run { id: "go".into() }]);
     assert_eq!(rig.click("t:action:stop"), Vec::new(), "a button that is not ready runs nothing");
+}
+
+/// #17417: when the tabs do not fit the row, a plain mouse wheel over them scrolls them sideways,
+/// as it does the History bar's strip.
+#[test]
+fn the_mouse_wheel_scrolls_tabs_that_do_not_fit_the_row() {
+    // Only the first tab fits the room the row leaves beside the search field and the buttons.
+    let rig = TabsRig::with_width(300.0);
+    let over = solidcraft_ui_registry::rect_of("t:tab_rect:ONE").expect("the first tab is drawn").center();
+    assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_none(), "the last tab is out of view");
+    for _ in 0..10 {
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -60.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![egui::Event::PointerMoved(over), wheel]);
+    }
+    for _ in 0..30 {
+        rig.frame(Vec::new());
+    }
+    assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_some(), "the wheel brought the last tab into view");
 }
 
 use egui::{Event, RawInput};
@@ -467,6 +497,8 @@ fn menu_style() -> MenuStyle<'static> {
         focus: egui::Id::unique("test_menu"),
         entry: &["t:entry:"],
         pin: "t:pin:",
+        more: "t:more:",
+        more_tip: "More",
         hot: "t:hot:",
         reveal: "t:reveal",
     }
@@ -533,7 +565,8 @@ impl MenuRig {
 }
 
 /// A row or grid icon is hot under the pointer, runs its command when clicked, opens its menu on
-/// a right-click, runs nothing when disabled, and pins or unpins from its pin.
+/// a right-click, runs nothing when disabled; a grid icon pins or unpins from its pin, a row
+/// opens its menu from its ⋯.
 #[test]
 fn a_menu_entry_returns_what_was_chosen() {
     for grid in [false, true] {
@@ -545,13 +578,32 @@ fn a_menu_entry_returns_what_was_chosen() {
         let chosen = rig.press(on, egui::PointerButton::Secondary, 0.0);
         assert!(matches!(chosen.as_slice(), [(id, MenuAction::Menu(_))] if id == "m.on"), "grid {grid}: {chosen:?}");
         assert_eq!(rig.press(rig.at("t:entry:m.off"), egui::PointerButton::Primary, 0.0), Vec::new(), "grid {grid}: a disabled entry runs nothing");
+        if !grid {
+            rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+            let chosen = rig.press(rig.at("t:more:m.on"), egui::PointerButton::Primary, 0.0);
+            assert!(matches!(chosen.as_slice(), [(id, MenuAction::More(_))] if id == "m.on"), "{chosen:?}");
+            continue;
+        }
         // A grid icon's pin takes clicks once the pointer has rested on the icon.
-        let wait = if grid { PIN_DELAY + 0.1 } else { 0.0 };
-        rig.press(on, egui::PointerButton::Primary, wait);
-        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.press(on, egui::PointerButton::Primary, PIN_DELAY + 0.1);
+        rig.frame(vec![egui::Event::PointerMoved(on)], PIN_DELAY + 0.1);
         let pin = rig.at("t:pin:m.on");
         let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
-        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)], "grid {grid}");
+        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
+    }
+}
+
+/// A list row has no pin of its own (#11853): its ⋯ sits at the row's end, where the pin was.
+#[test]
+fn a_list_row_shows_its_more_button_at_its_end_and_no_pin() {
+    let rig = MenuRig::new(false);
+    let on = rig.at("t:entry:m.on");
+    for wait in [0.0, 2.0] {
+        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+        assert!(solidcraft_ui_registry::handle_at("t:pin:m.on").is_none(), "a row publishes no pin, even after a rest");
+        // MenuRig rows are 220 wide; the entry handle is the row's centre.
+        assert_eq!(rig.at("t:more:m.on"), pos2(on.x + 110.0 - MORE_INSET, on.y), "the ⋯ is at the row's end");
     }
 }
 
@@ -626,6 +678,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
         let look = DeferredLook {
             id: "a.on".into(),
             selected: true,
+            kept: false,
             running: false,
             focus_ring: true,
             label: Some("On".into()),

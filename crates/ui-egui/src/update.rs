@@ -135,7 +135,13 @@ pub fn current_version() -> &'static str {
 /// The release workflow built this binary (`SOLIDCRAFT_VERSION` is set there). Anything else is a
 /// development build, which never checks for updates.
 pub fn release_build() -> bool {
-    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty()) && !cfg!(debug_assertions)
+    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty() && !is_test_version(v)) && !cfg!(debug_assertions)
+}
+
+/// A one-off test build (`0.43.0-test+abc1234`, from test-build.yml): it is not a release, so it
+/// is treated like a development build and never checks for or offers an update.
+pub fn is_test_version(v: &str) -> bool {
+    parse_version(v).is_some_and(|v| v.pre.as_str() == "test")
 }
 
 // ---- installations ----------------------------------------------------------------------------
@@ -160,8 +166,12 @@ pub enum InstallKind {
     Rpm,
     /// The plain `.tar.gz`, unpacked somewhere.
     LinuxTarball,
-    /// Installed by the `.msi` (under Program Files, or in the folder the installer recorded).
+    /// Installed by the `.msi` for all users (under Program Files, or in the folder the installer
+    /// recorded).
     WindowsMsi,
+    /// Installed by the `.msi` just for this user (`%LocalAppData%\Programs\SolidCraft` by default,
+    /// recorded under HKCU): updates run in that per-user context, with no administrator.
+    WindowsMsiPerUser,
     /// The portable `.zip`, unpacked somewhere.
     WindowsPortable,
     /// The lone `SolidCraft-<version>-windows-x64.exe`.
@@ -184,6 +194,8 @@ pub struct Probe<'a> {
     /// Where the Windows installer put SolidCraft (`HKLM\Software\SolidCraft`, `InstallDir`): a
     /// folder chosen in its wizard can be anywhere, not only under Program Files (#1870).
     pub msi_dir: Option<PathBuf>,
+    /// The same record for a "just for me" install (`HKCU\Software\SolidCraft`, `InstallDir`).
+    pub msi_user_dir: Option<PathBuf>,
 }
 
 pub fn detect(p: &Probe) -> InstallKind {
@@ -221,7 +233,14 @@ pub fn detect(p: &Probe) -> InstallKind {
         }
         "windows" => {
             let under = |k: &str| env(k).is_some_and(|dir| starts_with_ci(&exe, Path::new(&dir)));
-            let installed = p.msi_dir.as_deref().is_some_and(|dir| starts_with_ci(&exe, dir));
+            // The recorded folder holding the executable; when both do (one inside the other), the
+            // deeper one is the install it belongs to.
+            let holds = |dir: Option<&Path>| dir.filter(|d| starts_with_ci(&exe, d)).map(|d| d.to_string_lossy().trim_end_matches(['\\', '/']).len());
+            let (machine, user) = (holds(p.msi_dir.as_deref()), holds(p.msi_user_dir.as_deref()));
+            if user.is_some_and(|u| machine.is_none_or(|m| u > m)) {
+                return InstallKind::WindowsMsiPerUser;
+            }
+            let installed = machine.is_some();
             if installed || under("ProgramFiles") || under("ProgramW6432") || under("ProgramFiles(x86)") {
                 return InstallKind::WindowsMsi;
             }
@@ -266,7 +285,8 @@ pub fn this_install() -> InstallKind {
     {
         let env = |k: &str| std::env::var(k).ok();
         let exists = |p: &Path| p.exists();
-        let msi_dir = msi_install_dir();
+        let msi_dir = msi_install_dir(true);
+        let msi_user_dir = msi_install_dir(false);
         detect(&Probe {
             os: std::env::consts::OS,
             release_build: release_build(),
@@ -274,19 +294,22 @@ pub fn this_install() -> InstallKind {
             exe: std::env::current_exe().ok(),
             exists: &exists,
             msi_dir,
+            msi_user_dir,
         })
     }
 }
 
-/// The folder the Windows installer recorded (solidcraft.wxs writes it for upgrades), if any.
+/// The folder the Windows installer recorded (solidcraft.wxs writes it for upgrades), if any:
+/// under HKLM for an all-users install (`machine`), under HKCU for a "just for me" one.
 #[cfg(windows)]
-fn msi_install_dir() -> Option<PathBuf> {
-    let key = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(r"Software\SolidCraft").ok()?;
+fn msi_install_dir(machine: bool) -> Option<PathBuf> {
+    let hive = if machine { winreg::enums::HKEY_LOCAL_MACHINE } else { winreg::enums::HKEY_CURRENT_USER };
+    let key = winreg::RegKey::predef(hive).open_subkey(r"Software\SolidCraft").ok()?;
     key.get_value::<String, _>("InstallDir").ok().map(PathBuf::from)
 }
 
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
-fn msi_install_dir() -> Option<PathBuf> {
+fn msi_install_dir(_machine: bool) -> Option<PathBuf> {
     None
 }
 
@@ -416,6 +439,7 @@ impl InstallKind {
             InstallKind::Rpm => ".rpm package",
             InstallKind::LinuxTarball => ".tar.gz",
             InstallKind::WindowsMsi => "Windows installer (.msi)",
+            InstallKind::WindowsMsiPerUser => "Windows installer (.msi), just for me",
             InstallKind::WindowsPortable => "portable .zip",
             InstallKind::WindowsExe => "standalone .exe",
             InstallKind::MacApp(_) => "macOS app",
@@ -466,7 +490,7 @@ pub fn asset_name(kind: &InstallKind, arch: &str, version: &str) -> Option<Strin
         InstallKind::Deb => format!("solidcraft-linux-{}.deb", linux?),
         InstallKind::Rpm => format!("solidcraft-linux-{}.rpm", linux?),
         InstallKind::LinuxTarball => format!("solidcraft-{version}-linux-{}.tar.gz", linux?),
-        InstallKind::WindowsMsi => format!("solidcraft-windows-{}.msi", windows?),
+        InstallKind::WindowsMsi | InstallKind::WindowsMsiPerUser => format!("solidcraft-windows-{}.msi", windows?),
         InstallKind::WindowsPortable => format!("solidcraft-windows-{}-portable.zip", windows?),
         // Only x64 has the lone .exe; elsewhere the portable zip is the same thing.
         InstallKind::WindowsExe if windows == Some("x64") => format!("SolidCraft-{version}-windows-x64.exe"),
@@ -698,9 +722,12 @@ pub fn offered(app: &SolveApp) -> Option<&Release> {
     app.preferences.update.offers(r, current_version(), unix_now()).then_some(r)
 }
 
-/// Checks may run here: a release build with the host's HTTP client, or a test feed.
+/// Checks may run here: a release build with the host's HTTP client, or a test feed, unless the
+/// organization's policy turned checks off.
 pub fn available(app: &mut SolveApp) -> bool {
-    !app.updater.off && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
+    !app.updater.off
+        && app.policy.mandatory.check_for_updates() != Some(false)
+        && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
 }
 
 /// Per frame: the first frame of each launch starts an automatic check, the open app checks
@@ -729,7 +756,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let launch = !app.updater.launch_checked;
     if app.updater.job.is_none()
         && app.updater.rx.is_none()
-        && app.preferences.check_updates
+        && crate::policy::check_updates(app)
         && app.preferences.update.due(now, launch)
         && available(app)
     {
@@ -980,7 +1007,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     // squeezed; the icon alone in a narrow bar.
     let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
-    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
+    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update", false)?;
     if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
@@ -1014,7 +1041,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => State::Offer,
     };
     let primary = match (&install, one_click) {
-        (Some(install::Method::Msi), true) => solidcraft_ui_text::tr("update.install_msi"),
+        (Some(install::Method::Msi { .. }), true) => solidcraft_ui_text::tr("update.install_msi"),
         (Some(install::Method::Dmg), true) => solidcraft_ui_text::tr("update.download_open"),
         (Some(_), true) => solidcraft_ui_text::tr("update.update_now"),
         _ if kind.system_managed() => solidcraft_ui_text::tr("update.release_page"),
@@ -1031,8 +1058,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let id = egui::Id::unique("sc_update");
     let mut also_download = false;
-    let (closed, answer) =
-        ui_kit::Window::new(id, "update", solidcraft_ui_text::tr("update.title")).cards(1.7).actions(ok, cancel, apply).show(ctx, true, |ui| {
+    let (closed, answer) = ui_kit::Window::new(id, "update", solidcraft_ui_text::tr("update.title"))
+        .cards(1.7)
+        .actions(ok, cancel, apply)
+        .wrap_actions()
+        .show(ctx, true, |ui| {
             ui_kit::text(
                 ui,
                 &solidcraft_ui_text::format("update.available", &[("version", release.version())]),
@@ -1150,7 +1180,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Manual checks also have a visible result when no update can be offered.
 fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
-    let (message, warning) = if !available(app) {
+    let (message, warning) = if app.policy.mandatory.check_for_updates() == Some(false) {
+        (solidcraft_ui_text::tr("policy.updates_off").to_string(), false)
+    } else if !available(app) {
         (solidcraft_ui_text::tr("update.check_unavailable").to_string(), false)
     } else {
         match &app.updater.status {
@@ -1193,8 +1225,11 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
+    let policy = app.policy.mandatory.check_for_updates();
     let note = if kind == InstallKind::Web {
         solidcraft_ui_text::tr("update.prefs_web").to_string()
+    } else if policy == Some(false) {
+        solidcraft_ui_text::tr("policy.updates_off").to_string()
     } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
         solidcraft_ui_text::format("update.prefs_managed", &[("version", current_version()), ("manager", &manager)])
     } else if can {
@@ -1223,7 +1258,8 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_inline_note(ui, &checked);
             }
         } else {
-            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("update.check_unavailable"));
+            let why = if policy == Some(false) { "policy.updates_off" } else { "update.check_unavailable" };
+            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr(why));
         }
         let busy = app.updater.status == Status::Checking;
         let r = ui_kit::button(ui, solidcraft_ui_text::tr("update.check_now"), ui_kit::Button::Enabled(can && !busy));
@@ -1235,10 +1271,24 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         let help = ui_kit::help_icon(ui, &note);
         crate::scenario::publish_target("prefs:updates_help", help.rect);
     });
-    ui.add_enabled_ui(can, |ui| {
-        let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut app.preferences.check_updates);
-        crate::scenario::publish_target("prefs:check_updates", check.rect);
-    });
+    match policy {
+        // The organization's answer shows in place of the person's, which is kept for when the policy goes.
+        Some(mut set) => {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(false, |ui| {
+                    let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut set);
+                    crate::scenario::publish_target("prefs:check_updates", check.rect);
+                });
+                ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
+            });
+        }
+        None => {
+            ui.add_enabled_ui(can, |ui| {
+                let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut app.preferences.check_updates);
+                crate::scenario::publish_target("prefs:check_updates", check.rect);
+            });
+        }
+    }
     if let Some(v) = offered_or_newer(app)
         && offered(app).is_none()
         && ui_kit::button(ui, solidcraft_ui_text::format("update.show", &[("version", &v)]), ui_kit::Button::Normal).clicked()
@@ -1426,12 +1476,16 @@ pub fn row_spans(cells: &[Vec<Span>], header: bool) -> Vec<Span> {
 }
 
 fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
-    markdown_blocks(ui, &parse_markdown(src), t);
+    show_markdown_blocks(ui, &parse_markdown(src), t, true);
 }
 
 /// Parsed Markdown, for a text shown every frame that is parsed once (the About dialog's
 /// attributions, #7776).
 pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
+    show_markdown_blocks(ui, blocks, t, false);
+}
+
+fn show_markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens, inline_links: bool) {
     let body = ui.visuals().text_color();
     let job = |spans: &[Span], size: f32, strong: bool, wrap: f32| {
         let mut job = LayoutJob::default();
@@ -1447,9 +1501,39 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
         }
         job
     };
-    // A laid-out text can't be clicked in parts: a block's web links follow it as buttons that
-    // open them in the browser (#2943), as the agent chat shows its links.
+    let draw = |ui: &mut egui::Ui, spans: &[Span], size: f32, strong: bool, wrap: f32| {
+        if !inline_links || !spans.iter().any(|span| matches!(span, Span::Link { url: Some(_), .. })) {
+            ui.add(egui::Label::new(job(spans, size, strong, wrap)).wrap());
+            return;
+        }
+
+        // Egui's wrapping horizontal layout lets a label continue on the next line. Draw each
+        // text run up to the next link, then its native hyperlink in the same flow.
+        let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+        ui.allocate_ui_with_layout(egui::vec2(wrap.max(0.0), 0.0), layout, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            ui.visuals_mut().hyperlink_color = t.accent;
+            let mut start = 0;
+            for (index, span) in spans.iter().enumerate() {
+                if let Span::Link { text, url: Some(url) } = span {
+                    if index > start {
+                        ui.add(egui::Label::new(job(&spans[start..index], size, strong, wrap)).wrap());
+                    }
+                    ui.hyperlink_to(RichText::new(text).size(size).color(t.accent), url).backing_on_hover_text(url);
+                    start = index + 1;
+                }
+            }
+            if let Some(trailing) = spans.get(start..).filter(|trailing| !trailing.is_empty()) {
+                ui.add(egui::Label::new(job(trailing, size, strong, wrap)).wrap());
+            }
+        });
+    };
+    // The About tables retain their separate link row (#2943).
     let links = |ui: &mut egui::Ui, spans: &[Span], indent: f32| {
+        if inline_links {
+            return;
+        }
         let targets: Vec<(&str, &str)> = spans
             .iter()
             .filter_map(|s| match s {
@@ -1473,17 +1557,17 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
         match block {
             Block::Heading(spans) => {
                 ui.add_space(4.0);
-                ui.add(egui::Label::new(job(spans, t.font_heading, true, width)).wrap());
+                draw(ui, spans, t.font_heading, true, width);
             }
             Block::Paragraph(spans) => {
-                ui.add(egui::Label::new(job(spans, t.font_label, false, width)).wrap());
+                draw(ui, spans, t.font_label, false, width);
                 links(ui, spans, 0.0);
                 ui.add_space(3.0);
             }
             Block::Row { header, cells } => {
                 let spans = row_spans(cells, *header);
                 let size = if *header { t.font_caption } else { t.font_label };
-                ui.add(egui::Label::new(job(&spans, size, false, width)).wrap());
+                draw(ui, &spans, size, false, width);
                 links(ui, &spans, 0.0);
                 ui.add_space(2.0);
             }
@@ -1492,7 +1576,7 @@ pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent);
                     ui.label(RichText::new("•").size(solidcraft_theme::Tokens::get().font_label));
-                    ui.add(egui::Label::new(job(spans, t.font_label, false, width - indent - 14.0)).wrap());
+                    draw(ui, spans, t.font_label, false, width - indent - 14.0);
                 });
                 links(ui, spans, indent + 14.0);
             }

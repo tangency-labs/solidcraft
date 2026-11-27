@@ -55,18 +55,17 @@ sketch on every wall, not only on its tops and bottoms.
 Faces whose history is not exact (faces a feature rebuilt without reporting its history),
 ambiguous sources, and the pieces of a face split on purpose with Split Face (each piece is its
 own face) require an explicit fixed plane instead. The error says why, and the Create Sketch dialog then offers **Use fixed plane**,
-which places the sketch on that face's current plane without following later changes. A
+which places the sketch on that face's current plane without following later changes (the dialog
+says so beside the button, and nothing is made until it is clicked). A
 nearby or parallel face is never used to repair a new attachment automatically.
 
-The flat faces of a sheet metal body are the exception: they have no construction
-certificate, so a sketch on one attaches to its panel by name (`sheet:<body>:<panel>:<side>`)
-and finds it again after every rebuild, unfold and refold. The rims (the sheet's thickness
-along a panel's straight edge) attach the same way, by the edge they run along
-(`<panel>:rim.l3` for a base sketch line, `<flange>:rim.far`, `rim.side0`, `rim.side1`), and so
-do the flat ends of a bend (`<flange>:rim.bend0`, `rim.bend1`); a rim's plane faces out of the
-panel, its x along the edge and its y across the thickness. Extrude and Press Pull from a sheet
-face use the same attachment. If that panel no longer exists the
-sketch reports a lost attachment, as above. See the sheet metal guide.
+The faces of a sheet metal body attach the same way, by the names the engine gives them from
+what the sheet reports each face was made for (`F2:top`, `F3:far:F2:side:l1`, see
+`docs/design/sheet-metal-naming.md`), and find them again after every rebuild, unfold and
+refold: a sheet body's planar face supplies its own sketch frame, so a sketch drawn on the flat
+lands where it belongs after a refold. A `sheet:<body>:<panel>:<side>` name that designs saved
+before used finds no face: such a sketch reports a lost attachment, as above, and Redefine
+Sketch Plane attaches it again. See the sheet metal guide.
 
 ## Create and repair
 

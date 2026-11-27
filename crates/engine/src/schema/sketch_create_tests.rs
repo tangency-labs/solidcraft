@@ -242,7 +242,7 @@ fn creation_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ArcSlotCenterParams>(), &["center", "end", "sketch", "start", "sweep", "width"]);
     assert_keys(input_schema_for::<EllipseParams>(), &["axes", "center", "construction", "major", "minor", "minor_radius", "sketch"]);
     assert_keys(input_schema_for::<FitPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
-    assert_keys(input_schema_for::<ControlPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
+    assert_keys(input_schema_for::<ControlPointSplineParams>(), &["construction", "control_polygon", "periodic", "points", "sketch"]);
     assert_keys(input_schema_for::<ConicParams>(), &["apex", "construction", "end", "rho", "sketch", "start"]);
     assert_keys(input_schema_for::<BlendCurveParams>(), &["a", "b", "continuity", "sketch"]);
     assert_keys(input_schema_for::<CenterlineParams>(), &["curves", "sketch", "value"]);
@@ -345,7 +345,8 @@ fn strict_keeps_todays_errors_before_the_sketch() {
         ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0]})),
         ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": 0})),
         ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": -2})),
-        ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": "2"})),
+        ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": "nope"})),
+        ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": true})),
         ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5, 0], "width": null})),
         ("sketch.slot.center_point", json!({"center": [0, 0], "end": [5], "width": 2})),
         ("sketch.slot.arc_three_point", json!({})),
@@ -428,7 +429,8 @@ fn strict_keeps_todays_errors_before_the_sketch() {
         ("sketch.text", json!({"at": at, "text": "x", "align": 5})),
         ("sketch.text", json!({"at": at, "text": "x", "letter_spacing": "wide"})),
         ("sketch.text", json!({"at": at, "text": "x", "line_spacing": 0})),
-        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "2"})),
+        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "1 - 1"})),
+        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "no_such_parameter"})),
         ("sketch.text", json!({"at": at, "text": "x", "path": 5})),
     ]);
 }
@@ -858,7 +860,10 @@ fn the_creation_schemas_take_what_the_handlers_read() {
             (json!({"center": [0, 0], "start": [5, 0], "width": 1, "end": [0, 5]}), true),
             (json!({"center": [0, 0], "start": [5, 0], "width": 1}), false),
             (json!({"center": [0, 0], "start": [5, 0], "sweep": 90}), false),
-            (json!({"center": [0, 0], "start": [5, 0], "width": 0, "sweep": 90}), false),
+            // A width is a number or an expression, as a circle's radius is (#15857); whether it
+            // is positive is the handler's to say.
+            (json!({"center": [0, 0], "start": [5, 0], "width": "slot_w / 2", "sweep": 90}), true),
+            (json!({"center": [0, 0], "start": [5, 0], "width": true, "sweep": 90}), false),
         ],
     );
     takes(

@@ -34,8 +34,9 @@ use crate::params::json_brief;
 
 /// One or two entities to dimension: a curve or point id (`l1`, `p3`, `l1.start`), `x` or `y` (a
 /// sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}`
-/// or vertex `{vertex: [x, y, z], body?}`, which the handler projects into the sketch first. One
-/// id may be given as text rather than a list.
+/// or vertex `{vertex: [x, y, z], body?}`, which the handler projects into the sketch first, or in
+/// a 3D sketch a planar model face `{face: [x, y, z], body?}`. One id may be given as text rather
+/// than a list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DimensionEntities(pub Vec<Value>);
 
@@ -52,7 +53,9 @@ impl DimensionEntities {
                 if list.len() > MAX_PROJECTED_ENTITIES {
                     return Err(format!("`entities` may list at most {MAX_PROJECTED_ENTITIES} entities"));
                 }
-                if let Some((i, e)) = list.iter().enumerate().find(|(_, e)| !e.is_string() && !model_ref(e)) {
+                // A planar model face, `{face: [x,y,z], body?}`, is a plane for a 3D dimension
+                // (#10616), which the 3D handler reads first.
+                if let Some((i, e)) = list.iter().enumerate().find(|(_, e)| !e.is_string() && !model_ref(e) && e.get("face").is_none()) {
                     return Err(format!("`entities` must list names; the entry {} is {}", i + 1, json_brief(e)));
                 }
                 list.clone()
@@ -79,9 +82,9 @@ impl JsonSchema for DimensionEntities {
                 "required": [key]
             })
         };
-        let one = serde_json::json!({"anyOf": [{"type": "string"}, model("edge"), model("vertex")]});
+        let one = serde_json::json!({"anyOf": [{"type": "string"}, model("edge"), model("vertex"), model("face")]});
         json_schema!({
-            "description": "One or two entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. One id may be given as text instead of a list.",
+            "description": "One or two entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. In a 3D sketch, a 3D point or line and a plane: `xy`, `yz`, `xz`, a construction plane's name, or a planar model face `{face: [x, y, z], body?}`. One id may be given as text instead of a list.",
             "anyOf": [{"type": "string"}, {"type": "array", "items": one, "minItems": 1, "maxItems": 2}]
         })
     }
@@ -255,6 +258,9 @@ impl<'de> Deserialize<'de> for SketchDimensionParams {
 /// What `sketch.dimension` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DimensionResult {
+    /// For a 3D sketch's dimension (#10608): its constraint id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
     /// The parameter that holds the dimension's value (`d1`, or the name a `name = expression`
     /// value defined); null for a driven dimension, which has none.
     pub param: Option<String>,
@@ -263,7 +269,9 @@ pub struct DimensionResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub driven: Option<bool>,
     /// What the dimension is: `LinearDimension`, `RadialDimension`, `DiameterDimension`,
-    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`.
+    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`; for a 3D sketch's
+    /// dimension (#10608), `length`, `distance`, `distance_x`, `distance_y`, `distance_z`,
+    /// `angle` or `radius`.
     #[serde(rename = "type")]
     pub kind: String,
     /// The parameter's expression, as the design stores it, in the design's units (a driving

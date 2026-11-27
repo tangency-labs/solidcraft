@@ -13,12 +13,15 @@
 //! `S + r N` as one Taylor expansion in the foot's parameters ([`offset_taylor`],
 //! tangency-labs/solidcraft#16652), where the fork sums the expansions of `S` and `r N`: the
 //! same algebra, but only the first keeps their cancellation near the face's focal
-//! distance. The floating-point jets keep the fork's sum.
+//! distance. It does so only where the offset is not proved short of that distance
+//! (`offset_near_focal`, #19306); elsewhere, and in the floating-point jets, it keeps the
+//! fork's sum.
 
 use std::borrow::Cow;
 
-use super::series::{GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, STORE_E, V3};
-use crate::error::{Result, SolidError};
+use super::series::{inv_sqrt_scalar, GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_K, MAX_S, V3};
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
+use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -27,6 +30,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
+use crate::nurbs::nurbs_crv::MAX_DERIV;
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -94,25 +98,72 @@ pub(crate) fn knot(u: &[f64], i: isize) -> f64 {
 
 /// `sm_Partials`: a face's partial derivatives at a point, `P[a][b] = d^(a+b) S / du^a dv^b`
 /// for `a + b <=` the order asked for (`a, b <= MAX_K`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Partials<T> {
+    stride: usize,
     p: Vec<V3<T>>,
+}
+
+impl<T: GnScalar> PartialEq for Partials<T> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.stride == other.stride {
+            return self.p == other.p;
+        }
+        let n = self.stride.max(other.stride);
+        for a in 0..n {
+            for b in 0..n {
+                if self.at(a, b) != other.at(a, b) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
 }
 
 impl<T: GnScalar> Default for Partials<T> {
     fn default() -> Self {
+        Self::with_order(MAX_K)
+    }
+}
+
+impl<T: GnScalar> Partials<T> {
+    /// A zero-initialized partials table sized for orders up to `lk` (clamped to `MAX_K`).
+    #[must_use]
+    pub(crate) fn with_order(lk: usize) -> Self {
+        let stride = lk.min(MAX_K) + 1;
         let z = V3 {
             x: T::of(0.0),
             y: T::of(0.0),
             z: T::of(0.0),
         };
         Self {
-            p: vec![z; (MAX_K + 1) * (MAX_K + 1)],
+            stride,
+            p: vec![z; stride * stride],
         }
     }
-}
 
-impl<T: GnScalar> Partials<T> {
+    fn grow_to(&mut self, new_stride: usize) {
+        let z = V3 {
+            x: T::of(0.0),
+            y: T::of(0.0),
+            z: T::of(0.0),
+        };
+        let mut next = vec![z; new_stride * new_stride];
+        for a in 0..self.stride {
+            for b in 0..self.stride {
+                if let (Some(&v), Some(slot)) = (
+                    self.p.get(a * self.stride + b),
+                    next.get_mut(a * new_stride + b),
+                ) {
+                    *slot = v;
+                }
+            }
+        }
+        self.stride = new_stride;
+        self.p = next;
+    }
+
     /// `P[a][b]` (0 past `MAX_K`).
     #[must_use]
     pub fn at(&self, a: usize, b: usize) -> V3<T> {
@@ -121,10 +172,10 @@ impl<T: GnScalar> Partials<T> {
             y: T::of(0.0),
             z: T::of(0.0),
         };
-        if a > MAX_K || b > MAX_K {
+        if a >= self.stride || b >= self.stride {
             return z;
         }
-        self.p.get(a * (MAX_K + 1) + b).copied().unwrap_or(z)
+        self.p.get(a * self.stride + b).copied().unwrap_or(z)
     }
 
     /// Sets `P[a][b]` (ignored past `MAX_K`).
@@ -132,7 +183,10 @@ impl<T: GnScalar> Partials<T> {
         if a > MAX_K || b > MAX_K {
             return;
         }
-        if let Some(x) = self.p.get_mut(a * (MAX_K + 1) + b) {
+        if a >= self.stride || b >= self.stride {
+            self.grow_to(MAX_K + 1);
+        }
+        if let Some(x) = self.p.get_mut(a * self.stride + b) {
             *x = v;
         }
     }
@@ -185,17 +239,29 @@ impl Nurbs {
         let q = s.degree(SurfParamType::V);
         let u = full_knots(&ku, &mu);
         let v = full_knots(&kv, &mv);
-        if p < 1 || q < 1 || u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
-            // "SmGnSectionFSG: a face's NURBS data do not agree"
-            return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: a face's NURBS data do not agree"
+        if p < 1 || q < 1 {
+            return Err(SolidError::blend(
                 OP,
-                "a face's NURBS data do not agree",
+                BlendFailure::SectionUnsupported(SectionLimit::DegreeBelowOne),
+            ));
+        }
+        if u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a face's knots do not number its control points plus its order: a \
+                          B-spline surface the kernel holds keeps the two consistent",
+                },
             ));
         }
         if cps.len() != lnu * lnv {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "a face's control net does not match its knots",
+                BlendFailure::Defect {
+                    why: "a face's control net is not its rows by its columns: a B-spline \
+                          surface the kernel holds keeps its net that size",
+                },
             ));
         }
         let mut pw = Vec::new();
@@ -206,9 +272,9 @@ impl Nurbs {
             let positive = w > 0.0;
             if !positive {
                 // "SmGnSectionFSG: a face's weights are not positive"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "a face's weights are not positive",
+                    BlendFailure::SectionUnsupported(SectionLimit::FaceWeightNotPositive),
                 ));
             }
         }
@@ -266,11 +332,16 @@ pub fn sided_span(u: &[f64], p: usize, n: usize, x: f64, side: i32) -> usize {
     k
 }
 
-/// `sm_DersBasis`: the non-zero basis functions `N_{k-p..k}` and their derivatives up to
-/// `d` at `x` in span `k`, `ders[d][j]` (the NURBS book's A2.3, its knot differences taken
-/// from the knots directly, in `T`: for an interval `T` every result holds the exact one).
+/// Flat matrix version of [`ders_basis`], returning `ders.at(r, j)` for `0 <= r <= d`,
+/// `0 <= j <= p` without allocating a `Vec<Vec<T>>`.
 #[must_use]
-pub fn ders_basis<T: GnScalar>(u: &[f64], k: usize, p: usize, x: T, d: usize) -> Vec<Vec<T>> {
+pub(crate) fn ders_basis_flat<T: GnScalar>(
+    u: &[f64],
+    k: usize,
+    p: usize,
+    x: T,
+    d: usize,
+) -> Mat<T> {
     let (k, p) = (k as isize, p as isize);
     let pu = p as usize;
     let mut ndu = Mat::zeros(pu + 1, pu + 1);
@@ -349,8 +420,17 @@ pub fn ders_basis<T: GnScalar>(u: &[f64], k: usize, p: usize, x: T, d: usize) ->
         }
         f *= (p - kk) as f64;
     }
+    ders
+}
+
+/// `sm_DersBasis`: the non-zero basis functions `N_{k-p..k}` and their derivatives up to
+/// `d` at `x` in span `k`, `ders[d][j]` (the NURBS book's A2.3, its knot differences taken
+/// from the knots directly, in `T`: for an interval `T` every result holds the exact one).
+#[must_use]
+pub fn ders_basis<T: GnScalar>(u: &[f64], k: usize, p: usize, x: T, d: usize) -> Vec<Vec<T>> {
+    let ders = ders_basis_flat(u, k, p, x, d);
     (0..=d as isize)
-        .map(|i| (0..=p).map(|j| ders.at(i, j)).collect())
+        .map(|i| (0..=p as isize).map(|j| ders.at(i, j)).collect())
         .collect()
 }
 
@@ -365,15 +445,9 @@ pub fn nurbs_partials<T: GnScalar>(
     v: T,
     lk: usize,
 ) -> Partials<T> {
-    let mut out = Partials::default();
-    let nu = ders_basis(&n.u, ku, n.p, u, lk);
-    let nv = ders_basis(&n.v, kv, n.q, v, lk);
-    let get = |m: &[Vec<T>], i: usize, j: usize| {
-        m.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .unwrap_or_else(|| T::of(0.0))
-    };
+    let mut out = Partials::with_order(lk);
+    let nu = ders_basis_flat(&n.u, ku, n.p, u, lk);
+    let nv = ders_basis_flat(&n.v, kv, n.q, v, lk);
     // the homogeneous partials A (x, y, z) and w
     let mut ax = Mat::zeros(lk + 1, lk + 1);
     let mut ay = Mat::zeros(lk + 1, lk + 1);
@@ -386,7 +460,7 @@ pub fn nurbs_partials<T: GnScalar>(
                 for j in 0..=n.q {
                     // ku >= p and kv >= q (sm_Span)
                     let li = 4 * ((ku + i - n.p) * n.nv + (kv + j - n.q));
-                    let c = get(&nu, a, i) * get(&nv, b, j);
+                    let c = nu.at(a as isize, i as isize) * nv.at(b as isize, j as isize);
                     sx = sx + c * T::of(n.pw_at(li));
                     sy = sy + c * T::of(n.pw_at(li + 1));
                     sz = sz + c * T::of(n.pw_at(li + 2));
@@ -529,9 +603,12 @@ pub fn surface_partials_pinned(
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
     if lk > MAX_K {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: lk,
+                most: MAX_K,
+            }),
         ));
     }
     let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -558,11 +635,17 @@ pub fn surface_partials_pinned(
         let _exact = NetScope::exact(k);
         s.evaluate(k, uv, lk, lk, flags)?
     };
-    let mut out = Partials::default();
+    let mut out = Partials::with_order(lk);
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let v = d.get(a).and_then(|r| r.get(b)).copied().ok_or_else(|| {
-                SolidError::blend_failed(OP, "the surface has no partial of this order")
+                SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the surface's evaluation returned fewer partials than asked: it \
+                              returns every partial up to the orders asked",
+                    },
+                )
             })?;
             out.set(a, b, V3::from_vec3(v));
         }
@@ -590,6 +673,9 @@ pub struct GnSystem<'a, T: GnScalar> {
     /// `pR`: a ball whose radius varies, `r(s)` as a series in sigma (`r` unused), or
     /// none (014f66f).
     pub law: Option<&'a Ser<T>>,
+    /// Equal setbacks measured at the current oriented normals, instead of fixed offsets
+    /// or a radius prescribed along the leader.
+    pub equal_setback: Option<f64>,
 }
 
 /// The Taylor coefficients `W[a][b]` (`a + b <= deg`) of a face's offset point
@@ -708,7 +794,7 @@ pub fn offset_taylor<T: GnScalar>(pf: &Partials<T>, d0: T, deg: usize) -> Result
     // g = h^(-1/2), degree by degree
     let h0 = gets(&h, 0, 0);
     // 1 / sqrt(h0), refused where the normal vanishes, as the series' own inverse root
-    let g0 = Ser::constant(h0).inv_sqrt(Trunc::new(0, 0)?)?.at(0, 0);
+    let g0 = inv_sqrt_scalar(h0)?;
     let mut g = vec![zero; w * w];
     if let Some(x) = g.get_mut(idx(0, 0)) {
         *x = g0;
@@ -760,6 +846,53 @@ pub fn offset_taylor<T: GnScalar>(pf: &Partials<T>, d0: T, deg: usize) -> Result
     Ok(out)
 }
 
+/// How far towards a face's focal distance [`offset_near_focal`] lets an offset reach and
+/// still take it as the sum of the expansions of `S` and `d0 N`: a quarter of the way,
+/// `d0 k <= 1/4` for both principal curvatures `k`. Measured on a cylinder's rim
+/// chamfered by c (radius 10, `d0 k = c / 10`), the joint expansion certifies with the same
+/// work at 0.1 and 0.3 (5275 and 5183 cancel-token polls against the sum's 5275 and 5219),
+/// in 1.5 times the time, and with less from 0.5 on (5490 against 6338, half the time);
+/// a round of 1 on a round of 3 (`d0 k = 1/3`) takes 34 spans with it, 37 without.
+const FOCAL_REACH: f64 = 0.25;
+
+/// Whether an enclosure takes a face's offset point `S + d0 N` as one expansion
+/// ([`offset_taylor`], #16652) rather than as the sum of the expansions of `S` and `d0 N`
+/// (#19306). The two are the same algebra, each an enclosure; the joint one costs more (its
+/// own coefficients at every evaluation, and one more series composed with the feet) and
+/// is only tighter where the sum loses a cancellation. The offset's first partials are
+/// `W_u = (I - d0 W) S_u`, `W` the shape operator, whose eigenvalues `1 - d0 k_i` (`k_i`
+/// the principal curvatures along N) vanish at a focal distance; the sum's widths grow as
+/// `|S_u| + |d0 N_u|`, at most `(1 + d0 k) / (1 - d0 k)` times the joint ones' where
+/// `0 <= d0 k < 1`, and no wider where `d0 k <= 0` (the offset away from the centre of
+/// curvature). So the sum is kept where `d0 k_i <= FOCAL_REACH` (a ratio of at most 5/3)
+/// is proved for both curvatures at every point the partials `pf` enclose, as
+/// `I - (d0 / FOCAL_REACH) W` positive definite:
+/// `A = t X [[E, F], [F, G]] - d0 [[l, m], [m, n]]` (`t = FOCAL_REACH`,
+/// `X = |S_u x S_v|`, `l = S_uu . (S_u x S_v)`, ...) with `A_11` and `det A` proved
+/// positive in `T` (`det A = t^2 X^4 - t d0 X H + d0^2 K`, the form whose sign is the
+/// offset's regularity in `offset::construction::sheets`, there with `t = 1`). Not proved
+/// (near a focal distance, a box too wide to tell, a NaN), the joint expansion is taken.
+/// The test reads the partials to order 2: a caller that has fewer (0 past what it
+/// computed) evaluates at degree 0, where the two differ only in their rounding. Always
+/// false where `T` takes the sum ([`GnScalar::JOINT_OFFSET`]).
+fn offset_near_focal<T: GnScalar>(pf: &Partials<T>, d0: T) -> bool {
+    if !T::JOINT_OFFSET {
+        return false;
+    }
+    let dot = |a: V3<T>, b: V3<T>| a.x * b.x + a.y * b.y + a.z * b.z;
+    let (su, sv) = (pf.at(1, 0), pf.at(0, 1));
+    let n = V3 {
+        x: su.y * sv.z - su.z * sv.y,
+        y: su.z * sv.x - su.x * sv.z,
+        z: su.x * sv.y - su.y * sv.x,
+    };
+    let tx = T::of(FOCAL_REACH) * dot(n, n).sqrt();
+    let a11 = tx * dot(su, su) - d0 * dot(pf.at(2, 0), n);
+    let a12 = tx * dot(su, sv) - d0 * dot(pf.at(1, 1), n);
+    let a22 = tx * dot(sv, sv) - d0 * dot(pf.at(0, 2), n);
+    !(a11.is_positive() && (a11 * a22 - a12 * a12).is_positive())
+}
+
 /// The offset's constant term `d0` (its series' at `sigma^0 eps^0`): `r_i s_i`, or the
 /// law's radius there times the side.
 fn offset_d0<T: GnScalar>(sys: &GnSystem<'_, T>, rf: f64, sidef: f64) -> T {
@@ -775,31 +908,6 @@ fn offset_varies<T: GnScalar>(sys: &GnSystem<'_, T>, tr: Trunc) -> bool {
     sys.law.is_some() || (!sys.hold && tr.e() >= 1)
 }
 
-/// The offset point `V = W + (d - d0) N` from the joint expansion's series `wv` (`W`
-/// composed with the feet, [`offset_taylor`]), `N = nrm inv_len`, `d` the offset's series:
-/// `S + d N` with `S + d0 N` taken as one. `varies`: [`offset_varies`] (otherwise
-/// `d - d0` is 0 and `V = W`).
-fn offset_rest<T: GnScalar>(
-    wv: VSer<T>,
-    nrm: &VSer<T>,
-    inv_len: &Ser<T>,
-    d: &Ser<T>,
-    varies: bool,
-    tr: Trunc,
-) -> VSer<T> {
-    if !varies {
-        return wv;
-    }
-    wv.add(&nrm.times(&inv_len.mul(&offset_part(d), tr), tr), tr)
-}
-
-/// `d - d0`: the offset's series less its constant term (taken in [`offset_taylor`]).
-fn offset_part<T: GnScalar>(d: &Ser<T>) -> Ser<T> {
-    let mut dd = d.clone();
-    dd.set(0, 0, T::of(0.0));
-    dd
-}
-
 /// `W[a][b]` of [`offset_taylor`]'s coefficients computed to degree `deg` (0 past it).
 fn offset_at<T: GnScalar>(w: &[V3<T>], deg: usize, a: usize, b: usize) -> V3<T> {
     let zero = T::of(0.0);
@@ -812,6 +920,40 @@ fn offset_at<T: GnScalar>(w: &[V3<T>], deg: usize, a: usize, b: usize) -> V3<T> 
         return vz;
     }
     w.get(a * (deg + 1) + b).copied().unwrap_or(vz)
+}
+
+/// An equal setback d has radius d * (1 + q) / sqrt((1 - q) * (1 + q)), where
+/// q is the dot product of the unit normals towards the centre. Both factors must be
+/// positive over the station or enclosure. Treating q as a series retains its dependence
+/// on the two feet in the Jacobian as well as in the higher coefficients.
+fn equal_setback_radius<T: GnScalar>(
+    normals: &[VSer<T>; 2],
+    side: [f64; 2],
+    distance: f64,
+    tr: Trunc,
+) -> Result<Ser<T>> {
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the chamfer's setback is finite and positive",
+        ));
+    }
+    let [first, second] = normals;
+    let [side_first, side_second] = side;
+    let q = first
+        .dot(second, tr)
+        .scale(T::of(side_first * side_second), tr);
+    let one = Ser::constant(T::of(1.0));
+    let one_plus = one.add(&q, tr);
+    let one_minus = one.sub(&q, tr);
+    if !(one_plus.at(0, 0).is_positive() && one_minus.at(0, 0).is_positive()) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+        ));
+    }
+    let inv_sqrt = one_plus.mul(&one_minus, tr).inv_sqrt(tr)?;
+    Ok(one_plus.mul(&inv_sqrt, tr).scale(T::of(distance), tr))
 }
 
 /// G's four series and the two feet's (`sm_GnEvaluate`'s `rG`, `rF`).
@@ -863,53 +1005,101 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     x: &[Ser<T>; 4],
     tr: Trunc,
 ) -> Result<([Ser<T>; 4], [VSer<T>; 2], VSer<T>, [VSer<T>; 2])> {
+    let zero_s = T::of(0.0);
     let zero = V3 {
-        x: T::of(0.0),
-        y: T::of(0.0),
-        z: T::of(0.0),
+        x: zero_s,
+        y: zero_s,
+        z: zero_s,
     };
     let lm = tr.s() + tr.e();
+    let top = lm.min(tr.degree());
     let mut v_out = [VSer::constant(zero), VSer::constant(zero)];
     let mut f_out = [VSer::constant(zero), VSer::constant(zero)];
     let mut n_out = [VSer::constant(zero), VSer::constant(zero)];
+    let mut du = Ser::constant(zero_s);
+    let mut dv = Ser::constant(zero_s);
+    let mut mono = Ser::constant(zero_s);
+    let mut su = VSer::constant(zero);
+    let mut sv = VSer::constant(zero);
+    let mut nrm = VSer::constant(zero);
+    let mut nn = Ser::constant(zero_s);
+    let mut wv = VSer::constant(zero);
+    let mut d = Ser::constant(zero_s);
+    let mut w = Ser::constant(zero_s);
+    let mut pu: Vec<Ser<T>> = Vec::new();
+    let mut pv: Vec<Ser<T>> = Vec::new();
+    pu.push(Ser::constant(T::of(1.0)));
+    pv.push(Ser::constant(T::of(1.0)));
+    for _ in 1..=top {
+        pu.push(Ser::constant(zero_s));
+        pv.push(Ser::constant(zero_s));
+    }
     let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
     for (f, ((xf, pf), (&rf, sidef))) in rows.enumerate() {
         let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the station's system has no foot for the face",
+                BlendFailure::Defect {
+                    why: "the station's system has no foot for a face: its feet are taken in \
+                          exact pairs",
+                },
             ));
         };
-        let mut du = xu.clone();
-        let mut dv = xv.clone();
-        du.set(0, 0, T::of(0.0));
-        dv.set(0, 0, T::of(0.0));
-        // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
-        // powers and monomials past the degree computed are 0 there and left out
-        let top = lm.min(tr.degree());
-        // the offset point's own expansion (enclosures, #16652): its constant offset d0
+        du.copy_trunc_from(xu, tr);
+        dv.copy_trunc_from(xv, tr);
+        du.set(0, 0, zero_s);
+        dv.set(0, 0, zero_s);
+        // the offset point's own expansion (enclosures near a focal distance, #16652,
+        // #19306): its constant offset d0
         let d0 = offset_d0(sys, rf, sidef);
-        let wt = if T::JOINT_OFFSET {
+        let wt = if sys.equal_setback.is_none() && offset_near_focal(pf, d0) {
             Some(offset_taylor(pf, d0, top)?)
         } else {
             None
         };
-        let mut wv = VSer::constant(zero);
-        let mut pu = vec![Ser::constant(T::of(1.0))];
-        let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
-            let (Some(lu), Some(lv)) = (pu.last(), pv.last()) else {
-                return Err(SolidError::blend_failed(
+            let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) =
+                (pu.split_at_mut_checked(a), pv.split_at_mut_checked(a))
+            else {
+                return Err(SolidError::blend(
                     OP,
-                    "the face's powers are missing",
+                    BlendFailure::Defect {
+                        why: "the face's powers lack an order after preallocating to top",
+                    },
                 ));
             };
-            pu.push(lu.mul_valued(&du, a - 1, 1, tr));
-            pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
+            let (Some(lu), Some(pua), Some(lv), Some(pva)) = (
+                lu_slice.last(),
+                pu_slice.first_mut(),
+                lv_slice.last(),
+                pv_slice.first_mut(),
+            ) else {
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the face's powers lack the previous order: they start with the \
+                              0th and each order is preallocated up to top",
+                    },
+                ));
+            };
+            lu.mul_valued_into(&du, a - 1, 1, tr, pua);
+            lv.mul_valued_into(&dv, a - 1, 1, tr, pva);
         }
-        let mut s = VSer::constant(zero);
-        let mut su = s.clone();
-        let mut sv = s.clone();
+        let Some(s) = f_out.get_mut(f) else {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the output feet array lacks face f",
+                },
+            ));
+        };
+        if f > 0 {
+            su.zero_computed(tr);
+            sv.zero_computed(tr);
+            if wt.is_some() {
+                wv.zero_computed(tr);
+            }
+        }
         let mut fa = 1.0_f64;
         for (a, pua) in pu.iter().enumerate() {
             if a > 0 {
@@ -920,11 +1110,11 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 if b > 0 {
                     fb *= b as f64;
                 }
-                let mono = pua.mul_valued(pvb, a, b, tr);
+                pua.mul_valued_into(pvb, a, b, tr, &mut mono);
                 // a! b! is exact, 1 / (a! b!) is rounded in T (#2559)
                 let sf = T::of(1.0) / T::of(fa * fb);
                 let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
-                let outs: [&mut VSer<T>; 3] = [&mut s, &mut su, &mut sv];
+                let outs: [&mut VSer<T>; 3] = [s, &mut su, &mut sv];
                 for (c, out) in cs.iter().zip(outs) {
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
@@ -940,11 +1130,30 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 }
             }
         }
-        let nrm = su.cross(&sv, tr);
-        let inv_len = nrm.dot(&nrm, tr).inv_sqrt(tr)?;
+        su.cross_into(&sv, tr, &mut nrm);
+        nrm.dot_into(&nrm, tr, &mut nn);
+        let inv_len = nn.inv_sqrt(tr)?;
+        let Some(no) = n_out.get_mut(f) else {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the output normals array lacks face f",
+                },
+            ));
+        };
+        nrm.times_into(&inv_len, tr, no);
+        if sys.equal_setback.is_some() {
+            continue;
+        }
         // the offset towards the ball: tau r_i s_i, tau = 1 + eps (r_i a series in sigma
         // for a law)
-        let mut d = Ser::constant(T::of(rf * sidef));
+        for i in 0..=tr.s() {
+            d.set(i, 0, zero_s);
+            if tr.e() >= 1 {
+                d.set(i, 1, zero_s);
+            }
+        }
+        d.set(0, 0, T::of(rf * sidef));
         if let Some(law) = sys.law {
             for i in 0..=tr.s() {
                 d.set(i, 0, law.at(i, 0) * T::of(sidef));
@@ -955,24 +1164,47 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 d.set(i, 1, d.at(i, 0));
             }
         }
-        let vf = if wt.is_some() {
-            offset_rest(wv, &nrm, &inv_len, &d, offset_varies(sys, tr), tr)
-        } else {
-            s.add(&nrm.times(&inv_len.mul(&d, tr), tr), tr)
+        let Some(vo) = v_out.get_mut(f) else {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the output offset array lacks face f",
+                },
+            ));
         };
-        if let (Some(vo), Some(fo), Some(no)) =
-            (v_out.get_mut(f), f_out.get_mut(f), n_out.get_mut(f))
-        {
-            *vo = vf;
-            *no = nrm.times(&inv_len, tr);
-            *fo = s;
+        if wt.is_some() {
+            if offset_varies(sys, tr) {
+                d.set(0, 0, zero_s);
+                inv_len.mul_into(&d, tr, &mut w);
+                wv.add_times_into(&nrm, &w, tr, vo);
+            } else {
+                vo.merge_computed(&wv, tr);
+            }
+        } else {
+            inv_len.mul_into(&d, tr, &mut w);
+            s.add_times_into(&nrm, &w, tr, vo);
         }
     }
-    let [v0, v1] = &v_out;
-    let diff = v0.sub(v1, tr);
+    if let Some(distance) = sys.equal_setback {
+        let radius = equal_setback_radius(&n_out, sys.side, distance, tr)?;
+        let mut tau = Ser::constant(T::of(1.0));
+        if !sys.hold && tr.e() >= 1 {
+            tau.set(0, 1, T::of(1.0));
+        }
+        let offset = radius.mul(&tau, tr);
+        for (((centre, foot), normal), side) in
+            v_out.iter_mut().zip(&f_out).zip(&n_out).zip(sys.side)
+        {
+            offset.scale_into(T::of(side), tr, &mut w);
+            foot.add_times_into(normal, &w, tr, centre);
+        }
+    }
+    let [v0, v1] = v_out;
+    let diff = v0.sub(&v1, tr);
     let [g0, g1, g2] = diff.a;
-    let g3 = v0.sub(&sys.leader, tr).dot(&sys.tangent, tr);
-    Ok(([g0, g1, g2, g3], f_out, v0.clone(), n_out))
+    v0.sub_into(&sys.leader, tr, &mut su);
+    let g3 = su.dot(&sys.tangent, tr);
+    Ok(([g0, g1, g2, g3], f_out, v0, n_out))
 }
 
 /// [`gn_evaluate_vn`]'s values: G, the feet, V and the faces' unit normals.
@@ -995,8 +1227,11 @@ struct GnFaceSeries<T: GnScalar> {
     n: VSer<T>,
     /// The offset point's joint expansion composed with the feet ([`offset_taylor`]).
     wv: VSer<T>,
-    /// Its coefficients, to the orders' total degree (none before the first evaluation).
+    /// Its coefficients, to the orders' total degree (none before the first evaluation,
+    /// and none where the offset is the sum, [`offset_near_focal`]).
     wt: Option<Vec<V3<T>>>,
+    /// Whether the offset is the joint expansion, decided at the first evaluation.
+    joint: Option<bool>,
 }
 
 impl<T: GnScalar> GnFaceSeries<T> {
@@ -1020,26 +1255,28 @@ impl<T: GnScalar> GnFaceSeries<T> {
             n: vz.clone(),
             wv: vz,
             wt: None,
+            joint: None,
         }
     }
 }
 
-/// `v.a[j]` merged from `src.a[j]` where `tr` computes.
-fn merge_v<T: GnScalar>(v: &mut VSer<T>, src: &VSer<T>, tr: Trunc) {
-    for (a, b) in v.a.iter_mut().zip(&src.a) {
-        a.merge_computed(b, tr);
-    }
+/// Which unit-normal coefficients [`GnIncremental`] should bring up to date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NeedNormal {
+    None,
+    SigmaOnly,
+    Full,
 }
 
 /// [`gn_evaluate_vn`] evaluated incrementally, for a caller that evaluates the same system
-/// again and again as it fills in the feet's series (the certificate's Taylor models
-/// solve them order by order, [`super::feet_tm::gn_enclose_tm`]): every series
-/// [`gn_evaluate_vn`] takes is kept, and an evaluation computes only the coefficients its
-/// truncation computes that no earlier one has computed from the same coefficients of x.
-/// Each coefficient depends only on x's coefficients at the same or lower powers of both
-/// sigma and eps (see [`Trunc`]), so a kept one stays valid until x changes in that
-/// quadrant, and the evaluation's operations, their order and so every value are
-/// [`gn_evaluate_vn`]'s, bit for bit: the two must change together (a test compares them).
+/// again and again as it fills in the feet's series (the certificate's Taylor models and
+/// interval enclosures solve them order by order): every series [`gn_evaluate_vn`] takes
+/// is kept, and an evaluation computes only the coefficients its truncation computes that
+/// no earlier one has computed from the same coefficients of x. Each coefficient depends
+/// only on x's coefficients at the same or lower powers of both sigma and eps (see
+/// [`Trunc`]), so a kept one stays valid until x changes in that quadrant, and the
+/// evaluation's operations, their order and so every value are [`gn_evaluate_vn`]'s, bit
+/// for bit: the two must change together (a test compares them).
 #[derive(Clone, Debug)]
 pub struct GnIncremental<'s, 'a, T: GnScalar> {
     sys: &'s GnSystem<'a, T>,
@@ -1047,12 +1284,20 @@ pub struct GnIncremental<'s, 'a, T: GnScalar> {
     orders: Option<(usize, usize)>,
     /// The x the kept series were computed from.
     x: [Ser<T>; 4],
-    /// The kept coefficients still valid ([`Trunc::bit`]s, the same for every series).
+    /// The kept coefficients still valid ([`Trunc::bit`]s, the same for every series
+    /// except `faces[f].n`).
     valid: u64,
+    /// The kept coefficients of `faces[f].n` still valid.
+    n_valid: u64,
     faces: [GnFaceSeries<T>; 2],
     g: [Ser<T>; 4],
     /// `V - leader` (its dot product with the tangent reads all its lower coefficients).
     t: VSer<T>,
+    /// Reusable scratch series for incremental updates (zero allocations per call).
+    du: Ser<T>,
+    dv: Ser<T>,
+    mono: Ser<T>,
+    d: Ser<T>,
     /// The coefficients computed so far (each evaluation adds those of its series' it
     /// computes, counted once per position).
     computed: u64,
@@ -1068,11 +1313,16 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             orders: None,
             x: core::array::from_fn(|_| z.clone()),
             valid: 0,
+            n_valid: 0,
             faces: [GnFaceSeries::new(), GnFaceSeries::new()],
             g: core::array::from_fn(|_| z.clone()),
             t: VSer {
                 a: core::array::from_fn(|_| z.clone()),
             },
+            du: z.clone(),
+            dv: z.clone(),
+            mono: z.clone(),
+            d: z,
             computed: 0,
         }
     }
@@ -1091,164 +1341,20 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     ///
     /// As [`gn_evaluate_vn`].
     pub fn evaluate(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
-        let out = self.evaluate_kept(x, tr);
-        if out.is_err() {
-            // the kept series are part way through an update
+        // With equal setbacks the two faces' offsets depend on both normals. The
+        // per-face cache below assumes each offset is independent of the other foot.
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            return gn_evaluate_vn(self.sys, x, tr);
+        }
+        if let Err(e) = self.evaluate_core(x, tr, NeedNormal::Full) {
             self.valid = 0;
+            self.n_valid = 0;
             self.orders = None;
+            return Err(e);
         }
-        out
-    }
-
-    fn evaluate_kept(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
-        if self.orders != Some((tr.s(), tr.e())) {
-            let computed = self.computed;
-            *self = Self::new(self.sys);
-            self.computed = computed;
-            self.orders = Some((tr.s(), tr.e()));
-        }
-        // a coefficient of x that changed invalidates every kept one at or above both its
-        // powers
-        for (xn, xo) in x.iter().zip(&self.x) {
-            for i in 0..=MAX_S {
-                for k in 0..=STORE_E {
-                    if xn.at(i, k) != xo.at(i, k) {
-                        for i2 in i..=MAX_S {
-                            for k2 in k..=STORE_E {
-                                self.valid &= !Trunc::bit(i2, k2);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        self.x.clone_from(x);
-        let all = tr.computed_mask();
-        let btr = tr.skipping(self.valid);
-        self.computed = self
-            .computed
-            .saturating_add(u64::from(btr.computed_mask().count_ones()));
-        let lm = tr.s() + tr.e();
-        let top = lm.min(tr.degree());
-        let zero = Ser::constant(T::of(0.0));
-        let vzero = VSer {
-            a: core::array::from_fn(|_| zero.clone()),
-        };
-        let sys = self.sys;
-        let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
-        for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
-            let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the station's system has no foot for the face",
-                ));
-            };
-            let mut du = xu.clone();
-            let mut dv = xv.clone();
-            du.set(0, 0, T::of(0.0));
-            dv.set(0, 0, T::of(0.0));
-            for a in 1..=top {
-                let (Some(lu), Some(lv)) = (fs.pu.get(a - 1), fs.pv.get(a - 1)) else {
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the face's powers are missing",
-                    ));
-                };
-                let (nu, nv) = (
-                    lu.mul_valued(&du, a - 1, 1, btr),
-                    lv.mul_valued(&dv, a - 1, 1, btr),
-                );
-                if fs.pu.len() <= a {
-                    fs.pu.push(zero.clone());
-                    fs.pv.push(zero.clone());
-                }
-                let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the face's powers are missing",
-                    ));
-                };
-                pua.merge_computed(&nu, btr);
-                pva.merge_computed(&nv, btr);
-            }
-            merge_v(&mut fs.s, &vzero, btr);
-            merge_v(&mut fs.su, &vzero, btr);
-            merge_v(&mut fs.sv, &vzero, btr);
-            // the offset point's joint expansion (#16652), its coefficients once per orders
-            // (each the same whatever degree it is computed to, so [`gn_evaluate_vn`]'s)
-            if T::JOINT_OFFSET && fs.wt.is_none() {
-                fs.wt = Some(offset_taylor(pf, offset_d0(sys, rf, sidef), lm)?);
-            }
-            merge_v(&mut fs.wv, &vzero, btr);
-            let mut fa = 1.0_f64;
-            for (a, pua) in fs.pu.iter().enumerate().take(top + 1) {
-                if a > 0 {
-                    fa *= a as f64;
-                }
-                let mut fb = 1.0_f64;
-                for (b, pvb) in fs.pv.iter().enumerate().take(top - a + 1) {
-                    if b > 0 {
-                        fb *= b as f64;
-                    }
-                    let mono = pua.mul_valued(pvb, a, b, btr);
-                    let sf = T::of(1.0) / T::of(fa * fb);
-                    let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
-                    let outs: [&mut VSer<T>; 3] = [&mut fs.s, &mut fs.su, &mut fs.sv];
-                    for (c, out) in cs.iter().zip(outs) {
-                        let cv = [c.x, c.y, c.z];
-                        for (o, &cj) in out.a.iter_mut().zip(&cv) {
-                            o.add_scaled_from(&mono, cj * sf, a + b, btr);
-                        }
-                    }
-                    if let Some(wt) = &fs.wt {
-                        let c = offset_at(wt, lm, a, b);
-                        for (o, &cj) in fs.wv.a.iter_mut().zip(&[c.x, c.y, c.z]) {
-                            o.add_scaled_from(&mono, cj, a + b, btr);
-                        }
-                    }
-                }
-            }
-            merge_v(&mut fs.nrm, &fs.su.cross(&fs.sv, btr), btr);
-            fs.nn.merge_computed(&fs.nrm.dot(&fs.nrm, btr), btr);
-            let inv_len = fs.inv.update(&fs.nn, btr)?.clone();
-            let mut d = Ser::constant(T::of(rf * sidef));
-            if let Some(law) = sys.law {
-                for i in 0..=tr.s() {
-                    d.set(i, 0, law.at(i, 0) * T::of(sidef));
-                }
-            }
-            if !sys.hold && tr.e() >= 1 {
-                for i in 0..=tr.s() {
-                    d.set(i, 1, d.at(i, 0));
-                }
-            }
-            // (kept, as every series a later product reads: a product's coefficient reads
-            // its operands' lower ones, which an incremental call does not compute again)
-            let joint = fs.wt.is_some();
-            let dw = if joint { offset_part(&d) } else { d };
-            fs.w.merge_computed(&inv_len.mul(&dw, btr), btr);
-            if joint {
-                let vf = if offset_varies(sys, tr) {
-                    fs.wv.add(&fs.nrm.times(&fs.w, btr), btr)
-                } else {
-                    fs.wv.clone()
-                };
-                merge_v(&mut fs.v, &vf, btr);
-            } else {
-                merge_v(&mut fs.v, &fs.s.add(&fs.nrm.times(&fs.w, btr), btr), btr);
-            }
-            merge_v(&mut fs.n, &fs.nrm.times(&inv_len, btr), btr);
-        }
-        let [f0, f1] = &self.faces;
-        let diff = f0.v.sub(&f1.v, btr);
-        for (g, d) in self.g.iter_mut().zip(&diff.a) {
-            g.merge_computed(d, btr);
-        }
-        merge_v(&mut self.t, &f0.v.sub(&sys.leader, btr), btr);
-        if let Some(g3) = self.g.get_mut(3) {
-            g3.merge_computed(&self.t.dot(&sys.tangent, btr), btr);
-        }
-        self.valid |= all;
         let mv = |v: &VSer<T>| VSer {
             a: v.a.each_ref().map(|c| c.masked(tr)),
         };
@@ -1259,6 +1365,322 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             mv(&f0.v),
             [mv(&f0.n), mv(&f1.n)],
         ))
+    }
+
+    /// Updates `G` up to `tr` in place and returns a borrow of `G` with zero output
+    /// allocations (skipping unit normals, which order-by-order solves do not read).
+    /// Every coefficient computed by `tr` matches [`gn_evaluate_vn`] bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// As [`gn_evaluate_vn`].
+    pub fn evaluate_g(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<&[Ser<T>; 4]> {
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            let (g, _, _, _) = gn_evaluate_vn(self.sys, x, tr)?;
+            self.g = g;
+            return Ok(&self.g);
+        }
+        if let Err(e) = self.evaluate_core(x, tr, NeedNormal::None) {
+            self.valid = 0;
+            self.n_valid = 0;
+            self.orders = None;
+            return Err(e);
+        }
+        Ok(&self.g)
+    }
+
+    /// Completes the incremental evaluation at `tr` (computing unit normals only where
+    /// `need_normal_sigma` is true, and then only to `Trunc(tr.s(), 0)` for
+    /// [`gn_top_jets`]). Follow with [`Self::into_fv`] to move the series out without
+    /// cloning.
+    ///
+    /// # Errors
+    ///
+    /// As [`gn_evaluate_vn`].
+    pub fn evaluate_final(
+        &mut self,
+        x: &[Ser<T>; 4],
+        tr: Trunc,
+        need_normal_sigma: bool,
+    ) -> Result<()> {
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            let (g, [fs0, fs1], v, [fn0, fn1]) = gn_evaluate_vn(self.sys, x, tr)?;
+            self.g = g;
+            let [f0, f1] = &mut self.faces;
+            f0.s = fs0;
+            f1.s = fs1;
+            f0.v = v;
+            f0.n = fn0;
+            f1.n = fn1;
+            return Ok(());
+        }
+        let need_n = if need_normal_sigma {
+            NeedNormal::SigmaOnly
+        } else {
+            NeedNormal::None
+        };
+        if let Err(e) = self.evaluate_core(x, tr, need_n) {
+            self.valid = 0;
+            self.n_valid = 0;
+            self.orders = None;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Consumes the evaluator after [`Self::evaluate_final`], masking and moving out
+    /// `(f, v, n)` with zero allocations.
+    #[must_use]
+    #[allow(clippy::type_complexity)]
+    pub fn into_fv(
+        self,
+        tr: Trunc,
+        need_normal_sigma: bool,
+    ) -> ([VSer<T>; 2], VSer<T>, Option<[VSer<T>; 2]>) {
+        let [mut f0, mut f1] = self.faces;
+        f0.s.mask_in_place(tr);
+        f1.s.mask_in_place(tr);
+        f0.v.mask_in_place(tr);
+        let n = if need_normal_sigma {
+            let sigma = Trunc::new(tr.s(), 0).unwrap_or(tr);
+            f0.n.mask_in_place(sigma);
+            f1.n.mask_in_place(sigma);
+            Some([f0.n, f1.n])
+        } else {
+            None
+        };
+        ([f0.s, f1.s], f0.v, n)
+    }
+
+    /// Completes the incremental evaluation at `tr` with full unit normals and moves
+    /// `(f, v, n)` out without cloning.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn finish_vn(
+        mut self,
+        x: &[Ser<T>; 4],
+        tr: Trunc,
+    ) -> Result<([VSer<T>; 2], VSer<T>, [VSer<T>; 2])> {
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            let (_, f, v, n) = gn_evaluate_vn(self.sys, x, tr)?;
+            return Ok((f, v, n));
+        }
+        self.evaluate_core(x, tr, NeedNormal::Full)?;
+        let [mut f0, mut f1] = self.faces;
+        f0.s.mask_in_place(tr);
+        f1.s.mask_in_place(tr);
+        f0.v.mask_in_place(tr);
+        f0.n.mask_in_place(tr);
+        f1.n.mask_in_place(tr);
+        Ok(([f0.s, f1.s], f0.v, [f0.n, f1.n]))
+    }
+
+    fn evaluate_core(&mut self, x: &[Ser<T>; 4], tr: Trunc, need_n: NeedNormal) -> Result<()> {
+        if self.orders != Some((tr.s(), tr.e())) {
+            let computed = self.computed;
+            *self = Self::new(self.sys);
+            self.computed = computed;
+            self.orders = Some((tr.s(), tr.e()));
+        }
+        // a coefficient of x that changed invalidates every kept one at or above both its
+        // powers (within this evaluator's orders)
+        let max_s = tr.s();
+        let max_e = tr.e();
+        for (xn, xo) in x.iter().zip(&mut self.x) {
+            for i in 0..=max_s {
+                for k in 0..=max_e {
+                    if xn.at(i, k) != xo.at(i, k) {
+                        for i2 in i..=max_s {
+                            for k2 in k..=max_e {
+                                let mask = !Trunc::bit(i2, k2);
+                                self.valid &= mask;
+                                self.n_valid &= mask;
+                            }
+                        }
+                    }
+                }
+            }
+            xo.copy_trunc_from(xn, tr);
+        }
+        let all = tr.computed_mask();
+        let btr = tr.skipping(self.valid);
+        let btr_mask = btr.computed_mask();
+        self.computed = self
+            .computed
+            .saturating_add(u64::from(btr_mask.count_ones()));
+        if btr_mask != 0 {
+            let lm = tr.s() + tr.e();
+            let top = lm.min(tr.degree());
+            let zero_s = T::of(0.0);
+            let sys = self.sys;
+            let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
+            for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
+                let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::Defect {
+                            why: "the station's system has no foot for a face: its feet are taken \
+                                  in exact pairs",
+                        },
+                    ));
+                };
+                self.du.copy_trunc_from(xu, tr);
+                self.dv.copy_trunc_from(xv, tr);
+                self.du.set(0, 0, zero_s);
+                self.dv.set(0, 0, zero_s);
+                while fs.pu.len() <= top {
+                    fs.pu.push(Ser::constant(zero_s));
+                    fs.pv.push(Ser::constant(zero_s));
+                }
+                for a in 1..=top {
+                    let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) =
+                        (fs.pu.split_at_mut_checked(a), fs.pv.split_at_mut_checked(a))
+                    else {
+                        return Err(SolidError::blend(
+                            OP,
+                            BlendFailure::Defect {
+                                why: "the face's kept powers lack an order after resizing to top",
+                            },
+                        ));
+                    };
+                    let (Some(lu), Some(pua), Some(lv), Some(pva)) = (
+                        lu_slice.last(),
+                        pu_slice.first_mut(),
+                        lv_slice.last(),
+                        pv_slice.first_mut(),
+                    ) else {
+                        return Err(SolidError::blend(
+                            OP,
+                            BlendFailure::Defect {
+                                why: "the face's kept powers lack an order: they start with the \
+                                      0th and each order is resized up to top",
+                            },
+                        ));
+                    };
+                    lu.mul_valued_into(&self.du, a - 1, 1, btr, pua);
+                    lv.mul_valued_into(&self.dv, a - 1, 1, btr, pva);
+                }
+                fs.s.zero_computed(btr);
+                fs.su.zero_computed(btr);
+                fs.sv.zero_computed(btr);
+                // the offset point's joint expansion near a focal distance (#16652, #19306),
+                // decided and its coefficients computed once per orders (each the same whatever
+                // degree it is computed to, so [`gn_evaluate_vn`]'s)
+                if fs.joint.is_none() {
+                    let d0 = offset_d0(sys, rf, sidef);
+                    let near = offset_near_focal(pf, d0);
+                    if near {
+                        fs.wt = Some(offset_taylor(pf, d0, lm)?);
+                    }
+                    fs.joint = Some(near);
+                }
+                if fs.wt.is_some() {
+                    fs.wv.zero_computed(btr);
+                }
+                let mut fa = 1.0_f64;
+                for (a, pua) in fs.pu.iter().enumerate().take(top + 1) {
+                    if a > 0 {
+                        fa *= a as f64;
+                    }
+                    let mut fb = 1.0_f64;
+                    for (b, pvb) in fs.pv.iter().enumerate().take(top - a + 1) {
+                        if b > 0 {
+                            fb *= b as f64;
+                        }
+                        pua.mul_valued_into(pvb, a, b, btr, &mut self.mono);
+                        let sf = T::of(1.0) / T::of(fa * fb);
+                        let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
+                        let outs: [&mut VSer<T>; 3] = [&mut fs.s, &mut fs.su, &mut fs.sv];
+                        for (c, out) in cs.iter().zip(outs) {
+                            let cv = [c.x, c.y, c.z];
+                            for (o, &cj) in out.a.iter_mut().zip(&cv) {
+                                o.add_scaled_from(&self.mono, cj * sf, a + b, btr);
+                            }
+                        }
+                        if let Some(wt) = &fs.wt {
+                            let c = offset_at(wt, lm, a, b);
+                            for (o, &cj) in fs.wv.a.iter_mut().zip(&[c.x, c.y, c.z]) {
+                                o.add_scaled_from(&self.mono, cj, a + b, btr);
+                            }
+                        }
+                    }
+                }
+                fs.su.cross_into(&fs.sv, btr, &mut fs.nrm);
+                fs.nrm.dot_into(&fs.nrm, btr, &mut fs.nn);
+                let inv_len = fs.inv.update(&fs.nn, btr)?;
+                for i in 0..=tr.s() {
+                    self.d.set(i, 0, zero_s);
+                    if tr.e() >= 1 {
+                        self.d.set(i, 1, zero_s);
+                    }
+                }
+                self.d.set(0, 0, T::of(rf * sidef));
+                if let Some(law) = sys.law {
+                    for i in 0..=tr.s() {
+                        self.d.set(i, 0, law.at(i, 0) * T::of(sidef));
+                    }
+                }
+                if !sys.hold && tr.e() >= 1 {
+                    for i in 0..=tr.s() {
+                        self.d.set(i, 1, self.d.at(i, 0));
+                    }
+                }
+                // (kept, as every series a later product reads: a product's coefficient reads
+                // its operands' lower ones, which an incremental call does not compute again)
+                if fs.wt.is_some() {
+                    if offset_varies(sys, tr) {
+                        self.d.set(0, 0, zero_s);
+                        inv_len.mul_into(&self.d, btr, &mut fs.w);
+                        fs.wv.add_times_into(&fs.nrm, &fs.w, btr, &mut fs.v);
+                    } else {
+                        fs.v.merge_computed(&fs.wv, btr);
+                    }
+                } else {
+                    inv_len.mul_into(&self.d, btr, &mut fs.w);
+                    fs.s.add_times_into(&fs.nrm, &fs.w, btr, &mut fs.v);
+                }
+            }
+            let [f0, f1] = &self.faces;
+            for ((g, v0), v1) in self.g.iter_mut().zip(&f0.v.a).zip(&f1.v.a) {
+                v0.sub_into(v1, btr, g);
+            }
+            f0.v.sub_into(&sys.leader, btr, &mut self.t);
+            if let Some(g3) = self.g.get_mut(3) {
+                self.t.dot_into(&sys.tangent, btr, g3);
+            }
+            self.valid |= all;
+        }
+        match need_n {
+            NeedNormal::None => {}
+            NeedNormal::SigmaOnly => {
+                let sigma = Trunc::new(tr.s(), 0)?.computing(tr.s().min(tr.degree()), 0);
+                let ntr = sigma.skipping(self.n_valid);
+                if ntr.computed_mask() != 0 {
+                    for fs in &mut self.faces {
+                        fs.nrm.times_into(fs.inv.out(), ntr, &mut fs.n);
+                    }
+                }
+                self.n_valid |= sigma.computed_mask();
+            }
+            NeedNormal::Full => {
+                let ntr = tr.skipping(self.n_valid);
+                if ntr.computed_mask() != 0 {
+                    for fs in &mut self.faces {
+                        fs.nrm.times_into(fs.inv.out(), ntr, &mut fs.n);
+                    }
+                }
+                self.n_valid |= all;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1271,34 +1693,34 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
 /// section is as continuous as the face's n-th partials. `f` holds C on entry, the jets on
 /// return; `n` the faces' unit normals at the feet.
 pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut [VSer<T>; 2]) {
-    if top < 1 {
+    if top < 1 || top > tr.e() {
         return;
     }
     let sigma = Trunc::new(tr.s(), 0).unwrap_or(tr);
+    let zero_s = T::of(0.0);
+    let zero = V3 {
+        x: zero_s,
+        y: zero_s,
+        z: zero_s,
+    };
+    let mut sn = VSer::constant(zero);
+    let mut sc = VSer::constant(zero);
+    let mut dot = Ser::constant(zero_s);
+    let mut sj = VSer::constant(zero);
     for (ff, nf) in f.iter_mut().zip(n) {
-        let mut sn = nf.clone();
-        for comp in &mut sn.a {
-            for i in 0..=MAX_S {
-                for kk in 1..=MAX_E {
-                    comp.set(i, kk, T::of(0.0));
-                }
+        for (dst, src) in sn.a.iter_mut().zip(&nf.a) {
+            for i in 0..=tr.s() {
+                dst.set(i, 0, src.at(i, 0));
             }
         }
         for kk in top..=tr.e() {
-            let mut sc = sn.clone();
             for (cc, fc) in sc.a.iter_mut().zip(&ff.a) {
-                for i in 0..=MAX_S {
-                    for k2 in 0..=MAX_E {
-                        let v = if k2 == 0 && i <= tr.s() {
-                            fc.at(i, kk)
-                        } else {
-                            T::of(0.0)
-                        };
-                        cc.set(i, k2, v);
-                    }
+                for i in 0..=tr.s() {
+                    cc.set(i, 0, fc.at(i, kk));
                 }
             }
-            let sj = sn.times(&sn.dot(&sc, sigma), sigma);
+            sn.dot_into(&sc, sigma, &mut dot);
+            sn.times_into(&dot, sigma, &mut sj);
             for (fc, jc) in ff.a.iter_mut().zip(&sj.a) {
                 for i in 0..=tr.s() {
                     fc.set(i, kk, jc.at(i, 0));
@@ -1308,33 +1730,511 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
     }
 }
 
-/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms, offsets held: G along
-/// `x + e_j eps`, first order.
+/// First-order dual number `c0 + c1 eps` (`Trunc(0, 1)` on the stack, zero heap
+/// allocations), reproducing every [`Ser<T>`] operation's rounding order bit for bit.
+#[derive(Clone, Copy)]
+struct Dual<T> {
+    c0: T,
+    c1: T,
+}
+
+impl<T: GnScalar> Dual<T> {
+    #[inline]
+    fn new(c0: T, c1: T) -> Self {
+        Self { c0, c1 }
+    }
+
+    #[inline]
+    fn zero() -> Self {
+        let z = T::of(0.0);
+        Self { c0: z, c1: z }
+    }
+
+    #[inline]
+    fn add(self, b: Self) -> Self {
+        Self {
+            c0: self.c0 + b.c0,
+            c1: self.c1 + b.c1,
+        }
+    }
+
+    #[inline]
+    fn sub(self, b: Self) -> Self {
+        Self {
+            c0: self.c0 - b.c0,
+            c1: self.c1 - b.c1,
+        }
+    }
+
+    #[inline]
+    fn scale(self, f: T) -> Self {
+        Self {
+            c0: self.c0 * f,
+            c1: self.c1 * f,
+        }
+    }
+
+    #[inline]
+    fn mul(self, b: Self) -> Self {
+        let z = T::of(0.0);
+        Self {
+            c0: z + self.c0 * b.c0,
+            c1: (z + self.c0 * b.c1) + self.c1 * b.c0,
+        }
+    }
+
+    #[inline]
+    fn inv_sqrt(self) -> Result<Self> {
+        let x0 = self.c0;
+        if !x0.is_positive() {
+            return Err(SolidError::blend(
+                "blend::fillet_section::Ser::inv_sqrt",
+                BlendFailure::SectionDegenerate(SectionDegeneracy::VectorVanishes),
+            ));
+        }
+        let z = T::of(0.0);
+        let one = T::of(1.0);
+        let z1 = self.c1 * (one / x0);
+        let pow1 = z + one * z1;
+        let sum1 = z + pow1 * T::of(-0.5);
+        let inv_s = one / x0.sqrt();
+        Ok(Self {
+            c0: one * inv_s,
+            c1: sum1 * inv_s,
+        })
+    }
+}
+
+/// 3D vector of [`Dual<T>`].
+#[derive(Clone, Copy)]
+struct V3Dual<T>([Dual<T>; 3]);
+
+impl<T: GnScalar> V3Dual<T> {
+    #[inline]
+    fn zero() -> Self {
+        let z = Dual::zero();
+        Self([z, z, z])
+    }
+
+    #[inline]
+    fn add(self, b: Self) -> Self {
+        let [a0, a1, a2] = self.0;
+        let [b0, b1, b2] = b.0;
+        Self([a0.add(b0), a1.add(b1), a2.add(b2)])
+    }
+
+    #[inline]
+    fn sub(self, b: Self) -> Self {
+        let [a0, a1, a2] = self.0;
+        let [b0, b1, b2] = b.0;
+        Self([a0.sub(b0), a1.sub(b1), a2.sub(b2)])
+    }
+
+    #[inline]
+    fn times(self, s: Dual<T>) -> Self {
+        let [a0, a1, a2] = self.0;
+        Self([a0.mul(s), a1.mul(s), a2.mul(s)])
+    }
+
+    #[inline]
+    fn dot(self, b: Self) -> Dual<T> {
+        let [a0, a1, a2] = self.0;
+        let [b0, b1, b2] = b.0;
+        a0.mul(b0).add(a1.mul(b1)).add(a2.mul(b2))
+    }
+
+    #[inline]
+    fn cross(self, b: Self) -> Self {
+        let [a0, a1, a2] = self.0;
+        let [b0, b1, b2] = b.0;
+        Self([
+            a1.mul(b2).sub(a2.mul(b1)),
+            a2.mul(b0).sub(a0.mul(b2)),
+            a0.mul(b1).sub(a1.mul(b0)),
+        ])
+    }
+}
+
+/// Constant term `W[0][0]` of [`offset_taylor`] without allocating tables.
+fn offset_taylor_deg0<T: GnScalar>(pf: &Partials<T>, d0: T) -> Result<V3<T>> {
+    let zero = T::of(0.0);
+    let one = T::of(1.0);
+    #[allow(clippy::eq_op)]
+    let sf = one / one;
+    let scale = |p: V3<T>, f: T| V3 {
+        x: p.x * f,
+        y: p.y * f,
+        z: p.z * f,
+    };
+    let t00 = scale(pf.at(0, 0), sf);
+    let su = scale(scale(pf.at(1, 0), sf), one);
+    let sv = scale(scale(pf.at(0, 1), sf), one);
+    let n = V3 {
+        x: zero + (su.y * sv.z - su.z * sv.y),
+        y: zero + (su.z * sv.x - su.x * sv.z),
+        z: zero + (su.x * sv.y - su.y * sv.x),
+    };
+    let h0 = zero + (n.x * n.x + n.y * n.y + n.z * n.z);
+    let g0 = inv_sqrt_scalar(h0)?;
+    let c = V3 {
+        x: zero + n.x * g0,
+        y: zero + n.y * g0,
+        z: zero + n.z * g0,
+    };
+    Ok(V3 {
+        x: t00.x + d0 * c.x,
+        y: t00.y + d0 * c.y,
+        z: t00.z + d0 * c.z,
+    })
+}
+
+/// Evaluates `G` at `Trunc(0, 0)` directly on the stack (zero heap allocations), matching
+/// `gn_evaluate(sys, x, Trunc(0, 0))` bit for bit.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
+    p: [&Partials<T>; 2],
+    leader: &VSer<T>,
+    tangent: &VSer<T>,
+    r: [f64; 2],
+    side: [f64; 2],
+    law: Option<&Ser<T>>,
+    equal_setback: Option<f64>,
+) -> Result<[T; 4]> {
+    let zero = T::of(0.0);
+    let one = T::of(1.0);
+    let vz = V3 {
+        x: zero,
+        y: zero,
+        z: zero,
+    };
+    #[allow(clippy::eq_op)]
+    let sf = one / one;
+    let mono0 = zero + one * one;
+    let mut v_out = [vz; 2];
+    let mut f_out = [vz; 2];
+    let mut n_out = [vz; 2];
+    for (f, ((pf, &rf), sidef)) in p.into_iter().zip(r.iter()).zip(side).enumerate() {
+        let d0 = match law {
+            Some(l) => l.at(0, 0) * T::of(sidef),
+            None => T::of(rf * sidef),
+        };
+        let near = equal_setback.is_none() && offset_near_focal(pf, d0);
+        let scaled = |c: V3<T>| V3 {
+            x: zero + mono0 * (c.x * sf),
+            y: zero + mono0 * (c.y * sf),
+            z: zero + mono0 * (c.z * sf),
+        };
+        let s = scaled(pf.at(0, 0));
+        let su = scaled(pf.at(1, 0));
+        let sv = scaled(pf.at(0, 1));
+        let nrm = V3 {
+            x: (zero + su.y * sv.z) - (zero + su.z * sv.y),
+            y: (zero + su.z * sv.x) - (zero + su.x * sv.z),
+            z: (zero + su.x * sv.y) - (zero + su.y * sv.x),
+        };
+        let nn = ((zero + nrm.x * nrm.x) + (zero + nrm.y * nrm.y)) + (zero + nrm.z * nrm.z);
+        let inv_len = inv_sqrt_scalar(nn)?;
+        if equal_setback.is_some() {
+            if let (Some(fo), Some(no)) = (f_out.get_mut(f), n_out.get_mut(f)) {
+                *fo = s;
+                *no = V3 {
+                    x: zero + nrm.x * inv_len,
+                    y: zero + nrm.y * inv_len,
+                    z: zero + nrm.z * inv_len,
+                };
+            }
+            continue;
+        }
+        let vf = if near {
+            let w00 = offset_taylor_deg0(pf, d0)?;
+            let wv = V3 {
+                x: zero + mono0 * w00.x,
+                y: zero + mono0 * w00.y,
+                z: zero + mono0 * w00.z,
+            };
+            if law.is_some() {
+                let dw = zero + inv_len * zero;
+                V3 {
+                    x: wv.x + (zero + nrm.x * dw),
+                    y: wv.y + (zero + nrm.y * dw),
+                    z: wv.z + (zero + nrm.z * dw),
+                }
+            } else {
+                wv
+            }
+        } else {
+            let dw = zero + inv_len * d0;
+            V3 {
+                x: s.x + (zero + nrm.x * dw),
+                y: s.y + (zero + nrm.y * dw),
+                z: s.z + (zero + nrm.z * dw),
+            }
+        };
+        if let Some(vo) = v_out.get_mut(f) {
+            *vo = vf;
+        }
+    }
+    if let Some(distance) = equal_setback {
+        if !(distance.is_finite() && distance > 0.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the chamfer's setback is finite and positive",
+            ));
+        }
+        let [n0, n1] = n_out;
+        let [s0, s1] = side;
+        let q =
+            (((zero + n0.x * n1.x) + (zero + n0.y * n1.y)) + (zero + n0.z * n1.z)) * T::of(s0 * s1);
+        let one_plus = one + q;
+        let one_minus = one - q;
+        if !(one_plus.is_positive() && one_minus.is_positive()) {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+            ));
+        }
+        let inv_sq = inv_sqrt_scalar(zero + one_plus * one_minus)?;
+        let radius = (zero + one_plus * inv_sq) * T::of(distance);
+        let offset = zero + radius * one;
+        for (((centre, foot), normal), sidef) in v_out.iter_mut().zip(f_out).zip(n_out).zip(side) {
+            let os = offset * T::of(sidef);
+            *centre = V3 {
+                x: foot.x + (zero + normal.x * os),
+                y: foot.y + (zero + normal.y * os),
+                z: foot.z + (zero + normal.z * os),
+            };
+        }
+    }
+    let [v0, v1] = v_out;
+    let [l0, l1, l2] = &leader.a;
+    let [t0, t1, t2] = &tangent.a;
+    let tl = V3 {
+        x: v0.x - l0.at(0, 0),
+        y: v0.y - l1.at(0, 0),
+        z: v0.z - l2.at(0, 0),
+    };
+    let g3 =
+        ((zero + tl.x * t0.at(0, 0)) + (zero + tl.y * t1.at(0, 0))) + (zero + tl.z * t2.at(0, 0));
+    Ok([v0.x - v1.x, v0.y - v1.y, v0.z - v1.z, g3])
+}
+
+/// Evaluates one face's foot, unit normal, and (when `equal_setback` is false) offset point
+/// at `Trunc(0, 1)` with `hold = true` and `du = (0, du1)`, `dv = (0, dv1)`, matching
+/// [`gn_evaluate_vn`] bit for bit.
+#[allow(clippy::too_many_arguments)]
+fn eval_face_dual<T: GnScalar>(
+    pf: &Partials<T>,
+    d0: T,
+    has_law: bool,
+    equal_setback: bool,
+    du1: T,
+    dv1: T,
+    wt: Option<&[V3<T>]>,
+) -> Result<(V3Dual<T>, V3Dual<T>, V3Dual<T>)> {
+    let zero = T::of(0.0);
+    let one = T::of(1.0);
+    #[allow(clippy::eq_op)]
+    let sf = one / one;
+    let pu1 = zero + one * du1;
+    let pv1 = zero + one * dv1;
+    let mono00 = Dual::new(zero + one * one, (zero + one * zero) + zero * one);
+    let mono01 = Dual::new(zero, zero + one * pv1);
+    let mono10 = Dual::new(zero, zero + pu1 * one);
+    let mut s = V3Dual::zero();
+    let mut su = V3Dual::zero();
+    let mut sv = V3Dual::zero();
+    let mut wv = V3Dual::zero();
+    let accum = |out: &mut V3Dual<T>, mono: Dual<T>, c: V3<T>, from: usize| {
+        for (o, cj) in out.0.iter_mut().zip([c.x, c.y, c.z]) {
+            if from == 0 {
+                o.c0 = o.c0 + mono.c0 * cj;
+            }
+            o.c1 = o.c1 + mono.c1 * cj;
+        }
+    };
+    let scale_v3 = |c: V3<T>| V3 {
+        x: c.x * sf,
+        y: c.y * sf,
+        z: c.z * sf,
+    };
+    for (a, b, mono) in [(0, 0, mono00), (0, 1, mono01), (1, 0, mono10)] {
+        let from = a + b;
+        accum(&mut s, mono, scale_v3(pf.at(a, b)), from);
+        accum(&mut su, mono, scale_v3(pf.at(a + 1, b)), from);
+        accum(&mut sv, mono, scale_v3(pf.at(a, b + 1)), from);
+        if let Some(wt) = wt {
+            accum(&mut wv, mono, offset_at(wt, 1, a, b), from);
+        }
+    }
+    let nrm = su.cross(sv);
+    let inv_len = nrm.dot(nrm).inv_sqrt()?;
+    if equal_setback {
+        return Ok((s, nrm.times(inv_len), V3Dual::zero()));
+    }
+    let d = Dual::new(d0, zero);
+    let vf = if wt.is_some() {
+        if has_law {
+            wv.add(nrm.times(inv_len.mul(Dual::zero())))
+        } else {
+            wv
+        }
+    } else {
+        s.add(nrm.times(inv_len.mul(d)))
+    };
+    Ok((s, V3Dual::zero(), vf))
+}
+
+/// Equal-setback radius in [`Dual<T>`] (`Trunc(0, 1)`), matching [`equal_setback_radius`]
+/// bit for bit.
+fn equal_setback_radius_dual<T: GnScalar>(
+    normals: [V3Dual<T>; 2],
+    side: [f64; 2],
+    distance: f64,
+) -> Result<Dual<T>> {
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the chamfer's setback is finite and positive",
+        ));
+    }
+    let [first, second] = normals;
+    let [side_first, side_second] = side;
+    let q = first.dot(second).scale(T::of(side_first * side_second));
+    let one = Dual::new(T::of(1.0), T::of(0.0));
+    let one_plus = one.add(q);
+    let one_minus = one.sub(q);
+    if !(one_plus.c0.is_positive() && one_minus.c0.is_positive()) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+        ));
+    }
+    let inv_sqrt = one_plus.mul(one_minus).inv_sqrt()?;
+    Ok(one_plus.mul(inv_sqrt).scale(T::of(distance)))
+}
+
+/// Evaluates both the residual `G(x)` at `tau = 1` and the Jacobian `dG/dx` on the stack
+/// without cloning `leader`/`tangent` or allocating series, matching [`gn_linearize`] bit
+/// for bit.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gn_linearize_ref<T: GnScalar>(
+    p: [&Partials<T>; 2],
+    leader: &VSer<T>,
+    tangent: &VSer<T>,
+    r: [f64; 2],
+    side: [f64; 2],
+    law: Option<&Ser<T>>,
+    equal_setback: Option<f64>,
+) -> Result<([T; 4], [[T; 4]; 4])> {
+    let zero = T::of(0.0);
+    let one = T::of(1.0);
+    let [p0, p1] = p;
+    let d0_of = |rf: f64, sidef: f64| match law {
+        Some(l) => l.at(0, 0) * T::of(sidef),
+        None => T::of(rf * sidef),
+    };
+    let d00 = d0_of(r[0], side[0]);
+    let d01 = d0_of(r[1], side[1]);
+    let has_law = law.is_some();
+    let eq = equal_setback.is_some();
+    let wt0 = if !eq && offset_near_focal(p0, d00) {
+        Some(offset_taylor(p0, d00, 1)?)
+    } else {
+        None
+    };
+    let wt1 = if !eq && offset_near_focal(p1, d01) {
+        Some(offset_taylor(p1, d01, 1)?)
+    } else {
+        None
+    };
+    let f0_const = eval_face_dual(p0, d00, has_law, eq, zero, zero, wt0.as_deref())?;
+    let f1_const = eval_face_dual(p1, d01, has_law, eq, zero, zero, wt1.as_deref())?;
+    let f0_u = eval_face_dual(p0, d00, has_law, eq, one, zero, wt0.as_deref())?;
+    let f0_v = eval_face_dual(p0, d00, has_law, eq, zero, one, wt0.as_deref())?;
+    let f1_u = eval_face_dual(p1, d01, has_law, eq, one, zero, wt1.as_deref())?;
+    let f1_v = eval_face_dual(p1, d01, has_law, eq, zero, one, wt1.as_deref())?;
+    let [l0, l1, l2] = &leader.a;
+    let [t0, t1, t2] = &tangent.a;
+    let leader_d = V3Dual([
+        Dual::new(l0.at(0, 0), l0.at(0, 1)),
+        Dual::new(l1.at(0, 0), l1.at(0, 1)),
+        Dual::new(l2.at(0, 0), l2.at(0, 1)),
+    ]);
+    let tangent_d = V3Dual([
+        Dual::new(t0.at(0, 0), t0.at(0, 1)),
+        Dual::new(t1.at(0, 0), t1.at(0, 1)),
+        Dual::new(t2.at(0, 0), t2.at(0, 1)),
+    ]);
+    let pairs = [
+        (f0_u, f1_const),
+        (f0_v, f1_const),
+        (f0_const, f1_u),
+        (f0_const, f1_v),
+    ];
+    let mut residual = [zero; 4];
+    let mut jac = [[zero; 4]; 4];
+    let tau_one = Dual::new(one, zero);
+    for (j, ((s0, n0, mut v0), (s1, n1, mut v1))) in pairs.into_iter().enumerate() {
+        if let Some(distance) = equal_setback {
+            let radius = equal_setback_radius_dual([n0, n1], side, distance)?;
+            let offset = radius.mul(tau_one);
+            v0 = s0.add(n0.times(offset.scale(T::of(side[0]))));
+            v1 = s1.add(n1.times(offset.scale(T::of(side[1]))));
+        }
+        let diff = v0.sub(v1);
+        let g3 = v0.sub(leader_d).dot(tangent_d);
+        let [d0, d1, d2] = diff.0;
+        let g = [d0, d1, d2, g3];
+        if j == 0 {
+            residual = g.map(|gi| gi.c0);
+        }
+        for (row, gi) in jac.iter_mut().zip(g) {
+            if let Some(slot) = row.get_mut(j) {
+                *slot = gi.c1;
+            }
+        }
+    }
+    Ok((residual, jac))
+}
+
+/// [`gn_jacobian`] borrowing `leader` and `tangent` with zero series allocations.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gn_jacobian_ref<T: GnScalar>(
+    p: [&Partials<T>; 2],
+    leader: &VSer<T>,
+    tangent: &VSer<T>,
+    r: [f64; 2],
+    side: [f64; 2],
+    law: Option<&Ser<T>>,
+    equal_setback: Option<f64>,
+) -> Result<[[T; 4]; 4]> {
+    Ok(gn_linearize_ref(p, leader, tangent, r, side, law, equal_setback)?.1)
+}
+
+/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms and tau = 1: G along
+/// `x + e_j eps`, first order. An equal setback's offset still follows the feet.
 ///
 /// # Errors
 ///
 /// Those of [`gn_evaluate`].
 pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Result<[[T; 4]; 4]> {
-    let tr = Trunc::new(0, 1)?;
-    let mut held = sys.clone();
-    held.hold = true;
-    let mut jac = [[T::of(0.0); 4]; 4];
-    for j in 0..4 {
-        let mut sx = core::array::from_fn(|_| Ser::constant(T::of(0.0)));
-        for (q, (sq, xq)) in sx.iter_mut().zip(x).enumerate() {
-            *sq = Ser::constant(xq.at(0, 0));
-            if q == j {
-                sq.set(0, 1, T::of(1.0));
-            }
-        }
-        let (g, _) = gn_evaluate(&held, &sx, tr)?;
-        for (row, gi) in jac.iter_mut().zip(&g) {
-            if let Some(x) = row.get_mut(j) {
-                *x = gi.at(0, 1);
-            }
-        }
-    }
-    Ok(jac)
+    Ok(gn_linearize(sys, x)?.1)
+}
+
+/// Each seeded column has the same constant term, G(x) at tau = 1.
+fn gn_linearize<T: GnScalar>(
+    sys: &GnSystem<'_, T>,
+    _x: &[Ser<T>; 4],
+) -> Result<([T; 4], [[T; 4]; 4])> {
+    gn_linearize_ref(
+        sys.p,
+        &sys.leader,
+        &sys.tangent,
+        sys.r,
+        sys.side,
+        sys.law,
+        sys.equal_setback,
+    )
 }
 
 /// `sm_Solve4`: solves `A y = b`, 4 x 4, by Gaussian elimination with partial pivoting.
@@ -1368,9 +2268,9 @@ pub fn solve4(ca: &[[f64; 4]; 4], cb: &[f64; 4]) -> Result<[f64; 4]> {
         let regular = a.at(p, c).abs() > 1.0e-13 * scale;
         if !regular {
             // "the blend's system is singular at a station (its faces' normals agree there)"
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the blend's system is singular at a station (its faces' normals agree there)",
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NormalsAgree),
             ));
         }
         for j in 0..5 {
@@ -1473,6 +2373,8 @@ impl GnStation {
 pub struct StationOptions<'a> {
     /// `pR`.
     pub law: Option<&'a Ser<f64>>,
+    /// Equal setbacks measured at the current station, instead of a leader law.
+    pub equal_setback: Option<f64>,
     /// `lTop`.
     pub top: usize,
     /// `pSides`.
@@ -1520,12 +2422,27 @@ pub fn leader_series_sided(
     if !c.is_rational()? {
         derivs = derivs.min(c.degree()?);
     }
-    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
-    let mut d = c.evaluate(s, derivs, !before, false).map_err(|_| {
-        SolidError::blend_failed(
+    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated": a
+    // rational leader's order can pass the most the curve evaluator takes
+    if derivs > MAX_DERIV {
+        return Err(SolidError::blend(
             OP,
-            "the leader's derivatives of this order are not evaluated",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_DERIV,
+            }),
+        ));
+    }
+    let mut d = c.evaluate(s, derivs, !before, false).map_err(|e| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "the leader's evaluation failed at an order within the most the curve \
+                      evaluator takes, on a curve whose degree it just read",
+            },
         )
+        .caused_by(e)
+        .into_error()
     })?;
     d.resize(tr.s() + 2, Vec3::ZERO);
     let zero = V3 {
@@ -1536,16 +2453,11 @@ pub fn leader_series_sided(
     let mut l = VSer::constant(zero);
     let mut d1 = l;
     let mut fact = 1.0_f64;
-    for j in 0..=tr.s() {
+    // (`d` holds the orders 0 to `tr.s() + 1`: each j and the next, j to `tr.s()`)
+    for (j, (dj, dj1)) in d.iter().zip(d.iter().skip(1)).enumerate() {
         if j > 0 {
             fact *= j as f64;
         }
-        let (Some(dj), Some(dj1)) = (d.get(j), d.get(j + 1)) else {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the leader has no derivative of this order",
-            ));
-        };
         let cl = [dj.x, dj.y, dj.z];
         let cd = [dj1.x, dj1.y, dj1.z];
         for ((la, da), (&x, &y)) in l.a.iter_mut().zip(d1.a.iter_mut()).zip(cl.iter().zip(&cd)) {
@@ -1642,11 +2554,15 @@ fn solve_station_body(
     steps: &mut u32,
 ) -> Result<(GnStation, StationCurves)> {
     let law = opts.law;
+    let equal_setback = opts.equal_setback;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: tr.s(),
+                most: MAX_S,
+            }),
         ));
     }
     let lk = tr.s() + tr.e() + 1;
@@ -1676,29 +2592,19 @@ fn solve_station_body(
 
     // the feet at tau = 1, by Newton (the leader at sigma = 0 only)
     let mut x = seed;
-    let point = Trunc::new(0, 0)?;
     let mut converged = false;
     let mut it = 0;
+    // the last iteration's residual and step, for a station that does not converge
+    let mut last: Option<(f64, f64)> = None;
     while it < 50 && !converged {
         *steps += 1;
         let pp = partials_at(&x, 2)?;
         let [p0, p1] = &pp;
-        let sys = GnSystem {
-            p: [p0, p1],
-            leader: l,
-            tangent: t,
-            r,
-            side,
-            hold: false,
-            law,
-        };
-        let sx = x.map(Ser::constant);
-        let (g, _) = gn_evaluate(&sys, &sx, point)?;
-        let jac = gn_jacobian(&sys, &sx)?;
+        let (g, jac) = gn_linearize_ref([p0, p1], &l, &t, r, side, law, equal_setback)?;
         let mut b = [0.0_f64; 4];
         let mut res = 0.0_f64;
         for (bi, gi) in b.iter_mut().zip(&g) {
-            *bi = -gi.at(0, 0);
+            *bi = -gi;
             res = smax(res, bi.abs());
         }
         let dx = solve4(&jac, &b)?;
@@ -1711,12 +2617,19 @@ fn solve_station_body(
         if res <= tol && step <= STATION_STEP {
             converged = true;
         }
+        last = Some((res, step));
         it += 1;
     }
     if !converged {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the feet of a station did not converge",
+            BlendFailure::StationDidNotConverge {
+                s,
+                residual: last.map(|(res, _)| res),
+                tolerance: tol,
+                step: last.map(|(_, step)| step),
+                iterations: u32::try_from(it).ok(),
+            },
         ));
     }
 
@@ -1731,9 +2644,18 @@ fn solve_station_body(
         side,
         hold: false,
         law,
+        equal_setback,
     };
     let mut sx = x.map(Ser::constant);
-    let jac = gn_jacobian(&sys, &sx)?;
+    let jac = gn_jacobian_ref(
+        [p0, p1],
+        &sys.leader,
+        &sys.tangent,
+        r,
+        side,
+        law,
+        equal_setback,
+    )?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
     // solves them all; G is computed only at that degree and below, and at the powers of
     // eps solved for, bit for bit the whole truncation's there (`Trunc::computing`), and
@@ -1743,32 +2665,38 @@ fn solve_station_body(
     } else {
         tr.e()
     };
-    for tot in 1..=(tr.s() + tr.e()) {
-        let eps = eps_solved.min(tot);
-        if tot > tr.s() + eps {
-            continue;
-        }
-        let (g, _) = gn_evaluate(&sys, &sx, tr.computing(tot, eps))?;
-        for i in 0..=tr.s().min(tot) {
-            let kk = tot - i;
-            // (to order lTop - 1 in eps with lTop: gn_top_jets)
-            if kk > tr.e() || (opts.top >= 1 && kk >= opts.top) {
+    let (mut f, v, n) = if tr.s() + tr.e() >= 1 {
+        let mut series = GnIncremental::new(&sys);
+        for tot in 1..=(tr.s() + tr.e()) {
+            let eps = eps_solved.min(tot);
+            if tot > tr.s() + eps {
                 continue;
             }
-            let b = [
-                g[0].at(i, kk),
-                g[1].at(i, kk),
-                g[2].at(i, kk),
-                g[3].at(i, kk),
-            ]
-            .map(|v| -v);
-            let y = solve4(&jac, &b)?;
-            for (sq, &yq) in sx.iter_mut().zip(&y) {
-                sq.set(i, kk, yq);
+            let g = series.evaluate_g(&sx, tr.computing(tot, eps))?;
+            for i in 0..=tr.s().min(tot) {
+                let kk = tot - i;
+                // (to order lTop - 1 in eps with lTop: gn_top_jets)
+                if kk > tr.e() || (opts.top >= 1 && kk >= opts.top) {
+                    continue;
+                }
+                let b = [
+                    g[0].at(i, kk),
+                    g[1].at(i, kk),
+                    g[2].at(i, kk),
+                    g[3].at(i, kk),
+                ]
+                .map(|v| -v);
+                let y = solve4(&jac, &b)?;
+                for (sq, &yq) in sx.iter_mut().zip(&y) {
+                    sq.set(i, kk, yq);
+                }
             }
         }
-    }
-    let (_, mut f, v, n) = gn_evaluate_vn(&sys, &sx, tr)?;
+        series.finish_vn(&sx, tr)?
+    } else {
+        let (_, f, v, n) = gn_evaluate_vn(&sys, &sx, tr)?;
+        (f, v, n)
+    };
     let curves = StationCurves { c: f, n };
     gn_top_jets(opts.top, tr, &n, &mut f);
     let zero = V3 {
@@ -1875,6 +2803,7 @@ pub fn vec3(v: V3<f64>) -> Vec3 {
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
 mod tests {
+    use super::super::series::{MAX_E, STORE_E};
     use super::*;
     use crate::blend::fillet_section::interval::Ivl;
     use crate::geom::extent2d::Extent2d;
@@ -1937,6 +2866,55 @@ mod tests {
     /// Two planes at a square corner, the ball of radius r on the edge along y: the point
     /// at distance tau r from both is (tau r, y, tau r), its feet (tau r, y, 0) and
     /// (0, y, tau r), linear in tau, and y = L s along the leader.
+    #[test]
+    fn equal_setback_uses_the_oriented_wedge_and_its_derivative() {
+        let tr = Trunc::new(1, 0).unwrap();
+        let first = VSer::constant(V3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        let root3 = 3.0_f64.sqrt();
+        let mut second = VSer::constant(V3 {
+            x: 0.5,
+            y: 0.5 * root3,
+            z: 0.0,
+        });
+        let [cosine, sine, _] = &mut second.a;
+        cosine.set(1, 0, 1.0);
+        sine.set(1, 0, -1.0 / root3);
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first, second], [1.0, -1.0], d, tr).unwrap();
+        // The signed cosine is -1/2. The radius is d/sqrt(3), and
+        // differentiating its squared constraint gives dr/dq = r/(1-q^2).
+        let expected = d / root3;
+        assert!((radius.at(0, 0) - expected).abs() < 1.0e-15);
+        assert!((radius.at(1, 0) + 4.0 * expected / 3.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn equal_setback_encloses_the_radius_only_inside_its_wedge_domain() {
+        let tr = Trunc::new(0, 0).unwrap();
+        let normal = |x, y| {
+            VSer::constant(V3 {
+                x,
+                y,
+                z: Ivl::from(0.0),
+            })
+        };
+        let first = normal(Ivl::from(1.0), Ivl::from(0.0));
+        let second = normal(Ivl::new(0.4, 0.6), Ivl::new(0.8, 0.92));
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first.clone(), second], [1.0, 1.0], d, tr)
+            .unwrap()
+            .at(0, 0);
+        assert!(radius.lo <= d * (7.0_f64 / 3.0).sqrt());
+        assert!(radius.hi >= 2.0 * d);
+        // A box reaching the degenerate wedge cannot prove a radius there.
+        let second = normal(Ivl::new(0.9, 1.0), Ivl::new(0.0, 0.44));
+        assert!(equal_setback_radius(&[first, second], [1.0, 1.0], d, tr).is_err());
+    }
+
     #[test]
     fn square_corner_station_is_the_closed_form() {
         let k = Kernel::default();
@@ -2289,7 +3267,8 @@ mod tests {
     /// [`GnIncremental`] fed as the feet's Taylor models feed it (x filled in order by
     /// order, each order evaluated with the lower ones' coefficients set and its own 0,
     /// then one whole evaluation), against [`gn_evaluate_vn`] at each call: equal bit for
-    /// bit. Returns the positions it computed and those the whole evaluations compute.
+    /// bit. Returns the positions it computed and those the whole evaluations compute, and
+    /// whether each face's offset (by `r`) is the joint expansion ([`offset_near_focal`]).
     fn incremental_matches_whole<T: GnScalar + PartialEq + core::fmt::Debug>(
         mk: impl Fn(f64) -> T,
         s: usize,
@@ -2297,7 +3276,8 @@ mod tests {
         n: usize,
         law: bool,
         hold: bool,
-    ) -> (u64, u64) {
+        r: [f64; 2],
+    ) -> (u64, u64, [bool; 2]) {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
         let mut next = move || {
             seed = seed
@@ -2347,11 +3327,16 @@ mod tests {
             p: [p0, p1],
             leader,
             tangent,
-            r: [0.5, 0.75],
+            r,
             side: [1.0, -1.0],
             hold,
             law: law.then_some(&law_ser),
+            equal_setback: None,
         };
+        let near = [
+            offset_near_focal(p0, offset_d0(&sys, r[0], 1.0)),
+            offset_near_focal(p1, offset_d0(&sys, r[1], -1.0)),
+        ];
         let tr = Trunc::new(s, e).unwrap();
         let mut sx = [0.3, -0.2, 0.1, 0.4].map(|c| Ser::constant(mk(c)));
         let mut inc = GnIncremental::new(&sys);
@@ -2389,7 +3374,48 @@ mod tests {
             inc.evaluate(&sx, tr).unwrap(),
             gn_evaluate_vn(&sys, &sx, tr).unwrap()
         );
-        (before, whole)
+        (before, whole, near)
+    }
+
+    #[test]
+    fn seeded_newton_residual_matches_the_point_evaluation() {
+        let (n, u, v, ku, kv) = cylinder_at();
+        let curved = nurbs_partials::<f64>(&n, ku, kv, u, v, 2);
+        let flat = surface_partials(
+            &Kernel::default(),
+            &plane(Vec3::X, Vec3::Y),
+            Point2::new(0.4, 0.7),
+            2,
+        )
+        .unwrap();
+        let sx = [u, v, 0.4, 0.7].map(Ser::constant);
+        let law = Ser::constant(0.85);
+        for (law, equal_setback) in [(None, None), (Some(&law), None), (None, Some(0.75))] {
+            let sys = GnSystem {
+                p: [&curved, &flat],
+                leader: VSer::constant(V3 {
+                    x: 0.3,
+                    y: 0.4,
+                    z: 0.5,
+                }),
+                tangent: VSer::constant(V3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                }),
+                r: [9.99, 1.25],
+                side: [-1.0, 1.0],
+                hold: false,
+                law,
+                equal_setback,
+            };
+            let (point, _) = gn_evaluate(&sys, &sx, Trunc::new(0, 0).unwrap()).unwrap();
+            let (residual, _) = gn_linearize(&sys, &sx).unwrap();
+            assert_eq!(
+                residual.map(f64::to_bits),
+                point.map(|g| g.at(0, 0).to_bits())
+            );
+        }
     }
 
     #[test]
@@ -2397,13 +3423,24 @@ mod tests {
         let tm = |v: f64| {
             crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
         };
+        // the enclosures' offsets taken both ways: as the sum (far from a focal distance)
+        // and as the joint expansion (#19306)
+        let mut seen = [false; 2];
         for (s, e, n) in [(3, 2, 2), (2, 3, 2), (3, 0, 0), (2, 2, 0), (4, 1, 1)] {
             for (law, hold) in [(false, false), (true, false), (false, true)] {
-                incremental_matches_whole(|v| v, s, e, n, law, hold);
-                incremental_matches_whole(Ivl::from, s, e, n, law, hold);
-                incremental_matches_whole(tm, s, e, n, law, hold);
+                for r in [[0.5, 0.75], [8.0, 12.0]] {
+                    incremental_matches_whole(|v| v, s, e, n, law, hold, r);
+                    let (_, _, ni) = incremental_matches_whole(Ivl::from, s, e, n, law, hold, r);
+                    let (_, _, nt) = incremental_matches_whole(tm, s, e, n, law, hold, r);
+                    for near in ni.into_iter().chain(nt) {
+                        if let Some(x) = seen.get_mut(usize::from(near)) {
+                            *x = true;
+                        }
+                    }
+                }
             }
         }
+        assert_eq!(seen, [true, true]);
     }
 
     /// The work counter of the feet's Taylor models: their order-by-order evaluations
@@ -2413,7 +3450,7 @@ mod tests {
     fn incremental_evaluation_computes_each_order_once() {
         // the certificate's orders: order 3 in sigma, 2 in eps, the jets of order 2 the
         // faces'
-        let (inc, whole) = incremental_matches_whole(|v| v, 3, 2, 2, false, false);
+        let (inc, whole, _) = incremental_matches_whole(|v| v, 3, 2, 2, false, false, [0.5, 0.75]);
         let full = u64::from(Trunc::new(3, 2).unwrap().computed_mask().count_ones());
         assert_eq!(full, 12);
         assert!(
@@ -2430,7 +3467,13 @@ mod tests {
         let error = surface_partials(&k, &s, Point2::new(0.5, 0.5), MAX_K + 1).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "the order is past the most the series hold")
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                    order: MAX_K + 1,
+                    most: MAX_K
+                })
+            )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
@@ -2566,6 +3609,87 @@ mod tests {
         }
     }
 
+    /// #19306: an enclosure takes the offset point as one expansion only where the offset is
+    /// not proved short of a focal distance by [`FOCAL_REACH`], `d0 k <= 1/4` for both
+    /// principal curvatures `k` at every point its partials enclose. On
+    /// `z = (a u^2 + b v^2) / 2` at its origin (principal curvatures `a` and `b` along +z,
+    /// the focal distances `1 / a` and `1 / b`), in intervals and in Taylor models; over a
+    /// box of curvatures; for a NaN; on the cylinder of radius 10 as its rational net; and
+    /// never for the floating-point jets, which keep the sum.
+    #[test]
+    fn the_offset_is_one_expansion_only_near_a_focal_distance() {
+        fn quadric<T: GnScalar>(mk: impl Fn(f64) -> T, a: T, b: T) -> Partials<T> {
+            let v = |x: f64, y: f64| V3 {
+                x: mk(x),
+                y: mk(y),
+                z: mk(0.0),
+            };
+            let mut p = Partials::default();
+            p.set(1, 0, v(1.0, 0.0));
+            p.set(0, 1, v(0.0, 1.0));
+            p.set(
+                2,
+                0,
+                V3 {
+                    z: a,
+                    ..v(0.0, 0.0)
+                },
+            );
+            p.set(
+                0,
+                2,
+                V3 {
+                    z: b,
+                    ..v(0.0, 0.0)
+                },
+            );
+            p
+        }
+        let tm = <crate::blend::fillet_section::feet_tm::Ft as GnScalar>::of;
+        // (a, b, d0, near): near where d0 a or d0 b passes 1/4
+        let cases = [
+            (1.0, 0.25, 0.2, false),
+            (1.0, 0.25, 0.3, true),
+            (1.0, 0.25, -3.0, false),
+            (1.0, -1.0, 0.2, false),
+            (1.0, -1.0, -0.2, false),
+            (1.0, -1.0, 0.3, true),
+            (1.0, -1.0, -0.3, true),
+            // past both focal distances: det(I - 4 d0 W) > 0, but not definite
+            (1.0, 1.0, 2.5, true),
+            // a plane has none
+            (0.0, 0.0, 1.0e6, false),
+        ];
+        for (a, b, d0, near) in cases {
+            let pi = quadric(Ivl::from, Ivl::from(a), Ivl::from(b));
+            assert_eq!(offset_near_focal(&pi, Ivl::from(d0)), near, "{a} {b} {d0}");
+            let pt = quadric(tm, tm(a), tm(b));
+            assert_eq!(offset_near_focal(&pt, tm(d0)), near, "{a} {b} {d0}");
+            assert!(
+                !offset_near_focal(&quadric(|x| x, a, b), d0),
+                "{a} {b} {d0}"
+            );
+        }
+        // over a box of curvatures a in [0.8, 1.2]: 0.2 is short of a quarter of the way for
+        // every one, 0.22 only for some (the middle's 1 among them)
+        let pb = quadric(Ivl::from, Ivl::new(0.8, 1.2), Ivl::from(0.25));
+        assert!(!offset_near_focal(&pb, Ivl::from(0.2)));
+        assert!(offset_near_focal(&pb, Ivl::from(0.22)));
+        let pi = quadric(Ivl::from, Ivl::from(1.0), Ivl::from(0.25));
+        assert!(offset_near_focal(&pi, Ivl::from(f64::NAN)));
+        // the cylinder of radius 10: toward its axis, near past 2.5; away from it, never
+        let (n, u, v, ku, kv) = cylinder_at();
+        let pc = nurbs_partials::<Ivl>(&n, ku, kv, Ivl::from(u), Ivl::from(v), 2);
+        let pf = nurbs_partials::<f64>(&n, ku, kv, u, v, 1);
+        let (s, su, sv) = (pf.at(0, 0), pf.at(1, 0), pf.at(0, 1));
+        let outward = (su.y * sv.z - su.z * sv.y) * s.x + (su.z * sv.x - su.x * sv.z) * s.y;
+        let toward = if outward > 0.0 { -1.0 } else { 1.0 };
+        for (d, near) in [(2.4, false), (2.6, true), (9.99, true)] {
+            assert_eq!(offset_near_focal(&pc, Ivl::from(d * toward)), near, "{d}");
+            assert!(!offset_near_focal(&pc, Ivl::from(-d * toward)), "{d}");
+        }
+    }
+
     /// The root cause of #16652: near a face's focal distance the offset point moves far
     /// slower than the face's point (a cylinder of radius 10 offset by 9.99 toward its axis:
     /// a thousandth as fast), and the offset's enclosure must keep that. A foot whose
@@ -2607,6 +3731,7 @@ mod tests {
             side: [side, 1.0],
             hold: true,
             law: None,
+            equal_setback: None,
         };
         let half = 1e-6;
         let mut xu = Ser::constant(Ivl::from(u));
@@ -2626,6 +3751,246 @@ mod tests {
                 width <= 2.0 * closed + 1e-12,
                 "width {width:e} against the closed form's {closed:e}"
             );
+        }
+    }
+
+    #[test]
+    fn partials_with_order_matches_default_and_grows() {
+        let mut small = Partials::<Ivl>::with_order(2);
+        let mut full = Partials::<Ivl>::default();
+        let v = V3 {
+            x: Ivl::new(1.0, 2.0),
+            y: Ivl::new(-3.0, 4.0),
+            z: Ivl::from(0.5),
+        };
+        small.set(1, 1, v);
+        full.set(1, 1, v);
+        assert_eq!(small, full);
+        assert_eq!(small.at(3, 0), full.at(3, 0));
+        // Writing past the initial order grows the table transparently.
+        small.set(4, 2, v);
+        full.set(4, 2, v);
+        assert_eq!(small, full);
+        assert_eq!(small.at(4, 2), v);
+    }
+
+    #[test]
+    fn point_and_dual_evaluators_match_series_bit_for_bit() {
+        fn check_scalar<T: GnScalar + PartialEq + core::fmt::Debug>(
+            mk: impl Fn(f64) -> T,
+            r: [f64; 2],
+            law: bool,
+            equal_setback: Option<f64>,
+        ) {
+            let mut seed = 0x517c_c1b7_2722_0a95_u64;
+            let mut next = move || {
+                seed = seed
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (seed >> 11) as f64 / (1_u64 << 53) as f64 - 0.5
+            };
+            let mut v3 = |base: [f64; 3]| V3 {
+                x: mk(base[0] + 0.25 * next()),
+                y: mk(base[1] + 0.25 * next()),
+                z: mk(base[2] + 0.25 * next()),
+            };
+            let mut faces = [Partials::with_order(2), Partials::with_order(2)];
+            for (f, pf) in faces.iter_mut().enumerate() {
+                let sgn = if f == 0 { 1.0 } else { -1.0 };
+                for a in 0..=2 {
+                    for b in 0..=(2 - a) {
+                        let base = match (a, b) {
+                            (1, 0) => [1.0, 0.0, 0.0],
+                            (0, 1) => [0.0, sgn, 0.2],
+                            _ => [0.0; 3],
+                        };
+                        pf.set(a, b, v3(base));
+                    }
+                }
+            }
+            let leader = VSer::constant(v3([0.1, 0.2, 0.3]));
+            let tangent = VSer::constant(v3([0.0, 0.6, 0.8]));
+            let law_ser = Ser::constant(mk(0.85));
+            let [p0, p1] = &faces;
+            let sys = GnSystem {
+                p: [p0, p1],
+                leader,
+                tangent,
+                r,
+                side: [1.0, -1.0],
+                hold: false,
+                law: law.then_some(&law_ser),
+                equal_setback,
+            };
+            let sx = [0.1, 0.2, 0.3, 0.4].map(|c| Ser::constant(mk(c)));
+            // Point evaluation (Trunc(0, 0)): exact match with gn_evaluate.
+            let (g_ref, _) = gn_evaluate(&sys, &sx, Trunc::new(0, 0).unwrap()).unwrap();
+            let g_pt = gn_evaluate_point_ref(
+                sys.p,
+                &sys.leader,
+                &sys.tangent,
+                sys.r,
+                sys.side,
+                sys.law,
+                sys.equal_setback,
+            )
+            .unwrap();
+            assert_eq!(g_pt, g_ref.each_ref().map(|gi| gi.at(0, 0)));
+
+            // Linearize / Jacobian (Trunc(0, 1), hold = true): exact match with gn_evaluate.
+            let mut held = sys.clone();
+            held.hold = true;
+            let tr01 = Trunc::new(0, 1).unwrap();
+            let mut want_res = [T::of(0.0); 4];
+            let mut want_jac = [[T::of(0.0); 4]; 4];
+            for j in 0..4 {
+                let mut sxj = sx.clone();
+                sxj[j].set(0, 1, T::of(1.0));
+                let (gj, _) = gn_evaluate(&held, &sxj, tr01).unwrap();
+                if j == 0 {
+                    want_res = gj.each_ref().map(|gi| gi.at(0, 0));
+                }
+                for row in 0..4 {
+                    want_jac[row][j] = gj[row].at(0, 1);
+                }
+            }
+            let (got_res, got_jac) = gn_linearize_ref(
+                sys.p,
+                &sys.leader,
+                &sys.tangent,
+                sys.r,
+                sys.side,
+                sys.law,
+                sys.equal_setback,
+            )
+            .unwrap();
+            assert_eq!(got_res, want_res);
+            assert_eq!(got_jac, want_jac);
+        }
+        let tm = |v: f64| {
+            crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.004 * v])
+        };
+        let iv = |v: f64| Ivl::new(v - 1e-4, v + 1e-4);
+        for (r, law, eq) in [
+            ([0.5, 0.75], false, None),
+            ([8.0, 12.0], false, None),
+            ([0.5, 0.75], true, None),
+            ([8.0, 12.0], true, None),
+            ([0.5, 0.75], false, Some(0.4)),
+        ] {
+            check_scalar(|v| v, r, law, eq);
+            check_scalar(iv, r, law, eq);
+            check_scalar(tm, r, law, eq);
+        }
+    }
+
+    #[test]
+    fn incremental_evaluate_g_and_into_fv_match_whole_bit_for_bit() {
+        fn run<T: GnScalar + PartialEq + core::fmt::Debug>(
+            mk: impl Fn(f64) -> T,
+            s: usize,
+            e: usize,
+            n: usize,
+            r: [f64; 2],
+        ) {
+            let mut seed = 0x1234_5678_9abc_def0_u64;
+            let mut next = move || {
+                seed = seed
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (seed >> 11) as f64 / (1_u64 << 53) as f64 - 0.5
+            };
+            let mut v3 = |base: [f64; 3]| V3 {
+                x: mk(base[0] + 0.25 * next()),
+                y: mk(base[1] + 0.25 * next()),
+                z: mk(base[2] + 0.25 * next()),
+            };
+            let mut faces = [Partials::default(), Partials::default()];
+            for (f, pf) in faces.iter_mut().enumerate() {
+                let sgn = if f == 0 { 1.0 } else { -1.0 };
+                for a in 0..=MAX_K {
+                    for b in 0..=(MAX_K - a) {
+                        let base = match (a, b) {
+                            (1, 0) => [1.0, 0.0, 0.0],
+                            (0, 1) => [0.0, sgn, 0.2],
+                            _ => [0.0; 3],
+                        };
+                        pf.set(a, b, v3(base));
+                    }
+                }
+            }
+            let mut ser = |c0: f64| {
+                let mut x = Ser::constant(mk(c0));
+                for i in 0..=s {
+                    x.set(i, 0, mk(if i == 0 { c0 } else { 0.1 * next() }));
+                }
+                x
+            };
+            let [p0, p1] = &faces;
+            let sys = GnSystem {
+                p: [p0, p1],
+                leader: VSer {
+                    a: [ser(0.1), ser(0.2), ser(0.3)],
+                },
+                tangent: VSer {
+                    a: [ser(0.0), ser(0.6), ser(0.8)],
+                },
+                r,
+                side: [1.0, -1.0],
+                hold: false,
+                law: None,
+                equal_setback: None,
+            };
+            let tr = Trunc::new(s, e).unwrap();
+            let mut sx = [0.3, -0.2, 0.1, 0.4].map(|c| Ser::constant(mk(c)));
+            let mut inc = GnIncremental::new(&sys);
+            let eps_solved = if n >= 1 { e.min(n - 1) } else { e };
+            for tot in 1..=(s + e) {
+                let eps = eps_solved.min(tot);
+                if tot > s + eps {
+                    continue;
+                }
+                let at = tr.computing(tot, eps);
+                let (want_g, _, _, _) = gn_evaluate_vn(&sys, &sx, at).unwrap();
+                let got_g = inc.evaluate_g(&sx, at).unwrap();
+                for i in 0..=s.min(tot) {
+                    let kk = tot - i;
+                    if kk <= eps {
+                        for q in 0..4 {
+                            assert_eq!(got_g[q].at(i, kk), want_g[q].at(i, kk));
+                        }
+                    }
+                }
+                for i in 0..=s.min(tot) {
+                    let kk = tot - i;
+                    if kk > e || (n >= 1 && kk >= n) {
+                        continue;
+                    }
+                    for xc in &mut sx {
+                        xc.set(i, kk, mk(0.15 * next()));
+                    }
+                }
+            }
+            let need_top = n >= 1 && n <= e;
+            inc.evaluate_final(&sx, tr, need_top).unwrap();
+            let (mut got_f, got_v, got_n) = inc.into_fv(tr, need_top);
+            if let Some(nrm) = got_n {
+                gn_top_jets(n, tr, &nrm, &mut got_f);
+            }
+            let (_, mut want_f, want_v, want_n) = gn_evaluate_vn(&sys, &sx, tr).unwrap();
+            gn_top_jets(n, tr, &want_n, &mut want_f);
+            assert_eq!(got_f, want_f);
+            assert_eq!(got_v, want_v);
+        }
+        let tm = |v: f64| {
+            crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
+        };
+        for (s, e, n) in [(4, 0, 0), (3, 2, 2), (2, 3, 3)] {
+            for r in [[0.5, 0.75], [8.0, 12.0]] {
+                run(|v| v, s, e, n, r);
+                run(Ivl::from, s, e, n, r);
+                run(tm, s, e, n, r);
+            }
         }
     }
 }

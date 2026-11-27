@@ -1,0 +1,1 @@
+finds the wall an outline runs along by mesh triangles

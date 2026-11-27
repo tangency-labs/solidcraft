@@ -136,8 +136,8 @@ fn unsupported(reason: &'static str) -> SolidError {
 
 /// Whether `c` is straight: a line, or a B-spline whose control points all lie within `tol` of
 /// the line through its first and last (a skin's rails and flat sections are such splines).
-/// Any other curve is not.
-fn is_straight(c: &Curve, tol: f64) -> Result<bool> {
+/// Any other curve is not. Exact: the curve lies in its control points' hull.
+pub(crate) fn is_straight(c: &Curve, tol: f64) -> Result<bool> {
     let b = match c.kind() {
         CurveKind::Line(_) => return Ok(true),
         CurveKind::BSpline(b) => b,

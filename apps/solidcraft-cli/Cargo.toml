@@ -13,12 +13,6 @@ workspace = true
 name = "solidcraft-cli"
 path = "src/main.rs"
 
-# Compatibility alias for the CLI's former name: forwards to solidcraft-cli with a deprecation
-# note on stderr. Shipped in every package for at least one release.
-[[bin]]
-name = "solvecraft-cli"
-path = "src/alias.rs"
-
 [features]
 default = ["raytrace-cpu", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
@@ -26,6 +20,8 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 # The profiler, compiled in so any build can say where its time goes (`--profile`,
 # SOLIDCRAFT_PROFILE=1); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
+# Solidcore's own profiler, dumped to the file SOLIDCRAFT_KERNEL_PROFILE names.
+solidcore-profile = ["solidcraft-engine/solidcore-profile"]
 
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
@@ -35,6 +31,7 @@ solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

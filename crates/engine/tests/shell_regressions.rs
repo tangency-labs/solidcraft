@@ -112,3 +112,135 @@ fn a_shell_that_opens_no_face_seals_its_void() {
         assert!((got - want).abs() < 1e-6 * want, "{direction}: volume {got}, want {want}");
     }
 }
+
+/// #17158: a box with a round pocket cut into its top through two of its sides, and the two
+/// edges where the pocket's wall meets those sides rounded, so each round is tangent to the
+/// pocket's wall. An outside shell moves the round and the wall out together: they stay
+/// tangent along a line and meet the pocket's floor there. The shell was refused (`how far its
+/// neighbours extend to meet it has no certified bound`); it builds one closed sound body.
+#[test]
+fn an_outside_shell_of_a_round_tangent_to_a_pocket_wall_builds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.circle.center", json!({"center": [35, 5], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "direction": "negative", "operation": "cut"}));
+    // where the pocket's wall (radius 10 about (35, 5)) leaves the sides x = 40 and y = 0
+    run(&mut s, "solid.fillet", json!({"edges": [[40.0, 13.660254037844387, 8.0], [26.339745962155614, 0.0, 8.0]], "radius": 2}));
+    run(&mut s, "solid.shell", json!({"faces": [[10, 10, 0]], "thickness": 1.5, "direction": "outside"}));
+    sound(&s);
+}
+
+/// #17210: a disc with two circles swept down slanting lines onto it from either side, both
+/// ending on one circle on the disc's top (oblique cylinders, mirror images, tangent to each
+/// other where their crossing curve meets the disc). Shelled with the bottom open, the two
+/// walls' offsets meet on that circle's offset and on a curve through it, which crosses the
+/// offset top below the circle: the edge between the walls runs past the tangent point to
+/// its vertex there. The shell left a gap (`a gap in its offset's loops cannot be bridged`).
+/// The join itself is the kernel's `intersection_pieces_through_a_tangent_point_are_one_curve`.
+#[test]
+fn a_shell_of_two_sweeps_from_one_circle_meets_past_their_tangent_point() {
+    let mut s = Session::default();
+    let feature = |s: &mut Session, f: serde_json::Value| run(s, "timeline.add", json!({ "feature": f }));
+    feature(
+        &mut s,
+        json!({"id": 1, "name": "Sketch1", "type": "sketch", "plane": {"type": "origin", "name": "XY"}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "c1.center", "pos": [0.0, 0.0], "fixed": false}],
+        "curves": [{"id": "c1", "type": "circle", "c": 1, "r": 30.0, "construction": false}], "constraints": [], "counters": {"c": 1}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 2, "name": "Extrude1", "type": "extrude", "sketch": 1, "body_names": ["Body1"], "operation": "new_body",
+        "profiles": {"type": "curves", "loops": [["c1"]]}, "extent": {"distance": "8", "convention": "total_distance", "direction": "positive"}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 3, "name": "Sketch2", "type": "sketch", "plane": {"type": "flipped", "base": {"type": "origin", "name": "XZ"}}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "l1.start", "pos": [0.0, 8.0], "fixed": false},
+            {"id": "l1.end", "pos": [40.0, 40.0], "fixed": false}, {"id": "l2.end", "pos": [-40.0, 40.0], "fixed": false}],
+        "curves": [{"id": "l1", "type": "line", "a": 1, "b": 2, "construction": false}, {"id": "l2", "type": "line", "a": 1, "b": 3, "construction": false}],
+        "constraints": [], "counters": {"l": 2}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 4, "name": "Plane1", "type": "construction_plane", "plane": {"type": "through_point", "base": {"type": "origin", "name": "XY"},
+        "point": {"type": "sketch_point", "sketch": 3, "point": "l1.end"}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 5, "name": "Sketch3", "type": "sketch", "plane": {"type": "construction", "feature": 4}, "sketch": {
+        "points": [{"id": "origin", "pos": [0.0, 0.0], "fixed": true}, {"id": "c1.center", "pos": [40.0, 0.0], "fixed": false}, {"id": "c2.center", "pos": [-40.0, 0.0], "fixed": false}],
+        "curves": [{"id": "c1", "type": "circle", "c": 1, "r": 20.0, "construction": false}, {"id": "c2", "type": "circle", "c": 2, "r": 20.0, "construction": false}],
+        "constraints": [], "counters": {"c": 2}}}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 6, "name": "Sweep1", "type": "sweep", "sketch": 5, "profiles": {"type": "curves", "loops": [["c2"]]}, "path_sketch": 3, "path": ["l2"], "operation": "join"}),
+    );
+    feature(
+        &mut s,
+        json!({"id": 7, "name": "Sweep2", "type": "sweep", "sketch": 5, "profiles": {"type": "curves", "loops": [["c1"]]}, "path_sketch": 3, "path": ["l1"], "operation": "join"}),
+    );
+    run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[10.0, -10.0, 0.0]], "thickness": "1.5 mm", "tangent_chain": true}));
+    sound(&s);
+}
+
+/// A box with a curved tunnel lofted through it (from a circle on its side, through a tilted
+/// circle, to a circle on its bottom), shelled 2 mm with its top open. The shell builds but
+/// SMLib's check refuses it ("Face Near missing Seam": an edge close to the seam of the tunnel's
+/// wall) ([T-202](https://tickets.solidcraft.io/t/202), solidcore#3318). It must give a valid
+/// body that weighs less than the solid.
+#[test]
+fn shell_of_a_box_with_a_lofted_tunnel() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30, "corner": [-30, -25, 0], "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [50, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "A"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 15], "radius": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    let tilt = std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [25, 0, 18], "x_dir": [0, 1, 0], "y_dir": [tilt, 0, tilt]}, "name": "B"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 9}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sections = json!([{"sketch": "A", "profiles": [0]}, {"sketch": "B", "profiles": [0]}, {"sketch": "C", "profiles": [0]}]);
+    run(&mut s, "solid.loft", json!({"sections": sections, "operation": "cut", "targets": ["Body1"]}));
+    let solid = volume(&s);
+    run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[-20, 20, 30]], "thickness": "2 mm"}));
+    let state = s.model.state();
+    for b in &state.bodies {
+        assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
+    }
+    let shelled = volume(&s);
+    assert!(shelled > 0.0 && shelled < solid, "{shelled} vs {solid}");
+}
+
+/// A cylinder cut through the wall of a closed shell into its void (#20766).
+/// SMLib boolean difference creates cellular decomposition in void space outside
+/// the solid; the export must omit void-void partition faces rather than failing.
+#[test]
+fn cut_into_shelled_spline_extrusion_void() {
+    let mut s = Session::default();
+    s.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    run(&mut s, "sketch.create", json!({"name": "Outline", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(
+        &mut s,
+        "sketch.spline.fit_point",
+        json!({"periodic": true, "points": [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [-0.0, -22.0], [19.7, -13.1]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25.0, "operation": "new", "body_name": "Part"}));
+    run(&mut s, "solid.shell", json!({"faces": [], "thickness": 1.9, "body": "Part"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 1.9, "height": 12.5, "base": [30.073191071849813, 1.8963088922587372, 12.5], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+    );
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+}

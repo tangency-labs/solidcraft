@@ -98,7 +98,10 @@ use solidcore::mass::integrator::properties::{
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::EFF_ZERO;
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::primitive::primitive_creation::model::PrimitiveModel;
 use solidcore::sweep::api_brep::{
     non_manifold_rotational_sweep, non_manifold_sweep, RegionBrep, SweepSelection,
 };
@@ -537,6 +540,24 @@ fn build(k: &mut Kernel, b: &BrepIn) -> Result<Brep, Stop> {
     build_at(k, b, 0)
 }
 
+/// A sphere operand. The generator gives one sphere in ten a negative radius (as
+/// upstream's harness did, `SmApiCreateSphere` letting it through), which
+/// `create_sphere` now refuses. Such an operand is built as `SmApiCreateSphere` built
+/// it, by `SmPrimitiveCreation::CreateSphere(radius, 0, 360, frame)` itself, so these
+/// cases keep the operands their goldens were made with: the sphere of the radius's
+/// magnitude from the mirrored profile. Every other radius goes to `create_sphere`.
+fn sphere_operand(k: &mut Kernel, center: Point3, radius: f64) -> solidcore::Result<Brep> {
+    if !(radius.is_finite() && radius < -EFF_ZERO) {
+        return primitives::create_sphere(k, center, radius);
+    }
+    let mut frame = Axis2Placement::default();
+    let _ = frame.set_canonical(center, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    PrimitiveModel::build_new(k, |pc, model| {
+        pc.create_partial_sphere(model, PrimitiveModel::MAIN, radius, 0.0, 360.0, &frame)
+    })
+    .map(|(brep, ())| brep)
+}
+
 fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
     if depth >= MAX_DEPTH {
         return Err(Stop::Harness(harness("operand nested too deep")));
@@ -545,7 +566,7 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
         &BrepIn::Box { origin, size } => {
             primitives::create_box(k, p3(origin), size[0], size[1], size[2])
         }
-        &BrepIn::Sphere { center, radius } => primitives::create_sphere(k, p3(center), radius),
+        &BrepIn::Sphere { center, radius } => sphere_operand(k, p3(center), radius),
         &BrepIn::Cylinder {
             origin,
             radius,
@@ -711,6 +732,7 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
             None => Ok(status(e) as f64),
         }
     };
+    crate::dump::body(k, "volume", b);
     let mut o = match brep_volume(k, b, VOLUME_ACCURACY, &attrs) {
         Ok(v) => vec![0.0, v],
         Err(e) => vec![fail(&e)?, 0.0],
@@ -756,7 +778,7 @@ fn check(k: &mut Kernel, b: &mut Brep, level: u8) -> Result<Vec<i64>, Stop> {
         _ => return Err(Stop::Harness(harness(format!("check level {level}")))),
     };
     let c = check_brep(k, b, level).map_err(|e| stop("check_brep", &e))?;
-    let mut o = vec![i64::from(c.pointers_status)];
+    let mut o = vec![i64::from(crate::output::pointer_check_status(c.pointers))];
     failed_tests(&mut o, &c.pointer_reports)?;
     o.push(c.assert_valid.map_or(-1, i64::from));
     failed_tests(&mut o, &c.reports)?;
@@ -794,7 +816,7 @@ fn arc_lengths(k: &Kernel, b: &Brep, fraction: f64) -> Result<Vec<f64>, Stop> {
                 match c.find_parameter_at_arc_length(k, ivl.min(), fraction * length) {
                     Err(err) => row[2] = fail(&err)?,
                     Ok(found) => {
-                        row[2] = f64::from(found.status());
+                        row[2] = f64::from(crate::output::arc_length_status(&found));
                         match c.evaluate_point(k, found.end_param) {
                             Ok(p) => {
                                 row[3] = p.x;

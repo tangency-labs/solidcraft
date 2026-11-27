@@ -42,9 +42,12 @@
 //!   `rbFoundAnswer` out-param; any `Err` counts as a failed evaluation exactly where
 //!   upstream tests `!= SM_SUCCESS`, except [`SolidError::Unported`], which always
 //!   propagates (the solver cannot reproduce upstream past an unported callee). A
-//!   failed evaluation leaves the solver's "found answer" flag unchanged (upstream: an
-//!   evaluator that fails may or may not have written it). The function values are a
-//!   fixed-size slice, so an evaluator cannot resize them.
+//!   failed evaluation supplies no function values or found answer. The function values
+//!   are a fixed-size slice, so an evaluator cannot resize them.
+//! - Failed guesses are never solutions (WR-20, WR-253). An accepted clamped-and-scaled
+//!   step carries its own equations, Jacobian and found flag. If no candidate evaluates,
+//!   iteration stops at the last evaluated point; partial writes cannot become a zero
+//!   residual. A best point whose reevaluation fails is not accepted.
 //! - `SolveIt` returns [`NdSolution`] (found flag and solution vector) instead of
 //!   out-params, and `SmStatus` errors as [`SolidError`]. It rejects interval /
 //!   periodicity arrays whose size differs from the guess (`InvalidInput`; upstream
@@ -61,6 +64,7 @@
 //!   overwrites the value; no caller uses it).
 //! - The `SM_DEBUG_CODE` trace output is not ported.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::matrix::Matrix;
@@ -160,8 +164,11 @@ pub trait EvalNFunctions {
         _intervals: Option<&ExtentNd>,
         _periodicities: Option<&[bool]>,
     ) -> Result<()> {
-        Err(SolidError::geom_stage_failed(
+        Err(SolidError::geom(
             "geom::local_solve_nd::EvalNFunctions::set_intervals",
+            GeomFailure::Defect {
+                why: "an equation set says has_intervals() but does not implement set_intervals; every kernel equation set that wants intervals implements it",
+            },
         ))
     }
 
@@ -227,7 +234,7 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         if delta.abs() < EFF_ZERO {
             return Err(SolidError::geom(
                 OP,
-                crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                GeomFailure::ZeroDifferenceStep {
                     parameter: jj,
                     at: base_param,
                 },
@@ -268,7 +275,11 @@ pub struct NdSolution {
 fn eval_outcome(r: Result<bool>) -> Result<Option<bool>> {
     match r {
         Ok(found) => Ok(Some(found)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -295,7 +306,7 @@ pub struct LocalSolveNd<'a, E: EvalNFunctions + ?Sized> {
     boundary_handler: BoundaryHandler,
     max_boundary_hits: u64,
     step_cutting_enabled: bool,
-    skips_failed_evaluations: bool,
+    guess_unevaluated: bool,
     current_iteration: u64,
     termination_reason: TerminationReason,
 }
@@ -322,7 +333,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             boundary_handler: BoundaryHandler::HitsAllBoundaries,
             max_boundary_hits: 3,
             step_cutting_enabled: false,
-            skips_failed_evaluations: false,
+            guess_unevaluated: false,
             current_iteration: 0,
             termination_reason: TerminationReason::Undefined,
         }
@@ -338,6 +349,14 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     #[must_use]
     pub fn termination_reason(&self) -> TerminationReason {
         self.termination_reason
+    }
+
+    /// Whether the last solve stopped because the equations could not be evaluated at
+    /// the guess itself (not upstream). The solve then reports no solution (WR-20); a
+    /// caller can still check the guess without the failed equations.
+    #[must_use]
+    pub fn guess_unevaluated(&self) -> bool {
+        self.guess_unevaluated
     }
 
     /// The iteration counter after the last solve (`m_lCurrentIteration`; equals
@@ -357,19 +376,6 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     /// worse (`SetStepCuttingEnabled`).
     pub fn set_step_cutting_enabled(&mut self, enabled: bool) {
         self.step_cutting_enabled = enabled;
-    }
-
-    /// Opt-in, not upstream (WR-253 addendum; the fork's tangency-labs/smlib@d2757e1,
-    /// `Kernel::fixes.oscillating_skips_failed_guesses`): when `true`,
-    /// [`LocalSolveNd::solve_it`] takes no value from a failed evaluation. Each step
-    /// takes its equations, Jacobian and found flag from the evaluation it uses (upstream
-    /// kept the unscaled point's Jacobian and found flag for a clamped-and-scaled step),
-    /// the line search stops when no evaluation of the step succeeded, and a best guess
-    /// that cannot be re-evaluated is no solution, and so is a guess whose first
-    /// evaluation fails (WR-20; the fork's tangency-labs/smlib@d5c5cfd). Default `false`
-    /// (upstream).
-    pub fn set_skips_failed_evaluations(&mut self, enabled: bool) {
-        self.skips_failed_evaluations = enabled;
     }
 
     /// Sets the tight stopping tolerance on the sum of `|F_i|`
@@ -408,6 +414,8 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     ///
     /// Not finding a solution is not an error: see [`NdSolution::found`] and
     /// [`LocalSolveNd::termination_reason`].
+    /// Failed evaluations supply no usable values. Each accepted step keeps the
+    /// equations, Jacobian and found flag evaluated at that same point (WR-253).
     ///
     /// # Errors
     ///
@@ -451,6 +459,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         let mut equation_values2 = vec![0.0; n];
 
         self.acceptable_accuracy = acceptable_accuracy;
+        self.guess_unevaluated = false;
 
         // the last guess point starts at the guess
         let mut solution = guess.to_vec();
@@ -463,12 +472,10 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             Some(&mut jacobian),
         ))?
         else {
-            // exit case - the evaluation failed. Upstream reports the unevaluated guess as
-            // found; with `skips_failed_evaluations` (WR-20; the fork's
-            // tangency-labs/smlib@d5c5cfd) it is no solution, as when an evaluation fails
-            // during the iteration.
-            let found = !self.skips_failed_evaluations;
-            return Ok(self.done(found, TerminationReason::UnableToConverge, solution));
+            // An unevaluated guess is no solution (WR-20); a caller may still check it by
+            // other means (`guess_unevaluated`).
+            self.guess_unevaluated = true;
+            return Ok(self.done(false, TerminationReason::UnableToConverge, solution));
         };
 
         // exit case - the evaluator signalled a converged answer
@@ -495,7 +502,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         let mut next_sum_f = 0.0;
 
         self.current_iteration = 0;
-        while self.current_iteration < self.maximum_iterations {
+        'iterations: while self.current_iteration < self.maximum_iterations {
             // negate the right-hand side of Fn(p0, .., pn) = RHS
             for v in &mut equation_values {
                 *v = -*v;
@@ -553,29 +560,24 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
                 }
 
                 // evaluate the equations at the next guess
-                let mut first_failed = false;
-                if let Some(found) = eval_outcome(self.evaluator.evaluate(
+                let first = eval_outcome(self.evaluator.evaluate(
                     &next_guess_clamped,
                     &mut equation_values,
                     Some(&mut jacobian),
-                ))? {
-                    found_answer = found;
-                } else {
+                ))?;
+                if first.is_none() {
                     // exit case - the evaluation failed
                     self.termination_reason = TerminationReason::UnableToConverge;
-                    first_failed = true;
                     if !clamped {
-                        break; // leave the line search; if clamped, try again
+                        break 'iterations;
                     }
                 }
 
-                // accumulate the errors (with the fork's fix: a failed evaluation has no
-                // equation values)
-                next_sum_f = if self.skips_failed_evaluations && first_failed {
-                    0.0
-                } else {
+                // A candidate has a residual only if its evaluation succeeded.
+                let mut candidate_sum = first.map(|found| {
+                    found_answer = found;
                     sum_abs(&equation_values)
-                };
+                });
 
                 // if clamped, compare the unscaled and scaled locations
                 if clamped {
@@ -621,47 +623,25 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
                             &mut equation_values2,
                             Some(&mut jacobian2),
                         ))?;
-                        if second.is_none() && first_failed {
-                            // exit case - both evaluations failed
-                            self.termination_reason = TerminationReason::UnableToConverge;
-                            break;
-                        }
-
-                        // and see how good it is
-                        let fixed = self.skips_failed_evaluations;
-                        let next_sum_f2 = if fixed && second.is_none() {
-                            0.0
-                        } else {
-                            sum_abs(&equation_values2)
-                        };
-
-                        // take the scaled step if it is better (or the first failed); with
-                        // the fork's fix only when it evaluated, and with its own Jacobian
-                        // and found flag
-                        if fixed {
-                            if let Some(found2) = second {
-                                if next_sum_f2 < next_sum_f || first_failed {
-                                    next_guess_clamped.clone_from(&next_guess_clamped_scaled);
-                                    equation_values.clone_from(&equation_values2);
-                                    jacobian.clone_from(&jacobian2);
-                                    found_answer = found2;
-                                    next_sum_f = next_sum_f2;
-                                    first_failed = false;
-                                }
+                        // The better evaluated candidate supplies all of its state.
+                        if let Some(found2) = second {
+                            let scaled_sum = sum_abs(&equation_values2);
+                            if candidate_sum.is_none_or(|sum| scaled_sum < sum) {
+                                next_guess_clamped.clone_from(&next_guess_clamped_scaled);
+                                equation_values.clone_from(&equation_values2);
+                                jacobian.clone_from(&jacobian2);
+                                found_answer = found2;
+                                candidate_sum = Some(scaled_sum);
                             }
-                        } else if next_sum_f2 < next_sum_f || first_failed {
-                            next_guess_clamped.clone_from(&next_guess_clamped_scaled);
-                            equation_values.clone_from(&equation_values2);
-                            next_sum_f = next_sum_f2;
                         }
                     }
                 }
 
-                // with the fork's fix: the clamped step could not be evaluated, and no
-                // scaled one was
-                if self.skips_failed_evaluations && first_failed {
-                    break;
-                }
+                // No evaluated candidate: keep the current point and its residual.
+                let Some(evaluated_sum) = candidate_sum else {
+                    break 'iterations;
+                };
+                next_sum_f = evaluated_sum;
 
                 // record the better clamped value
                 next_guess.clone_from(&next_guess_clamped);
@@ -791,14 +771,13 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         if sum_f > best_sum_f && best_sum_f.abs() < BIG_DOUBLE {
             sum_f = best_sum_f;
             solution = best_guess;
-            // upstream ignores this evaluation's status; with the fork's fix a best
-            // guess that cannot be evaluated is no solution (not converged)
+            // A best guess that cannot be reevaluated is no solution (WR-253).
             let reevaluated = eval_outcome(self.evaluator.evaluate(
                 &solution,
                 &mut equation_values,
                 Some(&mut jacobian),
             ))?;
-            if self.skips_failed_evaluations && reevaluated.is_none() {
+            if reevaluated.is_none() {
                 return Ok(self.done(false, TerminationReason::UnableToConverge, solution));
             }
         }
@@ -962,30 +941,192 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(SolidError::geom_stage_failed("test"))
+            Err(SolidError::geom("test", GeomFailure::StageFailed))
         }
     }
 
+    /// An initial evaluation error cannot certify the zero residual left in scratch storage.
     #[test]
-    fn failing_first_evaluation_reports_found() {
+    fn wr20_failing_first_evaluation_finds_no_solution_by_default() {
         let mut e = Failing;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let r = s.solve_it(&[1.0, 2.0], EFF_ZERO).unwrap();
-        // upstream quirk: a failed first evaluation is reported as found
-        assert!(r.found);
+        assert!(!r.found, "an unevaluated guess is not a solution");
         assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
         assert_eq!(r.x, vec![1.0, 2.0]);
     }
 
-    /// WR-20 (the fork's tangency-labs/smlib@d5c5cfd): with the flag a guess whose first
-    /// evaluation fails is no solution, as when an evaluation fails mid-iteration.
+    fn bounds(extents: &[(f64, f64)]) -> ExtentNd {
+        let mut out = ExtentNd::new(extents.len());
+        for (i, &(lo, hi)) in extents.iter().enumerate() {
+            *out.get_mut(i).unwrap() = Extent1d::from_min_max(lo, hi);
+        }
+        out
+    }
+
+    struct QuadraticAndLinear;
+
+    impl EvalNFunctions for QuadraticAndLinear {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            f[0] = x[0] * x[0] - 1.0;
+            f[1] = x[1] - 4.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 2.0 * x[0])?;
+                j.set_at(0, 1, 0.0)?;
+                j.set_at(1, 0, 0.0)?;
+                j.set_at(1, 1, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    /// A scaled candidate carries its own Jacobian into the next Newton step.
     #[test]
-    fn wr20_failing_first_evaluation_finds_no_solution_with_the_flag() {
-        let mut e = Failing;
+    fn scaled_step_uses_the_jacobian_at_its_own_point() {
+        let mut e = QuadraticAndLinear;
+        let ivls = bounds(&[(0.0, 1.5), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        s.set_maximum_iterations(2);
+        let r = s.solve_it(&[0.5, 0.0], EFF_ZERO).unwrap();
+        // The first Newton point is (1.25, 4). Clamping gives (1.25, 1),
+        // scaling gives (11/16, 1), whose residual is smaller. The next x is
+        // Newton's (x + 1/x)/2 at 11/16, not at the rejected clamped point.
+        let expected = (11.0 / 16.0 + 16.0 / 11.0) / 2.0;
+        assert!((r.x[0] - expected).abs() < 1e-14, "{r:?}");
+        assert_eq!(r.x[1], 1.0);
+        assert!(!r.found); // y = 4 is outside the bounds.
+    }
+
+    struct BoundedLinear {
+        reject_scaled: bool,
+    }
+
+    impl EvalNFunctions for BoundedLinear {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            if x[0] == 1.0 && ((x[1] < 0.25) == self.reject_scaled) {
+                // Failed evaluators may leave apparently converged output.
+                f.fill(0.0);
+                return Err(SolidError::sm_err("test::bounded_linear"));
+            }
+            f[0] = x[0] - 3.0;
+            f[1] = x[1] - 0.5;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 1.0)?;
+                j.set_at(0, 1, 0.0)?;
+                j.set_at(1, 0, 0.0)?;
+                j.set_at(1, 1, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    /// A failed scaled evaluation cannot overwrite a successfully evaluated clamped candidate.
+    #[test]
+    fn failed_scaled_evaluation_cannot_replace_the_valid_clamped_step() {
+        let mut e = BoundedLinear {
+            reject_scaled: true,
+        };
+        let ivls = bounds(&[(0.0, 1.0), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        let r = s.solve_it(&[0.0, 0.0], EFF_ZERO).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x, [1.0, 0.5]);
+    }
+
+    /// A failed clamped evaluation preserves the last fully evaluated scaled candidate.
+    #[test]
+    fn failed_clamped_evaluation_keeps_the_last_valid_scaled_point() {
+        let mut e = BoundedLinear {
+            reject_scaled: false,
+        };
+        let ivls = bounds(&[(0.0, 1.0), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        let r = s.solve_it(&[0.0, 0.0], EFF_ZERO).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x[0], 1.0);
+        assert!((r.x[1] - 1.0 / 6.0).abs() < 1e-14, "{r:?}");
+    }
+
+    struct OnlyInitialIsEvaluable;
+
+    impl EvalNFunctions for OnlyInitialIsEvaluable {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            if x[0] != 0.0 {
+                f.fill(0.0);
+                return Err(SolidError::sm_err("test::only_initial"));
+            }
+            f[0] = -2.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    /// A later evaluation error cannot turn stale residuals into a successful solution.
+    #[test]
+    fn a_failed_next_evaluation_cannot_create_a_solution() {
+        for bounded in [false, true] {
+            let mut e = OnlyInitialIsEvaluable;
+            let ivls = bounds(&[(0.0, 1.0)]);
+            let mut s = LocalSolveNd::new(&mut e, bounded.then_some(&ivls), None);
+            let r = s.solve_it(&[0.0], EFF_ZERO).unwrap();
+            assert!(!r.found, "bounded {bounded}: {r:?}");
+            assert_eq!(r.x, [0.0]);
+            assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
+        }
+    }
+
+    struct BestReevaluationFails {
+        calls: usize,
+    }
+
+    impl EvalNFunctions for BestReevaluationFails {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            self.calls += 1;
+            if self.calls == 4 {
+                f.fill(0.0);
+                return Err(SolidError::sm_err("test::best_reevaluation"));
+            }
+            f[0] = x[0] * x[0] * x[0] - 2.0 * x[0] + 2.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 3.0 * x[0] * x[0] - 2.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    /// The saved best point must still evaluate successfully before it can be returned.
+    #[test]
+    fn a_best_point_that_fails_reevaluation_is_not_a_solution() {
+        let mut e = BestReevaluationFails { calls: 0 };
         let mut s = LocalSolveNd::new(&mut e, None, None);
-        s.set_skips_failed_evaluations(true);
-        let r = s.solve_it(&[1.0, 2.0], EFF_ZERO).unwrap();
-        assert!(!r.found);
+        s.set_maximum_iterations(2);
+        // Newton cycles 0 -> 1 -> 0. The best point is 1, with residual 1,
+        // but its mandatory reevaluation fails before it can be accepted.
+        let r = s.solve_it(&[0.0], 1.5).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x, [1.0]);
         assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
     }
 
@@ -1029,10 +1170,7 @@ mod tests {
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
-        assert_eq!(
-            e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::StageFailed)
-        );
+        assert!(matches!(e.geom_failure(), Some(GeomFailure::Defect { .. })));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
@@ -1063,7 +1201,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::ZeroDifferenceStep {
+            Some(&GeomFailure::ZeroDifferenceStep {
                 parameter: 0,
                 at: 0.5
             })

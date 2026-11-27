@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::vec::Vec2;
 
+pub mod line_family;
+
 /// One boundary segment in sketch coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

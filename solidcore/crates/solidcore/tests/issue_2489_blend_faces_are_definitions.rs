@@ -11,8 +11,9 @@
 //! The cases: a box edge rounded r 5 (an exact cylinder, ending in two Ends), its Gⁿ round
 //! (continuity 2), its chamfer; three equal rounds at a box corner (the Ball) and three
 //! unequal ones (the Setback), and beside a cylinder (the curved Setback, #2343); a boss's base rounded r 1 with its Turns Mitred and Swept; a
-//! cut ball's rim (two Joins); #2256's tangent peg (the Mixed corner); and the offset of
-//! #2388's chamfered box (the offsets of a chamfer and two rounds); and the two
+//! cut ball's rim (two Joins); #2256's tangent peg chamfered (the Mixed corner); and the offset of
+//! #2388's chamfered box (the offsets of a chamfer and two rounds); a cylinder's rim
+//! chamfered by its radius (a cone to its apex, #17875); and the two
 //! captured mirrored shell rims, using the geometry matrix's shared builder and rig fix set.
 #![allow(
     clippy::unwrap_used,
@@ -281,14 +282,14 @@ fn cases() -> Vec<Case> {
     let mut k = kernel();
     let mut b = peg(&mut k);
     let es = picks(&k, &b, &[[20.0, 0.0, 10.0], [32.0, 8.0, 10.0]]);
-    fillet_edges(&mut k, &mut b, &es, 2.0, 1, 1, 1.0).unwrap();
+    // chamfers: the Mixed corner of rounds is refused at the cusp (#22151)
+    fillet_edges(&mut k, &mut b, &es, 2.0, 0, 1, 1.0).unwrap();
     b.refresh_cached_topology();
-    out.push(checked("tangent peg's mixed corner r 2", &b, &made(&k)));
+    out.push(checked("tangent peg's mixed corner d 2", &b, &made(&k)));
 
     // #2388's own fix set: the offset of this body with every fix on is refused
     // (`offset_brep`, status 1001)
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_round_as_definition = true;
     k.blend_face_log = Some(BlendFaceLog::default());
     let mut b = chamfered_box(&mut k);
     let log = k.blend_face_log.take().unwrap();
@@ -318,6 +319,20 @@ fn cases() -> Vec<Case> {
         &offset,
         &made,
     ));
+
+    // A cylinder's rim chamfered by its radius: the offsets meet on the axis, so the
+    // chamfer is a cone to its apex, its centre line and its rail on the top one point;
+    // `definition_surface` has no section to run along and the chamfer is built as
+    // before, a traced net (the chamfer ledger entry's second source, #17875)
+    let mut k = kernel();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0).unwrap();
+    let e = pick(&k, &b, [10.0, 0.0, 10.0]);
+    fillet_edges(&mut k, &mut b, &[e], 10.0, 0, 1, 1.0).unwrap();
+    let case = checked("cylinder rim chamfered by its radius", &b, &self::made(&k));
+    assert_eq!(case.bare.len(), 1, "the rim chamfer's one face is bare");
+    assert_eq!(case.bare[0].kind, BlendFaceKind::Chamfer);
+    assert_eq!(case.bare[0].surface, "cone");
+    out.push(case);
 
     // The mirrored-rim matrix grades these same captures and builder at every seed.
     // Keep the ledger's own evidence non-vacuous for its chamfer entry too.

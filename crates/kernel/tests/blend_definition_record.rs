@@ -4,6 +4,7 @@
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Surface};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::*;
 
 /// The faces of a record that are blends by their definition.
@@ -47,4 +48,21 @@ fn a_body_rebuilt_from_its_record_takes_a_shell() {
     let rebuilt = body_from_smlib(&smlib_body(&reopened).unwrap()).unwrap();
     let shelled = shell(&rebuilt, &[Vec3::new(2.0, 2.0, 0.0)], 1.0).unwrap();
     assert!(shelled.validity().is_empty(), "{:?}", shelled.validity());
+}
+
+/// A ray onto the round meets one of its blend faces, evaluated on its net: halfway around the
+/// rim's torus (bore radius 5, round 0.3), at 45° between the top and the bore, the point is on
+/// the round and the normal its outward one there, into the bore and up.
+#[test]
+fn a_ray_onto_the_round_meets_its_blend_face_with_its_normal() {
+    let body = rounded_bore();
+    let faces = blends(&brep_record(&body).unwrap());
+    let h = 0.5f64.sqrt();
+    let normal = Vec3::new(-h, 0.0, h);
+    let point = Vec3::new(15.0 + 5.3 - 0.3 * h, 15.0, 9.7 + 0.3 * h);
+    let hit = body.fire_ray(point + normal * 10.0, normal * -1.0).unwrap().expect("the ray meets the round");
+    assert!(faces.contains(&hit.face), "face {} is not one of the blends {faces:?}", hit.face);
+    assert!((hit.point - point).len() < 1e-6, "{hit:?}");
+    assert!((hit.normal - normal).len() < 1e-6, "{hit:?}");
+    assert!((hit.depth - 10.0).abs() < 1e-6, "{hit:?}");
 }

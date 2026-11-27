@@ -39,15 +39,29 @@
   <true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
+  <!-- solidcraft:// links (a Workshop page's Open in SolidCraft button, docs/workshop-links.md):
+       AppKit hands them to application:openURLs: (apps/solidcraft/src/open_documents.rs). -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>io.tangencylabs.solidcraft.workshop</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>solidcraft</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
       <key>CFBundleTypeName</key>
       <string>SolidCraft design</string>
       <key>CFBundleTypeExtensions</key>
-      <!-- solidcraft: designs saved before .sc; solvecraft: before the rename (compatibility
-           shims, docs/compatibility.md). -->
-      <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+      <!-- solidcraft: designs saved before .sc (compatibility shim, docs/compatibility.md). -->
+      <array><string>sc</string><string>solidcraft</string></array>
       <key>LSItemContentTypes</key>
       <array><string>io.tangencylabs.solidcraft.design</string></array>
       <key>CFBundleTypeRole</key>
@@ -66,7 +80,7 @@
       <string>Alternate</string>
     </dict>
   </array>
-  <!-- The design type: .sc, and the older .solidcraft and .solvecraft (docs/compatibility.md). -->
+  <!-- The design type: .sc, and the older .solidcraft (docs/compatibility.md). -->
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
@@ -79,7 +93,7 @@
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
-        <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+        <array><string>sc</string><string>solidcraft</string></array>
         <key>public.mime-type</key>
         <array><string>application/x-solidcraft</string></array>
       </dict>

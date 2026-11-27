@@ -29,7 +29,7 @@ const SNAP_FIT_CONTRACT: TypedContract<SnapFitParams> = TypedContract::new();
 const REST_CONTRACT: TypedContract<RestParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss))
+    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("boss")
         .contract(&BOSS_CONTRACT)
@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
              draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
         ),
-    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip))
+    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("lip")
         .contract(&LIP_CONTRACT)
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
         ),
-    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit))
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("snap_fit")
         .contract(&SNAP_FIT_CONTRACT)
@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
              base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
         ),
-    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest))
+    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("rest")
         .contract(&REST_CONTRACT)
@@ -526,6 +526,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An outside lip on a shelled cylinder of radius 40 (#20625) left a body SMLib's check
+    /// refused ("Edge endpoints within face domain"), so the next join failed. The join under
+    /// the floor builds and adds its 20 × 10 × 1.
+    #[test]
+    fn a_join_after_an_outside_lip_on_a_shelled_cylinder_builds() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 40}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 20, "body_name": "Body1"}));
+        run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": 4}));
+        run(&mut s, "plastic.lip", json!({"face": [38, 0, 20], "width": 2, "height": 4, "side": "outside"}));
+        let before = volume(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+        run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 1, "direction": "negative", "operation": "join"}));
+        assert!(s.model.state().body("Body1").is_some_and(|b| b.body.validity().is_empty()));
+        let after = volume(&mut s);
+        assert!(rel(after, before + 200.0) < 1e-6, "{after} vs {}", before + 200.0);
     }
 
     #[test]

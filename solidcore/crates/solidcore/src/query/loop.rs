@@ -34,21 +34,14 @@
 //! - **Poles.** `SmSurface::GetSingularities` (unit `surface.surface_p3`) is only
 //!   reached when the point lies on a side of the surface's natural domain and an edge
 //!   use end of the loop does too.
-//! - **Ignored statuses.** Upstream ignores the status of `EvaluatePoint` /
+//! - **Ignored statuses (WR-663).** Upstream ignores the status of `EvaluatePoint` /
 //!   `Evaluate` of the surface and the trim curves and then reads the outputs they did
-//!   not write. For the trim curves (B-splines, whose failed evaluation writes
-//!   nothing) the port does the same: a failed `EvaluatePoint` of the last edge use's
-//!   trim leaves `sLastEndUV` at its `SM_UNDEF_DOUBLE` default, and a failed
-//!   `Evaluate(.., 1, ..)` leaves `sPtDer` as it was (its `SM_UNDEF_DOUBLE` defaults
-//!   for the edge use's first evaluation, else the previous evaluation's point and
-//!   derivative). A trim curve whose basis fails to evaluate (degree 3 with 2 control
-//!   points, from a STEP cylinder band) reaches it. A failed surface `EvaluatePoint`
-//!   still returns its error (no input reaches it). With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` (WR-663) a failed evaluation or local solve
-//!   answers `SM_POC_UNKNOWN`, as the fork (tangency-labs/smlib 7a35f33).
-//!   `DropPoint` and `LocalPointSolve` failures are "no answer" (both reset their
-//!   success flag first upstream). [`SolidError::Unported`] from any callee is
-//!   returned.
+//!   not write (`sLastEndUV` at its `SM_UNDEF_DOUBLE` default, `sPtDer` as it was). The
+//!   port answers as the fork does (tangency-labs/smlib 7a35f33): a failed surface or
+//!   trim evaluation or local solve answers `SM_POC_UNKNOWN`. A trim curve whose basis
+//!   fails to evaluate (degree 3 with 2 control points, from a STEP cylinder band)
+//!   reaches it. `DropPoint` failures are "no answer" (it resets its success flag first
+//!   upstream). [`SolidError::Unported`] from any callee is returned.
 //! - `dTol3d` is unused upstream and is kept as `_tol_3d`.
 //! - **Winding hulls.** Not upstream: `WindingHull` bounds every UV point the walk can
 //!   evaluate on a loop, so a caller that only asks whether a point is inside can leave
@@ -134,7 +127,7 @@ fn edge_of(b: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
 }
 
 /// `SmSurface::GetSingularities`: the sides of the natural domain that are poles.
-fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
+pub(crate) fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
     Ok(surface.get_singularities(k, false, false)?.singular)
 }
 
@@ -158,17 +151,20 @@ fn drop_on_edge(
         SolverOperation::Intersect,
     ) {
         Ok(d) => Ok(d.success.then_some(d.parameter)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }
 
-/// The value of a call whose failure the port returns, or `None` when, with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], the point is not classified
+/// The value of a call, or `None` when it failed and the point is not classified
 /// (`SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33). [`SolidError::Unported`] propagates.
-fn or_unknown<T>(k: &Kernel, r: Result<T>) -> Result<Option<T>> {
+fn or_unknown<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
-        Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => Ok(None),
+        Err(e) if !e.is_unported_or_cancelled() => Ok(None),
         r => r.map(Some),
     }
 }
@@ -248,10 +244,9 @@ fn curve_box_reaches(
 }
 
 /// `LocalPointSolve(SM_SO_MINIMIZE)` of the test point on a UV trim curve: whether it
-/// converged and the solution. A failing solve has not converged (its status is
-/// ignored upstream and the flag is reset first); with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] it classifies nothing
-/// (`Err(())`, the fork's `SM_POC_UNKNOWN`).
+/// converged and the solution. A failing solve classifies nothing (`Err(())`, the
+/// fork's `SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33; upstream ignores its status
+/// and reads the success flag it resets first).
 fn local_minimize(
     k: &Kernel,
     trim: &Curve,
@@ -267,16 +262,20 @@ fn local_minimize(
     match trim.local_point_solve::<()>(k, interval, SolverOperation::Minimize, point, &opts, guess)
     {
         Ok((true, sol)) => Ok(Ok(Some(sol))),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
-        Err(_) if k.fixes.query_statuses_pass_on => Ok(Err(())),
-        Ok((false, _)) | Err(_) => Ok(Ok(None)),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
+        Err(_) => Ok(Err(())),
+        Ok((false, _)) => Ok(Ok(None)),
     }
 }
 
 /// The point and unit tangent (in the edge use's direction) of a trim curve at `t`,
 /// with the tangent's length (`1` when below `SM_EFF_ZERO`), evaluated into `pt_der`
-/// (upstream `sPtDer`). A failed evaluation leaves `pt_der` as it was, as upstream
-/// ignores the status of `Evaluate`; with `query_statuses_pass_on` it is the error.
+/// (upstream `sPtDer`). A failed evaluation is the error (upstream ignores the status
+/// of `Evaluate`; the fork passes it on, tangency-labs/smlib 7a35f33).
 fn eval_with_tangent(
     k: &Kernel,
     trim: &Curve,
@@ -284,15 +283,9 @@ fn eval_with_tangent(
     orient: OrientType,
     pt_der: &mut [Vec3; 2],
 ) -> Result<(Point3, Vec3, f64)> {
-    match trim.evaluate(k, t, 1, false, true) {
-        Ok(der) => {
-            for (slot, v) in pt_der.iter_mut().zip(der) {
-                *slot = v;
-            }
-        }
-        Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => return Err(e),
-        // status ignored upstream: sPtDer keeps its values
-        Err(_) => {}
+    let der = trim.evaluate(k, t, 1, false, true)?;
+    for (slot, v) in pt_der.iter_mut().zip(der) {
+        *slot = v;
     }
     let [pt, mut tan] = *pt_der;
     if orient == OrientType::Opposite {
@@ -396,7 +389,7 @@ pub(crate) fn contains_uv_point_with_topology(
     let zone_tol = face_rec.tolerance;
 
     let srf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
-    let Some(point_3d) = or_unknown(k, surface.evaluate_point(k, uv))? else {
+    let Some(point_3d) = or_unknown(surface.evaluate_point(k, uv))? else {
         return Ok(UvContainment::of(PointContainment::Unknown));
     };
     let uv_pt = Point3::new(uv.x, uv.y, 0.0);
@@ -483,14 +476,12 @@ pub(crate) fn contains_uv_point_with_topology(
         let last_trim = eu1::uv_trim_curve(b, last_eu)?
             .0
             .ok_or_else(|| null("ContainsUVPoint: edge use without UV trim curve"))?;
-        // (status ignored upstream: a failed evaluation leaves sLastEndUV undefined)
+        // (status ignored upstream, leaving sLastEndUV undefined; the fork answers
+        // SM_POC_UNKNOWN, tangency-labs/smlib 7a35f33)
         match last_trim.evaluate_point(k, last_end_param) {
             Ok(p) => p,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if k.fixes.query_statuses_pass_on => {
-                return Ok(UvContainment::of(PointContainment::Unknown));
-            }
-            Err(_) => Vec3::UNDEF,
+            Err(_) => return Ok(UvContainment::of(PointContainment::Unknown)),
         }
     };
     let mut last_end_quad_num = calc_quad_num(uv_pt, last_end_uv);
@@ -554,10 +545,8 @@ pub(crate) fn contains_uv_point_with_topology(
 
         // Eval info for start point of this EU.
         let mut pt_der = [Vec3::UNDEF; 2];
-        let Some((mut prev_uv, mut prev_uv_tan, mut prev_uv_tan_len)) = or_unknown(
-            k,
-            eval_with_tangent(k, trim, prev_param, orient, &mut pt_der),
-        )?
+        let Some((mut prev_uv, mut prev_uv_tan, mut prev_uv_tan_len)) =
+            or_unknown(eval_with_tangent(k, trim, prev_param, orient, &mut pt_der))?
         else {
             return Ok(UvContainment::of(PointContainment::Unknown));
         };
@@ -677,10 +666,8 @@ pub(crate) fn contains_uv_point_with_topology(
                     return Ok(UvContainment::of(PointContainment::Unknown));
                 }
 
-                let Some((uv_at, this_uv_tan, this_uv_tan_len)) = or_unknown(
-                    k,
-                    eval_with_tangent(k, trim, this_param, orient, &mut pt_der),
-                )?
+                let Some((uv_at, this_uv_tan, this_uv_tan_len)) =
+                    or_unknown(eval_with_tangent(k, trim, this_param, orient, &mut pt_der))?
                 else {
                     return Ok(UvContainment::of(PointContainment::Unknown));
                 };
@@ -925,7 +912,11 @@ impl WindingHull {
             ) {
                 return None;
             }
-            curve.clone_for_evaluation().ok()?;
+            // the walk's copy of the curve for evaluation can only fail, for these three
+            // kinds, on its nesting check: the check alone, without the copy (an
+            // ellipse's copy rebuilds its NURB, for every loop of every point a face
+            // classifies)
+            Surface::check_curve_evaluation_copy_depth(curve, 0).ok()?;
             eu1::orientation(b, eu).ok()?;
             let failed = b
                 .edgeuse(eu)
@@ -1013,6 +1004,246 @@ impl WindingHull {
         };
         out(self.lo.x, self.hi.x, uv.x) || out(self.lo.y, self.hi.y, uv.y)
     }
+}
+
+/// The most boxes [`trim_boxes`] or [`edge_curve_boxes`] makes in one call: past this the
+/// curves are not bounded and the caller keeps its whole-box test. A curve crossing a box `n`
+/// boxes across takes about `n` of them (512 for the offset's fold test), so this leaves
+/// room for some hundred curves.
+pub(crate) const MAX_TRIM_BOXES: usize = 1 << 16;
+
+/// Not upstream (#20961): boxes `[x0, x1, y0, y1, z0, z1]` that hold `curve` over `ivl`, each
+/// at most about `fine` across, `budget` the boxes still allowed: a line cut into equal
+/// pieces at most `fine` long (its points between two of its points lie between them), a
+/// B-spline's (or an ellipse's NURB's) segment over `ivl` split into Bezier pieces, halved
+/// until their control points' box is that small (a piece lies in the box of its control
+/// points, the convex hull property, its weights positive; `ivl` within `[U[p], U[n]]`,
+/// [`in_hull_domain`], and no evaluation past the knots). `Ok(None)` for other curves, where
+/// those conditions fail, or past the budget.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set (polled per piece).
+fn curve_boxes(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    fine: f64,
+    budget: &mut usize,
+) -> Result<Option<Vec<[f64; 6]>>> {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::NOW;
+    const OP: &str = "query::loop::curve_boxes";
+    // the most halvings of a Bezier piece
+    const DEPTH: usize = 12;
+    let span = |a: Point3, z: Point3| {
+        [
+            a.x.min(z.x),
+            a.x.max(z.x),
+            a.y.min(z.y),
+            a.y.max(z.y),
+            a.z.min(z.z),
+            a.z.max(z.z),
+        ]
+    };
+    let control_box = |c: &crate::nurbs::crv_basic::Curve| -> Option<[f64; 6]> {
+        let mut bx = [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for q in c.cpts() {
+            if !(q.w == NOW || (q.w > 0.0 && q.w.is_finite())) {
+                return None;
+            }
+            let [x0, x1, y0, y1, z0, z1] = span(q.to_euclid(), q.to_euclid());
+            bx = [
+                bx[0].min(x0),
+                bx[1].max(x1),
+                bx[2].min(y0),
+                bx[3].max(y1),
+                bx[4].min(z0),
+                bx[5].max(z1),
+            ];
+        }
+        bx.iter().all(|x| x.is_finite()).then_some(bx)
+    };
+    let mut boxes = Vec::new();
+    let nurb = match curve.kind() {
+        CurveKind::Line(_) => {
+            let (Ok(a), Ok(z)) = (
+                curve.evaluate_point(k, ivl.min()),
+                curve.evaluate_point(k, ivl.max()),
+            ) else {
+                return Ok(None);
+            };
+            let pieces = (a.distance(z) / fine).ceil();
+            if !(pieces.is_finite() && pieces >= 0.0 && pieces < *budget as f64) {
+                return Ok(None);
+            }
+            let n = (pieces as usize).max(1);
+            let mut last = a;
+            for i in 1..=n {
+                k.check_cancelled(OP)?;
+                let t = ivl.min() + (ivl.max() - ivl.min()) * (i as f64 / n as f64);
+                let Ok(next) = curve.evaluate_point(k, if i == n { ivl.max() } else { t }) else {
+                    return Ok(None);
+                };
+                boxes.push(span(last, next));
+                last = next;
+            }
+            *budget -= n;
+            return Ok(Some(boxes));
+        }
+        CurveKind::BSpline(c) if !c.is_out_of_bounds_enabled() => c.nurb.as_ref(),
+        CurveKind::Ellipse(e) if !e.base().is_out_of_bounds_enabled() => e.base().nurb.as_ref(),
+        _ => None,
+    };
+    let Some(nurb) = nurb else {
+        return Ok(None);
+    };
+    if !in_hull_domain(nurb, ivl) {
+        return Ok(None);
+    }
+    let (p, knots) = (nurb.degree(), nurb.knots());
+    let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(nurb.cpts().len())) else {
+        return Ok(None);
+    };
+    let (a, z) = (ivl.min().max(lo), ivl.max().min(hi));
+    if a.partial_cmp(&z) != Some(std::cmp::Ordering::Less) {
+        return Ok(None);
+    }
+    let Some(mut pieces) = nurb
+        .extract_seg(a, z)
+        .ok()
+        .and_then(|seg| seg.decompose_bez().ok())
+    else {
+        return Ok(None);
+    };
+    let mut depth = vec![0usize; pieces.len()];
+    while let (Some(piece), Some(d)) = (pieces.pop(), depth.pop()) {
+        k.check_cancelled(OP)?;
+        if boxes.len() + pieces.len() >= *budget {
+            return Ok(None);
+        }
+        let Some(bx) = control_box(&piece) else {
+            return Ok(None);
+        };
+        let size = (bx[1] - bx[0]).max(bx[3] - bx[2]).max(bx[5] - bx[4]);
+        let (Some(&t0), Some(&t1)) = (piece.knots().first(), piece.knots().last()) else {
+            return Ok(None);
+        };
+        if size <= fine || d >= DEPTH {
+            boxes.push(bx);
+            continue;
+        }
+        let Ok((left, right)) = piece.split(0.5 * (t0 + t1)) else {
+            return Ok(None);
+        };
+        pieces.extend([left, right]);
+        depth.extend([d + 1, d + 1]);
+    }
+    *budget -= boxes.len();
+    Ok(Some(boxes))
+}
+
+/// Not upstream (#20961): boxes in the face's parameters that hold loop `l`'s UV trim
+/// curves over their edges' intervals (widened by the solves' slack), each at most about
+/// `fine` across ([`curve_boxes`]), and the chords between consecutive edge uses (the box of
+/// the nearest ends of each edge use and the next, where they join: the walk's chord across a
+/// gap between them).
+///
+/// `Ok(None)` where the loop is not what [`WindingHull::of`] bounds (its conditions, the same
+/// here), a trim is not bounded, or the loop takes more than [`MAX_TRIM_BOXES`] boxes, so a
+/// caller falls back to its whole-box test.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set.
+pub(crate) fn trim_boxes(
+    k: &Kernel,
+    b: &Brep,
+    l: LoopId,
+    fine: f64,
+) -> Result<Option<Vec<[f64; 4]>>> {
+    if !(fine.is_finite() && fine > 0.0) || WindingHull::of(k, b, l).is_none() {
+        return Ok(None);
+    }
+    let Some(lu) = b.loop_(l).ok().and_then(|lp| lp.loopuse) else {
+        return Ok(None);
+    };
+    let Ok(eus) = eu1::loopuse_edgeuses(b, lu) else {
+        return Ok(None);
+    };
+    let span = |a: Point3, z: Point3| [a.x.min(z.x), a.x.max(z.x), a.y.min(z.y), a.y.max(z.y)];
+    let mut budget = MAX_TRIM_BOXES;
+    let mut boxes = Vec::new();
+    // each edge use's trim points at the ends of its widened interval
+    let mut ends: Vec<(Point3, Point3)> = Vec::new();
+    for &eu in &eus {
+        let Some(edge) = edge_of(b, eu).ok().and_then(|e| b.edge(e).ok()) else {
+            return Ok(None);
+        };
+        let Some(trim_curve) = eu1::uv_trim_curve(b, eu).ok().and_then(|t| t.0) else {
+            return Ok(None);
+        };
+        let widened = with_solve_slack(&edge.interval);
+        let (Ok(a), Ok(z)) = (
+            trim_curve.evaluate_point(k, widened.min()),
+            trim_curve.evaluate_point(k, widened.max()),
+        ) else {
+            return Ok(None);
+        };
+        ends.push((a, z));
+        let Some(pieces) = curve_boxes(k, trim_curve, &widened, fine, &mut budget)? else {
+            return Ok(None);
+        };
+        boxes.extend(
+            pieces
+                .into_iter()
+                .map(|[x0, x1, y0, y1, _, _]| [x0, x1, y0, y1]),
+        );
+    }
+    // the chord from each edge use to the next: between their nearest ends, where they join
+    for (&(a, z), &(c, e)) in ends.iter().zip(ends.iter().cycle().skip(1)) {
+        let joint = [(a, c), (a, e), (z, c), (z, e)]
+            .into_iter()
+            .min_by(|x, y| x.0.distance(x.1).total_cmp(&y.0.distance(y.1)));
+        if let Some((p, q)) = joint {
+            boxes.push(span(p, q));
+        }
+    }
+    Ok(boxes
+        .iter()
+        .all(|bx| bx.iter().all(|x| x.is_finite()))
+        .then_some(boxes))
+}
+
+/// Not upstream (#20961): boxes in space that hold every point the walk's drop on `edge`'s
+/// curve can answer, each at most about `fine` across, for a caller that must keep clear of
+/// them: the curve over its interval widened by the solves' slack (the drop clamps into it)
+/// in [`curve_boxes`]' pieces, `budget` the boxes still allowed. `Ok(None)` where the curve
+/// is not bounded so.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set.
+pub(crate) fn edge_curve_boxes(
+    k: &Kernel,
+    edge: &crate::topology::Edge,
+    fine: f64,
+    budget: &mut usize,
+) -> Result<Option<Vec<[f64; 6]>>> {
+    let Some(curve) = edge.curve.as_ref() else {
+        return Ok(None);
+    };
+    if !(fine.is_finite() && fine > 0.0) {
+        return Ok(None);
+    }
+    curve_boxes(k, curve, &with_solve_slack(&edge.interval), fine, budget)
 }
 
 /// Not upstream: the parameters a curve may be evaluated at by the local solves of
@@ -1298,27 +1529,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_trim_evaluation_keeps_the_previous_derivatives() {
+    fn failed_trim_evaluation_is_returned() {
         let k = Kernel::default();
         let trim = bad_trim();
         assert!(trim.evaluate(&k, 0.0, 1, false, true).is_err());
-        // first evaluation of an edge use: the SM_UNDEF_DOUBLE defaults
-        let mut pt_der = [Vec3::UNDEF; 2];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::UNDEF);
-        assert_eq!(tan, Vec3::UNDEF);
-        assert_eq!(len, 1.0);
-        // a later evaluation: the previous point and derivative
+        // the failure is returned (SM_POC_UNKNOWN at the caller)
         let mut pt_der = [Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0)];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.5, OrientType::Opposite, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::new(1.0, 2.0, 0.0));
-        assert_eq!(tan, Vec3::new(0.0, -1.0, 0.0));
-        assert_eq!(len, 2.0);
-        // with the opt-in the failure is returned (SM_POC_UNKNOWN at the caller)
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
         assert!(eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).is_err());
     }
 
@@ -1440,16 +1656,13 @@ mod tests {
     #[test]
     fn issue_2009_unevaluable_trim_is_unknown() {
         // tangency-labs/smlib 7a35f33 (SmLoop::ContainsUVPoint): a trim point that
-        // cannot be evaluated is not classified (SM_POC_UNKNOWN); without the flag the
-        // port ignores the failed evaluation as upstream does (its outputs keep their
-        // values) and classifies on.
+        // cannot be evaluated is not classified (SM_POC_UNKNOWN), where upstream ignores
+        // the failed evaluation (its outputs keep their values) and classifies on.
         let mut b = square(plane(), true, &[]);
         b.edgeuse_mut(EdgeuseId::from_index(3))
             .unwrap()
             .uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(contains(&mut b.clone_standing_for_self().unwrap(), [0.0, 0.0]).is_ok());
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         let r = contains_uv_point(
             &k,
             &mut b,

@@ -36,14 +36,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_exact_round_classes`.
+/// Every fix, with or without `fillet_exact_round_classes`.
 fn all_fixes(exact_classes: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity"
-            && (exact_classes || name != "fillet_exact_round_classes")
-        {
+        if exact_classes || name != "fillet_exact_round_classes" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -348,12 +346,12 @@ fn stored_pcurves(k: &Kernel, b: &Brep, f: solidcore::topology::FaceId) -> Vec<O
     out
 }
 
-/// Item 5 (WR-722): with `keep_exact_pcurves`, a draft extrusion's cone wall keeps the
+/// Item 5 (WR-722): a draft extrusion's cone wall keeps the
 /// exact seam pcurves its construction made. The half disc of radius 20 (its diameter on
 /// the x axis), drafted 10 degrees in over a height of 10 with the curvature-keeping
 /// corners, has its arc's wall on the cone `rho = 20 - z tan 10`, and every edge of that
-/// face is on it in closed form (to 1e-13). With the flag each of the face's four pcurves
-/// lifts onto its edge to 1e-12. Without it (upstream) the walls' `MakeFaceWithCurves`
+/// face is on it in closed form (to 1e-13). Each of the face's four pcurves
+/// lifts onto its edge to 1e-12. Upstream the walls' `MakeFaceWithCurves`
 /// and `CopyFaces` drop them and the seams' are projected again, 2.37e-6 off their edges.
 #[test]
 fn a_draft_cone_wall_keeps_its_exact_seam_pcurves() {
@@ -363,78 +361,67 @@ fn a_draft_cone_wall_keeps_its_exact_seam_pcurves() {
         create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
     };
     let (tan, cos) = (10.0f64.to_radians().tan(), 10.0f64.to_radians().cos());
-    for keep in [true, false] {
-        let mut k = Kernel::default();
-        k.fixes.keep_exact_pcurves = keep;
-        let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
-        let line = Line::create_line_segment(3, p(-20.0, 0.0), p(20.0, 0.0), None).unwrap();
-        let arc =
-            Ellipse::circle_from_3_points(&k, p(20.0, 0.0), p(0.0, 20.0), p(-20.0, 0.0), 3, false)
-                .unwrap();
-        let curves = [Curve::from(line), Curve::from(arc)];
-        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        let made = create_taper_extrude_with_corner(
-            &mut k,
-            &refs,
-            10.0,
-            10.0,
-            3,
-            OffsetCornerType::CurveExtension,
-        )
-        .unwrap();
-        let TaperExtrude::Solid(b) = made else {
-            panic!("{made:?}")
-        };
-        let cones: Vec<_> = get_faces(&b)
-            .unwrap()
-            .into_iter()
-            .filter(|&f| {
-                matches!(
-                    face2::surface(&b, f).unwrap().unwrap().kind(),
-                    SurfaceKind::Cone(_)
+    let mut k = Kernel::default();
+    let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
+    let line = Line::create_line_segment(3, p(-20.0, 0.0), p(20.0, 0.0), None).unwrap();
+    let arc =
+        Ellipse::circle_from_3_points(&k, p(20.0, 0.0), p(0.0, 20.0), p(-20.0, 0.0), 3, false)
+            .unwrap();
+    let curves = [Curve::from(line), Curve::from(arc)];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let made = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        10.0,
+        10.0,
+        3,
+        OffsetCornerType::CurveExtension,
+    )
+    .unwrap();
+    let TaperExtrude::Solid(b) = made else {
+        panic!("{made:?}")
+    };
+    let cones: Vec<_> = get_faces(&b)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            matches!(
+                face2::surface(&b, f).unwrap().unwrap().kind(),
+                SurfaceKind::Cone(_)
+            )
+        })
+        .collect();
+    assert_eq!(cones.len(), 1);
+    let wall = cones[0];
+    // its edges on the cone in closed form
+    let mut on_cone = 0.0f64;
+    for e in solidcore::topology::topology_traverser::face_edges(&b, wall).unwrap() {
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        let ivl = edge::interval(&b, e).unwrap();
+        for i in 0..=32 {
+            let q = c
+                .evaluate_point(
+                    &k,
+                    ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 32.0,
                 )
-            })
-            .collect();
-        assert_eq!(cones.len(), 1);
-        let wall = cones[0];
-        // its edges on the cone in closed form
-        let mut on_cone = 0.0f64;
-        for e in solidcore::topology::topology_traverser::face_edges(&b, wall).unwrap() {
-            let c = edge::curve(&b, e).unwrap().unwrap();
-            let ivl = edge::interval(&b, e).unwrap();
-            for i in 0..=32 {
-                let q = c
-                    .evaluate_point(
-                        &k,
-                        ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 32.0,
-                    )
-                    .unwrap();
-                let rho = (q.x * q.x + q.y * q.y).sqrt();
-                on_cone = on_cone.max(((rho - (20.0 - q.z * tan)) * cos).abs());
-            }
-        }
-        assert!(on_cone <= 1e-13, "{on_cone:e}");
-        let pcurves = stored_pcurves(&k, &b, wall);
-        eprintln!("keep {keep}: {pcurves:?}");
-        assert_eq!(pcurves.len(), 4);
-        let worst = pcurves.iter().map(|q| q.unwrap().1).fold(0.0f64, f64::max);
-        if keep {
-            assert!(worst <= 1e-12, "{worst:e}");
-        } else {
-            // the projected seams (the behaviour the flag replaces)
-            assert!(
-                (worst - 2.371_850_463_194_937e-6).abs() <= 1e-12,
-                "{worst:e}"
-            );
+                .unwrap();
+            let rho = (q.x * q.x + q.y * q.y).sqrt();
+            on_cone = on_cone.max(((rho - (20.0 - q.z * tan)) * cos).abs());
         }
     }
+    assert!(on_cone <= 1e-13, "{on_cone:e}");
+    let pcurves = stored_pcurves(&k, &b, wall);
+    eprintln!("{pcurves:?}");
+    assert_eq!(pcurves.len(), 4);
+    let worst = pcurves.iter().map(|q| q.unwrap().1).fold(0.0f64, f64::max);
+    assert!(worst <= 1e-12, "{worst:e}");
 }
 
 /// Item 5 (WR-722), the keep step on its own: a face `MakeFaceWithCurves` makes with its
 /// surface's orientation opposite, from the four sides of part of a cylinder's domain
 /// (r 4, h 10) given clockwise in `(u, v)` with their exact iso lines (`pbOptCrvOnSurf`).
-/// With the flag every edge use keeps its iso line: exactly on its side of the domain,
-/// on its edge to 1e-12. Without it (upstream) the orientations are matched against the
+/// Every edge use keeps its iso line: exactly on its side of the domain,
+/// on its edge to 1e-12. Upstream the orientations are matched against the
 /// upward face use's edge uses, which run the other way on this face: `sm_FindBestUVCurve`'s
 /// tangent test refuses every given curve and each is projected again, off its iso line.
 #[test]
@@ -449,95 +436,86 @@ fn an_opposite_face_keeps_the_pcurves_it_is_given() {
     use solidcore::topology::brep::p3::new_brep;
     use solidcore::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
-    for keep in [true, false] {
-        let mut k = Kernel::default();
-        k.fixes.keep_exact_pcurves = keep;
-        let surface = Surface::from(
-            create_cylinder_surface(&k, Point3::new(1.0, 2.0, 3.0), 4.0, 10.0).unwrap(),
-        );
-        let nat = surface.natural_uv_domain_with_nurb(&k).unwrap();
-        let domain = Extent2d::from_bounds(
-            nat.min().x + 0.1 * nat.x_length(),
-            nat.min().y + 0.2 * nat.y_length(),
-            nat.min().x + 0.6 * nat.x_length(),
-            nat.min().y + 0.9 * nat.y_length(),
-        );
-        // the counter-clockwise loop, each UV line parameterised as its curve, then
-        // reversed: clockwise, each side's orientation flipped
-        let natural = surface
-            .create_natural_uv_trim_curves(&k, &domain, SurfParamType::U, false)
-            .unwrap();
-        let mut curves_3d = Vec::new();
-        let mut uv_curves = Vec::new();
-        let mut orientations = Vec::new();
-        for ((c, mut uv), o) in natural
-            .curves_3d
-            .into_iter()
-            .zip(natural.uv_curves)
-            .zip(natural.orients)
-            .rev()
-        {
-            uv.edit_parameterization(&c.natural_interval()).unwrap();
-            curves_3d.push(Some(c));
-            uv_curves.push(Curve::from(uv));
-            orientations.push(if o == OrientType::Same {
-                OrientType::Opposite
-            } else {
-                OrientType::Same
-            });
-        }
-        let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
-        let f = {
-            let mut state = ArenaNotifyState::new(&b);
-            let mut env = state.env(None);
-            let this_face = |face| arena_identity(CacheObject::Face(face));
-            let input = FaceCurvesInput {
-                loops: vec![4],
-                curves_3d: Some(curves_3d),
-                uv_curves: Some(uv_curves),
-                orientations,
-                loop_points: Vec::new(),
-            };
-            make_face_with_curves(
-                &mut k,
-                &mut b,
-                None,
-                input,
-                surface,
-                &domain,
-                OrientType::Opposite,
-                Some(true),
-                &this_face,
-                &mut env,
-            )
-            .unwrap()
-            .face
-            .unwrap()
+    let mut k = Kernel::default();
+    let surface =
+        Surface::from(create_cylinder_surface(&k, Point3::new(1.0, 2.0, 3.0), 4.0, 10.0).unwrap());
+    let nat = surface.natural_uv_domain_with_nurb(&k).unwrap();
+    let domain = Extent2d::from_bounds(
+        nat.min().x + 0.1 * nat.x_length(),
+        nat.min().y + 0.2 * nat.y_length(),
+        nat.min().x + 0.6 * nat.x_length(),
+        nat.min().y + 0.9 * nat.y_length(),
+    );
+    // the counter-clockwise loop, each UV line parameterised as its curve, then
+    // reversed: clockwise, each side's orientation flipped
+    let natural = surface
+        .create_natural_uv_trim_curves(&k, &domain, SurfParamType::U, false)
+        .unwrap();
+    let mut curves_3d = Vec::new();
+    let mut uv_curves = Vec::new();
+    let mut orientations = Vec::new();
+    for ((c, mut uv), o) in natural
+        .curves_3d
+        .into_iter()
+        .zip(natural.uv_curves)
+        .zip(natural.orients)
+        .rev()
+    {
+        uv.edit_parameterization(&c.natural_interval()).unwrap();
+        curves_3d.push(Some(c));
+        uv_curves.push(Curve::from(uv));
+        orientations.push(if o == OrientType::Same {
+            OrientType::Opposite
+        } else {
+            OrientType::Same
+        });
+    }
+    let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    let f = {
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let this_face = |face| arena_identity(CacheObject::Face(face));
+        let input = FaceCurvesInput {
+            loops: vec![4],
+            curves_3d: Some(curves_3d),
+            uv_curves: Some(uv_curves),
+            orientations,
+            loop_points: Vec::new(),
         };
-        let pcurves = stored_pcurves(&k, &b, f);
-        eprintln!("keep {keep}: {pcurves:?}");
-        assert_eq!(pcurves.len(), 4);
-        for q in &pcurves {
-            let (iso, off) = q.unwrap();
-            assert!(off <= 1e-12, "{pcurves:?}");
-            if keep {
-                assert!(iso == 0.0, "{pcurves:?}");
-            }
-        }
-        if !keep {
-            assert!(pcurves.iter().any(|q| q.unwrap().0 > 0.0), "{pcurves:?}");
-        }
+        make_face_with_curves(
+            &mut k,
+            &mut b,
+            None,
+            input,
+            surface,
+            &domain,
+            OrientType::Opposite,
+            Some(true),
+            &this_face,
+            &mut env,
+        )
+        .unwrap()
+        .face
+        .unwrap()
+    };
+    let pcurves = stored_pcurves(&k, &b, f);
+    eprintln!("{pcurves:?}");
+    assert_eq!(pcurves.len(), 4);
+    for q in &pcurves {
+        let (iso, off) = q.unwrap();
+        assert!(off <= 1e-12, "{pcurves:?}");
+        assert!(iso == 0.0, "{pcurves:?}");
     }
 }
 
-/// Item 6: `SmSurface::DropPoint` from a guess takes a stalled local solve for the foot
-/// without `good_drop_result_distances_in_order` (WR-56's fork eaa998a). On a wavy bicubic
+/// Item 6: `SmSurface::DropPoint` from a guess took a stalled local solve for the foot
+/// before WR-56's fork eaa998a. On a wavy bicubic
 /// (an 8 x 8 net over 10 x 10, its heights alternating +-1), the point 3 below
 /// `S(0.1, 0.8)` along the normal, dropped from the guess (0.3, 0.9): `LocalPointSolve_1`
 /// stops without converging (unable to go on) 1e-8 off a stationary point that is not the
 /// foot, its gap's components along the tangents summing to 7.7e-9. That is under
-/// upstream's 1e-4, so upstream returns it, at 2.99999944 from the point. With the flag
-/// only a foot within the local solve's own tolerance `EFF_ZERO (1 + max|P|)` is taken, so
+/// upstream's 1e-4, so upstream returns it, at 2.99999944 from the point. Now only a
+/// foot the local solve converged to at its own tolerance `EFF_ZERO (1 + max|P|)` is taken, so
 /// the drop goes on to the global solve and returns the foot, 4.5e-5 nearer (its gap
 /// 1.4e-8 off the normal, the global solve's own convergence): no point of a 201 x 201
 /// sampling of the surface is nearer.
@@ -596,30 +574,26 @@ fn a_drop_from_a_guess_does_not_take_a_stalled_local_solve() {
     );
     assert!(along > 100.0 * tight && along < 1e-4, "{along:e}");
 
-    let drop = |flag: bool| {
-        let mut k = Kernel::default();
-        k.fixes.good_drop_result_distances_in_order = flag;
-        let opts = DropPointOptions {
-            guess_uv: Some(guess),
-            ..DropPointOptions::default()
-        };
-        let d = s.drop_point::<NoObject>(&k, p, &dom, &opts).unwrap();
-        assert!(d.success);
-        d
+    let opts = DropPointOptions {
+        guess_uv: Some(guess),
+        ..DropPointOptions::default()
     };
-    // upstream: the stalled result is the foot
-    let up = drop(false);
-    eprintln!("upstream {:?} at {}", up.result_uv, up.gap);
-    assert_eq!(up.result_uv, stalled);
-    // with the flag: the global solve's foot, nearer
-    let fixed = drop(true);
-    eprintln!("with the flag {:?} at {}", fixed.result_uv, fixed.gap);
+    // the global solve's foot, nearer than the stalled result upstream returned
+    let fixed = s.drop_point::<NoObject>(&k, p, &dom, &opts).unwrap();
+    assert!(fixed.success);
+    eprintln!("drop {:?} at {}", fixed.result_uv, fixed.gap);
+    assert_ne!(fixed.result_uv, stalled);
+    let stalled_gap = s.evaluate_point(&k, stalled).unwrap().distance(p);
     assert!(
         gap_along(fixed.result_uv) < 1e-7,
         "{:e}",
         gap_along(fixed.result_uv)
     );
-    assert!(up.gap - fixed.gap > 4e-5, "{} {}", up.gap, fixed.gap);
+    assert!(
+        stalled_gap - fixed.gap > 4e-5,
+        "{stalled_gap} {}",
+        fixed.gap
+    );
     let mut nearest = f64::INFINITY;
     for i in 0..=200 {
         for j in 0..=200 {

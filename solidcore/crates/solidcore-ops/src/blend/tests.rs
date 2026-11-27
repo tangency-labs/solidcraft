@@ -35,6 +35,38 @@ fn a_crease_across_a_tangent_edge_is_a_rail_leaving_its_face() {
     );
 }
 
+/// A blend certificate that ran out of its work budget (the kernel's
+/// `BlendFailure::NotCertified`) is the operation's own refusal, naming no size: neither a bare
+/// status nor a fit.
+#[test]
+fn a_certificate_past_its_budget_is_refused_as_not_certified() {
+    use solidcore::error::{Failure, Reason};
+    let e = Failure::new(
+        "blend::fillet_section::GnSectionFsg::certify",
+        Reason::Blend(BlendFailure::NotCertified {
+            halvings: 499,
+            stations: 523,
+        }),
+    )
+    .into_error();
+    assert_eq!(e.sm_status(), Some(solidcore::error::SM_ERR));
+    // the same refusal for a caller that runs the kernel's blend itself (SolidCraft's)
+    assert_eq!(
+        failure(&e),
+        Some(Error::BlendNotCertified {
+            halvings: 499,
+            stations: 523
+        })
+    );
+    assert_eq!(
+        status(e),
+        Error::BlendNotCertified {
+            halvings: 499,
+            stations: 523
+        }
+    );
+}
+
 /// A blend failure with status `SM_ERR` whose statement is the session's generic one.
 fn not_built() -> SolidError {
     use solidcore::error::blend::BlendFailure;
@@ -119,4 +151,15 @@ fn a_session_failure_says_what_the_session_noted() {
     // an error that is no blend failure is not one for the note
     let other = SolidError::invalid_input("test", "refused");
     assert_eq!(noted_failure(&info, &other), None);
+    // a failure whose error info also names a location reports the failing edge point
+    let mut located = noting(
+        FilletErrorType::BadMerge,
+        "Fillet Error: a blend past its faces does not sew into the body along its creases and rails",
+    );
+    located.location = Some(solidcore::Point3::new(-10.0, 2.5, 4.0));
+    assert_eq!(
+        said(&located),
+        "the blend failed (status 1001): the fillet body is not built: a blend past its faces \
+         does not sew into the body along its creases and rails, at the edge at (-10.000, 2.500, 4.000)"
+    );
 }

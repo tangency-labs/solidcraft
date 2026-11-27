@@ -35,6 +35,16 @@ pub struct StepHeader {
     pub description: String,
 }
 
+/// STEP text and the exact written identity of each input body's faces.
+#[derive(Clone, Debug)]
+pub struct StepExport {
+    /// The complete STEP payload.
+    pub text: String,
+    /// `ADVANCED_FACE` ids indexed by input body, then source record face.
+    /// A face used by no shell has id 0.
+    pub face_ids: Vec<Vec<u64>>,
+}
+
 /// The header solidcore-step writes: SolidCraft as the program and system that wrote the file.
 fn product_header(h: &StepHeader) -> product::Header {
     product::Header {
@@ -91,11 +101,18 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
 
 /// STEP text for bodies of one part, named after the file.
 pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<String> {
+    step_export_bodies_with_face_ids(bodies, header).map(|written| written.text)
+}
+
+/// [`step_export_bodies`] with each source record face's written STEP entity id.
+pub fn step_export_bodies_with_face_ids(bodies: &[ExportBody], header: &StepHeader) -> Result<StepExport> {
     let _span = solidcraft_profile::span("kernel", "step_export_bodies");
     for b in bodies {
         b.body.require_brep("STEP export")?;
     }
-    product::bodies(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)
+    let written = product::bodies_with_face_ids(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)?;
+    let face_ids = written.face_ids.into_iter().next().ok_or_else(|| KernelError::Failed("STEP export omitted its product face map".into()))?;
+    Ok(StepExport { text: written.text, face_ids })
 }
 
 #[cfg(test)]
@@ -104,6 +121,27 @@ mod tests {
     use solidcore_record::Vec3;
     use solidcore_step::p21;
     use solidcraft_geom::prelude::*;
+
+    #[test]
+    fn exported_face_ids_find_the_same_faces_after_import() {
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let written = crate::step_export_with_face_ids(&[&body], "face correspondence").unwrap();
+        assert_eq!(written.text, crate::step_export(&[&body], "face correspondence").unwrap());
+        let imported = crate::step_import(&written.text).unwrap();
+        assert_eq!(imported.bodies.len(), 1);
+        let read = &imported.bodies[0];
+        let ids = &written.face_ids[0];
+        assert_eq!(ids.len(), 6);
+        for (index, source) in body.face_sources().unwrap().iter().enumerate() {
+            let crate::FaceSource::Box { axis, high, .. } = source.as_ref().unwrap() else { panic!("box face") };
+            let mut center = [5.0, 10.0, 15.0];
+            center[usize::from(*axis)] = if *high { [10.0, 20.0, 30.0][usize::from(*axis)] } else { 0.0 };
+            let center = Vec3::new(center[0], center[1], center[2]);
+            let matches: Vec<_> = read.face_origin.iter().enumerate().filter(|(_, id)| **id == ids[index]).collect();
+            assert_eq!(matches.len(), 1, "one imported face for each box face");
+            assert!(read.body.point_lies_on_face(matches[0].0, center, 1e-8).unwrap().is_some(), "{source:?} at {center:?}");
+        }
+    }
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {
@@ -165,6 +203,34 @@ mod tests {
         assert_eq!(stated(&text), vec![own]);
     }
 
+    /// Each body comes back as accurate as it was written, whatever is beside it: a box written
+    /// beside a box whose edge may lie 0.3 mm off its faces was read back at 0.3 mm (the file
+    /// stated one uncertainty, the loosest), and so was every body of an Insert Design beside
+    /// one loose body. The bodies come back in the order they were written, with their names.
+    #[test]
+    fn each_body_reads_back_at_its_own_tolerance_in_order() {
+        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let own = bx.record().tolerance;
+        let mut record = crate::box_solid(Vec3::new(30.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 5.0)).unwrap().record().clone();
+        record.edges.first_mut().unwrap().tolerance = 0.3;
+        let loose = crate::Body::from_record(record).unwrap();
+        let far = crate::box_solid(Vec3::new(60.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let named = |name: &str, body| ExportBody { name: name.into(), body, color: None };
+        let text = step_export_bodies(&[named("First", &bx), named("Loose", &loose), named("Last", &far)], &StepHeader::default()).unwrap();
+        let read = crate::step_import(&text).unwrap();
+        let names: Vec<&str> = read.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["First", "Loose", "Last"], "{:?}", read.warnings);
+        for b in &read.bodies {
+            let r = b.body.record();
+            let most = r.edges.iter().map(|e| e.tolerance).chain([r.tolerance]).fold(0.0, f64::max);
+            if b.name == "Loose" {
+                assert!(most >= 0.3, "{}: {most}", b.name);
+            } else {
+                assert!(most <= own, "{} read at {most}, written at {own}", b.name);
+            }
+        }
+    }
+
     #[test]
     fn assembly_names_colours_round_trip() {
         use crate::{box_solid, cylinder, measure, step_import, step_validate};
@@ -211,5 +277,87 @@ mod tests {
             ExportProduct { name: "B".into(), bodies: vec![ExportBody { name: "B".into(), body: &bx, color: None }], children: vec![] },
         ];
         assert!(step_export_products(&bad, 0, &StepHeader::default()).is_err());
+    }
+
+    /// Two equal-diameter perpendicular holes with intersecting axes (#22220): the intersection
+    /// curves are analytic ellipses whose minor axis equals the hole radius, so exported `ELLIPSE`
+    /// entities must satisfy `semi_axis_1 >= semi_axis_2`, keep vertices on-curve and loops
+    /// closed, validate, and round-trip cleanly.
+    #[test]
+    fn equal_diameter_perpendicular_intersecting_holes_step_export() {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+        use std::f64::consts::PI;
+
+        let r = 5.0_f64;
+        let side = 40.0_f64;
+        let expected = side.powi(3) - 2.0 * PI * r * r * side + 16.0 * r.powi(3) / 3.0;
+
+        // Case 1: primitive cylinders along Z and X through the block centre.
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(side, side, side)).unwrap();
+        let hole_z = crate::cylinder(Vec3::new(20.0, 20.0, -5.0), Vec3::Z, r, 50.0).unwrap();
+        let hole_x = crate::cylinder(Vec3::new(-5.0, 20.0, 20.0), Vec3::X, r, 50.0).unwrap();
+        let one = crate::boolean(&block, &hole_z, crate::BoolOp::Cut).unwrap().unwrap();
+        let prim_body = crate::boolean(&one, &hole_x, crate::BoolOp::Cut).unwrap().unwrap();
+
+        // Case 2: extruded circular sketches on XY and XZ through the centred block.
+        let centered = crate::box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let circle = || Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: vec![] };
+        let sk_z = crate::extrude_planar_regions(&Plane::XY, &[circle()], -25.0, 25.0).unwrap();
+        let sk_y = crate::extrude_planar_regions(&Plane::XZ, &[circle()], -25.0, 25.0).unwrap();
+        let one = crate::boolean(&centered, &sk_z, crate::BoolOp::Cut).unwrap().unwrap();
+        let sketch_body = crate::boolean(&one, &sk_y, crate::BoolOp::Cut).unwrap().unwrap();
+
+        for (label, body) in [("primitives", prim_body), ("sketched", sketch_body)] {
+            let text = crate::step_export(&[&body], label).unwrap();
+            crate::step_validate(&text).unwrap();
+            let ex = p21::parse(&text).unwrap();
+
+            // Every ELLIPSE entity must have semi_axis_1 >= semi_axis_2 > 0 (OpenCascade requirement).
+            let mut ellipse_count = 0usize;
+            for ent in ex.entities.values().filter(|e| e.name() == "ELLIPSE") {
+                let a = ent.params()[2].as_f64().unwrap();
+                let b = ent.params()[3].as_f64().unwrap();
+                assert!(a >= b && b > 0.0, "{label}: ELLIPSE has semi_axis_1 ({a}) < semi_axis_2 ({b})");
+                ellipse_count += 1;
+            }
+            assert!(ellipse_count >= 4, "{label}: expected at least 4 ELLIPSE entities, found {ellipse_count}");
+
+            // Every ADVANCED_FACE must have closed EDGE_LOOPs and a FACE_OUTER_BOUND.
+            for face in ex.entities.values().filter(|e| e.name() == "ADVANCED_FACE") {
+                let bounds = face.params()[1].as_list().unwrap();
+                let outer_count = bounds.iter().filter(|b| ex.get(b.as_ref_id().unwrap()).unwrap().name() == "FACE_OUTER_BOUND").count();
+                assert_eq!(outer_count, 1, "{label}: face without single FACE_OUTER_BOUND");
+                for b in bounds {
+                    let bound = ex.get(b.as_ref_id().unwrap()).unwrap();
+                    let lp = ex.get(bound.params()[1].as_ref_id().unwrap()).unwrap();
+                    if lp.name() != "EDGE_LOOP" {
+                        continue;
+                    }
+                    let oes = lp.params()[1].as_list().unwrap();
+                    assert!(!oes.is_empty(), "{label}: empty EDGE_LOOP");
+                    let ends: Vec<(u64, u64)> = oes
+                        .iter()
+                        .map(|oe| {
+                            let oe = ex.get(oe.as_ref_id().unwrap()).unwrap();
+                            let ec = ex.get(oe.params()[3].as_ref_id().unwrap()).unwrap();
+                            let (s, e) = (ec.params()[1].as_ref_id().unwrap(), ec.params()[2].as_ref_id().unwrap());
+                            if oe.params()[4].as_bool().unwrap() { (s, e) } else { (e, s) }
+                        })
+                        .collect();
+                    for i in 0..ends.len() {
+                        let next = (i + 1) % ends.len();
+                        assert_eq!(ends[i].1, ends[next].0, "{label}: EDGE_LOOP not closed at edge {i}");
+                    }
+                }
+            }
+
+            // Round-trip import: no warnings, valid body, matching face count and Steinmetz volume.
+            let imp = crate::step_import(&text).unwrap();
+            assert!(imp.warnings.is_empty(), "{label}: {:?}", imp.warnings);
+            assert_eq!(imp.bodies.len(), 1, "{label}");
+            assert_eq!(imp.bodies[0].body.face_count(), body.face_count(), "{label}");
+            let vol = crate::measure(&imp.bodies[0].body).unwrap().volume;
+            assert!((vol - expected).abs() < 1e-3, "{label}: got volume {vol}, expected {expected}");
+        }
     }
 }

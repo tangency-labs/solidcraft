@@ -17,6 +17,18 @@ pub const MAX_NEAREST: usize = 1000;
 /// Largest clearance (mm).
 pub const MAX_CLEARANCE: f64 = 1e6;
 
+/// What `envelopes` says when it is neither true nor false, here and in `inspect.interference`.
+pub(crate) const ENVELOPES_MESSAGE: &str = "`envelopes` must be true (check each component envelope instead of the bodies inside it) or false";
+
+/// `envelopes`: true or false, `null` as left out, with the handlers' message for anything else.
+pub(super) fn envelopes_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(ENVELOPES_MESSAGE))),
+    }
+}
+
 /// Find the solid bodies that overlap, and those closer than `clearance`, in world placement.
 /// Distances are measured on the exact faces and edges; the meshes only rule pairs out. Mesh
 /// bodies aren't measured: each is listed in `unchecked`.
@@ -48,6 +60,11 @@ pub struct ClearanceParams {
     pub nearest: Option<f64>,
     #[serde(default)]
     pub skip_within: Option<SkipWithin>,
+    /// Component envelopes (`solid.bounding_solid` with `component`) are left out unless named
+    /// (the default, false); true checks each one instead of the bodies inside it, and a body
+    /// named inside one means it. An envelope is never paired with a body inside it.
+    #[serde(default, deserialize_with = "envelopes_key")]
+    pub envelopes: Option<bool>,
 }
 
 /// A number from 0 to `max`, read as the handler reads it (`params::num`: finite, under 1e9 in
@@ -117,7 +134,8 @@ pub struct Clearance {
     pub overlaps: Vec<Overlap>,
     /// Pairs closer than `clearance`, nearest first; a pair in contact is at 0.
     pub near: Vec<NearPair>,
-    /// With `nearest`: each body of `bodies`, with its nearest others.
+    /// With `nearest`: each body of `bodies`, with its nearest others (pairs in `unchecked` are
+    /// omitted).
     pub nearest: BTreeMap<String, Vec<Neighbour>>,
     /// Pairs whose overlap couldn't be worked out, and each mesh body, which isn't measured
     /// (`b` is then `null`).
@@ -190,6 +208,15 @@ pub struct Unchecked {
     /// The other body; `null` for a mesh body.
     pub b: Option<String>,
     pub reason: String,
+    /// Non-boolean minimum distance between the pair (mm), when overlap could not be worked out
+    /// but the boundary distance was still computable; absent for mesh bodies or when distance
+    /// could not be computed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance_mm: Option<f64>,
+    /// `false` when `distance_mm` was measured on the meshes; absent when measured on the exact
+    /// faces and edges or when `distance_mm` is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact: Option<bool>,
 }
 
 #[cfg(test)]

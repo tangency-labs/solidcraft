@@ -9,8 +9,15 @@
 # C:solidcore, its parent is the previous mirror commit, and it keeps C's author, committer, dates
 # and message, plus a `solidcraft: <C>` trailer. The last commit of each run also carries
 # `solidcraft-main: <main>`, the main commit the run mirrored up to, so the next run walks only
-# <that>..main. Commits reached through a merge's second parent (a kernel branch's own commits)
-# are mirrored one by one, like main's own.
+# <that>..main. Only main's first-parent commits are mirrored: one per pull request, whether the
+# queue squashed it or landed it as a merge commit. A merged branch's own commits (work in
+# progress, built on an older main) are not mirrored one by one; its merge commit carries them.
+# A merge commit's subject is GitHub's "Merge pull request #N from owner/branch"; its mirror takes
+# the pull request's title instead (the first non-empty line of the body) with " (#N)", as a
+# squash commit's subject reads, so SolidCore's log reads the same either way.
+#
+# `scripts/ci/solidcore-mirror.sh --message <commit>` prints the message a commit would be mirrored
+# with (before the trailers), and nothing else.
 #
 # The first run (no trailer on solidcore's tip) starts from the vendoring merge: the merge on main
 # whose second parent is solidcore's tip (git subtree add), so the vendored history maps to itself.
@@ -18,6 +25,38 @@
 # Never `git subtree split`: it replays main's whole history (about 100 minutes here, and it
 # overflows dash's recursion limit on Ubuntu).
 set -euo pipefail
+
+# The message commit $1 is mirrored with, before the trailers. A squash commit (one parent) keeps
+# its message. A merge commit "Merge pull request #N from ..." becomes "<first non-empty body line>
+# (#N)", then the rest of the body; with no body, or no PR number in the subject, it keeps its own.
+message() {
+  local c=$1 msg subject n rest title
+  msg=$(git log -1 --format=%B "$c")
+  if [ "$(git rev-list --no-walk --parents -n 1 "$c" | wc -w)" -le 2 ]; then
+    printf '%s\n' "$msg"
+    return
+  fi
+  subject=$(head -n 1 <<<"$msg")
+  n=$(sed -n 's/^Merge pull request #\([0-9][0-9]*\)\( .*\)\{0,1\}$/\1/p' <<<"$subject")
+  rest=$(tail -n +2 <<<"$msg" | sed '/[^[:space:]]/,$!d')
+  title=$(head -n 1 <<<"$rest")
+  if [ -z "$n" ] || [ -z "$title" ]; then
+    printf '%s\n' "$msg"
+    return
+  fi
+  case "$title" in
+    *" (#$n)") printf '%s\n' "$title" ;;
+    *) printf '%s (#%s)\n' "$title" "$n" ;;
+  esac
+  rest=$(tail -n +2 <<<"$rest")
+  if [ -n "${rest//[[:space:]]/}" ]; then
+    printf '\n%s\n' "$(sed '/[^[:space:]]/,$!d' <<<"$rest")"
+  fi
+}
+if [ "${1:-}" = --message ]; then
+  message "$(git rev-parse --verify "${2:?commit}^{commit}")"
+  exit 0
+fi
 
 prefix=${PREFIX:-solidcore}
 remote=$(git rev-parse --verify "${1:?solidcore tip}^{commit}")
@@ -55,7 +94,7 @@ mirror() { # <commit> [main]: one mirror commit for <commit> on top of $tip
     echo "::error::$c has no $prefix/: refusing to mirror a deleted kernel." >&2
     exit 1
   fi
-  msg=$(git log -1 --format=%B "$c" | git interpret-trailers --if-exists add --trailer "solidcraft: $c" ${m:+--trailer "solidcraft-main: $m"})
+  msg=$(message "$c" | git interpret-trailers --if-exists add --trailer "solidcraft: $c" ${m:+--trailer "solidcraft-main: $m"})
   tip=$(
     GIT_AUTHOR_NAME=$(git log -1 --format=%an "$c") GIT_AUTHOR_EMAIL=$(git log -1 --format=%ae "$c") \
     GIT_AUTHOR_DATE=$(git log -1 --format=%ad --date=raw "$c") \
@@ -71,9 +110,9 @@ mirror() { # <commit> [main]: one mirror commit for <commit> on top of $tip
   count=$((count + 1))
 }
 
-# Every commit since the last run that changes solidcore/, oldest first. History simplification
-# follows a merge into the side it took solidcore/ from, so a merged branch's commits are listed.
-mapfile -t commits < <(git rev-list --reverse --topo-order "$last..$main" -- "$prefix")
+# Every first-parent commit since the last run that changes solidcore/, oldest first. A merge
+# counts when solidcore/ differs from its first parent.
+mapfile -t commits < <(git rev-list --reverse --first-parent "$last..$main" -- "$prefix")
 n=${#commits[@]}
 for i in "${!commits[@]}"; do
   if [ "$i" -eq $((n - 1)) ] && [ "$(git rev-parse "${commits[$i]}:$prefix")" = "$(git rev-parse "$main:$prefix")" ]; then
@@ -82,7 +121,7 @@ for i in "${!commits[@]}"; do
     mirror "${commits[$i]}"
   fi
 done
-# A merge that resolved solidcore/ to neither side is not listed: then mirror main's tree itself.
+# Should the walk miss main's tree (it should not with --first-parent), mirror main's tree itself.
 if [ "$(git rev-parse "$tip^{tree}")" != "$(git rev-parse "$main:$prefix")" ]; then
   mirror "$(git rev-list -1 --first-parent "$main" -- "$prefix")" "$main"
   [ "$(git rev-parse "$tip^{tree}")" = "$(git rev-parse "$main:$prefix")" ] || { echo "::error::could not reach $main:$prefix" >&2; exit 1; }
