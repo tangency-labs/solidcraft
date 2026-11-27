@@ -165,7 +165,7 @@ fn fit(points: &[Vec2], closed: bool, tolerance: f64) -> Option<DxfShape> {
         return None;
     }
     // Every point sits on the circle.
-    let slack = 1e-4 * r + 1e-6;
+    let slack = (1e-4 * r + 1e-6).min(tolerance);
     if pts.iter().any(|p| ((*p - c).len() - r).abs() > slack) {
         return None;
     }
