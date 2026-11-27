@@ -5776,7 +5776,7 @@ fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
     // A file whose stated tolerance resolves every edge is read once, at what it states.
     let imp = step_import(&text).unwrap_or_else(|e| panic!("{e}"));
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-    // So is one whose shortest edge is longer than the stated tolerance, however little.
+    // So is one whose shortest edge is twice the stated tolerance: its vertices' balls touch, no more.
     let (_, coarse) = stating_coarse(0.02);
     let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
