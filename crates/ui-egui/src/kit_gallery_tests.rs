@@ -508,6 +508,7 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
             app.session.path = Some(fixture.clone());
             let preview = image::load_from_memory(include_bytes!("../../../assets/samples/exports/0.png")).unwrap().to_rgba8();
             let preview = egui::ColorImage::from_rgba_unmultiplied([preview.width() as usize, preview.height() as usize], preview.as_raw());
+            let preview = crate::ui_kit::PreviewImage { picture: preview, shadow: None };
             crate::home::install(&mut app.home, &ctx, &fixture, Some(preview));
             app.preferences.theme = if dark { "dark" } else { "light" }.into();
             app.ui.dark = dark;

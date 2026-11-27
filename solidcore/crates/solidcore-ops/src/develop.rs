@@ -91,6 +91,23 @@ pub fn offset_contour(
     k::offset_contour(&cv::segs(segs), depth, thickness, flip, smooth).map(|s| cv::record_segs(&s))
 }
 
+/// A closed profile `segs` moved `depth` across its plane ([`solidcore::develop::offset_closed_contour`]),
+/// as [`offset_contour`] moves an open one, the last piece meeting the first at a corner like any
+/// other: a lip's band edge.
+///
+/// # Errors
+/// The kernel's [`ContourRefusal`]: why the shifted profile does not hold together.
+pub fn offset_closed_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    k::offset_closed_contour(&cv::segs(segs), depth, thickness, flip, smooth)
+        .map(|s| cv::record_segs(&s))
+}
+
 /// A curve through `points` in order ([`solidcore::develop::curve_through`]): a line where they
 /// lie on one, else a clamped cubic spline through every one of them.
 #[must_use]
@@ -644,6 +661,25 @@ mod tests {
         assert_eq!(
             offset_contour(&back, 1.0, 2.0, false, 1e-6),
             Err(ContourRefusal::TurnsBack)
+        );
+    }
+
+    /// A closed profile comes back as record segments: the square from (0, 0) to (10, 10) run
+    /// counter-clockwise, moved 1 to the left of the travel, is the square from (1, 1) to (9, 9),
+    /// joined at (1, 1) where it closes too.
+    #[test]
+    fn a_closed_contour_offset_comes_back_as_record_segments() {
+        let at = |x: f64, y: f64| Vec2 { x, y };
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let corners = [at(0.0, 0.0), at(10.0, 0.0), at(10.0, 10.0), at(0.0, 10.0)];
+        let moved = [at(1.0, 1.0), at(9.0, 1.0), at(9.0, 9.0), at(1.0, 9.0)];
+        let square: Vec<Seg2> = (0..4)
+            .map(|i| line(corners[i], corners[(i + 1) % 4]))
+            .collect();
+        let inside: Vec<Seg2> = (0..4).map(|i| line(moved[i], moved[(i + 1) % 4])).collect();
+        assert_eq!(
+            offset_closed_contour(&square, 1.0, 0.0, false, 1e-6),
+            Ok(inside)
         );
     }
 }

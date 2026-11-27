@@ -2004,6 +2004,8 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["Seed".into()],
                 placements: Vec::new(),
@@ -2081,6 +2083,8 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["A".into(), "B".into()],
                 placements: Vec::new(),
@@ -3451,7 +3455,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
 fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
     let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
-    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    use solidcraft_kernel::mesh::ReconstructionKind::{Analytic, Faceted};
     for (kind, digest) in [
         (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
         (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
@@ -3695,6 +3699,39 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+#[test]
+fn an_old_cell_grid_has_no_sketched_cell_and_is_saved_as_it_was() {
+    // A design from before the sketched cell (#21722): a built-in shape and a size, none of the
+    // sketched cell's fields. It reads with them all absent and writes none of them back.
+    let old = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "shape": "square",
+        "size": "10", "web": "2", "clip": "whole", "depth": "1.5"
+    });
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::CellGrid { size, cell_sketch, pitch_x, pitch_y, stagger, cell_angle, flip, cell_origin_x, cell_origin_y, .. } = &kind else {
+        panic!("a cell grid");
+    };
+    assert!(size.is_some() && cell_sketch.is_none() && pitch_x.is_none() && pitch_y.is_none());
+    assert!(stagger.is_none() && cell_angle.is_none() && !flip && cell_origin_x.is_none() && cell_origin_y.is_none());
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "cell_angle", "flip", "cell_origin_x", "cell_origin_y"] {
+        assert!(saved.get(key).is_none(), "{key} in {saved}");
+    }
+    assert_eq!(saved.get("size"), old.get("size"));
+    // A sketched cell has no size, and keeps its layout through a save.
+    let sketched = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "web": "2", "depth": "1.5",
+        "cell_sketch": 2, "pitch_x": "20", "pitch_y": "20", "stagger": "0.5", "flip": true
+    });
+    let kind: FeatureKind = serde_json::from_value(sketched.clone()).unwrap();
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "flip"] {
+        assert_eq!(saved.get(key), sketched.get(key), "{key}");
+    }
+    assert!(saved.get("size").is_none());
+    assert_eq!(kind.input_sketches(), vec![1, 2], "deleting the cell's sketch deletes the grid");
 }
 
 /// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
@@ -4429,6 +4466,8 @@ fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sk
                 origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
                 angle: Some("90 deg".into()),
                 copy: false,
+                carry: Vec::new(),
+                leave: Vec::new(),
                 copy_frames: Vec::new(),
             },
             Some("MoveAbout"),
@@ -5041,6 +5080,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["BodyB".into()],
                 placements: vec![vec![occ_b]],
