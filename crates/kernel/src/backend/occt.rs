@@ -281,8 +281,10 @@ impl Modelling for Occt {
         body.fillet_nearest(&points, radius).map_err(failed)
     }
 
-    fn fillet_removing(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
-        unsupported("a fillet that removes overflowing picks")
+    fn fillet_removing(&self, body: &Shape, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
+        // Every pick rounded, none removed: where rounds overflow their faces OCCT fails, and
+        // solidcore runs it and says which picks went.
+        self.fillet(body, edges, radius, turn).map(|s| (s, Vec::new()))
     }
 
     fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
@@ -858,6 +860,41 @@ mod tests {
             assert!((theirs.0 - area).abs() <= 1e-9 * area, "{what}: area {} against {area}", theirs.0);
             assert!((ours.0 - theirs.0).abs() <= 1e-9 * area, "{what}: area {} against {}", theirs.0, ours.0);
             assert_eq!((ours.1, ours.2, ours.3), (theirs.1, theirs.2, theirs.3), "{what}: faces, edges, a sheet");
+        }
+    }
+
+    #[test]
+    fn the_fillet_feature_s_rounds_match_solidcore() {
+        use std::f64::consts::PI;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let removing = |edges: Vec<Vec3>, r: f64| {
+            move || {
+                let (b, gone) = crate::route::fillet_removing(&cube()?, &edges, r, FilletTurn::Mitre)?;
+                assert!(gone.is_empty(), "no pick removed");
+                Ok(b)
+            }
+        };
+        // One edge, r 1: the section r² − πr²/4 along 10.
+        same_solid("one edge rounded", 1000.0 - 10.0 * (1.0 - PI / 4.0), removing(vec![v(5.0, 0.0, 10.0)], 1.0));
+        // The four top edges, mitred (the matrix's closed form).
+        let top = vec![v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0), v(5.0, 10.0, 10.0), v(0.0, 5.0, 10.0)];
+        same_solid("the top edges rounded, mitred", 1000.0 - 4.0 * (10.0 * (1.0 - PI / 4.0) - 2.0 * (5.0 / 6.0 - PI / 4.0)), removing(top, 1.0));
+    }
+
+    #[test]
+    fn a_round_too_large_reads_as_solidcore_s() {
+        use crate::route::foreign::{Kernel, set_kernel};
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0)).unwrap();
+        let _chosen = crate::route::foreign::choosing();
+        let edges = [v(5.0, 0.0, 10.0)];
+        set_kernel(Kernel::Solidcore);
+        let ours = crate::route::fillet_removing(&cube(), &edges, 12.0, FilletTurn::Mitre).map(|(b, g)| (volume(&b), g.len()));
+        set_kernel(Kernel::Occt);
+        let theirs = crate::route::fillet_removing(&cube(), &edges, 12.0, FilletTurn::Mitre).map(|(b, g)| (volume(&b), g.len()));
+        set_kernel(Kernel::Solidcore);
+        match (ours, theirs) {
+            (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+            (a, b) => assert!(a.is_ok() && b.is_ok(), "{a:?} against {b:?}"),
         }
     }
 }

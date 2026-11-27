@@ -233,6 +233,19 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 /// them removes whole is not rounded; a single concave round running off the flat face it rolls
 /// on carries that face on.
 pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    #[cfg(feature = "backend-occt")]
+    {
+        let mut gone = Vec::new();
+        if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Fillet, &[body], |k, f| match f {
+            [fb] => k.fillet_removing(fb, edges, radius, turn).map(|(s, g)| {
+                gone = g;
+                Some(s)
+            }),
+            _ => Err(solidcraft_kernel_api::BackendError::Invalid("a fillet takes one body".into())),
+        }) {
+            return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the fillet is empty".into()))).map(|b| (b, gone));
+        }
+    }
     match which(OpKind::Fillet) {
         Which::Solidcore => Solidcore.fillet_removing(body, edges, radius, turn),
     }
