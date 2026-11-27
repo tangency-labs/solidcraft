@@ -14,9 +14,6 @@ pub struct InspectResult {
     pub manifest: crate::plugin::Manifest,
     /// Required capabilities and the optional capabilities this host supports; grants no permissions.
     pub granted_capabilities: Vec<String>,
-    /// Where a URL install came from, as `host/owner/repo`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
     /// SHA-256 of the exact manifest bytes and component. Review the manifest before using it.
     pub approval: String,
     pub host_limits: crate::plugin::HostLimits,
@@ -357,6 +354,9 @@ pub struct InstallResult {
     /// Repository recorded for updates when installed from a URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// Where a URL install came from, as `host/owner/repo`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
