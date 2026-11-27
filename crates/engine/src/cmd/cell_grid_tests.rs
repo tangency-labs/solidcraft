@@ -823,6 +823,18 @@ fn square_cells_through_a_tubes_outside_wall_remove_exactly_their_sectors() {
     // V = 21488.5 - 54 x 2.85 x 71.7744 = 10442.4.
     let mut s = tube();
     let faces_before: usize = s.model.state().bodies.iter().map(|b| b.body.face_count()).sum();
+    // Angle 0 is the record's own frame x axis, where the outside's seam edge lies: the kernel
+    // does not put it on +X, so it is read off the wall before the cut.
+    let seam = {
+        let st = s.model.state();
+        let [b] = st.bodies.as_slice() else { panic!("one tube") };
+        let w = (0..b.body.face_count())
+            .filter_map(|f| solidcraft_kernel::cylinder_wall(&b.body, f).ok())
+            .find(|w| (w.radius - 30.0).abs() < 1e-6)
+            .expect("the outside wall");
+        assert_eq!(w.axis, [0.0, 0.0, 1.0], "{w:?}");
+        w.x_dir[1].atan2(w.x_dir[0])
+    };
     wall(&mut s, json!({})).unwrap();
     let size = pitch_18(30.0) - 2.0;
     let expect = TUBE_V0 - 54.0 * 2.85 * size * size;
@@ -836,10 +848,10 @@ fn square_cells_through_a_tubes_outside_wall_remove_exactly_their_sectors() {
     // seam, so counted before) and 4 cut faces per cell: its two sides and its top and bottom.
     // The outside and the bore are not split by the holes.
     assert_eq!(body.body.face_count(), faces_before + 4 * 54);
-    // Angle 0 is the record's own (+X for a cylinder made round Z): the seam sits mid-web, and
-    // the first cell's centre is p/2 round, at 10 deg. Both at R = 28.5, inside the wall.
+    // The seam sits mid-web, and the first cell's centre is p/2 round from it, at 10 deg. Both
+    // at R = 28.5, inside the wall.
     let at = |deg: f64| {
-        let a = deg.to_radians();
+        let a = seam + deg.to_radians();
         solidcore_record::Vec3::new(28.5 * a.cos(), 28.5 * a.sin(), 20.0)
     };
     assert_eq!(body.body.classify_point(at(10.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "a cell centre is cut");
