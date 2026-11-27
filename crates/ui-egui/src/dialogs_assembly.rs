@@ -253,6 +253,15 @@ impl Searched {
     }
 }
 
+/// As-built: a component picked whole, by its Browser row or selected when the dialog opened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WholeComponent {
+    /// The placement that was picked: the occurrence ids from the root.
+    pub path: Vec<u64>,
+    /// Its bodies, those of its sub-components included.
+    pub bodies: Vec<String>,
+}
+
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
@@ -309,10 +318,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
-    /// As-built: the bodies of each component picked whole (its Browser row, or the component
-    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
-    /// once any of its bodies leaves Components.
-    pub whole_components: Vec<Vec<String>>,
+    /// As-built: each component picked whole (its Browser row, or the component selected when
+    /// the dialog opened). Its bodies are one side, not parts to separate; a record goes once any
+    /// of its bodies leaves Components.
+    pub whole_components: Vec<WholeComponent>,
 }
 
 impl JointForm {
@@ -601,7 +610,20 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             return Some(Sel::SketchPoint { id: format!("{sketch}:{point}") });
         }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
+        // A between-faces reference is two faces, which no one pick stands for; the dialog
+        // keeps the constraint's own saved reference (its origins, as an edit loads them).
+        Snap::BetweenFaces { .. } => return None,
     };
+    placed_geometry_pick(s, o, pick, face, edge)
+}
+
+/// Each face of a saved between-faces origin, as a separate pick in Constrain.
+pub(crate) fn between_face_picks(app: &SolveApp, o: &JointOrigin) -> Option<[Option<Sel>; 2]> {
+    let Snap::BetweenFaces { a, b } = &o.snap else { return None };
+    Some([a, b].map(|f| placed_geometry_pick(&app.session, o, f.pick, Some(&f.face), None)))
+}
+
+fn placed_geometry_pick(s: &Session, o: &JointOrigin, pick: Vec3, face: Option<&str>, edge: Option<&str>) -> Option<Sel> {
     // The pick is in its part's coordinates; the placed bodies are in the world.
     let path = origin_placement(s, o)?;
     let (_, at) = s.doc.path_placement(&path)?;
@@ -1514,10 +1536,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
         }
         Asm::Joint(f) => {
             let picked = sel_items(inputs, 0);
-            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            f.whole_components.retain(|w| w.bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
             // As-built: two components picked, the position comes next. Counted as OK counts
-            // them: a component with two bodies is one.
-            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
+            // them: a component with two bodies, or with a sub-component, is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked, &f.whole_components).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -2635,7 +2657,8 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
     // As-built: one component picked whole is one side, and the second is still to come (#21842).
-    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    let whole =
+        f.as_built && f.whole_components.iter().any(|w| w.bodies.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.bodies.contains(b)));
     if whole {
         return None;
     }
@@ -2667,14 +2690,17 @@ pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput])
     if f.editing.is_some() {
         return None;
     }
-    let picks: Vec<&Sel> =
-        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
     let doc = &app.session.doc;
     let mut occs: Vec<u64> = Vec::new();
-    for pick in picks {
-        let occ = side_occurrence(&app.session, pick)?;
-        if !occs.contains(&occ) {
-            occs.push(occ);
+    if f.as_built {
+        // The components as OK counts them: a component picked whole is one.
+        occs = occurrences(&app.session, sel_items(inputs, 0), &f.whole_components);
+    } else {
+        for pick in (0..2).filter_map(|i| sel_items(inputs, i).first()) {
+            let occ = side_occurrence(&app.session, pick)?;
+            if !occs.contains(&occ) {
+                occs.push(occ);
+            }
         }
     }
     let [a, b] = occs.as_slice() else { return None };
@@ -2704,29 +2730,46 @@ fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
     }
 }
 
-/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
-pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
+/// As-built: the component placed at `path` was picked whole, as these bodies. Kept while
+/// Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[String]) {
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
     let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
-    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
-        f.whole_components.push(bodies.to_vec());
+    let whole = WholeComponent { path: path.to_vec(), bodies: bodies.to_vec() };
+    if f.as_built && held && !bodies.is_empty() && !f.whole_components.contains(&whole) {
+        f.whole_components.push(whole);
     }
+}
+
+/// As-built: the row of a component inside one picked whole, or around one, adds that component
+/// as a side of its own, where a second click on a row otherwise takes its bodies out again.
+pub(crate) fn row_adds_nested_whole(d: &Dialog, path: &[u64]) -> bool {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    f.as_built
+        && f.whole_components.iter().any(|w| path.starts_with(&w.path) || w.path.starts_with(path))
+        && !f.whole_components.iter().any(|w| w.path == path)
 }
 
 /// As-built with fewer than two components in Components: they are still being picked.
 pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built && occurrences(s, sel_items(&d.inputs, 0), &f.whole_components).len() < 2)
 }
 
-/// The occurrences of picked bodies (deduplicated, in pick order).
-fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
+/// The occurrences of picked bodies (deduplicated, in pick order). A body of a component picked
+/// whole counts as that component, also when a sub-component places it; where several whole picks
+/// hold it (a component and its sub-component), as each of them, in the order they were picked.
+fn occurrences(s: &Session, items: &[Sel], whole: &[WholeComponent]) -> Vec<u64> {
     let mut out = Vec::new();
     for x in items {
-        if let Sel::Body { name } = x
-            && let Some(o) = occurrence_of_body(s, name)
-            && !out.contains(&o)
-        {
-            out.push(o);
+        let Sel::Body { name } = x else { continue };
+        let mut held: Vec<u64> = whole.iter().filter(|w| w.bodies.contains(name)).filter_map(|w| w.path.last().copied()).collect();
+        if held.is_empty() {
+            held.extend(occurrence_of_body(s, name));
+        }
+        for o in held {
+            if !out.contains(&o) {
+                out.push(o);
+            }
         }
     }
     out
@@ -2835,7 +2878,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(out);
             }
             if f.as_built {
-                let occs = occurrences(s, sel_items(inputs, 0));
+                let occs = occurrences(s, sel_items(inputs, 0), &f.whole_components);
                 if occs.len() != 2 {
                     return Err("select two components".into());
                 }
@@ -2887,7 +2930,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::RigidGroup => {
             let items = sel_items(inputs, 0);
-            let occs = occurrences(s, items);
+            let occs = occurrences(s, items, &[]);
             if occs.len() < 2 {
                 if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
                     return Err(solidcraft_ui_text::format(
@@ -3003,8 +3046,10 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
-    // A constraint's reply: how free its part is with the constraint the preview shows.
-    let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
+    // Keep the placement report for Constrain's freedom line. Its round-part Center mode
+    // creates a line-on-plane joint rather than a planar constraint.
+    let placed =
+        cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.") || c == "joint.create").map(|(_, r)| r.clone());
     let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
     let before = preview.before.clone();
     let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
@@ -3119,7 +3164,8 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
+    let center = matches!(&d.kind, Kind::Assembly(Asm::Constrain(f)) if f.center);
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let center_frame = under
         .as_ref()
@@ -3163,8 +3209,9 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint and a constraint name their two picks; a joint origin and a trace have one.
-    let two = matches!(k, Asm::Joint(_) | Asm::Constrain(_));
+    // A joint and an ordinary constraint name their two picks. In Center, the first two
+    // picks share a part; mark both walls alike, leaving the part's picks in the other colour.
+    let two = !center && matches!(k, Asm::Joint(_) | Asm::Constrain(_));
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
@@ -3178,9 +3225,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .inputs
         .iter()
         .enumerate()
-        .filter(|(_, i)| i.accept == SNAPS)
+        .filter(|(_, i)| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES)
         .filter_map(|(n, i)| {
-            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), if n == 0 { t.accent } else { t.warning })))
+            let color = if n < if center { 2 } else { 1 } { t.accent } else { t.warning };
+            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), color)))
         })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {

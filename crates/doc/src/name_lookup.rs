@@ -238,7 +238,9 @@ pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: 
             .or_else(|| recover_blend_numbered_edge(b, name, near))
             .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
             .or_else(|| recover_misnumbered_side_edge(b, name, near))
+            .or_else(|| recover_numbered_edge_of_split_face(b, name, near))
             .or_else(|| recover_positional_edge(b, name, near))
+            .or_else(|| recover_numbered_rib_edge(b, name, near))
             .ok_or(miss)
     })
 }
@@ -425,6 +427,39 @@ fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Optio
         verified: false,
         on_point: true,
     })
+}
+
+/// A saved edge that was one of several between two faces, numbered by where they lay
+/// (`F20:side:l7|F34:side:c3~1`), where a face it names has been split into pieces since, each
+/// named after the faces around it (`F34:side:c3#[F20:side:a14,F20:side:l7]`): every piece
+/// answers to the saved face, so the edges between the other face and those pieces are more than
+/// the saved name told apart, and the number, given by where the edges lay, says nothing about
+/// which one it was (#22928). The saved point decides: of the B-rep's edges between faces that
+/// answer exactly to the two saved faces (see [`exactly`]), at least one of them as a piece, the
+/// one whose exact curve the point lies on, within a pick's reach. None or several, and the name
+/// asks to be picked again. No mesh or nearest-edge substitution decides this.
+fn recover_numbered_edge_of_split_face(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let wanted = strip_edge_number(name);
+    if wanted.len() == name.len() {
+        return None;
+    }
+    let parts = split_top_level_bars(wanted);
+    let [x, y] = parts.as_slice() else { return None };
+    let faces = naming::names(b);
+    let level = |f: u32, n: &str| crate::history_names::matches(&faces, f as usize, n).filter(|l| exactly(*l));
+    // Both faces answer exactly, and at least one is a piece of the saved face.
+    let between = |p: u32, q: u32| level(p, x).zip(level(q, y)).is_some_and(|(lp, lq)| lp == Match::Piece || lq == Match::Piece);
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        (between(p.face, q.face) || between(q.face, p.face))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
@@ -942,10 +977,20 @@ fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
 /// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
 /// Whether feature `fid` that made/modified body `b` is a revolve feature.
 fn feature_is_revolve(b: &ModelBody, fid: u64) -> bool {
+    history_feature(b, fid).is_some_and(|f| matches!(f.kind, FeatureKind::Revolve { .. } | FeatureKind::SurfaceRevolve { .. }))
+}
+
+/// Whether feature `fid` that made/modified body `b` is a rib.
+fn feature_is_rib(b: &ModelBody, fid: u64) -> bool {
+    history_feature(b, fid).is_some_and(|f| matches!(f.kind, FeatureKind::Rib { .. }))
+}
+
+/// Feature `fid` in the history of body `b`: the features that made or changed it, latest first.
+fn history_feature(b: &ModelBody, fid: u64) -> Option<&crate::Feature> {
     let mut origin = b.names.origin.as_deref();
     while let Some(o) = origin {
         if o.feature.id == fid {
-            return matches!(o.feature.kind, FeatureKind::Revolve { .. } | FeatureKind::SurfaceRevolve { .. });
+            return Some(&o.feature);
         }
         origin = o
             .before
@@ -955,7 +1000,7 @@ fn feature_is_revolve(b: &ModelBody, fid: u64) -> bool {
             .and_then(|prev| prev.names.origin.as_deref())
             .or_else(|| o.before.bodies.iter().find_map(|prev| prev.names.origin.as_deref()));
     }
-    false
+    None
 }
 
 fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
@@ -1368,6 +1413,7 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
         Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round)
             .or_else(|| replaced_side_line(st, name, p))
             .or_else(|| numbered_sheet_face(st, name, p))
+            .or_else(|| numbered_rib_face(st, name, p))
             .or_else(|| recover_positional_face(st, name, p)),
         Err(Miss::Several) => None,
     }
@@ -1414,6 +1460,87 @@ fn numbered_sheet_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> 
         }
     }
     found
+}
+
+/// The id of the feature a face is numbered among the faces of (`F7:face:2` is 7): `None` for any
+/// other name.
+fn numbered_face_feature(name: &str) -> Option<u64> {
+    numbered_face_name(name)?.strip_prefix('F')?.parse().ok()
+}
+
+/// The faces of body `b` (named `names`) that rib `fid` made: the ones named after it.
+fn rib_faces<'a>(names: &'a Names, fid: u64) -> impl Iterator<Item = usize> + 'a {
+    let stem = format!("F{fid}:");
+    names.faces.iter().enumerate().filter(move |(_, own)| own.starts_with(stem.as_str())).map(|(face, _)| face)
+}
+
+/// A face of a rib saved by its number among the faces the rib made (`F7:face:2`), as builds
+/// before #20622 named every face of a rib. A rib names its faces by role now (its walls by the
+/// curve and the side, its ends as caps), so the stored name names nothing. The stored point still
+/// lies on the face it was: that face, when it is the one face rib `F7` made that the point lies
+/// on. A point on no face of the rib, or on two, finds nothing, as before.
+fn numbered_rib_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    let fid = numbered_face_feature(name)?;
+    if !p.is_finite() {
+        return None;
+    }
+    let mut found: Option<FaceHit> = None;
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && b.body.face_count() <= MAX_PROJECTION_RECOVERY_FACES) {
+        if !feature_is_rib(b, fid) {
+            continue;
+        }
+        let names = naming::names(b);
+        for face in rib_faces(&names, fid) {
+            let Some((_, point)) = on_face(b, face, p) else { continue };
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body: bi, face, point, verified: names.verified(face), on_point: true });
+        }
+    }
+    found
+}
+
+/// An edge of a rib's face saved by the face's number (`F7:face:2|F3:+z`, see
+/// [`numbered_rib_face`]), on either side of the name or both. A side named so answers to any face
+/// rib `F7` made; any other side, to the face with that name, or, when none has it, to the pieces
+/// of the face it is a piece of: a piece told apart by the faces around it names the rib's faces
+/// the old way too (`F2:inner(F1:-z)#[F2:inner(F1:+x),F7:face:2]`). The edge is the one exact edge
+/// between such faces that the saved point lies on, as [`recover_positional_edge`] finds one.
+fn recover_numbered_rib_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() || b.body.face_count() > MAX_PROJECTION_RECOVERY_FACES {
+        return None;
+    }
+    let parts = split_top_level_bars(strip_edge_number(name));
+    let [fa, fb] = parts.as_slice() else { return None };
+    let names = naming::names(b);
+    let rib = |part: &str| numbered_face_feature(part).filter(|fid| feature_is_rib(b, *fid) && !names.faces.iter().any(|own| own == part));
+    if rib(fa).is_none() && rib(fb).is_none() {
+        return None;
+    }
+    let side = |part: &str| -> Vec<usize> {
+        match rib(part) {
+            Some(fid) => rib_faces(&names, fid).collect(),
+            None => {
+                let exact: Vec<usize> = names.faces.iter().enumerate().filter(|(_, own)| own.as_str() == part).map(|(face, _)| face).collect();
+                let whole = strip_piece(part);
+                if !exact.is_empty() || whole == part {
+                    return exact;
+                }
+                names.faces.iter().enumerate().filter(|(_, own)| strip_piece(own) == whole).map(|(face, _)| face).collect()
+            }
+        }
+    };
+    let (sa, sb) = (side(fa), side(fb));
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        let (p, q) = (p.face as usize, q.face as usize);
+        ((sa.contains(&p) && sb.contains(&q)) || (sa.contains(&q) && sb.contains(&p)))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// The `F2` and the number of a side face named after a sketch line (`F2:side:l1`): `None` for any
