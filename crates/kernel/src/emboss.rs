@@ -2311,6 +2311,26 @@ mod tests {
         assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
     }
 
+    /// solidcore#3431: a rectangle `2 w` wide and 4 tall on a plane tangent to a radius-30 wall,
+    /// embossed `d` deep, keeps its straight ends however far the wall falls from the plane at
+    /// them (7.6 at w = 20). The added section is ∫ (√((30 + d)² − y²) − √(30² − y²)) dy over
+    /// |y| ≤ w, 4 tall.
+    #[test]
+    fn a_projected_emboss_reaches_the_wall_at_a_wide_profiles_ends() {
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 30., 20.).unwrap();
+        let wall = face_where(&cyl, |s| matches!(s, Surf::Cylinder { convex: true, .. }));
+        let sketch = Plane::new(Vec3::new(30., 0., 10.), Vec3::Y, Vec3::Z).unwrap();
+        let quarter = |r: f64, y: f64| 0.5 * (y * (r * r - y * y).sqrt() + r * r * (y / r).asin());
+        for (w, d) in [(20., 0.5), (2., 0.5), (20., 3.)] {
+            let rect =
+                Region2 { outer: Loop2::polygon(&[Vec2::new(-w, -2.), Vec2::new(w, -2.), Vec2::new(w, 2.), Vec2::new(-w, 2.)]), holes: vec![] };
+            let want = 4. * 2. * (quarter(30. + d, w) - quarter(30., w));
+            let result = emboss_project_face(&cyl, wall, Vec3::new(30., 0., 10.), &sketch, &[rect], d).unwrap();
+            let added = volume(&result) - volume(&cyl);
+            assert!((added - want).abs() < 1e-4 * want, "w {w}, d {d}: added {added}, want {want}");
+        }
+    }
+
     #[test]
     fn projected_cylinder_emboss_stays_on_the_selected_wall_and_within_reach() {
         // A stepped shaft: radius 10 up to z 10, radius 15 above it.
