@@ -192,7 +192,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -200,13 +200,13 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
 }
 
 /// Revolve with contiguous pieces of the same circle joined before turning each profile.
 pub fn revolve_joining_arcs(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_joining_arcs");
-    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinArcs)
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinArcs)
 }
 
 /// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
@@ -221,7 +221,7 @@ pub fn revolve_whole_sides(
     one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
 ) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
-    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinFreeForm(one_curve))
+    revolve_regions(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinFreeForm(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -237,9 +237,16 @@ enum RevolveProfile<'a> {
 }
 
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
-fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64, profile: RevolveProfile<'_>) -> Result<Vec<Body>> {
+fn revolve_regions(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    profile: RevolveProfile<'_>,
+) -> Result<Vec<Body>> {
     let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
-    revolution_plans(plane, regions, axis_origin, axis_dir, angle, profile, |x| {
+    revolved(plane, regions, axis_origin, axis_dir, angle, profile, |x| {
         crate::smlib_sweeps::revolve(plane, &x.pieces, x.origin, x.axis, x.angle, join_arcs)
     })
 }
@@ -257,6 +264,7 @@ pub(crate) struct RevolutionPlan {
 /// [`revolve`], [`revolve_whole`] and [`revolve_whole_sides`]'s revolution of `regions`, checked
 /// and planned region by region (for [`revolve_joining_arcs`], the pieces before the arcs join):
 /// what another kernel builds the same solids from, and what names them after.
+#[cfg(feature = "backend-occt")]
 pub(crate) fn revolution_plans_of(
     plane: &Plane,
     regions: &[Region2],
@@ -269,11 +277,12 @@ pub(crate) fn revolution_plans_of(
         Some(f) => RevolveProfile::JoinFreeForm(f),
         None => RevolveProfile::AsDrawn,
     };
-    revolution_plans(plane, regions, axis_origin, axis_dir, angle, profile, Ok)
+    revolved(plane, regions, axis_origin, axis_dir, angle, profile, Ok)
 }
 
-/// The plans of [`revolution_plans_of`], each handed to `each` as soon as it is made.
-fn revolution_plans<T>(
+/// The plans of [`revolution_plans_of`], each handed to `each` as soon as it is made: the
+/// checks, on-axis snapping and side of the axis every revolve shares.
+fn revolved<T>(
     plane: &Plane,
     regions: &[Region2],
     axis_origin: Vec2,

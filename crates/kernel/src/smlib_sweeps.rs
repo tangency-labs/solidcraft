@@ -81,11 +81,12 @@ pub(crate) struct Draft {
 #[cfg(test)]
 pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
-    body_from_record, curve, curve_tolerance, cylinder, cylinder_circle, extrude, extrude_drafted_with_holes, extrusion_curves, face_section, loft,
-    loft_curves, loft_curves_of, loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_extrusion, name_loft, name_revolution,
-    name_revolved_primitive, path_curve, project_onto_face, rail_curves, railed_skin, revolution_curves, revolve, screw, screw_radial, skin_sections,
-    sphere, sweep, sweep_controlled, torus,
+    body_from_record, curve, curve_tolerance, cylinder, cylinder_circle, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves,
+    loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_revolved_primitive, path_curve, project_onto_face, rail_curves,
+    railed_skin, revolve, screw, screw_radial, skin_sections, sphere, sweep, sweep_controlled, torus,
 };
+#[cfg(feature = "backend-occt")]
+pub(crate) use imp::{extrusion_curves, loft_curves_of, name_extrusion, name_loft, name_revolution, revolution_curves};
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
 /// the next pair, and so on, a part left over at the end of a level carried up as it is. Every
@@ -770,7 +771,7 @@ mod imp {
         draft: Option<Draft>,
     ) -> Result<Body> {
         let base = plane.offset(from);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let n = profile_normal(plane)?;
         let dir = n * sign.signum();
         // Only extrusions take runs of pieces as one curve (`crate::build`).
         let pieces = &broken_at_seams(&base, pieces)?;
@@ -840,14 +841,21 @@ mod imp {
     /// The curves another kernel extrudes for [`extrude`] without a draft along the normal
     /// (`sign` 1): the profile `pieces` moved `from` along `plane`'s normal and broken at their
     /// seams, each run of one curve as one curve, loop after loop, and the unit direction.
+    #[cfg(feature = "backend-occt")]
     pub(crate) fn extrusion_curves(plane: &Plane, pieces: &[Piece], from: f64) -> Result<(Vec<Curve>, [f64; 3])> {
         let base = plane.offset(from);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let n = profile_normal(plane)?;
         Ok((curves(&base, &broken_at_seams(&base, pieces)?)?, p(n)))
+    }
+
+    /// The unit normal of a profile's plane.
+    fn profile_normal(plane: &Plane) -> Result<Vec3> {
+        plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))
     }
 
     /// `body`, another kernel's extrusion of [`extrusion_curves`] by `distance`, with the roles,
     /// construction sources and history [`extrude`] gives its own.
+    #[cfg(feature = "backend-occt")]
     pub(crate) fn name_extrusion(body: Body, plane: &Plane, pieces: &[Piece], region: Option<&Region2>, from: f64, distance: f64) -> Result<Body> {
         let base = plane.offset(from);
         let pieces = &broken_at_seams(&base, pieces)?;
@@ -861,7 +869,7 @@ mod imp {
     /// its roles.
     fn drafted_loop(plane: &Plane, pieces: &[Piece], from: f64, distance: f64, sign: f64, d: Draft) -> Result<Brep> {
         let base = plane.offset(from);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let n = profile_normal(plane)?;
         let dir = n * sign.signum();
         if d.foot > 0.0 {
             if !(d.foot < distance) {
@@ -993,14 +1001,11 @@ mod imp {
     /// The profile `pieces` on `plane` turned `angle` radians (signed, right-handed about `axis`)
     /// about the axis through `origin` (both in the plane). Segments on the axis sweep nothing.
     pub(crate) fn revolve(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, angle: f64, join_arcs: bool) -> Result<Body> {
-        let k = axis.normalized().ok_or_else(|| KernelError::Invalid("revolve axis".into()))?;
-        let (k, turn) = if angle < 0.0 { (-k, -angle) } else { (k, angle) };
-        let turn = turn.min(std::f64::consts::TAU);
-        let c = curves(plane, pieces)?;
+        let (c, o, k, turn) = revolution_curves(plane, pieces, origin, axis, angle)?;
         let revolve = if join_arcs { Brep::revolve_joining_arcs } else { Brep::revolve };
-        let brep = revolve(&c, p(origin), p(k), turn, true).map_err(|e| failed("revolve", e))?;
+        let brep = revolve(&c, o, k, turn, true).map_err(|e| failed("revolve", e))?;
         let body = body_of(brep, "revolve")?;
-        name_revolution(body, plane, pieces, origin, k, turn)
+        name_revolution(body, plane, pieces, origin, Vec3::new(k[0], k[1], k[2]), turn)
     }
 
     /// The curves another kernel turns for [`revolve`] (arcs not joined), with the axis through
@@ -2501,12 +2506,14 @@ mod imp {
 
     /// The section curves [`loft`] skins (runs of one curve joined where every section agrees),
     /// section by section: what another kernel lofts.
+    #[cfg(feature = "backend-occt")]
     pub(crate) fn loft_curves_of(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<Vec<Curve>>> {
         loft_section_curves(sections)
     }
 
     /// `body`, another kernel's loft of [`loft_curves_of`], with the roles and history [`loft`]
     /// gives its own.
+    #[cfg(feature = "backend-occt")]
     pub(crate) fn name_loft(body: Body, sections: &[(Plane, Vec<Piece>)], first: usize) -> Result<Body> {
         loft_roles(body, sections, first)
     }
