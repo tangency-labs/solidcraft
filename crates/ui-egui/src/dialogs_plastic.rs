@@ -280,7 +280,19 @@ fn rule_length_display(doc: &solidcraft_engine::doc::Document, expr: &str) -> St
         && let Ok(mm) = doc.eval(expr, ValueKind::Length)
         && mm.is_finite()
     {
-        return crate::length_input::model(doc, mm);
+        let shown = crate::length_input::model(doc, mm);
+        if doc.eval(&shown, ValueKind::Length).is_ok_and(|value| value == mm) {
+            return shown;
+        }
+        // A rounded display can change the saved rule if the user edits its text.
+        // Prefer full precision, and retain the authored value if the conversion
+        // cannot represent the original model-space length exactly.
+        let unit = crate::length_input::unit(doc);
+        let scale = solidcraft_engine::doc::expr::unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+        let exact = format!("{} {unit}", mm / scale);
+        if doc.eval(&exact, ValueKind::Length).is_ok_and(|value| value == mm) {
+            return exact;
+        }
     }
     crate::length_input::stored(doc, expr)
 }
