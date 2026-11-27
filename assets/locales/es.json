@@ -7231,7 +7231,7 @@
   "ui.ribbon_exit": "Salir",
   "ui.ribbon_labels": "Mostrar texto bajo los iconos de la cinta",
   "ui.ribbon_menus_skip_pinned": "Dejar comandos anclados fuera de los menús desplegables",
-  "ui.ribbon_pin_footer": "Los comandos anclados se muestran en la cinta. Pasa el ratón sobre una fila para anclarla o desanclarla.",
+  "ui.ribbon_pin_footer": "Los comandos anclados se muestran en la cinta. Ancla o desancla un comando desde su menú ⋯.",
   "ui.ribbon_workspace": "Espacio de trabajo",
   "ui.right": "Derecha",
   "ui.right_click_confirms": "El clic derecho confirma las entradas del diálogo",

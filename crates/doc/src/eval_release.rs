@@ -79,7 +79,7 @@ impl Model {
     /// The states this model holds: after every feature, and of the features the history marker
     /// hides ([`Model::rolled_results`]).
     fn held_states(&self) -> impl Iterator<Item = &Arc<ModelState>> {
-        self.results.iter().map(|r| &r.state).chain(self.rolled_results.values().map(|(_, r)| &r.state))
+        self.results.iter().map(|r| &r.state).chain(self.rolled_results.values().map(|(_, _, r)| &r.state))
     }
 
     /// The addresses of the states this model holds, in one order whatever order they are held in.
