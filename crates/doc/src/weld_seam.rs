@@ -171,7 +171,7 @@ pub fn seam_weld(seam: &SeamWeld) -> Result<Seam> {
     let h = thickness * w;
     let radii = [MARKS.core, MARKS.band, MARKS.edge].map(|f| f * w / 2.0);
     let t_u: f64 = seam.thicknesses.iter().skip(1).sum();
-    let reach = laid.iter().flat_map(Laid::points).flatten().fold(0.0_f64, |m, c| m.max(c.abs())) + radii[2] + t_u + first + h;
+    let reach = laid.iter().map(Laid::reach).fold(0.0_f64, f64::max) + radii[2] + t_u + first + h;
     if !reach.is_finite() || reach > profiles::MAX_COORD {
         return bad("a seam so large that it passes the model's size limit");
     }
@@ -240,11 +240,18 @@ pub struct SeamSite {
 ///
 /// # Errors
 /// [`SeamRefusal::Invalid`] for an empty path or a path point that is not finite, and the
-/// refusals of [`seam_weld`] for the path itself; [`SeamRefusal::AtJoint`] with the spot's
-/// refusal at a joint; [`SeamRefusal::JointOnOtherFaces`], [`SeamRefusal::PastFaceEdge`] and
-/// [`SeamRefusal::EdgeNotMeasured`] where the stack does not take the seam. The errors of the
-/// kernel calls otherwise.
+/// refusals of [`seam_weld`] for the path itself, [`SeamRefusal::ArcTighterThanSeam`] included;
+/// [`SeamRefusal::AtJoint`] with the spot's refusal at a joint; [`SeamRefusal::JointOnOtherFaces`],
+/// [`SeamRefusal::PastFaceEdge`] and [`SeamRefusal::EdgeNotMeasured`] where the stack does not
+/// take the seam. The errors of the kernel calls otherwise.
 pub fn seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64) -> Result<SeamSite> {
+    site(sheets, picked, face, start, path, width, MARKS.edge * width / 2.0)
+}
+
+/// [`seam_site`] for a weld along the path whose widest part reaches `widest` from it: every arc
+/// of the path must turn wider than that, by more than the zone tolerance, so the site never
+/// takes an arc the weld's build refuses.
+pub(crate) fn site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64, widest: f64) -> Result<SeamSite> {
     if path.is_empty() {
         return bad("a seam with no path");
     }
@@ -265,6 +272,14 @@ pub fn seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], 
     let tol = profiles::zone_tolerance()?;
     let n = first.normal;
     let laid = lay(start, path, n, tol)?;
+    // an arc the build refuses: tighter than the weld's widest part
+    for (i, piece) in laid.iter().enumerate() {
+        if let Laid::Arc { radius, .. } = *piece
+            && radius - widest <= tol
+        {
+            return Err(SeamRefusal::ArcTighterThanSeam { piece: i, fits: radius * width / widest });
+        }
+    }
 
     // every face crossed, at its level along the line from the picked face
     let mut level = 0.0;
@@ -396,11 +411,14 @@ impl Laid {
         }
     }
 
-    /// Every point the piece is drawn from: its ends, and an arc's centre.
-    fn points(&self) -> Vec<[f64; 3]> {
+    /// How far the piece reaches from the origin along any axis, at most: a line's largest end
+    /// coordinate; an arc's largest centre coordinate plus its radius, which bounds an arc that
+    /// bulges past its ends.
+    pub(crate) fn reach(&self) -> f64 {
+        let largest = |p: [f64; 3]| p.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
         match *self {
-            Self::Line { a, b, .. } => vec![a, b],
-            Self::Arc { a, b, c, .. } => vec![a, b, c],
+            Self::Line { a, b, .. } => largest(a).max(largest(b)),
+            Self::Arc { c, radius, .. } => largest(c) + radius,
         }
     }
 

@@ -436,22 +436,14 @@ pub(super) fn renamed(app: &SolveApp, d: &mut ParamsDialog, old: &str, new: &str
     d.redesign.toast = Some((app.session.revision, solidcraft_ui_text::format("parameters.redesign.promoted", &[("old", old), ("name", new)])));
 }
 
-fn show_feature(app: &mut SolveApp, name: &str) {
-    if let Some(feature) = app.session.doc.features.iter().find(|f| f.name == name) {
-        let id = feature.id;
-        let _ = app.run("select.set", json!({"items":[{"type":"feature","id":id}]}));
-    }
-}
-
-fn show_reader(app: &mut SolveApp, reader: &str) {
+/// The feature a reader stands for: the feature itself (`Feature:<name>`), or the feature or sketch
+/// that owns a dimension or feature-input parameter. A user parameter has none.
+fn reader_feature(app: &SolveApp, reader: &str) -> Option<u64> {
+    let doc = &app.session.doc;
     if let Some(name) = reader.strip_prefix("Feature:") {
-        show_feature(app, name);
-        return;
+        return doc.features.iter().find(|f| f.name == name).map(|f| f.id);
     }
-    let owner = app
-        .session
-        .doc
-        .features
+    doc.features
         .iter()
         .find(|f| {
             f.param_names.iter().any(|n| n == reader)
@@ -462,13 +454,45 @@ fn show_reader(app: &mut SolveApp, reader: &str) {
                     _ => false,
                 }
         })
-        .map(|f| f.name.clone());
-    if let Some(owner) = owner {
-        show_feature(app, &owner);
+        .map(|f| f.id)
+}
+
+fn show_feature(app: &mut SolveApp, name: &str) {
+    if let Some(id) = app.session.doc.features.iter().find(|f| f.name == name).map(|f| f.id) {
+        select_features(app, &[id]);
     }
 }
 
-pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, r: &Row) -> egui::Response {
+fn select_features(app: &mut SolveApp, ids: &[u64]) {
+    let items: Vec<Value> = ids.iter().map(|id| json!({"type":"feature","id":id})).collect();
+    let _ = app.run("select.set", json!({ "items": items }));
+}
+
+/// The users `parameters.users` reports that are not readers in the Used by list, and that the
+/// list cannot select: a component's quantity, a joint, a configuration column, a rule, a canvas
+/// or a moved occurrence (#20879), by their names in the design.
+pub(super) fn other_uses(users: &Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for user in users.get("users").and_then(Value::as_array).into_iter().flatten() {
+        let name = match user.get("type").and_then(Value::as_str) {
+            Some("parameter" | "feature" | "dimension") | None => continue,
+            Some("configuration") => user.get("column"),
+            Some(_) => user.get("name"),
+        };
+        if let Some(name) = name.and_then(Value::as_str)
+            && !out.iter().any(|known| known == name)
+        {
+            out.push(name.to_owned());
+        }
+    }
+    out
+}
+
+/// The Used by cell and its list. Choosing a reader selects its feature or sketch, so it lights in
+/// the viewport and the Browser; a reader that is a user parameter filters the window to it
+/// instead, to follow a chain of parameters; Select All selects every reader's feature at once;
+/// uses the list cannot select are named under Other uses (#20879).
+pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, r: &Row) -> egui::Response {
     let response = ui_kit::text(ui, &r.readers.len().to_string(), ui_kit::Text::Cell).interact(egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("parameters.redesign.used_by")));
     let key = response.id.with(("readers", app.session.revision));
@@ -494,15 +518,46 @@ pub(super) fn used_by(app: &mut SolveApp, ui: &mut egui::Ui, r: &Row) -> egui::R
                 } else {
                     solidcraft_ui_text::format("parameters.redesign.reader_detail", &[("name", label), ("detail", detail)])
                 };
-                let response = ui_kit::button(ui, &shown, ui_kit::Button::Normal);
+                // A name from the design is shown as it is, never looked up in the catalog.
+                let response = {
+                    let _names = solidcraft_ui_text::resolved_labels();
+                    ui_kit::button(ui, &shown, ui_kit::Button::Normal)
+                };
                 crate::scenario::publish_target(&format!("param:reader:{}:{reader}", r.name), response.rect);
                 if response.clicked() {
-                    show_reader(app, reader);
+                    if let Some(id) = reader_feature(app, reader) {
+                        select_features(app, &[id]);
+                    } else if app.session.doc.param(reader).is_some() {
+                        d.filter = reader.clone();
+                        d.reset_scroll = true;
+                    }
                     ui.close();
                 }
             }
         });
-        if r.readers.is_empty() {
+        let mut features: Vec<u64> = Vec::new();
+        for id in r.readers.iter().filter_map(|reader| reader_feature(app, reader)) {
+            if !features.contains(&id) {
+                features.push(id);
+            }
+        }
+        if features.len() > 1 {
+            let response = ui_kit::button(ui, solidcraft_ui_text::tr_label("Select All"), ui_kit::Button::Normal);
+            crate::scenario::publish_target(&format!("param:readers:{}:all", r.name), response.rect);
+            if response.clicked() {
+                select_features(app, &features);
+                ui.close();
+            }
+        }
+        let others = other_uses(&users);
+        if !others.is_empty() {
+            ui_kit::text(ui, tr("parameters.redesign.other_uses"), ui_kit::Text::Hint("other_uses"));
+            let _names = solidcraft_ui_text::resolved_labels();
+            for other in &others {
+                ui_kit::text(ui, other, ui_kit::Text::Cell);
+            }
+        }
+        if r.readers.is_empty() && others.is_empty() {
             ui_kit::text(ui, tr("parameters.redesign.no_readers"), ui_kit::Text::Hint("no_readers"));
         }
     });
@@ -565,7 +620,7 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
             }
         }
         if d.redesign.narrow {
-            let _ = used_by(app, ui, r);
+            let _ = used_by(app, ui, d, r);
             if r.source == "user" {
                 // A combo popup replaces the parent popup in egui's memory. Use the kit's
                 // nested menu so the row remains available while choosing a unit.

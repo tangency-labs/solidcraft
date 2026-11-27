@@ -77,6 +77,13 @@ every prompt and answer, including those scrolled out of view, but not thoughts,
 notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
 click ends the selection; in the message box Ctrl+A selects only the draft.
 
+From the Assistant header, choose **Export conversation as Markdown…** to save the current
+chat as a `.md` file. The file preserves the original formatting of the prompts and replies
+still in the chat. If a reply is arriving, the export captures the text received when you
+open the save dialog. Select **Include tool details** to add the retained tool calls and results.
+With this option selected, the dialog reminds you to review the file before sharing it. The file
+lists attachments by name and skips the draft, thoughts, plans and approval cards.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick

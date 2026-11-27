@@ -525,7 +525,11 @@ pub fn wheel_entries(root: &Path, version: &str, platform: &str, cli: Option<(&s
         if binary { "false" } else { "true" }
     );
     files.push((format!("{info}/WHEEL"), wheel_meta.into_bytes(), false));
-    files.push((format!("{info}/entry_points.txt"), b"[console_scripts]\nsolidcraft-session = solidcraft.__main__:main\n".to_vec(), false));
+    files.push((
+        format!("{info}/entry_points.txt"),
+        b"[console_scripts]\nsolidcraft = solidcraft._cli:main\nsolidcraft-session = solidcraft.__main__:main\n".to_vec(),
+        false,
+    ));
     let mut record = String::new();
     for (path, bytes, _) in &files {
         use sha2::Digest as _;

@@ -348,9 +348,12 @@ against the binary inside it. It then uploads the wheels as `release-python`, so
 to the draft and listed in `SHA256SUMS.txt` like every other asset. Wheel versions follow PEP 440:
 `0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a nightly.
 
-Publishing the release runs `pypi.yml`, which uploads the release's wheels with PyPI trusted
-publishing, so no token is stored. A stable release goes to PyPI. A pre-release goes to TestPyPI
-only. Like `winget.yml`, a publication made with `GITHUB_TOKEN` (every nightly) doesn't trigger it;
+`pypi.yml` uploads the release's wheels with PyPI trusted publishing, so no token is stored.
+Publishing a pre-release sends its wheels to TestPyPI only. The release reaches PyPI when it becomes
+a full release: flipping the pre-release to a release (or publishing one as a release) uploads its
+wheels to PyPI with no manual run, and the flip doesn't upload to TestPyPI again. A pre-release
+never goes to PyPI. Like `winget.yml`, an event made with `GITHUB_TOKEN` (every nightly) doesn't
+trigger it, so flip the release as yourself;
 to upload one by hand, run `gh workflow run pypi.yml -R tangency-labs/solidcraft --ref v<version> -f tag=v<version>`
 (from the tag: the environments deploy from `v*` tags only, step 2).
 A release with no wheels uploads nothing. PyPI refuses to replace a file it already has, so a

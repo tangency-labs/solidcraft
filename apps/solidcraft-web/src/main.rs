@@ -1520,7 +1520,7 @@ mod web {
                         let files = Rc::new(Files::default());
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
-                        let services = if !launch.persists() { Services::default() } else { Services {
+                        let mut services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
@@ -1565,6 +1565,7 @@ mod web {
                             usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
+                        services.browser_safari = crate::install::safari();
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
                         let (sender, receiver) = std::sync::mpsc::channel();

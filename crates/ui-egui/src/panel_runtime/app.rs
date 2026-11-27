@@ -654,7 +654,16 @@ impl AppPanelRuntime {
                             let _blur = content.app.blur.begin(ui.ctx());
                             let before = crate::semantic_content::presented_owners(content.app);
                             let painted = solidcraft_ui_registry::isolated(|| {
-                                super::paint_native_window(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                                let action =
+                                    super::paint_native_window(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)?;
+                                if enabled
+                                    && !matches!(action, Some(WindowAction::Redock))
+                                    && ui.input(|input| input.viewport().visible() != Some(false))
+                                {
+                                    // Draw outside the panel body so its modal also works for a collapsed card.
+                                    content.finish_native_window(active, action.as_ref(), ui.ctx());
+                                }
+                                Ok(action)
                             });
                             // A window dropped before its panel measured its content fits
                             // it once measured, as the app's side cards do.
@@ -846,6 +855,10 @@ impl AppPanelRuntime {
     }
     pub fn host(&self) -> Option<&WorkspacePanelHost> {
         self.host.as_ref()
+    }
+    #[cfg(test)]
+    pub(crate) fn host_mut(&mut self) -> Option<&mut WorkspacePanelHost> {
+        self.host.as_mut()
     }
     pub fn enable_host(&mut self, options: HostOptions) -> PanelResult<()> {
         self.runtime.require_live()?;
@@ -1042,7 +1055,9 @@ impl AppPanelRuntime {
         self.refresh_metrics()?;
         let mut services = self.services.services();
         if let Some(host) = &mut self.host {
-            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
+            let mut finish =
+                || host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()));
+            if let Some(state) = &self.production { state.with_widget_actions(finish) } else { finish() }
         } else {
             Ok(())
         }
