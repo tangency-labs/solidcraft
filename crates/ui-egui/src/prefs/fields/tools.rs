@@ -14,7 +14,8 @@ macro_rules! tools_preferences {
             /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
             auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
             /// Creative Mode: pulls apply on release and a command pill floats above the selection
-            /// (`creative_mode`); off by default.
+            /// (`creative_mode`); off by default. The title-bar switch turns it on and off and this
+            /// remembers it; Settings shows no row for it.
             creative_mode: bool = false, PAGE_TOOLS;
             /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
             direct_interaction: bool = false, PAGE_TOOLS;
