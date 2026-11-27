@@ -700,8 +700,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
-            vec![
-                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
+            let plugin = crate::plugin_workspaces::active_id(app).is_some();
+            let mut items = vec![
+                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing || plugin {
                     ""
                 } else {
                     "current"
@@ -721,7 +722,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         crate::render_workspace::entry_open(app)
                     },
                 ),
-            ]
+            ];
+            items.extend(crate::plugin_workspaces::switcher_items(app));
+            items
         }
         Target::Units => crate::prefs::UNITS
             .iter()
@@ -1637,7 +1640,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             }
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => {
-            item.params = Some(json!({"bodies": bodies}));
+            item.params =
+                Some(if item.id == "ui.export" { json!({"bodies": bodies, "component": placement.component}) } else { json!({"bodies": bodies}) });
             item.enabled = has_bodies && (item.id != "ui.sendToSlicer" || crate::dialogs_save_mesh::available(app));
         }
         // A flyout's row is on while any of its entries is, as `group` made it; the entries
@@ -1808,7 +1812,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         "Export",
         "export",
         vec![
-            act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
+            act("ui.export", "Export…", "export").with(json!({ "bodies": names, "component": id })).on(!bodies.is_empty()),
             act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
             act("ui.sendToSlicer", "Send to Slicer", "export")
                 .with(json!({ "bodies": names }))
@@ -2572,7 +2576,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let default_name = crate::export_name::default_for_bodies(app, &bodies);
-            let name = crate::export_name::offered(app, body, &default_name);
+            let name = crate::export_name::offered_for_component(app, body, id_of(&p, "component"), &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
@@ -2835,7 +2839,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
-        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
+        id if matches!(id, "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing")
+            || id.starts_with("ui.workspace.plugin:") =>
+        {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {
                 app.set_status(error, true);
@@ -4197,6 +4203,14 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
     use crate::ui_kit::WorkspaceStyle;
     use solidcraft_theme::AccentRamp;
+    if item.params.as_ref().and_then(|params| params.get("workspace")).and_then(Value::as_str).is_some_and(|id| id.starts_with("plugin:")) {
+        return Some(WorkspaceStyle {
+            slug: "plugin",
+            description: if item.enabled { "ui.plugin_workspace.description" } else { "ui.plugin_workspace.unavailable" },
+            tabs: Some("ui.plugin_workspace.tabs"),
+            ramp: None,
+        });
+    }
     Some(match item.label.as_str() {
         "Design" => {
             WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
@@ -5620,6 +5634,18 @@ mod tests {
 mod workspace_menu_tests {
     use super::*;
     use crate::scenario::{Harness, rect_of};
+
+    #[test]
+    fn plugin_workspace_rows_are_drawn_with_the_host_workspace_style() {
+        let ctx = crate::fonts::test_context();
+        let item = act("ui.workspace.plugin:manufacture/cam", "Machining", "ws_design").with(json!({"workspace":"plugin:manufacture/cam"}));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            workspace_menu(ui, std::slice::from_ref(&item), None, 720.0);
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Machining")));
+        assert!(rect_of("menu:ui.workspace.plugin:manufacture/cam").is_some());
+    }
 
     #[test]
     fn workspace_titles_use_one_semibold_text_run() {

@@ -1378,16 +1378,20 @@ fn crossing_end_passes(
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
-/// stopped in `b`, `edges` its edges, `sizes` theirs, `mitred` the mitred pairs it found): the
-/// blends that overflow on their own (each edge's alone, classified in `b`, where nothing was
-/// built) go first on `fresh` (the untouched input, copied before the first call; a copy keeps
-/// the order, so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged
-/// ([`Picked`]). Each other asked edge is then what is left of it, the edges carrying its tag,
-/// rounded at its size in a second pass that is handed the faces the first made, so it meets
-/// the first rounds as one blend. An asked edge with nothing left is `dropped`. Two rounds
-/// mitred at a face's concave corner go first together. Where none overflows on its own, or
-/// all do, the edges are rounded together as before. Every pass turns as `turn`. The result is
-/// `fresh`, untagged.
+/// stopped in `b`, `edges` its edges, `sizes` theirs, `overflowing` the edges whose blends it
+/// found to overflow, `mitred` the mitred pairs it found): the blends that overflow on their own
+/// (each edge's alone, classified in `b`, where nothing was built) and in the first call go
+/// first on `fresh` (the untouched input, copied before the first call; a copy keeps the order,
+/// so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged ([`Picked`]).
+/// A blend that overflows alone but not with the other asked blends (#22796: a round that
+/// alone runs on past its end into a notch, where with the round of the notch's side edge it
+/// turns the corner) stays with the others: going first, it would be built past its corner
+/// before the round it meets there. Each other asked edge is then what is left of it, the
+/// edges carrying its tag, rounded at its size in a second pass that is handed the faces the
+/// first made, so it meets the first rounds as one blend. An asked edge with nothing left is
+/// `dropped`. Two rounds mitred at a face's concave corner go first together. Where none goes
+/// first, or all do, the edges are rounded together as before. Every pass turns as `turn`. The
+/// result is `fresh`, untagged.
 #[allow(clippy::too_many_arguments)] // the C API's overflow_first
 fn overflow_first(
     k: &mut Kernel,
@@ -1397,6 +1401,7 @@ fn overflow_first(
     sizes: &[f64],
     section: fn(&[f64]) -> Section<'_>,
     turn: Turn,
+    overflowing: &[EdgeId],
     mitred: &[EdgeId],
     dropped: &mut [bool],
     contract: Contract,
@@ -1445,7 +1450,8 @@ fn overflow_first(
             Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
         )?;
         if let Some(flag) = goes_first.get_mut(i) {
-            *flag = stopped.overflow.is_some_and(|over| !over.is_empty());
+            *flag =
+                stopped.overflow.is_some_and(|over| !over.is_empty()) && overflowing.contains(&e);
         }
     }
     // a round mitred to one that goes first goes with it, through every mitre
@@ -1712,21 +1718,30 @@ pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
 
 /// [`session_failure`] on the session's error info.
 fn noted_failure(info: &ErrorInfo<FilletObject>, e: &SolidError) -> Option<Error> {
-    Some(match (failure(e)?, noted(info)) {
-        (
-            Error::BlendFailed {
-                class,
-                status,
-                phrase,
-            },
-            Some(why),
-        ) => Error::BlendFailed {
-            class,
-            status,
-            phrase: format!("{phrase}: {why}"),
-        },
-        (failed, _) => failed,
-    })
+    use std::fmt::Write as _;
+
+    let mut failed = failure(e)?;
+    if let Error::BlendFailed { ref mut phrase, .. } = failed {
+        if let Some(why) = noted(info) {
+            *phrase = format!("{phrase}: {why}");
+        }
+        if !phrase.contains("at (")
+            && info.code != FilletErrorType::Ok as i32
+            && !(info.no_room_without_site && info.code == FilletErrorType::NoRoom as i32)
+        {
+            if let Some(p) = info
+                .location
+                .filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+            {
+                let _ = write!(
+                    phrase,
+                    ", at the edge at ({:.3}, {:.3}, {:.3})",
+                    p.x, p.y, p.z
+                );
+            }
+        }
+    }
+    Some(failed)
 }
 
 /// What the session noted of its last failure, in the kernel's words: its error info's
@@ -2280,6 +2295,7 @@ fn blend_on_body(
             return Ok(Err(Error::Exception));
         };
         let mitred = std::mem::take(&mut stopped.mitred);
+        let overflowing = stopped.overflow.take().unwrap_or_default();
         return match overflow_first(
             k,
             b,
@@ -2288,6 +2304,7 @@ fn blend_on_body(
             each,
             section,
             turn,
+            &overflowing,
             &mitred,
             &mut dropped,
             contract,

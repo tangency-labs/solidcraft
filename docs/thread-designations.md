@@ -6,6 +6,15 @@ This changes generated UI text, not the resolved numerical pitch or geometry. Ex
 
 For ISO metric tapped holes, the drill is the tap maker's for the size (M8 gives 6.8 mm, M8x1 7 mm), and nominal diameter minus pitch for a custom size the table lacks. Saving and reopening retains the resolved pitch. See the [tapped-hole catalogue](thread-catalogue.md) for the additional metric fine choices and finite UNC/UNF and parallel G/Rp catalogues with their tabulated pilot recommendations. The Thread command's forms are in [Threads](threads.md).
 
+## ISO metric tolerance classes
+
+The Thread feature accepts an ISO 965-1 tolerance class after a metric size:
+`M8-6g` on a shaft, `M8-6H` in a hole, or a pitch diameter class then a crest
+diameter class such as `M10x1.25-5g6g`. Lowercase `e`, `f`, `g` and `h` are for
+a shaft, uppercase `G` and `H` for a hole. The class is kept in the callout and
+refused on the wrong side; it changes no geometry. See [Threads](threads.md)
+for the grades each side takes.
+
 ## Unified inch Thread designations
 
 The Thread feature also accepts `<size>-<TPI> UNC|UNF|UNEF|UN` with an optional

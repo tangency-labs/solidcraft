@@ -610,7 +610,20 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             return Some(Sel::SketchPoint { id: format!("{sketch}:{point}") });
         }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
+        // A between-faces reference is two faces, which no one pick stands for; the dialog
+        // keeps the constraint's own saved reference (its origins, as an edit loads them).
+        Snap::BetweenFaces { .. } => return None,
     };
+    placed_geometry_pick(s, o, pick, face, edge)
+}
+
+/// Each face of a saved between-faces origin, as a separate pick in Constrain.
+pub(crate) fn between_face_picks(app: &SolveApp, o: &JointOrigin) -> Option<[Option<Sel>; 2]> {
+    let Snap::BetweenFaces { a, b } = &o.snap else { return None };
+    Some([a, b].map(|f| placed_geometry_pick(&app.session, o, f.pick, Some(&f.face), None)))
+}
+
+fn placed_geometry_pick(s: &Session, o: &JointOrigin, pick: Vec3, face: Option<&str>, edge: Option<&str>) -> Option<Sel> {
     // The pick is in its part's coordinates; the placed bodies are in the world.
     let path = origin_placement(s, o)?;
     let (_, at) = s.doc.path_placement(&path)?;
@@ -3033,8 +3046,10 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
-    // A constraint's reply: how free its part is with the constraint the preview shows.
-    let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
+    // Keep the placement report for Constrain's freedom line. Its round-part Center mode
+    // creates a line-on-plane joint rather than a planar constraint.
+    let placed =
+        cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.") || c == "joint.create").map(|(_, r)| r.clone());
     let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
     let before = preview.before.clone();
     let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
@@ -3149,7 +3164,8 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
+    let center = matches!(&d.kind, Kind::Assembly(Asm::Constrain(f)) if f.center);
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let center_frame = under
         .as_ref()
@@ -3193,8 +3209,9 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint and a constraint name their two picks; a joint origin and a trace have one.
-    let two = matches!(k, Asm::Joint(_) | Asm::Constrain(_));
+    // A joint and an ordinary constraint name their two picks. In Center, the first two
+    // picks share a part; mark both walls alike, leaving the part's picks in the other colour.
+    let two = !center && matches!(k, Asm::Joint(_) | Asm::Constrain(_));
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
@@ -3208,9 +3225,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .inputs
         .iter()
         .enumerate()
-        .filter(|(_, i)| i.accept == SNAPS)
+        .filter(|(_, i)| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES)
         .filter_map(|(n, i)| {
-            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), if n == 0 { t.accent } else { t.warning })))
+            let color = if n < if center { 2 } else { 1 } { t.accent } else { t.warning };
+            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), color)))
         })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
