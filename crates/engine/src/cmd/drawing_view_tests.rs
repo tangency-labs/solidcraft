@@ -1694,7 +1694,9 @@ fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
     assert!((dashed.1 - 100.0).abs() < 1e-6 && (solid - 240.0).abs() < 1e-6, "{dashed:?} {solid}");
     let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
-    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 4, "{svg}");
+    // Under the round caps each dash is stroked a line width shorter about its middle: 2.75 and 1,
+    // from 3.75 - 0.125 into the pattern.
+    assert_eq!(svg.matches("stroke-dasharray=\"2.75 1\" stroke-dashoffset=\"3.625\"").count(), 4, "{svg}");
     let plain = snap(&mut s, json!({"scale": "1:1", "scene": true}));
     assert!(strokes(&plain).iter().all(|(_, _, width)| *width == 0.5), "{plain}");
     assert_eq!(plain["scene"].to_string().matches("lengths_mm").count(), 0, "{plain}");
@@ -4946,6 +4948,43 @@ fn a_bad_cutting_line_is_refused() {
         let why = create_refused(&mut s, SECTION, bad.clone());
         assert!(why.contains(SECTION), "{bad}: {why}");
     }
+}
+
+/// Section kinds that can't be cut yet (`half`, `offset` and `aligned`) and a section of a shaded
+/// parent are refused by `drawing.view.section` before anything is saved, so they never leave a
+/// failed view on the sheet that stops `drawing.export` (#19879).
+#[test]
+fn unsupported_section_views_are_refused_and_keep_the_sheet_exportable() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    for (kind, points, expected) in [
+        ("half", json!([[-10.0, 10.0], [50.0, 10.0], [50.0, 30.0]]), "not supported yet: a half section"),
+        ("offset", json!([[-10.0, 5.0], [50.0, 5.0], [50.0, 15.0], [110.0, 15.0]]), "not supported yet: an offset section"),
+        ("aligned", json!([[-10.0, 10.0], [50.0, 10.0], [80.0, 30.0]]), "not supported yet: an aligned section"),
+    ] {
+        let params = json!({
+            "parent": ids::encode(front),
+            "line": {"kind": kind, "points": points, "arrows": "right"},
+            "place": {"at": [300.0, 60.0]},
+        });
+        let why = create_refused(&mut s, SECTION, params);
+        assert!(why.contains(SECTION) && why.contains(expected), "{kind}: {why}");
+    }
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
+
+    // A full section of a shaded parent would inherit the shaded style, which isn't cut yet either.
+    edit_view(&mut s, front, json!({"visual_style": "shaded"}));
+    let shaded = create_refused(
+        &mut s,
+        SECTION,
+        json!({"parent": ids::encode(front), "line": {"kind": "full", "points": [[-10.0, 10.0], [110.0, 10.0]], "arrows": "right"}}),
+    );
+    assert!(shaded.contains(SECTION) && shaded.contains("not supported yet: a shaded section view"), "{shaded}");
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
 }
 
 /// A section view takes its letter as it is made, the next one free: A for the first, then B.

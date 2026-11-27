@@ -233,11 +233,26 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
     }
     let dir = root().await?;
     let h = file_handle(&dir, name, true).await?;
+    write_handle(&h, bytes).await
+}
+
+/// Write a browser file and abort its writable stream if writing or closing fails.
+/// Both private storage and files picked from the computer use this path.
+pub(crate) async fn write_handle(h: &FileSystemFileHandle, bytes: &[u8]) -> Result<(), String> {
     let w: FileSystemWritableFileStream =
         JsFuture::from(h.create_writable()).await.map_err(err)?.dyn_into().map_err(|_| "no writable stream".to_string())?;
-    JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
-    JsFuture::from(w.close()).await.map_err(err)?;
-    Ok(())
+    let result = async {
+        JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
+        JsFuture::from(w.close()).await.map_err(err)?;
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        // Release the browser's temporary file if possible. Keep the original
+        // write/close error even when abort itself fails.
+        let _ = JsFuture::from(w.abort()).await;
+    }
+    result
 }
 
 async fn remove_file(name: &str) -> Result<(), String> {
@@ -435,18 +450,24 @@ fn enqueue(files: &Rc<Files>, write: Write) {
                     // queue asked the shell to mark unsaved.
                     files.unsaved.borrow_mut().retain(|failed| failed != &path);
                 }
-                let _ = done.send(result.map_err(|e| format!("{path}: {e}")));
+                let shown = solidcraft_ui_egui::display_user_path(&path);
+                let _ = done.send(result.map_err(|e| format_write_error(shown, &e)));
             } else if let Err(e) = result {
                 if disk::route(&path) == disk::WriteTo::Disk {
                     files.failed_disk(&path, &e);
                 } else {
-                    files.say(format!("{path}: {e}"), true);
+                    let shown = solidcraft_ui_egui::display_user_path(&path);
+                    files.say(format_write_error(shown, &e), true);
                 }
             }
             files.wake();
         }
         files.writing.set(false);
     });
+}
+
+fn format_write_error(shown: &str, error: &str) -> String {
+    if error.strip_prefix(shown).is_some_and(|rest| rest.starts_with(": ")) { error.to_string() } else { format!("{shown}: {error}") }
 }
 
 async fn store_opfs(files: &Files, name: &str, bytes: &[u8]) -> SaveOutcome {

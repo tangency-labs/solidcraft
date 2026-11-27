@@ -2226,11 +2226,14 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super:
                 let mut past = (0.0, 0.0);
                 let meets = if across {
                     let (z0, z1) = (b.z.min(b.z + a.z * height), b.z.max(b.z + a.z * height));
-                    let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
-                    if own.contains(Vec2::new(b.x, b.y)) && !(z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)) {
+                    let through = z0 <= tol && z1 >= t - tol && {
+                        let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
+                        crate::sheet_surface::holds_clear(own, &circle)
+                    };
+                    if own.contains(Vec2::new(b.x, b.y)) && !through {
                         return Ok(Vec::new());
                     }
-                    z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)
+                    through
                 } else if a.z.abs() <= 1e-9 {
                     // Along the panel: its line through the panel's material, inside its thickness.
                     // A drill clear of the panel's slab meets nothing of it: one square across
