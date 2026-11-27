@@ -61,6 +61,8 @@ pub enum PanelAction {
     SetMode(String),
     SetModel(String),
     SetCustomModel(String),
+    #[cfg(not(target_arch = "wasm32"))]
+    SetServiceTier(agents::ServiceTier),
     SetConfigOption {
         id: String,
         value: String,
@@ -129,6 +131,8 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::SetCustomModel(m) => {
             set_custom_model(app, &m);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        PanelAction::SetServiceTier(tier) => super::set_service_tier(app, tier),
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
@@ -1484,6 +1488,8 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if let Some(options) = chat.config_options.clone() {
         config_selects(chat, ui, &options);
+    } else if let Some(entry) = current.as_ref() {
+        service_tier_picker(chat, ui, entry);
     }
     if chat.state().shows_stop() || !chat.state().running() {
         ui.horizontal(|ui| {
@@ -1561,6 +1567,55 @@ fn picker_width(ui: &egui::Ui, label: &str) -> f32 {
     text.clamp(t.form_label_width, most)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn service_tier_picker(chat: &mut AgentChat, ui: &mut egui::Ui, entry: &agents::Entry) {
+    let tiers = entry.service_tiers();
+    if tiers.is_empty() {
+        return;
+    }
+    let current = chat.service_tier(entry);
+    let label = trf("ui.agent_chat_service_tier_value", &[("tier", current.label())]);
+    let width = picker_width(ui, &label).min(ui.available_width());
+    let response = ui_kit::bounded_dropdown_menu(ui, "sc_agent_service_tier", &label, width, |ui| {
+        for &tier in tiers {
+            let choice = ui_kit::list_picker(ui, tier.id(), tier.label(), tier == current);
+            solidcraft_ui_registry::publish_handle(&format!("agent_chat:service_tier:{}", tier.id()), choice.rect.center());
+            if choice.clicked() && tier != current {
+                chat.actions.push(PanelAction::SetServiceTier(tier));
+            }
+        }
+    });
+    solidcraft_ui_registry::publish_target("agent_chat:service_tier", response.rect);
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("ui.agent_chat_service_tier"));
+        info.current_text_value = Some(current.label().to_owned());
+        info
+    });
+    response.backing_on_hover_text(format!("{label}\n{}", tr("ui.agent_chat_service_tier_tip")));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_service_tier_option(option: &acp::ConfigOption) -> bool {
+    matches!(option.category.as_str(), "speed" | "service_tier" | "service-tier")
+        || (option.category.is_empty() && matches!(option.id.as_str(), "service_tier" | "service-tier"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn config_choice_name<'a>(option: &acp::ConfigOption, choice: &'a acp::ConfigChoice) -> &'a str {
+    // Codex ACP's fast-mode select advertises On and Off but expects those choices by ID.
+    match (option.category.as_str(), option.id.as_str(), choice.value.as_str()) {
+        ("speed", "fast-mode", "off") => tr("ui.standard"),
+        ("speed", "fast-mode", "on") => agents::ServiceTier::Fast.label(),
+        _ => &choice.name,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn config_button_label<'a>(option: &'a acp::ConfigOption, current: Option<&'a acp::ConfigChoice>) -> std::borrow::Cow<'a, str> {
+    let selected = current.map_or(option.current_value.as_str(), |choice| config_choice_name(option, choice));
+    if is_service_tier_option(option) { trf("ui.agent_chat_service_tier_value", &[("tier", selected)]).into() } else { selected.into() }
+}
+
 /// An agent's select options are authoritative. Compact value pickers share a strip below the
 /// agent switcher; only a narrow chat wraps them, rather than spending two full rows per option.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1572,8 +1627,8 @@ fn config_selects(chat: &mut AgentChat, ui: &mut egui::Ui, options: &[acp::Confi
     let mut used = 0.0;
     for option in options {
         let current = option.options.iter().find(|choice| choice.value == option.current_value);
-        let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
-        let preview = compact_text(selected, 32);
+        let label = config_button_label(option, current);
+        let preview = compact_text(&label, 32);
         let preferred = ui.painter().layout_no_wrap(preview, egui::FontId::proportional(t.font_label), t.text).size().x + 34.0;
         let width = preferred.clamp(76.0, strip_width.clamp(76.0, 200.0));
         let spacing = if row.is_empty() { 0.0 } else { ui.spacing().item_spacing.x };
@@ -1601,20 +1656,22 @@ fn config_selects(chat: &mut AgentChat, ui: &mut egui::Ui, options: &[acp::Confi
 fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOption, width: f32, pending: bool) {
     let t = Tokens::get();
     let current = option.options.iter().find(|choice| choice.value == option.current_value);
-    let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
+    let label = config_button_label(option, current);
     // Bound both the measurement and the visible label: agent-provided text may be huge.
     // Width follows the current value, leaving short choices room to sit on one line.
     let font = egui::FontId::proportional(t.font_label);
     let mut chars = 32;
     let displayed = loop {
-        let text = compact_text(selected, chars);
+        let text = compact_text(&label, chars);
         if chars == 1 || ui.painter().layout_no_wrap(text.clone(), font.clone(), t.text).size().x <= width - 36.0 {
             break text;
         }
         chars -= 1;
     };
     let name = if option.name.is_empty() { &option.id } else { &option.name };
-    let tip = [name.as_str(), option.description.as_str(), current.map_or("", |choice| choice.description.as_str())]
+    let service_tier = is_service_tier_option(option);
+    let heading = if service_tier { label.as_ref() } else { name.as_str() };
+    let tip = [heading, option.description.as_str(), current.map_or("", |choice| choice.description.as_str())]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -1677,13 +1734,10 @@ fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOp
                                 ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).backing_on_hover_text(group);
                             }
                             previous_group = group;
-                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
+                            let name = config_choice_name(option, choice);
+                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(name, 32), choice.value == option.current_value);
                             let row = row.backing_on_hover_text(
-                                [choice.name.as_str(), choice.description.as_str()]
-                                    .into_iter()
-                                    .filter(|part| !part.is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n"),
+                                [name, choice.description.as_str()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n"),
                             );
                             solidcraft_ui_registry::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
                             if row.clicked() {
@@ -1701,7 +1755,13 @@ fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOp
         }
         response
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
+    response.widget_info(|| {
+        if service_tier {
+            egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, label.as_ref())
+        } else {
+            egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {label}"))
+        }
+    });
     response.backing_on_hover_text(tip);
     match picked {
         Some(ui_kit::Picked::Listed(value)) => chat.actions.push(PanelAction::SetConfigOption { id: option.id.clone(), value }),
@@ -1741,16 +1801,84 @@ mod config_ui_tests {
     }
 
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
+        draw_switcher_with_events(app, ctx, width, vec![]);
+    }
+
+    fn draw_switcher_with_events(app: &mut SolveApp, ctx: &egui::Context, width: f32, events: Vec<egui::Event>) {
         solidcraft_ui_registry::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
         let view = PanelView::of(app, ctx);
-        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
                 ui_kit::scope(ui, |ui| switcher(&mut app.agent_chat, &view, ui));
             });
         })
         .textures_delta
         .clear();
+    }
+
+    fn click_switcher_control(app: &mut SolveApp, ctx: &egui::Context, width: f32, handle: &str) {
+        let pos = solidcraft_ui_registry::handle_at(handle).expect(handle);
+        for pressed in [true, false] {
+            let events = vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+            ];
+            draw_switcher_with_events(app, ctx, width, events);
+        }
+        draw_switcher(app, ctx, width);
+    }
+
+    #[test]
+    fn service_tier_picker_offers_endpoint_choices_and_dispatches_the_selection() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.agents.push(agents::AgentConfig {
+            id: "api".into(),
+            kind: agents::Kind::Api,
+            base_url: "https://api.openai.com/v1".into(),
+            openai_responses: true,
+            ..Default::default()
+        });
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            draw_switcher(&mut app, &ctx, 280.0);
+        }
+        let rect = solidcraft_ui_registry::rect_of("agent_chat:service_tier").expect("endpoint tier control");
+        assert!(rect.left() >= 0.0 && rect.right() <= 280.0);
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:default").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:fast").is_some());
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier:ultrafast");
+        let actions = std::mem::take(&mut app.agent_chat.actions);
+        assert_eq!(actions, [PanelAction::SetServiceTier(agents::ServiceTier::Ultrafast)]);
+        for action in actions {
+            run(&mut app, &ctx, action);
+        }
+        let entry = agents::current(&app).expect("configured API endpoint");
+        assert_eq!(app.agent_chat.service_tier(&entry), agents::ServiceTier::Ultrafast);
+
+        app.preferences.agents[0].openai_responses = false;
+        draw_switcher(&mut app, &ctx, 280.0);
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:fast").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:ultrafast").is_none());
+    }
+
+    #[test]
+    fn acp_speed_picker_keeps_the_advertised_wire_ids() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let fast_mode = option("fast-mode", "speed", &[("off", "Off", None), ("on", "On", None)]);
+        assert_eq!(config_choice_name(&fast_mode, &fast_mode.options[0]), tr("ui.standard"));
+        assert_eq!(config_choice_name(&fast_mode, &fast_mode.options[1]), agents::ServiceTier::Fast.label());
+        app.agent_chat.config_options = Some(vec![fast_mode]);
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            draw_switcher(&mut app, &ctx, 280.0);
+        }
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier").is_none());
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:config:fast-mode");
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:config:fast-mode:on");
+        assert_eq!(app.agent_chat.actions, [PanelAction::SetConfigOption { id: "fast-mode".into(), value: "on".into() }]);
     }
 
     #[test]
