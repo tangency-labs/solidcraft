@@ -5285,7 +5285,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut part = Session::default();
         run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
-        let step = solidcraft_io::export(&part.doc, &["Block".to_string()], solidcraft_io::Format::Step, "Block").unwrap();
+        let step_file = dir.join("block.step");
+        run(&mut part, "file.export", json!({"path": step_file}));
+        let step = std::fs::read(&step_file).unwrap();
         let mut kind = solidcraft_io::step_import_feature(&step, "block.step").unwrap().kind;
         if let FeatureKind::Import { file, .. } = &mut kind {
             *file = "part.FCStd".into();
