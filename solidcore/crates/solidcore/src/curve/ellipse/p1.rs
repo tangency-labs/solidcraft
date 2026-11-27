@@ -1282,9 +1282,42 @@ impl Ellipse {
         polar_key: ObjectKey,
         trim_surface: Option<&Surface>,
     ) -> Result<bool> {
+        if !level_given {
+            self.ensure_nurb_for_assert(k)?;
+        }
+        self.assert_valid_on_prepared(k, list, level_given, key, polar_key, trim_surface)
+    }
+
+    /// Materializes the cached NURB representation if missing (the only mutation
+    /// [`Self::assert_valid_on`] performs).
+    pub(crate) fn ensure_nurb_for_assert(&mut self, k: &Kernel) -> Result<()> {
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb(k))?;
+        }
+        Ok(())
+    }
+
+    /// Read-only body of [`Self::assert_valid_on`], once [`Self::ensure_nurb_for_assert`]
+    /// has run (when `!level_given`).
+    pub(crate) fn assert_valid_on_prepared(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         if !self.circle {
-            return self.ellipse_assert_valid(k, list, level_given, key, polar_key, trim_surface);
+            return self.ellipse_assert_valid_prepared(
+                k,
+                list,
+                level_given,
+                key,
+                polar_key,
+                trim_surface,
+            );
         }
 
         // init return value
@@ -1294,7 +1327,7 @@ impl Ellipse {
         rtn &= if level_given {
             true
         } else {
-            self.ellipse_assert_valid(
+            self.ellipse_assert_valid_prepared(
                 k,
                 list.as_deref_mut(),
                 level_given,
@@ -1318,9 +1351,10 @@ impl Ellipse {
         Ok(rtn)
     }
 
-    /// `SmEllipse::AssertValid` (see [`Self::assert_valid`]).
-    fn ellipse_assert_valid(
-        &mut self,
+    /// `SmEllipse::AssertValid` (see [`Self::assert_valid`]), assuming any missing NURB
+    /// was already materialized when `!level_given`.
+    fn ellipse_assert_valid_prepared(
+        &self,
         k: &Kernel,
         list: Option<&mut AssertArray>,
         level_given: bool,
@@ -1335,11 +1369,7 @@ impl Ellipse {
 
         // call the base class AssertValid
         if !level_given {
-            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb)
-            if self.base.nurb.is_none() {
-                ignore_status(self.make_nurb(k))?;
-            }
-            let this = &*self;
+            let this = self;
             let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol));
             rtn &= this.base.assert_valid_with(
                 k,
