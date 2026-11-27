@@ -69,6 +69,7 @@ pub mod face_surface;
 pub mod faceted;
 pub mod facing_trough;
 pub mod file;
+pub mod finger_joint;
 pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
