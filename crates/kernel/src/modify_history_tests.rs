@@ -633,6 +633,46 @@ mod smlib {
         assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
     }
 
+    /// Where the kernel refused a wall for folding and no thinner wall builds, the refusal says
+    /// the wall is not the obstacle, in exactly these words.
+    #[test]
+    fn a_folding_shell_no_thinner_wall_fixes_says_so_in_its_words() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let folds = SmError::WallFolds { largest: None };
+        let e = thinner_shell_hint(1.5875, &folds, crate::KernelError::Invalid("fold".into()), |_| false);
+        assert_eq!(
+            e,
+            crate::KernelError::Invalid(
+                "shell: a wall of 1.5875 mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
+                 a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
+                 (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
+                    .into()
+            )
+        );
+    }
+
+    /// A shell the kernel refuses for any other reason than a fold (a result that is not a solid,
+    /// a refusal of its own, a status) at every wall keeps the kernel's refusal (solidcore#3424):
+    /// a kernel defect is never told to the user as a face that curves too tightly. A thinner
+    /// wall that builds is still named.
+    #[test]
+    fn a_shell_refused_at_every_wall_for_another_reason_keeps_the_kernels_refusal() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let not_solid = SmError::RefusedWithDiagnostic {
+            refusal: solidcore_ops::Error::NotSolid,
+            diagnostic: "offset::offset_executive::p2::shell_brep: the body built is not a manifold solid, as its input was".into(),
+        };
+        for failure in [not_solid, SmError::NotSolid, SmError::Status(1001), SmError::Solidcore("shell: refused".into())] {
+            let first = crate::KernelError::Failed(format!("SMLib shell: operation: {failure}"));
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |_| false);
+            assert_eq!(e, first, "{failure:?}");
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |w| w <= 0.8).to_string();
+            assert!(e.contains("the walls offset from this body do not close into a solid; a wall of 0.79375 mm builds"), "{e}");
+        }
+    }
+
     /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
     /// refusal offers builds when used (#20781).
     #[test]

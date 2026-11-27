@@ -76,6 +76,31 @@ fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
     assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some("join"));
 }
 
+/// Grouped faces are picked in the world, so a construction plane they extrude to is read there
+/// too, not in the frame of the moved component that is active (#8527).
+#[test]
+fn grouped_face_auto_operation_reads_a_root_plane_in_the_world() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[0,0,20]}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":"25 mm","name":"Below"}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":"35 mm","name":"Above"}));
+    run(&mut s, "component.activate", json!({"component":part["component"]}));
+    // The top face is at z = 30 in the world: Below (z = 25) is inside the part, Above 5 mm over it.
+    for (plane, expected, volume) in [("Below", "cut", 500.), ("Above", "join", 1500.)] {
+        let params = json!({"faces":[[2,2,30],[8,8,30]],"face_body":"Stock","to":{"plane":plane}});
+        assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected), "{plane}");
+        let mut actual = s.scratch();
+        let mut params = params;
+        params["operation"] = json!("auto");
+        run(&mut actual, "solid.extrude", params);
+        let got = solidcraft_kernel::measure(&actual.model.state().body("Stock").unwrap().body).unwrap().volume;
+        assert!((got - volume).abs() < 1e-6, "{plane}: {got}, want {volume}");
+    }
+}
+
 /// A part inserted into a new design (a STEP file) sits in its own component under the empty
 /// root. A sketch on its face must join it going out and cut it going in, never make a
 /// separate body beside it.

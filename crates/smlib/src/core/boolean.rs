@@ -4,11 +4,6 @@
 //! and consumes the second. A SolidCraft body never changes, so every operation here copies its
 //! operands first ([`Body::copy`], `SmApiBrepCopy`).
 
-use solidcore::Result as SolidResult;
-use solidcore::boolean::api_brep as sm;
-use solidcore::geom::a_object::BooleanOperation;
-use solidcore::kernel::Kernel;
-use solidcore::topology::Brep;
 use solidcore_ops::boolean as ops;
 
 use super::Body;
@@ -111,29 +106,6 @@ pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::
         (None, Ok(_)) => return Err(Error::Argument),
     };
     call::ops_on("SmApiBoolean", &inputs, || ops::boolean(ta, tb, operation(op)))
-}
-
-/// The kernel's operation for [`merged`].
-fn kernel_operation(op: BooleanOp) -> BooleanOperation {
-    match op {
-        BooleanOp::Union => BooleanOperation::Union,
-        BooleanOp::Subtract => BooleanOperation::Difference,
-        BooleanOp::Intersect => BooleanOperation::Intersection,
-    }
-}
-
-/// `SmApiBoolean` of `a` and `b` in the kernel `k` (both consumed), with the result's
-/// tolerances grown as [`boolean`] grows them.
-pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidResult<Brep> {
-    let mut r = sm::boolean(k, a, b, kernel_operation(op))?;
-    // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
-    // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
-    // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
-    // a body that already passes is unchanged; a marginal failure becomes sound.
-    // Offset and shell already grow their results' tolerances this way. First, a vertex
-    // a grazing cut left wider than the check allows is centred on its edges' ends.
-    solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
-    Ok(r.result)
 }
 
 /// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
