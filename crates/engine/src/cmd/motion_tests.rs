@@ -1855,3 +1855,44 @@ fn motion_play_same_value_after_cp1_creates_cp2_and_prevents_expr_resurrection()
     assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
     assert!((s.doc.assembly.joints[0].values[0] - 20.0).abs() < 1e-6);
 }
+
+/// #23208: with a single component in the design, the automatic explode separates the parts
+/// inside it, whichever component is active, and its preview moves them the same way.
+#[test]
+fn automatic_explode_separates_parts_nested_in_a_single_component() {
+    for active in ["root", "Assembly"] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Assembly"}));
+        for (name, z) in [("Lower", 0), ("Upper", 50)] {
+            run(&mut s, "component.activate", json!({"component": "Assembly"}));
+            run(&mut s, "component.create", json!({"name": name, "parent": "Assembly"}));
+            run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "corner": [0, 0, z]}));
+        }
+        run(&mut s, "component.activate", json!({"component": active}));
+        let preview = s.prepare_automatic_explode().unwrap().placements(1.0).unwrap();
+        let r = run(&mut s, "explode.create", json!({"name": "Out"}));
+        assert_eq!(
+            r["moves"],
+            json!([
+                {"occurrence": occ(&s, "Lower"), "translate": [0.0, 0.0, -25.0]},
+                {"occurrence": occ(&s, "Upper"), "translate": [0.0, 0.0, 25.0]},
+            ]),
+            "{active}"
+        );
+        run(&mut s, "explode.show", json!({"view": "Out"}));
+        assert_eq!(s.pending_moves.len(), 2, "{active}");
+        assert_eq!(preview, s.pending_moves, "{active}: the preview matches the view");
+    }
+}
+
+/// #23208: where there is only one part at every level, the refusal speaks of parts with bodies.
+#[test]
+fn automatic_explode_of_a_single_nested_part_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Assembly"}));
+    run(&mut s, "component.create", json!({"name": "Only", "parent": "Assembly"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let e = s.execute("explode.create", &json!({})).unwrap_err();
+    assert!(e.to_string().contains("two or more occurrences with bodies side by side"), "{e}");
+    assert!(s.doc.assembly.exploded.is_empty());
+}

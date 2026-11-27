@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPLODE_CREATE_CONTRACT)
         .output(output_schema_for::<ExplodeCreated>)
         .params(
-            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+            "name?; scale? (automatic: each occurrence with bodies, or inside the only one, pushed from their shared centre by scale × its offset, default 1); \
              moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
         ),
     CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
@@ -1473,22 +1473,38 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
-/// World centre of each top-level occurrence's bodies.
+/// World centre of each part the automatic exploded view pulls apart: the occurrences with bodies
+/// placed directly in the design or, while only one of them has any, those inside it, level by
+/// level (#23208).
 fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     let bodies = placed(s);
-    let mut out = Vec::new();
-    for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
-        let mut bounds = Aabb3::EMPTY;
-        for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(bb) = b.exact_bounds() {
-                bounds = bounds.union(&bb);
+    let mut path = Vec::new();
+    let mut parent = 0;
+    // Each pass goes one level down; no design nests deeper than it has occurrences.
+    for _ in 0..=s.doc.occurrences.len() {
+        let mut out = Vec::new();
+        let mut inside = 0;
+        for o in s.doc.occurrences.iter().filter(|o| o.parent == parent) {
+            let mut bounds = Aabb3::EMPTY;
+            for (_, b) in bodies.iter().filter(|(p, _)| p.starts_with(&path) && p.get(path.len()) == Some(&o.id)) {
+                if let Ok(bb) = b.exact_bounds() {
+                    bounds = bounds.union(&bb);
+                }
+            }
+            if !bounds.is_empty() {
+                out.push((o.id, bounds.center()));
+                inside = o.component;
             }
         }
-        if !bounds.is_empty() {
-            out.push((o.id, bounds.center()));
+        match out.as_slice() {
+            [(only, _)] => {
+                path.push(*only);
+                parent = inside;
+            }
+            _ => return out,
         }
     }
-    out
+    Vec::new()
 }
 
 /// The unit moves for an automatic exploded view, prepared once for an interactive preview.
@@ -1505,9 +1521,7 @@ impl Session {
         let created = scratch.execute("explode.create", &json!({}))?;
         let index = view_index(&scratch, &created, "explode.show")?;
         let view = scratch.doc.assembly.exploded.get(index).ok_or_else(|| bad("explode.show", "view"))?;
-        let placed: BTreeMap<u64, Mat> = scratch.doc.occurrences.iter().filter(|o| o.parent == 0).map(|o| (o.id, o.transform)).collect();
-        let moves = view.moves.iter().filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect();
-        Ok(AutomaticExplode { moves })
+        Ok(AutomaticExplode { moves: explode_moves(&scratch, view) })
     }
 }
 
@@ -1556,7 +1570,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let c = centres(s);
             if c.len() < 2 {
-                return Err(bad(cmd, "an exploded view needs two or more occurrences"));
+                return Err(bad(cmd, "an exploded view needs two or more occurrences with bodies side by side"));
             }
             let mid = c.iter().fold(Vec3::ZERO, |a, (_, p)| a + *p) * (1.0 / c.len() as f64);
             c.iter().map(|(o, p)| (*o, (*p - mid) * scale)).collect()

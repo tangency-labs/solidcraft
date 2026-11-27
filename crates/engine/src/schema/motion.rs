@@ -690,14 +690,15 @@ pub struct MotionStudyDeleted {
 
 /// Make an exploded view: occurrences moved apart, shown with `explode.show`. The design keeps
 /// its placements. One undo step. With `moves`, each occurrence moves as given; without, every
-/// top-level occurrence is pushed away from the assembly's centre by `scale` times its offset.
+/// occurrence with bodies placed in the design (or, while only one has any, every one inside it,
+/// level by level) is pushed away from their shared centre by `scale` times its offset.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExplodeCreateKeys {
     /// The view's name. Default: "Exploded View" and the first number no view's name has.
     #[serde(default)]
     pub name: Option<String>,
-    /// For the automatic view: how far each occurrence is pushed away from the assembly's
+    /// For the automatic view: how far each occurrence is pushed away from the parts' shared
     /// centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1.
     /// Not read, and so not checked, when `moves` is given.
     #[serde(default, deserialize_with = "explode_scale", skip_serializing_if = "Option::is_none")]
@@ -751,7 +752,7 @@ fn explode_scale<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Erro
 
 fn explode_scale_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "For the automatic view: how far each occurrence is pushed away from the assembly's centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1. Not read, and so not checked, when `moves` is given.",
+        "description": "For the automatic view: how far each occurrence is pushed away from the parts' shared centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1. Not read, and so not checked, when `moves` is given.",
         "type": "number",
         "minimum": -100,
         "maximum": 100
