@@ -1,23 +1,23 @@
 {
   "en": {
-    "ui.palette_shortcut_starts_listed_tool": "Shortcuts start the tool listed with them"
+    "ui.palette_shortcut_starts_listed_tool": "Shortcut starts the listed tool"
   },
   "ar": {
-    "ui.palette_shortcut_starts_listed_tool": "الاختصارات تبدأ الأداة المدرجة بجانبها"
+    "ui.palette_shortcut_starts_listed_tool": "الاختصار يبدأ الأداة المدرجة"
   },
   "de": {
-    "ui.palette_shortcut_starts_listed_tool": "Tastenkürzel starten das Werkzeug, neben dem sie stehen"
+    "ui.palette_shortcut_starts_listed_tool": "Taste startet das gelistete Werkzeug"
   },
   "he": {
-    "ui.palette_shortcut_starts_listed_tool": "קיצורי מקשים מפעילים את הכלי שמופיע לצידם"
+    "ui.palette_shortcut_starts_listed_tool": "קיצור מפעיל את הכלי המוצג"
   },
   "ja": {
-    "ui.palette_shortcut_starts_listed_tool": "ショートカットで横に表示されたツールを開始"
+    "ui.palette_shortcut_starts_listed_tool": "ショートカットで表示中のツールを開始"
   },
   "vi": {
-    "ui.palette_shortcut_starts_listed_tool": "Phím tắt mở công cụ được ghi bên cạnh"
+    "ui.palette_shortcut_starts_listed_tool": "Phím tắt mở công cụ được ghi"
   },
   "zh": {
-    "ui.palette_shortcut_starts_listed_tool": "快捷键启动其旁边列出的工具"
+    "ui.palette_shortcut_starts_listed_tool": "快捷键启动列出的工具"
   }
 }
