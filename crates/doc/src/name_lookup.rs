@@ -160,19 +160,32 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         }
     }
     let at_pick = |i: usize| EdgeHit { edge: i, point: near, verified: false, on_point: true };
+    let resuffixed = |(i, on_point): (usize, bool)| -> Result<EdgeHit, String> {
+        if on_point {
+            Ok(at_pick(i))
+        } else {
+            mid(i).map(|point| EdgeHit { edge: i, point, verified: verified(i), on_point: false }).ok_or_else(|| "edge".into())
+        }
+    };
+    let numbered = wanted.len() != name.len();
     let Some((_, cands)) = best else {
-        let picked = if loose { resuffixed_edge(b, &m, &faces, wanted, near) } else { renamed_edge(b, &m, &faces, wanted, near) };
-        return picked.map(at_pick).ok_or_else(|| format!("edge `{name}` no longer exists"));
+        if loose {
+            return resuffixed_edge(b, &m, &faces, wanted, near, !numbered)
+                .map(resuffixed)
+                .unwrap_or_else(|| Err(format!("edge `{name}` no longer exists")));
+        }
+        return renamed_edge(b, &m, &faces, wanted, near).map(at_pick).ok_or_else(|| format!("edge `{name}` no longer exists"));
     };
     // When the faces of several numbered edges bound one edge now, every one of their names
     // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
-    let numbered = wanted.len() != name.len();
     match cands.as_slice() {
         [i] if numbered && !edge_near(b, &m, *i, near) => {
             Err(format!("edge `{name}` was one of several between its faces, and the one left is elsewhere"))
         }
         [i] => exact(*i),
-        _ => resuffixed_edge(b, &m, &faces, wanted, near).map(at_pick).ok_or_else(|| format!("edge `{name}` is no longer one edge")),
+        _ => {
+            resuffixed_edge(b, &m, &faces, wanted, near, false).map(resuffixed).unwrap_or_else(|| Err(format!("edge `{name}` is no longer one edge")))
+        }
     }
 }
 
@@ -1050,24 +1063,42 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 
 /// The edge a stored edge name `wanted` (without its number) meant when one of its faces is named
 /// with the faces around it (`F44:top#[F43:side:l7]`) and those are now others: the face is still
-/// there under its stem, but its qualifier changed, or several faces answer to it (a join over
-/// another extrude's footprint names the walls it joins differently, and can leave two faces of
-/// that stem). The candidates are the edges between faces answering to the name's two faces: each
-/// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
-/// too is named with a qualifier (another one: a face whole again is not it) or where the name's
-/// qualifier lists only faces named by their index and the face borders such a face that is not
-/// verified (those tell no piece apart now, so the piece has no qualifier), at least one
-/// side of them by a qualifier that is not that face's own (a piece of the named face split since
-/// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
-/// whose exact curve the reference's point `near` lies on (within the pick reach, as
-/// [`solidcraft_kernel::edge_distance`] measures it) is taken; none or several, and the name finds
-/// nothing. The point must be the reference's own pick, as for [`renamed_edge`].
-fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
-    if b.body.is_mesh() || !near.is_finite() {
+/// there under its stem, but its qualifier changed, dropped off (became bare stem, numbered tie,
+/// or whole again when an unrelated neighbour elsewhere on the face was edited or deleted), or
+/// several faces answer to it (a join over another extrude's footprint names the walls it joins
+/// differently, and can leave two faces of that stem). The candidates are the edges between faces
+/// answering to the name's two faces: each exactly (see [`exactly`]) or, for a face named with its
+/// qualifier, by its stem when:
+/// - the face is still split into multiple pieces on the body (whether qualified, bare stem, or
+///   numbered tie),
+/// - the face still carries a qualifier or uniquely matches by neighbour overlap,
+/// - the name's qualifier lists only faces named by their index and the face borders such an
+///   unverified face (#19455), or
+/// - the face became whole again without un-splitting this edge: no missing entry is a Split Face
+///   role or index-only qualifier, and either the edge's other face itself was listed in the
+///   qualifier (with at least one surviving neighbour) or the edge's other face was created after
+///   this face and after every missing qualifier face (so the missing neighbour came from an
+///   earlier unrelated split of this face before the other face existed).
+///
+/// At least one side must answer by a qualifier that is not that face's own (a piece of the named
+/// face split since is not a renamed face: the edge split with it and the name asks again). Of
+/// those candidates, the one edge whose exact curve the reference's point `near` lies on (within
+/// the pick reach, as [`solidcraft_kernel::edge_distance`] measures it) is taken; when `near` lies
+/// on none and `allow_moved` is set, a single unique candidate backed by surviving qualifier
+/// context is taken so upstream edits that shift the edge also preserve it. None or several, and
+/// the name finds nothing.
+fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3, allow_moved: bool) -> Option<(usize, bool)> {
+    if b.body.is_mesh() || (!allow_moved && !near.is_finite()) {
         return None;
     }
     let beside_index = beside_index_named(b, faces);
     let mut resuffixed_cache: std::collections::HashMap<&str, Option<usize>> = std::collections::HashMap::new();
+    let mut stem_counts: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+    for own in faces.faces.iter() {
+        let today = crate::persistent_name::written_now(own);
+        let (core, at) = crate::history_names::instance_suffix(&today);
+        *stem_counts.entry((strip_piece(core).to_string(), at.to_string())).or_default() += 1;
+    }
     for (k, _) in wanted.match_indices('|') {
         for part in [wanted.get(..k), wanted.get(k + 1..)].into_iter().flatten() {
             if qualified(part) {
@@ -1075,57 +1106,105 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
             }
         }
     }
-    // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
-    let side = |f: usize, x: &str| -> Option<bool> {
+    let whole_edge_context = |status: &crate::history_names::QualifierStatus, x: &str, other_face: &str| -> Option<bool> {
+        if told_apart_by_index_only(x) || status.missing.iter().any(|m| crate::history_names::is_split_role(m)) {
+            return None;
+        }
+        if status.lists_other && status.matched > 0 {
+            return Some(true);
+        }
+        let x_maker = crate::persistent_name::made_by(x)?;
+        let other_maker = crate::persistent_name::made_by(other_face)?;
+        if other_maker > x_maker
+            && !status.missing.is_empty()
+            && status.missing.iter().all(|m| crate::persistent_name::made_by(m).is_some_and(|mid| mid < other_maker))
+        {
+            return Some(status.matched > 0);
+        }
+        None
+    };
+    // How face `f` answers to face name `x` on an edge shared with `other_face`:
+    // `Some((resuffixed, context_supported))`, where `resuffixed` is true when `f` answered by a
+    // qualifier that is not its own, and `context_supported` is true when surviving qualifier
+    // neighbours (or an exact/descending match) back it even if the edge moved.
+    let side = |f: usize, x: &str, other_face: &str| -> Option<(bool, bool)> {
         let level = crate::history_names::matches(faces, f, x)?;
         if exactly(level) {
             let resuffixed = level == Match::Piece && qualified(x) && faces.faces.get(f).is_some_and(|n| !crate::history_names::descends(n, x));
-            return Some(resuffixed);
+            return Some((resuffixed, true));
         }
-        // By its stem only where the face is still named after its neighbours, others than the name's:
-        // a face whole again is not one the name told apart by a face it never touches (#11731).
-        // A name told apart only by faces named by their index may name a piece that has no
-        // qualifier now, where the face still borders such an unverified face: those no longer
-        // tell pieces apart (#19455).
+        if level != Match::Stem || !qualified(x) {
+            return None;
+        }
+        let own = faces.faces.get(f)?;
+        let today = crate::persistent_name::written_now(own);
+        let (core, at) = crate::history_names::instance_suffix(&today);
+        let is_split = stem_counts.get(&(strip_piece(core).to_string(), at.to_string())).copied().unwrap_or(0) > 1;
+        let status = crate::history_names::qualifier_status(faces, f, x, other_face);
+        let has_overlap = status.as_ref().is_some_and(|s| s.matched > 0 && !s.missing.iter().any(|m| crate::history_names::is_split_role(m)));
         let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
-        (level == Match::Stem
-            && qualified(x)
-            && (faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece()) || resuffixed_cache.get(x).copied().flatten() == Some(f)))
-        .then_some(true)
+        if is_split {
+            return Some((true, has_overlap));
+        }
+        if qualified(own) || resuffixed_cache.get(x).copied().flatten() == Some(f) {
+            return Some((true, has_overlap));
+        }
+        if unqualified_piece() {
+            return Some((true, false));
+        }
+        whole_edge_context(status.as_ref()?, x, other_face).map(|supported| (true, supported))
     };
-    let mut cands: Vec<usize> = Vec::new();
+    let mut cands: Vec<(usize, bool)> = Vec::new();
     for (i, fs) in m.edge_faces.iter().enumerate() {
         let [fa, fb] = fs.as_slice() else { continue };
-        let answers = wanted.match_indices('|').any(|(k, _)| {
-            let (Some(x), Some(y)) = (wanted.get(..k), wanted.get(k + 1..)) else { return false };
-            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| side(p as usize, x).zip(side(q as usize, y)).is_some_and(|(sx, sy)| sx || sy))
-        });
-        if answers {
-            cands.push(i);
+        let mut matched: Option<bool> = None;
+        for (k, _) in wanted.match_indices('|') {
+            let (Some(x), Some(y)) = (wanted.get(..k), wanted.get(k + 1..)) else { continue };
+            for (p, q) in [(*fa, *fb), (*fb, *fa)] {
+                if let Some(((sx, cx), (sy, cy))) = side(p as usize, x, y).zip(side(q as usize, y, x))
+                    && (sx || sy)
+                {
+                    let supported = cx && cy;
+                    matched = Some(matched.map_or(supported, |prev| prev || supported));
+                }
+            }
+        }
+        if let Some(supported) = matched {
+            cands.push((i, supported));
         }
     }
-    let reach = pick_reach(b);
-    let record = b.body.record();
-    let sorted = |mut fs: Vec<u32>| {
-        fs.sort_unstable();
-        fs.dedup();
-        fs
-    };
-    let mut on = cands.into_iter().filter(|i| {
-        // The mesh's edges are the B-rep's, in its order: the edge's faces say it is the same edge.
-        let same = record
-            .edges
-            .get(*i)
-            .zip(m.edge_faces.get(*i))
-            .is_some_and(|(e, fs)| sorted(e.uses.iter().map(|u| u.face).collect()) == sorted(fs.clone()));
-        same && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
-    });
-    on.next().filter(|_| on.next().is_none())
+    if near.is_finite() {
+        let reach = pick_reach(b);
+        let record = b.body.record();
+        let sorted = |mut fs: Vec<u32>| {
+            fs.sort_unstable();
+            fs.dedup();
+            fs
+        };
+        let mut on = cands.iter().copied().filter(|&(i, _)| {
+            // The mesh's edges are the B-rep's, in its order: the edge's faces say it is the same edge.
+            let same = record
+                .edges
+                .get(i)
+                .zip(m.edge_faces.get(i))
+                .is_some_and(|(e, fs)| sorted(e.uses.iter().map(|u| u.face).collect()) == sorted(fs.clone()));
+            same && solidcraft_kernel::edge_distance(&b.body, i, near).ok().flatten().is_some_and(|d| d <= reach)
+        });
+        if let Some((first, _)) = on.next() {
+            return on.next().is_none().then_some((first, true));
+        }
+    }
+    if allow_moved && let &[(only, true)] = cands.as_slice() {
+        return Some((only, false));
+    }
+    None
 }
 
-/// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
+/// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`,
+/// including on a pattern copy `F2:top#[F4:side:l1]@F9.1`).
 fn qualified(x: &str) -> bool {
-    crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
+    let (core, _) = crate::history_names::instance_suffix(x);
+    crate::piece_names::piece_parts(core).is_some_and(|(_, around)| !around.is_empty())
 }
 
 /// Whether face name `x` is told apart only by faces named by their index
