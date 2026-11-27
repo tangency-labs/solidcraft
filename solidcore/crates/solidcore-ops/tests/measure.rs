@@ -1327,3 +1327,85 @@ fn a_body_of_unknown_naming_is_refused_by_the_check() {
         .set_naming(solidcore::topology::NamingScheme::Caller);
     assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
 }
+
+/// The proved normal angle: a box's top is square to `+z` and a quarter turn from `+x`; a
+/// strip of a cylinder's side of radius 40 across `y` in `[-10, 10]` turns `asin(10 / 40)`
+/// from `+x` at its ends, and the bound holds that within 0.03 (whole or split at its seam);
+/// a whole tube and a whole sphere prove nothing; a bad index or direction is refused.
+#[test]
+fn a_face_normal_angle_bound_holds_its_largest_angle() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let top = (0..order.faces.len())
+        .find(|&f| b.face_plane_normal(&order, f).unwrap().unwrap().value[2] > 0.99)
+        .unwrap();
+    let up = b
+        .face_normal_angle_bound(&order, top, [0.0, 0.0, 2.0])
+        .unwrap()
+        .unwrap();
+    assert!((0.0..=1e-9).contains(&up), "{up}");
+    let side = b
+        .face_normal_angle_bound(&order, top, [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert!(near(side, PI / 2.0, 1e-9) && side >= PI / 2.0, "{side}");
+    let down = b
+        .face_normal_angle_bound(&order, top, [0.0, 0.0, -1.0])
+        .unwrap()
+        .unwrap();
+    assert!(near(down, PI, 1e-9), "{down}");
+    assert_eq!(
+        b.face_normal_angle_bound(&order, top, [0.0; 3]).unwrap(),
+        None
+    );
+    assert!(matches!(
+        b.face_normal_angle_bound(&order, top, [f64::NAN, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        b.face_normal_angle_bound(&order, order.faces.len(), [0.0, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+
+    let strip = solidcore_ops::boolean::boolean(
+        make_cylinder([0.0; 3], 40.0, 2.0).unwrap(),
+        make_box([30.0, -10.0, -1.0], [20.0, 20.0, 4.0]).unwrap(),
+        solidcore_ops::boolean::BooleanOp::Intersect,
+    )
+    .unwrap()
+    .unwrap();
+    let (_, order) = strip.to_record().unwrap();
+    // the cylinder's seam may split the strip's side in two: the largest bound holds the ends
+    let mut got = f64::NEG_INFINITY;
+    for f in 0..order.faces.len() {
+        if strip.face_plane_normal(&order, f).unwrap().is_none() {
+            let bound = strip
+                .face_normal_angle_bound(&order, f, [1.0, 0.0, 0.0])
+                .unwrap()
+                .unwrap();
+            got = got.max(bound);
+        }
+    }
+    // asin(10 / 40), written out: ops tests compute no geometry (clippy.toml)
+    let exact = 0.252_680_255_142_078_65;
+    assert!(
+        (exact..exact + 0.03).contains(&got),
+        "{got} against {exact}"
+    );
+
+    for whole in [
+        make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+        make_sphere([0.0; 3], 5.0).unwrap(),
+    ] {
+        let (_, order) = whole.to_record().unwrap();
+        for f in 0..order.faces.len() {
+            if whole.face_plane_normal(&order, f).unwrap().is_none() {
+                let got = whole
+                    .face_normal_angle_bound(&order, f, [1.0, 0.0, 0.0])
+                    .unwrap();
+                assert_eq!(got, None, "face {f}");
+            }
+        }
+    }
+}
