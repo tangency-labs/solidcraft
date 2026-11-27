@@ -42,13 +42,13 @@ pub struct EquationFit {
 const RANGE_UNIT_REFUSED: &str =
     "with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number";
 
-/// How bare numbers read in the formulas: lengths in the design's unit, and angles in degrees,
-/// as everywhere else in the expression language (#19630). A curve saved before that reads
+/// How bare numbers read in the formulas: lengths in the design's unit (areas and volumes in its
+/// square and cube), and angles in degrees, as everywhere else in the expression language (#19630). A curve saved before that reads
 /// radians still: its `radians_trig` mark, set as the design opens, keeps its angles as they
 /// were, so an older design keeps its curves.
 fn defaults(vals: &BTreeMap<String, Value>, radians_trig: bool) -> Defaults {
     let len = vals.get(crate::eval::DESIGN_LEN).map(|v| v.v).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    let mut d = Defaults { len, ..Defaults::default() };
+    let mut d = Defaults::for_unit("", len);
     if radians_trig {
         d.ang = 1.0;
     }
