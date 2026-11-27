@@ -2017,7 +2017,7 @@ mod tests {
         let a = sketch.add_point(solidcore_record::Vec2::ZERO, None).unwrap();
         let b = sketch.add_point(solidcore_record::Vec2::new(30.0, 0.0), None).unwrap();
         let line = sketch.add_line_pts(a, b, None).unwrap();
-        let dimension = doc.new_model_param("qqlb * 3", "mm");
+        let dimension = doc.new_model_param("qqlb * 3", "mm").unwrap();
         sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: line, value: 30.0 }, Some(dimension.clone())).unwrap();
         doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         doc.rename_param(&dimension, "qqml").unwrap();
