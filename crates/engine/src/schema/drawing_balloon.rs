@@ -36,6 +36,18 @@ impl JsonSchema for BalloonIdParam {
     }
 }
 
+/// Where on its edge a balloon's arrow or a note's leader ends (#22195).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AtEdge {
+    /// The edge's middle.
+    #[default]
+    Middle,
+    /// Where the edge was picked: its `point`, kept as a part of the edge's length from its start,
+    /// so it follows the edge as the model changes.
+    Picked,
+}
+
 /// What `drawing.balloon.add` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +65,9 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "TableIdParam")]
     pub parts_list: Option<TableIdParam>,
+    /// Where its arrow ends on the edge: `middle` (the default) or `picked`, the edge's `point`.
+    #[serde(default)]
+    pub at_edge: AtEdge,
 }
 
 /// What `drawing.balloon.inspect` takes.

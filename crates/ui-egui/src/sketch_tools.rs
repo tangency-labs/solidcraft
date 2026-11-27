@@ -1488,6 +1488,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         pts: Vec::new(),
         hover: None,
         picks: Vec::new(),
+        picks_dropped: false,
         point_picks: Vec::new(),
         dims: Vec::new(),
         dim_history: Vec::new(),
@@ -1499,6 +1500,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
         arc_modes: false,
+        rotatable: crate::sketch_dims::last_rectangle_rotatable(),
         preselected: false,
         finished: false,
     })
@@ -2009,7 +2011,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if periodic_start_snap(app, tool, proj, pos).is_some() {
                 // Only this deliberate click selects periodic interpolation. A
                 // right-click finish and all previously saved splines stay natural.
-                let params = json!({"points":tool.pts.iter().map(arg).collect::<Vec<_>>(),"periodic":true});
+                // A stored click whose snap the Undo button took away goes as the place clicked.
+                let points: Vec<_> = tool.pts.iter().map(|p| arg(&crate::tools::standing(app, p))).collect();
+                let params = json!({"points": points, "periodic": true});
                 if app.run(cmd, params).is_ok() {
                     tool.pts.clear();
                     crate::sketch_dims::reset(tool);
@@ -2045,8 +2049,12 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             if !tool.picks.contains(&id) {
+                // Every clicked pick gets its place, also when the click misses the sketch
+                // plane (a view along it): the places then stay matched to the last picks.
+                let place = at.map(|(p, _)| p).or_else(|| hit_place(app, &hits, &id));
                 tool.picks.push(id);
-                if let Some((p, _)) = at {
+                tool.picks_dropped = false;
+                if let Some(p) = place {
                     tool.pts.push((p, None));
                 }
             }
@@ -2138,6 +2146,15 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         return;
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
+    // Tangent Arc and Blend Curve take the sketch point itself, since the tangent comes from its
+    // curve. When the Undo button took that point away after the click, the place clicked is no
+    // answer, so the stored click goes and the tool says where to click to start over (#22766).
+    if matches!(tool.cmd, "sketch.arc.tangent" | "sketch.blend_curve") && tool.pts.iter().any(|q| crate::tools::standing(app, q).1 != q.1) {
+        tool.pts.clear();
+        crate::sketch_dims::reset(tool);
+        app.set_status(hint(tool.cmd).unwrap_or_default(), true);
+        return;
+    }
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(tr_engine_error(&error), true);
         return;
@@ -2169,7 +2186,10 @@ fn tangent_start(app: &SolveApp, p: &(Vec2, Option<String>)) -> bool {
 }
 
 fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
-    let p = &t.pts;
+    // A stored click whose snap the Undo button took away goes as the place clicked, as
+    // `run_shape` sends it, so the command does not refuse click after click (#22766).
+    let pts: Vec<_> = t.pts.iter().map(|p| crate::tools::standing(app, p)).collect();
+    let p = &pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
     let slot_width = |fallback: f64| crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| fallback.max(1e-3));
     let params = match (t.cmd, p.as_slice()) {
@@ -2203,6 +2223,59 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
         _ => return false,
     };
     crate::tools::draw(app, t, params).is_ok()
+}
+
+/// Drops the picks of a curve-picking tool that no longer name a curve or point of the active
+/// sketch, with their click places, so the user picks again instead of the command refusing the
+/// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
+/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept. Run on every frame
+/// before the value boxes are decided, so 2-Tangent Circle's Radius box goes with the pair.
+/// After a drop the boxes start over and true is returned, for the caller to show the hint.
+pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
+    if !matches!(mode(t.cmd), Some(Mode::Entities(_))) || t.picks.is_empty() {
+        return false;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return false };
+    let stands =
+        |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
+    let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
+    if keep.iter().all(|k| *k) {
+        return false;
+    }
+    // Each click adds its pick and its place together, after any preselected picks, which have
+    // no place: the places belong to the last picks.
+    let offset = t.picks.len().saturating_sub(t.pts.len());
+    let mut i = offset;
+    t.pts.retain(|_| {
+        let kept = keep.get(i).copied().unwrap_or(true);
+        i = i.saturating_add(1);
+        kept
+    });
+    let mut flags = keep.iter();
+    t.picks.retain(|_| flags.next().copied().unwrap_or(true));
+    crate::sketch_dims::reset(t);
+    t.picks_dropped = t.picks.is_empty();
+    true
+}
+
+/// A right-click on the view while a tool runs: true when the Undo button just took every pick
+/// of a curve-picking tool away, so the right-click that was meant to apply keeps the tool on for
+/// the user to pick again, as a pick still standing would (#23086). Esc still ends the tool.
+pub(crate) fn keep_on_right_click(app: &mut SolveApp) -> bool {
+    app.tool.as_mut().is_some_and(|t| std::mem::take(&mut t.picks_dropped) && t.picks.is_empty())
+}
+
+/// Where on the active sketch the hit for entity `id` is, in sketch coordinates.
+fn hit_place(app: &SolveApp, hits: &[Hit], id: &str) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = st.sketch(sid)?.plane;
+    hits.iter().find_map(|h| match h {
+        Hit::SketchPoint { sketch, id: hit, at } if *sketch == sid && hit == id => Some(*at),
+        Hit::SketchCurve { sketch, id: hit, point, .. } if *sketch == sid && hit == id => Some(plane.to_local(*point)),
+        _ => None,
+    })
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {

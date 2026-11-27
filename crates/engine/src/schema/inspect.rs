@@ -286,7 +286,7 @@ pub struct ModelThread {
     pub feature: u64,
     /// The body it is on.
     pub body: String,
-    /// Its size, such as `M6x1`.
+    /// Its size and any tolerance class, such as `M6x1`, `M8-6g` or `1/4-20 UNC-2A`.
     pub designation: String,
     /// Its major diameter (mm).
     pub major_diameter: f64,

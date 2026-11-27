@@ -6,7 +6,7 @@ use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
 use solidcore_record::{Loop2, Seg2};
-use solidcraft_develop::prelude::*;
+use solidcraft_develop::{Rigid3, prelude::*};
 use solidcraft_geom::{Aabb3, ArcMap, Ring};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -96,7 +96,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // stops the wall.
             let shown = targets_as_shown(st, f, &["*".to_string()])?;
             let tools = rib_tools(vals, &shown, f, None)?;
-            apply_op(doc, st, f, tools, Operation::Join, &[])
+            apply_traced(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
             let tp = doc.resolve_plane_in(vals, target, 0, f.component, Some(st))?;
@@ -232,7 +232,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// The walls of rib `f` (one per curve for a web), each run until it meets the bodies. `at`
 /// moves the rib's sketch first: a pattern's or mirror's copy of the rib is built again where
 /// the copy is, against the bodies there (#4593), as a hole is drilled again at each copy.
-pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Body>> {
+pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Traced>> {
     let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, extend } = &f.kind else {
         return Err(DocError::Invalid(format!("{} is not a rib", f.name)));
     };
@@ -416,7 +416,7 @@ fn contour_profile(ss: &SolvedSketch, ids: &[String]) -> Result<(Vec<Seg2>, Vec<
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
 /// `t` thick about the sketch plane.
-fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Body> {
+fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Traced> {
     let mut pts = chain_points(ss, ids)?;
     let meshes: Vec<_> = st.bodies.iter().map(|b| b.mesh()).collect();
     let reach = meshes.iter().map(|m| m.bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
@@ -567,8 +567,11 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
         lp = lp.reversed();
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
-    let tools = kernel::extrude(&ss.plane, &[region], -t / 2.0, t / 2.0)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), -t / 2.0, t / 2.0)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its two walls are the extrude's caps, `start` and `end`; its top, along the curve, the
+    // curve's `side:<curve>` (#20622).
+    Ok(crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)).tool(body, None))
 }
 
 /// Run a rib curve's open ends (`pts`, in sketch coordinates) on in their own direction until they
@@ -622,7 +625,7 @@ fn extend_rib_ends(st: &ModelState, ss: &SolvedSketch, pts: &mut Vec<Vec2>, t: f
 
 /// A rib wall along the sketch normal: the curves widened to `t` in the sketch plane, run from
 /// the sketch toward the body by `depth` (or until the whole wall reaches the body).
-fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Body> {
+fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Traced> {
     let pts = chain_points(ss, ids)?;
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     if !(len > 1e-9) {
@@ -708,8 +711,13 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
     let (a, b) = if sign > 0.0 { (0.0, h) } else { (-h, 0.0) };
-    let tools = kernel::extrude(&ss.plane, &[region], a, b)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), a, b)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its walls lie half the thickness beside its curves: named as a thin extrude's are, by the
+    // curve and the side (#20622). Its ends are the extrude's caps.
+    let thin = crate::lineage::ThinWallRoles { curves: ids.to_vec(), distances: [half, half] };
+    let roles = crate::lineage::ProfileRoles { thin: Some(&thin), ..crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)) };
+    Ok(roles.tool(body, None))
 }
 
 /// Where the material begins and ends along a ray, from where the ray crosses the bodies'
@@ -1306,6 +1314,23 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
+        FeatureKind::SheetCornerJoin { body, corner } => {
+            let mut candidates = st.surface_sheets.iter().enumerate().filter(|(_, sheet)| match body {
+                Some(name) => &sheet.body == name,
+                None => st.body(&sheet.body).is_some_and(|built| corner.joint_pair(|source| sheet.bend_joint_for_edge_name(source, built)).is_ok()),
+            });
+            let Some((i, before)) = candidates.next() else {
+                return Err(DocError::reselect(body.as_ref().map(|name| name.to_string()).unwrap_or_else(|| corner.covering.to_string())));
+            };
+            if candidates.next().is_some() {
+                return Err(DocError::Invalid("select a sheet body; these corner sources match more than one sheet".into()));
+            }
+            let mut next = before.clone();
+            let built = st.body(&before.body).ok_or_else(|| DocError::reselect(&before.body))?;
+            corner.apply(&mut next, |source| before.bend_joint_for_edge_name(source, built), |expr| val(vals, expr, Kind::Length))?;
+            *st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))? = next;
+            rebuild_surface_sheet(st, i)
+        }
         FeatureKind::SheetFlange {
             edges,
             height,
@@ -1318,7 +1343,11 @@ pub(super) fn sheet_eval(
             corner_relief_shape,
             corner_relief,
             bend_relief_shape,
+            corners,
         } if surface_flange_sheet(st, body, f, edges).is_some() => {
+            if corners.len() > 2000 {
+                return Err(DocError::Invalid("at most 2000 flange corner choices are supported".into()));
+            }
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1448,6 +1477,33 @@ pub(super) fn sheet_eval(
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            if !corners.is_empty() {
+                let prev = std::mem::take(&mut sk.parts);
+                let solid = sk.build()?;
+                let mut built = st.body(&before.body).cloned().ok_or_else(|| DocError::reselect(&before.body))?;
+                let depth = built.names.depth().unwrap_or(0).saturating_add(1);
+                let lineage =
+                    crate::lineage::SheetBefore::of(&built, &prev).and_then(|previous| crate::lineage::sheet_lineage(Some(previous), &sk, &solid));
+                replace_traced_sheet_body(&mut built, solid, lineage.clone(), &sk.frames);
+                built.names = crate::naming::NameCell::traced(
+                    Some(std::sync::Arc::new(crate::naming::NamingOrigin {
+                        feature: f.clone(),
+                        before: std::sync::Arc::new(st.clone()),
+                        depth,
+                        mats: Vec::new(),
+                    })),
+                    lineage.map(std::sync::Arc::new),
+                );
+                let sources = sk.clone();
+                for corner in corners {
+                    let joints = corner.joint_pair(|source| sources.bend_joint_for_edge_name(source, &built))?;
+                    if !joints.iter().any(|joint| made.contains(joint)) {
+                        return Err(DocError::Invalid("a flange corner choice must include one of this feature's bends".into()));
+                    }
+                    corner.apply(&mut sk, |source| sources.bend_joint_for_edge_name(source, &built), |expr| val(vals, expr, Kind::Length))?;
+                }
+                sk.parts = prev;
+            }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
@@ -1934,11 +1990,11 @@ fn takes_part(f: &Feature, targets: &[String], b: &ModelBody) -> bool {
 }
 
 /// What an extrude cut takes from the sheets made from surfaces it reaches, of the bodies it takes
-/// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool a prism
-/// along a flat panel's normal, through its whole thickness, its footprint clear inside the
-/// panel's material and its box apart from the rest of the sheet. That is what the cut takes in
-/// space (see `sheet_surface_cuts`), without cutting
-/// a body the sheet builds again. What lies inside a footprint (a letter's counter) stays, a
+/// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool is a prism
+/// square through the full thickness of each flat panel it cuts, with its box clear of all
+/// other sheet material. A folded sheet can have several parallel panels in that path.
+/// Reading the footprint gives what the cut takes in space without cutting a body the sheet
+/// builds again. What lies inside a footprint (a letter's counter) stays, a
 /// loose piece. A footprint through the panel's outline takes what it covers of the panel, the
 /// curves of both kept as drawn; a piece it parts from the panel stays, a loose piece. The
 /// sheets' bodies cut; none, and nothing changed, for any other cut, which the generic path
@@ -2013,8 +2069,8 @@ pub(super) fn surface_prism_cut(
         let tol = 1e-7;
         let mut out = sk.clone();
         for (lo, hi, plane, region, tool_box) in reaching {
-            // The panel the tool goes square through.
-            let mut found = None;
+            // The panels the tool goes square through.
+            let mut found: Vec<(usize, Region2, Rigid3, bool)> = Vec::new();
             for (p, frame, own) in &panels {
                 if frame.z.cross(n).len() > 1e-9 {
                     continue;
@@ -2046,63 +2102,66 @@ pub(super) fn surface_prism_cut(
                         Err(_) => return Ok(Vec::new()),
                     }
                 }
-                if found.is_some() {
+                // A footprint across several pieces of an unfolded sheet is left to the body's cut.
+                if (sk.unfolded && !found.is_empty()) || found.iter().any(|(other, ..)| other == p) {
                     return Ok(Vec::new());
                 }
-                found = Some((*p, mapped, *frame, clear));
+                found.push((*p, mapped, *frame, clear));
             }
-            let Some((p, mapped, frame, clear)) = found else { return Ok(Vec::new()) };
-            // Nothing else of the sheet in its way, and nothing the panel keeps there already.
-            if boxes.iter().any(|(k, b)| *k != Some(p) && !boxes_apart(tool_box, &Some(*b))) {
+            // Only the full-thickness panels may meet the tool's box. In particular, a tool
+            // that might reach a bend or stop partway through another panel needs the 3D path.
+            if found.is_empty() || boxes.iter().any(|(k, b)| !found.iter().any(|(p, ..)| *k == Some(*p)) && !boxes_apart(tool_box, &Some(*b))) {
                 return Ok(Vec::new());
             }
-            let near = |r: &Region2| {
-                let (a, b) = (crate::sheet_surface_cuts::loop_box(&r.outer), crate::sheet_surface_cuts::loop_box(&mapped.outer));
-                !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
-            };
-            if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
-                || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
-                || out.loose.iter().any(|l| l.panel == p && near(&l.region))
-                || !out.sheet.cuts.is_empty()
-            {
-                return Ok(Vec::new());
-            }
-            if !clear {
-                // Through the panel's outline: the panel less the footprint, by the planar
-                // boolean, keeps the panel's curves and the tool's as drawn, where the body's cut
-                // brings both back as splines fitted to them. A piece it parts from the panel
-                // stays, a loose piece, as the body's cut reads it; pieces that each hold a joint
-                // are left to the body's cut, which keeps the panel whole. A bore runs in from the
-                // panel's edge, which the cut moves: the body's cut reads what it leaves of one.
-                if out.bores.iter().any(|b| b.panel == p) {
-                    return Ok(Vec::new());
-                }
-                let Ok((kept, parted)) = crate::sheet_surface_cuts::left_of_panel(&out, p, std::slice::from_ref(&mapped), tol) else {
-                    return Ok(Vec::new());
+            for (p, mapped, frame, clear) in found {
+                let near = |r: &Region2| {
+                    let (a, b) = (crate::sheet_surface_cuts::loop_box(&r.outer), crate::sheet_surface_cuts::loop_box(&mapped.outer));
+                    !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
                 };
+                if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                    || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
+                    || out.loose.iter().any(|l| l.panel == p && near(&l.region))
+                    || !out.sheet.cuts.is_empty()
+                {
+                    return Ok(Vec::new());
+                }
+                if !clear {
+                    // Through the panel's outline: the panel less the footprint, by the planar
+                    // boolean, keeps the panel's curves and the tool's as drawn, where the body's cut
+                    // brings both back as splines fitted to them. A piece it parts from the panel
+                    // stays, a loose piece, as the body's cut reads it; pieces that each hold a joint
+                    // are left to the body's cut, which keeps the panel whole. A bore runs in from the
+                    // panel's edge, which the cut moves: the body's cut reads what it leaves of one.
+                    if out.bores.iter().any(|b| b.panel == p) {
+                        return Ok(Vec::new());
+                    }
+                    let Ok((kept, parted)) = crate::sheet_surface_cuts::left_of_panel(&out, p, std::slice::from_ref(&mapped), tol) else {
+                        return Ok(Vec::new());
+                    };
+                    let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
+                    panel.region = kept;
+                    out.loose.extend(parted.into_iter().map(|region| crate::Loose { panel: p, region }));
+                    continue;
+                }
                 let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
-                panel.region = kept;
-                out.loose.extend(parted.into_iter().map(|region| crate::Loose { panel: p, region }));
-                continue;
-            }
-            let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
-            if !crate::sheet_surface::holds_clear(&panel.region, &Region2 { outer: mapped.outer.clone(), holes: Vec::new() }) {
-                return Ok(Vec::new());
-            }
-            let hole = mapped.outer.ccw().reversed();
-            panel.region.holes.push(hole.clone());
-            let holder = panel.name.clone();
-            out.loose.extend(mapped.holes.iter().map(|h| crate::Loose { panel: p, region: Region2 { outer: h.ccw(), holes: Vec::new() } }));
-            // Its walls are named after the curves of the cut's profiles they lie on, read in the
-            // sketch's plane, which is parallel to the panel (the cut goes square through both),
-            // not the tool's footprint, which lies on its cap when it cuts through all or both ways.
-            if let Some(ss) = cut_sketch {
-                let inv = frame.inverse();
-                let chart = |q: Vec2| {
-                    let w = inv.point(cut.plane.to_world(q));
-                    Vec2::new(w.x, w.y)
-                };
-                out.name_hole(&holder, &hole, f.id, ss, &cut.regions, &chart);
+                if !crate::sheet_surface::holds_clear(&panel.region, &Region2 { outer: mapped.outer.clone(), holes: Vec::new() }) {
+                    return Ok(Vec::new());
+                }
+                let hole = mapped.outer.ccw().reversed();
+                panel.region.holes.push(hole.clone());
+                let holder = panel.name.clone();
+                out.loose.extend(mapped.holes.iter().map(|h| crate::Loose { panel: p, region: Region2 { outer: h.ccw(), holes: Vec::new() } }));
+                // Its walls are named after the curves of the cut's profiles they lie on, read in the
+                // sketch's plane, which is parallel to the panel (the cut goes square through both),
+                // not the tool's footprint, which lies on its cap when it cuts through all or both ways.
+                if let Some(ss) = cut_sketch {
+                    let inv = frame.inverse();
+                    let chart = |q: Vec2| {
+                        let w = inv.point(cut.plane.to_world(q));
+                        Vec2::new(w.x, w.y)
+                    };
+                    out.name_hole(&holder, &hole, f.id, ss, &cut.regions, &chart);
+                }
             }
         }
         plans.push((i, out));

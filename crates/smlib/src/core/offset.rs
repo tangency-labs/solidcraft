@@ -53,6 +53,7 @@ const INVALID_INPUT: i32 = 1007;
 /// Other failures pass through the blend mapper, retaining that diagnostic wherever
 /// it would otherwise give only a numeric status.
 fn status(e: SolidError) -> Error {
+    log::debug!(target: "smlib", "offset diagnostic: {e:?}");
     let diagnostic = solidcore_ops::offset::diagnostic(&e);
     match diagnostic.refusal {
         Some(error) => refused(error, diagnostic.detail),
@@ -75,7 +76,13 @@ pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error 
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },
         Ops::Unsupported(_) => Error::Unsupported,
-        error @ Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { .. }, .. } => Error::Refused(error),
+        error @ Ops::OffsetRefused {
+            why:
+                solidcore_ops::OffsetRefusal::Phrase { .. }
+                | solidcore_ops::OffsetRefusal::DraftConeCloses
+                | solidcore_ops::OffsetRefusal::DraftNeutralPlanePastApex,
+            ..
+        } => Error::Refused(error),
         refusal => Error::RefusedWithDiagnostic { refusal, diagnostic },
     }
 }
