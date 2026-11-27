@@ -101,6 +101,34 @@ fn with_the_preference_off_the_window_keeps_its_operation() {
 }
 
 #[test]
+fn with_new_body_by_default_the_window_opens_and_stays_in_new_body() {
+    assert!(!serde_json::from_value::<crate::prefs::Prefs>(json!({})).unwrap().new_body_default, "off for saved settings without it");
+    // An extrude touching the cube would join, and a sphere inside it would cut.
+    let mut h = cube();
+    h.app.preferences.new_body_default = true;
+    rect_sketch(&mut h, [10.0, 0.0], [20.0, 10.0]);
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.frames(3);
+    assert!(!h.app.op_check.busy(), "no check runs");
+    assert_eq!(op(&mut h), NEW);
+    ok(&mut h);
+    assert_eq!(bodies(&h).len(), 2, "the touching extrude is a body of its own");
+    let mut h = cube();
+    h.app.preferences.new_body_default = true;
+    h.step(&json!({"start": "solid.sphere"})).unwrap();
+    if let Some(Kind::Primitive { fields, at, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        fields.iter_mut().for_each(|(_, v)| *v = "4 mm".into());
+        *at = Some((Vec3::new(5.0, 5.0, 5.0), Some(Vec3::Z)));
+    }
+    h.frames(3);
+    assert_eq!(op(&mut h), NEW, "the sphere inside the cube stays a new body");
+    // Picked by hand, another operation is the window's.
+    pick(&mut h, JOIN);
+    h.frames(2);
+    assert_eq!(op(&mut h), JOIN);
+}
+
+#[test]
 fn closing_the_window_stops_its_check() {
     // A larger body, so the check is still running when the window closes.
     let mut h = Harness::new();

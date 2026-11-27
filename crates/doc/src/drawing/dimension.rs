@@ -692,6 +692,15 @@ impl<'a> Reference<'a> {
             Reference::Face(face) => &face.path,
         }
     }
+
+    /// Its body's name, as its definition names it.
+    pub fn body(self) -> &'a str {
+        match self {
+            Reference::Edge(edge) => &edge.body,
+            Reference::Point(point) => &point.body,
+            Reference::Face(face) => &face.body,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name
@@ -1347,13 +1356,19 @@ impl<'a> Lookup<'a> {
         let pieces = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
         let not_round = || Status::Unmeasurable(format!("edge `{}` isn't a circle or an arc", edge.name));
         // A spline piece is no arc: only the pieces the kernel gives as segments can be one.
-        let segs: Option<Vec<Seg2>> = pieces
-            .into_iter()
-            .map(|piece| match piece {
-                crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
-                crate::kernel::PlanarPiece::Spline(_) => None,
-            })
-            .collect();
+        let segments = |pieces: Vec<crate::kernel::PlanarPiece>| -> Option<Vec<Seg2>> {
+            pieces
+                .into_iter()
+                .map(|piece| match piece {
+                    crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
+                    crate::kernel::PlanarPiece::Spline(_) => None,
+                })
+                .collect()
+        };
+        // An edge held only as a spline, such as where a countersink meets its bore (#22308), is
+        // still the circle of a cylinder it bounds when the view looks along that cylinder's axis:
+        // the kernel's certified circular reading of it.
+        let segs = segments(pieces).or_else(|| body.body.cylinder_edge_projection(&local, *index).and_then(segments));
         let (radius, points) = segs.as_deref().and_then(one_arc).ok_or_else(not_round)?;
         Ok((radius, points.map(|p| apply_point(&found.frame, local.to_world(p)))))
     }

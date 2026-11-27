@@ -5734,7 +5734,7 @@
   "ui.ribbon_exit": "Ukončit",
   "ui.ribbon_labels": "Zobrazovat text pod ikonami pásu karet",
   "ui.ribbon_menus_skip_pinned": "Vynechat připnuté příkazy v rozbalovacích nabídkách",
-  "ui.ribbon_pin_footer": "Připnuté příkazy se zobrazují na pásu karet. Najetím na řádek jej připnete nebo odepnete.",
+  "ui.ribbon_pin_footer": "Připnuté příkazy se zobrazují na pásu karet. Příkaz připnete nebo odepnete z jeho nabídky ⋯.",
   "ui.ribbon_workspace": "Pracovní prostředí",
   "ui.right": "Zprava",
   "ui.right_click_confirms": "Pravé kliknutí potvrzuje vstupy dialogu",

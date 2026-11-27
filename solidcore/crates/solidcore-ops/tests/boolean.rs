@@ -4814,6 +4814,172 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
 
+/// acid-10's near miss: a 50 mm block, joined (or not) by a Ø20 cylinder along x lying 2e-5
+/// deep in its top face, then joined by an r 15 ball centred 14.99998 from its +x face, so
+/// that the ball dips 2e-5 into it, twice the zone tolerance. They meet in a circle of radius
+/// √(2 · 15 · 2e-5 − 4e-10) = 0.0245, at 0.094° to each other. At that angle the radial sector
+/// steps off the circle until the ball's face and the block's are more than the tolerance
+/// apart; upstream's secant step aimed at the tolerance itself, settled 0.009 from the
+/// circle with the faces exactly that far apart, and read the unchanging distance as a
+/// coincidence. Taken for a copy of the block face, the ball's face was put in the block's
+/// material, and the union deleting the disc the ball covers merged the block into the
+/// outside: refused. The step now aims at twice the tolerance, the faces part, and the ball's
+/// face is outside the block.
+///
+/// The volume is the closed form: block, cylinder and ball, less the cap the ball dips in,
+/// π d² (3R − d) / 3 with d = 2e-5, and the cylinder's segment under the top face over its
+/// 50 mm, (r² acos((r − d) / r) − (r − d) √(2 r d − d²)) · 50; the ball and cylinder are
+/// apart (the ball's top is at z = 40, the cylinder's bottom at 49.99998).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
+    all_fixes();
+    let (d, rb, rc): (f64, f64, f64) = (2e-5, 15.0, 10.0);
+    let cap = PI * d * d * (3.0 * rb - d) / 3.0;
+    let segment =
+        (rc * rc * ((rc - d) / rc).acos() - (rc - d) * (2.0 * rc * d - d * d).sqrt()) * 50.0;
+    for with_cylinder in [false, true] {
+        let mut part = make_box([0.0; 3], [50.0; 3]).unwrap();
+        let mut want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - cap;
+        if with_cylinder {
+            let v = solidcore_record::Vec3::new;
+            let plane = Plane {
+                origin: v(0.0, 25.0, 60.0 - d),
+                x: v(0.0, 1.0, 0.0),
+                y: v(0.0, 0.0, 1.0),
+            };
+            let region = Region2 {
+                outer: Loop2::circle_from(Vec2::new(0.0, 0.0), rc, 0.6131),
+                holes: vec![],
+            };
+            let cylinder = extrude_planar_regions(&plane, &[region], 0.0, 50.0).unwrap();
+            part = boolean(part, cylinder, BooleanOp::Union).unwrap().unwrap();
+            want += PI * rc * rc * 50.0 - segment;
+        }
+        let ball = make_sphere([65.0 - d, 25.0, 25.0], rb).unwrap();
+        let u = boolean(part, ball, BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("cylinder {with_cylinder}: {e:?}"))
+            .unwrap();
+        assert_eq!(u.solid_count().unwrap(), 1, "cylinder {with_cylinder}");
+        assert!(u.is_manifold_solid().unwrap(), "cylinder {with_cylinder}");
+        assert!(
+            near(volume(&u), want),
+            "cylinder {with_cylinder}: {} vs {want}",
+            volume(&u)
+        );
+        // In the ball beyond the block face, at its middle and where the ball dips in.
+        for p in [
+            [79.0, 25.0, 25.0],
+            [50.000_005, 25.0, 25.0],
+            [49.999_99, 25.0, 25.0],
+        ] {
+            assert_eq!(
+                u.classify_point(p).unwrap(),
+                PointClass::Inside,
+                "cylinder {with_cylinder}: {p:?}"
+            );
+        }
+    }
+}
+
+/// A 40 × 30 × 10 box and an r 5 cylinder lying along its top face, 50 long so that it runs
+/// past both ends, sunk d into it just past the zone tolerance (1e-5 per edge, so t = 2e-5 for
+/// two edges), its seam at five angles from its lowest line (solidcraft#21194's sweep). The
+/// cylinder meets the top face in two lines h = √(2 r d − d²) either side of y = 15 (0.0297
+/// apart at d = 2.2e-5), leaving it at asin(h / r) = 0.17°. Between them the plane and the
+/// cylinder's lowest strip part to d at the middle and close again, and the sector search,
+/// stepping off a line until the two are more than t apart, must stop before the middle: past
+/// it the cylinder turns back up and is read on the other side of the plane. Aimed at 2t the
+/// steps went past it (union refused, the difference left the box whole), and upstream's step,
+/// aimed at t through 0, refused d = 2e-5 to 2.05e-5.
+///
+/// The top face keeps the two strips outside the lines in both operations, of area
+/// 40 (30 − 2h). The difference takes out the groove, the circular segment of depth d,
+/// r² · 2 asin(√(d / 2r)) − (r − d) h, over the box's 40, and its floor is the cylinder's arc
+/// between the lines, 2 r asin(h / r) wide; the union adds the cylinder less that groove.
+/// The faces cross at the small angle θ = asin(h / r), so each line is fixed along them only
+/// to the edge tolerance over sin θ (`booleans.md`, near-coincident strips): the areas are
+/// checked within 40 · 2 · 1e-5 / sin θ = 0.28 of the closed form, a quarter of the strip
+/// (1.15 to 1.19) a refused cut would leave.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_cylinder_sunk_just_past_the_tolerance_into_a_box_face_joins_and_cuts_it() {
+    all_fixes();
+    let r: f64 = 5.0;
+    for d in [2.05e-5, 2.1e-5, 2.2e-5] {
+        let h = (2.0 * r * d - d * d).sqrt();
+        let groove = (r * r * 2.0 * (d / (2.0 * r)).sqrt().asin() - (r - d) * h) * 40.0;
+        let top = 40.0 * (30.0 - 2.0 * h);
+        let floor = 40.0 * 2.0 * r * (h / r).asin();
+        let slack = 40.0 * 2.0 * 1e-5 / (h / r);
+        for seam in [0.0, 0.01, 0.6131, PI / 2.0, PI] {
+            let (sin, cos) = seam.sin_cos();
+            for op in [BooleanOp::Union, BooleanOp::Subtract] {
+                let case = format!("d {d}, seam {seam}, {op:?}");
+                let block = make_box([0.0; 3], [40.0, 30.0, 10.0]).unwrap();
+                // Its seam (the local x axis) at `seam` from straight down, its axis along x.
+                let cylinder = solidcore_ops::make_cylinder([0.0; 3], r, 50.0).unwrap();
+                cylinder
+                    .transform(&[
+                        [0.0, sin, -cos, 0.0],
+                        [0.0, cos, sin, 0.0],
+                        [1.0, 0.0, 0.0, 0.0],
+                        [-5.0, 15.0, 15.0 - d, 1.0],
+                    ])
+                    .unwrap();
+                let got = boolean(block, cylinder, op)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"))
+                    .unwrap();
+                assert_eq!(got.solid_count().unwrap(), 1, "{case}");
+                assert!(got.is_manifold_solid().unwrap(), "{case}");
+                assert!(got.check(CheckLevel::All).unwrap().is_valid(), "{case}");
+                let want = match op {
+                    BooleanOp::Union => 12_000.0 + PI * r * r * 50.0 - groove,
+                    _ => 12_000.0 - groove,
+                };
+                assert!(
+                    near(volume(&got), want),
+                    "{case}: {} vs {want}",
+                    volume(&got)
+                );
+                let (record, order) = got.to_record().unwrap();
+                let area_on = |on: &dyn Fn(&Surface) -> bool| -> f64 {
+                    (0..record.faces.len())
+                        .filter(|&f| on(&record.faces[f].surface))
+                        .map(|f| got.face_area(&order, f, 1e-10).unwrap())
+                        .sum()
+                };
+                let on_top = area_on(&|s| match s {
+                    Surface::Plane {
+                        origin,
+                        u_axis,
+                        v_axis,
+                    } => (origin[2] - 10.0).abs() < 1e-12 && u_axis[2] == 0.0 && v_axis[2] == 0.0,
+                    Surface::PlaneThrough {
+                        origin,
+                        u_point,
+                        v_point,
+                    } => [origin, u_point, v_point]
+                        .iter()
+                        .all(|p| (p[2] - 10.0).abs() < 1e-12),
+                    _ => false,
+                });
+                assert!(
+                    (on_top - top).abs() <= slack,
+                    "{case}: top {on_top} vs {top}"
+                );
+                if op == BooleanOp::Subtract {
+                    let on_cylinder = area_on(&|s| matches!(s, Surface::Cylinder { .. }));
+                    assert!(
+                        (on_cylinder - floor).abs() <= slack,
+                        "{case}: floor {on_cylinder} vs {floor}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The length of the line through (x, z) parallel to y that lies in the cube −20..20 less a
 /// Ø18 hole along each axis through its centre and Ø8 holes along x at y = −10 and y = 10
 /// (z = 0): 40 less the union of the y intervals the holes take. A hole along y (x² + z² < 81)

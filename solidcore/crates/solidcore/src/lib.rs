@@ -53,6 +53,7 @@ pub mod curve;
 pub mod develop;
 pub mod dogbone;
 pub mod eval;
+pub mod finger_joint;
 pub mod geom;
 pub mod heal;
 pub mod hlr;

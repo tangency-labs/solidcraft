@@ -104,6 +104,32 @@ Press Pull, Delete Face and Move Face.
 - **Elsewhere:** base feature, dumb solid, imported body.
 - **For translators:** not a base flange of sheet metal, and not a base sketch.
 
+### bend allowance
+
+The flat length a bend takes in a sheet's flat pattern, measured along the bend's neutral axis.
+
+For bend angle θ, inner radius R, thickness T and K-factor K, it is θ · (R + K·T). A press brake
+chart often gives it for a 90° bend. Compare *bend deduction*.
+
+- **In SolidCraft:** `allowance_mm` in `sheet.export_bend_table`; the `allowance` value of a sheet
+  metal rule's `unfold_method` (Sheet Metal Rules › Unfold › Bend Allowance), with the 90° value
+  in `unfold_value`.
+- **Elsewhere:** BA.
+- **For translators:** a length added for the bend, not a permission or a tolerance.
+
+### bend deduction
+
+How much shorter a sheet's flat blank is than its flange lengths measured to the outside of the
+bend.
+
+At 90° it is 2·(R + T) less the bend allowance, for inner radius R and thickness T. A press brake
+chart often gives it for a 90° bend. Compare *bend allowance*.
+
+- **In SolidCraft:** the `deduction` value of a sheet metal rule's `unfold_method` (Sheet Metal
+  Rules › Unfold › Bend Deduction), with the 90° value in `unfold_value`.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -391,6 +417,16 @@ construction plane.
 - **Elsewhere:** feature, operation.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
+
+### finger joint
+
+A connection made by alternating rectangular projections on two parts.
+
+- **In SolidCraft:** `solid.finger_joint`; the `FingerJointFeature` timeline feature and its
+  `bodies`, `count`, `clearance`, `inverted` and `edge_offset` parameters.
+- **Don't use:** dovetail joint.
+- **Elsewhere:** box joint, finger joint.
+- **For translators:** a woodworking connection, not an anatomical joint.
 
 ### folder
 
@@ -993,7 +1029,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
-| | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
 | | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
