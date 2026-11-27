@@ -483,8 +483,11 @@ altering the design or opening dialogs.
 | `Text::Heading(key)` | Semibold body heading; retains `dialog:report:KEY` |
 | `Text::NameCell(strong)` | Medium/semibold clipped clickable name; retains `dialog:cell:TEXT` |
 | `Text::MonoCell`, `Text::Value(key, error)` | Monospace unit/value cells; clipped to one row with full tooltips. Value/error cells retain `dialog:report:KEY`. |
-| `Text::Inline` | Native truncated label; rect/handle `dialog:inline:TEXT` |
+| `Text::Inline`, `Text::MonoInline` | Native truncated label with text selection and copying, optionally monospace for tabular numbers; rect/handle `dialog:inline:TEXT` |
 | `Text::Cell` | Fixed-height clipped clickable cell with tooltip; rect/handle `dialog:cell:TEXT` |
+
+`table_min_width(ui, columns)` measures the minimum card width with the renderer's own
+column sizing. Omit low-priority columns until it fits, keeping essential columns visible.
 
 `name_cell_with_hint(ui, name, strong, hint)` keeps the name cell's allocation and
 scenario identity, but owns its single tooltip: the action hint alone when the

@@ -13,6 +13,8 @@ use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::metadata::{self, BOM_KEYS, FINISH, MATERIAL};
 
 use crate::SolveApp;
+use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_theme::Tokens;
 
 /// The panel's state; the rows come from the engine.
@@ -135,9 +137,9 @@ fn text(row: &Value, k: &str) -> String {
     }
 }
 
-/// The grid's headers and the row key each column shows.
-const HEADERS: [&str; 8] = ["Item", "Part number", "Description", "Rev", "Qty", "Definition", "Material", "Finish"];
-const COLUMN_KEYS: [&str; 8] = ["item", "part_number", "description", "revision", "count", "definition", "material", "finish"];
+/// The value columns after the item picker.
+const COLUMN_KEYS: [&str; 7] = ["part_number", "description", "count", "revision", "definition", MATERIAL, FINISH];
+
 /// The keys a picked row edits, in the order of [`BomPanel::fields`]: [`BOM_KEYS`], then the static
 /// material and the finish.
 fn edit_keys() -> impl Iterator<Item = &'static str> {
@@ -146,37 +148,6 @@ fn edit_keys() -> impl Iterator<Item = &'static str> {
 /// How many of [`edit_keys`] are [`BOM_KEYS`]: Apply always sends those, and the material and the
 /// finish only when they were changed.
 const ALWAYS: usize = BOM_KEYS.len();
-/// The column that takes the space the others leave, truncating its text.
-const DESCRIPTION: usize = 2;
-const COLUMN_SPACING: f32 = 14.0;
-
-/// Each column's width: every column fits its widest cell, Description takes what is left.
-fn column_widths(ui: &egui::Ui, rows: &[Value]) -> [f32; 8] {
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let width = |s: &str| ui.painter().layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::PLACEHOLDER).size().x.ceil();
-    // The item cell is a picker button, padded on both sides.
-    let padding = 2.0 * ui.spacing().button_padding.x;
-    let mut widths = HEADERS.map(width);
-    for row in rows.iter().flat_map(|r| std::iter::once(r).chain(r["children"].as_array().into_iter().flatten())) {
-        for (i, key) in COLUMN_KEYS.iter().enumerate() {
-            let w = width(&text(row, key)) + if i == 0 { padding } else { 0.0 };
-            widths[i] = widths[i].max(w);
-        }
-    }
-    let others: f32 = widths.iter().enumerate().filter(|(i, _)| *i != DESCRIPTION).map(|(_, w)| w).sum();
-    let left = ui.available_width() - others - COLUMN_SPACING * (HEADERS.len() - 1) as f32;
-    widths[DESCRIPTION] = left.max(widths[DESCRIPTION]);
-    widths
-}
-
-/// One grid cell exactly `width` wide; text wider than that truncates.
-fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    ui.allocate_ui_with_layout(egui::vec2(width, crate::ui_kit::row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_width(width);
-        add(ui)
-    })
-    .inner
-}
 
 /// The label of one of [`edit_keys`].
 fn field_label(key: &str) -> &str {
@@ -267,8 +238,8 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) {
         .min_scrolled_height(0.0)
         .max_height(max.min(REPORT_MAX_HEIGHT))
         .show(ui, |ui| report(app, ui, d));
-    let (row, table_extra) = scroll.inner;
-    let report_extent = (scroll.content_size.y + table_extra).min(REPORT_MAX_HEIGHT);
+    let row = scroll.inner;
+    let report_extent = scroll.content_size.y.min(REPORT_MAX_HEIGHT);
 
     let mut editor_extent = 0.0;
     if row.is_some() || d.error.is_some() {
@@ -308,7 +279,7 @@ fn actions(ui: &mut egui::Ui, selected: bool) -> Option<Action> {
             }
         }
         for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
-            let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(label), crate::ui_kit::Button::Normal);
+            let response = ui.push_id(ext, |ui| crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(label), crate::ui_kit::Button::Normal)).inner;
             crate::panel_runtime::register_content_focus(ui.ctx(), &response);
             if response.clicked() {
                 action = Some(Action::Export(ext));
@@ -323,18 +294,18 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     let was = (d.top, d.by_definition, d.group_children);
     let available = ui.available_width();
     ui.horizontal_wrapped(|ui| {
-        for (option, labels) in [(&mut d.top, ["Parts only", "Top level"]), (&mut d.by_definition, ["By part number", "By definition"])] {
-            let width = labels.iter().map(|label| crate::ui_kit::ContentWidth::button(ui, label)).fold(0.0, f32::max) * 2.0;
-            let width = width.min(available);
+        for (key, option, labels) in
+            [("bom:levels", &mut d.top, ["Parts only", "Top level"]), ("bom:group-by", &mut d.by_definition, ["By part number", "By definition"])]
+        {
+            let width = ui_kit::ContentWidth::dropdown(ui, &labels).min(available);
             let mut selected = usize::from(*option);
-            ui.allocate_ui(egui::vec2(width, crate::ui_kit::row_height()), |ui| {
-                crate::ui_kit::segmented(ui, &mut selected, &labels, Default::default());
-            });
+            let response = ui.allocate_ui(egui::vec2(width, ui_kit::row_height()), |ui| ui_kit::dropdown(ui, key, &mut selected, &labels)).inner;
+            solidcraft_ui_registry::publish_target(key, response.rect);
             *option = selected == 1;
             ui.separator();
         }
     });
-    ui.scope(|ui| {
+    ui.push_id("bom-group-children", |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
         let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
@@ -344,58 +315,116 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     }
 }
 
-fn report(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) -> (Option<Value>, f32) {
+fn report(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) -> Option<Value> {
     options(ui, d);
     let bom = d.rows(app);
     let rows = bom["rows"].as_array().map_or(&[][..], Vec::as_slice);
     d.reconcile_pick(rows);
     ui.separator();
-    let widths = column_widths(ui, rows);
-    let t = Tokens::get();
-    let summary = crate::ui_kit::row_height() + ui.spacing().item_spacing.y;
-    let scroll =
-        egui::ScrollArea::both().id_salt("table").min_scrolled_height(0.0).max_height((ui.available_height() - summary).max(0.0)).show(ui, |ui| {
-            table(ui, d, rows, widths);
-            ui.add_space(t.space_8);
-        });
-    let table_extra = (scroll.content_size.y.min(REPORT_MAX_HEIGHT) - scroll.inner_rect.height()).max(0.0);
-    ui.label(RichText::new(format!("{} rows, {} placed", rows.len(), text(&bom, "total_occurrences"))).small().color(t.text_dim));
-    (d.picked.and_then(|i| rows.get(i)).cloned(), table_extra)
+    table(ui, d, rows);
+    let summary = solidcraft_ui_text::format("bom.summary", &[("rows", &rows.len().to_string()), ("placed", &text(&bom, "total_occurrences"))]);
+    ui_kit::text(ui, &summary, ui_kit::Text::Note("bom-summary"));
+    d.picked.and_then(|i| rows.get(i)).cloned()
 }
 
-fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 8]) {
+fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value]) {
     let t = Tokens::get();
-    // The item cell (a picker for a row, dim text for a sub-part) is drawn by the caller.
-    let rest = |ui: &mut egui::Ui, row: &Value| {
-        for (i, key) in COLUMN_KEYS.iter().enumerate().skip(1) {
-            let dim = *key == "definition";
-            cell(ui, widths[i], |ui| ui.label(if dim { RichText::new(text(row, key)).color(t.text_dim) } else { RichText::new(text(row, key)) }));
+    let available = ui.available_width();
+    let (mut item_width, mut part_width, mut qty_width) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for (row, picker) in
+        rows.iter().flat_map(|row| std::iter::once((row, true)).chain(row["children"].as_array().into_iter().flatten().map(|child| (child, false))))
+    {
+        item_width =
+            item_width.max(ui_kit::ContentWidth::monospace(ui, &text(row, "item")) + if picker { ui.spacing().button_padding.x * 2.0 } else { 0.0 });
+        part_width = part_width.max(ui_kit::ContentWidth::label(ui, &text(row, "part_number")));
+        qty_width = qty_width.max(ui_kit::ContentWidth::monospace(ui, &text(row, "count")));
+    }
+    let mut columns = vec![
+        ui_kit::Column::new("Item", 0.0).min_content_width(item_width.min(t.control_height * 2.0)),
+        ui_kit::Column::new("Part number", 0.0).min_content_width(part_width.min(available * 0.3)),
+        ui_kit::Column::new("Description", 1.0).flex().min_content_width(ui_kit::ContentWidth::label(ui, "Description") + t.space_4),
+        ui_kit::Column::new("Qty", 0.0).min_content_width(qty_width.min(t.control_height * 2.0)),
+        ui_kit::Column::new("Rev", 0.0),
+        ui_kit::Column::new("Definition", 0.0),
+        ui_kit::Column::new("Material", 0.0),
+        ui_kit::Column::new("Finish", 0.0),
+    ];
+    let mut keys = COLUMN_KEYS.to_vec();
+    // Keep the main BOM columns visible; optional details must not displace quantity.
+    while columns.len() > 4 && ui_kit::table_min_width(ui, &columns) > available {
+        let _ = columns.pop();
+        let _ = keys.pop();
+    }
+    if ui_kit::table_min_width(ui, &columns) > available
+        && let Some(part) = columns.get_mut(1)
+    {
+        *part = ui_kit::Column::new("Part number", 0.0).manual_width(Some(part_width.min(available * 0.3).max(t.control_height)));
+    }
+    if ui_kit::table_min_width(ui, &columns) > available
+        && let Some(description) = columns.get_mut(2)
+    {
+        *description = ui_kit::Column::new("Description", 1.0).flex();
+    }
+    if columns.len() == 4 && ui_kit::table_min_width(ui, &columns) > available {
+        columns.remove(1);
+        keys.remove(0);
+    }
+    // Inline labels retain native text selection and copying; only parent items pick a part.
+    let rest = |cells: &mut ui_kit::TableRow<'_>, row: &Value| {
+        for key in &keys {
+            cells.cell(|ui| {
+                let mut value = text(row, key);
+                if *key == "description" && value.is_empty() && !keys.contains(&"definition") {
+                    value = text(row, "definition");
+                }
+                let layout =
+                    if *key == "count" { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                ui.with_layout(layout, |ui| ui_kit::text(ui, &value, if *key == "count" { ui_kit::Text::MonoInline } else { ui_kit::Text::Inline }));
+            });
         }
-        ui.end_row();
     };
-    // No minimum column width: padding a narrow column would push the grid wider.
-    egui::Grid::new("sc_bom_grid").num_columns(8).striped(true).min_col_width(0.0).spacing([COLUMN_SPACING, 4.0]).show(ui, |ui| {
-        for (h, w) in HEADERS.iter().zip(widths) {
-            cell(ui, w, |ui| ui.label(RichText::new(*h).strong().color(t.text_dim)));
-        }
-        ui.end_row();
+    ui_kit::table_custom(ui, "bom", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+        table.headers(ui, |_, _| false);
         for (i, row) in rows.iter().enumerate() {
             let picked = d.picked == Some(i);
-            let response = cell(ui, widths[0], |ui| crate::ui_kit::list_picker(ui, &i.to_string(), &text(row, "item"), picked));
-            if picked || response.has_focus() {
-                crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-            }
-            if response.clicked() {
-                if picked {
-                    d.clear_pick();
-                } else {
-                    d.pick_row(i, row);
-                }
-            }
-            rest(ui, row);
-            for c in row["children"].as_array().into_iter().flatten() {
-                cell(ui, widths[0], |ui| ui.label(RichText::new(text(c, "item")).color(t.text_dim)));
-                rest(ui, c);
+            table.row(ui, &i.to_string(), picked, |cells| {
+                cells.cell(|ui| {
+                    let item = text(row, "item");
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    let response = ui
+                        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui_kit::button(
+                                ui,
+                                RichText::new(&item).font(egui::FontId::monospace(t.font_body)),
+                                if picked { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
+                            )
+                        })
+                        .inner
+                        .backing_on_hover_text(&item);
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, &item));
+                    solidcraft_ui_registry::publish_target(&format!("dialog:list:{i}"), response.rect);
+                    if picked || response.has_focus() {
+                        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+                    }
+                    if response.clicked() {
+                        if picked {
+                            d.clear_pick();
+                        } else {
+                            d.pick_row(i, row);
+                        }
+                    }
+                });
+                rest(cells, row);
+            });
+            for (child, c) in row["children"].as_array().into_iter().flatten().enumerate() {
+                table.row(ui, &format!("{i}:child:{child}"), false, |cells| {
+                    cells.cell(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui_kit::text(ui, &text(c, "item"), ui_kit::Text::MonoInline)
+                        });
+                    });
+                    rest(cells, c);
+                });
             }
         }
     });
@@ -425,6 +454,7 @@ mod tests {
     use serde_json::json;
 
     use crate::scenario::Harness;
+    use crate::ui_kit::test_support;
 
     fn open_report(h: &mut Harness) {
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -532,7 +562,7 @@ mod tests {
         h.app.run("component.metadata.set", json!({"component": "Plate", "part_number": "PL-100", "revision": "A"})).unwrap();
         open_report(&mut h);
         h.frames(2);
-        // The grid's own column says "Rev"; "Revision" is the edit field's label, from the table.
+        // The report column says "Rev"; "Revision" is the edit field's label.
         assert!(h.widget("Revision").is_none());
         h.step(&json!({"widget": "1"})).unwrap();
         h.frames(2);
@@ -632,54 +662,191 @@ mod tests {
         assert_eq!(material(&h), Some("A".into()));
     }
 
-    /// `column_widths` for `rows` in a grid `width` wide, and the measured width of each text.
-    fn widths_in(width: f32, rows: &[serde_json::Value], texts: &[&str]) -> ([f32; 8], Vec<f32>) {
-        let ctx = egui::Context::default();
-        let mut out = ([0.0; 8], Vec::new());
-        // The first frame loads the fonts.
-        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-        ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.allocate_ui(egui::vec2(width, 100.0), |ui| {
-                ui.set_max_width(width);
-                let font = egui::TextStyle::Body.resolve(ui.style());
-                let measure = |s: &str| ui.painter().layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::PLACEHOLDER).size().x;
-                out = (super::column_widths(ui, rows), texts.iter().map(|s| measure(s)).collect());
-            });
-        })
-        .textures_delta
-        .clear();
-        out
+    #[test]
+    fn the_table_keeps_quantity_visible_and_hides_optional_columns_in_narrow_panels() {
+        let h = Harness::new();
+        let ctx = h.ctx.clone();
+        let rows = [
+            json!({"item": 1234, "part_number": "PL-100", "description": "Socket head cap screw ".repeat(20), "count": 12}),
+            json!({"item": 4321, "part_number": "HG-200", "description": "Bolt", "count": 34}),
+        ];
+        for width in [720.0, 420.0, 280.0, 250.0, 240.0] {
+            let mut painted = Vec::new();
+            for _ in 0..2 {
+                solidcraft_ui_registry::clear_handles();
+                painted = test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                    ui.set_width(width);
+                    super::table(ui, &mut super::BomPanel::default(), &rows);
+                })
+                .shapes;
+            }
+            let viewport = solidcraft_ui_registry::rect_of("dialog:table:bom:viewport").unwrap();
+            let content = solidcraft_ui_registry::count_of("dialog:table:bom:content_width").unwrap() as f32;
+            assert!(viewport.width() <= width, "the card stays inside the panel: {viewport:?}");
+            assert!((content - viewport.width()).abs() <= 1.0, "all visible columns fit: {width}, {content}, {viewport:?}");
+            if width <= 280.0 {
+                assert!(solidcraft_ui_registry::rect_of("dialog:column:bom:Rev").is_none());
+                assert!(solidcraft_ui_registry::rect_of("dialog:column:bom:Definition").is_none());
+            }
+            let item = solidcraft_ui_registry::rect_of("dialog:table:bom:0:cell:Item").unwrap();
+            let picker = solidcraft_ui_registry::rect_of("dialog:list:0").unwrap();
+            assert!(item.contains_rect(picker), "the item picker fits its cell");
+            assert!((item.right() - picker.right()).abs() < 1.0, "item numbers align to the right");
+            let qty = solidcraft_ui_registry::rect_of("dialog:table:bom:0:cell:Qty").unwrap();
+            assert!(viewport.expand(1.0).contains_rect(qty), "quantity remains on screen at {width}: {qty:?}, {viewport:?}");
+            let value = solidcraft_ui_registry::rect_of("dialog:inline:12").unwrap();
+            assert!((qty.right() - value.right()).abs() < 1.0, "quantity is right aligned: {qty:?}, {value:?}");
+            let other = solidcraft_ui_registry::rect_of("dialog:inline:34").unwrap();
+            assert!((value.right() - other.right()).abs() < 1.0 && (value.width() - other.width()).abs() < 1.0, "quantities use tabular alignment");
+            let mut numbers = 0;
+            let mut truncated_description = false;
+            for shape in &painted {
+                if let egui::Shape::Text(text) = &shape.shape {
+                    if text.galley.text() == "Description" && width >= 420.0 {
+                        assert!(!text.galley.elided, "the Description header keeps its full label");
+                    }
+                    if text.galley.text().starts_with("Socket head cap screw") {
+                        assert!(text.galley.elided, "long descriptions use an ellipsis, not viewport clipping");
+                        truncated_description = true;
+                    }
+                    if matches!(text.galley.text(), "1234" | "4321" | "12" | "34") {
+                        assert!(text.galley.job.sections.iter().all(|s| s.format.font_id.family == egui::FontFamily::Monospace));
+                        numbers += 1;
+                    }
+                }
+            }
+            assert_eq!(numbers, 4, "both item numbers and quantities are painted at {width}");
+            assert!(truncated_description, "the description is painted at {width}");
+        }
     }
 
     #[test]
-    fn columns_fit_their_contents_and_the_description_takes_the_rest() {
-        let short =
-            [json!({"item": 1, "part_number": "ISO 4762 M5x16", "description": "Bolt", "revision": "A", "count": 12, "definition": "SHCS M5x16"})];
-        let (w, text) = widths_in(800.0, &short, &["ISO 4762 M5x16", "SHCS M5x16"]);
-        assert!(w[1] >= text[0] && w[5] >= text[1], "part number and definition are not cut: {w:?} {text:?}");
-        let used = w.iter().sum::<f32>() + super::COLUMN_SPACING * 7.0;
-        assert!((used - 800.0).abs() < 0.5, "the description fills the grid: {w:?} uses {used}");
-
-        let long = [json!({"item": 1, "part_number": "P", "description": "Socket head cap screw ".repeat(20), "count": 1})];
-        let (w, _) = widths_in(800.0, &long, &[]);
-        assert!(w[2] > 800.0, "a long description can be reached by horizontal scrolling: {w:?}");
-
-        let (w, header) = widths_in(10.0, &short, &["Description"]);
-        assert!(w.iter().all(|x| x.is_finite() && *x >= 0.0), "{w:?}");
-        assert!(w[2] >= header[0], "the description keeps its header in a narrow grid: {w:?}");
+    fn several_rows_and_option_dropdowns_have_no_widget_id_clashes() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.ctx.options_mut(|options| options.warn_on_id_clash = true);
+        h.app.run("component.create", json!({"name":"Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app
+            .run(
+                "component.metadata.set",
+                json!({"component":"Plate","part_number":"PL-100","description":"Plate, 3 mm","material":"304, 2 mm","finish":"Brushed"}),
+            )
+            .unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        for x in [50, 100] {
+            h.app.run("occurrence.copy", json!({"component":"Plate","translate":[x,0,0]})).unwrap();
+        }
+        h.app.run("component.create", json!({"name":"Hinge"})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":8,"height":4})).unwrap();
+        h.app.run("component.metadata.set", json!({"component":"Hinge","part_number":"HG-200"})).unwrap();
+        h.app.run("component.create", json!({"name":"Pin"})).unwrap();
+        h.app.run("solid.box", json!({"length":2,"width":2,"height":8})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.step(&json!({"start":"assembly.bom"})).unwrap();
+        h.app.bom.as_mut().unwrap().group_children = true;
+        for width in [280, 420, 560, 720, 900] {
+            if width == 900 {
+                h.call("ui.resize", json!({"width":1600,"height":720}));
+                h.frames(2);
+            }
+            h.app
+                .run_panel_command(
+                    "panel.resize",
+                    &json!({
+                        "target":{"type":"instance","id":"bom"},"size":{"width":width,"height":500},"thickness_only":true
+                    }),
+                )
+                .unwrap();
+            h.frames(4);
+            h.step(&json!({"click":{"handle":"dialog:list:0"}})).unwrap();
+            h.frames(2);
+            let warnings: Vec<_> = h
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains("use of ") && text.galley.text().contains(" ID ") => {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(warnings.is_empty(), "panel width {width}: {warnings:?}");
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            let ids: Vec<_> = ["Parts only", "By part number"]
+                .iter()
+                .map(|value| {
+                    tree.nodes
+                        .iter()
+                        .find(|(_, node)| node.role() == egui::Role::ComboBox && (node.label() == Some(*value) || node.value() == Some(*value)))
+                        .map(|(id, _)| *id)
+                        .unwrap()
+                })
+                .collect();
+            assert_ne!(ids[0], ids[1], "the real option ComboBoxes have different native IDs");
+            let cached = &h.app.bom.as_ref().unwrap().cache.as_ref().unwrap().2;
+            assert_eq!(cached["rows"].as_array().unwrap().len(), 2);
+            assert_eq!(cached["total_occurrences"], 5);
+            let viewport = solidcraft_ui_registry::rect_of("dialog:table:bom:viewport").unwrap();
+            let content = solidcraft_ui_registry::count_of("dialog:table:bom:content_width").unwrap() as f32;
+            assert!((content - viewport.width()).abs() <= 1.0, "the whole panel needs no horizontal table scrolling at {width}");
+            let section = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "bom").unwrap();
+            assert!((section.outer.size.width - width as f32).abs() <= 1.0, "the test exercises the requested whole-panel width {width}");
+            let panel = crate::panel_runtime::egui_rect(section.outer).expand(1.0);
+            assert!(panel.contains_rect(viewport), "the table stays inside the whole panel at {width}");
+            for key in ["bom:levels", "bom:group-by", "dialog:note:bom-summary"] {
+                let rect = solidcraft_ui_registry::rect_of(key).unwrap();
+                assert!(panel.contains_rect(rect), "{key} stays inside the whole panel at {width}: {rect:?}, {panel:?}");
+            }
+            for label in ["Sub-parts in their part's row", "Export CSV…", "Export JSON…"] {
+                let [x, y] = h.widget(label).unwrap();
+                assert!(panel.contains(egui::pos2(x as f32, y as f32)), "{label} stays inside the whole panel at {width}");
+            }
+            let quantity = solidcraft_ui_registry::rect_of("dialog:column:bom:Qty").unwrap();
+            assert!(viewport.expand(1.0).contains_rect(quantity), "quantity is visible at panel width {width}");
+            let part = solidcraft_ui_registry::rect_of("dialog:column:bom:Part number").unwrap();
+            assert!(viewport.expand(1.0).contains_rect(part), "part numbers are visible at panel width {width}");
+            if width == 900 {
+                let rows = cached["rows"].as_array().unwrap();
+                let index = rows.iter().position(|row| row["part_number"] == "PL-100").unwrap();
+                for (column, value) in [("Material", "304, 2 mm"), ("Finish", "Brushed")] {
+                    let cell = solidcraft_ui_registry::rect_of(&format!("dialog:table:bom:{index}:cell:{column}")).unwrap();
+                    let caption = solidcraft_ui_registry::rect_of(&format!("dialog:inline:{value}")).unwrap();
+                    assert!(viewport.expand(1.0).contains_rect(cell) && cell.contains_rect(caption), "the wide table retains main's {column} column");
+                }
+            }
+            if width == 280 {
+                let rows = cached["rows"].as_array().unwrap();
+                let index = rows.iter().position(|row| row["part_number"] == "HG-200").unwrap();
+                let name = super::text(&rows[index], "definition");
+                let caption = solidcraft_ui_registry::rect_of(&format!("dialog:inline:{name}")).unwrap();
+                let description = solidcraft_ui_registry::rect_of(&format!("dialog:table:bom:{index}:cell:Description")).unwrap();
+                assert!(description.contains_rect(caption), "a part with no description retains its name when Definition is hidden");
+            }
+        }
     }
 
     #[test]
-    fn the_description_column_takes_the_available_panel_width() {
+    fn report_text_can_be_selected_and_copied_without_editing_a_part() {
         let mut h = Harness::new();
         h.app.run("component.create", json!({"name": "Plate"})).unwrap();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
         h.app.run("component.activate", json!({"component": 0})).unwrap();
-        h.app.run("component.metadata.set", json!({"component": "Plate", "part_number": "PL-100", "description": "Plate"})).unwrap();
+        let description = "Plate, 3 mm";
+        h.app.run("component.metadata.set", json!({"component": "Plate", "description": description})).unwrap();
         open_report(&mut h);
-        h.frames(2);
-        let (Some(desc), Some(rev)) = (h.widget("Description"), h.widget("Rev")) else { panic!("the grid's headers are drawn") };
-        assert!(rev[0] > desc[0], "Revision follows the Description column: {desc:?}, {rev:?}");
+        let undo = h.app.session.undo.len();
+        for value in [description, "1"] {
+            let rect = solidcraft_ui_registry::rect_of(&format!("dialog:inline:{value}")).unwrap();
+            h.frame_with(test_support::pointer(rect.left_center(), true));
+            h.frame_with(vec![egui::Event::PointerMoved(rect.right_center())]);
+            h.frame_with(test_support::pointer(rect.right_center(), false));
+            h.frame_with(vec![egui::Event::Copy]);
+            assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == value)), "copy {value}");
+        }
+        assert_eq!(h.app.bom.as_ref().unwrap().picked, None);
+        assert_eq!(h.app.session.undo.len(), undo);
     }
 
     #[test]

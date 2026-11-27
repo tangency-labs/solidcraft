@@ -2,6 +2,32 @@ use super::*;
 use crate::test_support as harness;
 use solidcraft_ui_registry as registry;
 
+#[test]
+fn minimum_card_width_matches_the_rendered_card() {
+    let ctx = harness::context();
+    let columns = [Column::new("Item", 0.0), Column::new("Description", 1.0).flex(), Column::new("Qty", 0.0)];
+    for ppp in [1.0, 1.25, 2.0] {
+        ctx.set_pixels_per_point(ppp);
+        for _ in 0..2 {
+            registry::clear_handles();
+            harness::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                ui.set_width(table_min_width(ui, &columns));
+                table_custom(ui, "minimum-width", &columns, "", |ui, table| {
+                    table.headers(ui, |_, _| false);
+                    table.row(ui, "row", false, |row| {
+                        for _ in 0..3 {
+                            row.cell(|ui| crate::text(ui, "1", crate::Text::Inline));
+                        }
+                    });
+                });
+            });
+        }
+        let viewport = registry::rect_of("dialog:table:minimum-width:viewport").unwrap();
+        let content = registry::count_of("dialog:table:minimum-width:content_width").unwrap() as f32;
+        assert!((content - viewport.width()).abs() <= 1.0 / ppp, "minimum includes the card's margins and border at {ppp}: {content}, {viewport:?}");
+    }
+}
+
 fn cell_frame(ctx: &egui::Context, selection: &mut CellSelection, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> egui::FullOutput {
     registry::clear_handles();
     harness::raw_frame(

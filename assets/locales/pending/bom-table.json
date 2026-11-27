@@ -1,0 +1,10 @@
+{
+  "en": { "bom.summary": "{rows} rows, {placed} placed" },
+  "ar": { "bom.summary": "{rows} صفوف، {placed} موضوعة" },
+  "he": { "bom.summary": "{rows} שורות, {placed} מוצבים" },
+  "ja": { "bom.summary": "{rows} 行、{placed} 個配置済み" },
+  "vi": { "bom.summary": "{rows} hàng, {placed} đã đặt" },
+  "zh": { "bom.summary": "{rows} 行，已放置 {placed} 个" },
+  "de": { "bom.summary": "{rows} Zeilen, {placed} platziert" },
+  "ko": { "bom.summary": "{rows}개 행, {placed}개 배치됨" }
+}
