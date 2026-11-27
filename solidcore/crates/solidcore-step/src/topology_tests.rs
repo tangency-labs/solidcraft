@@ -1444,6 +1444,152 @@ fn a_spindle_torus_a_hair_from_a_horn_ends_its_form_where_its_tube_crosses_the_a
     }
 }
 
+/// One full horn torus (`R = r`) face written into `w`: a `TOROIDAL_SURFACE` (or
+/// `DEGENERATE_TOROIDAL_SURFACE` when `degenerate` is true) bounded by a meridian circle at
+/// longitude `meridian_angle` and, when `parallel_angle` is `Some(w)`, the parallel circle at
+/// tube angle `w` (`(-meridian, +parallel, +meridian, -parallel)`, the standard STEP 2-seam
+/// torus loop of #21218); when `parallel_angle` is `None`, bounded by the meridian slit alone
+/// starting at tube angle `start_tube` (`PI` starts at the pinch pole).
+fn full_horn_torus_face(
+    w: &mut W,
+    origin: V,
+    axis: V,
+    ref_dir: V,
+    r: f64,
+    meridian_angle: f64,
+    parallel_angle: Option<f64>,
+    start_tube: f64,
+    degenerate: bool,
+    same_sense: bool,
+) -> u64 {
+    let z = v3(axis).normalized().unwrap();
+    let x0 = v3(ref_dir);
+    let x = (x0 - z * x0.dot(z)).normalized().unwrap();
+    let y = z.cross(x);
+    let arr = |u: Vec3| [u.x, u.y, u.z];
+    let o = v3(origin);
+
+    let (su, cu) = meridian_angle.sin_cos();
+    let radial = x * cu + y * su;
+    let tangent = z.cross(radial);
+
+    let tube_angle = parallel_angle.unwrap_or(start_tube);
+    let (sw, cw) = tube_angle.sin_cos();
+    let p_start = o + radial * (r * (1.0 + cw)) + z * (r * sw);
+    let v_start = w.vertex(arr(p_start));
+
+    let m_ref = radial * cw + z * sw;
+    let c_meridian = w.circle(arr(o + radial * r), arr(-tangent), arr(m_ref), r);
+    let e_meridian = w.add(format!("EDGE_CURVE('',#{v_start},#{v_start},#{c_meridian},.T.)"));
+
+    let oes = if parallel_angle.is_some() {
+        let p_radius = r * (1.0 + cw);
+        let c_parallel = w.circle(arr(o + z * (r * sw)), arr(z), arr(radial), p_radius);
+        let e_parallel = w.add(format!("EDGE_CURVE('',#{v_start},#{v_start},#{c_parallel},.T.)"));
+        vec![w.oe(e_meridian, false), w.oe(e_parallel, true), w.oe(e_meridian, true), w.oe(e_parallel, false)]
+    } else {
+        vec![w.oe(e_meridian, false), w.oe(e_meridian, true)]
+    };
+
+    let bound = w.bound(&oes, true, true);
+    let placement = w.axis(origin, arr(z), arr(x));
+    let surface = if degenerate {
+        w.add(format!("DEGENERATE_TOROIDAL_SURFACE('',#{placement},{},{},.T.)", real(r), real(r)))
+    } else {
+        w.add(format!("TOROIDAL_SURFACE('',#{placement},{},{})", real(r), real(r)))
+    };
+    w.face(&[bound], surface, same_sense)
+}
+
+fn check_horn_torus_solid(s: &Solid, r: f64, expected_counts: [usize; 5], label: &str) {
+    assert!(!s.sheet, "{label}: expected solid, got sheet");
+    assert_eq!(counts(&s.brep), expected_counts, "{label}");
+    solidcore_ops::record_check::validate(&s.brep).unwrap_or_else(|e| panic!("{label}: validate: {e}"));
+    solidcore_ops::record_check::agreement(&s.brep).unwrap_or_else(|e| panic!("{label}: agreement: {e}"));
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap_or_else(|e| panic!("{label}: from_record: {e}"));
+    assert!(body.is_manifold_solid().unwrap(), "{label}: not manifold solid");
+    assert_eq!(body.check_solid(), Ok(()), "{label}: check_solid failed");
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{label}: {report}");
+    let exact_vol = 2.0 * PI * PI * r * r * r;
+    let exact_area = 4.0 * PI * PI * r * r;
+    let mass = body.mass_properties(1e-6).unwrap_or_else(|e| panic!("{label}: mass: {e}"));
+    assert!((mass.volume - exact_vol).abs() < 1e-6 * exact_vol, "{label}: volume {} vs {exact_vol}", mass.volume);
+    assert!((mass.area - exact_area).abs() < 1e-6 * exact_area, "{label}: area {} vs {exact_area}", mass.area);
+}
+
+/// #21218: a full horn torus (`TOROIDAL_SURFACE` or `DEGENERATE_TOROIDAL_SURFACE` with `R = r`,
+/// one face bounded by its meridian and a parallel seam such as the outer equator) imports as a
+/// valid manifold solid matching the closed-form volume `2 π² r³` and surface area `4 π² r²`,
+/// rather than failing with `topology::Brep::face: face 0 not found` or importing with wrong volume.
+#[test]
+fn a_full_horn_torus_with_meridian_and_equator_imports_as_a_valid_solid() {
+    let cases = [
+        ("origin R=r=5 tol=2e-5", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, 0.0, false, 2e-5),
+        ("tilted off-origin", [17.3, -9.4, 5.2], [1.0, 2.0, 3.0], [2.0, -1.0, 0.0], 5.0, 0.0, 0.0, false, 1e-7),
+        ("meridian off ref_direction", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 0.0, false, 1e-7),
+        ("parallel at top circle", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, std::f64::consts::FRAC_PI_2, false, 1e-7),
+        ("parallel near pinch pole", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 3.0, false, 1e-7),
+        ("degenerate toroidal surface", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, 0.0, true, 2e-5),
+    ];
+    for (label, origin, axis, ref_dir, r, lon, par, degen, tol) in cases {
+        let mut w = W::default();
+        let f = full_horn_torus_face(&mut w, origin, axis, ref_dir, r, lon, Some(par), 0.0, degen, true);
+        let shell = closed_shell(&mut w, &[f]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('Ring',#{shell})"));
+        let ex = w.file_with_uncertainty(&[solid], tol);
+        let res = read_solids(&ex);
+        assert!(res.failures.is_empty(), "{label}: {:?}", res.failures);
+        let s = res.solids.into_iter().next().unwrap_or_else(|| panic!("{label}: no solid"));
+        check_horn_torus_solid(&s, r, [2, 1, 1, 2, 2], label);
+    }
+}
+
+/// #21218: a full horn torus bounded by its meridian slit alone (starting at the outer equator
+/// or starting at the pinch pole) also imports as a valid manifold solid with closed-form volume.
+#[test]
+fn a_full_horn_torus_with_meridian_slit_only_imports_as_a_valid_solid() {
+    for (label, start_tube, expected_counts) in
+        [("equator start", 0.0, [2, 1, 1, 2, 2]), ("off-grid start", 0.3, [2, 1, 1, 2, 2]), ("pole start", PI, [2, 1, 1, 1, 1])]
+    {
+        let mut w = W::default();
+        let f = full_horn_torus_face(&mut w, [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.4, None, start_tube, false, true);
+        let shell = closed_shell(&mut w, &[f]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('Ring',#{shell})"));
+        let res = read_solids(&w.file(&[solid]));
+        assert!(res.failures.is_empty(), "{label}: {:?}", res.failures);
+        let s = res.solids.into_iter().next().unwrap_or_else(|| panic!("{label}: no solid"));
+        check_horn_torus_solid(&s, 5.0, expected_counts, label);
+    }
+}
+
+/// #21218: a full horn torus as an inward-facing cavity inside a cube subtracts `2 π² r³` from
+/// the cube's volume.
+#[test]
+fn a_full_horn_torus_void_inside_a_cube_subtracts_its_closed_form_volume() {
+    let mut w = W::default();
+    let outer_faces = box_faces(&mut w, [-20.0; 3], [20.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &outer_faces);
+    let void_face = full_horn_torus_face(&mut w, [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, Some(0.0), 0.0, false, false);
+    let inner = closed_shell(&mut w, &[void_face]);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.T.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('BlockWithHornVoid',#{outer},(#{void}))"));
+    let res = read_solids(&w.file(&[solid]));
+    assert!(res.failures.is_empty(), "{:?}", res.failures);
+    let s = res.solids.into_iter().next().unwrap();
+    assert!(!s.sheet);
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    assert_eq!(body.check_solid(), Ok(()));
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let exact_vol = 40.0_f64.powi(3) - 2.0 * PI * PI * 5.0_f64.powi(3);
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - exact_vol).abs() < 1e-6 * exact_vol, "{} vs {exact_vol}", mass.volume);
+}
+
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
 /// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
 /// vertex's angle round the tube, as a band round the axis gets one round the tube.
@@ -1606,6 +1752,65 @@ fn a_tube_swept_round_a_corner_reads_closed_whatever_its_second_legs_direction()
         let mass = body.mass_properties(1e-9).unwrap();
         assert!((mass.volume - volume).abs() < 1e-6 * volume, "{leg:?}: {mass:?}, {volume} expected");
         assert!((mass.area - area).abs() < 1e-6 * area, "{leg:?}: {mass:?}, {area} expected");
+    }
+}
+
+/// A STEP writer may omit both periodic seams of a complete ring torus.
+#[test]
+fn a_ring_torus_without_bounds_is_a_closed_solid() {
+    let mut w = W::default();
+    let a = w.axis([3.0, -4.0, 2.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},11.,1.)"));
+    let face = w.face(&[], torus, true);
+    let shell = closed_shell(&mut w, &[face]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ring',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 1, 2, 1]);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let volume = body.mass_properties(1e-9).unwrap().volume;
+    let expected = 22.0 * std::f64::consts::PI.powi(2);
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} vs {expected}");
+}
+
+#[test]
+fn an_unbounded_inward_torus_bounds_a_void() {
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [-5.0; 3], [5.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &faces);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},3.,1.)"));
+    let face = w.face(&[], torus, false);
+    let inner = closed_shell(&mut w, &[face]);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.T.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('',#{outer},(#{void}))"));
+    let s = one_solid(&w.file(&[solid]));
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let volume = body.mass_properties(1e-9).unwrap().volume;
+    let expected = 1000.0 - 6.0 * std::f64::consts::PI.powi(2);
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} vs {expected}");
+}
+
+#[test]
+fn missing_torus_seams_are_only_inferred_for_a_ring_without_bounds() {
+    for (major, vertex_bound) in [(1.0, false), (0.5, false), (3.0, true)] {
+        let mut w = W::default();
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},1.)", real(major)));
+        let mut bounds = Vec::new();
+        if vertex_bound {
+            let v = w.vertex([major + 1.0, 0.0, 0.0]);
+            let l = w.add(format!("VERTEX_LOOP('',#{v})"));
+            bounds.push(w.add(format!("FACE_BOUND('',#{l},.T.)")));
+        }
+        let face = w.face(&bounds, torus, true);
+        let shell = closed_shell(&mut w, &[face]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+        let r = read_solids(&w.file(&[solid]));
+        assert!(r.solids.is_empty());
+        assert_eq!(r.failures.len(), 1);
+        assert!(r.failures[0].message.contains("without an edge loop"));
     }
 }
 
@@ -3924,7 +4129,10 @@ fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
 /// So does a side a quarter turn past the seam whose neighbours do not end on it, the next one
 /// starting a whole turn back (a loop lifted past the seam, as at the pole of the sphere faces
 /// #98053 and #98718 of file 211 in #12859): put on the seam it would be a quarter turn from its
-/// edge, and the face was left out.
+/// edge, and the face was left out. Nor does one whose side before it ends on the seam while the
+/// next starts a turn back: it is measured against the side on the seam only, and around the
+/// period, so a side before it ending at lo, the seam's other side, meets it there and does not
+/// let it move a quarter turn.
 #[test]
 fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let frame = Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
@@ -3975,6 +4183,33 @@ fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let mut pcs = vec![lifted.clone()];
     assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
     assert_eq!(pcs[0], lifted);
+    // The side before it ends on the seam, the next starts a turn back: the side runs from the
+    // seam a quarter turn past it, which no rounding is, so it stays.
+    let mixed = vec![
+        side([hi - 1.0, 0.2], [hi, 0.2]),
+        side([hi, 0.2], [q, 0.8]),
+        side([lo + 0.25 * period, 0.8], [hi - 1.0, 0.8]),
+        side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+    ];
+    let mut pcs = vec![mixed.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], mixed);
+    // The same with the side before it ending on the seam's other side, at lo: the two meet on
+    // the seam, so the miss is nothing, not a turn, and the side stays.
+    let across_seam = vec![
+        side([hi - 1.0, 0.2], [lo, 0.2]),
+        side([hi, 0.2], [q, 0.8]),
+        side([lo + 0.25 * period, 0.8], [hi - 1.0, 0.8]),
+        side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+    ];
+    let mut pcs = vec![across_seam.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], across_seam);
+    // A seam side 2.5e-9 of a turn past hi whose neighbours end at lo, the seam's other side:
+    // still a rounding, put on the seam.
+    let mut pcs = vec![rectangle(hi + past, lo)];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 1);
+    assert_eq!(pcs[0], rectangle(hi, lo));
 }
 
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
@@ -5483,4 +5718,78 @@ fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
     assert!(fine_read_holds(&brep, shortest));
     brep.edges[3].tolerance = 10.0;
     assert!(!fine_read_holds(&brep, shortest));
+}
+
+/// A 10 mm box whose top steps up by `step` along y = 5, as a file stating `uncertainty`, with
+/// the corner at (10, 0, 0) written `gap` above where its three edges' LINEs and the bottom's
+/// PLANE put it.
+fn hair_step_with_a_corner_off(step: f64, gap: f64, uncertainty: f64) -> p21::Exchange {
+    let h = 10.0 + step;
+    let corners: [V; 12] = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    // Each face's corners counter-clockwise seen from outside.
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    let mut w = W::default();
+    let vertices: Vec<u64> = corners.iter().enumerate().map(|(i, &p)| w.vertex(if i == 1 { [p[0], p[1], gap] } else { p })).collect();
+    let mut edges: std::collections::HashMap<(usize, usize), u64> = Default::default();
+    let mut faces = Vec::new();
+    for cycle in cycles {
+        let mut oes = Vec::new();
+        for (k, &a) in cycle.iter().enumerate() {
+            let z = cycle[(k + 1) % cycle.len()];
+            let (lo, hi) = (a.min(z), a.max(z));
+            let e = *edges.entry((lo, hi)).or_insert_with(|| w.line_edge((vertices[lo], corners[lo]), (vertices[hi], corners[hi]), true, 1.0));
+            oes.push(w.oe(e, a == lo));
+        }
+        let [p, q, r] = [corners[cycle[0]], corners[cycle[1]], corners[cycle[2]]];
+        let x = sub3(q, p);
+        let normal = crate::geom::cross(x, sub3(r, q));
+        let bound = w.bound(&oes, true, true);
+        let plane = w.plane(p, normal, x);
+        faces.push(w.face(&[bound], plane, true));
+    }
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('stepped',#{shell})"));
+    w.file_with_uncertainty(&[solid], uncertainty)
+}
+
+/// tangency-labs/solidcraft#22579: a solid with an edge shorter than the tolerance its file
+/// states is read again at a quarter of that edge, and a vertex off its edges' curves takes a
+/// tolerance from its gap. 1.5 times the gap was less than the kernel's check asks (it holds a
+/// vertex's gap to half its zone, and its zone is half the record's tolerance), so a gap the
+/// stated tolerance covers failed the check once the solid was read finer, as SolidCraft's own
+/// export of a bent strip did. Read finer, the gap stays covered up to what the file states; a
+/// gap past a quarter of that is no more covered than as stated, and the check still fails it.
+#[test]
+fn a_vertex_gap_the_stated_tolerance_covers_stays_covered_when_read_finer() {
+    let check = |gap: f64, uncertainty: f64| {
+        let s = one_solid(&hair_step_with_a_corner_off(3e-4, gap, uncertainty));
+        assert!(s.notes.iter().any(|n| n.ends_with("read at 7.500e-5 mm")), "{:?}", s.notes);
+        // Trusted, so the kernel's healer leaves the tolerances as the reader made them.
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, true).unwrap();
+        // The box and the riser: 10 x 10 x 10 + 10 x 5 x 3e-4 (the corner's gap moves no face).
+        let volume = body.mass_properties(1e-9).unwrap().volume;
+        assert!((volume - 1000.015).abs() < 1e-9, "{gap} {uncertainty}: {volume}");
+        body.check(solidcore_ops::check::CheckLevel::All).unwrap()
+    };
+    for (gap, uncertainty) in [(0.0, 1e-3), (1e-4, 1e-3), (2.4e-4, 1e-3), (1e-4, 5e-4)] {
+        let report = check(gap, uncertainty);
+        assert!(report.is_valid(), "{gap} {uncertainty}: {report}");
+    }
+    for (gap, uncertainty) in [(2.6e-4, 1e-3), (1.3e-4, 5e-4)] {
+        assert!(!check(gap, uncertainty).is_valid(), "{gap} {uncertainty}");
+    }
 }

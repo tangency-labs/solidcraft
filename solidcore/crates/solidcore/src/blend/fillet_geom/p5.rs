@@ -615,6 +615,7 @@ pub(crate) fn turned_back_arc(
             skip_two_pnts_intersection: false,
             ref_point: None,
             closed_by_start_direction: true,
+            heading_side_only: false,
         },
     )?
     .curve_3d;

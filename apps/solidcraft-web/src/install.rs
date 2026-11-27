@@ -4,7 +4,7 @@
 //! one prompt; a browser that is still willing makes a new one later. Safari makes no offer: it
 //! gets its steps, unless the app is already running installed.
 
-use solidcraft_ui_egui::install::{InstallApp, Offer, safari_steps};
+use solidcraft_ui_egui::install::{InstallApp, Offer, is_safari, safari_steps};
 use wasm_bindgen::{JsCast as _, JsValue};
 
 /// Where index.html keeps the browser's offer.
@@ -44,14 +44,29 @@ fn running_installed(window: &web_sys::Window) -> bool {
     standalone || home_screen
 }
 
+/// The browser's `navigator.userAgent` and `navigator.vendor` (empty when unreadable).
+fn browser_names(nav: &web_sys::Navigator) -> (String, String) {
+    let vendor = js_sys::Reflect::get(nav, &"vendor".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
+    (nav.user_agent().unwrap_or_default(), vendor)
+}
+
+/// The page runs in Safari (`Services::browser_safari`: Preferences offers the two-finger twist
+/// there only).
+pub fn safari() -> bool {
+    web_sys::window().is_some_and(|w| {
+        let (user_agent, vendor) = browser_names(&w.navigator());
+        is_safari(&user_agent, &vendor)
+    })
+}
+
 /// The host service for File ▸ Install app…; the UI is drawn again whenever the browser
 /// makes or withdraws its offer (even with nothing else happening).
 pub fn service(ctx: &egui::Context) -> InstallApp {
     // Safari's steps, decided once: the browser and the way the page runs don't change.
     let steps = web_sys::window().filter(|w| !running_installed(w)).and_then(|w| {
         let nav = w.navigator();
-        let vendor = js_sys::Reflect::get(&nav, &"vendor".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
-        safari_steps(&nav.user_agent().unwrap_or_default(), &vendor, nav.max_touch_points())
+        let (user_agent, vendor) = browser_names(&nav);
+        safari_steps(&user_agent, &vendor, nav.max_touch_points())
     });
     if let Some(window) = web_sys::window() {
         for event in ["beforeinstallprompt", "appinstalled"] {

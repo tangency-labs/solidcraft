@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Show penetration</title>
+  <path d="M6 27.3L58 27.3" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 27.3Q32 9.3 46 27.3Z" fill="currentColor" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 33.3L32 55.3L44 33.3Z" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 7"/>
+</svg>

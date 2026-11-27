@@ -55,6 +55,11 @@
 //!   (`RoundNotSewn`, status 1001). A round is a connected piece of the sheet, so one chain's
 //!   faces, corners included, are cut as the fork's; so are the faces of a round whose rails
 //!   are not known.
+//! - **No crease on a face the round rolls on.** A cut's wall that the sheet face's round rolls
+//!   on is not intersected with it (`rolls_on`): the round is tangent to it along the rail and
+//!   crosses it nowhere, so the fork's surface intersection there found only the rail, slowly
+//!   (the tangent case). With one rim of a hole through a cylinder rounded, the other rim is
+//!   an inner loop of the outer face whose wall is the hole the round rolls on.
 //! - **The trace.** The fork's `SM_ERR_MESSAGE` naming a reached feature isn't kept: the
 //!   port's kernel has no message channel for a step that goes on.
 //! - **Merging on a face.** The fork's `MergeCurvesOnSurface` takes the face's surface; the
@@ -192,6 +197,7 @@ fn creases(
     wall: FaceId,
     tol: f64,
 ) -> Result<Vec<Curve>> {
+    k.work_counters.add_keep_feature_crease();
     // Copies without an owner: the pieces are classified in both faces below, so the
     // intersection needs no trimmed cache of the faces.
     let mut sheet_surface = face::p2::surface(sheet, sheet_face)?
@@ -399,6 +405,18 @@ fn reaches(supports: &BTreeMap<FaceId, Vec<FaceId>>, sheet_face: FaceId, support
     supports
         .get(&sheet_face)
         .is_none_or(|on| on.contains(&support))
+}
+
+/// Whether `sheet_face`'s round rolls on `wall`, a face of the target ([`round_supports`]).
+/// A round is tangent to each face it rolls on along its rail and lies on the ball's side of
+/// it: the two surfaces touch along the rail and cross nowhere in the band, so the round makes
+/// no crease on such a wall. A cut whose wall the round rolls on (the far rim of a hole drilled
+/// through a cylinder, the round on its near rim) is not in the band; intersecting the round
+/// with that wall is the tangent surface intersection, whose whole result is the rail.
+fn rolls_on(supports: &BTreeMap<FaceId, Vec<FaceId>>, sheet_face: FaceId, wall: FaceId) -> bool {
+    supports
+        .get(&sheet_face)
+        .is_some_and(|on| on.contains(&wall))
 }
 
 /// The edit-notification reference of a new edge's curve in `b`.
@@ -936,8 +954,11 @@ impl FilletSession<'_> {
                 let wall_box =
                     crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
                 for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
+                    // a cut's wall is a target face: the round meets one it rolls on only
+                    // along its rail (`rolls_on`); a boss's continued walls are the sheet's
                     if sheet_box.are_disjoint(&wall_box, on_tol)
                         || !reaches(reach, sheet_face, feature.support)
+                        || (!feature.boss && rolls_on(reach, sheet_face, wall))
                     {
                         continue;
                     }
@@ -993,6 +1014,7 @@ impl FilletSession<'_> {
                     for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
                         if sheet_box.are_disjoint(&wall_box, on_tol)
                             || !reaches(reach, sheet_face, feature.support)
+                            || rolls_on(reach, sheet_face, wall)
                         {
                             continue;
                         }

@@ -698,6 +698,12 @@ pub enum OffsetRefusal {
         /// The largest draft angle that keeps a wall, radians.
         largest: f64,
     },
+    /// A drafted cone or cylinder whose radius would drop to zero or below within the face's
+    /// span: the draft angle closes the cone before the end of the face.
+    DraftConeCloses,
+    /// A drafted cone whose neutral plane is at or past its apex, so its radius on the neutral
+    /// plane is not positive and there is no hinge circle.
+    DraftNeutralPlanePastApex,
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -782,6 +788,12 @@ impl std::fmt::Display for OffsetRefusal {
                 "the drafted face would reach another shell of the body, closing the wall \
                  between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
+            OffsetRefusal::DraftConeCloses => {
+                write!(f, "a drafted cone would close within the face")
+            }
+            OffsetRefusal::DraftNeutralPlanePastApex => {
+                write!(f, "the neutral plane is at or past a drafted cone's apex")
+            }
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
