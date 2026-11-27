@@ -711,6 +711,7 @@ fn workspace_hook_limits(requested: &Limits, ceilings: HostLimits) -> Limits {
         fuel: requested.fuel.min(1_000_000).min(ceilings.max_fuel),
         memory_mib: requested.memory_mib.min(32).min(ceilings.max_memory_mib),
         deadline_ms: requested.deadline_ms.min(ui::WORKSPACE_HOOK_DEADLINE_MS),
+        host_calls: requested.host_calls.min(ceilings.max_host_calls),
         stack_kib: requested.stack_kib.map(|kib| kib.min(256)),
     }
 }

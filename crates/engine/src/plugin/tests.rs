@@ -263,10 +263,13 @@ fn workspace_manifest() -> Value {
 fn workspace_hook_budgets_are_capped_without_raising_smaller_limits() {
     let limits = workspace_hook_limits(&Limits::default(), HostLimits::default());
     assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms), (1_000_000, 32, 1000));
-    let requested = Limits { fuel: 100, memory_mib: 1, deadline_ms: 5, stack_kib: Some(64) };
+    let requested = Limits { fuel: 100, memory_mib: 1, deadline_ms: 5, stack_kib: Some(64), ..Limits::default() };
     let limits = workspace_hook_limits(&requested, HostLimits::default());
     assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (100, 1, 5, Some(64)));
-    let limits = workspace_hook_limits(&Limits { stack_kib: Some(1024), ..Limits::default() }, HostLimits { max_fuel: 500, max_memory_mib: 2 });
+    let limits = workspace_hook_limits(
+        &Limits { stack_kib: Some(1024), ..Limits::default() },
+        HostLimits { max_fuel: 500, max_memory_mib: 2, ..HostLimits::default() },
+    );
     assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (500, 2, 1000, Some(256)));
 }
 
@@ -1671,7 +1674,7 @@ mod native {
     fn workspace_hooks_run_under_the_one_second_deadline() {
         // The fuel cap ends any guest loop in milliseconds, so the deadline is checked where it is
         // set: a package asking for minutes still gets one second, and a smaller ask is kept.
-        let long = Limits { fuel: u64::MAX, memory_mib: 256, deadline_ms: 600_000, stack_kib: None };
+        let long = Limits { fuel: u64::MAX, memory_mib: 256, deadline_ms: 600_000, stack_kib: None, ..Limits::default() };
         assert_eq!(workspace_hook_limits(&long, HostLimits::default()).deadline_ms, 1000);
         assert_eq!(workspace_hook_limits(&Limits { deadline_ms: 50, ..long }, HostLimits::default()).deadline_ms, 50);
     }
