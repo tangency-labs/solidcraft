@@ -249,9 +249,10 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                     .fold((c, c), |(l, h), p| (Vec2::new(l.x.min(p.x), l.y.min(p.y)), Vec2::new(h.x.max(p.x), h.y.max(p.y))));
                 let corners = [lo2, Vec2::new(hi2.x, lo2.y), hi2, Vec2::new(lo2.x, hi2.y)];
                 // The prism runs square to the wall at the centroid, so a point `s` round it lands
-                // at the angle asin(s / r), not s / r.
-                let projected = |(t, h): (f64, f64)| (theta + (t - theta).clamp(-1.0, 1.0).asin(), h);
-                if !on_wall((theta, height)) || !corners.into_iter().all(|p| on_wall(projected(laid(p)))) {
+                // at the angle asin(s / r), not s / r; past the ring's inside it misses the ring.
+                let reach = r_in / r;
+                let lands = |(t, h): (f64, f64)| (t - theta).abs() <= reach && on_wall((theta + (t - theta).asin(), h));
+                if !on_wall((theta, height)) || !corners.into_iter().all(|p| lands(laid(p))) {
                     return Err(refuse(NOT_FITTING));
                 }
                 let radial = radial0 * theta.cos() + tangent0 * theta.sin();
@@ -2342,6 +2343,11 @@ mod tests {
             let added = volume(&result) - volume(&cyl);
             assert!((added - want).abs() < 1e-4 * want.abs(), "w {w}, d {d}: added {added}, want {want}");
         }
+        // 70 wide, its ends would pass the wall: refused, not cut short.
+        let wide =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-35., -2.), Vec2::new(35., -2.), Vec2::new(35., 2.), Vec2::new(-35., 2.)]), holes: vec![] };
+        let e = emboss_project_face(&cyl, wall, Vec3::new(30., 0., 10.), &sketch, &[wide], 0.5).unwrap_err();
+        assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
     }
 
     #[test]
