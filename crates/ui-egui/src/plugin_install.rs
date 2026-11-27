@@ -211,6 +211,16 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if !themes.is_empty() {
         lines.push(format("plugin_install.themes", &[("names", &themes.join(", "))]));
     }
+    // Review every declaration, including capabilities a newer host might grant.
+    let granted = list(plugin.get("granted_capabilities"));
+    for capability in list(plugin.get("optional_capabilities")) {
+        let key = if granted.contains(&capability) {
+            "plugin_install.optional_capability_supported"
+        } else {
+            "plugin_install.optional_capability_unavailable"
+        };
+        lines.push(format(key, &[("capability", &capability)]));
+    }
     lines
 }
 
@@ -466,6 +476,24 @@ mod tests {
                 "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_review_names_all_optional_capabilities() {
+        crate::i18n::install();
+        let plugin = json!({
+            "capabilities": ["commands@0.2"],
+            "optional_capabilities": ["user-storage@0.1", "future@0.1"],
+            "granted_capabilities": ["commands@0.2", "user-storage@0.1"]
+        });
+        assert_eq!(
+            permission_lines(&plugin),
+            [
+                "Optional capability: user-storage@0.1 (supported by this app)",
+                "Optional capability: future@0.1 (not supported by this app; may be enabled by a later version)",
+            ]
+        );
+        assert!(permission_lines(&json!({"capabilities":["commands@0.2"]})).is_empty());
     }
 
     #[test]

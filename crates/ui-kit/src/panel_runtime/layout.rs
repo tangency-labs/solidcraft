@@ -1304,6 +1304,11 @@ fn append_section(
     // A one-row header with actions at its right end keeps the collapse button's place empty, so
     // they line up with those of a taller header that takes its place (the 1D and 2D History).
     let hold_collapse = !collapsible && visible_actions.clone().any(|action| trailing(&action));
+    // The last trailing action (the timeline's chevron) takes that held place, furthest right like every panel's collapse button.
+    let slot_id =
+        if hold_collapse && !side_strip { visible_actions.clone().rfind(|action| trailing(action)).map(|action| action.id.clone()) } else { None };
+    let action_count = action_count - usize::from(slot_id.is_some());
+    let not_slot = |action: &&HeaderActionSpec| slot_id.as_ref() != Some(&action.id);
     let primary_count = 1 + usize::from(collapsible || hold_collapse) + usize::from(spec.features.hot_closable);
     let control_count = action_count + primary_count;
     let split = !side_strip
@@ -1336,9 +1341,7 @@ fn append_section(
     };
     let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
     let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
-    if hold_collapse {
-        take(&mut cursor, header, primary_extent);
-    }
+    let held = hold_collapse.then(|| take(&mut cursor, header, primary_extent));
     let menu = take(&mut cursor, header, primary_extent);
     let mut actions = Vec::new();
     let mut strip_bottom = bottom(header);
@@ -1369,7 +1372,7 @@ fn append_section(
             actions.push((action.id.clone(), rect(x, header.origin.y + (header.size.height - extent) / 2.0, extent, extent)));
             leading += if out.direction == Direction::Ltr { extent } else { -extent };
         }
-        for action in visible_actions.clone().filter(|action| trailing(action)).collect::<Vec<_>>().into_iter().rev() {
+        for action in visible_actions.clone().filter(|action| trailing(action) && not_slot(action)).collect::<Vec<_>>().into_iter().rev() {
             actions.push((action.id.clone(), take(&mut cursor, header, extent)));
         }
         let content = if out.direction == Direction::Ltr {
@@ -1383,14 +1386,14 @@ fn append_section(
             let margin = edge_margin.min(row.size.width / 2.0);
             let extent = metrics.control_extent.min(row.size.height).min((row.size.width - margin) / action_count as f32);
             let mut action_cursor = if out.direction == Direction::Ltr { right(row) - margin } else { row.origin.x + margin };
-            for action in visible_actions.rev() {
+            for action in visible_actions.filter(not_slot).rev() {
                 actions.push((action.id.clone(), take(&mut action_cursor, row, extent)));
             }
         } else if !split {
             let remaining = if out.direction == Direction::Ltr { cursor - header.origin.x } else { right(header) - cursor };
             let extent = extent.min(header.size.height).min(remaining / action_count.max(1) as f32);
             if extent > 0.0 {
-                for action in visible_actions.rev() {
+                for action in visible_actions.filter(not_slot).rev() {
                     actions.push((action.id.clone(), take(&mut cursor, header, extent)));
                 }
             }
@@ -1406,6 +1409,9 @@ fn append_section(
             None,
         )
     };
+    if let (Some(id), Some(slot)) = (slot_id.clone(), held) {
+        actions.push((id, slot));
+    }
     // A group replaces the single title with one grip and text-only tabs in
     // that same slot. Collapsing never removes access to individual tabs.
     // A lone panel may put its own content there instead (a search field), folded or not.

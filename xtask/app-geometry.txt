@@ -993,7 +993,6 @@ crates/kernel/src/iges_in.rs:Tr::curve_parts atan2
 crates/kernel/src/iso.rs:iso_record cross
 crates/kernel/src/lip.rs:Piece::at cross
 crates/kernel/src/lip.rs:face_at cross,dot,normalized,triangles
-crates/kernel/src/lip.rs:offset_loop cross,dot,normalized
 crates/kernel/src/lip.rs:piece_edge cross,normalized
 crates/kernel/src/lip.rs:pieces cross,dot
 crates/kernel/src/lip.rs:raise_band cross
@@ -1481,7 +1480,8 @@ crates/ui-egui/src/viewport.rs:build_block triangles
 crates/ui-egui/src/viewport.rs:build_shared_tris triangles
 crates/ui-egui/src/viewport.rs:build_sketch_scene cross,dot
 crates/ui-egui/src/viewport.rs:current_face dot
-crates/ui-egui/src/viewport.rs:edge_normals dot
+# Display only: picks mesh normals to lift edge highlights at grazing angles.
+crates/ui-egui/src/viewport.rs:edge_normal_lookup dot
 crates/ui-egui/src/viewport.rs:feature_parts triangles
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot

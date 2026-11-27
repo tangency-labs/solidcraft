@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
@@ -359,6 +359,25 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### dogbone
+
+A round relief, of a router bit's diameter, cut into an inside corner so that a square part seats
+where the bit would leave a round.
+
+A dogbone runs the length of the corner edge. Its normal style is centred on the corner's
+bisector with its circle through the sharp corner; minimal stops a gap short of the corner.
+T-bone: the relief is centred on one wall's line, the longer or the shorter one. At a square
+corner it bites that wall only; at a sharper corner it also bites the other wall.
+
+- **In SolidCraft:** the `solid.dogbone` command; its `diameter`, `style` (`normal`, `minimal`,
+  `t_bone`), `gap`, `side` (`longer`, `shorter`), `max_angle` and `along` parameters; the
+  `dogbone` feature type in a design file.
+- **Don't use:** relief cut, corner relief (sheet metal's word for the cut where two flanges meet),
+  overcut.
+- **Elsewhere:** dog-bone fillet, T-bone, mortise relief.
+- **For translators:** not a fillet or a round (those add material or round an edge off); the
+  relief removes material beyond the corner.
+
 ### end cap
 
 A plate that closes the open end of a frame member, shaped like the member profile's outer outline
@@ -458,6 +477,30 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
+
+### keyboard profile
+
+A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
+
+A keyboard profile sits under the user's own keys: a key the user changes always wins, and stays
+when another keyboard profile is chosen. Each one is a file that maps keys to existing commands,
+and it never adds a command. It is an app setting, not part of a design, and a settings profile
+carries the chosen one.
+
+- **In SolidCraft:** Preferences › Shortcuts › Keyboard profile; the `keyboard_profile`
+  preference; the files in `crates/ui-egui/keyboard-profiles/`.
+- **Don't use:** keymap, key scheme, preset (for the set of keys).
+- **Elsewhere:** keyboard profile, keyboard scheme, keymap.
+- **For translators:** a set of keyboard shortcuts, not a settings profile, a sketch profile or a
+  frame profile (see *Words with more than one meaning*, "Profile").
 
 ### lay
 
@@ -1006,7 +1049,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
 | | the cross-section a frame member follows | frame profile | `frame.profile.*` |
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
+| | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
+| | the clearance between two flanges at a sheet corner | *corner gap* | the Gap row in a Flange corner card or the Corner Join dialog |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
@@ -1034,6 +1079,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 
