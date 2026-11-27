@@ -3125,6 +3125,12 @@ impl Session {
         self.visibility_revision += 1;
     }
 
+    /// Revision of the document and its evaluated model within this session. Selecting or
+    /// hiding an item redraws the view without changing either input.
+    pub fn model_revision(&self) -> u64 {
+        self.revision.wrapping_sub(self.visibility_revision)
+    }
+
     /// Show the sketch a live frame changed, leaving the features after it as they were last
     /// evaluated (marked stale); a full `refresh` when the model cannot show it that way.
     fn refresh_live(&mut self, edit: LiveEdit) {
