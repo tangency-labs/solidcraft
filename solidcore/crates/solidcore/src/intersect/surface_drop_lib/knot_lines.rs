@@ -456,4 +456,47 @@ mod tests {
         assert_eq!(U_LINE.offset(Point2::new(0.5, 7.0)), -0.5);
         assert_eq!(V_LINE.offset(Point2::new(7.0, 1.25)), 0.25);
     }
+
+    /// The surface/surface trace turns a corner on a line where a first derivative jumps
+    /// (#18488). With `jump` it does across both lines of the patch, flat or folded; without,
+    /// the patch is `C1` across them and nothing jumps. A step reaches a point on a line
+    /// from the side its start is on: from below the span ending at the knot (right), from
+    /// above the one starting there (left); a start on the line, or an end beside it,
+    /// reaches none.
+    #[test]
+    fn a_derivative_jumps_across_a_line_and_a_step_reaches_it_from_one_side() {
+        let k = Kernel::default();
+        let at = Point2::new(0.3, 0.6);
+        assert_eq!(U_LINE.put_on(at), Point2::new(1.0, 0.6));
+        assert_eq!(V_LINE.put_on(at), Point2::new(0.3, 1.0));
+        for (fold_degrees, jump) in [(0.0, true), (2.0, true), (0.0, false)] {
+            let surface = patch(fold_degrees, jump);
+            for line in [U_LINE, V_LINE] {
+                let jumps = line.jumps_at(&k, &surface, at).unwrap();
+                assert_eq!(jumps, jump, "folded {fold_degrees}, {line:?}");
+            }
+        }
+
+        let whole = Extent2d::from_bounds(0.0, 0.0, 4.0, 2.0);
+        let lines = KnotLines::of(&patch(0.0, true), &whole).unwrap();
+        let p = |x: f64, y: f64| Point2::new(x, y);
+        let on_u = p(1.0, 0.4);
+        assert_eq!(
+            lines.reached_from(p(0.5, 0.2), on_u),
+            [Some(Side::Right), None]
+        );
+        assert_eq!(
+            lines.reached_from(p(1.5, 0.2), on_u),
+            [Some(Side::Left), None]
+        );
+        assert_eq!(lines.reached_from(on_u, on_u), [None, None]);
+        assert_eq!(
+            lines.reached_from(p(0.5, 0.2), p(1.0 + 1e-9, 0.4)),
+            [None, None]
+        );
+        assert_eq!(
+            lines.reached_from(p(1.5, 0.5), p(1.0, 1.0)),
+            [Some(Side::Left), Some(Side::Right)]
+        );
+    }
 }

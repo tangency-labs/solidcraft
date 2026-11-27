@@ -4205,6 +4205,25 @@ mod tests {
             .evaluate_point(&k, at)
             .unwrap();
         assert_eq!(uv.x, 1.0, "{uv:?}");
+        // the sweep is 2 long over v in [0, 1]: the corner's height 1.2 is v = 0.6, within
+        // the tolerance over |S_v| = 2
+        assert!((uv.y - 0.6).abs() < tol / 2.0, "{uv:?}");
+        // Each leg of the polyline is a straight line, and every span's ends are roots
+        // within the tolerance with tangents along their leg (n1 x n2), so its Bezier
+        // control points, and by the convex hull every point of it, lie within the
+        // tolerance of that leg: a tangent from the wrong side of the corner bends a span
+        // away from it
+        let to_leg = |p: Vec3, a: Vec3, b: Vec3| {
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+            p.distance(a + ab * t)
+        };
+        for i in 0..=1000 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
+            let p = c.evaluate_point(&k, t).unwrap();
+            let d = to_leg(p, a, corner).min(to_leg(p, corner, b));
+            assert!(d < tol, "{p:?} is {d:e} from the polyline");
+        }
     }
 
     #[test]

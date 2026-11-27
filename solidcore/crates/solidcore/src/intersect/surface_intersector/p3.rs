@@ -1240,16 +1240,20 @@ impl SurfaceIntersector<'_> {
         {
             let (from, along) = (prev_tsp.uv_pos(s), prev_tsp.uv_deriv(s));
             let to = from + along * step_size;
-            let Some(line) = lines.crossed(from, to) else {
-                continue;
-            };
-            let fraction = line.offset(from) / (line.offset(from) - line.offset(to));
-            if !line.jumps_at(k, self.surface(s), from + (to - from) * fraction)? {
-                continue;
+            // the first line on the way where a derivative jumps (a crossing put on its
+            // line is on neither side of it, so the next search passes it)
+            let mut start = from;
+            while let Some(line) = lines.crossed(start, to) {
+                let fraction = line.offset(start) / (line.offset(start) - line.offset(to));
+                let crossing = line.put_on(start + (to - start) * fraction);
+                if line.jumps_at(k, self.surface(s), crossing)? {
+                    *piece = piece_before(piece, line, from);
+                    step_size = step_size.min(piece.clip_line(from, along, step_size));
+                    *at = Some(line);
+                    break;
+                }
+                start = crossing;
             }
-            *piece = piece_before(piece, line, from);
-            step_size = step_size.min(piece.clip_line(from, along, step_size));
-            *at = Some(line);
         }
 
         // remember clipping when it happens
@@ -1299,18 +1303,23 @@ impl SurfaceIntersector<'_> {
         let Some(mut next_uvs) = refine([guess_uv0, guess_uv1], true)? else {
             return Ok(res);
         };
-        // (not upstream, #18488: a point within the parameter zero of the line its step
-        // was clipped to is on it; the solve can stop a rounding error short of it)
-        let onto_lines = |uvs: [Point2; 2]| {
-            let mut uvs = uvs;
-            for ((uv, at), lines) in uvs.iter_mut().zip(&clipped_at).zip(&self.knot_lines) {
-                if let Some(line) = at.filter(|&line| lines.is_within_zero(line, *uv)) {
-                    *uv = line.put_on(*uv);
-                }
+        // (not upstream, #18488: the solve can stop a rounding error short of the line the
+        // step was clipped to; from that point put on the line, the boundary solve gives
+        // the root on it)
+        let mut on_lines = next_uvs;
+        let mut moved = false;
+        for ((uv, at), lines) in on_lines.iter_mut().zip(&clipped_at).zip(&self.knot_lines) {
+            if let Some(line) = at.filter(|&l| l.offset(*uv) != 0.0 && lines.is_within_zero(l, *uv))
+            {
+                *uv = line.put_on(*uv);
+                moved = true;
             }
-            uvs
-        };
-        next_uvs = onto_lines(next_uvs);
+        }
+        if moved {
+            if let Some(uvs) = refine(on_lines, true)? {
+                next_uvs = uvs;
+            }
+        }
 
         // Not upstream: a step clipped at a boundary the curve does not reach, where the
         // line goes on to a degenerate boundary (a pole), steps to the pole instead
@@ -1350,7 +1359,7 @@ impl SurfaceIntersector<'_> {
             let Some(uvs) = refine([guess_uv0, guess_uv1], false)? else {
                 return Ok(res);
             };
-            next_uvs = onto_lines(uvs);
+            next_uvs = uvs;
 
             // update StepSize for this refined point
             let guess_step = guess_uv0 - prev_tsp.uv_pos(s0);
@@ -1387,6 +1396,17 @@ impl SurfaceIntersector<'_> {
         *self.point_mut(next)? = next_tsp.clone();
         if ignored(r)?.is_none() {
             res.boundary_hit = true; // causes termination of current tracing
+            return Ok(res);
+        }
+
+        // Not upstream (#18488): a point on a line its step was clipped to is a root within
+        // the tolerance (the boundary solve's); one a solve was clamped onto is not good
+        let on_clip_line = clipped_at
+            .iter()
+            .zip(next_uvs)
+            .any(|(at, uv)| at.is_some_and(|line| line.offset(uv) == 0.0));
+        let gap = next_tsp.srf_pos(s0).distance(next_tsp.srf_pos(s1));
+        if on_clip_line && gap > self.this_approx_tol_3d {
             return Ok(res);
         }
 
@@ -1476,7 +1496,25 @@ impl SurfaceIntersector<'_> {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         }
-        if corner.point_type != IntersectionPointType::Crossing {
+        // the same point (the near-tangency search may have moved it), crossing, and its UV
+        // tangent leaving each line it reached into the other side
+        let same = [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(uvs)
+            .all(|(s, uv)| corner.uv_pos(s) == uv);
+        let leaves = [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(reached)
+            .all(|(s, [u, v])| {
+                let d = corner.uv_deriv(s);
+                let into = |side: Option<Side>, x: f64| match side {
+                    Some(Side::Right) => x > 0.0,
+                    Some(Side::Left) => x < 0.0,
+                    None => true,
+                };
+                into(u, d.x) && into(v, d.y)
+            });
+        if !same || !leaves || corner.point_type != IntersectionPointType::Crossing {
             return Ok(None);
         }
         corner.curve_parameter = at.curve_parameter;

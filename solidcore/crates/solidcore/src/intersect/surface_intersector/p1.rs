@@ -631,8 +631,8 @@ pub struct SurfaceIntersector<'s> {
     surfaces: [&'s Surface; 2],
     /// `m_vUVDomain`: the domain of each surface.
     pub uv_domains: [Extent2d; 2],
-    /// Not upstream (#18488): each surface's `C0` knot lines over its natural domain,
-    /// where the trace's marching direction may turn a corner
+    /// Not upstream (#18488): each surface's `C0` knot lines inside its domain, where the
+    /// trace's marching direction may turn a corner
     /// ([`SurfaceIntersector::compute_next_point`]).
     pub(crate) knot_lines: [KnotLines; 2],
     /// `m_bClosedU`.
@@ -903,9 +903,11 @@ impl<'s> SurfaceIntersector<'s> {
             }
         };
 
+        // (inside the domains by more than the parameter zero: a line on a domain's side
+        // is that side)
         let knot_lines = [
-            KnotLines::of(surface1, &surface1.natural_uv_domain_with_nurb(k)?)?,
-            KnotLines::of(surface2, &surface2.natural_uv_domain_with_nurb(k)?)?,
+            KnotLines::of(surface1, &surf1_uv_domain)?,
+            KnotLines::of(surface2, &surf2_uv_domain)?,
         ];
 
         Ok(Self {
