@@ -19,6 +19,7 @@ pub const DOCUMENTED: &[&str] = &[
     "canvas.decal",
     "canvas.edit",
     "canvas.insert",
+    "component.activate.parent",
     "component.break_link",
     "component.capture_position",
     "component.create",
