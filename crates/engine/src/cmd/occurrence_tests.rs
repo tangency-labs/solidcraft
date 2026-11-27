@@ -1774,22 +1774,29 @@ fn reparent_carries_a_joint_on_the_moved_placements_origin_plane() {
         "joint.create",
         json!({"name": "J1", "type": "rigid", "a": {"occurrence": a, "plane": "XY"}, "b": {"occurrence": b, "plane": "XY"}, "offset": 5}),
     );
-    let joint = |s: &mut Session| run(s, "joint.inspect", json!({"joint": "J1"}))["joints"][0].clone();
-    let side_b = |s: &mut Session| joint(s)["b"].clone();
-    let before = side_b(&mut s);
-    assert_eq!(before["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")), "{before}");
+    // A plane built on the datum (an offset of it) names the same path, one level down.
+    let offset = json!({"type": "offset", "base": {"type": "datum", "datum": format!("o:{b}/origin/XZ")}, "distance": "2 mm"});
+    run(
+        &mut s,
+        "joint.create",
+        json!({"name": "J2", "type": "planar", "a": {"occurrence": a, "plane": "XZ"}, "b": {"occurrence": b, "plane": offset}}),
+    );
+    let joint = |s: &mut Session, name: &str| run(s, "joint.inspect", json!({"joint": name}))["joints"][0].clone();
+    let datums = |s: &mut Session| {
+        let (j1, j2) = (joint(s, "J1"), joint(s, "J2"));
+        for j in [&j1, &j2] {
+            assert_eq!(j["b"]["resolves"], json!(true), "{j}");
+            assert!(j["errors"].as_array().is_none_or(Vec::is_empty), "{j}");
+        }
+        (j1["b"]["snap"]["plane"]["datum"].clone(), j2["b"]["snap"]["plane"]["base"]["datum"].clone())
+    };
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": group_component}));
-    let moved = side_b(&mut s);
-    assert_eq!(moved["resolves"], json!(true), "{moved}");
-    assert_eq!(moved["snap"]["plane"]["datum"], json!(format!("o:{group}/{b}/origin/XY")));
-    let errors = joint(&mut s)["errors"].clone();
-    assert!(errors.as_array().is_none_or(Vec::is_empty), "{errors}");
+    assert_eq!(datums(&mut s), (json!(format!("o:{group}/{b}/origin/XY")), json!(format!("o:{group}/{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": "root"}));
-    let back = side_b(&mut s);
-    assert_eq!(back["resolves"], json!(true), "{back}");
-    assert_eq!(back["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")));
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 }
 
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
@@ -3591,4 +3598,54 @@ fn capture_position_session_new_syncs_unsynced_document_moves_and_joints() {
     let joint = synced.doc.assembly.joints.iter().find(|j| j.id == jid).unwrap();
     assert_eq!(joint.captured, Some(vec![20.0]));
     assert_eq!(joint.values, vec![20.0]);
+}
+
+/// A mesh body has one face, the whole body. A look given to that face (a pick on the mesh in
+/// the view selects its face) hid every body look from then on: a mesh in a component painted
+/// red from the top of the design stayed in the face's grey, and its opacity stayed at the
+/// face's 0.41 (#22573). A body look on a mesh now replaces its face look; a solid keeps its own.
+#[test]
+fn a_body_look_on_a_mesh_in_a_component_replaces_the_look_on_its_one_face() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-22573-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Chip.stl");
+    // A tetrahedron with 10 mm legs; its slanted side is x + y + z = 10.
+    let facet = |[a, b, c]: [[i32; 3]; 3]| {
+        let v = |p: [i32; 3]| format!("vertex {} {} {}\n", p[0], p[1], p[2]);
+        format!("facet normal 0 0 0\nouter loop\n{}{}{}endloop\nendfacet\n", v(a), v(b), v(c))
+    };
+    let corners = [
+        [[0, 0, 0], [0, 10, 0], [10, 0, 0]],
+        [[0, 0, 0], [10, 0, 0], [0, 0, 10]],
+        [[0, 0, 0], [0, 0, 10], [0, 10, 0]],
+        [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+    ];
+    std::fs::write(&stl, format!("solid t\n{}endsolid t\n", corners.into_iter().map(facet).collect::<String>())).unwrap();
+    let mut s = Session::default();
+    created(&mut s, "Door");
+    // Insert Mesh puts the mesh in a component of its own, here inside Door.
+    run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let world = s.world_state().unwrap();
+    let mesh = world.bodies.iter().find(|b| b.body.is_mesh()).unwrap().name.clone();
+    assert_eq!(world.body(&mesh).unwrap().body.face_count(), 1);
+    // The grey and opacity the reporter's mesh face kept, then the face of the solid.
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":mesh,"point":[3,3,4]}],"color":"#c4c7cc","opacity":0.41}));
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":"Block","point":[35,5,10]}],"color":"#00ff00"}));
+    let look = |s: &Session, name: &str| {
+        let world = s.world_state().unwrap();
+        let b = world.body(name).unwrap();
+        (s.doc.model_face_look(b, 0).map(|l| (l.color, l.opacity)), s.doc.face_colors(b).len())
+    };
+    assert_eq!(look(&s, &mesh), (Some(([196, 199, 204], 0.41)), 1));
+    for opacity in [1.0, 0.5, 1.0] {
+        run(&mut s, "appearance.assign", json!({"bodies":[mesh],"color":"#ff0000","opacity":opacity}));
+        assert_eq!(look(&s, &mesh), (Some(([255, 0, 0], opacity)), 0), "the mesh shows its body look at opacity {opacity}");
+    }
+    run(&mut s, "appearance.assign", json!({"bodies":["Block"],"color":"#0000ff"}));
+    let world = s.world_state().unwrap();
+    let block = world.body("Block").unwrap();
+    assert_eq!(s.doc.face_colors(block).iter().map(|(_, l)| l.color).collect::<Vec<_>>(), [[0, 255, 0]], "a solid keeps its face look");
+    let _ = std::fs::remove_dir_all(dir);
 }

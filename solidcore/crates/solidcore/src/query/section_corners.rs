@@ -9,10 +9,11 @@
 //! |--------------------------|----------|
 //! | [`measure_corner_turns`] | (none)   |
 //! | [`exit_through_box`]     | (none)   |
+//! | [`exit_through_round`]   | (none)   |
 //!
 //! Deviations: no upstream counterpart.
 
-use crate::error::Result;
+use crate::error::{Result, SolidError};
 use crate::math::{Point2, Point3, Vec3};
 use crate::prism::profile::{Loop2, Seg2};
 
@@ -91,4 +92,114 @@ pub fn exit_through_box(end: Point3, toward: Vec3, rect: &[Point3; 4]) -> Result
         exit = Some(exit.map_or(out, |e| e.min(out)));
     }
     Ok(exit)
+}
+
+/// How far along `toward` from `start` its line leaves the round bar of `radius` about the line
+/// through `a` and `b`, without end: the room a member's section takes about its line, when only
+/// its line and its farthest point from it are known. The farther root `s` of
+/// `|((start + s t) − a)⊥| = radius`, for `t` the unit vector along `toward` and `⊥` the part
+/// square to `b − a`. `None` where the line misses the bar, runs along it (its square part within
+/// `PARALLEL` of 0), or `a` and `b` are one point.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a zero or non-finite `toward`, or a `radius` not finite and
+/// positive.
+pub fn exit_through_round(
+    start: Point3,
+    toward: Vec3,
+    (a, b): (Point3, Point3),
+    radius: f64,
+) -> Result<Option<f64>> {
+    const PARALLEL: f64 = 1e-9;
+    if !(radius.is_finite() && radius > 0.0) {
+        return Err(SolidError::InvalidInput {
+            operation: "exit_through_round",
+            reason: "the radius must be finite and positive",
+        });
+    }
+    let t = toward.unitize()?;
+    let Ok(w) = (b - a).unitize() else {
+        return Ok(None);
+    };
+    let p = start - a;
+    let p_sq = p - w * p.dot(w);
+    let t_sq = t - w * t.dot(w);
+    let aa = t_sq.dot(t_sq);
+    if aa <= PARALLEL {
+        return Ok(None);
+    }
+    let bb = 2.0 * p_sq.dot(t_sq);
+    let cc = p_sq.dot(p_sq) - radius * radius;
+    let disc = bb * bb - 4.0 * aa * cc;
+    if disc < 0.0 {
+        return Ok(None);
+    }
+    Ok(Some((-bb + disc.sqrt()) / (2.0 * aa)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_leaves_a_round_bar_at_its_far_side() {
+        // The bar of radius 10 about the X axis. From the axis straight up: out at 10; from 30 below at 45°
+        // across it: out where it meets z = 10 on the far side, 40·√2 along.
+        let axis = (Point3::new(0.0, 0.0, 0.0), Point3::new(100.0, 0.0, 0.0));
+        let up = exit_through_round(
+            Point3::new(5.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 2.0),
+            axis,
+            10.0,
+        )
+        .unwrap();
+        assert!((up.unwrap() - 10.0).abs() < 1e-12, "{up:?}");
+        let across = exit_through_round(
+            Point3::new(0.0, 0.0, -30.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            axis,
+            10.0,
+        )
+        .unwrap();
+        assert!(
+            (across.unwrap() - 40.0 * 2f64.sqrt()).abs() < 1e-9,
+            "{across:?}"
+        );
+        // Along it, past it, a zero direction and a bad radius.
+        assert_eq!(
+            exit_through_round(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                axis,
+                10.0
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            exit_through_round(
+                Point3::new(0.0, 0.0, 20.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                axis,
+                10.0
+            )
+            .unwrap(),
+            None
+        );
+        assert!(exit_through_round(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            axis,
+            10.0
+        )
+        .is_err());
+        assert!(exit_through_round(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            axis,
+            f64::NAN
+        )
+        .is_err());
+    }
 }

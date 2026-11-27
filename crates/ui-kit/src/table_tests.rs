@@ -342,8 +342,9 @@ fn cell_selection_leaves_buttons_and_editors_in_charge_of_their_clicks() {
 
 #[test]
 fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_scales() {
-    for ppp in [1.0, 1.25, 2.0] {
-        for width in [260.0, 319.0, 320.0, 499.0, 500.3, 748.0, 749.0, 762.0] {
+    // At 0.9375 the 8-point gaps are 7.5 px, so the columns' share can end on a half pixel (#22382).
+    for ppp in [0.9375, 1.0, 1.25, 1.75, 2.0] {
+        for width in [260.0, 319.0, 320.0, 499.0, 500.3, 720.0, 748.0, 749.0, 762.0] {
             let ctx = crate::test_support::context();
             ctx.set_pixels_per_point(ppp);
             for _ in 0..3 {
@@ -376,7 +377,7 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
             }
             let viewport = registry::rect_of("dialog:table:fit:viewport").unwrap();
             let content = registry::count_of("dialog:table:fit:content_width").unwrap() as f32;
-            assert!(content <= viewport.width().ceil(), "{width} at {ppp}: content {content}, viewport {viewport:?}");
+            assert!(content <= viewport.width() + 0.01, "{width} at {ppp}: content {content}, viewport {viewport:?}");
             let row = registry::rect_of("dialog:table:fit:row").unwrap();
             let first = registry::rect_of("dialog:table:fit:row:cell:Name").unwrap();
             let last = registry::rect_of("dialog:table:fit:row:cell:Value").unwrap();

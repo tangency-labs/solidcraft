@@ -132,9 +132,9 @@ go to the new `.sc` file at its origin, with the parameters they use, and the co
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
-The menu offers Extract only for a component that can leave: nothing outside uses its sketches
-or changes its bodies, no bodies were moved into or out of it, and none of its subcomponents is
-joined to the rest of the design.
+A component can leave when nothing outside uses its sketches or changes its bodies, no bodies
+were moved into or out of it, and none of its subcomponents is joined to the rest of the design.
+When it can't, the menu shows Extract greyed out, and hovering it says why.
 
 **Joints** (`joint.create`, J) connect two components by joint origins that snap to faces, edges,
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
@@ -647,7 +647,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 

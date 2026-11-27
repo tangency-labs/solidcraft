@@ -54,7 +54,7 @@ the same for any feature.
 
 | Panel | Features |
 |---|---|
-| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, rectangular/circular/path patterns, mirror |
+| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, shaft spline, rectangular/circular/path patterns, mirror |
 | Modify | press pull, fillet, chamfer, shell, draft, scale, combine, split body, offset face, replace face, move/copy, align, remove |
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
@@ -285,6 +285,25 @@ The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Bot
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
+**Shaft Spline** (MODEL › CREATE, in the Create menu) is one History feature that cuts a spline into a
+picked round shaft or bore, or, with nothing picked, makes a new splined shaft, a hub or both. Pick
+the outside of a shaft to cut the spline into it, a bore to cut the hub's teeth, or both to cut a
+pair that fits. The **Type** is Involute, Straight-sided or Serration. The dialog draws the teeth as
+you change them and says in words when the numbers make no spline. By default the shaft's diameter
+follows the spline's numbers (more teeth of one size make a larger shaft); **Fixed diameter** keeps
+the shaft's own size and works the spline's size out from it. A round face has two ends, so each
+picked part takes a second pick, **Shaft start** or **Bore start**: the face the teeth start from (the
+part's end, a shoulder or a chamfer). **Length** is measured along the picked round face from that
+end. **Round the ends** makes each tooth space end in the curve a
+cutter of the given diameter leaves. **End chamfer** (shaft) and **Entry chamfer** (hub) are cut by
+the spline itself, so they follow the size and the tooth count; each takes the Chamfer tool's types
+(Equal Distance at 45 degrees, Two Distances, Distance and Angle). A **Master spline** (a tooth left
+out, or a wide tooth) lets the hub go on one way only. The numbers that size the teeth stay at the
+top of the dialog, and the rest is in groups that open and close: **Tooth form**, **Fit** (the
+clearances), **Tip corners**, **Chamfers**, **Groove end**, **Master spline**, **Hub** and **As
+made** (what the clearances come to). Scripts use `shaft_spline.insert`. How the numbers work is in the
+[shaft spline details](https://github.com/tangency-labs/solidcraft/blob/main/docs/shaft-splines.md).
+
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.
@@ -332,6 +351,36 @@ and 0.5 places the plane halfway along its length. The plane is perpendicular to
 local segment. Preview does not change the design; OK creates one editable timeline feature.
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
+
+## Cell Grid
+
+`solid.cell_grid` fills the closed profiles of a sketch with cells and cuts them out of the bodies
+(vents, grilles, weight-saving pockets), or with `mode: raised` stands them on the sketch plane as
+material. A profile's outer loop is the field; a loop inside it is a keep-out.
+
+The cells are hexagons, squares, triangles, circles or regular polygons (`shape`, with `size`), or
+your own: `shape: sketch` repeats the one closed profile of another sketch of the design
+(`cell_sketch`, lines and arcs, no holes), drawn and constrained like any sketch. A sketched cell
+has no lattice of its own, so you give the layout:
+
+- `pitch_x`, `pitch_y`: the distance between cell origins along a row and between rows.
+- `stagger`: how far each row shifts along the row, as a fraction of `pitch_x`, 0 to 1 (default 0).
+  0.5 gives hexagonal and brick layouts; other values give a skewed lattice.
+- `cell_angle`: turns the cell about its own origin. `angle` turns the whole grid, as for every shape.
+- `flip`: mirrors every other cell (row plus column odd), for cells that interlock.
+- `cell_origin`: the cell's origin as `[x, y]` in the cell sketch's own coordinates (default: the
+  profile's centroid). `anchor` is where the origin of the first cell sits.
+
+`web` is the least distance between neighbouring cells, checked exactly on the lines and arcs: a
+pitch that makes a cell overlap a neighbour or come nearer than `web` is refused. `size`, `sides`
+and `dot_grid` are not used by a sketched cell. `clip` defaults to `whole` for a sketched cell
+(`snap` for the built-in shapes), `free` trims the cells at the edge, and `snap` is refused.
+A cell sketch with no closed profile, or with several, is refused with the sketch's name.
+
+In the Cell Grid dialog, choose **Shape: Sketch**, pick one profile of the cell sketch, and fill in
+**Pitch X**, **Pitch Y**, **Stagger**, **Cell angle** and **Flip alternate cells**. Cell size and
+Snap are not offered, and the cell's origin is the profile's centroid (set `cell_origin` through the
+command to move it).
 
 ## Section Analysis
 

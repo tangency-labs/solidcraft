@@ -584,9 +584,10 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_viewport::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
-    // The view's own background colour (#7688).
-    if let Some([r, g, b]) = app.preferences.viewport_background {
-        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r, g, b));
+    // The view's own background, one colour (#7688) or a gradient (#9230).
+    if let Some(solidcraft_theme::ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = app.preferences.viewport_background_colours() {
+        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r2, g2, b2));
+        palette.background_middle = middle.map(|[r, g, b]| solidcraft_viewport::Rgb(r, g, b));
     }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
@@ -1382,10 +1383,14 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
     app.cancel_view_animation();
     match v {
         "fit" => app.fit_view(),
-        "home" => {
-            app.cam.set_view(StandardView::Iso);
-            app.fit_view();
-        }
+        // The design's own Home view as it was set (#19972), else the iso view fitted.
+        "home" => match solidcraft_engine::view::home_view(&app.session) {
+            Some(home) => app.cam = home,
+            None => {
+                app.cam.set_view(StandardView::Iso);
+                app.fit_view();
+            }
+        },
         v => {
             if let Some(sv) = StandardView::parse(v) {
                 app.cam.set_view(sv);
