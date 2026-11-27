@@ -33,6 +33,13 @@ decoding state machines from image 0.25.10 (https://github.com/image-rs/image),
 MIT OR Apache-2.0. ATTRIBUTION.md describes the bounded/cancellable changes; the
 original licence texts are included in THIRD-PARTY-LICENSES.txt.
 
+Open CASCADE Technology (OCCT, https://dev.opencascade.org) is not part of SolidCraft and is in no
+build we ship. An opt-in developer build (`solidcraft-kernel`'s `backend-occt` feature) downloads
+OCCT's source at build time and links it dynamically, through its own C ABI module in
+vendor/occt-capi, whose files are MIT OR Apache-2.0 (adapted from text-to-cad-rs; ATTRIBUTION.md).
+OCCT is licensed under LGPL-2.1-only WITH OCCT-exception-1.0; both texts are in
+vendor/occt-capi/licenses/. Such a build makes use of Open CASCADE Technology software.
+
 Most bundled assets are drawn in code or contributed originally; third-party fonts (Liberation Sans
 for sketch text, BIZ UDPGothic for web Japanese display) are licensed under SIL OFL 1.1. The
 per-file list is in ATTRIBUTION.md.
