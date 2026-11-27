@@ -117,7 +117,7 @@ fn straight(b: &Brep, e: EdgeId) -> Result<bool> {
 }
 
 fn pick(b: &Brep, edge: EdgeId, size: f64) -> Result<Option<Pick>> {
-    if !(size.is_finite() && size > 0.0) || !straight(b, edge)? {
+    if !(size.is_finite() && size > 0.0 && straight(b, edge)?) {
         return Ok(None);
     }
     let (Some(start), Some(end)) = edge::start_end_vertices(b, edge)? else {
