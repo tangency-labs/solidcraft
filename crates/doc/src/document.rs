@@ -5102,6 +5102,10 @@ pub struct Document {
     /// What a body looks like to a simulator, by body name; a body not listed is `Auto`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub collision_shapes: std::collections::BTreeMap<String, CollisionShape>,
+    /// Bodies drawn without their edge lines (by body name), whatever the visual style: an
+    /// overlay such as a thin label on a plate. Every other body draws them as the style says.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub edgeless_bodies: std::collections::BTreeSet<String>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -5482,6 +5486,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             collision_shapes: Default::default(),
+            edgeless_bodies: Default::default(),
             print_faces: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
@@ -5522,6 +5527,9 @@ impl Document {
         }
         if let Some(shape) = self.collision_shapes.remove(old) {
             self.collision_shapes.insert(new.to_string(), shape);
+        }
+        if self.edgeless_bodies.remove(old) {
+            self.edgeless_bodies.insert(new.to_string());
         }
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();

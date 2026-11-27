@@ -2207,6 +2207,9 @@ struct BodyDraw {
     edges_shared: bool,
     /// Drawn as its edges alone, whatever the style: what an Isolate hid, shown as wireframe.
     wire: bool,
+    /// Drawn without its edge lines in every style (`body.edge_lines`): an overlay body such as
+    /// a thin label keeps no outline while the others keep theirs.
+    no_edges: bool,
 }
 
 impl BodyDraw {
@@ -2231,6 +2234,7 @@ impl BodyDraw {
             self.wire,
         )
             .hash(&mut h);
+        self.no_edges.hash(&mut h);
         // The block holds the slot its box is tested under: another slot is another block.
         self.motion.hash(&mut h);
         h.finish()
@@ -2238,7 +2242,7 @@ impl BodyDraw {
 
     fn build(&self, out: &mut crate::gpu::BlockBuilder, shaded: bool, edges: bool, hidden_edges: bool, markers: bool) {
         // A body drawn as its edges: no faces, and every edge, as the wireframe style draws.
-        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges) };
+        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges && !self.no_edges) };
         let m = &self.mesh;
         let color = |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color);
         let class = |ti: usize| {
@@ -3385,7 +3389,11 @@ fn body_scene(
         // (alike faces share a colour): only while every face has a slot of its own.
         let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
         let edge_colours = (slots.edge, slots.hidden_edge);
-        let instanced = if on_gpu || wire {
+        // A body set to draw no edge lines (`body.edge_lines`), unless an Isolate shows it as them.
+        // It is drawn from its own triangles: an instance draws its mesh's shared edges, which
+        // every copy of that mesh shares.
+        let no_edges = !wire && s.doc.edgeless_bodies.contains(&b.name);
+        let instanced = if on_gpu || wire || no_edges {
             None
         } else if face_looks.is_empty() {
             instances.place(b, slots.instance, edge_colours, look, oit, slots.motion)
@@ -3403,7 +3411,7 @@ fn body_scene(
         // a copy shares with the others and which name no motion (with none, the arena full, its
         // faces are drawn in its own colour slot, which does).
         arena.drawn_in_shared(&name, instanced.is_none() && slots.faces != u32::MAX);
-        let edge_tol = if edges || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
+        let edge_tol = if (edges && !no_edges) || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         if edges_shared && let Some((mesh, place)) = &instanced {
             edge_placements.insert(b.name.clone(), (mesh.clone(), *place));
         }
@@ -3427,6 +3435,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared,
                 wire,
+                no_edges,
             },
             None => BodyDraw {
                 name,
@@ -3447,6 +3456,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared: false,
                 wire,
+                no_edges,
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -14384,6 +14394,7 @@ mod tests {
             simplified: simplified.clone(),
             edges_shared: false,
             wire: false,
+            no_edges: false,
         };
         let lines = |d: &BodyDraw| {
             let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));
