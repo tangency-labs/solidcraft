@@ -855,13 +855,8 @@ fn a_thin_lofted_neck_on_a_cylinder_stays_solid() {
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
-/// radius, 70, and collapses: the shell is refused for it, naming that radius. The retry
-/// with the boss taken off caps its footprint, a circle split where it touches the rim and at
-/// the boss's seam. The footprint's two arcs run between the cap and the top, on one plane,
-/// and at both vertices their offsets take the vertex's image as an end. Their extended UV
-/// curves, each wound round the circle many times, coincide: their thousands of crossings
-/// within the tolerance had some five thousand stretches certified for moving to a curve end
-/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+/// radius, 70, and collapses: the shell is refused for it, naming that radius. The boss's
+/// foot touches the top's rim (its outer loop), so it is no feature: one shell, no retry.
 #[test]
 #[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
 fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
@@ -885,10 +880,9 @@ fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint()
         .unwrap();
     let o = order(&b);
     let before = volume(&b);
-    let (r, certified) = session::counted(
-        solidcore::kernel::WorkCounters::contact_stretch_certifications,
-        || shell(&b, &o, &[], -72.0),
-    );
+    let (r, shells) = session::counted(solidcore::kernel::WorkCounters::shells, || {
+        shell(&b, &o, &[], -72.0)
+    });
     match r {
         Err(Error::OffsetRefused {
             why: crate::OffsetRefusal::Collapses { distance, radius },
@@ -900,9 +894,7 @@ fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint()
         other => panic!("{other:?}"),
     }
     assert!(rel(volume(&b), before) < 1e-12);
-    // the shells' own intersections certify under a hundred stretches; the footprint's wound
-    // extensions certified thousands
-    assert!(certified < 1_000, "{certified} stretches certified");
+    assert_eq!(shells, 1);
 }
 
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
