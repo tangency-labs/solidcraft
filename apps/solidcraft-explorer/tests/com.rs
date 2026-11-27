@@ -198,3 +198,30 @@ fn the_dll_can_unload_only_when_nothing_is_alive() {
     drop(factory);
     assert_eq!(can_unload(), S_OK);
 }
+
+#[test]
+fn every_out_parameter_is_cleared_when_another_argument_is_null() {
+    let _serial = serial();
+    let get: GetClassObject = unsafe { std::mem::transmute(export(c"DllGetClassObject")) };
+    let clsid = GUID::from_u128(solidcraft_explorer::CLSID_U128);
+    let mut out = std::ptr::dangling_mut::<c_void>();
+    assert_eq!(unsafe { get(&clsid, std::ptr::null(), &mut out) }, E_POINTER, "DllGetClassObject without an interface id");
+    assert!(out.is_null(), "DllGetClassObject clears its out-parameter");
+    let mut out = std::ptr::dangling_mut::<c_void>();
+    assert_eq!(unsafe { get(std::ptr::null(), &IClassFactory::IID, &mut out) }, E_POINTER, "DllGetClassObject without a class id");
+    assert!(out.is_null(), "DllGetClassObject clears its out-parameter");
+    let factory = factory();
+    let mut out = std::ptr::dangling_mut::<c_void>();
+    let create = Interface::vtable(&factory).CreateInstance;
+    assert_eq!(unsafe { create(Interface::as_raw(&factory), std::ptr::null_mut(), std::ptr::null(), &mut out) }, E_POINTER);
+    assert!(out.is_null(), "CreateInstance clears its out-parameter");
+    let provider = handler(&factory, &support::design(V2, 512, 384));
+    let mut hbmp = HBITMAP(std::ptr::dangling_mut::<c_void>());
+    let result = unsafe { provider.GetThumbnail(256, &mut hbmp, std::ptr::null_mut()) };
+    assert_eq!(result.map_err(|e| e.code()), Err(E_POINTER));
+    assert!(hbmp.0.is_null(), "GetThumbnail clears the bitmap when the alpha type has nowhere to go");
+    let mut alpha = WTS_ALPHATYPE(7);
+    let result = unsafe { provider.GetThumbnail(256, std::ptr::null_mut(), &mut alpha) };
+    assert_eq!(result.map_err(|e| e.code()), Err(E_POINTER));
+    assert_eq!(alpha, WTS_ALPHATYPE(0), "GetThumbnail clears the alpha type when the bitmap has nowhere to go");
+}
