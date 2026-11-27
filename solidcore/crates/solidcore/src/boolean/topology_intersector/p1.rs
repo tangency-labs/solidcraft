@@ -588,6 +588,23 @@ pub trait IntersectorBrep<O>:
     ///
     /// Those of the edit; [`SolidError::InvalidInput`] for a vertex of another B-rep.
     fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: O, vertex: O) -> Result<()>;
+    /// Batch deletion of `faces`, together with any edges of those faces that become wire
+    /// edges (except those in `keep_wires`) and any vertices that become shell vertices,
+    /// reconciling affected shells once at the end. Returns `Ok(Some((edges, vertices)))`
+    /// with the deleted wire edges and shell vertices when handled in batch, or `Ok(None)`
+    /// to use the per-entity `brep_delete_*` path.
+    ///
+    /// # Errors
+    ///
+    /// Those of the batch edit.
+    fn brep_delete_faces_batch(
+        &mut self,
+        _k: &mut Kernel,
+        _faces: &[O],
+        _keep_wires: Option<&[O]>,
+    ) -> Result<Option<(Vec<O>, Vec<O>)>> {
+        Ok(None)
+    }
     /// `SmBrep::GlueEdgesGeneral(pSurvivingEdge, eRelativeOrientation, dEdgeGap,
     /// bDoRegionNesting, pEdgeToDelete, pInsideFaceuses)` on B-rep `brep`
     /// (`topology::brep::p7::glue_edges_general`; `pInsideFaceuses` defaults to `NULL`).

@@ -14995,25 +14995,27 @@ fn production_sole_content_tracks_real_tree_folds_and_stops_at_column_capacity()
 }
 
 #[test]
-fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes() {
+fn production_bottom_history_is_a_strip_that_does_not_collapse_and_skips_the_gap_below_the_2d_timeline() {
     let mut h = production_content_harness(false, false);
     h.frames(6);
+    let strip = |h: &crate::scenario::Harness| {
+        let frame = h.app.universal_panel_frame().unwrap();
+        frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap().outer.size.height
+    };
+    let shots = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.render_shots").unwrap()).unwrap();
+    let one_row = shots.fixed_bottom_height.unwrap();
+    assert_eq!(strip(&h), one_row);
     let frame = h.app.universal_panel_frame().unwrap();
-    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
-    let spec = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.history").unwrap()).unwrap();
-    assert_eq!(history.outer.size.height, spec.fixed_bottom_height.unwrap());
-    assert!(history.collapse.is_none());
-    let before = h.app.panel_runtime().unwrap().layout().inspect();
+    assert!(frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap().collapse.is_none());
     assert!(h.app.run_panel_command("panel.collapse", &serde_json::json!({"target":{"type":"instance","id":"history"},"collapsed":true})).is_err());
-    assert!(
-        h.app
-            .run_panel_command(
-                "panel.resize",
-                &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":100},"thickness_only":true})
-            )
-            .is_err()
+    // A height just above the strip is in the gap below the 2D Timeline: the row stays the strip.
+    let _ = h.app.run_panel_command(
+        "panel.resize",
+        &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":one_row + 10.0},"thickness_only":true}),
     );
-    assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+    h.frames(3);
+    assert_eq!(strip(&h), one_row);
+    assert!(!crate::panel_runtime::timeline_tall(&h.app));
 }
 
 #[test]

@@ -749,34 +749,37 @@ impl<H: PluginHost> source::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
-        if import.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
-            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
-        }
-        // The one file in that folder whose name matches ignoring case: a part an assembly
-        // spelled differently from the disk (made on a case-insensitive system).
-        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
-            return Ok(None);
+        // The listing decides the spelling, because a disk that ignores case opens a file under any
+        // spelling: the entry spelled as typed, else the one file whose name matches ignoring case
+        // (a part an assembly spelled differently from the disk). The path as typed is the answer
+        // only when it opens a file and the listing cannot tell.
+        let typed = import.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
+        let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+            return Ok(typed);
         };
+        let wanted = typed_name.to_lowercase();
         let listing = if parent.as_os_str().is_empty() { import.dir.entries() } else { import.dir.read_dir(parent) };
-        let Ok(listing) = listing else { return Ok(None) };
+        let Ok(listing) = listing else { return Ok(typed) };
         let mut found = None;
+        let mut matches = 0;
         let mut scanned = 0;
         for entry in listing.flatten() {
             scanned += 1;
             if scanned > MAX_IMPORT_FILES {
                 // A partial scan cannot show the match is the only one.
-                return Ok(None);
+                return Ok(typed);
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if found.is_some() {
-                return Ok(None);
+            if name == typed_name {
+                return Ok(Some(target.to_string_lossy().replace('\\', "/")));
             }
+            matches += 1;
             found = Some(parent.join(name).to_string_lossy().replace('\\', "/"));
         }
-        Ok(found)
+        Ok(if matches == 1 { found } else { typed })
     }
 }
 impl<H: PluginHost> design::Host for State<H> {
