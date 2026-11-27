@@ -322,6 +322,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod tab_groups;
 mod tab_layouts;
 mod tab_views;
 mod view_dxf;
@@ -721,6 +722,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(tab_groups::COMMANDS.iter());
     v.extend(documents::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());

@@ -406,6 +406,8 @@ pub mod starting;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
+pub(crate) mod tab_group_ui;
+pub mod tab_groups;
 pub(crate) mod test_boat;
 pub mod theme;
 pub use solidcraft_ui_kit::theme_files;
@@ -2058,6 +2060,7 @@ impl SolveApp {
             Some(window) if window.starts_with("tab.window.") || window == "window.options.use_as_default" => {
                 r.and_then(|v| view_windows::command(self, window, v))
             }
+            Some(group) if group.starts_with("tab.group.") => r.and_then(|v| tab_group_ui::command(self, group, v)),
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.
