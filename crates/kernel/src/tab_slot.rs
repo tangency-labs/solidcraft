@@ -175,6 +175,7 @@ mod tests {
             width,
             end_distance,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 0.0,
             overshoot: 0.5,

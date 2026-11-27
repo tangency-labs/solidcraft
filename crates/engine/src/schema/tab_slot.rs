@@ -23,8 +23,10 @@ pub enum PlateParam {
 
 /// Tabs on the tab plates' edges where they meet the slot plates, and matching slots cut through
 /// the slot plates, for laser-cut or routed boxes and frames. Every tab plate is tried against
-/// every slot plate; a pair that cannot be cut is skipped and named in the reply. Sheet metal and
-/// mesh bodies are refused.
+/// every slot plate; a pair that cannot be cut is skipped and named in the reply. A sheet metal or
+/// mesh body is refused as a pick. A plate that is sheet metal when the feature is built (an earlier
+/// feature made it so) has its pairs skipped as waiting for the sheet metal route, not built yet
+/// (`sheet_route_not_built`); one that is a mesh body then has its pairs skipped as `not_solid`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TabSlotParams {
@@ -44,9 +46,13 @@ pub struct TabSlotParams {
     /// From a stretch's end to the nearest tab, 0 or more. Default: the tab width.
     #[serde(default)]
     pub end_distance: Option<LengthExpr>,
-    /// The room on every side of a tab in its slot, 0 or more. Default: 0.1 mm.
+    /// The room at each end of a tab in its slot, along the edge, 0 or more. Default: 0.1 mm.
     #[serde(default)]
     pub clearance: Option<LengthExpr>,
+    /// The room each side of a tab's faces in its slot, across the tab plate's thickness, 0 or
+    /// more. Default: the clearance.
+    #[serde(default)]
+    pub thickness_clearance: Option<LengthExpr>,
     /// How far a tab stands out past the slot plate's far face. Default: 0.
     #[serde(default)]
     pub protrusion: Option<LengthExpr>,

@@ -44,7 +44,20 @@ pub(crate) fn joint_seed(seed: u64, (tab, slot): (u32, u32)) -> u64 {
 /// `joint_keys` are the tab and slot plates' keys: the joint's seed is hashed from the feature's
 /// seed and both, so adding or removing a joint does not reshuffle the others' widths.
 pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f64, t_slot: f64, joint_keys: (u32, u32)) -> Result<TabSlotSpec> {
-    let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, tip_chamfer, .. } = k else {
+    let FeatureKind::TabSlot {
+        count,
+        spacing,
+        tab_width,
+        end_distance,
+        clearance,
+        thickness_clearance,
+        protrusion,
+        seed,
+        width_jitter,
+        tip_chamfer,
+        ..
+    } = k
+    else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };
     let length = |e: &str, what: &str, least: f64| -> Result<f64> {
@@ -112,11 +125,17 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
         Some(e) => length(e, "tip chamfer", 0.0)?,
         None => 0.0,
     };
+    let clearance = length(clearance, "clearance", 0.0)?;
+    let thickness_clearance = match thickness_clearance {
+        Some(e) => length(e, "thickness clearance", 0.0)?,
+        None => clearance,
+    };
     Ok(TabSlotSpec {
         layout,
         width,
         end_distance,
-        clearance: length(clearance, "clearance", 0.0)?,
+        clearance,
+        thickness_clearance,
         min_land: MIN_LAND,
         protrusion,
         overshoot: CUT_OVERSHOOT_PER_THICKNESS * t_slot,
@@ -559,6 +578,17 @@ mod tests {
         assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "1.5"})).is_err());
         assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "-1"})).is_err());
         assert!(spec(serde_json::json!({"clearance": "0.1", "width_jitter": "-1"})).is_err());
+    }
+
+    #[test]
+    fn tab_slot_spec_of_takes_a_thickness_clearance_that_follows_the_clearance() {
+        let s = spec(serde_json::json!({"clearance": "0.2"})).unwrap();
+        assert_eq!((s.clearance, s.thickness_clearance), (0.2, 0.2));
+        let s = spec(serde_json::json!({"clearance": "0.1", "thickness_clearance": "0.3"})).unwrap();
+        assert_eq!((s.clearance, s.thickness_clearance), (0.1, 0.3));
+        let s = spec(serde_json::json!({"clearance": "0.1", "thickness_clearance": "0"})).unwrap();
+        assert_eq!(s.thickness_clearance, 0.0);
+        assert!(spec(serde_json::json!({"clearance": "0.1", "thickness_clearance": "-0.1"})).is_err());
     }
 
     #[test]

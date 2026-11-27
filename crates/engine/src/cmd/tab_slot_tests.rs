@@ -86,6 +86,19 @@ fn two_identical_joints_in_one_feature_get_different_widths() {
 }
 
 #[test]
+fn a_thickness_clearance_widens_the_slots_across_only() {
+    let mut s = fixture_f();
+    tab_slot(&mut s, json!({"thickness_clearance": 0.4})).unwrap();
+    // Three 20 x 6 tabs: the tabs are unchanged, each slot is 20.2 x 6.8 through the 6 thick
+    // Bottom (clearance 0.1 along, 0.4 across): 96000 - 3 x 20.2 x 6.8 x 6.
+    assert!((volume(&s, "Wall") - 45_360.0).abs() < 1e-3);
+    assert!((volume(&s, "Bottom") - 93_527.52).abs() < 1e-3, "{}", volume(&s, "Bottom"));
+    let mut s = fixture_f();
+    let e = tab_slot(&mut s, json!({"thickness_clearance": -0.1})).unwrap_err().to_string();
+    assert!(e.contains("thickness_clearance"), "{e}");
+}
+
+#[test]
 fn a_tip_chamfer_trims_the_tabs_and_not_the_slots() {
     let mut s = fixture_f();
     tab_slot(&mut s, json!({"tip_chamfer": 2})).unwrap();

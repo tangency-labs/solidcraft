@@ -21,6 +21,8 @@ pub struct TabSlot {
     pub tab_width: String,
     pub end_distance: String,
     pub clearance: String,
+    /// Thickness Clearance: the room across the tab plate's thickness; empty follows the clearance.
+    pub thickness_clearance: String,
     pub protrusion: String,
     /// Width Jitter: tabs vary by up to this much either way; empty is off.
     pub width_jitter: String,
@@ -58,6 +60,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
     enter |= tipped(ui, "ui.tab_slot.tab_width_tip", |ui| expr_row(ui, "ui.tab_slot.tab_width", &mut t.tab_width));
     enter |= tipped(ui, "ui.tab_slot.end_distance_tip", |ui| expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance));
     enter |= tipped(ui, "ui.tab_slot.clearance_tip", |ui| expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance));
+    enter |= tipped(ui, "ui.tab_slot.thickness_clearance_tip", |ui| expr_row(ui, "ui.tab_slot.thickness_clearance", &mut t.thickness_clearance));
     enter |= tipped(ui, "ui.tab_slot.protrusion_tip", |ui| expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion));
     enter |= tipped(ui, "ui.tab_slot.tip_chamfer_tip", |ui| expr_row(ui, "ui.tab_slot.tip_chamfer", &mut t.tip_chamfer));
     enter |= tipped(ui, "ui.tab_slot.width_jitter_tip", |ui| expr_row(ui, "ui.tab_slot.width_jitter", &mut t.width_jitter));
@@ -143,6 +146,7 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
         ("tab_width", t.tab_width.as_str()),
         ("end_distance", t.end_distance.as_str()),
         ("clearance", t.clearance.as_str()),
+        ("thickness_clearance", t.thickness_clearance.as_str()),
         ("protrusion", t.protrusion.as_str()),
         ("tip_chamfer", t.tip_chamfer.as_str()),
         ("width_jitter", t.width_jitter.as_str()),
@@ -170,6 +174,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         tab_width,
         end_distance,
         clearance,
+        thickness_clearance,
         protrusion,
         seed,
         width_jitter,
@@ -188,6 +193,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         tab_width: text(tab_width),
         end_distance: text(end_distance),
         clearance: clearance.as_str().to_string(),
+        thickness_clearance: text(thickness_clearance),
         protrusion: text(protrusion),
         width_jitter: text(width_jitter),
         tip_chamfer: text(tip_chamfer),
@@ -233,6 +239,10 @@ mod tests {
         t.tip_chamfer = "1 mm".into();
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!(args["tip_chamfer"].as_str(), Some("1 mm"), "{args}");
+        assert!(args.get("thickness_clearance").is_none(), "{args}");
+        t.thickness_clearance = "0.3 mm".into();
+        let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
+        assert_eq!(args["thickness_clearance"].as_str(), Some("0.3 mm"), "{args}");
         t.layout = 1;
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!((args.get("count"), args["spacing"].as_str()), (None, Some("30 mm")), "{args}");
@@ -271,7 +281,7 @@ mod edit_tests {
             s.execute("solid.box", &p).unwrap();
         }
         let p = json!({"tab_plates": [{"body": "Wall", "near": [80, 33, 6]}], "slot_plates": ["Bottom"], "spacing": "40 mm", "tab_width": "12 mm",
-            "width_jitter": "2 mm", "seed": "7", "tip_chamfer": "1 mm"});
+            "width_jitter": "2 mm", "seed": "7", "tip_chamfer": "1 mm", "thickness_clearance": "0.3 mm"});
         s.execute("solid.tab_slot", &p).unwrap();
         let app = SolveApp::new(s, Services::default());
         let kind = app.session.doc.features.last().unwrap().kind.clone();
@@ -279,6 +289,7 @@ mod edit_tests {
         assert_eq!((t.layout, t.spacing.as_str(), t.tab_width.as_str(), t.count.as_str()), (1, "40 mm", "12 mm", ""));
         assert_eq!((t.width_jitter.as_str(), t.seed.as_str()), ("2 mm", "7"));
         assert_eq!(t.tip_chamfer, "1 mm");
+        assert_eq!(t.thickness_clearance, "0.3 mm");
         assert_eq!(inputs[0].items, vec![Sel::Body { name: "Wall".into() }]);
         let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
         assert_eq!(args["tab_plates"], json!([{"key": 1, "body": "Wall", "near": [80.0, 33.0, 6.0]}]), "{args}");

@@ -2119,6 +2119,11 @@ pub enum FeatureKind {
         /// The room on every side of a tab in its slot (the command writes 0.1 mm).
         #[walk(length = "Clearance")]
         clearance: Expr,
+        /// The room each side of a tab's faces in its slot, across the tab plate's thickness
+        /// (default: the clearance, so a feature without one builds as before).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thickness Clearance")]
+        thickness_clearance: Option<Expr>,
         /// How far a tab stands out past the slot plate's far face (default 0).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Protrusion")]
