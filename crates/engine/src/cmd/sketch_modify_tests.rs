@@ -7005,6 +7005,36 @@ fn a_fillet_reaches_the_mirrored_corner_of_a_mirrored_copy() {
     assert!(close(area[0], 300.0 - cut) && close(area[1], 300.0 - cut), "{area:?}");
 }
 
+/// A second mirror of the original and its copy produces four symmetric corners.
+#[test]
+fn corner_tools_follow_two_successive_mirrors() {
+    for (command, size, cut) in
+        [("sketch.fillet", "radius", 9.0 * (1.0 - std::f64::consts::PI / 4.0)), ("sketch.chamfer.equal_distance", "distance", 4.5)]
+    {
+        let mut s = new_sketch();
+        run(
+            &mut s,
+            "sketch.line",
+            json!({"closed": true, "points": [[-20, 5], [-20, 20], [-5, 20], [-5, 5]], "ids": ["left", "top", "right", "bottom"]}),
+        );
+        let mut curves = vec!["left".to_string(), "top".into(), "right".into(), "bottom".into()];
+        let first = run(&mut s, "sketch.mirror", json!({"entities": curves, "line": "y"}));
+        curves.extend(ids(&first["curves"]));
+        assert_eq!(curves.len(), 8);
+        let second = run(&mut s, "sketch.mirror", json!({"entities": curves, "line": "x"}));
+        assert_eq!(ids(&second["curves"]).len(), 8);
+        let mut params = json!({"point": "left.start"});
+        params[size] = json!(3);
+        let result = run(&mut s, command, params);
+        assert_eq!(result["sketch"]["solved"], true, "{result}");
+        assert_eq!(ids(&result["virtual_corners"]).len(), 4, "{result}");
+        assert_eq!(ids(&result["curves"]).len(), 4, "{result}");
+        let areas = profiles(&s);
+        assert_eq!(areas.len(), 4, "{areas:?}");
+        assert!(areas.iter().all(|&a| close(a, 225.0 - cut)), "{areas:?}");
+    }
+}
+
 /// #18075: a chamfer reaches the corner symmetric to the one it cuts, and keeps the distances it
 /// measures along the mirrored sides.
 #[test]
