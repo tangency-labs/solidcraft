@@ -6600,7 +6600,7 @@
   "update.checking": "მოწმდება…",
   "update.copy": "კოპირება",
   "update.dmg_opened": "დისკის ასლი გახსნილი და შემოწმებულია: დახურეთ SolidCraft, გადაათრიეთ ახალი SolidCraft Applications-ში ძველი ასლის ჩანაცვლებით, შემდეგ SolidCraft ხელახლა გახსენით.",
-  "update.download": "ჩამოტვირთვა",
+  "update.download": "ბრაუზერში ჩამოტვირთვა",
   "update.download_open": "ჩამოტვირთვა და გახსნა",
   "update.downloading": "ჩამოტვირთვა და შემოწმება… {done} / {total} MB",
   "update.failed": "შემოწმება ვერ მოხერხდა: {error}",

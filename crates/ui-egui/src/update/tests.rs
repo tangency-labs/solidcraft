@@ -537,7 +537,7 @@ fn help_check_shows_progress_and_up_to_date_then_closes() {
     h.frames(2);
     assert_eq!(h.app.updater.status, Status::UpToDate);
     assert!(h.widget("SolidCraft is up to date.").is_some());
-    assert!(h.widget("Download").is_none() && h.widget("Update now").is_none());
+    assert!(h.widget("Download in web browser").is_none() && h.widget("Update now").is_none());
     let [x, y] = h.widget("Close").unwrap();
     h.call("ui.click", json!({"x": x, "y": y}));
     assert!(!h.app.updater.open);
@@ -1167,7 +1167,7 @@ fn a_managed_install_points_to_its_manager_instead_of_updating_itself() {
     let (mut h, _dir) = open_update_window(Some("ArtCraft Launcher"));
     assert_eq!(install_method(&mut h.app), None, "no AppImage self-replace");
     assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_some());
-    for gone in ["Update now", "Download", "Open release page"] {
+    for gone in ["Update now", "Download in web browser", "Open release page"] {
         assert!(h.widget(gone).is_none(), "{gone} is not offered");
     }
     assert!(h.widget("Skip this version").is_some() && h.widget("Remind me later").is_some());
@@ -1181,7 +1181,9 @@ fn an_unmanaged_install_updates_itself_as_before() {
     let (mut h, _dir) = open_update_window(None);
     assert_eq!(install_method(&mut h.app), Some(install::Method::AppImage("/home/me/SolidCraft.AppImage".into())));
     assert!(h.widget("Update now").is_some());
-    assert!(h.widget("Download").is_some());
+    // Next to the one-click update, the other button only opens the file's link in the web browser,
+    // and its label says so (#22585).
+    assert!(h.widget("Download in web browser").is_some());
     assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_none());
 }
 
