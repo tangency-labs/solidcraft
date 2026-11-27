@@ -5017,7 +5017,7 @@ impl OffsetGeometryCreation {
                         other_base_edgeuse,
                         &tan_eus,
                     )?
-                    || Self::smooth_vertex(k, brep, executive, base_vertex, tan_tol_deg)?);
+                    || self.smooth_vertex(k, brep, executive, base_vertex, tan_tol_deg)?);
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -5901,17 +5901,20 @@ impl OffsetGeometryCreation {
     }
 
     /// Not upstream: whether `vertex` is smooth and every face at it moves by the one
-    /// distance: it has edges, none lamina, every use of each is a tangent sector within
-    /// `tol_deg`, the operation is no local operation (whose faces move by their own
-    /// distances, or not at all) and no face at it is one the shell keeps unmoved. Every
-    /// face at a smooth vertex has the one tangent plane there, so moved by one distance
-    /// `d` the offsets of all its faces pass through the vertex's one image `V + d n(V)`
-    /// ([`Self::offset_vertex_image`]), the end of each offset edge at it.
+    /// distance to the one point: it has edges, none lamina, every use of each is a tangent
+    /// sector within `tol_deg`, the operation is no local operation (whose faces move by
+    /// their own distances, or not at all), no face at it is one the shell keeps unmoved,
+    /// and every face's own image of it, `V + d n(V)` with that face's normal
+    /// ([`Self::offset_vertex_image`]), lies within the body's tolerance at the vertex of
+    /// the first. Faces tangent only within `tol_deg` have images up to about `d` times
+    /// the angle apart, no one point for the offset edges to end at; only where the images
+    /// meet is that image the end of each offset edge at the vertex.
     ///
     /// # Errors
     ///
-    /// Those of the topology queries and the tangent sector test.
+    /// Those of the topology queries, the tangent sector test and the images.
     fn smooth_vertex<O: ClassObject + SolutionObject>(
+        &self,
         k: &Kernel,
         brep: &mut impl OffsetBrep<O>,
         executive: &impl OffsetExecutive<O>,
@@ -5926,6 +5929,7 @@ impl OffsetGeometryCreation {
             return Ok(false);
         }
         let shell_faces = executive.shell_faces();
+        let mut uses = Vec::new();
         for edge in edges {
             if brep.edge_is_lamina(edge)? {
                 return Ok(false);
@@ -5937,6 +5941,21 @@ impl OffsetGeometryCreation {
                 if unmoved || !brep.edgeuse_is_tangent_sector(k, eu, tol_deg)? {
                     return Ok(false);
                 }
+                // the uses the offset carries (a face's other use, below it, has the image
+                // on the other side)
+                if executive.offset_edgeuse(eu).is_some() {
+                    uses.push(eu);
+                }
+            }
+        }
+        let tol = brep.brep_tolerance(vertex)?;
+        let mut first: Option<Point3> = None;
+        for eu in uses {
+            let image = self.offset_vertex_image(k, brep, eu, vertex)?;
+            match first {
+                None => first = Some(image),
+                Some(p) if p.distance(image) > tol => return Ok(false),
+                Some(_) => {}
             }
         }
         Ok(true)
