@@ -747,6 +747,7 @@ fn benchmark_independent_step_solids() {
 }
 
 fn assert_same_import(serial: &StepImport, parallel: &StepImport) {
+    assert_eq!(serial.report.current(), parallel.report.current());
     assert_eq!(serial.tree, parallel.tree);
     assert_eq!(serial.warnings, parallel.warnings);
     assert_eq!((&serial.schema, &serial.system), (&parallel.schema, &parallel.system));
@@ -2141,6 +2142,40 @@ fn instanced_assembly_of(parts: u64, n: u64) -> String {
     }
     t += TAIL;
     t
+}
+
+#[test]
+fn finishing_a_partly_read_assembly_reuses_its_placed_parts() {
+    let text = instanced_assembly_of(4, (3 * MAX_WINDOW + 1) as u64);
+    let mut reading = StepReading::with_workers(&text, 3).unwrap();
+    assert!(reading.step());
+    assert_eq!(reading.progress().0, MAX_WINDOW);
+    let finished = reading.finish().unwrap();
+    assert_same_import(&step_import_with_workers(&text, 1).unwrap(), &finished);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cancelling_a_large_read_discards_work_ahead_and_allows_retry() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CancelAtWindow(AtomicBool);
+    impl crate::watch::Watch for CancelAtWindow {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+
+        fn progress(&self, stage: &'static str, done: usize, _: usize) {
+            if stage == "converting" && done == MAX_WINDOW {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let text = boxes_step(MAX_WINDOW * 2 + 3, "cancel work ahead");
+    let watch = Arc::new(CancelAtWindow(AtomicBool::new(false)));
+    let err = crate::watch::watching(watch, || StepReading::with_workers(&text, 3)?.finish_shared()).unwrap_err();
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    let imported = step_import_shared(&text).unwrap();
+    assert_eq!(imported.bodies.len(), MAX_WINDOW * 2 + 3);
 }
 
 /// A part placed many times is oriented (meshed whole) once, not once per instance (#2814:
@@ -7508,6 +7543,50 @@ fn a_mapped_item_placed_by_an_operator_without_its_description_comes_in() {
         for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
             assert!((x - want).abs() < 1e-6, "{op}: {xs:?}");
         }
+    }
+}
+
+/// An operator that leaves `axis2` out takes +Y for it, made orthogonal to `axis3` and `axis1`
+/// (ISO 10303-42 `second_proj_axis`), not `axis3` x `axis1`: `axis1` = -X, `axis3` = +Z keeps
+/// +Y (a mirror), so the cube at x = 60 spans x 59..60 and y 0..1, as `axis1` = +Y with
+/// `axis2` = -X (a quarter turn about Z) places it. `axis1` = +Y with no `axis2` leaves nothing of
+/// +Y, where the standard derives no Y: it stays `axis3` x `axis1`, the same quarter turn.
+#[test]
+fn a_mapped_item_placed_by_an_operator_without_axis2_takes_the_standard_y() {
+    let axes = "#5091=DIRECTION('',(0.,1.,0.));\n#5092=DIRECTION('',(0.,0.,1.));\n#5093=DIRECTION('',(-1.,0.,0.));\n";
+    let ops =
+        ["('','',#5093,$,#5020,1.,#5092)", "('',#5093,$,#5020,1.,#5092)", "('','',#5091,#5093,#5020,1.,#5092)", "('','',#5091,$,#5020,1.,#5092)"];
+    for op in ops {
+        let text =
+            mapped_cube_row(axes).replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut boxes: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox).collect();
+        boxes.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        assert_eq!(boxes.len(), 3, "{op}: {boxes:?} {:?}", imp.warnings);
+        let placed = &boxes[2];
+        assert!((placed.min.x - 59.0).abs() < 1e-6 && (placed.max.x - 60.0).abs() < 1e-6, "{op}: {placed:?}");
+        assert!(placed.min.y.abs() < 1e-6 && (placed.max.y - 1.0).abs() < 1e-6, "{op}: {placed:?}");
+    }
+}
+
+/// ISO 10303-42 derives an operator's axes orthonormal (`base_axis`): `axis1` and `axis2` given
+/// off the right angle place the item on `axis3`, `axis1` made orthogonal to it and their cross
+/// product, never sheared. Here they derive the global axes, so the cube at x = 60 is not turned,
+/// and a non-uniform operator scales it along those axes (2 x 3 x 4).
+#[test]
+fn a_mapped_item_placed_by_an_operator_with_skew_axes_is_placed_on_their_orthonormal_frame() {
+    let axes = "#5091=DIRECTION('',(1.,0.,1.));\n#5092=DIRECTION('',(1.,1.,0.));\n#5093=DIRECTION('',(0.,0.,1.));\n";
+    for (op, size) in
+        [("_3D('','',#5091,#5092,#5020,1.,#5093)", [1.0, 1.0, 1.0]), ("_3D_NON_UNIFORM('','',#5091,#5092,#5020,2.,#5093,3.,4.)", [2.0, 3.0, 4.0])]
+    {
+        let text = mapped_cube_row(axes).replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut boxes: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox).collect();
+        boxes.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        assert_eq!(boxes.len(), 3, "{op}: {boxes:?} {:?}", imp.warnings);
+        let placed = &boxes[2];
+        assert!(placed.min.dist(Vec3::new(60.0, 0.0, 0.0)) < 1e-6, "{op}: {placed:?}");
+        assert!(placed.max.dist(Vec3::new(60.0 + size[0], size[1], size[2])) < 1e-6, "{op}: {placed:?}");
     }
 }
 
