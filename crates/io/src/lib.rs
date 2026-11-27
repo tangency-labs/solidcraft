@@ -75,11 +75,11 @@ pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
 pub use design::written_design_provenance_chain;
+pub use design::{set_smaller_default_saves, smaller_default_saves};
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
 pub use glb::export_glb;
-pub use design::{set_smaller_default_saves, smaller_default_saves};
 // Experimental file kinds (#6892).
 pub use design::{
     DesignKind, InternalOf, LEGACY_SHEET_METAL, design_drawings, design_kind, internal_components, internal_of, is_legacy_sheet_metal_file,
