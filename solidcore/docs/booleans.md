@@ -62,7 +62,12 @@ boolean_intersection, boolean_with_options}` and the manifold engine under them
 (`boolean/merge/p4.rs`, `manifold_boolean`); the topology intersector
 (`boolean/topology_intersector`); the point classification the classify step calls
 (`query/brep.rs`, `BrepQuery::point_3d_classify`; `intersect/point_class.rs`); and the ops entry
-points (`solidcore-ops/src/boolean.rs`).
+points (`solidcore-ops/src/boolean.rs`). The ops union of a list (`union_all`) unites it pairwise,
+level by level; two solids of a pair that are proved apart are put side by side instead of
+intersected (`boolean/apart.rs`): every shell's certified box lies farther than their intersection
+tolerance from every shell box of the other, so a boolean would pair none of their faces, and
+the second operand's topology is copied into the first (`MergeBrep`) with the boolean's operand
+preparation and union tail.
 
 **Out**, each with its own page:
 - Surface/surface intersection, its curves and their certification: [ssi.md](ssi.md).
@@ -153,7 +158,17 @@ where the surfaces cross back. Where two equal holes cross a hair off each other
 round the tip of one hole's lens in the other's wall has its midpoint in a neck 0.018 mm wide, the
 walls within 1e-5 of each other, and read there the face lying in the material was put in the
 holes' space; a point nearer the edge's ends, where the walls cross at a clear angle (36° at the
-ends), decides at the edge. The sector's region gives the class: `region_keep` reads its void flag.
+ends), decides at the edge. A second thing differs: how the steps grow (`parting_step`). The
+faces' distance is 0 at the edge and, to second order, a parabola in the step; through the edge and
+the last two steps it gives the next step, aimed where the faces are twice the tolerance apart. Aimed
+at the tolerance along a line through 0, as upstream's was, faces parting at a small angle and faster
+than linearly (a ball dipped 2e-5 into a face leaves it at 0.094°) settled short of it, and the
+unchanging distance read as a coincidence. Faces that cross again part only so far: a cylinder sunk
+2.2e-5 into a plane meets it in two lines 0.0297 apart, between which the two part to 2.2e-5 at the
+middle and close again, and past the middle the cylinder turns back and is read on the other side of
+the plane. Where the parabola tops out under three times the tolerance, the step aims midway between
+the tolerance and its top, before the middle. The sector's region gives the class: `region_keep`
+reads its void flag.
 
 A sector whose faces coincide is the coincident case of §5.
 

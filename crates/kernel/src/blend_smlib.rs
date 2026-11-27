@@ -510,16 +510,15 @@ mod imp {
                 }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here when the evaluation's validation mode checks each step
-            // (`crate::validation`).
             let step = crate::validation::step();
-            if step == crate::validation::Step::Check {
-                let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
-                if !check.is_valid() {
-                    return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), check));
-                }
-            }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
+            // Checked here when the evaluation's validation mode checks each step
+            // (`crate::validation`), on the decoded record every later operation imports (#22138).
+            if step == crate::validation::Step::Check
+                && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), out.record())?
+            {
+                return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), detail));
+            }
             let history = match (order, &result_order) {
                 (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], ro) {
                     Ok(mut h) => {
@@ -536,11 +535,7 @@ mod imp {
                 _ => None,
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
-            let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r, &[body])
-            } else {
-                out
-            };
+            let out = if step == crate::validation::Step::Defer { out.left_unchecked(&format!("SMLib {what}"), &[body]) } else { out };
             Ok((out, extra, result_order))
         })
     }
@@ -842,6 +837,27 @@ mod tests {
         assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[], &[]).is_err());
+    }
+
+    /// A convex and a concave round that meet at a vertex of four edges: the slab [0, 10] x
+    /// [-10, 10] x [-10, 0] with the riser [-5, 10] x [0, 10] x [0, 10] on it, rounded along
+    /// the slab's convex top edge on its wall x = 0 and the concave edge under the riser's front
+    /// y = 0. Each round alone builds; together they are refused with the kernel's own reason,
+    /// not a refusal that says only that SMLib cannot build them.
+    #[test]
+    fn a_convex_and_a_concave_round_at_a_vertex_of_four_edges_are_refused_saying_why() {
+        let slab = box_solid(Vec3::new(0.0, -10.0, -10.0), Vec3::new(10.0, 10.0, 0.0)).unwrap();
+        let riser = box_solid(Vec3::new(-5.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let b = crate::boolean(&slab, &riser, crate::BoolOp::Union).unwrap().unwrap();
+        let picks = [Vec3::new(0.0, -5.0, 0.0), Vec3::new(5.0, 0.0, 0.0)];
+        for p in picks {
+            let alone = fillet(&b, &[p], 1.0, FilletTurn::Mitre).unwrap();
+            assert!(volume(&alone) != volume(&b), "{p:?}");
+        }
+        let e = fillet(&b, &picks, 1.0, FilletTurn::Mitre).unwrap_err();
+        let KernelError::Invalid(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("not supported yet: a convex and a concave round meeting at a vertex of four edges"), "{text}");
+        assert!(text.contains("at any size (#10876)"), "{text}");
     }
 
     /// A smooth edge (a round's seam with the face it runs into) has nothing to round: refused

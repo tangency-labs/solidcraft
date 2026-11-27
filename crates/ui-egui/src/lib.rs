@@ -782,6 +782,8 @@ pub struct SolveApp {
     /// A drawing being read for the Insert SVG/DXF window, on a worker (see
     /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
     pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1208,6 +1210,7 @@ impl SolveApp {
             verifying: None,
             drawing_job: None,
             insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -2385,6 +2388,7 @@ impl SolveApp {
                         // an earlier signature is in the file but does not cover this save.
                         let signature = v.get("signature").and_then(Value::as_object);
                         let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let shown = display_user_path(&p);
                         let saved = match signature {
                             Some(signature) => {
                                 let key = signature
@@ -2392,10 +2396,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                self.tr("ui.design_saved_signed").replace("{path}", shown).replace("{key}", key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", shown),
+                            None => self.tr("ui.design_saved").replace("{path}", shown),
                         };
                         self.set_status(saved, false);
                     }
@@ -5403,6 +5407,31 @@ fn with_queued(mut result: Value, queued: bool) -> Value {
 /// A command's name as people see it (its label), for the status bar.
 pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
+}
+
+/// Format a file path for user-facing notices and labels.
+///
+/// Native OS paths are returned unchanged. Browser virtual-filesystem mount
+/// prefixes (`/disk/<id>/...`, `/opfs/...`, `/downloads/...`, `/upload/...`)
+/// are stripped so internal mount tokens never appear in save or export toasts.
+pub fn display_user_path(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix("/disk/")
+        && let Some((id, tail)) = rest.split_once('/')
+        && !id.is_empty()
+        && !tail.is_empty()
+        && !tail.starts_with('/')
+    {
+        return tail;
+    }
+    for prefix in ["/opfs/", "/downloads/", "/upload/"] {
+        if let Some(tail) = path.strip_prefix(prefix)
+            && !tail.is_empty()
+            && !tail.starts_with('/')
+        {
+            return tail;
+        }
+    }
+    path
 }
 
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".
