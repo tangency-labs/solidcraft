@@ -1858,6 +1858,10 @@ pub enum FeatureKind {
         /// Normals the same way instead of facing each other.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
+        /// With `flip`, a side that faces no way against a plane or a frame only moves, as before
+        /// #21331, instead of turning half round to face along it. Set on designs saved before then.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_moves_only: bool,
         /// A plane the bodies move with (an origin or construction plane): its origin and normal
         /// are the `from` point and normal, worked out again whenever the plane moves.
         #[serde(default, skip_serializing_if = "Option::is_none")]

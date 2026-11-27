@@ -261,6 +261,38 @@ pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
     circle_through(&samples, tol)
 }
 
+/// A circular edge with its axis out of the body ([`rim_circle`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RimCircle {
+    pub center: Vec3,
+    /// The circle's axis, pointing out of the body the edge bounds.
+    pub axis: UnitVec3,
+    pub radius: f64,
+}
+
+/// The circular edge of `b` (in the order of [`Body::edges`]) point `p` picks, of the edges in
+/// `among` (every edge when it is empty), with its distance: on the edge or at its circle's
+/// centre, within `reach` (`solidcore_ops::Body::circle_edge_at`). `None` for none, and for a
+/// mesh body.
+pub fn circle_edge_at(b: &Body, p: Vec3, reach: f64, among: &[usize]) -> Result<Option<(usize, f64)>> {
+    let Some(form) = b.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
+    ops.circle_edge_at(order, [p.x, p.y, p.z], reach, among).map_err(|e| KernelError::Failed(format!("circle edge at a point: {e}")))
+}
+
+/// Edge `edge`'s circle with its axis pointing out of the body (`solidcore_ops::Body::rim_circle`):
+/// out of a hole's or a boss's cap. `None` for an edge that is no circle, a circle between two
+/// walls and a mesh body.
+pub fn rim_circle(b: &Body, edge: usize) -> Result<Option<RimCircle>> {
+    let Some(form) = b.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
+    let rim = ops.rim_circle(order, edge).map_err(|e| KernelError::Failed(format!("a rim's circle: {e}")))?;
+    Ok(rim.and_then(|r| {
+        let axis = Vec3::from(r.axis).unit()?;
+        Some(RimCircle { center: Vec3::from(r.center), axis, radius: r.radius })
+    }))
+}
+
 /// The circle through evenly spaced samples of a curve (first to last), if they all lie on one.
 fn circle_through(s: &[Vec3], tol: f64) -> Option<EdgeCircle> {
     let (start, end) = (*s.first()?, *s.last()?);

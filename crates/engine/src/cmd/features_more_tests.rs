@@ -4769,3 +4769,327 @@ fn a_draft_past_where_a_short_walls_sides_meet_ends_the_wall_in_a_point() {
     assert_eq!([b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()], [1, 6, 12, 8]);
     assert!(b.validity().is_empty(), "{:?}", b.validity());
 }
+
+/// The plate and the block of the Align picks below (#21331): Plate (z -5..0) with a hole d8
+/// through it at (14.5, -1), Block (z 0..10) with a hole d10 through it at (35, 30).
+fn drilled_plate_and_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, -10, -5], "length": 30, "width": 20, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [14.5, -1, 0], "diameter": 8, "targets": ["Plate"]}));
+    run(&mut s, "solid.box", json!({"corner": [25, 20, 0], "length": 60, "width": 40, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [35, 30, 10], "diameter": 10, "targets": ["Block"]}));
+    s
+}
+
+/// The block's hole rim onto the plate's: each circle faces out of its body's top.
+fn rims(flip: bool) -> Value {
+    let (from, to) = (json!({"snap": "circle_center", "at": [40, 30, 10]}), json!({"snap": "circle_center", "at": [18.5, -1, 0]}));
+    json!({"bodies": ["Block"], "from": from, "to": to, "flip": flip})
+}
+
+/// A circle picks a direction, its axis out of its body: two rims meet face to face, and `flip`
+/// sets the block flush below the plate instead (#21331).
+#[test]
+fn align_circle_centres_meet_and_flip() {
+    for (flip, lo, hi) in [(false, [-35.5, -11., 0.], [24.5, 29., 10.]), (true, [4.5, -11., -10.], [64.5, 29., 0.])] {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.align", rims(flip));
+        assert_bounds(&mut s, "Block", lo, hi);
+    }
+}
+
+/// Two bare points face no way: without `flip` they are a plain move, as before; `flip` is
+/// refused with what to pick instead of doing nothing (#21331).
+#[test]
+fn align_bare_points_refuse_a_flip() {
+    let mut s = drilled_plate_and_block();
+    let p = json!({"bodies": ["Block"], "from": [35, 30, 10], "to": [14.5, -1, 0]});
+    let mut flipped = p.clone();
+    flipped["flip"] = json!(true);
+    let e = s.execute("solid.align", &flipped);
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains(super::FLIP_NEEDS)), "{e:?}");
+    run(&mut s, "solid.align", p);
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+}
+
+/// A face and a circle mate as two faces do; a side that faces no way (a vertex) keeps the
+/// bodies' turn, and `flip` turns them half round about an axis square to the other side's way (#21331).
+#[test]
+fn align_faces_and_circles_mix() {
+    let aligned = |p: Value| {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.align", p);
+        s
+    };
+    let circle = json!({"snap": "circle_center", "at": [40, 30, 10]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": circle, "to_face": [14.5, 5, 0]}));
+    assert_bounds(&mut s, "Block", [-35.5, -5., 0.], [24.5, 35., 10.]);
+    let plate_rim = json!({"snap": "circle_center", "at": [18.5, -1, 0]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": {"snap": "face_center", "at": [50, 20, 5]}, "to": plate_rim}));
+    assert_bounds(&mut s, "Block", [-15.5, -6., 0.], [44.5, 4., 40.]);
+    let corner = json!({"snap": "vertex", "at": [25, 20, 0]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": corner, "to": plate_rim}));
+    assert_bounds(&mut s, "Block", [14.5, -1., 0.], [74.5, 39., 10.]);
+    let mut s = aligned(json!({"bodies": ["Block"], "from": corner, "to": plate_rim, "flip": true}));
+    assert_bounds(&mut s, "Block", [-45.5, -1., -10.], [14.5, 39., 0.]);
+}
+
+/// `{snap: circle_center}` finds a bore drilled by Hole from a pick on its rim, at its centre
+/// and on its wall (the nearer rim), and faces out of the plate there (#21331).
+#[test]
+fn align_snaps_to_the_centre_of_a_drilled_bore() {
+    for (at, z) in [([18.5, -1., 0.], 0.), ([14.5, -1., 0.], 0.), ([14.5, 3., 0.], 0.), ([18.5, -1., -1.], 0.), ([18.5, -1., -4.], -5.)] {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        let to = json!({"snap": "circle_center", "at": at});
+        run(&mut s, "solid.align", json!({"bodies": ["Cube"], "from": {"snap": "vertex", "at": [100, 0, 0]}, "to": to, "flip": true}));
+        assert_bounds(&mut s, "Cube", [4.5, -1., z - 10.], [14.5, 9., z]);
+    }
+}
+
+/// `timeline.edit` of a circle-centre Align (#21331): `flip` turns the block over; a new `from`
+/// faces as its own pick does (the block's bottom rim faces down, so the block meets the plate
+/// without turning), never as the old one did; two bare points move plainly and refuse a flip.
+#[test]
+fn align_edits_take_the_ways_of_their_new_picks() {
+    let mut s = drilled_plate_and_block();
+    let id = run(&mut s, "solid.align", rims(false))["feature"].clone();
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"flip": true}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+    let bottom = json!({"snap": "circle_center", "at": [40, 30, 0]});
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from": bottom, "flip": false}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., 0.], [64.5, 29., 10.]);
+    let points = json!({"from": [35, 30, 10], "to": [14.5, -1, 0], "flip": true});
+    let e = s.execute("timeline.edit", &json!({"feature": id, "set": points}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("flip needs")), "{e:?}");
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from": [35, 30, 10], "to": [14.5, -1, 0], "flip": false}}));
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+}
+
+/// A design saved with an Align of two bare points (no stored ways) reopens as it was, flip
+/// true or false: a plain move, as it always evaluated (#21331).
+#[test]
+fn a_saved_align_of_two_points_reopens_unchanged() {
+    fn align_of(v: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
+        if matches!(v, Value::Object(o) if o.contains_key("bodies") && o.contains_key("from") && o.contains_key("to")) {
+            return v.as_object_mut();
+        }
+        match v {
+            Value::Object(o) => o.values_mut().find_map(align_of),
+            Value::Array(a) => a.iter_mut().find_map(align_of),
+            _ => None,
+        }
+    }
+    let mut s = drilled_plate_and_block();
+    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from": [35, 30, 10], "to": [14.5, -1, 0]}));
+    for flip in [false, true] {
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        let align = align_of(&mut saved).expect("the Align");
+        assert!(!align.contains_key("from_normal") && !align.contains_key("to_normal"), "{align:?}");
+        align.insert("flip".into(), json!(flip));
+        let mut reopened = Session { doc: solidcraft_doc::format::read(&saved.to_string()).unwrap().into(), ..Default::default() };
+        reopened.refresh();
+        assert_bounds(&mut reopened, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+    }
+}
+
+/// Box C, 10 a side at (50, 0, 20), and the plane Tilt: XY turned by the parameter `tilt` about
+/// X (#21331).
+fn box_and_tilted_plane(tilt: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 20], "body_name": "C"}));
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": tilt}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "tilt", "name": "Tilt"}));
+    s
+}
+
+/// Box C lies where it lies in `fresh`, and has not turned (it is still 10 a side along x, y and z).
+fn assert_moved_as(s: &mut Session, fresh: &mut Session, turned: bool) {
+    let (lo, hi) = bounds(fresh, "C");
+    assert_bounds(s, "C", lo, hi);
+    let square = (0..3).all(|i| (hi[i] - lo[i] - 10.0).abs() < 1e-6);
+    assert!(turned || square, "C turned: {lo:?}..{hi:?}");
+}
+
+/// The bottom centre of box C, a bare point, onto a plane: the box moves along the plane's normal
+/// and does not turn, also when `timeline.edit` sets a tilted plane; with `flip` it turns over
+/// half round, against the plane it is set on now, as a new Align onto that plane does (#21331).
+#[test]
+fn align_a_point_onto_an_edited_plane_moves_without_turning() {
+    for flip in [false, true] {
+        let mut s = box_and_tilted_plane("30 deg");
+        let id = run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "XY", "flip": flip}))["feature"].clone();
+        let (lo, hi) = if flip { ([50., 0., -10.], [60., 10., 0.]) } else { ([50., 0., 0.], [60., 10., 10.]) };
+        assert_bounds(&mut s, "C", lo, hi);
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {"to_plane": {"type": "construction", "name": "Tilt"}}}));
+        let mut fresh = box_and_tilted_plane("30 deg");
+        run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": flip}));
+        assert_moved_as(&mut s, &mut fresh, flip);
+    }
+}
+
+/// A bare point aligned onto a plane that is tilted later, earlier in the timeline: the box still
+/// only moves along the plane's normal, as a new Align onto the tilted plane does (#21331).
+#[test]
+fn align_a_point_onto_a_plane_tilted_later_moves_without_turning() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_bounds(&mut s, "C", [50., 0., 0.], [60., 10., 10.]);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_moved_as(&mut s, &mut fresh, false);
+}
+
+/// The ways the Align of `s` stores for its two sides.
+fn align_ways(s: &Session) -> (Option<solidcore_record::Vec3>, Option<solidcore_record::Vec3>) {
+    let way = |n: &Option<solidcraft_doc::Dir>| n.map(|d| d.0);
+    let ways = s.doc.features.iter().find_map(|f| match &f.kind {
+        solidcraft_doc::FeatureKind::Align { from_normal, to_normal, .. } => Some((way(from_normal), way(to_normal))),
+        _ => None,
+    });
+    ways.expect("an Align")
+}
+
+fn assert_way(got: Option<solidcore_record::Vec3>, want: solidcore_record::Vec3) {
+    assert!(got.is_some_and(|n| n.dist(want) < 1e-12), "{got:?}, want {want:?}");
+}
+
+/// The plate and the block, the block's top front edge chamfered 2 (its face at y 20…22, z 8…10).
+fn chamfered_block() -> Session {
+    let mut s = drilled_plate_and_block();
+    run(&mut s, "solid.chamfer", json!({"edges": [[50, 20, 10]], "distance": 2}));
+    s
+}
+
+/// A face pick faces along its face's exact outward normal (#21331): the block's top beside its
+/// hole, the plate's top, the chamfer's tilted face, also when `timeline.edit` picks it.
+#[test]
+fn align_face_picks_store_their_exact_normals() {
+    use solidcore_record::Vec3;
+    let tilted = Vec3::new(0.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
+    let mut s = chamfered_block();
+    let id = run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 50, 10], "to_face": [14.5, 5, 0]}))["feature"].clone();
+    let (from, to) = align_ways(&s);
+    assert_way(from, Vec3::Z);
+    assert_way(to, Vec3::Z);
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"from_face": [50, 21, 9]}}));
+    assert_way(align_ways(&s).0, tilted);
+    let mut s = chamfered_block();
+    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 21, 9], "to_face": [14.5, 5, 0]}));
+    assert_way(align_ways(&s).0, tilted);
+}
+
+/// A face pick or a face centre snap on a face that is not planar (the wall of the block's hole)
+/// is refused with what it needs, instead of facing a way the display mesh made up (#21331).
+#[test]
+fn align_refuses_a_curved_face() {
+    let mut s = drilled_plate_and_block();
+    let e = s.execute("solid.align", &json!({"bodies": ["Block"], "from_face": [40, 30, 5], "to_face": [14.5, 5, 0]}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("`from_face` must be on a planar face")), "{e:?}");
+    let centre = json!({"snap": "face_center", "at": [40, 30, 5]});
+    let e = s.execute("solid.align", &json!({"bodies": ["Block"], "from": centre, "to_face": [14.5, 5, 0]}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("face_center snaps to the centre of a planar face")), "{e:?}");
+}
+
+/// A bare point flipped onto a plane that is tilted later: the box turns half round about an axis
+/// square to the plane's new normal, as a new Align onto the tilted plane does, not from the way
+/// the plane faced when the Align was made (#21331).
+#[test]
+fn align_a_flipped_point_onto_a_plane_tilted_later_turns_against_its_new_normal() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    assert_bounds(&mut s, "C", [50., 0., -10.], [60., 10., 0.]);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    assert_moved_as(&mut s, &mut fresh, true);
+}
+
+/// A bare point flipped onto a plane, the plane tilted, then the flip taken off in the timeline:
+/// a plain move along the plane's normal, no turn (#21331).
+#[test]
+fn align_a_point_unflipped_after_its_plane_tilts_only_moves() {
+    let mut s = box_and_tilted_plane("0 deg");
+    let id = run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}))["feature"].clone();
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"flip": false}}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_moved_as(&mut s, &mut fresh, false);
+}
+
+/// A session opened from the saved design `json`, evaluated.
+fn reopen(json: &str) -> Session {
+    let mut s = Session { doc: solidcraft_doc::format::read(json).unwrap().into(), ..Default::default() };
+    s.refresh();
+    s
+}
+
+/// Box C flipped by a bare point onto the plane, saved by a build before this change: its Align
+/// stores no ways, and the format lacks this change.
+fn legacy_flipped_point_onto_a_plane() -> Session {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let align = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "align").expect("the Align");
+    for k in ["from_normal", "to_normal", "flip_moves_only"] {
+        align.as_object_mut().unwrap().remove(k);
+    }
+    let main: Vec<String> = solidcraft_doc::format::pending_names().into_iter().filter(|n| n != "align-flip-against-plane-or-frame").collect();
+    saved["format_pending"] = json!(main);
+    reopen(&saved.to_string())
+}
+
+/// The Align of `s`: its id and whether it is saved with `flip_moves_only`.
+fn align_moves_only(s: &Session) -> (u64, bool) {
+    let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Align { .. })).expect("an Align").id;
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let align = saved["features"].as_array().unwrap().iter().find(|f| f["type"] == "align").expect("the saved Align");
+    (id, align["flip_moves_only"] == json!(true))
+}
+
+/// A design saved before flip turned a bare point against a plane reopens as it evaluated then:
+/// a plain move (#21331).
+#[test]
+fn a_saved_flipped_point_onto_a_plane_reopens_as_a_plain_move() {
+    let mut reopened = legacy_flipped_point_onto_a_plane();
+    assert_bounds(&mut reopened, "C", [50., 0., 0.], [60., 10., 10.]);
+}
+
+/// Saved and reopened, a new flipped point onto a plane still turns, its format already holding
+/// this change; an older design's Align keeps `flip_moves_only` and its plain move, until
+/// `timeline.edit` sets its flip, which clears the flag and turns the box (#21331).
+#[test]
+fn saved_and_reopened_aligns_onto_a_plane_keep_their_flip() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    let mut again = reopen(&s.doc.to_json());
+    assert!(!align_moves_only(&again).1);
+    assert_bounds(&mut again, "C", [50., 0., -10.], [60., 10., 0.]);
+    let old = legacy_flipped_point_onto_a_plane();
+    let mut old = reopen(&old.doc.to_json());
+    let (id, moves_only) = align_moves_only(&old);
+    assert!(moves_only);
+    assert_bounds(&mut old, "C", [50., 0., 0.], [60., 10., 10.]);
+    run(&mut old, "timeline.edit", json!({"feature": id, "set": {"flip": true}}));
+    assert!(!align_moves_only(&old).1);
+    assert_bounds(&mut old, "C", [50., 0., -10.], [60., 10., 0.]);
+}
+
+/// A face pick on a mesh body is refused as needing a face of a solid body (#21331).
+#[test]
+fn align_refuses_a_face_of_a_mesh_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-align-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| b.name.clone()).expect("a mesh body");
+    let e = s.execute("solid.align", &json!({"bodies": [mesh], "from_face": [10, 10, 20], "to_plane": "XY"}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("`from_face` must be on a planar face of a solid body")), "{e:?}");
+}

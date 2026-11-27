@@ -206,6 +206,7 @@ pub use measure::PointNormalFace;
 pub use measure::PointSetSummary;
 pub use measure::RayEntity;
 pub use measure::RayHit;
+pub use measure::RimCircle;
 pub use measure::SquareFaceLevel;
 pub use measure::EDGE_POINTS_MAX;
 pub use offset::draft;
