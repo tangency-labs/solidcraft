@@ -7114,6 +7114,31 @@ fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
         assert!(!imported.warnings.iter().any(|w| w.contains("were not completed")), "{scale}: {:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
+        assert_face_domains_hold_their_trims(&body.body);
+    }
+}
+
+/// Every face's stored domain is around the control points of all its loops' pcurves (the
+/// positive-weight hull holds the whole trim), as `Face::domain` says: seating a seam's trims on
+/// the boundary lines must not leave a box taken before it.
+fn assert_face_domains_hold_their_trims(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    for (fi, face) in body.record().faces.iter().enumerate() {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points: Vec<[f64; 2]> = match &u.pcurve {
+                    Curve2::Spline { points, .. } => points.clone(),
+                    Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+                };
+                for p in points {
+                    for (d, range) in face.domain.iter().enumerate() {
+                        assert!(p[d] >= range[0] - 1e-9 && p[d] <= range[1] + 1e-9, "face {fi}, edge {}: {p:?} outside {:?}", u.edge, face.domain);
+                    }
+                }
+            }
+        }
     }
 }
 

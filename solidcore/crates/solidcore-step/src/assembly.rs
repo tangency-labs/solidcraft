@@ -2500,6 +2500,7 @@ fn seat_seam_trims(brep: &mut Brep) -> usize {
     for face in &mut brep.faces {
         let Ok(eval) = SurfaceEval::new(face.parameters()) else { continue };
         let dom = eval.domain();
+        let seated_before = seated;
         for d in 0..2 {
             let (Some(Some(period)), Some(Some((lo, hi)))) = (dom.period.get(d).copied(), dom.range.get(d).copied()) else { continue };
             if !(period > 0.0) {
@@ -2563,6 +2564,23 @@ fn seat_seam_trims(brep: &mut Brep) -> usize {
                         }
                     }
                 }
+            }
+        }
+        if seated > seated_before {
+            // The face's domain is around every loop (`Face::domain`), and a trim moved to the
+            // base period's boundary can lie a sliver outside the box taken before: take it again
+            // from the moved pcurves, by the rule that made it. `face_domain` refuses only a face
+            // without finite pcurves, which the record check rejects; the box then stays as it was.
+            let pcs: Vec<Vec<Curve2>> = face
+                .loops
+                .iter()
+                .filter_map(|l| match l {
+                    Loop::Edges { edges } => Some(edges.iter().map(|u| u.pcurve.clone()).collect()),
+                    Loop::Vertex { .. } => None,
+                })
+                .collect();
+            if let Ok(domain) = face_domain(face.parameters(), &pcs) {
+                face.domain = domain;
             }
         }
     }
