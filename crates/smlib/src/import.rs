@@ -597,25 +597,30 @@ fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f
     if !(lu > 0.0 && ln > 0.0 && lu.is_finite() && ln.is_finite()) {
         return Err(Unsupported::Invalid("plane axes"));
     }
-    let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
-    let y = cross(z, x);
-    let range = if x == u && y == v {
-        // Equal surface coefficients mean equal parameters. Projecting onto the same
-        // rounded axes again changes the domain on every record import.
-        [u0, v0, u1, v1]
+    let same_bits = |a: [f64; 3], b: [f64; 3]| a.map(f64::to_bits) == b.map(f64::to_bits);
+    let kept = crate::core::plane_placement(origin, u, v).ok().filter(|p| same_bits(p.x_axis().to_array(), u) && same_bits(p.y_axis().to_array(), v));
+    let (p, range) = if let Some(p) = kept {
+        // Identical coefficients mean identical parameters, including a loose modeled range.
+        (p, [u0, v0, u1, v1])
     } else {
+        // Keep the historical normal when axes change: canonicalizing a nearly parallel raw
+        // pair can choose an arbitrary perpendicular plane instead of the record's plane.
+        let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
+        let p = crate::core::plane_placement(origin, x, cross(z, x)).map_err(|_| Unsupported::Invalid("plane axes"))?;
+        let (x, y) = (p.x_axis().to_array(), p.y_axis().to_array());
         let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
             let d = add(scale(u, s), scale(v, t));
             [dot(d, x), dot(d, y)]
         });
         let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
         let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
-        [lo(0), lo(1), hi(0), hi(1)]
+        (p, [lo(0), lo(1), hi(0), hi(1)])
     };
     a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
     a.r3(flat::FACE_PLANE_ORIGIN, origin);
-    a.r3(flat::FACE_PLANE_AXIS, z);
-    a.r3(flat::FACE_PLANE_REF_DIRECTION, x);
+    a.r3(flat::FACE_PLANE_AXIS, p.z_axis().to_array());
+    a.r3(flat::FACE_PLANE_REF_DIRECTION, p.x_axis().to_array());
+    a.r3(flat::FACE_PLANE_Y_AXIS, p.y_axis().to_array());
     a.r(flat::FACE_RANGE).extend(range);
     Ok(())
 }
