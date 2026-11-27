@@ -18585,7 +18585,9 @@ fn eval_feature_kind(
                     }
                     match ids.as_slice() {
                         [] => return Err(DocError::Invalid("a sketch tool needs its line or its curves".into())),
-                        [one] if *extend && !mb.is_surface() && sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
+                        [one] if *extend && !mb.is_surface() && sketch_curve_is_line(st, sketch.0, one)? => {
+                            split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?
+                        }
                         _ => {
                             // In the sketch's own frame, as a straight line's plane is read, so a
                             // line cuts at the same place whatever `extend` says.
@@ -21745,7 +21747,8 @@ fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body, extend: bo
         let (head, tail) = (start - back * reach(start), end + on * reach(end));
         if segments_cross(head, start, end, tail) {
             return Err(DocError::Invalid(
-                "the sketch curves' ends, continued past the body, cross each other: draw the curves past the body, or split with extend false".into(),
+                "the sketch curves' ends, continued past the body, cross each other: draw the curves past the body, or split with extend false"
+                    .into(),
             ));
         }
         chain.insert(0, solidcore_record::Seg2::Line { a: head, b: start });
