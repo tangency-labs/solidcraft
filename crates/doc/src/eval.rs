@@ -17586,8 +17586,14 @@ fn eval_feature_kind(
             unchanged(st, warning);
             Ok(())
         }
-        FeatureKind::CellGrid { targets, mode, .. } => {
+        FeatureKind::CellGrid { targets, mode, face, body, .. } => {
             let tools = cell_grid::tools(doc, vals, f, st, warning)?;
+            // A grid on a wall cuts the wall's body alone (#23010), also when no target is named.
+            let wall_body: Vec<crate::BodyName> = match (face, body) {
+                (Some(_), Some(b)) if targets.is_empty() => vec![b.clone()],
+                _ => Vec::new(),
+            };
+            let targets = if wall_body.is_empty() { targets } else { &wall_body };
             // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
             // Raised cells are joined, as a join extrude's tool is: with no body to join they are
             // a new body, and one that stands inside the body changes nothing, with no warning.
