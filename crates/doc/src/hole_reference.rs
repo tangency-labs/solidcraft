@@ -255,13 +255,13 @@ fn flat_face(b: &ModelBody, m: &Mesh, at: Vec3, dir: Vec3, edges: &[(Vec3, Vec3,
     {
         return Some(hit);
     }
-    let edge_face = faces.into_iter().filter_map(plane).min_by(|x, y| x.2.dot(dir).total_cmp(&y.2.dot(dir)));
-    if let Some(hit) = edge_face
-        && (at - hit.1).dot(hit.2).abs() <= tol
-    {
+    let shared: Vec<(usize, Vec3, Vec3)> = faces.into_iter().filter_map(plane).collect();
+    let by_drill = |x: &(usize, Vec3, Vec3), y: &(usize, Vec3, Vec3)| x.2.dot(dir).total_cmp(&y.2.dot(dir));
+    let coplanar = shared.iter().copied().filter(|hit| b.body.planar_face(hit.0).is_some_and(|pl| pl.height(at).abs() <= tol)).min_by(by_drill);
+    if let Some(hit) = coplanar {
         return Some(hit);
     }
-    at_face.or(edge_face)
+    at_face.or_else(|| shared.into_iter().min_by(by_drill))
 }
 
 /// Which side of an edge (through `mid`, square to it in the plane along `across`) face `face`
