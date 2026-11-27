@@ -127,42 +127,51 @@ fn points(path: &[Seg2]) -> Vec<egui::Pos2> {
     points
 }
 
+/// A dashed polyline as separate segments on the screen canvas. The paper phase consumes the
+/// pattern from its start (egui's own dash offset would add a gap instead). The pattern is
+/// validated by `Weld::draw`: an even count of positive lengths. Anything else draws nothing.
 fn dashed(points: &[egui::Pos2], stroke: Stroke, pattern: &Dashes) -> Vec<Shape> {
-    // Paper phase consumes the pattern at the start; egui's dash offset instead adds a gap.
-    let mut phase = pattern.phase_mm as f32;
-    let mut index = 0;
-    for (i, length) in pattern.lengths_mm.iter().enumerate() {
-        index = i;
-        if phase < *length as f32 {
-            break;
-        }
-        phase -= *length as f32;
+    const MAX_DASHES: usize = 100_000;
+    let lengths: Vec<f32> = pattern.lengths_mm.iter().map(|length| *length as f32).collect();
+    let phase = pattern.phase_mm as f32;
+    if lengths.is_empty()
+        || !lengths.len().is_multiple_of(2)
+        || lengths.iter().any(|length| !length.is_finite() || *length <= 0.0)
+        || !phase.is_finite()
+        || phase < 0.0
+        || points.iter().any(|point| !point.is_finite())
+    {
+        return Vec::new();
     }
-    let Some(length) = pattern.lengths_mm.get(index) else { return Vec::new() };
-    let mut remaining = *length as f32 - phase;
+    let mut phase = phase % lengths.iter().sum::<f32>();
+    let mut index = 0;
+    while phase >= lengths[index] {
+        phase -= lengths[index];
+        index = (index + 1) % lengths.len();
+    }
+    let mut remaining = lengths[index] - phase;
     let mut shapes = Vec::new();
     for pair in points.windows(2) {
-        let length = pair[0].distance(pair[1]);
+        let vector = pair[1] - pair[0];
+        let length = vector.length();
+        if !length.is_finite() || length <= 0.0 {
+            continue;
+        }
         let mut along = 0.0;
-        // Draw's validated local pattern has positive lengths and bounded coordinates.
-        for _ in 0..10_000 {
-            if along >= length || remaining <= 0.0 {
-                break;
-            }
-            let available = length - along;
-            let finishes_dash = remaining <= available;
-            let end = if finishes_dash { along + remaining } else { length };
+        while along < length {
+            let end = (along + remaining).min(length);
             if index.is_multiple_of(2) {
-                shapes.push(Shape::line_segment([pair[0].lerp(pair[1], along / length), pair[0].lerp(pair[1], end / length)], stroke));
+                if shapes.len() >= MAX_DASHES {
+                    return shapes;
+                }
+                shapes.push(Shape::line_segment([pair[0] + vector * (along / length), pair[0] + vector * (end / length)], stroke));
             }
-            if finishes_dash {
-                index = (index + 1) % pattern.lengths_mm.len();
-                let Some(next) = pattern.lengths_mm.get(index) else { break };
-                remaining = *next as f32;
-            } else {
-                remaining -= available;
-            }
+            remaining -= end - along;
             along = end;
+            if remaining <= 0.0 {
+                index = (index + 1) % lengths.len();
+                remaining = lengths[index];
+            }
         }
     }
     shapes
@@ -172,15 +181,15 @@ fn shapes(painter: &Painter, drawing: &weld::Drawing, color: Color32) -> Vec<Sha
     let mut shapes = Vec::new();
     for item in &drawing.items {
         match item {
-            Item::Stroke { path, closed, width_mm, pattern } => {
+            Item::Stroke { path, closed: is_loop, width_mm, pattern } => {
                 let mut points = points(path);
                 let stroke = Stroke::new(*width_mm as f32, color);
                 if let Some(pattern) = pattern {
-                    if *closed && let Some(first) = points.first().copied() {
+                    if *is_loop && let Some(first) = points.first().copied() {
                         points.push(first);
                     }
                     shapes.extend(dashed(&points, stroke, pattern));
-                } else if *closed {
+                } else if *is_loop {
                     shapes.push(Shape::closed_line(points, stroke));
                 } else {
                     shapes.push(Shape::line(points, stroke));

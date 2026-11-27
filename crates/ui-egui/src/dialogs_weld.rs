@@ -165,7 +165,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, mut d: Dialog) {
     );
     let mut painted = false;
     let mut local = if let Kind::Weld(state) = &mut d.kind { std::mem::take(&mut state.panel) } else { WeldPanelState::default() };
-    let response = panel.fixed_window(ctx, size).show(ctx, |ui| {
+    let response = panel.window(ctx).fixed_size(size).show(ctx, |ui| {
         painted = ui.is_visible() && !ui.is_sizing_pass();
         let title = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(size.x, t.form_header_height));
         crate::frame::drag_dock(ui, title, side.dialog_offset_key(), moved, panel.bounded_anchor(ctx) - docked);

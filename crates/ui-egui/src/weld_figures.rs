@@ -187,7 +187,7 @@ impl Drawing<'_> {
     }
 
     fn dimension(&self, a: Pos2, b: Pos2, outside: bool) {
-        let direction = (b - a).normalized();
+        let direction = unit(b - a);
         if outside {
             self.arrow(a, direction);
             self.arrow(b, -direction);
@@ -240,7 +240,7 @@ impl Drawing<'_> {
 
     fn face_points(&self, a: Pos2, b: Pos2) -> Vec<Pos2> {
         use crate::weld_panel::Face;
-        let normal = vec2(b.y - a.y, a.x - b.x).normalized();
+        let normal = unit(vec2(b.y - a.y, a.x - b.x));
         let bulge = match self.state.face {
             Face::Flat => 0.,
             Face::Convex => 8.,
@@ -325,8 +325,8 @@ impl Drawing<'_> {
         let vertical = root.y - top.y;
         let projection = vertical * vertical / (horizontal * horizontal + vertical * vertical);
         let foot = top + vec2(horizontal, vertical) * projection;
-        let normal = (foot - root).normalized();
-        let tangent = (right - top).normalized();
+        let normal = unit(foot - root);
+        let tangent = unit(right - top);
         let deep = self.state.letters.contains("s");
         let deep_root = if deep { root - normal * (self.amount("s", 18., 8.) / 2.) } else { root };
         self.face_weld(deep_root, top, right);
@@ -657,6 +657,13 @@ impl Drawing<'_> {
             _ => {}
         }
     }
+}
+
+/// The direction of `v` on the illustration's own screen-space canvas; a zero or non-finite
+/// vector points along x. Nothing here is model geometry: it only places arrowheads and bulges.
+fn unit(v: Vec2) -> Vec2 {
+    let length = v.length();
+    if length.is_finite() && length > 1e-9 { v / length } else { vec2(1.0, 0.0) }
 }
 
 /// Flatten a quadratic at 32 steps: subpixel chord error even at twice the design size.

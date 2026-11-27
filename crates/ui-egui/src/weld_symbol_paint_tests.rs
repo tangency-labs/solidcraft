@@ -111,3 +111,34 @@ fn weld_symbol_paint_fit_centres_ink_and_rejects_empty_or_invalid_rects() {
     });
     output.textures_delta.clear();
 }
+
+#[test]
+fn dashes_follow_the_pattern_start_part_way_through_it_and_refuse_a_bad_one() {
+    let line = [pos2(0.0, 0.0), pos2(10.0, 0.0)];
+    let stroke = Stroke::new(1.0, Color32::WHITE);
+    let xs = |shapes: Vec<Shape>| -> Vec<[f32; 2]> {
+        shapes
+            .into_iter()
+            .map(|shape| match shape {
+                Shape::LineSegment { points, .. } => [points[0].x, points[1].x],
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    let pattern = |lengths: Vec<f64>, phase_mm: f64| Dashes { lengths_mm: lengths, phase_mm };
+    assert_eq!(xs(dashed(&line, stroke, &pattern(vec![2.0, 1.0], 0.0))), [[0.0, 2.0], [3.0, 5.0], [6.0, 8.0], [9.0, 10.0]]);
+    // One unit into the first dash: it is one long, then the pattern carries on.
+    let shifted = xs(dashed(&line, stroke, &pattern(vec![2.0, 1.0], 1.0)));
+    assert_eq!(shifted[0], [0.0, 1.0]);
+    assert_eq!(shifted[1], [2.0, 4.0]);
+    // Half way into the gap: the first dash starts half a unit in.
+    assert_eq!(xs(dashed(&line, stroke, &pattern(vec![2.0, 1.0], 2.5)))[0][0], 0.5);
+    // The corner of a polyline does not restart the pattern.
+    let corner = [pos2(0.0, 0.0), pos2(3.0, 0.0), pos2(3.0, 3.0)];
+    assert_eq!(dashed(&corner, stroke, &pattern(vec![2.0, 1.0], 0.0)).len(), 2);
+    for bad in [vec![], vec![1.0], vec![1.0, 0.0], vec![f64::NAN, 1.0]] {
+        assert!(dashed(&line, stroke, &pattern(bad, 0.0)).is_empty());
+    }
+    assert!(dashed(&line, stroke, &pattern(vec![1.0, 1.0], f64::NAN)).is_empty());
+    assert_eq!(dashed(&[pos2(0.0, 0.0), pos2(1.0e9, 0.0)], stroke, &pattern(vec![0.001, 0.001], 0.0)).len(), 100_000);
+}

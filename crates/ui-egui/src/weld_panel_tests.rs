@@ -645,6 +645,7 @@ fn weld_symbol_strip_has_iso_a_identification_line_and_arrow() {
 }
 #[test]
 fn weld_panel_type_defaults_and_filtered_process_tables() {
+    crate::i18n::install();
     use sections::look::numbers;
     let expected = [
         (WeldType::Fillet, Face::Convex, "135", vec!["111", "121", "131", "135", "136", "138", "141", "311", "51", "52"]),
