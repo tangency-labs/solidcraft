@@ -3855,7 +3855,7 @@
   "prefs.shortcuts": "Pikanäppäimet",
   "prefs.shortcuts_import": "Tuo",
   "prefs.shortcuts_intro": "Näppäimet kullekin komennolle.",
-  "prefs.shortcuts_not_assigned": "Ei määritetty",
+  "prefs.shortcuts_not_assigned": "Lisää pikanäppäin",
   "prefs.shortcuts_press": "Paina näppäintä...",
   "prefs.show_discord_button": "Näytä Discord-painike",
   "prefs.show_discord_button_help": "Discord-painike otsikkorivillä ennen Ilmoita virheestä -kohtaa. Sen × poistaa sen käytöstä; Ohje-valikko, Tietoja ja Aloitus säilyttävät Discord-linkin joka tapauksessa.",

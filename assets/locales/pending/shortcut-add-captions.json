@@ -1,0 +1,47 @@
+{
+  "bg": {
+    "prefs.shortcuts_not_assigned": "Добавяне на клавишна комбинация"
+  },
+  "bs": {
+    "prefs.shortcuts_not_assigned": "Dodaj prečicu"
+  },
+  "da": {
+    "prefs.shortcuts_not_assigned": "Tilføj genvej"
+  },
+  "eu": {
+    "prefs.shortcuts_not_assigned": "Gehitu lasterbidea"
+  },
+  "gl": {
+    "prefs.shortcuts_not_assigned": "Engadir atallo"
+  },
+  "hr": {
+    "prefs.shortcuts_not_assigned": "Dodaj prečac"
+  },
+  "hu": {
+    "prefs.shortcuts_not_assigned": "Billentyűparancs hozzáadása"
+  },
+  "id": {
+    "prefs.shortcuts_not_assigned": "Tambahkan pintasan"
+  },
+  "lo": {
+    "prefs.shortcuts_not_assigned": "ເພີ່ມປຸ່ມລັດ"
+  },
+  "ms": {
+    "prefs.shortcuts_not_assigned": "Tambah pintasan"
+  },
+  "nb": {
+    "prefs.shortcuts_not_assigned": "Legg til hurtigtast"
+  },
+  "nl": {
+    "prefs.shortcuts_not_assigned": "Sneltoets toevoegen"
+  },
+  "pt-PT": {
+    "prefs.shortcuts_not_assigned": "Adicionar atalho"
+  },
+  "ro": {
+    "prefs.shortcuts_not_assigned": "Adaugă comandă rapidă"
+  },
+  "sv": {
+    "prefs.shortcuts_not_assigned": "Lägg till kortkommando"
+  }
+}

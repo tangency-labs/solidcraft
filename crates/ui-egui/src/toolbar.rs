@@ -683,7 +683,6 @@ impl FileAction {
             Self::Settings => crate::prefs::open_at(app, 0),
             Self::Shortcuts => {
                 app.keymap.open = true;
-                app.keymap.read_only = false;
             }
             Self::AgentChat => crate::agent_chat::toggle(app),
             Self::Quit => crate::documents::request_quit(app),

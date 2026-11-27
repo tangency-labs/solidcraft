@@ -3638,7 +3638,7 @@
   "prefs.shortcuts": "Skróty",
   "prefs.shortcuts_import": "Importuj",
   "prefs.shortcuts_intro": "Klawisze dla każdego polecenia.",
-  "prefs.shortcuts_not_assigned": "Nie przypisano",
+  "prefs.shortcuts_not_assigned": "Dodaj skrót klawiszowy",
   "prefs.shortcuts_press": "Naciśnij klawisz…",
   "prefs.show_discord_button": "Pokaż przycisk Discord",
   "prefs.show_discord_button_help": "Przycisk Discord na pasku tytułu, przed przyciskiem Zgłoś błąd. Jego × go wyłącza; menu Pomoc, okno O programie i strona startowa i tak zachowują link do Discorda.",

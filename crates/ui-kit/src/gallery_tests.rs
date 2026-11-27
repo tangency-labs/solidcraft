@@ -2165,11 +2165,11 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("shortcut_binding", |ui, _| {
         ui.horizontal(|ui| {
-            shortcut_binding(ui, "Ctrl+Shift+PageDown", "Not assigned", true);
-            shortcut_binding(ui, "Option+Enter", "Not assigned", false);
-            shortcut_binding(ui, "Ctrl++", "Not assigned", true);
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", "Add Shortcut", true);
+            shortcut_binding(ui, "Option+Enter", "Add Shortcut", false);
+            shortcut_binding(ui, "Ctrl++", "Add Shortcut", true);
         });
-        shortcut_binding(ui, "", "Not assigned", true);
+        shortcut_binding(ui, "", "Add Shortcut", true);
     }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
@@ -3002,4 +3002,70 @@ fn preference_widgets_and_figures_board_in_both_themes() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn shortcuts_hover_and_focus_outline_stays_inside_the_clipped_cell() {
+    let t = Tokens::get();
+    for chord in ["Ctrl+Shift+J", ""] {
+        let ctx = super::test_support::context();
+        let mut target = egui::Rect::NOTHING;
+        for pass in 0..4 {
+            let at = target.left_center() + vec2(t.space_2, 0.0);
+            let events = match pass {
+                0 => vec![],
+                1 => vec![egui::Event::PointerMoved(at)],
+                _ => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: pass == 2,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            };
+            let mut clicked = false;
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                scope(ui, |ui| {
+                    let width = shortcut_binding_width(ui, chord, "Add Shortcut");
+                    let cell = egui::Rect::from_min_size(ui.next_widget_position(), vec2(width, t.control_height));
+                    ui.set_clip_rect(cell);
+                    let response = shortcut_binding(ui, chord, "Add Shortcut", true);
+                    target = response.rect;
+                    clicked = response.clicked();
+                });
+            });
+            output.textures_delta.clear();
+            if pass > 0 {
+                let rings: Vec<_> =
+                    output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.stroke.color == t.form_primary)).collect();
+                assert_eq!(rings.len(), 1, "{chord:?}, pass {pass}: hover/focus ring");
+                for ring in rings {
+                    let egui::Shape::Rect(shape) = &ring.shape else { unreachable!() };
+                    assert_eq!(shape.stroke_kind, egui::StrokeKind::Inside);
+                    assert!(target.contains_rect(ring.shape.visual_bounding_rect()), "the full stroke stays inside its own target");
+                    assert!(ring.clip_rect.contains_rect(ring.shape.visual_bounding_rect()), "no side is cut by the cell");
+                }
+            }
+            assert_eq!(clicked, pass == 3, "both a chord and Add Shortcut record on click");
+        }
+    }
+}
+
+#[test]
+fn shortcuts_bare_actions_never_paint_a_background_or_border() {
+    let ctx = super::test_support::context();
+    let t = Tokens::get();
+    let mut target = egui::Rect::NOTHING;
+    for hovered in [false, true] {
+        let events = if hovered { vec![egui::Event::PointerMoved(target.center())] } else { vec![] };
+        let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            scope(ui, |ui| {
+                (target, _) = ui.allocate_exact_size(vec2(t.control_height, t.control_height), egui::Sense::hover());
+                let response = bare_icon_button_at(ui, target, "undo", "Reset");
+                assert_eq!(response.hovered(), hovered);
+            });
+        });
+        output.textures_delta.clear();
+        assert!(!output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+            if r.rect == target && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0))));
+    }
 }

@@ -3427,7 +3427,7 @@
   "prefs.shortcuts": "Сочетания клавиш",
   "prefs.shortcuts_import": "Импорт",
   "prefs.shortcuts_intro": "Клавиши для каждой команды.",
-  "prefs.shortcuts_not_assigned": "Не назначено",
+  "prefs.shortcuts_not_assigned": "Добавить сочетание клавиш",
   "prefs.shortcuts_press": "Нажмите клавишу...",
   "prefs.show_discord_button": "Показывать кнопку Discord",
   "prefs.show_discord_button_help": "Кнопка Discord в строке заголовка перед «Сообщить об ошибке». Значок × на ней отключает её; меню «Справка», «О программе» и «Главная» в любом случае сохраняют ссылку на Discord.",

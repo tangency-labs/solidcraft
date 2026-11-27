@@ -4011,7 +4011,7 @@
   "prefs.shortcuts": "ショートカット",
   "prefs.shortcuts_import": "インポート",
   "prefs.shortcuts_intro": "各コマンドのキー。",
-  "prefs.shortcuts_not_assigned": "未割り当て",
+  "prefs.shortcuts_not_assigned": "ショートカットを追加",
   "prefs.shortcuts_press": "キーを押してください...",
   "prefs.show_discord_button": "Discord ボタンを表示",
   "prefs.show_discord_button_help": "タイトルバーの「バグを報告」の前に Discord ボタンを表示します。× で隠せます。ヘルプメニュー、バージョン情報、ホームには常にリンクがあります。",

@@ -1081,8 +1081,20 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `settings_picture_choices`, `settings_picture_choices_sized`, `PictureChoice`, `PictureChoiceSize` | A labelled, wrapping radio group with stable option handles and one search result for the row or matching choice. Returns the picked index. The sized variant accepts the card width, figure aspect and caption visibility used by independent Preferences pages. | card tokens, `space_10/12/16/24` |
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip on hover and in a popover after a click, Enter or Space; a click outside or Escape closes it. Exposes `text` as the button's label. | `form_dim`, `form_ink` |
-| `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
+| `shortcut_binding(ui, chord, unassigned, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show a plus and the host’s Add Shortcut label. Padding and an inside stroke keep the complete hover/focus ring inside clipped table cells. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10/12`, `radius_sm` |
 | `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
+
+Preferences' Shortcuts table stays editable in Preferences, Help and search results. Its three
+columns contain the command's registered icon/name, centred shortcut bindings, and a fixed-width
+blank-header actions column. Assigned chords have separate click targets with `space_16` gaps;
+only empty rows show the centred plus and Add Shortcut caption. A quiet plus appears beside an
+assigned group on hover or keyboard focus to record another binding. The final column aligns
+bare Remove and Reset buttons to its right edge: Remove clears assigned chords, and Reset
+appears only when the bindings differ from the selected keyboard profile or registry defaults.
+`bare_icon_button_at` brightens its glyph without a border or hover background; the kit's Quiet
+presentation keeps its own hover styling. The profile picker, excluded-key reports and source
+captions under command names remain available. Empty action cells keep the column width without
+painting disabled buttons. Section bands retain their command counts.
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.

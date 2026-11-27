@@ -3407,7 +3407,7 @@
   "prefs.shortcuts": "Kısayollar",
   "prefs.shortcuts_import": "İçe Aktar",
   "prefs.shortcuts_intro": "Her komut için tuşlar.",
-  "prefs.shortcuts_not_assigned": "Atanmamış",
+  "prefs.shortcuts_not_assigned": "Kısayol ekle",
   "prefs.shortcuts_press": "Bir tuşa basın...",
   "prefs.show_design_view_switcher": "Tasarım görünümü değiştiricisini göster",
   "prefs.show_design_view_switcher_note": "Her tasarım sekmesi kendi görünüm değiştiricisini gösterir ve bir eskizi düzenlemek veya Render'ı açmak kendi görünümünü ekler. Kapalı: Tasarımın ikinci bir görünümünü (Ctrl+T) açana kadar tasarım sekmesinde değiştirici gösterilmez.",

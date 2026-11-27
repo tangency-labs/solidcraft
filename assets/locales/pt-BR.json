@@ -3618,7 +3618,7 @@
   "prefs.shortcuts": "Atalhos",
   "prefs.shortcuts_import": "Importar",
   "prefs.shortcuts_intro": "Teclas de cada comando.",
-  "prefs.shortcuts_not_assigned": "Não atribuído",
+  "prefs.shortcuts_not_assigned": "Adicionar atalho",
   "prefs.shortcuts_press": "Pressione uma tecla...",
   "prefs.show_discord_button": "Mostrar botão Discord",
   "prefs.show_discord_button_help": "Uma pílula do Discord na barra de título, antes de Relatar um bug. O × nela desliga; o menu Ajuda, Sobre e Início mantêm o link do Discord de qualquer jeito.",

@@ -2861,7 +2861,6 @@ impl prefs_window::Host for SolveApp {
     }
     fn page_left(&mut self) {
         crate::keymap::stop_capture(self);
-        self.keymap.read_only = false;
     }
     fn result_opened(&mut self, page: usize) {
         if page == PAGE_SHORTCUTS {
@@ -2876,7 +2875,6 @@ impl prefs_window::Host for SolveApp {
         self.prefs_window.plugin_remove = None;
         self.prefs_window.panel_restore_details = false;
         self.prefs_window.panel_popup_reset = true;
-        self.keymap.read_only = false;
         crate::keymap::stop_capture(self);
     }
 }
@@ -2939,8 +2937,7 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
     match index {
         PAGE_SHORTCUTS => {
-            let read_only = app.keymap.read_only;
-            let mut show = |ui: &mut egui::Ui| {
+            let show = |ui: &mut egui::Ui| {
                 ui_kit::settings_heading_with_tag(
                     ui,
                     app.tr("prefs.shortcuts"),
@@ -2949,11 +2946,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
                 );
                 crate::keymap::page(app, ui);
             };
-            if read_only {
-                show(ui);
-            } else {
-                ui_kit::settings_page(ui, show);
-            }
+            ui_kit::settings_page(ui, show);
         }
         PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),

@@ -76,7 +76,6 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
         "updates" => crate::update::check_now(app, ctx),
         "shortcuts" => {
             app.keymap.open = true;
-            app.keymap.read_only = true;
         }
         "crashes" => crate::crash_ui::open(app),
         "connect" => app.help.connect = Some(connect_assistants()),

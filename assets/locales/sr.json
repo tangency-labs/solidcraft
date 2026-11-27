@@ -3619,7 +3619,7 @@
   "prefs.shortcuts": "Пречице",
   "prefs.shortcuts_import": "Увези",
   "prefs.shortcuts_intro": "Тастери за сваку команду.",
-  "prefs.shortcuts_not_assigned": "Није додељено",
+  "prefs.shortcuts_not_assigned": "Додај пречицу",
   "prefs.shortcuts_press": "Притисните тастер...",
   "prefs.show_discord_button": "Прикажи дугме Discord",
   "prefs.show_discord_button_help": "Дугме Discord у насловној траци, испред Пријави грешку. × на њему га искључује; мени Помоћ, О програму и Почетак задржавају везу ка Discord-у у сваком случају.",
