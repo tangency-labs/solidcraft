@@ -338,7 +338,7 @@ pub struct FilletCorner {
     /// continued to hold it once the rails are trimmed, before the faces are made
     /// (`chamfer::continue_chamfer_surfaces`): the rails' trim reads them at the ends of
     /// the surface's own parameter box.
-    pub chamfer_reach: Vec<(crate::blend::fillet_geom::p1::FilletGeomId, Point3)>,
+    pub chamfer_reach: Vec<(FilletGeomId, Point3)>,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.

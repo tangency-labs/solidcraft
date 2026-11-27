@@ -403,6 +403,10 @@ struct ChamferPlane {
     h: f64,
 }
 
+/// A chamfer's plane in its ring ([`chamfer_planes_at`]): the plane, its setbacks on `F_i` and
+/// `F_(i+1)`, and its rails' unit directions away from the edge into those faces.
+type RingPlane = (ChamferPlane, [f64; 2], [Vec3; 2]);
+
 /// The solution of `a_k . y = b_k`, k = 0..3 (Cramer's rule), `None` where the planes
 /// do not meet in one point.
 fn solve3(a: [Vec3; 3], b: [f64; 3]) -> Option<Vec3> {
@@ -484,7 +488,7 @@ fn chamfer_planes_at(
     t: &[Vec3],
     widths: &[ChamferWidth],
     reflex: &[bool],
-) -> core::result::Result<Vec<(ChamferPlane, [f64; 2], [Vec3; 2])>, &'static str> {
+) -> core::result::Result<Vec<RingPlane>, &'static str> {
     let n = t.len();
     let mut out = Vec::new();
     for (i, width) in widths.iter().enumerate() {
@@ -697,7 +701,7 @@ fn too_wide_of(mu: &[Vec3], planes: &[ChamferPlane], forms: &MitreForms) -> Opti
 /// plane of the face its form is taken on.
 fn mixed_forms(
     mu: &[Vec3],
-    planes: &[(ChamferPlane, [f64; 2], [Vec3; 2])],
+    planes: &[RingPlane],
     concave: &[bool],
     reflex: &[bool],
 ) -> Option<MitreForms> {
