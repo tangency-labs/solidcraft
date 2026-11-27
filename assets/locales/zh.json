@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "单击以确定区域的大小。",
   "ui.drawing_detail.title": "局部视图",
   "ui.drawing_dimension_tool.pick": "点击工程图视图中的边。",
-  "ui.drawing_dimension_tool.place": "点击图纸以放置尺寸。",
+  "ui.drawing_dimension_tool.place": "点击图纸或按 Enter 以放置尺寸。",
   "ui.drawing_export.all_sheets": "所有图纸",
   "ui.drawing_export.dxf": "DXF（线条）",
   "ui.drawing_export.dxf_note": "当前显示的图纸，线条以毫米为单位，每种线型一个图层。着色视图和图像不包含在内。",

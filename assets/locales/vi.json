@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "Bấm để đặt kích thước vùng.",
   "ui.drawing_detail.title": "Hình chi tiết",
   "ui.drawing_dimension_tool.pick": "Bấm vào một cạnh trong hình chiếu.",
-  "ui.drawing_dimension_tool.place": "Bấm vào tờ bản vẽ để đặt kích thước.",
+  "ui.drawing_dimension_tool.place": "Bấm vào tờ bản vẽ hoặc nhấn Enter để đặt kích thước.",
   "ui.drawing_export.all_sheets": "Mọi tờ",
   "ui.drawing_export.dxf": "DXF (đường nét)",
   "ui.drawing_export.dxf_note": "Tờ đang hiển thị, các đường nét tính bằng milimét, mỗi loại đường một lớp. Hình chiếu tô bóng và ảnh bị bỏ qua.",

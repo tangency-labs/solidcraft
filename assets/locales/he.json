@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "לחצו כדי לקבוע את גודל האזור.",
   "ui.drawing_detail.title": "מבט פרט",
   "ui.drawing_dimension_tool.pick": "לחצו על קצה בתצוגת השרטוט.",
-  "ui.drawing_dimension_tool.place": "לחצו על הגיליון כדי למקם את המידה.",
+  "ui.drawing_dimension_tool.place": "לחצו על הגיליון או הקישו Enter כדי למקם את המידה.",
   "ui.drawing_export.all_sheets": "כל הגיליונות",
   "ui.drawing_export.dxf": "DXF (קווים)",
   "ui.drawing_export.dxf_note": "הגיליון המוצג, הקווים שלו במילימטרים, שכבה לכל סוג קו. מבטים מוצללים ותמונות אינם נכללים.",

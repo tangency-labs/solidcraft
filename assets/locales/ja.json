@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "クリックして範囲の大きさを決めます。",
   "ui.drawing_detail.title": "詳細図",
   "ui.drawing_dimension_tool.pick": "図面ビューのエッジをクリックします。",
-  "ui.drawing_dimension_tool.place": "シートをクリックして寸法を配置します。",
+  "ui.drawing_dimension_tool.place": "シートをクリックするか Enter を押して寸法を配置します。",
   "ui.drawing_export.all_sheets": "すべてのシート",
   "ui.drawing_export.dxf": "DXF（線）",
   "ui.drawing_export.dxf_note": "表示中のシートをミリ単位の線で出力し、線の種類ごとに画層を分けます。シェーディングされたビューと画像は含まれません。",

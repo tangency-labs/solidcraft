@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "Click to set the region's size.",
   "ui.drawing_detail.title": "Detail View",
   "ui.drawing_dimension_tool.pick": "Click an edge in a drawing view.",
-  "ui.drawing_dimension_tool.place": "Click the sheet to place the dimension.",
+  "ui.drawing_dimension_tool.place": "Click the sheet or press Enter to place the dimension.",
   "ui.drawing_export.all_sheets": "All sheets",
   "ui.drawing_export.dxf": "DXF (lines)",
   "ui.drawing_export.dxf_note": "The sheet shown, its lines in millimeters, a layer for each kind of line. Shaded views and images are left out.",

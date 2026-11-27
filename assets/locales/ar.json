@@ -6390,7 +6390,7 @@
   "ui.drawing_detail.step_size": "انقر لتحديد حجم المنطقة.",
   "ui.drawing_detail.title": "مسقط تفصيلي",
   "ui.drawing_dimension_tool.pick": "انقر لاختيار حافة من المسقط.",
-  "ui.drawing_dimension_tool.place": "انقر على الورقة لوضع البُعد.",
+  "ui.drawing_dimension_tool.place": "انقر على الورقة أو اضغط Enter لوضع البُعد.",
   "ui.drawing_export.all_sheets": "كل الأوراق",
   "ui.drawing_export.dxf": "DXF (خطوط)",
   "ui.drawing_export.dxf_note": "الورقة المعروضة، خطوطها بالمليمتر، وطبقة لكل نوع من الخطوط. تُستبعد المساقط المظللة والصور.",

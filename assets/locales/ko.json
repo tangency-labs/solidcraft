@@ -5413,7 +5413,7 @@
   "ui.drawing_detail.step_size": "클릭해 영역의 크기를 정합니다.",
   "ui.drawing_detail.title": "상세도",
   "ui.drawing_dimension_tool.pick": "도면 뷰에서 모서리를 클릭하세요.",
-  "ui.drawing_dimension_tool.place": "시트를 클릭하여 치수를 배치하세요.",
+  "ui.drawing_dimension_tool.place": "시트를 클릭하거나 Enter를 눌러 치수를 배치하세요.",
   "ui.drawing_export.all_sheets": "모든 시트",
   "ui.drawing_export.dxf": "DXF(선)",
   "ui.drawing_export.dxf_note": "표시된 시트의 선을 밀리미터로, 선 종류마다 한 레이어에 씁니다. 음영 뷰와 이미지는 빠집니다.",

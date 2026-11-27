@@ -5980,7 +5980,7 @@
   "ui.drawing_detail.step_size": "Klicken, um die Größe des Bereichs festzulegen.",
   "ui.drawing_detail.title": "Detailansicht",
   "ui.drawing_dimension_tool.pick": "Klicken Sie auf eine Kante in der Ansicht.",
-  "ui.drawing_dimension_tool.place": "Klicken Sie auf das Blatt, um das Maß zu platzieren.",
+  "ui.drawing_dimension_tool.place": "Klicken Sie auf das Blatt oder drücken Sie die Eingabetaste, um das Maß zu platzieren.",
   "ui.drawing_export.all_sheets": "Alle Blätter",
   "ui.drawing_export.dxf": "DXF (Linien)",
   "ui.drawing_export.dxf_note": "Das angezeigte Blatt, seine Linien in Millimetern, eine Ebene pro Linienart. Schattierte Ansichten und Bilder werden weggelassen.",

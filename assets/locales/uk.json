@@ -6072,7 +6072,7 @@
   "ui.drawing_browser_title_block": "Основний напис",
   "ui.drawing_browser_view": "Вид {number}",
   "ui.drawing_dimension_tool.pick": "Клацніть ребро у виді креслення.",
-  "ui.drawing_dimension_tool.place": "Клацніть аркуш, щоб розмістити розмір.",
+  "ui.drawing_dimension_tool.place": "Клацніть аркуш або натисніть Enter, щоб розмістити розмір.",
   "ui.drawing_first.after_named": "Після {name}",
   "ui.drawing_first.any_size": "будь-який розмір",
   "ui.drawing_first.blank": "Порожній аркуш креслення",
