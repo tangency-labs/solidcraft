@@ -355,11 +355,13 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if c.on_dots() {
             args.insert("dot_grid".into(), json!(DOT_GRIDS.get(c.dot_grid).copied().unwrap_or("hexagonal")));
         }
+        // A wall always cuts: a raised choice kept from before the wall was picked is dropped.
+        let raised = c.raised() && wall_body.is_none();
         // Cut is the command's default: left out, as before the choice existed.
-        if c.raised() && wall_body.is_none() {
+        if raised {
             args.insert("mode".into(), json!("raised"));
         }
-        if c.through_all && !c.raised() {
+        if c.through_all && !raised {
             args.insert("through_all".into(), json!(true));
         } else {
             args.insert("depth".into(), json!(c.depth));

@@ -523,7 +523,6 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         }
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)" | "ui.cell_grid.wall") {
             continue; // Cell Grid's wall is an alternative to its profiles: the form checks it apart
-
         }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
         let point = if index == 1 && command != "surface.ruled" { Vec3::new(30.0, 0.0, 5.0) } else { Vec3::new(0.0, 0.0, 5.0) };
