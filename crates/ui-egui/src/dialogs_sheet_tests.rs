@@ -259,9 +259,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", Some(DxfExportOptions::default())), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -337,6 +337,147 @@ fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
         }
         assert!(!texts.iter().any(|t| t.galley.text().contains('×')), "{layout}: the sides are no longer run together");
     }
+}
+
+/// A plate with one flange up, its Flat Pattern panel open, and `profile` written beside the
+/// exports as the file the next Open picker returns.
+fn flat_panel_with_profile_file(profile: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+    for (id, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+        ("sketch.finish", json!({})),
+        ("sheet.flange", json!({"sketch": "Base"})),
+        ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    std::fs::write(h.dir.join("example-laser.json"), profile).unwrap();
+    h.app.start("sheet.flat_pattern");
+    h.frames(4);
+    h.step(&json!({"choose_file": "example-laser.json"})).unwrap();
+    h
+}
+
+/// Everything the Flat Pattern panel paints in one more frame.
+fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
+    let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+        h.app.logic(ui.ctx());
+        h.app.ui(ui);
+    });
+    crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect()
+}
+
+/// The one DXF the panel's Export DXF… wrote into the scenario's folder.
+fn exported_dxf(h: &crate::scenario::Harness) -> Option<String> {
+    let mut files = std::fs::read_dir(&h.dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "dxf"));
+    let file = files.next()?;
+    assert!(files.next().is_none(), "one DXF");
+    Some(std::fs::read_to_string(file).unwrap())
+}
+
+/// The Flat Pattern panel takes a DXF profile (#6803): Choose profile… reads a shop's file, the
+/// panel lists the roles it writes otherwise than the standard layers, and Export DXF… writes
+/// the file with it. Without a profile the export is the command's plain one.
+#[test]
+fn flat_pattern_exports_the_dxf_with_the_chosen_profile() {
+    let profile = json!({
+        "format": "solidcraft-dxf-profile",
+        "name": "Example laser",
+        "roles": {
+            "outline": {"layer": "LASER_CUT", "color": 7},
+            "bend_up": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_down": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_notes": {"on": false},
+        }
+    });
+    let mut h = flat_panel_with_profile_file(&profile.to_string());
+    let texts = painted_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "DXF profile") && texts.iter().any(|t| t == "Standard layers"), "{texts:?}");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let plain = exported_dxf(&h).unwrap();
+    assert_eq!(plain, h.app.session.execute("sheet.export_dxf", &json!({})).unwrap()["dxf"].as_str().unwrap());
+    assert!(plain.contains("BEND_UP") && !plain.contains("FOLD") && !plain.contains("LASER_CUT"));
+
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    for shown in ["Example laser", "LASER_CUT, color 7, continuous", "FOLD, color 30, hidden", "Not exported", "Bends up", "Bend notes"] {
+        assert!(texts.iter().any(|t| t.trim() == shown), "{shown} is not shown: {texts:?}");
+    }
+    // Roles the profile leaves as they are have no row.
+    assert!(!texts.iter().any(|t| t.trim() == "Roll lines" || t.trim() == "Etched text"), "{texts:?}");
+    assert_eq!(texts.iter().filter(|t| t.as_str() == "FOLD, color 30, hidden").count(), 2, "both bend directions");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let written = exported_dxf(&h).unwrap();
+    let path = h.dir.join("example-laser.json").to_string_lossy().into_owned();
+    assert_eq!(written, h.app.session.execute("sheet.export_dxf", &json!({"profile": path})).unwrap()["dxf"].as_str().unwrap());
+    assert!(written.contains("LASER_CUT") && written.contains("FOLD"));
+    assert!(!written.contains("BEND_UP"));
+
+    // Back to the standard layers: the plain file again.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert_eq!(exported_dxf(&h).unwrap(), plain);
+}
+
+/// A profile file that cannot be used says why in the panel, and Export DXF… writes nothing
+/// with it: a cutter that expects its own layers must not get the standard ones by mistake.
+#[test]
+fn flat_pattern_refuses_to_export_with_a_dxf_profile_it_cannot_use() {
+    let mut h = flat_panel_with_profile_file(r#"{"format": "solidcraft-dxf-profile", "roles": {"engrave": {"layer": "MARK"}}}"#);
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    let error = texts.iter().find(|t| t.starts_with("This DXF profile cannot be used.")).unwrap_or_else(|| panic!("no error shown: {texts:?}"));
+    assert!(error.contains("role `engrave` is not known"), "{error}");
+    // The file's name stands for the profile that has none.
+    assert!(texts.iter().any(|t| t == "example-laser.json"), "{texts:?}");
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_none() && !h.app.file_picker_busy(), "nothing is exported and no picker opens");
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.as_deref().is_some_and(|s| s.starts_with("Nothing was exported")), "{status:?}");
+    assert!(profile.as_ref().is_some_and(|p| p.read.is_err()));
+
+    // The file is read again at each export: once it is mended, the same choice exports.
+    std::fs::write(
+        h.dir.join("example-laser.json"),
+        r#"{"format": "solidcraft-dxf-profile", "roles": {"etch": {"layer": "MARK"}, "outline": {"layer": "LASER_CUT"}}}"#,
+    )
+    .unwrap();
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_some_and(|dxf| dxf.contains("LASER_CUT")));
+    // Dropping the profile takes the last export's message with it.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.is_none() && profile.is_none(), "{status:?}");
+    // A file that is not there is refused the same way.
+    std::fs::remove_file(h.dir.join("example-laser.json")).unwrap();
+    let choice = DxfProfileChoice::open(h.dir.join("example-laser.json").to_string_lossy().into_owned());
+    assert!(choice.read.is_err());
+    // A profile that changes nothing lists no role.
+    assert!(dxf_profile_changes(&solidcraft_engine::io::DxfExportProfile::neutral()).is_empty());
 }
 
 #[test]
@@ -470,7 +611,9 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         h.app.start("sheet.flat_pattern");
         h.settle();
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"Export DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:options"}})).unwrap();
+        assert!(!path.exists(), "opening the options does not export");
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:save"}})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
@@ -495,7 +638,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();

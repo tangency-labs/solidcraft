@@ -478,9 +478,24 @@ consume an undo step.
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf"}}
 ```
 
-The DXF is an AutoCAD 2000 (`AC1015`) drawing in millimetres, made for a laser-cutting shop's
+The DXF is an AutoCAD 2000 (`AC1015`) drawing, made for a laser-cutting shop's
 nesting or CAM software: each kind of line is on a layer of its own, with a colour (AutoCAD's
 index) and, for the bends, a linetype that the file defines.
+
+`"units"` is `mm` (the default) or `inches`: in `inches` every coordinate, radius and text height
+is written in inches, the header is `$INSUNITS 1` and `$MEASUREMENT 0` (instead of `$INSUNITS 4`
+and `$MEASUREMENT 1`), the `DASHED` pattern is in half and quarter inches, the bend notes' radii
+are in inches and the pocket layers name their depths in inches (`POCKET_…_Z…_TO_…_IN`). The
+drawing is the same part, only its units are different; the bend table's CSV stays in millimetres.
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat-in.dxf","units":"inches"}}
+```
+
+`"bend_lines"` (default `true`) and `"markings"` (default `true`) keep or leave out the bend
+centre lines and the letters' contours with the bend notes — for a cutter that would cut or etch
+them. **Export DXF…** opens these options before the save picker, from the flat-pattern panel
+or the Sheet Metal ribbon. The choices apply to that export only.
 
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
@@ -533,8 +548,14 @@ A cutter's software often expects its own layer names and colours. A **DXF profi
 file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
 etched text, bends up, bends down, bend notes, pockets, perforation, roll lines) it gives the
 layer's name, its colour and its linetype (continuous, dashed or hidden), or turns the role off
-so that it is not in the file at all. Pass it as `"profile"`, either the file's path or the
-profile itself:
+so that it is not in the file at all.
+
+In the app, open **Create Flat Pattern** and click **Choose profile…** to pick the file. The panel
+lists each role the profile writes otherwise than the standard layers, or says why the file cannot
+be used, and **Export DXF…** then writes the file with it. **Use standard layers** drops the
+profile again. The ribbon's **Export DXF** button always writes the standard layers.
+
+From a script, pass it as `"profile"`, either the file's path or the profile itself:
 
 ```json
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":"example-laser.json"}}
@@ -612,7 +633,8 @@ The pocket floor and side walls remain solid geometry; overlapping cuts from opp
 become a through hole wherever they remove the whole thickness. Flat-pattern JSON lists
 `pockets` with their side, depth and bottom/top thickness coordinates in millimetres.
 DXF pocket boundaries use `POCKET_BOTTOM_Z…_TO_…_MM`, `POCKET_TOP_Z…_TO_…_MM`, or
-`POCKET_INTERNAL_Z…_TO_…_MM` layers. These are machining operations, so do not treat every
+`POCKET_INTERNAL_Z…_TO_…_MM` layers (named in `_IN` with their depths in inches in an inches
+drawing, `"units": "inches"`). These are machining operations, so do not treat every
 pocket layer as a through-cut contour when importing the drawing into a CAM tool. (Text
 machined to a depth is a marking, on `ETCH`.)
 

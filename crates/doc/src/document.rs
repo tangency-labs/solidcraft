@@ -22,7 +22,7 @@ pub const MAX_FEATURE_ID: u64 = 1 << 52;
 pub struct Param {
     pub name: String,
     pub expr: String,
-    /// `mm`, `deg` or empty (unit-less).
+    /// A unit (`mm`, `deg`, `kg`, `mm³`…) or empty (unit-less).
     pub unit: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
@@ -204,6 +204,31 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Profiles that the curves around them can't tell apart (twins, such as the halves of a lens
+    /// a line cuts), each saved as the curves of its outer loop with the side of each it lies on
+    /// (#22548). Found again on every evaluation; after a change of the regions, the profile that
+    /// shares the most of those curves on the same sides and lies against none of them. A tie is
+    /// an error, never a guess.
+    SidedCurves { loops: Vec<Vec<SidedCurve>> },
+}
+
+/// The side of a sketch curve a region lies on: inside or outside a circle or arc (toward its
+/// centre or away from it), left or right of a line seen from its start to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveSide {
+    Inside,
+    Outside,
+    Left,
+    Right,
+}
+
+/// A curve of a profile's outer loop and the side of it the profile lies on.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SidedCurve {
+    pub curve: String,
+    pub side: CurveSide,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1339,6 +1364,11 @@ pub enum FeatureKind {
         /// that fades out); none: the groove stops square there.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ease_out: Option<ThreadRunout>,
+        /// A modelled internal thread runs down to a blind hole's bottom, its last turn trimmed at
+        /// the plane of the bottom, instead of stopping clear of it (#22616): a printed part needs
+        /// no room for a tap's lead. Missing in older designs, whose threads stop clear as before.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        to_bottom: bool,
         /// The chamfered tip at the thread's free end (ISO 4753).
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         tip: crate::thread_forms::ThreadTip,
@@ -1923,7 +1953,7 @@ pub enum FeatureKind {
     },
     /// A spline on a shaft, in a bore, or both (#17693): tooth spaces cut into the picked round faces, or, with
     /// no face picked, a new splined shaft and hub at the origin. The teeth come from the kernel's tooth outlines
-    /// (`solidcraft_kernel::services::shaft_spline`), so every number here is one of their inputs and stays a parameter.
+    /// (`solidcraft_kernel::shaft_spline`), so every number here is one of their inputs and stays a parameter.
     ShaftSpline {
         /// A point on the outside of the shaft the tooth spaces are cut into.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2984,6 +3014,14 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// Constructions (by feature id) carried along with the bodies although they are not
+        /// built only on them, such as a Center Pole placed at fixed points.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        carry: Vec<FeatureId>,
+        /// Constructions (by feature id) built on the moved bodies that stay where they are
+        /// instead of following them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        leave: Vec<FeatureId>,
         /// For each copied body, its captured source frame in the copy's component. Applied
         /// after the source-local move. Empty in older designs, which copy local geometry.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3842,6 +3880,16 @@ pub enum PatternKind {
         copy_at_end1: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy_at_end2: bool,
+        /// Count and spacing list: the gaps between neighbours along the first direction, used
+        /// in turn and from the start again, so `10; 20; 30` with a count of 5 puts the copies
+        /// at 10, 30, 60 and 70.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list")]
+        spacing_list1: Vec<Expr>,
+        /// The spacing list along the second direction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list 2")]
+        spacing_list2: Vec<Expr>,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -3927,6 +3975,8 @@ pub enum PatternDistance {
     CountExtent,
     /// The spacing and the extent: as many evenly spaced copies as fit in the extent.
     SpacingExtent,
+    /// The count and a list of spacings, used in turn and from the start again.
+    CountList,
 }
 
 impl PatternDistance {
@@ -3940,12 +3990,13 @@ impl PatternDistance {
             Self::CountSpacing => "count_spacing",
             Self::CountExtent => "count_extent",
             Self::SpacingExtent => "spacing_extent",
+            Self::CountList => "count_list",
         }
     }
 
     /// Read [`PatternDistance::as_str`]'s word.
     pub fn from_word(word: &str) -> Option<Self> {
-        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent].into_iter().find(|d| d.as_str() == word)
+        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent, Self::CountList].into_iter().find(|d| d.as_str() == word)
     }
 
     /// Whether the count is given (else worked out from the spacing and the extent).
@@ -3953,14 +4004,20 @@ impl PatternDistance {
         self != Self::SpacingExtent
     }
 
-    /// Whether the spacing is given (else worked out from the count and the extent).
+    /// Whether one spacing is given (else worked out from the count and the extent, or the
+    /// list's first).
     pub fn uses_spacing(self) -> bool {
-        self != Self::CountExtent
+        matches!(self, Self::CountSpacing | Self::SpacingExtent)
     }
 
     /// Whether an extent is given.
     pub fn uses_extent(self) -> bool {
-        self != Self::CountSpacing
+        matches!(self, Self::CountExtent | Self::SpacingExtent)
+    }
+
+    /// Whether a list of spacings is given.
+    pub fn uses_list(self) -> bool {
+        self == Self::CountList
     }
 }
 
@@ -4000,9 +4057,9 @@ pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
 
 /// `v` as a unit direction, however short it is: scaled by its largest component first, so
 /// only a vector that is exactly zero (or not finite) has none (#18822). The kernel makes it
-/// unit (`solidcore_ops::unit_direction`).
+/// unit (`solidcraft_kernel::points::unit_direction`).
 pub fn unit_direction(v: Vec3) -> Option<Vec3> {
-    solidcraft_kernel::services::unit_direction([v.x, v.y, v.z]).map(Vec3::from)
+    solidcraft_kernel::points::unit_direction([v.x, v.y, v.z]).map(Vec3::from)
 }
 
 fn z_axis_expr() -> DirExpr {
@@ -6232,8 +6289,8 @@ impl Document {
             if p.expr.len() > 4096 || p.comment.len() > 4096 {
                 return Err(DocError::Expr(format!("parameter `{}`: expression or comment too long", p.name)));
             }
-            if !p.unit.is_empty() && expr::unit_info(&p.unit).is_none() {
-                return Err(DocError::Invalid(format!("parameter `{}`: unknown unit `{}`", p.name, p.unit)));
+            if let Some(why) = expr::unit_problem(&p.unit) {
+                return Err(DocError::Invalid(format!("parameter `{}`: {why}", p.name)));
             }
         }
         let id = f.id;
@@ -6404,8 +6461,7 @@ impl Document {
 
     /// Why a name cannot be a parameter name (None = fine).
     pub fn param_name_problem(name: &str) -> Option<String> {
-        let mut cs = name.chars();
-        if !matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') || !cs.all(|c| c.is_alphanumeric() || c == '_') {
+        if !expr::is_name_shaped(name) {
             return Some(format!("`{name}` is not a valid parameter name (letters, digits and _, starting with a letter)"));
         }
         if name.len() > 64 {
@@ -6436,10 +6492,8 @@ impl Document {
         if expr_s.trim().is_empty() {
             return Err(DocError::Expr("empty expression".into()));
         }
-        if let Some(u) = unit
-            && expr::unit_info(u).is_none()
-        {
-            return Err(DocError::Expr(format!("unknown unit `{u}` (mm, cm, m, in, ft, deg, rad or none)")));
+        if let Some(why) = unit.and_then(expr::unit_problem) {
+            return Err(DocError::Expr(why));
         }
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
