@@ -2595,18 +2595,19 @@ fn a_hole_in_a_notched_cross_cut_large_half_torus_is_cut() {
 /// The cut was refused by the check's test 11 ("Bad SpeedPt") on a UV trim of the outer round:
 /// the round's two parameters have very different lengths on the surface, and the trim, read in
 /// raw (u, v), slowed to 3.5e-4 against a tolerance of 4.4e-4; on the surface its slowest speed
-/// is 0.97. The notch is cut into one valid body, and it takes what integrating its disc against
-/// the rounded section's height gives.
+/// is 0.97. The notch is cut into one valid body. Its volume against the analytic one is
+/// solidcore's kernel case `booleans/23062-notch-through-thin-round-on-large-half-torus`.
 #[test]
 fn a_notch_through_a_thin_round_on_a_large_half_torus_is_cut() {
-    let commands = json!([
-        {"command": "solid.torus", "params": {"center": [0.0, 0.0, 0.0], "major": 500.0, "minor": 0.5, "operation": "new", "body_name": "Part"}},
-        {"command": "solid.box", "params": {"length": 1003.0, "width": 1003.0, "height": 1.5, "corner": [-501.5, -501.5, -1.5], "operation": "cut", "targets": ["Part"]}},
-        {"command": "solid.fillet", "params": {"edges": [[0.0, -499.5, 0.0], [0.0, -500.5, 0.0]], "radius": 0.05}},
-        {"command": "solid.cylinder", "params": {"radius": 0.05, "height": 0.25, "base": [0.0, 500.5, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"]}}
-    ]);
-    let rounded = replay(&json!({"commands": &commands.as_array().unwrap()[..3]}).to_string());
-    let s = replay(&json!({"commands": commands}).to_string());
+    let s = replay(
+        &json!({"commands": [
+            {"command": "solid.torus", "params": {"center": [0.0, 0.0, 0.0], "major": 500.0, "minor": 0.5, "operation": "new", "body_name": "Part"}},
+            {"command": "solid.box", "params": {"length": 1003.0, "width": 1003.0, "height": 1.5, "corner": [-501.5, -501.5, -1.5], "operation": "cut", "targets": ["Part"]}},
+            {"command": "solid.fillet", "params": {"edges": [[0.0, -499.5, 0.0], [0.0, -500.5, 0.0]], "radius": 0.05}},
+            {"command": "solid.cylinder", "params": {"radius": 0.05, "height": 0.25, "base": [0.0, 500.5, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"]}}
+        ]})
+        .to_string(),
+    );
     let bodies = &s.model.state().bodies;
     assert_eq!(bodies.len(), 1);
     let body = &bodies[0].body;
@@ -2615,37 +2616,4 @@ fn a_notch_through_a_thin_round_on_a_large_half_torus_is_cut() {
     let class = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
     assert_eq!(class(0.0, 500.46, 0.05), Outside, "the notch");
     assert_eq!(class(0.0, 500.38, 0.05), Inside, "beside the notch");
-    // The section's height at a distance `rho` from the axis: the tube over the flat face, less
-    // the outer round (centre 0.05 above the face, 0.45 from the tube's centre) under it.
-    let (big, tube, round): (f64, f64, f64) = (500.0, 0.5, 0.05);
-    let round_x = big + ((tube - round) * (tube - round) - round * round).sqrt();
-    let height = |rho: f64| -> f64 {
-        let d = rho - big;
-        if d.abs() >= tube {
-            return 0.0;
-        }
-        let top = (tube * tube - d * d).sqrt().min(0.25);
-        let dx = rho - round_x;
-        let bottom = if dx <= 0.0 {
-            0.0
-        } else if dx < round {
-            round - (round * round - dx * dx).sqrt()
-        } else {
-            return 0.0;
-        };
-        (top - bottom).max(0.0)
-    };
-    let (cx, cy, cr, n) = (0.0, 500.5, 0.05, 2000);
-    let cell = 2.0 * cr / n as f64;
-    let mut notch = 0.0;
-    for i in 0..n {
-        for j in 0..n {
-            let (x, y) = (cx - cr + (i as f64 + 0.5) * cell, cy - cr + (j as f64 + 0.5) * cell);
-            if (x - cx).hypot(y - cy) <= cr {
-                notch += height(x.hypot(y)) * cell * cell;
-            }
-        }
-    }
-    let removed = volume(&rounded, "Part") - volume(&s, "Part");
-    assert!((removed - notch).abs() < 1e-6, "the notch takes {removed} mm³, want {notch}");
 }
