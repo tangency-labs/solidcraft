@@ -602,3 +602,32 @@ fn symmetric_revolve_of_arc_about_tilted_offset_axis_is_valid() {
     );
     assert_eq!(s.model.state().bodies.len(), 1);
 }
+
+/// #2667: the semicircular profile consists of two arcs with a common centre,
+/// and its diameter lies on a translated revolution axis.
+#[test]
+fn a_translated_split_half_disc_revolves_to_a_sphere() {
+    let mut s = Session::default();
+    let h = 7.0 / SQRT_2;
+    run(&mut s, "sketch.create", json!({"name":"Profile","plane":{"origin":[5,8,11],"x_dir":[1,0,0],"y_dir":[0,0,1]}}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-7],[0,7]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start":[0,-7],"through":[h,-h],"end":[7,0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start":[7,0],"through":[h,h],"end":[0,7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch":"Profile","axis":{"origin":[5,8,11],"dir":[0,0,1]},"angle":"360 deg","operation":"new","body_name":"Ball"}),
+    );
+    let result = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(result["body_count"], 1, "{result}");
+    let b = &result["bodies"][0];
+    assert_eq!(b["closed"], true, "{b}");
+    assert!((b["volume_mm3"].as_f64().unwrap() - 4.0 * PI * 7.0_f64.powi(3) / 3.0).abs() < 1e-6, "{b}");
+    assert!((b["area_mm2"].as_f64().unwrap() - 4.0 * PI * 49.0).abs() < 1e-6, "{b}");
+    for (i, (lo, hi, c)) in [(-2.0, 12.0, 5.0), (1.0, 15.0, 8.0), (4.0, 18.0, 11.0)].into_iter().enumerate() {
+        assert!((b["bbox"]["min"][i].as_f64().unwrap() - lo).abs() < 1e-6, "{b}");
+        assert!((b["bbox"]["max"][i].as_f64().unwrap() - hi).abs() < 1e-6, "{b}");
+        assert!((b["center_of_mass"][i].as_f64().unwrap() - c).abs() < 1e-6, "{b}");
+    }
+}
