@@ -52,8 +52,10 @@ jobs:
       - name: Build the app with backend-occt
         shell: pwsh
         run: |
-          cargo build --release --locked -p solidcraft --features solidcraft-kernel/backend-occt --target $env:TARGET
+          cargo build --release --locked -p solidcraft --features backend-occt --target $env:TARGET
           if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
+          cargo build --release --locked -p solidcraft-cli --features backend-occt --target $env:TARGET
+          if ($LASTEXITCODE -ne 0) { throw "cargo build (cli) failed ($LASTEXITCODE)" }
 
       - name: Bundle and check imports
         shell: pwsh
@@ -68,14 +70,26 @@ jobs:
           $out = 'dist\SolidCraft-OCCT-test'
           New-Item -ItemType Directory -Force $out | Out-Null
           Copy-Item "target\$env:TARGET\release\solidcraft.exe" $out
+          Copy-Item "target\$env:TARGET\release\solidcraft-cli.exe" $out
           Copy-Item "$env:OCCT_CAPI_LIB_DIR\occt_capi.dll" $out
-          # The module is built with MSVC's default dynamic C++ runtime: ship it app-local.
+          # The module is built with MSVC's default dynamic C++ runtime: ship it app-local, with
+          # any OCCT DLL it (or they) import, found anywhere under the OCCT install.
           $redist = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') -Directory | Sort-Object FullName | Select-Object -Last 1
           Write-Output "VC redist: $($redist.FullName)"
-          foreach ($d in (Deps "$out\occt_capi.dll")) {
-            $src = Join-Path $redist.FullName $d
-            if (Test-Path $src) { Copy-Item $src $out }
+          $occtDlls = @{}
+          Get-ChildItem $env:OCCT_OUT -Recurse -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object { if (-not $occtDlls.ContainsKey($_.Name.ToLower())) { $occtDlls[$_.Name.ToLower()] = $_.FullName } }
+          $queue = [System.Collections.Generic.Queue[string]]::new()
+          $queue.Enqueue("$out\occt_capi.dll")
+          while ($queue.Count -gt 0) {
+            foreach ($d in (Deps $queue.Dequeue())) {
+              if (Test-Path (Join-Path $out $d)) { continue }
+              $src = Join-Path $redist.FullName $d
+              if (Test-Path $src) { Copy-Item $src $out; continue }
+              if ($occtDlls.ContainsKey($d)) { Copy-Item $occtDlls[$d] $out; $queue.Enqueue((Join-Path $out $d)) }
+            }
           }
+          Write-Output "bundled DLLs:"; Get-ChildItem $out -Filter *.dll | Format-Table Name, Length
+          "@echo off`r`nrem Same build, every operation on solidcore (for comparison).`r`nset SOLIDCRAFT_KERNEL=solidcore`r`nstart `"`" `"%~dp0solidcraft.exe`" %*`r`n" | Set-Content -NoNewline "$out\SolidCraft (solidcore kernel).cmd"
           New-Item -ItemType Directory -Force "$out\licenses" | Out-Null
           Copy-Item vendor/occt-capi/licenses/* "$out\licenses"
           Copy-Item LICENSE* "$out\licenses" -ErrorAction SilentlyContinue
@@ -83,8 +97,14 @@ jobs:
           SolidCraft test build with the Open CASCADE (OCCT 8.0.1) kernel adapter on (backend-occt).
           Built from tangency-labs/solidcraft $env:GITHUB_SHA. Unsigned, not a release.
 
-          Primitives, booleans and fillets try OCCT first and fall back to solidcore.
-          Set SOLIDCRAFT_KERNEL=solidcore to keep everything on solidcore.
+          solidcraft.exe runs with OCCT on by default: primitives, booleans and fillets try OCCT
+          first and fall back to solidcore. There is no in-app switch: "SolidCraft (solidcore
+          kernel).cmd" (or SOLIDCRAFT_KERNEL=solidcore) runs the same build on solidcore only.
+          solidcraft-cli.exe is the matching command-line tool (same switch).
+
+          Use test copies of designs: this build and a normal build share the cached-body cache
+          (tangency-labs/solidcraft#23125), so a design saved by one can reopen with the other
+          kernel's cached geometry.
 
           This software makes use of Open CASCADE Technology (https://dev.opencascade.org).
           OCCT is LGPL-2.1-only WITH OCCT-exception-1.0 (licenses/). It lives in occt_capi.dll, a
@@ -96,7 +116,7 @@ jobs:
           # The VC++ runtime counts as missing unless bundled (not every PC has it).
           $bundled = Get-ChildItem $out -Filter *.dll | ForEach-Object { $_.Name.ToLower() }
           $bad = @()
-          foreach ($f in @('solidcraft.exe') + $bundled) {
+          foreach ($f in @('solidcraft.exe', 'solidcraft-cli.exe') + $bundled) {
             $deps = @(Deps (Join-Path $out $f))
             Write-Output "== $f imports: $($deps -join ', ')"
             foreach ($d in $deps) {
@@ -108,7 +128,9 @@ jobs:
             }
           }
           if ($bad) { throw "missing DLLs:`n$($bad -join "`n")" }
-          if ((Deps "$out\solidcraft.exe") -notcontains 'occt_capi.dll') { throw 'solidcraft.exe does not import occt_capi.dll: the feature is off' }
+          foreach ($e in 'solidcraft.exe', 'solidcraft-cli.exe') {
+            if ((Deps "$out\$e") -notcontains 'occt_capi.dll') { throw "$e does not import occt_capi.dll: the feature is off" }
+          }
 
           # The loader resolves every import (0xC0000135 otherwise), and the exe runs.
           $p = Start-Process -FilePath "$out\solidcraft.exe" -ArgumentList '--version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput ver.txt
@@ -125,6 +147,23 @@ jobs:
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
+
+      # The bundled CLI, from the bundle folder only (no OCCT install on PATH), on both kernels.
+      - name: Smoke - bracket.json volume on OCCT and solidcore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $cli = 'dist\SolidCraft-OCCT-test\solidcraft-cli.exe'
+          foreach ($k in 'occt', 'solidcore') {
+            $env:SOLIDCRAFT_KERNEL = $k
+            & $cli eval examples/bracket.json --json-out "eval-$k.json"
+            if ($LASTEXITCODE -ne 0) { throw "eval on $k exited $LASTEXITCODE" }
+            $txt = Get-Content "eval-$k.json" -Raw
+            $vols = [regex]::Matches($txt, '"volume[a-z_]*"\s*:\s*(-?[0-9.eE+-]+)') | ForEach-Object { $_.Value }
+            Write-Output "SMOKE kernel=$k $($vols -join ' ')"
+            if (-not $vols) { Write-Output ($txt.Substring(0, [Math]::Min(3000, $txt.Length))); throw "no volume in eval output ($k)" }
+          }
 
       # OCCT really runs on Windows: the measurement matrix through the router on both kernels.
       - name: OCCT matrix (box, cylinder, sphere, torus, boolean, fillet)

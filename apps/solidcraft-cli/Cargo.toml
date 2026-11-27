@@ -14,6 +14,8 @@ name = "solidcraft-cli"
 path = "src/main.rs"
 
 [features]
+# Throwaway OCCT test build only.
+backend-occt = ["solidcraft-kernel/backend-occt"]
 default = ["raytrace-cpu", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]

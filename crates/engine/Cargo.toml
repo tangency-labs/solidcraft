@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
+# Throwaway OCCT test build only: solidcraft-kernel's opt-in OCCT adapter.
+backend-occt = ["solidcraft-kernel/backend-occt"]
 default = ["plugins"]
 plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
