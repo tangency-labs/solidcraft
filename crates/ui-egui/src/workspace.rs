@@ -825,7 +825,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"] },
+    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "weld.create", "frame.end_cap", "frame.plate", "frame.gusset"] },
     Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member", "frame.trim"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
@@ -1847,14 +1847,14 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
-        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"]);
+        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "weld.create", "frame.end_cap", "frame.plate"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
 
         let mut h = crate::scenario::Harness::new();
         h.step(&json!({"click":{"handle":"tab:WELDMENTS"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "WELDMENTS");
-        for id in ["sketch.create", "frame.member", "frame.end_cap", "frame.plate", "frame.gusset", "parameters.change"] {
+        for id in ["sketch.create", "frame.member", "weld.create", "frame.end_cap", "frame.plate", "parameters.change"] {
             assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Weldments tab");
         }
         h.step(&json!({"click":{"handle":"button:frame.member"}})).unwrap();
@@ -2120,10 +2120,10 @@ mod tests {
         h.step(&json!({"click":{"handle":"button:parameters.change"}})).unwrap();
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());
-        assert!(h.widget("User Parameters").is_some());
-        assert!(h.widget("Model Parameters").is_none(), "model groups are bands in the shared table");
+        assert!(crate::scenario::handle_at("params:view:named").is_some());
+        assert!(crate::scenario::handle_at("params:view:dimensions").is_some());
         // Exercise the inline draft row through the public add prompt and Enter.
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         let parameters = h.app.params.as_mut().unwrap();
         parameters.new_name = "width".into();
         parameters.new_expr = "25 mm".into();
@@ -2141,6 +2141,14 @@ mod tests {
         ));
         assert!(h.widget("Add column").is_some());
         assert!(h.widget("Add configuration").is_some());
+    }
+
+    /// Weld graphics are available beside the frame members they describe.
+    #[test]
+    fn weld_create_is_next_to_frame_member_in_the_create_section() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, _) = layout("WELDMENTS", "CREATE", &specs).unwrap();
+        assert_eq!(commands.iter().take(2).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "weld.create"]);
     }
 
     /// Shared assembly, sheet and plastic commands remain reachable in their ribbon sections.

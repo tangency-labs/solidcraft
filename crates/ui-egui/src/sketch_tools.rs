@@ -1499,6 +1499,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
         arc_modes: false,
+        rotatable: crate::sketch_dims::last_rectangle_rotatable(),
         preselected: false,
         finished: false,
     })

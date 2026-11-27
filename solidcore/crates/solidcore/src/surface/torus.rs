@@ -529,6 +529,7 @@ impl Torus {
             other_uv_domain,
             approx_tol_3d,
             &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+            0.0,
             out,
         )
     }

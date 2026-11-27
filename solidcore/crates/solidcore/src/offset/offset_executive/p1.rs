@@ -292,6 +292,10 @@ pub struct OffsetExecutive {
     /// `m_vSurfaces`).
     pub(super) local_faces: Vec<FaceId>,
     pub(super) local_surfaces: Vec<Surface>,
+    /// Not upstream (#21674): the steps the check for crossed planar insets of an unmerged
+    /// inset may take (`p2::refuse_crossing_planar_insets`), `p2::CROSSING_WITNESS_STEPS`
+    /// unless a test shrinks it ([`Self::set_crossing_witness_steps`]).
+    crossing_witness_steps: usize,
 }
 
 impl OffsetExecutive {
@@ -355,6 +359,7 @@ impl OffsetExecutive {
             eliminated_lenses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
+            crossing_witness_steps: super::p2::CROSSING_WITNESS_STEPS,
         }
     }
 
@@ -434,6 +439,20 @@ impl OffsetExecutive {
     /// Sets `m_bInset`.
     pub fn set_inset(&mut self, value: bool) {
         self.inset = value;
+    }
+
+    /// Not upstream (#21674): sets the steps the check for crossed planar insets of an
+    /// unmerged inset may take, so a test can make them run out part way through its scan.
+    /// Only tests call this; every operation runs with the default.
+    #[doc(hidden)]
+    pub fn set_crossing_witness_steps(&mut self, steps: usize) {
+        self.crossing_witness_steps = steps;
+    }
+
+    /// The steps the check for crossed planar insets may take
+    /// ([`Self::set_crossing_witness_steps`]).
+    pub(super) const fn crossing_witness_steps(&self) -> usize {
+        self.crossing_witness_steps
     }
 
     /// Sets `m_bExtendConvexEdges`.
