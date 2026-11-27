@@ -644,6 +644,17 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     if !picks || (!placed(s) && !axis_edit && grouped_thread.is_none() && !copying && !copy_edit) {
         return Ok(None);
     }
+    // Commands whose entries only map into the active component's frame (Make, Dir, PrimitiveAxis)
+    // never read world geometry: an identity active frame needs no mapping at all, and a moved
+    // active frame needs no `world_state()` build.
+    let active_only = !table(id).is_empty()
+        && !matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine" | "solid.move")
+        && !PICKED_PLANES.contains(&id)
+        && grouped_thread.is_none()
+        && table(id).iter().all(|(_, k)| matches!(k, Make | Dir | PrimitiveAxis));
+    if active_only && is_identity(&s.active_component_frame()) {
+        return Ok(None);
+    }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
     // it by frame and maps each part itself (`split_move`).
     if id == "solid.move" && split_move(s, params)?.is_some() {
@@ -662,26 +673,35 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     } else {
         None
     };
-    let world = match (placed, &thread_input) {
+    let world = match (placed && !active_only, &thread_input) {
         (true, Some(input)) => std::sync::Arc::new(solidcraft_doc::world_state(&s.placed_document(), input)?),
         (true, None) => s.world_state()?,
         (false, Some(input)) => input.clone(),
         (false, None) => s.model.state(),
     };
-    let mut normalized = params.clone();
-    if let Some(faces) = grouped_thread {
+    let has_grouped_thread = grouped_thread.is_some();
+    let normalized;
+    let params = if let Some(faces) = grouped_thread {
+        let mut copy = params.clone();
         let input = thread_input.clone().unwrap_or_else(|| s.model.state());
         let faces = Value::Array(thread_body_picks(s, &input, faces)?);
         if id == "timeline.redefine" {
-            normalized["params"]["faces"] = faces;
+            copy["params"]["faces"] = faces;
         } else {
-            normalized["faces"] = faces;
+            copy["faces"] = faces;
         }
-    }
-    if !placed && !axis_edit && !copying && !copy_edit {
-        return Ok(grouped_thread.map(|_| normalized));
-    }
-    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref(), None).or_else(|| grouped_thread.map(|_| normalized)))
+        normalized = copy;
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(Some(normalized));
+        }
+        &normalized
+    } else {
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(None);
+        }
+        params
+    };
+    Ok(map_local_with_input(s, &world, id, params, thread_input.as_deref(), None).or_else(|| has_grouped_thread.then(|| params.clone())))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move

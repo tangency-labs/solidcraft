@@ -419,6 +419,17 @@ unisolate	false
 update	false
 warning	false
 web	false
+weld	false
+weld_both_sides	false
+weld_face_concave	false
+weld_face_convex	false
+weld_face_flat	false
+weld_flag_tack	false
+weld_new_bead	false
+weld_tangent_chain	false
+weld_type_fillet	false
+weld_type_groove	false
+weld_type_spot	false
 window_other	false
 ws_design	false
 ws_drawing	false
