@@ -2291,6 +2291,104 @@ fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     assert!(find(&items, "Find in Browser").enabled, "the body is still known");
 }
 
+/// A face of `body` whose persistent name starts with `prefix`, picked at a point on it.
+fn pick_face(app: &SolveApp, body: &str, prefix: &str) -> solidcraft_engine::Sel {
+    let state = app.session.world_state().unwrap();
+    let b = state.body(body).unwrap();
+    let names = solidcraft_engine::doc::naming::face_names(b);
+    let index = names.iter().position(|n| n.starts_with(prefix)).unwrap_or_else(|| panic!("no `{prefix}` face in {names:?}"));
+    let mesh = b.mesh();
+    let point = mesh
+        .triangles
+        .iter()
+        .enumerate()
+        .find_map(|(i, t)| (mesh.tri_face.get(i).copied() == Some(index as u32)).then(|| mesh.tri(t)).flatten())
+        .map(|t| (t[0] + t[1] + t[2]) / 3.0)
+        .unwrap_or(Vec3::ZERO);
+    solidcraft_engine::Sel::Face { body: body.into(), index, point }
+}
+
+/// A body moved into a component keeps Edit Feature, Edit Profile Sketch and Find in Timeline on
+/// its faces, and the History lights the face's feature: the features stay in this design's
+/// timeline wherever the body sits now (#23190).
+#[test]
+fn faces_of_a_body_moved_into_a_component_still_open_their_features() {
+    use solidcraft_engine::Sel;
+    for moved in ["root", "component.from_bodies", "component.move_bodies"] {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        app.run("solid.extrude", json!({"sketch": "Base", "distance": 20, "name": "Block"})).unwrap();
+        let b = body(&app);
+        let id = |app: &SolveApp, name: &str| app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+        let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
+        app.run("solid.fillet", json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+        let fillet = app.session.doc.features.last().unwrap().id;
+        match moved {
+            "component.from_bodies" => {
+                app.run(moved, json!({"bodies": [b]})).unwrap();
+            }
+            "component.move_bodies" => {
+                let made = app.run("component.create", json!({"name": "Holder"})).unwrap();
+                app.run(moved, json!({"bodies": [b], "component": made["component"]})).unwrap();
+            }
+            _ => {}
+        }
+        let state = app.session.world_state().unwrap();
+        let placed = state.body(&b).unwrap();
+        assert_eq!(app.session.doc.model_body_component(placed) == 0, moved == "root", "{moved}: the body's component");
+        for (prefix, feature, profile) in [(format!("F{fillet}:"), fillet, None), (format!("F{block}:"), block, Some(sketch))] {
+            let pick = pick_face(&app, &b, &prefix);
+            app.session.selection = vec![pick.clone()];
+            let items = context_menu::items(&app, &Target::Viewport);
+            for label in ["Edit Feature", "Find in Timeline"] {
+                let item = find(&items, label);
+                assert!(item.enabled, "{moved}: {label} on {prefix}");
+                assert_eq!(item.params.as_ref().unwrap()["feature"], json!(feature), "{moved}: {label} on {prefix}");
+            }
+            if let Some(sketch) = profile {
+                let item = find(&items, "Edit Profile Sketch");
+                assert!(item.enabled, "{moved}: Edit Profile Sketch on {prefix}");
+                assert_eq!(item.params.as_ref().unwrap()["sketch"], json!(sketch), "{moved}");
+            }
+            assert_eq!(crate::timeline::picked_feature(&app), Some(feature), "{moved}: the History lights {prefix}'s feature");
+            act(&mut app, &Target::Viewport, "Find in Timeline");
+            assert_eq!(app.session.selection, vec![Sel::Feature { id: feature }], "{moved}");
+            app.session.selection = vec![pick];
+            act(&mut app, &Target::Viewport, "Edit Feature");
+            assert_eq!(app.dialog.as_ref().unwrap().editing.unwrap().0, feature, "{moved}");
+            app.dialog = None;
+        }
+    }
+}
+
+/// A face of an inserted design keeps its menu: Edit Feature and Find in Timeline act on the
+/// feature that placed the design, not on a feature of this design with the same number (#23190).
+#[test]
+fn faces_of_an_inserted_design_keep_their_menu() {
+    let mut h = crate::scenario::Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("solid.fillet", &json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+    h.app.run("component.from_bodies", json!({"bodies": ["Plate"]})).unwrap();
+    let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    let link = inserted["feature"].as_u64().unwrap();
+    let b = inserted["bodies"][0].as_str().unwrap().to_string();
+    let state = h.app.session.world_state().unwrap();
+    for name in solidcraft_engine::doc::naming::face_names(state.body(&b).unwrap()).iter() {
+        h.app.session.selection = vec![pick_face(&h.app, &b, name)];
+        let items = context_menu::items(&h.app, &Target::Viewport);
+        for label in ["Edit Feature", "Find in Timeline"] {
+            assert_eq!(find(&items, label).params.as_ref().unwrap()["feature"], json!(link), "{label} on {name}");
+        }
+    }
+}
+
 #[test]
 fn every_context_target_has_identified_icon_rows_including_submenus() {
     fn check(rows: &[Item]) {
