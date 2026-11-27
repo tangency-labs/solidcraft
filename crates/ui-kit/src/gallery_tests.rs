@@ -988,16 +988,9 @@ pub const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preference_specimens", |ui, _| {
-        settings_axis_row(
-            ui,
-            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
-            "Push X",
-            0.6,
-            [0.1, 0.2],
-            |_| {},
-            |_| {},
-            |_| {},
-        );
+        let t = Tokens::get();
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_14), egui::Sense::hover());
+        live_axis_bar_in(ui, rect, 0.6, [0.1, 0.2]);
         settings_mouse_mapping(ui, &[(vec!["Shift".into(), "Middle drag".into()], "Orbit".into())], |_| {});
     }),
     element!("assistant_entry", |ui, _| {

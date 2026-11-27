@@ -165,6 +165,17 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
+For preference tables that must stay within their card, use `table_fitted` with flexible
+columns. It uses the same headers, cells and row rules, disables both scrolling axes, and
+lets column minimums yield when necessary. `table_custom` retains horizontal overflow for
+wide editable data such as configurations.
+
+Table headers are opt-in: call `Table::headers` once to add a header band, or omit it
+for a headerless table. The card, column layout, row padding and hairline rules
+remain the same. Headerless columns can use stable internal identifiers rather than
+translated headings. The Navigation mouse-mapping legend uses this mode beside its
+mouse picture, with input chips and action text in separate cells.
+
 ## Grid
 
 `Grid` is the one editable table: a cell cursor, ranges, editing, TSV copy and paste, fill down
