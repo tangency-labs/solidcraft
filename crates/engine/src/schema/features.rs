@@ -17,9 +17,9 @@ use super::config::NameList;
 use super::motion::require;
 use super::types::{
     AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
-    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromObject, GeoRefParam, IdOrName, LengthExpr,
     NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToObject, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -67,6 +67,31 @@ pub struct BoxParams {
     /// Names for the new bodies, in order.
     #[serde(default)]
     pub body_names: Option<StringList>,
+}
+
+/// Create complementary fingers on intersecting pairs of selected plates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FingerJointParams {
+    /// Two to 32 distinct body names in processing order. Default: the selected bodies.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// The number of alternating finger/slot pairs, producing 2 * count + 1 segments. Default: 3.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 64))]
+    pub count: Option<u64>,
+    /// The gap between complementary fingers, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub clearance: Option<LengthExpr>,
+    /// Start and end with fingers instead of slots. Default: false.
+    #[serde(default)]
+    pub inverted: Option<bool>,
+    /// Additional length for each end segment, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub edge_offset: Option<LengthExpr>,
+    /// The feature's name in the timeline.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Extrude sketch profiles (or a planar body face) into a solid.
@@ -155,10 +180,11 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
     pub convention: Option<ConventionParam>,
-    /// Extrude up to this face, vertex or point (To Object).
+    /// Extrude up to this face, vertex or point (To Object), or up to a plane or a construction
+    /// point, followed when it moves.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "ToPoint")]
-    pub to: Option<ToPoint>,
+    #[schemars(with = "ToObject")]
+    pub to: Option<ToObject>,
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
@@ -169,11 +195,12 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
-    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
-    /// face, and a distance moves it along the extrusion.
+    /// Start at this face or point (From Object), or at a plane or a construction point,
+    /// followed when it moves. On a flat face or a plane at a slant the start follows its slope,
+    /// and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "FromPoint")]
-    pub from: Option<FromPoint>,
+    #[schemars(with = "FromObject")]
+    pub from: Option<FromObject>,
     /// How the extrusion combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<ExtrudeOperation>,
@@ -2011,7 +2038,8 @@ pub struct ThreadParams {
     #[serde(default, deserialize_with = "thread_form")]
     #[schemars(schema_with = "thread_form_schema")]
     pub form: Option<String>,
-    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5"; unified
+    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5", with an optional
+    /// ISO 965-1 tolerance class kept in the callout ("M8-6g" on a shaft, "M8-6H" in a hole); unified
     /// "1/4-20 UNC-2A", "#10-32 UNF"; trapezoidal "Tr20x4", "Tr40x14(P7)"; buttress "S20x4"; acme
     /// "1/2-10 ACME"; buttress_asme "2.5-8 BUTT"; bspp "G 1/2"; rp "Rp 1/2"; bspt "R 1/2"
     /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT". Blank text is the same as left out.

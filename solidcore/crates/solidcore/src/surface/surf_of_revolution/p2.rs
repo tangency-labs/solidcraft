@@ -990,6 +990,7 @@ impl SurfOfRevolution {
                     other_uv_domain,
                     approx_tol_3d,
                     &Self::own_sweep_iso,
+                    revolved_contact_tol(k, [Some(this), Some(other)]),
                     out,
                 )?;
             }

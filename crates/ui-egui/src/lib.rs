@@ -53,6 +53,7 @@ pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
+mod dialog_drag_undo;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -60,6 +61,7 @@ pub mod dialogs_capture;
 pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
+pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
@@ -83,6 +85,7 @@ pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -137,6 +140,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
+pub(crate) mod keyboard_profiles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
@@ -450,9 +454,14 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
+pub mod workshop;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -502,6 +511,10 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
+    /// The saved design and Preferences remain unchanged.
+    #[serde(skip)]
+    pub sketch_open_view: sketch_palette::SketchOpenView,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -551,6 +564,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),
@@ -645,6 +659,9 @@ pub struct Services {
     pub usage_http: Option<tickets::Http>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
     pub window_system: Option<&'static str>,
+    /// HTTPS GET to workshop.solidcraft.io with the signature headers, for Workshop links
+    /// (`workshop`); None: links are not opened (browser, tests).
+    pub workshop_get: Option<workshop::HttpGet>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -654,6 +671,43 @@ pub struct PreSketchView {
     pub view: u64,
     pub before: Camera,
     pub facing: Camera,
+}
+
+/// Cameras left by each sketch in the active design tab. Kept in that design's slot on tab
+/// switches, never shared with a different design's same-numbered feature (#18998).
+#[derive(Default)]
+pub(crate) struct SketchLastViews {
+    /// Most recent exit, including Cancel.
+    last: std::collections::BTreeMap<u64, Camera>,
+    /// Most recent Finish: cancelling a later edit must not replace this camera.
+    finished: std::collections::BTreeMap<u64, Camera>,
+}
+
+impl SketchLastViews {
+    fn to_open(&self, sketch: u64, mode: sketch_palette::SketchOpenView) -> Option<Camera> {
+        match mode {
+            sketch_palette::SketchOpenView::Face => None,
+            sketch_palette::SketchOpenView::Last => self.last.get(&sketch).copied(),
+            sketch_palette::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
+        }
+    }
+
+    fn closed(&mut self, sketch: u64, cam: Camera, finished: bool) {
+        self.last.insert(sketch, cam);
+        if finished {
+            self.finished.insert(sketch, cam);
+        }
+    }
+
+    fn forget(&mut self, sketch: u64) {
+        self.last.remove(&sketch);
+        self.finished.remove(&sketch);
+    }
+
+    fn retain_existing(&mut self, exists: impl Fn(u64) -> bool) {
+        self.last.retain(|id, _| exists(*id));
+        self.finished.retain(|id, _| exists(*id));
+    }
 }
 
 /// The active component (and placement) before a sketch opened inside another one (#8127), and
@@ -743,6 +797,8 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// Per-sketch last and last-finished views of this design tab (not saved into the model).
+    pub(crate) sketch_last_views: SketchLastViews,
     /// The command now running named the view to open its sketch in, so that view turns to face it.
     sketch_view_named: bool,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
@@ -769,6 +825,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// Plugin updates found at start, and the one being downloaded or reviewed.
     pub(crate) plugin_updates: plugin_updates::State,
+    /// A Workshop link being looked up, downloaded or asked about (`workshop`).
+    pub(crate) workshop: workshop::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -1191,6 +1249,7 @@ impl SolveApp {
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_last_views: Default::default(),
             sketch_view_named: false,
             pre_extrude_cam: None,
             pre_command_cam: None,
@@ -1203,6 +1262,7 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             plugin_updates: Default::default(),
+            workshop: Default::default(),
             import_report: None,
             saving: None,
             host_saves: Vec::new(),
@@ -1972,6 +2032,10 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some("edit.undo" | "edit.redo") if r.is_ok() => {
+                self.agent_chat.clear_model_changes();
+                r
+            }
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
@@ -1997,6 +2061,17 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             sheet_views::command_opened(self, id, v);
+            // A sketch id can be reused after undo or deletion. Its predecessor's view
+            // must never become the starting camera of the newly created sketch.
+            if id == "sketch.create"
+                && let Some(sketch) = v.get("sketch").and_then(Value::as_u64)
+            {
+                self.sketch_last_views.forget(sketch);
+            }
+            if matches!(id, "edit.undo" | "edit.redo" | "timeline.delete") {
+                let doc = &self.session.doc;
+                self.sketch_last_views.retain_existing(|sketch| doc.feature(sketch).is_some());
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -2009,7 +2084,7 @@ impl SolveApp {
                     let named = std::mem::take(&mut self.sketch_view_named);
                     self.open_sketch_camera(before, named);
                 }
-                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64), id == "sketch.finish"),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
                     if let Some(tool) = self.tool.as_mut() {
@@ -2155,7 +2230,8 @@ impl SolveApp {
                 };
                 render_workspace::selection_editor(self, &selected);
             }
-            if id == "view.layout" {
+            // The organization's layout stays; the command changes nothing while a policy sets it.
+            if id == "view.layout" && !self.policy.locks("layout") {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
@@ -2348,6 +2424,9 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
+                    // Commands can replace the document inside this tab without switching
+                    // tabs. Its feature ids must not inherit views from the old design.
+                    self.sketch_last_views = Default::default();
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -3678,10 +3757,16 @@ impl SolveApp {
             return false;
         }
         let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
-        let turn = turn && self.preferences.sketch_open_look_at;
+        // The Palette choice only changes how a person opens an existing sketch.
+        // Scripted edits and new sketches retain the previous view behaviour.
+        let remembered =
+            if turn { self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis) } else { None };
+        let turn = turn && (remembered.is_some() || self.preferences.sketch_open_look_at);
         let _ = documents::with_sketch_camera(self, view, |app| {
             let before = if painted == view { before } else { app.settled_cam() };
-            if turn {
+            if let Some(to) = remembered {
+                app.animate_to(to);
+            } else if turn {
                 dialogs::look_at_sketch(app);
             }
             let facing = app.settled_cam();
@@ -3765,7 +3850,17 @@ impl SolveApp {
     }
 
     /// Successful UI and programmatic exits share the same window cleanup.
-    fn sketch_closed(&mut self, open: Option<u64>) {
+    fn sketch_closed(&mut self, open: Option<u64>, finished: bool) {
+        // Capture the actual editing tile before the existing exit preference restores
+        // its earlier camera. A cancelled new sketch has no surviving feature to remember.
+        if let Some(sketch) = open.filter(|sketch| self.session.doc.feature(*sketch).is_some())
+            && let Some(view) = self.pre_sketch_cam.as_ref().filter(|pre| pre.sketch == sketch).map(|pre| pre.view)
+        {
+            let _ = documents::with_sketch_camera(self, view, |app| {
+                let camera = app.settled_cam();
+                app.sketch_last_views.closed(sketch, camera, finished);
+            });
+        }
         self.sketch_closed_in(open, None);
     }
 
@@ -3809,13 +3904,14 @@ impl SolveApp {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
-    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
         v.extend(agent_chat::hovered_chip(self).iter().cloned());
+        v.extend(agent_chat::model_changes_targets(self));
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
@@ -4621,6 +4717,9 @@ impl SolveApp {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // The orbit's wrap setting covers label drags too; a synthetic drag (control channel,
+        // scripts) has no real cursor to move.
+        ui_kit::set_scrub_cursor_wrap(ctx, self.preferences.orbit_cursor_wrap && !self.synthetic_press);
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
@@ -4723,6 +4822,7 @@ impl SolveApp {
         #[cfg(feature = "usage-stats")]
         usage_stats::tick(self, ctx);
         plugin_updates::tick(self, ctx);
+        workshop::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
@@ -5036,6 +5136,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
@@ -5058,6 +5159,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // A Workshop link can arrive while Home shows: its question shows there too.
+                workshop::show(self, ui.ctx());
                 // The recovery banner's Discard all asks here (File view lists the designs inline).
                 recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
@@ -5102,6 +5205,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        workshop::show(self, ui.ctx());
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());

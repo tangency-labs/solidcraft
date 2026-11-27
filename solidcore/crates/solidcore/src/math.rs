@@ -560,6 +560,30 @@ impl Transform {
         Some([x, y])
     }
 
+    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `x` is the unit
+    /// cross product of `v`'s part square to `d` with `d`, and `y = d × x`; so `x`, `y` and `d` are
+    /// unit and square to each other within a few ulps for any `v` taken, `x × y` runs along `d`,
+    /// and `y` runs along `v`'s part square to `d`. `d` and `v` are made unit first, at any finite
+    /// length (nothing is squared before it is scaled). `None` when a coordinate is not finite, `d`
+    /// or `v` has no length, or `v`'s part square to `d` is no longer than its own rounding
+    /// ([`FRAME_LEAN`]): `y` would then follow the rounding, not `v`. Otherwise `y`'s direction is
+    /// off `v`'s part square to `d` by about `4ε / sin`, `sin` the sine of the angle between `v`
+    /// and `d`; a caller that needs it closer compares that sine itself.
+    #[must_use]
+    pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
+        if !(finite3(d) && finite3(v)) {
+            return None;
+        }
+        let (_, d) = d.length_and_unit()?;
+        let (_, v) = v.length_and_unit()?;
+        let (square, y) = (v - d * v.dot(d)).length_and_unit()?;
+        if square <= FRAME_LEAN {
+            return None;
+        }
+        let (_, x) = y.cross(d).length_and_unit()?;
+        Some([x, d.cross(x)])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their
@@ -675,6 +699,14 @@ impl Transform {
 
 /// The operation name of the refusals of the maps built from their numbers.
 const OP_MAPS: &str = "math::Transform";
+
+/// The remainder [`Transform::frame_axes`] refuses: taking the unit `v`'s part along the unit `d`
+/// out leaves a remainder of length `sin` (the sine of the angle between them) but for its
+/// rounding. For a `v` along `d` (or against it) the computed remainder is at most about 10 ulps:
+/// `|1 - |d|²|` for `d` unit within 2 ulps (4), the three-term `v · d` (`γ₃`, 3), and the product,
+/// the difference and the length (an ulp each). So a remainder no longer than 16 ulps is
+/// rounding, not `v`, and gives no direction (brett19 on #22066).
+pub const FRAME_LEAN: f64 = 16.0 * f64::EPSILON;
 
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
@@ -1195,6 +1227,13 @@ pub fn bisector_centre_2d(start: [f64; 2], end: [f64; 2], p: [f64; 2]) -> Option
 #[must_use]
 pub fn is_square_to_radius_2d(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool {
     unit_between_2d(centre, p).is_some_and(|radial| dot_2d(dir, radial).abs() <= 1e-6)
+}
+
+/// Not upstream: whether `p` lies on the line through `origin` along `dir`, within `tol` of it.
+/// `false` where `dir` is of no length or not finite.
+#[must_use]
+pub fn on_line_2d(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    unit_2d(dir).is_some_and(|u| dot_2d(left_2d(u), sub_2d(p, origin)).abs() <= tol)
 }
 
 /// Not upstream: the centre of the circle through `a`, `b` and `c`. `None` for points on one
