@@ -80,9 +80,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::p2::is_curve_class;
 use crate::curve::curve::{p8::CurveIntersectOptions, Curve, CurveKind};
+use crate::error::query::QueryFailure;
 use crate::error::topology::TopologyFailure;
 use crate::error::{
-    ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+    ignore_status, native_failure, EntityRef, Failure, Result, SolidError, SM_ERR,
+    SM_ERR_NULL_POINTER,
 };
 use crate::geom::a_object::{self, BREP_TYPE};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -2091,7 +2093,9 @@ pub(crate) fn cache_entity(object: CacheObject) -> Result<EntityRef> {
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the best hit is closer than `SM_EFF_ZERO * (1 + max |start|)`; errors
+/// `SM_ERR` when the best hit is closer than `SM_EFF_ZERO * (1 + max |start|)`, and (not
+/// upstream) [`QueryFailure::TangentAlongEdge`] when it is on a curved edge the ray grazes
+/// ([`ray_grazes_edge`]), so the caller fires another ray; errors
 /// of the B-rep box, the solve, the classification load and [`local_curve_sector`];
 /// [`SolidError::Unported`] from the callees.
 #[allow(clippy::too_many_arguments)] // one upstream routine
@@ -2282,6 +2286,16 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
         }
     }
 
+    // Not upstream (#22582): a ray that grazes a curved edge says nothing about the edge's
+    // sectors, and the next ray is fired instead.
+    if let (PointClassType::Edge, Some(EntityRef::Edge(e))) =
+        (intersection.point_class(), intersection.object())
+    {
+        if ray_grazes_edge(k, b, e, intersection.t_param(), ray, ray_zone_tol_3d)? {
+            return Err(SolidError::query(OP, QueryFailure::TangentAlongEdge));
+        }
+    }
+
     // make temporary [StartPoint,IntersectionPoint] line segement
     let end = start + best.start.solution_value * ray;
     let line = Curve::from(BSplineCurve::create_line_segment(3, start, end)?);
@@ -2294,6 +2308,52 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
         region,
         intersection,
     })
+}
+
+/// Whether `ray` (a unit direction) meets edge `e` of `b` at its curve parameter `t` too close
+/// to the edge's tangent to cross it: within the tolerance (the edge's, at least
+/// `ray_zone_tol_3d`) of the edge everywhere near the hit. A ray at angle `theta` to a curve
+/// of curvature `kappa` stays within `tol` of it while `sin theta <= sqrt(2 tol kappa)`: a
+/// tangent line is within `tol` of the curve for an arc of `s` with `s^2 kappa / 2 <= tol`,
+/// over which the tangent turns by `s kappa`, and a chord at that angle is at most its sagitta
+/// `theta^2 / (2 kappa) <= tol` inside. Its direction across the edge is then a rounding
+/// error, and the edge's sectors would classify it either way. A straight edge (`kappa = 0`)
+/// is grazed only along its own line, which `radial_sector_of_curve_classify` refuses.
+/// A wire edge, which classifies by its region alone, and an edge whose curve does not
+/// evaluate there (the kernel's status) are not grazed.
+///
+/// # Errors
+///
+/// Those of the topology reads; port errors of the curve evaluation.
+fn ray_grazes_edge(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    t: f64,
+    ray: Vec3,
+    ray_zone_tol_3d: f64,
+) -> Result<bool> {
+    if edge::is_wire(b, e)? {
+        return Ok(false);
+    }
+    let record = b.edge(e)?;
+    let Some(curve) = record.curve.as_ref() else {
+        return Ok(false);
+    };
+    let Some(derivatives) = native_failure(curve.evaluate(k, t, 2, true, true))? else {
+        return Ok(false);
+    };
+    let (Some(&d1), Some(&d2)) = (derivatives.get(1), derivatives.get(2)) else {
+        return Ok(false);
+    };
+    let speed = d1.length();
+    if speed <= EFF_ZERO {
+        return Ok(false);
+    }
+    let curvature = d1.cross(d2).length() / (speed * speed * speed);
+    let tolerance = record.tolerance.max(ray_zone_tol_3d);
+    let sine = (d1 / speed).cross(ray).length();
+    Ok(sine <= (2.0 * tolerance * curvature).sqrt())
 }
 
 // ---- geometry replacement -----------------------------------------------------------------
