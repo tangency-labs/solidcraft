@@ -6,7 +6,7 @@
 //!
 //! - The corpus labels #3137's parity run refused under the old constant `gamma(16 (p + q +
 //!   2)) size`, pinned to their margins under the derived bound. The four torus labels
-//!   stand (0.01 to 0.49); the cylinders (b94 1.23, b43 1.47, the 2903 rims 1.58 and 2.13)
+//!   stand (0.01 to 0.49); the cylinders (b94 1.23, b43 1.40, the 2903 rims 1.52 and 2.03)
 //!   do not. Since #16297 a stored torus support supplies both converters' circles and
 //!   their angular intervals, as well as the analytic evaluator's circles. Previously
 //!   recognition's independently fitted generator and polar converter remained installed:
@@ -117,18 +117,6 @@ fn label_and_form(
 /// to its labelled torus of 1.65e-14 mm (b6), 3.20e-15 (b46), 2.22e-13 (b85/15) and 2.46e-13
 /// (b85/21). The b85 labels retain their small geometric discrepancies; their changed
 /// margins still stand. The deliberately turned label below must still be refused.
-///
-/// Test change (#3383): a cylinder's sweep ends are read off its form's end meridians about
-/// the label's own axis, and its sweep converter is rebuilt on that axis, instead of both
-/// coming from recognition's fitted circle. The four torus margins and b94's are unchanged
-/// to four digits; b43's goes from 1.4008 to 1.4656 and the 2903 rims' from 1.5243 and 2.0275
-/// to 1.5762 and 2.1290. Every cylinder label is refused as before, and the refusal is the
-/// label's, not the converters': at its worst Greville point each form point's distance from
-/// the labelled cylinder alone, measured square to the label's axis (no parametrisation can
-/// make it smaller), is 1.2337 (b94), 1.4013 (b43), 1.5241 and 2.0275 (2903) times the
-/// bound. What moved is the along-surface part, now measured about the label's own axis
-/// rather than the fitted circle's (b43's worst point: 3.9e-13 along a radius of 3, its form's
-/// sweep end reading 90.0000000000073 degrees about the label's axis).
 const CASES: &[(&str, &str, usize, f64, bool)] = &[
     (
         "sweeps/3897-sweep-ring-along-a-short-arc-joined-to-a-collar",
@@ -169,13 +157,13 @@ const CASES: &[(&str, &str, usize, f64, bool)] = &[
         "crashes/2243-step-export-flanged-enclosure",
         "b43",
         1,
-        1.4656, // formerly 1.4008 with the fitted sweep and converter
+        1.4008,
         false,
     ),
-    ("fillets/2903-original-rim-chamfer", "b0", 1, 1.5762, false),
-    ("fillets/2903-original-rim-chamfer", "b0", 3, 2.1290, false),
-    ("fillets/2903-original-rim-round", "b0", 1, 1.5762, false),
-    ("fillets/2903-original-rim-round", "b0", 3, 2.1290, false),
+    ("fillets/2903-original-rim-chamfer", "b0", 1, 1.5243, false),
+    ("fillets/2903-original-rim-chamfer", "b0", 3, 2.0275, false),
+    ("fillets/2903-original-rim-round", "b0", 1, 1.5243, false),
+    ("fillets/2903-original-rim-round", "b0", 3, 2.0275, false),
 ];
 
 /// Each corpus label's margin, pinned to 1 % of its measured value, on its side of 1, and
