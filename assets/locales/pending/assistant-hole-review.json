@@ -1,0 +1,90 @@
+{
+  "en": {
+    "ui.agent_hole_review_busy": "Finish the open tool to see this preview.",
+    "ui.agent_hole_review_checking": "Computing the cut preview…",
+    "ui.agent_hole_review_invalid": "Enter coordinates and a positive diameter. Depth can be blank or positive.",
+    "ui.agent_hole_review_model_view": "Open a Model view to see this preview.",
+    "ui.agent_hole_review_no_cut": "This proposal does not cut the target body.",
+    "ui.agent_hole_review_position": "Position and size in mm",
+    "ui.agent_hole_review_target": "Target body: {name}",
+    "ui.agent_hole_review_through": "Through all",
+    "ui.agent_hole_review_title": "Review the proposed hole"
+  },
+  "ar": {
+    "ui.agent_hole_review_busy": "أنه استخدام الأداة المفتوحة لعرض هذه المعاينة.",
+    "ui.agent_hole_review_checking": "جارٍ حساب معاينة القطع…",
+    "ui.agent_hole_review_invalid": "أدخل الإحداثيات وقطرًا موجبًا. يمكن ترك العمق فارغًا أو إدخال قيمة موجبة.",
+    "ui.agent_hole_review_model_view": "افتح عرض النموذج لمشاهدة هذه المعاينة.",
+    "ui.agent_hole_review_no_cut": "هذا الاقتراح لا يقطع الجسم المستهدف.",
+    "ui.agent_hole_review_position": "الموضع والحجم بالملليمتر",
+    "ui.agent_hole_review_target": "الجسم المستهدف: {name}",
+    "ui.agent_hole_review_through": "نافذ بالكامل",
+    "ui.agent_hole_review_title": "مراجعة الثقب المقترح"
+  },
+  "de": {
+    "ui.agent_hole_review_busy": "Schließen Sie das geöffnete Werkzeug ab, um diese Vorschau zu sehen.",
+    "ui.agent_hole_review_checking": "Schnittvorschau wird berechnet…",
+    "ui.agent_hole_review_invalid": "Geben Sie Koordinaten und einen positiven Durchmesser ein. Die Tiefe kann leer oder positiv sein.",
+    "ui.agent_hole_review_model_view": "Öffnen Sie eine Modellansicht, um die Vorschau zu sehen.",
+    "ui.agent_hole_review_no_cut": "Der vorgeschlagene Schnitt trifft den Zielkörper nicht.",
+    "ui.agent_hole_review_position": "Position und Größe in mm",
+    "ui.agent_hole_review_target": "Zielkörper: {name}",
+    "ui.agent_hole_review_through": "Durch alles",
+    "ui.agent_hole_review_title": "Vorgeschlagene Bohrung prüfen"
+  },
+  "he": {
+    "ui.agent_hole_review_busy": "יש לסיים את השימוש בכלי הפתוח כדי לראות את התצוגה המקדימה.",
+    "ui.agent_hole_review_checking": "מחשב תצוגה מקדימה של החיתוך…",
+    "ui.agent_hole_review_invalid": "יש להזין קואורדינטות וקוטר חיובי. אפשר להשאיר את העומק ריק או להזין ערך חיובי.",
+    "ui.agent_hole_review_model_view": "יש לפתוח תצוגת מודל כדי לראות תצוגה מקדימה זו.",
+    "ui.agent_hole_review_no_cut": "ההצעה אינה חותכת את גוף היעד.",
+    "ui.agent_hole_review_position": "מיקום וגודל במילימטרים",
+    "ui.agent_hole_review_target": "גוף יעד: {name}",
+    "ui.agent_hole_review_through": "עובר לכל העומק",
+    "ui.agent_hole_review_title": "בדיקת החור המוצע"
+  },
+  "ja": {
+    "ui.agent_hole_review_busy": "開いているツールの操作を終えると、プレビューを表示できます。",
+    "ui.agent_hole_review_checking": "穴のプレビューを計算中…",
+    "ui.agent_hole_review_invalid": "座標と正の直径を入力してください。深さは空欄または正の値にします。",
+    "ui.agent_hole_review_model_view": "モデルビューを開くと、プレビューを確認できます。",
+    "ui.agent_hole_review_no_cut": "この位置と寸法では対象ボディに穴が開きません。",
+    "ui.agent_hole_review_position": "位置と寸法（mm）",
+    "ui.agent_hole_review_target": "対象ボディ：{name}",
+    "ui.agent_hole_review_through": "貫通",
+    "ui.agent_hole_review_title": "穴の提案を確認"
+  },
+  "ko": {
+    "ui.agent_hole_review_busy": "열린 도구를 마치면 미리보기를 볼 수 있습니다.",
+    "ui.agent_hole_review_checking": "절삭 미리보기 계산 중…",
+    "ui.agent_hole_review_invalid": "좌표와 양의 지름을 입력하세요. 깊이는 비워 두거나 양수로 입력할 수 있습니다.",
+    "ui.agent_hole_review_model_view": "이 미리보기를 보려면 모델 뷰를 여세요.",
+    "ui.agent_hole_review_no_cut": "이 제안은 대상 바디를 절삭하지 않습니다.",
+    "ui.agent_hole_review_position": "위치 및 크기(mm)",
+    "ui.agent_hole_review_target": "대상 바디: {name}",
+    "ui.agent_hole_review_through": "완전 관통",
+    "ui.agent_hole_review_title": "제안된 구멍 검토"
+  },
+  "vi": {
+    "ui.agent_hole_review_busy": "Hoàn tất công cụ đang mở để xem bản xem trước này.",
+    "ui.agent_hole_review_checking": "Đang tính bản xem trước phần cắt…",
+    "ui.agent_hole_review_invalid": "Nhập tọa độ và đường kính dương. Có thể để trống độ sâu hoặc nhập giá trị dương.",
+    "ui.agent_hole_review_model_view": "Mở chế độ xem mô hình để xem bản xem trước này.",
+    "ui.agent_hole_review_no_cut": "Đề xuất này không cắt khối đích.",
+    "ui.agent_hole_review_position": "Vị trí và kích thước (mm)",
+    "ui.agent_hole_review_target": "Khối đích: {name}",
+    "ui.agent_hole_review_through": "Xuyên suốt",
+    "ui.agent_hole_review_title": "Xem xét lỗ được đề xuất"
+  },
+  "zh": {
+    "ui.agent_hole_review_busy": "请结束当前工具操作后查看预览。",
+    "ui.agent_hole_review_checking": "正在计算切除预览…",
+    "ui.agent_hole_review_invalid": "请输入坐标和正的直径。深度可留空或输入正值。",
+    "ui.agent_hole_review_model_view": "请打开模型视图以查看预览。",
+    "ui.agent_hole_review_no_cut": "此方案不会切除目标实体。",
+    "ui.agent_hole_review_position": "位置和尺寸（毫米）",
+    "ui.agent_hole_review_target": "目标实体：{name}",
+    "ui.agent_hole_review_through": "完全贯穿",
+    "ui.agent_hole_review_title": "检查建议的孔"
+  }
+}

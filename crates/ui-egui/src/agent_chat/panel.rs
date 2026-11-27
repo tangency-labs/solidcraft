@@ -219,6 +219,8 @@ pub struct PanelView {
     /// The undo history as a message's changes left it, while it still is: their Undo is offered
     /// only then, so it never takes a step made after them.
     pub undo_history: Option<super::Revision>,
+    /// Whether the Hole in the review card is shown for the currently entered parameters.
+    hole_review: Option<Result<bool, String>>,
     /// Whether the current view can show a feature highlight, and which card is showing one.
     model_view_visible: bool,
     model_changes: Option<usize>,
@@ -267,6 +269,7 @@ impl PanelView {
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
             undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
+            hole_review: super::hole_review_state(app),
             model_view_visible: super::model_changes_view_visible(app),
             model_changes: super::model_changes_index(app),
             units: app.session.doc.units.clone(),
@@ -2451,6 +2454,41 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                 );
             }
             Item::Approval { id, title, tool, answer: given } => {
+                let review = chat.held.iter_mut().find(|held| held.id == *id).and_then(|held| held.review.as_mut());
+                if let Some(review) = review {
+                    ui_kit::assistant_approval(ui, tr("ui.agent_hole_review_title"), |ui| {
+                        ui.label(trf("ui.agent_hole_review_target", &[("name", &review.target)]));
+                        let before = review.params();
+                        review.fields(ui);
+                        let current = review.params();
+                        let ready = current.is_some() && current == before && matches!(view.hole_review, Some(Ok(true)));
+                        let error = if current.is_none() {
+                            Some(tr("ui.agent_hole_review_invalid"))
+                        } else if current == before {
+                            view.hole_review.as_ref().and_then(|status| status.as_ref().err()).map(String::as_str)
+                        } else {
+                            None
+                        };
+                        if let Some(error) = error {
+                            ui.label(RichText::new(error).color(t.error));
+                        } else if !ready {
+                            ui.label(RichText::new(tr("ui.agent_hole_review_checking")).color(t.text_dim));
+                        }
+                        ui_kit::assistant_actions(ui, |ui| {
+                            let apply = ui.add_enabled_ui(ready, |ui| ui_kit::primary_button(ui, tr("ui.apply"))).inner;
+                            let cancel = ui_kit::button(ui, tr("ui.cancel"), ui_kit::Button::Normal);
+                            solidcraft_ui_registry::publish_handle("agent_chat:hole_review:apply", apply.rect.center());
+                            solidcraft_ui_registry::publish_handle("agent_chat:hole_review:cancel", cancel.rect.center());
+                            if apply.clicked() {
+                                approval = Some((*id, Some(true)));
+                            }
+                            if cancel.clicked() {
+                                approval = Some((*id, Some(false)));
+                            }
+                        });
+                    });
+                    continue;
+                }
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
                         super::markdown_view::selectable(
@@ -3458,6 +3496,7 @@ mod tests {
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
             undo_history: None,
+            hole_review: None,
             model_view_visible: true,
             model_changes: None,
             units: "mm".into(),
