@@ -1507,6 +1507,11 @@ impl FreeOrbitKey {
         Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
     }
 
+    /// The Roll key (`roll_key`, #22691), from the same keys (no key for an unknown one).
+    pub fn roll_of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.roll_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
     pub fn parse(id: &str) -> Option<FreeOrbitKey> {
         Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
     }
@@ -4452,6 +4457,9 @@ fn prepare_preferences(
         return Err("`dimension_colour` must be null or three numbers 0…255".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    if !solidcraft_engine::doc::weld::SYMBOL_STANDARDS.contains(&new.weld_symbol_standard.as_str()) {
+        return Err("unknown weld_symbol_standard".into());
+    }
     new.retain_legacy_panel_fields(base);
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
@@ -4639,6 +4647,12 @@ fn prepare_preferences(
     }
     if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
         return Err("`free_orbit_key` must be none, alt or ctrl".into());
+    }
+    // The same key as `free_orbit_key` is allowed here, so a profile that sets the two one at a
+    // time never trips over the other's current value; the free-orbit key then wins and the
+    // Roll key does nothing (`decide_orbit_roll`), and Preferences greys the clash out.
+    if FreeOrbitKey::parse(&new.roll_key).is_none() {
+        return Err("`roll_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());

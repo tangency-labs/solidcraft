@@ -1296,6 +1296,15 @@ pub struct SrfSrfOptions {
     /// the chord `end - start`, which heads along a circle's arc only where it is shorter than
     /// a half turn, and upstream's span is then the right curve, also a longer arc.
     pub closed_by_start_direction: bool,
+    /// Not upstream (solidcore-native, with `closed_by_start_direction`): the heading tells
+    /// only the side the curve leaves its start on (a positive dot product with it), not its
+    /// tangent within the angle tolerance. The two ways round a closed curve leave the start in
+    /// opposite directions, so the side tells them apart, and a curve approximated to the
+    /// intersection's tolerance keeps it where its tangent may stray past that angle. A curve
+    /// cut at a closed surface's seam is joined across it as without a heading (#21416), and
+    /// kept only where the joined curve leaves on that side. For a caller whose heading is
+    /// exact but whose curve may be approximated (an End's cap edge, `calc_end_cap_edges`).
+    pub heading_side_only: bool,
 }
 
 /// One candidate curve of the selection loop.
@@ -1976,7 +1985,11 @@ pub fn srf_srf_intersection_with_context(
         .filter(|_| opts.closed_by_start_direction)
         .map(|dir| Heading {
             dir,
-            cos_tol: angle_tol.cos(),
+            cos_tol: if opts.heading_side_only {
+                0.0
+            } else {
+                angle_tol.cos()
+            },
         });
 
     // surface and surf/surf intersection locals
@@ -2438,7 +2451,9 @@ pub fn srf_srf_intersection_with_context(
     // error: didn't find a curve within tol of endPoints
     if best_dist == NO_CURVE && best_len == NO_CURVE {
         // Not upstream (#21416): one curve the intersectors cut at a closed surface's seam
-        if let (Some(start_pnt), Some(end_pnt), None) = (start, end, wanted_heading) {
+        // (with a heading only by its side, and kept where the joined curve leaves on it)
+        let pairs = wanted_heading.is_none() || opts.heading_side_only;
+        if let (Some(start_pnt), Some(end_pnt), true) = (start, end, pairs) {
             // (a failure of the pairing leaves the search empty, as it was)
             if let Some(across) = ignore_status(candidates_across_seam(
                 k,
@@ -2450,7 +2465,15 @@ pub fn srf_srf_intersection_with_context(
             ))?
             .flatten()
             {
-                return Ok(across);
+                let headed = match (wanted_heading, across.curve_3d.as_ref()) {
+                    (Some(h), Some(c)) => leaves_along(k, c, h)?,
+                    (Some(_), None) => false,
+                    (None, _) => true,
+                };
+                if headed {
+                    return Ok(across);
+                }
+                headed_away = true;
             }
         }
         // Not upstream: a curve through the points that heads away from the wanted heading is

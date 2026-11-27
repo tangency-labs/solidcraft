@@ -240,15 +240,47 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     FreeOrbitKey::Ctrl => "Ctrl/Cmd",
                 };
                 ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let taken = FreeOrbitKey::roll_of(app);
                     let response = ui_kit::dropdown_menu(ui, "pref_free_orbit_key", name(current), |ui| {
                         for &(key, id) in FreeOrbitKey::ALL {
-                            if ui_kit::list_picker(ui, id, name(key), current == key).clicked() {
+                            let free = key == FreeOrbitKey::Off || key != taken;
+                            if ui.add_enabled_ui(free, |ui| ui_kit::list_picker(ui, id, name(key), current == key)).inner.clicked() {
                                 app.preferences.free_orbit_key = id.into();
                             }
                         }
                     });
                     crate::scenario::publish_target("prefs:free_orbit_key", response.rect);
                 });
+            });
+        });
+        roll_key_row(app, ui, t);
+    });
+}
+
+/// The Roll key (#22691): held as a mouse orbit drag starts, the drag rolls the view like a dial.
+/// The free-orbit key's choices, less the key that one already uses.
+fn roll_key_row(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let label = app.tr("nav.roll_key.label");
+    let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
+    ui_kit::settings_form(ui, width, |ui| {
+        ui_kit::settings_row_help(ui, label, app.tr("nav.roll_key.help"), |ui| {
+            let current = FreeOrbitKey::roll_of(app);
+            let taken = FreeOrbitKey::of(app);
+            let name = |key: FreeOrbitKey| match key {
+                FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                FreeOrbitKey::Alt => "Alt/Option",
+                FreeOrbitKey::Ctrl => "Ctrl/Cmd",
+            };
+            ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                let response = ui_kit::dropdown_menu(ui, "pref_roll_key", name(current), |ui| {
+                    for &(key, id) in FreeOrbitKey::ALL {
+                        let free = key == FreeOrbitKey::Off || key != taken;
+                        if ui.add_enabled_ui(free, |ui| ui_kit::list_picker(ui, id, name(key), current == key)).inner.clicked() {
+                            app.preferences.roll_key = id.into();
+                        }
+                    }
+                });
+                crate::scenario::publish_target("prefs:roll_key", response.rect);
             });
         });
     });
@@ -288,6 +320,10 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
                 setting::orbit_reverse(app, ui);
                 setting::trackpad_twist_turns(app, ui);
+                ui.add_enabled_ui(app.preferences.trackpad_twist_turns, |ui| {
+                    let response = setting::trackpad_twist_rolls(app, ui);
+                    crate::scenario::publish_target("prefs:trackpad_twist_rolls", response.rect);
+                });
                 let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });
