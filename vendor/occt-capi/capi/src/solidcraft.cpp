@@ -185,7 +185,7 @@ API int32_t occt_solid_count(uint32_t h) {
 namespace {
 
 // Reads a profile's doubles in order.
-struct Reader {
+struct ProfileReader {
   const void* data;
   size_t count;
   size_t at = 0;
@@ -215,7 +215,7 @@ struct Reader {
 // One curve of a profile: 0 a line (start, end), 1 an arc (centre, unit axis, unit reference,
 // radius, start and end angle counter-clockwise about the axis from the reference), 2 a NURBS
 // (degree, point count, knot count, points as x y z weight, the clamped knots).
-TopoDS_Edge read_edge(Reader& r) {
+TopoDS_Edge read_edge(ProfileReader& r) {
   const size_t kind = r.size(2);
   if (kind == 0) {
     const gp_Pnt a = r.point();
@@ -274,7 +274,7 @@ TopoDS_Edge read_edge(Reader& r) {
 
 // A planar face of a profile: a loop count, then each loop (the outer first, then its holes) as
 // a curve count and its curves in order, each starting where the one before ends.
-std::vector<TopoDS_Wire> read_loops(Reader& r) {
+std::vector<TopoDS_Wire> read_loops(ProfileReader& r) {
   const size_t loops = r.size(100000);
   if (loops == 0) throw std::invalid_argument("the profile has no loop");
   std::vector<TopoDS_Wire> wires;
@@ -293,7 +293,7 @@ std::vector<TopoDS_Wire> read_loops(Reader& r) {
 }
 
 TopoDS_Face read_profile(const void* data, size_t count) {
-  Reader r{data, count};
+  ProfileReader r{data, count};
   const std::vector<TopoDS_Wire> wires = read_loops(r);
   if (r.at != count) throw std::invalid_argument("the profile's data runs past its loops");
   BRepBuilderAPI_MakeFace f(wires[0], Standard_True);
@@ -343,7 +343,7 @@ API uint32_t occt_revol_profile(const void* data, size_t count, double ox, doubl
 // data of one loop. Each curve of a section is ruled to the curve in the same place of the next.
 API uint32_t occt_loft_ruled(const void* data, size_t count) {
   return guard_handle([&]() -> uint32_t {
-    Reader r{data, count};
+    ProfileReader r{data, count};
     const size_t sections = r.size(50);
     if (sections < 2) throw std::invalid_argument("a loft needs two sections or more");
     BRepOffsetAPI_ThruSections maker(Standard_True, Standard_True, 1e-7);
