@@ -138,6 +138,8 @@ macro_rules! sketch_preferences {
             /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
             /// it is, and Look At faces the sketch when asked.
             sketch_open_look_at: bool = true, PAGE_SKETCH;
+            /// Reopen an edited sketch at its last view or only its last finished view (#18998).
+            /// Face retains the existing behaviour; new sketches always use the old choice.
             /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
             /// Off: the guides stay visual and the cursor does not move (#8694).
             sketch_recent_snap: bool = false, PAGE_SKETCH;

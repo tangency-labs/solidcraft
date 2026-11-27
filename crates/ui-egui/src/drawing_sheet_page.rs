@@ -202,6 +202,9 @@ pub struct Page {
     /// The object under the pointer on the last frame, as the selection names it: what a
     /// right-click's menu is about.
     hover: Option<solidcraft_engine::Sel>,
+    /// The sheet the last frame drew and where its paper was on screen: a right-click's menu finds
+    /// the model line under the pointer with it ([`line_under`]).
+    drawn_at: Option<(u64, OnScreen)>,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -220,6 +223,7 @@ impl Default for Page {
             pictures: PictureTextures::default(),
             view_tools: Default::default(),
             hover: None,
+            drawn_at: None,
             shown: None,
         }
     }
@@ -362,6 +366,7 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
         page.hover = None;
+        page.drawn_at = None;
         page.shown = None;
     }
 }
@@ -369,6 +374,16 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
 /// The object of the open drawing under the pointer on the last frame, as the selection names it.
 pub(crate) fn hovered(app: &SolveApp) -> Option<solidcraft_engine::Sel> {
     app.drawing_workspace.page.hover.clone()
+}
+
+/// The model line under screen point `at` on the sheet the last frame drew, within the band the
+/// page's hover uses: the view it is in and the body that drew it. `None` over paper with no line,
+/// off the paper, or before the sheet has been drawn.
+pub(crate) fn line_under(app: &mut SolveApp, at: Pos2) -> Option<(u64, solidcraft_engine::drawing_view::Shown)> {
+    let (sheet, on_screen) = app.drawing_workspace.page.drawn_at?;
+    let point = on_screen.paper(at);
+    let band = HOVER_BAND / on_screen.scale;
+    drawing_scene::line_at(&mut app.session, sheet, point, band).ok().flatten().map(|hit| (hit.view, hit.body))
 }
 
 /// Fit Sheet: the sheet is framed again on the next frame.
@@ -760,6 +775,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale)).or(annotation);
     app.drawing_workspace.page.hover =
         hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| solidcraft_engine::Sel::Drawing { drawing: drawing.id, object: hit.object });
+    app.drawing_workspace.page.drawn_at = Some((sheet, at));
     // A right-click, as in the model and a sketch: it finishes the tool in hand, or else opens the
     // menu on what is under the pointer.
     if owns_tools
@@ -1259,7 +1275,7 @@ impl Marks {
                     }
                     for outline in outlines {
                         let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        round_line(painter, &points, true, Stroke::new(hair * 0.5, ink));
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {
@@ -1320,7 +1336,7 @@ const SAME_POINT_PX: f64 = 1e-3;
 /// the ends of every run. A line that closes without a sharp turn is one loop with no ends.
 fn round_line(painter: &egui::Painter, points: &[Pos2], closed: bool, stroke: Stroke) {
     let points: Vec<[f64; 2]> = points.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
-    let runs = solidcraft_kernel::services::stroke_runs::runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
+    let runs = solidcraft_kernel::planar::stroke_runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
     let r = stroke.width / 2.0;
     let on_screen = |p: &[f64; 2]| pos2(p[0] as f32, p[1] as f32);
     for run in &runs {
