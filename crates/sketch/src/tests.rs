@@ -3640,3 +3640,34 @@ fn an_outline_folding_back_for_micrometres_has_no_spur_and_no_lobe_region() {
     }
     assert!(ps[0].area > 0.5, "{}", ps[0].area);
 }
+
+/// A thin region drawn on its own that touches another outline at one point stays a region, from
+/// outside the outline or from inside it (#22630): it touches at its own corner, the end of its
+/// curves, where a fold of one outline back across itself (above) touches where two curves cross.
+#[test]
+fn a_thin_region_touching_an_outline_at_one_corner_stays_a_region() {
+    let w = 1.5e-5;
+    // Outside the square, at the square's corner.
+    let mut sk = Sketch::new();
+    rect(&mut sk, [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    rect(&mut sk, [v(0.0, 0.0), v(0.0, -w), v(-1.0, -w), v(-1.0, 0.0)]);
+    let ps = find_profiles(&sk);
+    let mut areas: Vec<f64> = ps.iter().map(|p| p.area).collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    assert!((areas[0] - w).abs() < 1e-10, "{areas:?}");
+    assert!((areas[1] - 100.0).abs() < 1e-9, "{areas:?}");
+    // Inside the square, its corner on the middle of the square's bottom side: a hole in the
+    // square's region that touches its outline, and a region of its own.
+    let d = w / 2.0_f64.sqrt();
+    let mut sk = Sketch::new();
+    rect(&mut sk, [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    rect(&mut sk, [v(5.0, 0.0), v(6.0, 1.0), v(6.0 - d, 1.0 + d), v(5.0 - d, d)]);
+    let ps = find_profiles(&sk);
+    let mut areas: Vec<f64> = ps.iter().map(|p| p.area).collect();
+    areas.sort_by(f64::total_cmp);
+    let thin = 2.0_f64.sqrt() * w;
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    assert!((areas[0] - thin).abs() < 1e-10, "{areas:?}");
+    assert!((areas[1] - (100.0 - thin)).abs() < 1e-9, "{areas:?}");
+}

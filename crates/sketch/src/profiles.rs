@@ -2325,7 +2325,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             if !ok || h != start {
                 continue;
             }
-            let keep = without_lobes_of_no_area(&segs, &edge_nodes);
+            let keep = without_lobes_of_no_area(&segs, &edge_nodes, |q| curve_ends.iter().any(|e| e.dist(q) <= tol));
             // The lobe traced from its other side is a loop of its own: no region either (below).
             lobe_twins.extend(hs.iter().zip(&keep).filter(|(_, k)| !**k).map(|(h, _)| h ^ 1));
             if keep.iter().any(|k| !k) {
@@ -2338,6 +2338,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 kept(&mut edge_nodes, &keep);
                 kept(&mut edge_analytic, &keep);
                 kept(&mut ids, &keep);
+                kept(&mut alts, &keep);
                 kept(&mut ptags, &keep);
                 kept(&mut coverage_tags, &keep);
             }
@@ -2405,8 +2406,10 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
 
 /// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
 /// is left out, as the lens two near-tangent crossings leave (#14182), and so is one thinner than
-/// [`LOBE_WIDTH`] in a loop that is not, as an outline folding back on itself leaves (#22630).
-fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec<bool> {
+/// [`LOBE_WIDTH`] in a loop that is not, as an outline folding back on itself leaves (#22630):
+/// where two curves cross, never at a curve's end (`at_end`), where a thin region drawn on its
+/// own touches another outline at a corner.
+fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)], at_end: impl Fn(Vec2) -> bool) -> Vec<bool> {
     let n = segs.len();
     let mut keep = vec![true; n];
     // The edges leaving each node, in loop order: a lobe closes only at a node two edges leave.
@@ -2454,7 +2457,7 @@ fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec
             let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
             let area = area_about_start(&lobe);
             let perimeter: f64 = lobe.iter().map(Seg2::length).sum();
-            let thin = wide_loop && 2.0 * area.abs() < LOBE_WIDTH * perimeter;
+            let thin = wide_loop && 2.0 * area.abs() < LOBE_WIDTH * perimeter && !segs.get(i).is_some_and(|s| at_end(s.start()));
             (idx.len() < n && (area.abs() <= 1e-9 || thin)).then_some(idx)
         });
         match lobe {
@@ -3182,7 +3185,7 @@ mod tests {
             line((1.0, 1.0), (0.0, 0.0)),
         ];
         let nodes = [(0, 1), (1, 2), (2, 1), (1, 3), (3, 0)];
-        assert_eq!(without_lobes_of_no_area(&segs, &nodes), [true, false, false, true, true]);
+        assert_eq!(without_lobes_of_no_area(&segs, &nodes, |_| false), [true, false, false, true, true]);
         // Each node is left once: nothing to take out, however long the loop.
         let mut unique = Vec::new();
         let n = 5000;
@@ -3194,7 +3197,7 @@ mod tests {
             unique.push(line(at(k), at(k + 1)));
         }
         let unique_nodes: Vec<(usize, usize)> = (0..n).map(|k| (k, (k + 1) % n)).collect();
-        assert!(without_lobes_of_no_area(&unique, &unique_nodes).iter().all(|k| *k));
+        assert!(without_lobes_of_no_area(&unique, &unique_nodes, |_| false).iter().all(|k| *k));
     }
 
     /// An outline imported as thousands of short segments is one closed profile, found as one:
