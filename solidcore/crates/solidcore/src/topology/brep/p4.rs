@@ -2655,4 +2655,36 @@ mod tests {
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
         assert_eq!(b.face(f).unwrap().rectangular_trim, face2::UNSURE);
     }
+
+    /// #21218: deleting the second internal seam of a single-face doubly-periodic body
+    /// (whose radial edge uses sit on two different loops of that same face after the first
+    /// seam split the loop) merges those two loops on the face instead of destroying the
+    /// face as a self-merge.
+    #[test]
+    fn deleting_a_second_internal_seam_keeps_the_surviving_face() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_torus(&mut k, crate::Point3::ZERO, 10.0, 3.0)
+                .unwrap();
+        let face = b.face_list()[0];
+        let edges = b.edge_list().to_vec();
+        assert_eq!(b.face_list().len(), 1);
+        assert_eq!(edges.len(), 2);
+
+        b.set_editing_enabled(true);
+        with_local_env(|env| {
+            delete_edge(&mut k, &mut b, env, edges[0], Some(face))?;
+            delete_edge(&mut k, &mut b, env, edges[1], Some(face))
+        })
+        .unwrap();
+
+        assert_eq!(b.face_list(), &[face]);
+        assert!(b.face(face).is_ok());
+        assert!(b.edge_list().is_empty());
+        let loops = face2::loops(&b, face, false, None).unwrap();
+        assert_eq!(loops.len(), 1);
+        let lu = b.loop_(loops[0]).unwrap().loopuse.unwrap();
+        assert_eq!(loopuse::orientation(&b, lu).unwrap(), OrientType::Same);
+        assert!(loopuse::is_vertex_loopuse(&b, lu).unwrap());
+    }
 }
