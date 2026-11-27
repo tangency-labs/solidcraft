@@ -57,6 +57,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -778,6 +779,11 @@ pub struct SolveApp {
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
     drawing_job: Option<drawing_jobs::Drawing>,
+    /// A drawing being read for the Insert SVG/DXF window, on a worker (see
+    /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
+    pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1203,6 +1209,8 @@ impl SolveApp {
             host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
+            insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -2380,6 +2388,7 @@ impl SolveApp {
                         // an earlier signature is in the file but does not cover this save.
                         let signature = v.get("signature").and_then(Value::as_object);
                         let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let shown = display_user_path(&p);
                         let saved = match signature {
                             Some(signature) => {
                                 let key = signature
@@ -2387,10 +2396,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                self.tr("ui.design_saved_signed").replace("{path}", shown).replace("{key}", key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", shown),
+                            None => self.tr("ui.design_saved").replace("{path}", shown),
                         };
                         self.set_status(saved, false);
                     }
@@ -3019,7 +3028,7 @@ impl SolveApp {
             let command = id.to_string();
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_drawing::open(app, &command, path);
+                    dialogs_insert_drawing::start(app, &command, path);
                 }
             });
             return;
@@ -4637,6 +4646,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         parts_library::tick(self, ctx);
         file_load::tick(self, ctx);
+        dialogs_insert_drawing::tick(self);
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
@@ -4647,7 +4657,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() || self.insert_read.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -5397,6 +5407,31 @@ fn with_queued(mut result: Value, queued: bool) -> Value {
 /// A command's name as people see it (its label), for the status bar.
 pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
+}
+
+/// Format a file path for user-facing notices and labels.
+///
+/// Native OS paths are returned unchanged. Browser virtual-filesystem mount
+/// prefixes (`/disk/<id>/...`, `/opfs/...`, `/downloads/...`, `/upload/...`)
+/// are stripped so internal mount tokens never appear in save or export toasts.
+pub fn display_user_path(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix("/disk/")
+        && let Some((id, tail)) = rest.split_once('/')
+        && !id.is_empty()
+        && !tail.is_empty()
+        && !tail.starts_with('/')
+    {
+        return tail;
+    }
+    for prefix in ["/opfs/", "/downloads/", "/upload/"] {
+        if let Some(tail) = path.strip_prefix(prefix)
+            && !tail.is_empty()
+            && !tail.starts_with('/')
+        {
+            return tail;
+        }
+    }
+    path
 }
 
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".

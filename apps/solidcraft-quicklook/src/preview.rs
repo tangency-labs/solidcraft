@@ -2,8 +2,10 @@
 //!
 //! A Quick Look preview extension (`SolidCraft.app/Contents/PlugIns`). Pressing Space on a design
 //! in Finder shows the display meshes a save keeps in the design (`cache/preview.bin`, read with
-//! `solidcraft-design-preview`), drawn with Metal ([`viewer`]): drag to turn the model, scroll or
-//! pinch to zoom. A design without them shows its saved picture instead, and one with neither
+//! `solidcraft-design-preview`), drawn with Metal ([`viewer`]): drag to turn the model, Shift-drag,
+//! right-drag or middle-drag to pan, scroll or pinch to zoom, and Option-double-click or middle
+//! double-click to reset the view.
+//! A design without them shows its saved picture instead, and one with neither
 //! leaves Quick Look its generic card. Nothing evaluates or tessellates the model, and the GPU
 //! draws only when the view changes.
 

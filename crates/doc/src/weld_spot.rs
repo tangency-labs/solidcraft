@@ -131,6 +131,10 @@ pub enum MarkFaces {
     /// sheet's thickness), so the spot shows on both faces whatever the sheets; on both faces when
     /// the style has no ball.
     WhereBallHidden,
+    /// Only on the last sheet's outer face (along `normal`).
+    Upper,
+    /// Only on the first sheet's outer face (against `normal`).
+    Lower,
 }
 
 /// The marks of a [`SpotStyle`]: three zones on an outer face, a core out to diameter `core`, a
@@ -274,13 +278,13 @@ pub fn proposed_spot_diameter(thicknesses: &[f64]) -> Result<f64> {
     Ok(5.0 * thicknesses.iter().fold(f64::INFINITY, |m, &t| m.min(t)).sqrt())
 }
 
-fn positive(v: f64) -> bool {
+pub(crate) fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.0
 }
 
 /// The first and the last sheet's thickness; refuses fewer than two sheets, or a thickness that is
 /// not finite and positive.
-fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
+pub(crate) fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
     let [first, .., last] = *thicknesses else {
         return bad("fewer than two sheets");
     };
@@ -402,6 +406,8 @@ impl Layout {
                 None => [false, false],
                 Some(MarkFaces::Both) => [true, true],
                 Some(MarkFaces::WhereBallHidden) => [!shows(last), !shows(first)],
+                Some(MarkFaces::Upper) => [true, false],
+                Some(MarkFaces::Lower) => [false, true],
             },
             ball,
             pin,

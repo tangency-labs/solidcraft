@@ -382,13 +382,13 @@ pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
 pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "torus");
     let (major, minor) = (finite(major, "major radius")?, finite(minor, "minor radius")?);
+    if !center.is_finite() {
+        return Err(KernelError::Invalid("torus center must be finite".into()));
+    }
     if !(minor > 1e-6 && major > minor) {
         return Err(KernelError::Invalid("torus needs major > minor > 0".into()));
     }
-    let plane = Plane { origin: center, ..Plane::XZ };
-    let r = Region2 { outer: Loop2::circle(Vec2::new(major, 0.0), minor), holes: vec![] };
-    let mut v = revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
-    v.pop().ok_or_else(|| KernelError::Failed("torus".into()))
+    crate::smlib_sweeps::torus(center, major, minor)
 }
 
 /// Offset every segment of a loop to its right by `d` (outward for a region's outer loop and
@@ -1552,6 +1552,54 @@ impl PathSeg {
             .collect()
     }
 
+    /// The unit normal of a plane the whole path lies in, within `tol` radians: the axis of its
+    /// first arc, or else the turn between its first two directions of travel that are not
+    /// parallel, checked against every segment over its whole length: a line's direction, an
+    /// arc's axis, and a free-form segment's control points ([`PathSeg::control_points`]). A
+    /// straight path lies in many planes and gets one of them. `None` for a path that leaves
+    /// every plane, or has no direction. Solidcore decides it
+    /// ([`solidcore_ops::path_plane::plane_normal`]); this reads the segments for it.
+    pub fn plane_normal(path: &[PathSeg], tol: f64) -> Option<Vec3> {
+        use solidcore_ops::path_plane::{PathPlanePiece, PieceFit};
+        let directions = |s: &PathSeg| -> Vec<[f64; 3]> {
+            match s {
+                PathSeg::Line { .. } | PathSeg::Arc { .. } => s.tangents().map(|(a, b)| vec![point3(a), point3(b)]).unwrap_or_default(),
+                _ => (0..=8).filter_map(|i| s.along(f64::from(i) / 8.0).map(|(_, d)| point3(d))).collect(),
+            }
+        };
+        let fit = |s: &PathSeg| match *s {
+            PathSeg::Arc { axis, .. } => PieceFit::Axis(point3(axis)),
+            PathSeg::Line { .. } => PieceFit::Directions(directions(s)),
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => s.control_points(),
+        };
+        let pieces: Vec<PathPlanePiece> = path
+            .iter()
+            .map(|s| PathPlanePiece {
+                directions: directions(s),
+                arc_axis: if let PathSeg::Arc { axis, .. } = *s { Some(point3(axis)) } else { None },
+                // A sketch line or arc carried as a curve is checked as the line or arc it is.
+                fit: match *s {
+                    PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => fit(&PathSeg::of_sketch(&plane, &seg)),
+                    _ => fit(s),
+                },
+            })
+            .collect();
+        let [x, y, z] = solidcore_ops::path_plane::plane_normal(&pieces, tol)?;
+        Some(Vec3::new(x, y, z))
+    }
+
+    /// A free-form segment as [`PathSeg::plane_normal`] checks it against a plane: its start and
+    /// its control points in space (a rational Bézier span with positive weights lies in their
+    /// hull, so they decide the whole span). A segment that is no free-form span, or a control
+    /// point with no point in space, gives no points, which fit no plane.
+    fn control_points(&self) -> solidcore_ops::path_plane::PieceFit {
+        let Some(b) = self.space_bezier() else {
+            return solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(self.start()), points: None };
+        };
+        let points = b.ctrl().iter().map(|q| q.project().map(point3)).collect();
+        solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(b.start()), points }
+    }
+
     /// Points along the segment (an arc within `tol` of its chords), without its start.
     pub(crate) fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
         match *self {
@@ -1567,6 +1615,11 @@ impl PathSeg {
             }
         }
     }
+}
+
+/// A point or a direction as the plain numbers solidcore-ops takes.
+fn point3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
 /// `p` turned by `angle` about the unit axis `k` through `center` (right hand).

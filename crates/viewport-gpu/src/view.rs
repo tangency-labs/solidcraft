@@ -120,20 +120,39 @@ pub struct Material {
     /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
     /// sheet's back would otherwise be black). Off for solids, which never show their back.
     pub two_sided: bool,
+    /// The axis a turned face was cut about, as a lathe leaves it: a point on it and its
+    /// direction, in the scene's frame. Brushed metal's grooves run around it (rings on a round
+    /// face, circles on a flat face across it). `None`: the shader picks a world axis.
+    pub turn: Option<[[f32; 3]; 2]>,
 }
+
+/// Texel rows a palette row of materials takes in the material texture ([`Material::texels`]).
+const MATERIAL_TEXEL_ROWS: u32 = 4;
 
 impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
+        Material {
+            base,
+            metallic: s.metallic() as f32,
+            roughness: s.roughness() as f32,
+            ior: s.dielectric_ior() as f32,
+            pbr: true,
+            two_sided: false,
+            turn: None,
+        }
     }
 
-    /// Its two texels in the material texture: base and flag, then the optical parameters.
-    fn texels(&self) -> [[f32; 4]; 2] {
+    /// Its texels in the material texture: base and flag, the optical parameters, then the turn
+    /// axis's point (w 1 when there is one) and direction.
+    fn texels(&self) -> [[f32; 4]; MATERIAL_TEXEL_ROWS as usize] {
+        let [at, along] = self.turn.unwrap_or_default();
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+            [at[0], at[1], at[2], if self.turn.is_some() { 1.0 } else { 0.0 }],
+            [along[0], along[1], along[2], 0.0],
         ]
     }
 }
@@ -2147,7 +2166,7 @@ fn class_gpu(
 }
 
 impl BlockGpu {
-    fn update(device: &wgpu::Device, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
+    fn update(device: &wgpu::Device, queue: &wgpu::Queue, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
         let fits = bytes.vertices.len() as u64 <= device.limits().max_buffer_size;
         let same_vertices = old.as_ref().is_some_and(|o| Arc::ptr_eq(&o.bytes.vertices, &bytes.vertices));
         let vertices = if !fits || bytes.vertices.is_empty() {
@@ -2160,7 +2179,7 @@ impl BlockGpu {
             *uploaded += bytes.vertices.len() as u64;
             // A buffer the device refuses (the product preview's upload error scope reports it)
             // leaves the block undrawn rather than panicking.
-            buffer_init(device, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
+            buffer_write(device, queue, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
         };
         let mut class = |class: TriClass| {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));
@@ -2178,7 +2197,7 @@ impl BlockGpu {
         };
         let mut fresh = |data: &[u8], label: &str| {
             *uploaded += data.len() as u64;
-            upload(device, label, data, LINE_SIZE)
+            upload_write(device, queue, label, data, LINE_SIZE)
         };
         let lines = keep(old.as_ref(), |b| &b.lines, |b| b.lines.as_ref()).or_else(|| fresh(&bytes.lines, "sc_block_lines"));
         let hidden = keep(old.as_ref(), |b| &b.hidden, |b| b.hidden.as_ref()).or_else(|| fresh(&bytes.hidden, "sc_block_hidden"));
@@ -2290,7 +2309,7 @@ struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
-    /// The PBR materials ([`Material`]): two texel rows for each palette row that has any.
+    /// The PBR materials ([`Material`]): `MATERIAL_TEXEL_ROWS` texel rows for each palette row that has any.
     materials: wgpu::Texture,
     material_rows: u32,
     bind: wgpu::BindGroup,
@@ -2300,11 +2319,11 @@ struct PaletteGpu {
 /// Bytes of one palette texel.
 const PALETTE_TEXEL: u32 = 8;
 
-/// The material texture for `rows` palette rows of materials (two texel rows each).
+/// The material texture for `rows` palette rows of materials (`MATERIAL_TEXEL_ROWS` texel rows each).
 fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sc_materials"),
-        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * rows.max(1), depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * rows.max(1), depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -2314,15 +2333,15 @@ fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     })
 }
 
-/// Palette rows `first..last` of `materials` as the material texture's texels: for each, a row
-/// of base colours and flags, then a row of optical parameters.
+/// Palette rows `first..last` of `materials` as the material texture's texels: for each palette
+/// row, one texel row per entry of [`Material::texels`].
 fn material_bytes(materials: &[Material], first: u32, last: u32) -> Vec<u8> {
     let width = PALETTE_WIDTH as usize;
-    let mut out = Vec::with_capacity((last - first) as usize * 2 * width * 16);
+    let mut out = Vec::with_capacity((last - first) as usize * MATERIAL_TEXEL_ROWS as usize * width * 16);
     for row in first..last {
-        for half in 0..2 {
+        for half in 0..MATERIAL_TEXEL_ROWS as usize {
             for col in 0..width {
-                let texels = materials.get(row as usize * width + col).map_or([[0.0; 4]; 2], Material::texels);
+                let texels = materials.get(row as usize * width + col).map_or(Default::default(), Material::texels);
                 for v in texels[half] {
                     out.extend_from_slice(&v.to_le_bytes());
                 }
@@ -2342,10 +2361,19 @@ fn write_materials(queue: &wgpu::Queue, texture: &wgpu::Texture, materials: &[Ma
     let bytes = material_bytes(materials, first, last);
     *written += bytes.len() as u64;
     queue.write_texture(
-        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 2 * first, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: MATERIAL_TEXEL_ROWS * first, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
         &bytes,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 16), rows_per_image: Some(2 * (last - first)) },
-        wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * (last - first), depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(PALETTE_WIDTH * 16),
+            rows_per_image: Some(MATERIAL_TEXEL_ROWS * (last - first)),
+        },
+        wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * (last - first), depth_or_array_layers: 1 },
     );
 }
 
@@ -2671,7 +2699,7 @@ impl Batches {
             self.projection = sc.projected_shadow.clone();
             self.shadow_fallback = sc.projected_shadow.as_ref().and_then(|p| upload(device, "sc_shadow_fallback", &p.fallback, TRI_SIZE));
             self.planned = match tess {
-                Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
+                Some((tess, encoder)) => self.planned(device, queue, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
             // On a device that draws them indirectly, the meshes go into the arena (only those it
@@ -2762,7 +2790,7 @@ impl Batches {
                         shared.or(mine)
                     }
                 };
-                self.blocks.insert(block.key, BlockGpu::update(device, old, block.bytes.clone(), &mut geometry));
+                self.blocks.insert(block.key, BlockGpu::update(device, queue, old, block.bytes.clone(), &mut geometry));
                 order.push(block.key);
             }
             self.block_order = order;
@@ -3176,6 +3204,7 @@ impl Batches {
     fn planned(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         tess: &crate::TessGpu,
         encoder: &mut wgpu::CommandEncoder,
         bodies: &[PlannedBody],
@@ -3204,8 +3233,10 @@ impl Batches {
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
         let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
-        self.resident.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
-        self.chunk_colors.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
+        // Looked up, not searched for: a large model has thousands of chunks.
+        let live: std::collections::HashSet<Vec<usize>> = chunks.iter().map(|c| key(c)).collect();
+        self.resident.retain(|k, _| live.contains(k));
+        self.chunk_colors.retain(|k, _| live.contains(k));
         let mut out = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
             let k = key(chunk);
@@ -3255,7 +3286,7 @@ impl Batches {
                 }
             }
             self.uploads.planned += bytes.len() as u64;
-            if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
+            if let Some((colors, _)) = upload_write(device, queue, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
                 self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
                 out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
@@ -4783,6 +4814,17 @@ fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Op
 }
 
 fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage: wgpu::BufferUsages) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_init(device, label, part, usage))
+}
+
+/// As [`upload`], written through `queue` ([`buffer_write`]): for what a scene uploads again and
+/// again as the view changes.
+fn upload_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_write(device, queue, label, part, wgpu::BufferUsages::VERTEX))
+}
+
+/// `bytes` of `stride` in as many buffers made by `buffer` as the device's limit takes.
+fn batch(device: &wgpu::Device, bytes: &[u8], stride: usize, buffer: impl Fn(&[u8]) -> Option<wgpu::Buffer>) -> Option<Batch> {
     if bytes.len() < stride || stride == 0 {
         return None;
     }
@@ -4790,7 +4832,7 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     let parts = bytes
         .chunks(chunk)
         .filter(|part| part.len() >= stride)
-        .map(|part| Some((buffer_init(device, label, part, usage)?, u32::try_from(part.len() / stride).unwrap_or(0))))
+        .map(|part| Some((buffer(part)?, u32::try_from(part.len() / stride).unwrap_or(0))))
         .collect::<Option<Vec<_>>>()?;
     Some(Batch { parts, chunk })
 }
@@ -4859,6 +4901,17 @@ fn spilled_lines(sc: &GpuScene, spill: Spill) -> Option<(Vec<u8>, Vec<u8>)> {
 /// upload can fail and leave the previous picture in place.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
     match crate::buffer_init(device, label, contents, usage) {
+        Ok(buffer) => Some(buffer),
+        Err(error) => {
+            refused(error.to_string());
+            None
+        }
+    }
+}
+
+/// As [`buffer_init`], written through `queue` ([`crate::buffer_write`]).
+fn buffer_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    match crate::buffer_write(device, queue, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
             refused(error.to_string());
@@ -5169,8 +5222,10 @@ impl Renderer {
             self.pic.ss_key = None;
         }
         self.timing = time;
-        if let Some(timer) = &mut self.timer {
-            timer.begin(device, time);
+        // A timed frame whose timestamps came back without times (a new query set's first frame
+        // on Apple's GPUs) is drawn and timed once more: a still view times no other frame.
+        if self.timer.as_mut().is_some_and(|timer| timer.begin(device, time)) {
+            self.pic.ss_key = None;
         }
         self.prepare_frame(device, queue, encoder, frame, isolated);
         // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
@@ -5728,6 +5783,11 @@ impl Renderer {
         tris(pass, &res.pbr, &m.pbr);
         if !cb.product {
             res.clouds.paint(pass, &res.cloud_pipes, tally);
+            // Clouds use a pipeline layout with only 2 bind groups, which invalidates groups 1 and 2
+            // for the lit pipeline that follows. Rebind access and AO maps so later triangles read
+            // valid data (#16048).
+            pass.set_bind_group(1, &res.access_bind, &[]);
+            pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
@@ -7697,7 +7757,7 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided };
+            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, turn: None };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -7745,7 +7805,8 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false };
+        let material =
+            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, turn: None };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],
@@ -7761,7 +7822,7 @@ mod glass_tests {
         assert!(first.geometry > 0 && first.palette > 0, "the first scene uploads its block and tables: {first:?}");
         let edited = take(&mut r, 2, scene(material(0.6)));
         assert_eq!(edited.geometry, 0, "a material edit uploads no geometry: {edited:?}");
-        assert_eq!(edited.palette, u64::from(2 * PALETTE_WIDTH * 16), "one row of materials (two texel rows): {edited:?}");
+        assert_eq!(edited.palette, u64::from(MATERIAL_TEXEL_ROWS * PALETTE_WIDTH * 16), "one row of materials (its texel rows): {edited:?}");
     }
 
     /// Without order-independent transparency, the sorted glass stream is kept while the blocks'
@@ -8883,7 +8944,8 @@ mod glass_tests {
         }
         assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
         // A still view: the same frame again shows the picture already drawn, which records no
-        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        // passes. Timing asked for over it draws a frame once, so its times come all the same; and
+        // once more where that frame's timestamps read back empty (a new query set's on Metal).
         let mut still = Renderer::new(&device, target, None);
         let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
         render_frame(&mut still, &device, &queue, &frame, true);

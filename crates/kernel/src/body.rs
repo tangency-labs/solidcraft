@@ -513,7 +513,7 @@ pub struct FaceInfo {
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 /// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
-pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats, ShapeLimit, Unshaped};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -726,6 +726,11 @@ impl std::fmt::Debug for OutlinePrep {
 /// ([`Body::outline_prepared`]).
 pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
 
+/// The relative accuracy [`Body::face_area`] asks solidcore for. Its estimate is cautious: on a
+/// cut sphere 1e-6 already lands within 1e-15 of the exact area; 1e-8 keeps a margin for other
+/// surfaces at about 2 ms for a sphere face (#22556).
+pub const FACE_AREA_ACCURACY: f64 = 1e-8;
+
 impl Body {
     /// Whether this body's lazily placed record has been moved: a placement's geometry was
     /// needed exactly ([`crate::ops::transform_matrix`]). Derived from the move's own state, so
@@ -778,10 +783,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
-    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
-        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
+    /// This body with the step `what` (and `operands`) it was decoded from, whose check that step
+    /// left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
@@ -1918,6 +1923,11 @@ impl Body {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn cached_mesh_count(&self) -> usize {
+        self.meshes.as_ref().map_or(0, |m| m.made.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len())
+    }
+
     /// Planar faces whose boundary crosses itself: two of its loops crossing each other, or a
     /// loop crossing itself. Such a face has no inside, and its mesh covers what it shouldn't
     /// and leaves openings beside it, while the shell is still closed and every face meshes
@@ -2307,6 +2317,26 @@ impl Body {
         }
     }
 
+    /// The area of face `face_index` from its exact surface and trim (#22556): solidcore's
+    /// boundary integral ([`solidcore_ops::Body::face_area`]), the measure the whole body's area
+    /// uses, at [`FACE_AREA_ACCURACY`]; no mesh. `None` for a mesh body or an index out of range.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Failed`] for the kernel's failure (a face it cannot integrate).
+    pub fn face_area(&self, face_index: usize) -> Result<Option<f64>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        guard("face area", || match body.face_area(order, face_index, FACE_AREA_ACCURACY) {
+            Ok(a) => Ok(Some(a)),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face area: {e}"))),
+        })
+    }
+
     /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
     /// modelling tolerance): exact, from the face's own surface and trim
     /// ([`solidcore_ops::Body::face_normal_at_point`]), no mesh. It points out of the material,
@@ -2338,18 +2368,60 @@ impl Body {
     pub fn classify_points_with_normals(
         &self,
         points: &[Vec3],
-        face: Option<solidcore_ops::PointNormalFace>,
-    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        face: Option<crate::points::PointNormalFace>,
+    ) -> Result<Vec<crate::points::ClassifiedPoint>> {
+        use crate::points::{ClassifiedPoint, PointNormalFace, UnitNormal};
         let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
         let (body, order) = &*form;
         let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
-        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+        let face = face.map(|f| match f {
+            PointNormalFace::Index(i) => solidcore_ops::PointNormalFace::Index(i),
+            PointNormalFace::Point(p) => solidcore_ops::PointNormalFace::Point(p),
+        });
+        let class = |c: solidcore_ops::ClassifiedPoint| match c {
+            solidcore_ops::ClassifiedPoint::Inside => ClassifiedPoint::Inside,
+            solidcore_ops::ClassifiedPoint::Outside => ClassifiedPoint::Outside,
+            solidcore_ops::ClassifiedPoint::On { face, normal } => {
+                ClassifiedPoint::On { face, normal: UnitNormal { value: normal.value, bound: normal.bound } }
+            }
+        };
+        body.classify_points_with_normals(order, &points, face).map(|v| v.into_iter().map(class).collect()).map_err(|e| match e {
             solidcore_ops::Error::Argument => {
                 KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
             }
             solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
             e => KernelError::Failed(format!("classify points with normals: {e}")),
         })
+    }
+
+    /// Which sides of the plane through `p` with normal `normal` immediately enter material of
+    /// `self`: `negative` for `-normal`, `positive` for `+normal`
+    /// ([`solidcore_ops::Body::material_sides_at`]). Decided on exact B-rep classification and
+    /// outward face normals (no display mesh); a mesh body's triangles are its exact shape and
+    /// are probed via [`Self::classify_point`].
+    pub fn material_sides_at(&self, p: Vec3, normal: Vec3) -> Result<solidcore_ops::MaterialSides> {
+        if !p.is_finite() || !normal.is_finite() {
+            return Ok(solidcore_ops::MaterialSides::default());
+        }
+        if self.is_mesh() {
+            let Some(unit) = solidcore_ops::unit_direction([normal.x, normal.y, normal.z]) else {
+                return Ok(solidcore_ops::MaterialSides::default());
+            };
+            let step = (self.size() * 1e-5).max(self.record.tolerance * 4.0).max(1e-5);
+            let in_dir = |s: f64| {
+                solidcore_ops::point_along_line([p.x, p.y, p.z], unit, s)
+                    .map(|q| Vec3::new(q[0], q[1], q[2]))
+                    .is_some_and(|q| matches!(self.classify_point(q), Ok(PointClass::Inside)))
+            };
+            return Ok(solidcore_ops::MaterialSides { negative: in_dir(-step), positive: in_dir(step) });
+        }
+        let Some(form) = self.ops_body() else { return Ok(solidcore_ops::MaterialSides::default()) };
+        let (ops, order) = &*form;
+        match ops.material_sides_at(order, [p.x, p.y, p.z], [normal.x, normal.y, normal.z]) {
+            Ok(sides) => Ok(sides),
+            Err(solidcore_ops::Error::Argument) => Ok(solidcore_ops::MaterialSides::default()),
+            Err(e) => Err(KernelError::Failed(format!("material sides: {e}"))),
+        }
     }
 
     /// Where the line through `through` along `direction` meets face `face_index`, of its
@@ -2598,8 +2670,12 @@ impl Body {
         self.require_brep("contact test")?;
         other.require_brep("contact test")?;
         let tol = (self.size().max(other.size()) * 1e-4).max(1e-6);
+        let gap = 2.0 * tol;
+        if exact_boxes_separate(self, other, gap, tol) {
+            return Ok(false);
+        }
         let (a, b) = (self.mesh(&MeshTolerance::chord(tol))?, other.mesh(&MeshTolerance::chord(tol))?);
-        shell_groups::meshes_meet(&a, &b, 2.0 * tol)
+        shell_groups::meshes_meet(&a, &b, gap)
     }
 
     /// The same contact test for several tools, reusing this unchanged body's
@@ -2615,6 +2691,11 @@ impl Body {
         for other in others {
             other.require_brep("contact test")?;
             let tol = (size.max(other.size()) * 1e-4).max(1e-6);
+            let gap = 2.0 * tol;
+            if exact_boxes_separate(self, other, gap, tol) {
+                contacts.push(false);
+                continue;
+            }
             let key = tol.to_bits();
             if !meshes.contains_key(&key) {
                 // Bound retained meshes even when hostile inputs request many tolerances.
@@ -2624,10 +2705,36 @@ impl Body {
                 meshes.insert(key, self.mesh(&MeshTolerance::chord(tol))?);
             }
             let mesh = meshes.get(&key).ok_or_else(|| KernelError::Internal("contact mesh disappeared".into()))?;
-            contacts.push(shell_groups::meshes_meet(mesh, &other.mesh(&MeshTolerance::chord(tol))?, 2.0 * tol)?);
+            contacts.push(shell_groups::meshes_meet(mesh, &other.mesh(&MeshTolerance::chord(tol))?, gap)?);
         }
         Ok(contacts)
     }
+}
+
+/// Whether `a` and `b`'s exact bounding boxes are separated by more than `gap` plus both contact
+/// meshes' chord deviation (`2 * tol`) and record tolerances, proving their `tol`-chord meshes
+/// cannot meet within `gap` without meshing either. Checks cheap inner boxes first so overlapping
+/// bodies skip measuring `exact_bounds`.
+fn exact_boxes_separate(a: &Body, b: &Body, gap: f64, tol: f64) -> bool {
+    let margin = gap + 2.0 * tol + a.record().tolerance + b.record().tolerance;
+    if !margin.is_finite() {
+        return false;
+    }
+    if let (Some(ia), Some(ib)) = (crate::ops::inner_box(a), crate::ops::inner_box(b))
+        && !shell_groups::boxes_separate(ia, ib, margin)
+    {
+        return false;
+    }
+    let (Ok(ba), Ok(bb)) = (a.exact_bounds(), b.exact_bounds()) else {
+        return false;
+    };
+    !ba.is_empty()
+        && !bb.is_empty()
+        && ba.min.is_finite()
+        && ba.max.is_finite()
+        && bb.min.is_finite()
+        && bb.max.is_finite()
+        && shell_groups::boxes_separate(ba, bb, margin)
 }
 
 /// `chord`, or a thousandth of the edge's own extent where that is finer: the body's size says

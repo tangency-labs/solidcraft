@@ -29,7 +29,7 @@ use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
 use crate::history_names::{Match, Names};
-use crate::naming::{self, closest, edge_names, face_names, strip_piece};
+use crate::naming::{self, closest, face_names, strip_piece};
 use crate::piece_names::strip_edge_number;
 use crate::{FeatureKind, ModelBody, ModelState, Operation};
 
@@ -62,7 +62,7 @@ pub struct EdgeHit {
 /// A body's edge names and face names, worked out once for every edge name looked up on it.
 pub(crate) struct BodyEdges {
     pub(crate) mesh: Arc<Mesh>,
-    names: Vec<String>,
+    edges: Arc<naming::EdgeNameIndex>,
     faces: Arc<Names>,
 }
 
@@ -77,26 +77,26 @@ pub(crate) enum EdgeMatch {
 
 impl BodyEdges {
     pub(crate) fn new(b: &ModelBody) -> BodyEdges {
-        BodyEdges { mesh: b.mesh(), names: edge_names(b), faces: naming::names(b) }
+        BodyEdges { mesh: b.mesh(), edges: naming::edge_name_index(b), faces: naming::names(b) }
+    }
+
+    /// Edge `i`'s persistent name.
+    pub(crate) fn name(&self, i: usize) -> Option<&str> {
+        self.edges.names.get(i).map(String::as_str)
     }
 
     /// Whether edge `i`'s name follows exact history: the faces it separates do, and it isn't one
     /// of several edges between them, numbered by where they lie.
-    /// Edge `i`'s persistent name.
-    pub(crate) fn name(&self, i: usize) -> Option<&str> {
-        self.names.get(i).map(String::as_str)
-    }
-
     pub(crate) fn verified(&self, i: usize) -> bool {
         self.mesh.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| self.faces.verified(*f as usize)))
-            && self.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+            && self.edges.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
     }
 
     /// What the stored edge name `name` matches: the edge with that name; else the one edge
     /// between the faces it names (followed through splits and merges of those faces); else the
     /// pieces of it. `None` when nothing does.
     pub(crate) fn matching(&self, name: &str) -> Option<EdgeMatch> {
-        if let Some(i) = self.names.iter().position(|n| n == name) {
+        if let Some(&i) = self.edges.by_name.get(name) {
             return Some(EdgeMatch::Edge(i));
         }
         // By the faces it separates: the best way any edge matches.
@@ -132,19 +132,19 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         return Err(format!("edge `{name}` was named by a build before format 14"));
     }
     let m = b.mesh();
-    let names = edge_names(b);
+    let edges = naming::edge_name_index(b);
     let faces = naming::names(b);
     let mid = |i: usize| edge_mid(&m, i);
     // Several edges between the same two faces are numbered by where they lie: not exact.
     let verified = |i: usize| {
         m.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| faces.verified(*f as usize)))
-            && names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+            && edges.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
     };
     let exact = |i: usize| -> Result<EdgeHit, String> {
         let on = edge_near(b, &m, i, near);
         mid(i).map(|p| EdgeHit { edge: i, point: if on { near } else { p }, verified: verified(i), on_point: on }).ok_or_else(|| "edge".into())
     };
-    if let Some(i) = names.iter().position(|n| crate::persistent_name::same_edge(n, name)) {
+    if let Some(i) = edges.find_exact(name) {
         return exact(i);
     }
     // By the faces it separates: the best way any edge matches.
@@ -215,7 +215,7 @@ pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: usize, nea
     }
     let wanted = without_face_ties(name)?;
     let j = edge_through(b, m, near).filter(|j| *j != found)?;
-    (without_face_ties(edge_names(b).get(j)?)? == wanted).then_some(j)
+    (without_face_ties(naming::edge_name_index(b).names.get(j)?)? == wanted).then_some(j)
 }
 
 /// Find a saved edge in its body when it may be named with numbered pieces: a Sketch Project edge, or
@@ -611,26 +611,21 @@ pub fn locate_vertex(b: &ModelBody, name: &str, near: Vec3) -> Result<VertexHit,
         return Err(format!("vertex `{name}` cannot be found on a mesh body"));
     }
     let record = b.body.record();
-    let incident = naming::vertex_incident_faces(record);
+    let vertices = naming::vertex_name_index(b);
+    let incident = &vertices.incident;
     let faces = naming::names(b);
-    let names = naming::vertex_names_from_record(record, &incident, &faces.faces);
     let reach = pick_reach(b);
     let pos = |v: usize| record.vertices.get(v).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).filter(|p| p.is_finite());
     let verified = |v: usize| {
         incident.get(v).is_some_and(|fs| !fs.is_empty() && fs.iter().all(|f| faces.verified(*f as usize)))
-            && names.get(v).is_some_and(|n| strip_edge_number(n).len() == n.len())
+            && vertices.names.get(v).is_some_and(|n| strip_edge_number(n).len() == n.len())
     };
     let hit = |v: usize| -> Result<VertexHit, String> {
         let point = pos(v).ok_or_else(|| "vertex".to_string())?;
         let on_point = near.is_finite() && point.dist(near) <= reach;
         Ok(VertexHit { vertex: v, point, verified: verified(v), on_point })
     };
-    if let Some(v) = names
-        .iter()
-        .enumerate()
-        .find(|(v, n)| !n.is_empty() && incident.get(*v).is_some_and(|fs| !fs.is_empty()) && crate::persistent_name::same_edge(n, name))
-        .map(|(v, _)| v)
-    {
+    if let Some(v) = vertices.find_exact(name) {
         return hit(v);
     }
     let (wanted, numbered) = parse_vertex_wanted(name);
@@ -654,9 +649,9 @@ pub fn locate_vertex(b: &ModelBody, name: &str, near: Vec3) -> Result<VertexHit,
     };
     let Some((_, cands)) = best else {
         let picked = if loose {
-            resuffixed_vertex(record, &incident, &faces, &wanted_parsed, reach, near)
+            resuffixed_vertex(record, incident, &faces, &wanted_parsed, reach, near)
         } else {
-            renamed_vertex(record, &incident, &faces, &wanted, reach, near)
+            renamed_vertex(record, incident, &faces, &wanted, reach, near)
         };
         return picked.and_then(at_pick).ok_or_else(|| format!("vertex `{name}` no longer exists"));
     };
@@ -664,7 +659,7 @@ pub fn locate_vertex(b: &ModelBody, name: &str, near: Vec3) -> Result<VertexHit,
     match cands.as_slice() {
         [v] if numbered && !vertex_near(*v) => Err(format!("vertex `{name}` was one of several between its faces, and the one left is elsewhere")),
         [v] => hit(*v),
-        _ => resuffixed_vertex(record, &incident, &faces, &wanted_parsed, reach, near)
+        _ => resuffixed_vertex(record, incident, &faces, &wanted_parsed, reach, near)
             .and_then(at_pick)
             .ok_or_else(|| format!("vertex `{name}` is no longer one vertex")),
     }
@@ -1519,6 +1514,18 @@ pub fn locate_thread_face_on_body(st: &ModelState, body: Option<&str>, name: &st
     locate_face_on_body_with(st, body, name, p, true)
 }
 
+/// Whether [`locate_face_on_body`] resolves `name` directly on `st.bodies[body_index]` without
+/// falling back to scanning other bodies in `st`.
+pub(crate) fn face_resolved_on_body(st: &ModelState, body_index: usize, name: &str, p: Vec3) -> bool {
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
+        return false;
+    }
+    let Some(b) = st.bodies.get(body_index).filter(|b| !b.body.is_mesh()) else {
+        return false;
+    };
+    locate_in(std::iter::once((body_index, b)), name, Some(p)).is_ok()
+}
+
 /// [`locate_face_on_body`] for a face that stands only for where it lies: an extrude's From or To
 /// face. When the named face is now split into pieces (a letter with a closed hole cut into it
 /// leaves an island of it, #22281), every piece lies on the face's own surface, so the piece the
@@ -1909,4 +1916,100 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
             format!("`{name}` names more than one face (pieces of a split face, or faces of several bodies): give `body`, or the name of one piece")
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::naming::{NameCell, edge_name_index, vertex_name_index};
+
+    fn blend_named_box(old_form_on_body: bool) -> ModelBody {
+        let solid = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 6., 4.)).unwrap();
+        let mut body = ModelBody::new("BlendBox".into(), solid, 1);
+        let blend = if old_form_on_body { "F5:blend:F2:side:l1|F2:top" } else { "F5:blend(F2:side:l1|F2:top)" };
+        let faces = vec![blend.into(), "F2:side:l1".into(), "F2:side:l2".into(), "F2:side:l3".into(), "F2:side:l4".into(), "F2:top".into()];
+        body.names = NameCell::known(Arc::new(faces));
+        body
+    }
+
+    #[test]
+    fn locate_edge_and_body_edges_hit_cache_and_preserve_old_form_and_retied_lookup() {
+        let body = blend_named_box(false);
+        let idx = edge_name_index(&body);
+        let be = BodyEdges::new(&body);
+        assert!(Arc::ptr_eq(&be.edges, &idx), "BodyEdges must share cached EdgeNameIndex");
+
+        let (i, modern_name) = idx.names.iter().enumerate().find(|(_, n)| n.contains("F5:blend(F2:side:l1|F2:top)")).unwrap();
+        assert_eq!(locate_edge(&body, modern_name, Vec3::ZERO).unwrap().edge, i);
+        assert!(Arc::ptr_eq(&edge_name_index(&body), &idx));
+        assert!(matches!(be.matching(modern_name), Some(EdgeMatch::Edge(hit)) if hit == i));
+
+        // Older colon-nested query finds the same edge in O(1) via canonicalized lookup.
+        let old_query = modern_name.replace("F5:blend(F2:side:l1|F2:top)", "F5:blend:F2:side:l1|F2:top");
+        assert_ne!(old_query, *modern_name);
+        assert_eq!(locate_edge(&body, &old_query, Vec3::ZERO).unwrap().edge, i);
+
+        // A body whose stored face name itself uses the older form still matches modern queries.
+        let legacy_body = blend_named_box(true);
+        let legacy_idx = edge_name_index(&legacy_body);
+        let (li, legacy_edge) = legacy_idx.names.iter().enumerate().find(|(_, n)| n.contains("F5:blend:F2:side:l1|F2:top")).unwrap();
+        let modern_query = legacy_edge.replace("F5:blend:F2:side:l1|F2:top", "F5:blend(F2:side:l1|F2:top)");
+        assert_eq!(locate_edge(&legacy_body, &modern_query, Vec3::ZERO).unwrap().edge, li);
+        assert!(locate_edge(&body, "?F2:side:l1|F2:top", Vec3::ZERO).is_err());
+
+        // `retied_edge` resolves an opposite tie-numbered cap edge using the cached EdgeNameIndex.
+        let solid = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 6., 4.)).unwrap();
+        let face_infos = solid.faces(0.01).unwrap();
+        let mut names = vec![String::new(); face_infos.len()];
+        let mut side = 1usize;
+        for f in &face_infos {
+            let n = f.plane_normal.unwrap();
+            names[f.index] = if n.z > 0.9 {
+                "F2:top#1".into()
+            } else if n.z < -0.9 {
+                "F2:top#2".into()
+            } else {
+                let s = format!("F2:side:l{side}");
+                side += 1;
+                s
+            };
+        }
+        let mut retied_body = ModelBody::new("Retied".into(), solid, 1);
+        retied_body.names = NameCell::known(Arc::new(names));
+        let m = retied_body.mesh();
+        let ridx = edge_name_index(&retied_body);
+        let e1 = ridx.names.iter().position(|n| n == "F2:side:l1|F2:top#1").unwrap();
+        let e2 = ridx.names.iter().position(|n| n == "F2:side:l1|F2:top#2").unwrap();
+        let mid2 = edge_mid(&m, e2).unwrap();
+        assert_eq!(retied_edge(&retied_body, &m, &ridx.names[e1], e1, mid2), Some(e2));
+        assert!(Arc::ptr_eq(&edge_name_index(&retied_body), &ridx));
+    }
+
+    #[test]
+    fn locate_vertex_hits_cache_and_handles_old_form_and_errors() {
+        let body = blend_named_box(false);
+        let idx = vertex_name_index(&body);
+        let (v, modern_name) = idx.names.iter().enumerate().find(|(_, n)| n.contains("F5:blend(F2:side:l1|F2:top)")).unwrap();
+        assert_eq!(locate_vertex(&body, modern_name, Vec3::ZERO).unwrap().vertex, v);
+        assert!(Arc::ptr_eq(&vertex_name_index(&body), &idx));
+
+        let old_query = modern_name.replace("F5:blend(F2:side:l1|F2:top)", "F5:blend:F2:side:l1|F2:top");
+        assert_eq!(locate_vertex(&body, &old_query, Vec3::ZERO).unwrap().vertex, v);
+
+        let legacy_body = blend_named_box(true);
+        let legacy_idx = vertex_name_index(&legacy_body);
+        let (lv, legacy_vertex) = legacy_idx.names.iter().enumerate().find(|(_, n)| n.contains("F5:blend:F2:side:l1|F2:top")).unwrap();
+        let modern_query = legacy_vertex.replace("F5:blend:F2:side:l1|F2:top", "F5:blend(F2:side:l1|F2:top)");
+        assert_eq!(locate_vertex(&legacy_body, &modern_query, Vec3::ZERO).unwrap().vertex, lv);
+
+        assert!(locate_vertex(&body, "", Vec3::ZERO).is_err());
+        assert!(locate_vertex(&body, "?F2:side:l1|F2:top", Vec3::ZERO).is_err());
+
+        let mesh_body = ModelBody::new(
+            "Mesh".into(),
+            solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap(),
+            1,
+        );
+        assert!(locate_vertex(&mesh_body, modern_name, Vec3::ZERO).is_err());
+    }
 }

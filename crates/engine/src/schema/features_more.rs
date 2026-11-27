@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
-    FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
-    StringList, TouchingParam, feature_common, present,
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilHeightMeasureParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint,
+    EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    RibDirectionParam, SketchRef, StringList, TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -302,6 +302,12 @@ pub struct CoilParams {
     /// are both given.
     #[serde(default)]
     pub height: Option<LengthExpr>,
+    /// What `height` measures: the helix's centre line (the default) or the coil overall, end to
+    /// end, where the section reaches past the centre line at both ends. With `overall`, the
+    /// command works out the centre-line height that gives it. Needs `height`, refused with
+    /// `sketch`; with square ends it needs `pitch` too.
+    #[serde(default)]
+    pub height_measure: Option<CoilHeightMeasureParam>,
     /// The distance along `axis` between one turn and the next.
     #[serde(default)]
     pub pitch: Option<LengthExpr>,

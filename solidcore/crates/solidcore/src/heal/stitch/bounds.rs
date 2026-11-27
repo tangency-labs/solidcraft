@@ -1319,12 +1319,32 @@ pub(crate) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Re
     ))
 }
 
-/// Bounds the whole curve's distance from a point (the geometry a squeeze removes).
+/// Bounds the whole curve's distance from a point (the geometry a squeeze removes): the
+/// farthest of [`curve_cover`]'s boxes over the interval and of the curve's boxes at the
+/// interval's two ends. A B-spline span's box is cut to the box of its control points, so the
+/// bound follows the curve's own size: the interval evaluation of a span alone widens with the
+/// distance of its points from the origin (`(1 - a) p + a q` with `a` in `[0, 1]` spans
+/// `[0, |p| + |q|]` even where `p = q`). The end boxes hold what the evaluation returns at a
+/// natural end, the end control point ([`spline_box`]), which no span holds on an unclamped end.
 pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
-    norm(difference(
-        curve_box(curve, checked_range([interval.min(), interval.max()])?)?,
-        point_box(point)?,
-    ))
+    let p = point_box(point)?;
+    let ends = [interval.min(), interval.max()]
+        .into_iter()
+        .map(|t| curve_box(curve, checked_range([t, t])?));
+    let mut far = 0.0_f64;
+    for piece in curve_cover(curve, interval.min(), interval.max(), 1)?
+        .into_iter()
+        .map(Ok)
+        .chain(ends)
+    {
+        let piece = piece?;
+        let d = norm(difference(piece, p))?;
+        if !d.is_finite() {
+            return Err(invalid("non-finite curve-to-point bound"));
+        }
+        far = far.max(d);
+    }
+    Ok(far)
 }
 
 /// Cells the mean-value pair bound starts from, the most it encloses, and its most
@@ -1561,6 +1581,38 @@ mod tests {
 
     fn cp(x: f64, y: f64, w: f64) -> CPoint {
         CPoint { x, y, z: 0.0, w }
+    }
+
+    /// A curve far from the origin whose control points all lie within 1e-9 of (1, 1, 1)
+    /// (the healer's degenerate wire edge): its bound from that point is about 1e-9, not
+    /// the size of the span's plain interval evaluation, which widens with the points'
+    /// distance from the origin (5.2 here).
+    #[test]
+    fn a_curve_far_from_the_origin_is_bounded_by_its_own_size() {
+        let p = |z: f64| CPoint {
+            x: 1.0,
+            y: 1.0,
+            z,
+            w: NOW,
+        };
+        let c = BSplineCurve::from_nurb(
+            Nurbs::new(
+                vec![p(1.0), p(1.0), p(1.000_000_001)],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            true,
+        )
+        .into();
+        let far = curve_to_point(
+            &c,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        assert!((1e-9..=1.1e-9).contains(&far), "{far}");
     }
 
     #[test]
@@ -2415,9 +2467,16 @@ mod tests {
             2,
             vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
         );
-        // `basis_eval` fails on its natural ends; the box there holds both the end
-        // control point and the end piece's value.
-        assert!(uv.evaluate_point(&k, 0.2).is_err() && uv.evaluate_point(&k, 0.8).is_err());
+        // At U[2] the quadratic basis weights are 3/4 and 1/4 on P0,P1;
+        // at U[4] they are 1/4 and 3/4 on P2,P3. Both natural ends are valid.
+        let expected = [Vec3::new(0.2, 0.375, 0.0), Vec3::new(0.675, 0.15, 0.0)];
+        for (t, expected) in [0.2, 0.8].into_iter().zip(expected) {
+            let point = uv.evaluate_point(&k, t).unwrap();
+            assert!((point - expected).length() < 1e-12, "{t}: {point:?}");
+            let end = curve_box(&uv, Ivl::from(t)).unwrap();
+            assert!(contains(end, point), "{t}: {point:?} outside {end:?}");
+        }
+        // The conservative endpoint enclosure still holds the stored end control point.
         let end = curve_box(&uv, Ivl::from(0.2)).unwrap();
         assert!(contains(end, Vec3::new(0.1, 0.2, 0.0)), "{end:?}");
         for range in [[0.21, 0.79], [0.3, 0.6]] {

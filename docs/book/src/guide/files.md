@@ -85,6 +85,15 @@ body's colour and each face's own colour, but without the bodies' names, and IGE
 named and in its colour, as cadmpeg's IGES writer writes no assemblies. The reply's warnings say what
 the file leaves out.
 
+To export a [sketch](sketching.md) with real circles, arcs, and lines, right-click the sketch
+in the **Browser** and choose **Export DXF…** (`sketch.export_dxf`). These become DXF
+`CIRCLE`, `ARC`, and `LINE` entities; a rectangle is four `LINE` entities. Other curves, such as
+splines, are written as short straight `LINE` segments, and construction curves are left out.
+**File → Export Current View as DXF…** instead writes a projected drawing made of straight
+segments, so circles and arcs become segmented curves. See
+[view DXF export](https://github.com/tangency-labs/solidcraft/blob/main/docs/view-dxf.md)
+for projection and tolerance settings.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
@@ -241,6 +250,13 @@ Closed meshes can be rebuilt as solids with the `mesh.convert` command (command 
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
+To convert a standalone STL file without adding it to the open design, use
+`file.stl_to_step` with `input` and `output` paths. It imports the STL into a temporary design,
+converts each mesh body using the same rules as `mesh.convert`, then writes a STEP solid.
+Coordinates are millimetres by default; `units` can specify `mm`, `cm`, `m`, `in` or `ft`, and
+`tolerance` defaults to `0.05 mm`. The input must be a closed mesh that can be converted; an
+import or conversion failure leaves the open design and output file unchanged.
+
 Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
 original. Select the mesh body and choose either a retained percentage (greater than 0 and less
 than 100) or a positive target triangle count. The status reports the original, target and achieved
@@ -302,10 +318,12 @@ cache with `cache: true` on warm saves; saving never rebuilds cold geometry just
 create one. Ordinary saves and browser downloads default to `cache: false`. An additional display-mesh cache remains opt-in
 with `preview: true`. Unsupported or mismatched caches are ignored. Browser opening
 still rebuilds synchronously.
-Warm saves with explicit `cache: true` can also include a small PNG thumbnail. It travels with the file, so
-Home can show the recent design without reconstructing it when no local picture
-is available. Missing or incompatible pictures use the usual thumbnail generation.
-The default `cache: false` omits the portable thumbnail too.
+A save also includes a picture of the design, from the window, the command line or a script. It
+travels with the file, so Home and the parts library can show the design without rebuilding it.
+It shows the model alone from the isometric view. SolidCraft draws a grid under it in your theme's
+3D view colours, and the model lifts off the grid while the pointer is on its card. If your system
+turns animations off, it stays still. A missing picture is drawn again, and saving with
+`cache: false` omits it.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`

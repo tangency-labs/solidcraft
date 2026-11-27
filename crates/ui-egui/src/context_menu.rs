@@ -394,6 +394,84 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     v
 }
 
+/// Distinct non-empty occurrence paths in the current selection, preserving order.
+fn sel_occurrence_paths(app: &SolveApp) -> Vec<Vec<u64>> {
+    let mut paths: Vec<Vec<u64>> = Vec::new();
+    for s in &app.session.selection {
+        if let Sel::Occurrence { path } = s
+            && !path.is_empty()
+            && !paths.contains(path)
+        {
+            paths.push(path.clone());
+        }
+    }
+    paths
+}
+
+/// Distinct non-empty bodies referenced by the current selection (faces, edges, vertices,
+/// bodies, and occurrences), preserving selection order.
+fn selected_viewport_bodies(app: &SolveApp) -> Vec<String> {
+    let mut bodies: Vec<String> = Vec::new();
+    let mut push = |name: &str| {
+        if !name.is_empty() && !bodies.iter().any(|b| b == name) {
+            bodies.push(name.to_string());
+        }
+    };
+    for s in &app.session.selection {
+        match s {
+            Sel::Body { name } => push(name),
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => push(body),
+            Sel::Occurrence { path } if !path.is_empty() => {
+                if let Ok(occ_bodies) = app.session.occurrence_bodies(path, true) {
+                    for body in occ_bodies {
+                        push(&body);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    bodies
+}
+
+/// Build the `Isolate` item for a viewport body selection.
+///
+/// When every selected body maps to a placed component occurrence, isolate those occurrences
+/// so all bodies of each selected component stay visible. Otherwise isolate the bodies directly.
+fn viewport_isolate_item(app: &SolveApp, bodies: &[String]) -> Option<Item> {
+    if bodies.is_empty() {
+        return None;
+    }
+    let mut paths: Vec<Vec<u64>> = Vec::new();
+    let mut all_occurrences = true;
+    for body in bodies {
+        if let Some(path) = crate::dialogs::occurrence_path_of_body(&app.session, body) {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        } else {
+            all_occurrences = false;
+            break;
+        }
+    }
+    if all_occurrences && !paths.is_empty() {
+        Some(act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "paths": paths })))
+    } else {
+        Some(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })))
+    }
+}
+
+/// Build `Show/Hide` and `Isolate` items for a viewport face or edge selection.
+fn viewport_visibility_items(app: &SolveApp) -> Vec<Item> {
+    let bodies = selected_viewport_bodies(app);
+    let all_hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    let mut out = vec![act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": bodies }))];
+    if let Some(isolate) = viewport_isolate_item(app, &bodies) {
+        out.push(isolate);
+    }
+    out
+}
+
 fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
     crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
@@ -551,13 +629,22 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         ],
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
-            // A selected browser body hands every selected body to Export as well as the
-            // mesh dialogs (#18902). A row outside the selection still targets only that row.
+            // A selected browser body hands every selected body to Export, the mesh dialogs
+            // (#18902), Isolate, and Show/Hide. A row outside the selection still targets only
+            // that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
+                let all_hidden = selected.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
                 for item in &mut v {
-                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer") {
-                        item.params = Some(json!({ "bodies": selected }));
+                    match item.id.as_str() {
+                        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.isolate" => {
+                            item.params = Some(json!({ "bodies": selected }));
+                        }
+                        "ui.hide" | "ui.show" => {
+                            item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
+                            item.params = Some(json!({ "bodies": selected }));
+                        }
+                        _ => {}
                     }
                 }
                 // Remove N Tubes, when the selection is all members of this Frame Member.
@@ -1006,7 +1093,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     // curve to the face it lies on (`pick_hits` offers curves before faces). A right-click that
     // resolved to a sketch curve therefore replaces any face in the selection with that curve.
     // The menu then follows the pick.
-    let solid = has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } | Sel::Body { .. }));
+    let occ_paths = sel_occurrence_paths(app);
+    let solid = has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } | Sel::Body { .. })) || !occ_paths.is_empty();
     // Faces, edges or bodies selected: the others of their kind can be selected instead (#18107).
     if has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Body { .. })) {
         v.push(cmd(app, "select.invert", "Invert Selection"));
@@ -1017,7 +1105,6 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else if has(|s| matches!(s, Sel::Face { .. })) {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = feature_and_sketch(app, picked_face_feature(app));
-        let hidden = app.session.visibility.hidden_bodies.contains(&face);
         if app.preferences.nav == "solidworks" {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
@@ -1069,7 +1156,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             }
         }
         v.extend(remove_tube_item(app, &bodies));
-        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
+        v.extend(viewport_visibility_items(app));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
@@ -1083,12 +1170,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.retain(|i| i.enabled || i.is_sep());
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
-        let hidden = app.session.visibility.hidden_bodies.contains(&body);
         v.push(cmd(app, "solid.fillet", "Fillet"));
         v.push(cmd(app, "solid.chamfer", "Chamfer"));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
-        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
+        v.extend(viewport_visibility_items(app));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
@@ -1097,7 +1183,30 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "select.edge_loop", "Select Edge Loop"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
-        v.extend(body_items(app, &sel_bodies(app), false));
+        let mut items = body_items(app, &sel_bodies(app), false);
+        let all_bodies = selected_viewport_bodies(app);
+        let all_hidden = !all_bodies.is_empty() && all_bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+        let mut isolate = viewport_isolate_item(app, &all_bodies);
+        for item in &mut items {
+            match item.id.as_str() {
+                "ui.hide" | "ui.show" => {
+                    item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
+                    item.params = Some(json!({ "bodies": all_bodies }));
+                }
+                "ui.isolate" => {
+                    if let Some(replacement) = isolate.take() {
+                        *item = replacement;
+                    }
+                }
+                _ => {}
+            }
+        }
+        v.extend(items);
+    } else if !occ_paths.is_empty() {
+        let all_hidden = occ_paths.iter().all(|path| app.session.occurrence_hidden(path));
+        v.push(act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "visible": all_hidden, "paths": occ_paths })));
+        v.push(act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "paths": occ_paths })));
+        v.push(zoom_item(occ_paths.into_iter().map(|path| Sel::Occurrence { path }).collect(), true));
     } else if has(|s| matches!(s, Sel::Profile { .. })) {
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.revolve", "Revolve"));
@@ -1341,7 +1450,7 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
         let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
             Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
             Err(e) => {
-                app.set_status(format!("{path}: {e}"), true);
+                app.set_status(format!("{}: {e}", crate::display_user_path(&path)), true);
                 return;
             }
         };
@@ -1493,8 +1602,14 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
-        // This placement's own Isolate, whatever the component's first placement shows.
-        "ui.isolate" => *item = isolate_occurrence_item(app, path),
+        // This placement's own Isolate, whatever the component's first placement shows; with
+        // more than one placement selected, Isolate keeps all of them.
+        "ui.isolate" => {
+            *item = isolate_occurrence_item(app, path);
+            if selected_paths.len() > 1 {
+                item.params = Some(json!({"paths": selected_paths}));
+            }
+        }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
@@ -2613,7 +2728,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.isolateOccurrence" => {
-            let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
+            let paths: Vec<Value> = if let Some(list) = p.get("paths").and_then(Value::as_array) {
+                list.clone()
+            } else if let Some(path) = p.get("path").filter(|v| !v.is_null()) {
+                vec![path.clone()]
+            } else {
+                Vec::new()
+            };
+            if !paths.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "visible": true, "paths": paths, "isolate": true }));
+            }
         }
         "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
@@ -5122,6 +5246,297 @@ mod tests {
         for icon in icons {
             assert!(!crate::icon_svg::resolve(icon).placeholder, "{icon} is drawn");
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Viewport and multi-selection Isolate / Show/Hide
+
+    /// Assembly with three sibling components: `CompA` and `CompB` each contain two bodies, and
+    /// `CompC` contains one body. Returns `(harness, [occ_a, occ_b, occ_c])` with root active.
+    fn three_component_assembly() -> (Harness, [u64; 3]) {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let mut occs = [0u64; 3];
+        for (i, (name, x, bodies)) in [("CompA", 0, 2), ("CompB", 40, 2), ("CompC", 80, 1)].into_iter().enumerate() {
+            h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+            occs[i] = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+            for j in 0..bodies {
+                h.app
+                    .run(
+                        "solid.box",
+                        json!({
+                            "length": 10,
+                            "width": 10,
+                            "height": 10,
+                            "corner": [x, j * 30, 0],
+                            "operation": "new_body",
+                            "body_name": format!("{name}_{j}"),
+                        }),
+                    )
+                    .unwrap();
+            }
+        }
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        (h, occs)
+    }
+
+    /// Three separate root-level bodies (`BoxA`, `BoxB`, `BoxC`).
+    fn three_root_boxes() -> Harness {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for (name, x) in [("BoxA", 0), ("BoxB", 30), ("BoxC", 60)] {
+            h.app
+                .run(
+                    "solid.box",
+                    json!({
+                        "length": 10,
+                        "width": 10,
+                        "height": 10,
+                        "corner": [x, 0, 0],
+                        "operation": "new_body",
+                        "body_name": name,
+                    }),
+                )
+                .unwrap();
+        }
+        h
+    }
+
+    #[test]
+    fn viewport_face_isolate_keeps_all_bodies_of_selected_components() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let c_bodies = h.app.session.occurrence_bodies(&[occ_c], true).unwrap();
+        assert_eq!((a_bodies.len(), b_bodies.len(), c_bodies.len()), (2, 2, 1));
+
+        let face = |body: &str| Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) };
+        h.app.session.selection = vec![face(&a_bodies[0]), face(&b_bodies[0])];
+
+        let menu = items(&h.app, &Target::Viewport);
+        let hide = menu.iter().find(|i| i.label == "Show/Hide").expect("face menu offers Show/Hide");
+        assert_eq!(hide.id, "ui.hide");
+        assert_eq!(hide.params, Some(json!({ "bodies": [a_bodies[0], b_bodies[0]] })));
+
+        let isolate = menu.iter().find(|i| i.label == "Isolate").cloned().expect("face menu offers Isolate");
+        assert_eq!(isolate.id, "ui.isolateOccurrence");
+        assert_eq!(isolate.params, Some(json!({ "paths": [[occ_a], [occ_b]] })));
+
+        run_item(&mut h.app, &isolate, Pos2::ZERO);
+        assert!(h.app.session.occurrence_hidden(&[occ_c]), "unselected component is hidden");
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]) && !h.app.session.occurrence_hidden(&[occ_b]));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)), "every body of CompA stays visible");
+        assert!(b_bodies.iter().all(|b| h.app.session.body_visible(b)), "every body of CompB stays visible");
+        assert!(!h.app.session.body_visible(&c_bodies[0]), "CompC body is hidden");
+    }
+
+    #[test]
+    fn viewport_face_and_edge_isolate_uses_bodies_for_root_selection() {
+        let mut h = three_root_boxes();
+        let face = |body: &str| Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) };
+        let edge = |body: &str| Sel::Edge { body: body.into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) };
+
+        h.app.session.selection = vec![face("BoxA"), face("BoxB")];
+        let menu = items(&h.app, &Target::Viewport);
+        let hide = menu.iter().find(|i| i.label == "Show/Hide").expect("face menu offers Show/Hide");
+        assert_eq!(hide.id, "ui.hide");
+        assert_eq!(hide.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+
+        let isolate = menu.iter().find(|i| i.label == "Isolate").cloned().expect("face menu offers Isolate");
+        assert_eq!(isolate.id, "ui.isolate");
+        assert_eq!(isolate.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+
+        run_item(&mut h.app, &isolate, Pos2::ZERO);
+        assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+        assert!(!h.app.session.body_visible("BoxC"), "unselected root body is hidden");
+
+        h.app.run("browser.visibility", json!({ "folder": "all", "visible": true })).unwrap();
+        h.app.session.selection = vec![edge("BoxA"), edge("BoxB")];
+        let edge_menu = items(&h.app, &Target::Viewport);
+        let edge_hide = edge_menu.iter().find(|i| i.label == "Show/Hide").expect("edge menu offers Show/Hide");
+        assert_eq!(edge_hide.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+        let edge_isolate = edge_menu.iter().find(|i| i.label == "Isolate").cloned().expect("edge menu offers Isolate");
+        assert_eq!(edge_isolate.id, "ui.isolate");
+        assert_eq!(edge_isolate.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+        run_item(&mut h.app, &edge_isolate, Pos2::ZERO);
+        assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+        assert!(!h.app.session.body_visible("BoxC"));
+    }
+
+    #[test]
+    fn occurrence_selection_isolates_multiple_occurrences_from_viewport_and_browser() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let c_bodies = h.app.session.occurrence_bodies(&[occ_c], true).unwrap();
+
+        h.app.session.selection = vec![Sel::Occurrence { path: vec![occ_a] }, Sel::Occurrence { path: vec![occ_b] }];
+
+        // Viewport context menu with selected occurrences
+        let vp_menu = items(&h.app, &Target::Viewport);
+        let vp_hide = vp_menu.iter().find(|i| i.label == "Show/Hide").expect("viewport occurrence menu offers Show/Hide");
+        assert_eq!(vp_hide.id, "browser.visibility");
+        assert_eq!(vp_hide.params, Some(json!({ "visible": false, "paths": [[occ_a], [occ_b]] })));
+        assert!(vp_menu.iter().any(|i| i.id == "ui.zoomTo"), "viewport occurrence menu offers Zoom to Selection");
+
+        let vp_isolate = vp_menu.iter().find(|i| i.label == "Isolate").cloned().expect("viewport occurrence menu offers Isolate");
+        assert_eq!(vp_isolate.id, "ui.isolateOccurrence");
+        assert_eq!(vp_isolate.params, Some(json!({ "paths": [[occ_a], [occ_b]] })));
+
+        run_item(&mut h.app, &vp_isolate, Pos2::ZERO);
+        assert!(h.app.session.occurrence_hidden(&[occ_c]));
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]) && !h.app.session.occurrence_hidden(&[occ_b]));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)));
+        assert!(b_bodies.iter().all(|b| h.app.session.body_visible(b)));
+        assert!(!h.app.session.body_visible(&c_bodies[0]));
+
+        // Browser context menu on a selected occurrence row
+        h.app.run("browser.visibility", json!({ "folder": "all", "visible": true })).unwrap();
+        let browser_menu = items(&h.app, &Target::Occurrence { path: vec![occ_a] });
+        let browser_isolate = browser_menu.iter().find(|i| i.label == "Isolate").cloned().expect("browser occurrence menu offers Isolate");
+        assert_eq!(browser_isolate.id, "ui.isolateOccurrence");
+        assert_eq!(browser_isolate.params, Some(json!({ "paths": [[occ_a], [occ_b]] })));
+
+        run_item(&mut h.app, &browser_isolate, Pos2::ZERO);
+        assert!(h.app.session.occurrence_hidden(&[occ_c]));
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]) && !h.app.session.occurrence_hidden(&[occ_b]));
+
+        // Legacy single-path parameter fallback on ui.isolateOccurrence
+        h.app.run("browser.visibility", json!({ "folder": "all", "visible": true })).unwrap();
+        let legacy = act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": [occ_a] }));
+        run_item(&mut h.app, &legacy, Pos2::ZERO);
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]));
+        assert!(h.app.session.occurrence_hidden(&[occ_b]) && h.app.session.occurrence_hidden(&[occ_c]));
+    }
+
+    #[test]
+    fn browser_body_menu_multi_selection_isolates_and_toggles_visibility() {
+        let mut h = three_root_boxes();
+        select_bodies(&mut h, &["BoxA", "BoxB"]);
+
+        let menu = items(&h.app, &Target::Body { name: "BoxA".into() });
+        let isolate = menu.iter().find(|i| i.label == "Isolate").cloned().expect("body menu offers Isolate");
+        assert_eq!(isolate.id, "ui.isolate");
+        assert_eq!(isolate.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+
+        run_item(&mut h.app, &isolate, Pos2::ZERO);
+        assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+        assert!(!h.app.session.body_visible("BoxC"));
+
+        // Mixed visibility across the multi-selection hides all selected bodies, then shows all.
+        h.app.run("browser.visibility", json!({ "folder": "all", "visible": true })).unwrap();
+        h.app.run("browser.visibility", json!({ "items": ["BoxA"], "visible": false })).unwrap();
+
+        let hide =
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.label == "Show/Hide").expect("body menu offers Show/Hide");
+        assert_eq!(hide.id, "ui.hide");
+        assert_eq!(hide.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+        run_item(&mut h.app, &hide, Pos2::ZERO);
+        assert!(!h.app.session.body_visible("BoxA") && !h.app.session.body_visible("BoxB"));
+
+        let show =
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.label == "Show/Hide").expect("body menu offers Show/Hide");
+        assert_eq!(show.id, "ui.show");
+        assert_eq!(show.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
+        run_item(&mut h.app, &show, Pos2::ZERO);
+        assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+
+        // A body outside the selection still targets only itself.
+        let other =
+            items(&h.app, &Target::Body { name: "BoxC".into() }).into_iter().find(|i| i.label == "Isolate").expect("other body menu offers Isolate");
+        assert_eq!(other.params, Some(json!({ "bodies": ["BoxC"] })));
+    }
+
+    #[test]
+    fn viewport_body_isolate_keeps_sibling_bodies_of_occurrence() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let c_bodies = h.app.session.occurrence_bodies(&[occ_c], true).unwrap();
+        assert_eq!(a_bodies.len(), 2);
+
+        h.app.session.selection = vec![Sel::Body { name: a_bodies[0].clone() }];
+
+        // Viewport Isolate promotes occurrence body selection to occurrence isolation so sibling
+        // bodies of the same component stay visible.
+        let vp_menu = items(&h.app, &Target::Viewport);
+        let vp_isolate = vp_menu.iter().find(|i| i.label == "Isolate").cloned().expect("viewport body menu offers Isolate");
+        assert_eq!(vp_isolate.id, "ui.isolateOccurrence");
+        assert_eq!(vp_isolate.params, Some(json!({ "paths": [[occ_a]] })));
+
+        // Browser body row keeps body-level Isolate behavior.
+        let browser_isolate = items(&h.app, &Target::Body { name: a_bodies[0].clone() })
+            .into_iter()
+            .find(|i| i.label == "Isolate")
+            .expect("browser body menu offers Isolate");
+        assert_eq!(browser_isolate.id, "ui.isolate");
+        assert_eq!(browser_isolate.params, Some(json!({ "bodies": [a_bodies[0]] })));
+
+        run_item(&mut h.app, &vp_isolate, Pos2::ZERO);
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]));
+        assert!(h.app.session.occurrence_hidden(&[occ_b]) && h.app.session.occurrence_hidden(&[occ_c]));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)), "sibling body of CompA stays visible");
+        assert!(b_bodies.iter().all(|b| !h.app.session.body_visible(b)));
+        assert!(!h.app.session.body_visible(&c_bodies[0]));
+    }
+
+    #[test]
+    fn viewport_mixed_root_body_and_occurrence_visibility_and_isolate_include_both() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        for (name, x) in [("RootKeep", 120), ("RootOther", 160)] {
+            h.app
+                .run(
+                    "solid.box",
+                    json!({
+                        "length": 10,
+                        "width": 10,
+                        "height": 10,
+                        "corner": [x, 0, 0],
+                        "operation": "new_body",
+                        "body_name": name,
+                    }),
+                )
+                .unwrap();
+        }
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let mut expected_bodies = vec!["RootKeep".to_string()];
+        expected_bodies.extend(a_bodies.iter().cloned());
+
+        h.app.session.selection = vec![Sel::Body { name: "RootKeep".into() }, Sel::Occurrence { path: vec![occ_a] }];
+
+        // Show/Hide includes both the root body and the occurrence's bodies.
+        let vp_menu = items(&h.app, &Target::Viewport);
+        let hide = vp_menu.iter().find(|i| i.label == "Show/Hide").cloned().expect("viewport menu offers Show/Hide");
+        assert_eq!(hide.id, "ui.hide");
+        assert_eq!(hide.params, Some(json!({ "bodies": expected_bodies })));
+
+        let isolate = vp_menu.iter().find(|i| i.label == "Isolate").cloned().expect("viewport menu offers Isolate");
+        assert_eq!(isolate.id, "ui.isolate");
+        assert_eq!(isolate.params, Some(json!({ "bodies": expected_bodies })));
+
+        run_item(&mut h.app, &hide, Pos2::ZERO);
+        assert!(!h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| !h.app.session.body_visible(b)));
+        assert!(h.app.session.body_visible("RootOther"));
+        assert!(b_bodies.iter().all(|b| h.app.session.body_visible(b)));
+
+        let show = items(&h.app, &Target::Viewport)
+            .into_iter()
+            .find(|i| i.label == "Show/Hide")
+            .expect("viewport menu offers Show/Hide when all selected bodies are hidden");
+        assert_eq!(show.id, "ui.show");
+        assert_eq!(show.params, Some(json!({ "bodies": expected_bodies })));
+        run_item(&mut h.app, &show, Pos2::ZERO);
+        assert!(h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)));
+
+        // Isolate keeps the root body and every body of CompA visible while hiding the rest.
+        run_item(&mut h.app, &isolate, Pos2::ZERO);
+        assert!(h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)));
+        assert!(!h.app.session.body_visible("RootOther"));
+        assert!(h.app.session.occurrence_hidden(&[occ_b]) && h.app.session.occurrence_hidden(&[occ_c]));
     }
 }
 
