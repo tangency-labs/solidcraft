@@ -6062,6 +6062,7 @@ name = "solidcore"
 version = "1.0.1"
 dependencies = [
  "serde",
+ "spade",
  "thiserror 2.0.21",
 ]
 
@@ -6290,6 +6291,7 @@ version = "0.50.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
+ "crc32fast",
  "flate2",
  "image",
  "log",
@@ -6346,6 +6348,7 @@ dependencies = [
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -6731,6 +6734,7 @@ dependencies = [
  "naga",
  "pollster 0.4.0",
  "serde",
+ "serde_json",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",

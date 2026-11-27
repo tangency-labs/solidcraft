@@ -46,6 +46,7 @@ pub mod section;
 pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
+pub mod surface_texture;
 pub mod table;
 /// The plan evaluator and the display plan, solidcore-tess's (RFC 0003, items 1.1 and 1.8;
 /// `solidcore_tess::eval`), under their old path.

@@ -239,7 +239,7 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let state = app.session.world_state().ok();
     let changes = after.and_then(|after| crate::preview::sketch_changes(state.as_ref().and_then(|state| state.sketch(sketch)), &after));
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget));
+    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget, None));
     crate::scenario::publish_count("dimwin:preview_curves", curves as f64);
 }
 

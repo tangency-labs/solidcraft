@@ -67,9 +67,16 @@ const PICKED_PLANES: [&str; 4] =
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
-        "solid.extrude" => {
-            &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
-        }
+        "solid.extrude" => &[
+            ("face", Pick),
+            ("faces", Picks),
+            ("face_body", Body),
+            ("from", Make),
+            ("to", Make),
+            ("to2", Make),
+            ("targets", Body),
+            ("participants", Body),
+        ],
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
         // A sweep profile given as a body face: the face point, in the frame of the body under it.
         // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
@@ -727,6 +734,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
             if let Some(name) = given.filter(|_| k > 0) {
                 p["name"] = Value::String(format!("{name} ({})", k + 1));
             }
+            // A carried construction is moved once, by the first move: the later moves leave it,
+            // or one built on a body they move would follow that body a second time.
+            if k > 0
+                && let Some(o) = p.as_object_mut()
+                && let Some(carried) = o.remove("carry")
+                && let Some(carried) = carried.as_array().filter(|c| !c.is_empty())
+            {
+                let mut leave = o.get("leave").and_then(Value::as_array).cloned().unwrap_or_default();
+                leave.extend(carried.iter().filter(|c| !leave.contains(c)).cloned().collect::<Vec<_>>());
+                o.insert("leave".into(), Value::Array(leave));
+            }
             map_local(s, &world, "solid.move", &p).unwrap_or(p)
         })
         .collect();
@@ -856,9 +874,9 @@ fn map_local_with_input(
             }
         }
         let points = match (&feature.kind, cmd) {
-            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None)],
-            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from)],
-            _ => [("to", None), ("from", None)],
+            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None), ("to2", None)],
+            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from), ("to2", extent.to2)],
+            _ => [("to", None), ("from", None), ("to2", None)],
         };
         for (key, point) in points {
             if let Some(point) = point {

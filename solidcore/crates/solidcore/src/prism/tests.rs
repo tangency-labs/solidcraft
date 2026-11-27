@@ -15,6 +15,7 @@ use super::extrude::{
     extrude_region, level_on_plane, plane_gap, plane_rise, symmetric_offset_intervals,
     symmetric_offset_probe_points,
 };
+use super::extrude::{plane_raised, slab_sides};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -299,6 +300,63 @@ fn clockwise_quarters(c: Point2, r: f64) -> Loop2 {
             })
             .collect(),
     }
+}
+
+/// The distance from a point to a line or an arc is closed form: the foot clamped to the line's
+/// ends, the radial distance on an arc where the point is within its angles (and from its centre
+/// any point of the circle), else the nearer end; a free-form segment and a point that is no number
+/// have none.
+#[test]
+fn distance_to_a_line_or_an_arc_is_exact_and_a_curve_has_none() {
+    let line = Seg2::Line {
+        a: p(0.0, 0.0),
+        b: p(10.0, 0.0),
+    };
+    assert_eq!(line.distance_to(p(5.0, 3.0)), Some(3.0));
+    assert_eq!(line.distance_to(p(5.0, 0.0)), Some(0.0));
+    // Past an end: the distance to the end, 3-4-5.
+    assert_eq!(line.distance_to(p(-3.0, 4.0)), Some(5.0));
+    assert_eq!(line.distance_to(p(13.0, -4.0)), Some(5.0));
+    // A quarter arc of radius 5 about the origin, from the +x axis to the +y axis.
+    let arc = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    };
+    assert_eq!(
+        arc.distance_to(p(10.0, 0.0)),
+        Some(5.0),
+        "within its angles, radially"
+    );
+    assert_eq!(arc.distance_to(p(1.0, 0.0)), Some(4.0), "inside the circle");
+    assert_eq!(
+        arc.distance_to(p(0.0, 0.0)),
+        Some(5.0),
+        "from its centre, any point of it"
+    );
+    // Outside its angles: the nearer end, (5, 0): sqrt(5^2 + 5^2) from (0, -5).
+    let d = arc.distance_to(p(0.0, -5.0)).unwrap();
+    assert!((d - 50.0_f64.sqrt()).abs() < 1e-12, "{d}");
+    // A clockwise arc measures the same way.
+    let back = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 5.0,
+        start: FRAC_PI_2,
+        sweep: -FRAC_PI_2,
+    };
+    assert_eq!(back.distance_to(p(10.0, 0.0)), Some(5.0));
+    // Free-form: none.
+    let curve = Seg2::Cubic {
+        p0: p(0.0, 0.0),
+        p1: p(1.0, 2.0),
+        p2: p(3.0, 2.0),
+        p3: p(4.0, 0.0),
+    };
+    assert_eq!(curve.distance_to(p(2.0, 5.0)), None);
+    // Not a number: none, never a NaN.
+    assert_eq!(line.distance_to(p(f64::NAN, 1.0)), None);
+    assert_eq!(arc.distance_to(p(f64::INFINITY, 0.0)), None);
 }
 
 #[test]
@@ -2779,6 +2837,83 @@ mod arc_conversion_regressions {
     }
 
     #[test]
+    fn polyline_piece_inside_one_writer_cell_joins_the_run_instead_of_refusing_the_path() {
+        use super::super::profile::Loop2;
+        // a drawing's hidden-line pass can leave a piece of an edge whose
+        // projection is far below the writer's grid (a circle seen edge on, cut beside its fold).
+        // A caller whose lengths are written on a 1e-3 grid, with three decimals elsewhere.
+        let encoding = scalar_encoding(|v| Some((v * 1e3).round() / 1e3));
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let (a, b, c) = (Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0002, 1.0));
+        // `b` and `b2` are distinct in storage but both written as (1, 0).
+        let b2 = Vec2::new(1.0002, 0.0);
+        let sliver = line(b, b2);
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+        // Written, the sliver is the point where its neighbours meet. Each polyline vertex is the
+        // stored start of the edge leaving it, so the joint is the next edge's start, `b2`.
+        let through = [line(a, b), sliver, line(b2, c)];
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&through), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A free-form piece whose controls are all written as one point is the same point.
+        let curl = Seg2::Cubic {
+            p0: b,
+            p1: Vec2::new(1.0001, 0.0001),
+            p2: Vec2::new(1.0002, 0.0001),
+            p3: b2,
+        };
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(a, b), curl, line(b2, c)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A closed loop that starts with the sliver still closes: its last edge ends at the
+        // written point the sliver is, where the first written edge starts.
+        let lp = Loop2 {
+            segs: vec![sliver, line(b2, c), line(c, a), line(a, b)],
+        };
+        assert_eq!(
+            path_shapes(PlanarPath::Closed(&lp), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b2), vertex(c), vertex(a)],
+                closed: true,
+            }])
+        );
+        // A path that is only the sliver draws nothing the file can hold: no entity, no refusal.
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&[sliver]), PathStyle::Polyline, encoding),
+            Ok(vec![])
+        );
+        // An authored zero-length line is not a sliver: it stays a two-vertex polyline.
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(b, b)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b), vertex(b)],
+                closed: false,
+            }])
+        );
+        // Exact output keeps each piece as its own entity, so it still refuses the sliver.
+        let error =
+            path_shapes(PlanarPath::Open(&through), PathStyle::Exact, encoding).unwrap_err();
+        assert_eq!(error.piece, Some((1, 3)));
+        assert_eq!(error.reason, "line endpoints collapse at writer precision");
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,
@@ -3251,6 +3386,171 @@ fn the_gap_between_two_planes_over_a_profile_turns_negative_only_where_they_cros
     assert!(is_range(g, (0.0, 1.5)), "{g:?}");
     // No profile has no gap.
     assert!(plane_gap(&xy(), &xy(), &half_slope(), &[]).is_err());
+}
+
+/// `frame` with its normal reversed (its y axis negated, so `x × y` turns over).
+fn flipped(frame: &Frame) -> Frame {
+    let [a, b, c] = frame.y_axis;
+    Frame {
+        y_axis: [-a, -b, -c],
+        ..*frame
+    }
+}
+
+#[test]
+fn a_plane_raised_along_the_extrusion_rises_by_the_same_level_everywhere() {
+    use crate::geom::vector3d::Vec3;
+    // z = 1 + x / 2 raised by 2 along +z is z = 3 + x / 2: level 5 at x = 4, 2 at x = -2.
+    let up = plane_raised(&xy(), &half_slope(), 2.0).unwrap();
+    assert_eq!(up.origin, [0.0, 0.0, 3.0]);
+    assert_eq!(
+        (up.x_axis, up.y_axis),
+        (half_slope().x_axis, half_slope().y_axis)
+    );
+    for (x, want) in [(4.0, 5.0), (-2.0, 2.0)] {
+        let level = level_on_plane(&xy(), Vec3::new(x, 0.0, 0.0), &up).unwrap();
+        assert!(close(level, want), "{x}: {level}");
+    }
+    // A sketch whose normal is +x (sketch x = world y, sketch y = world z): the line along +x
+    // through world (0, u, v) meets z = 1 + x / 2 at x = 2 (v - 1); lowered by 3 it meets the
+    // moved plane at x = 2 (v - 1) - 3, wherever u is.
+    let side = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let down = plane_raised(&side, &half_slope(), -3.0).unwrap();
+    assert_eq!(down.origin, [-3.0, 0.0, 1.0]);
+    for (u, v) in [(0.0, 1.0), (5.0, 4.0), (-7.0, -0.5)] {
+        let level = level_on_plane(&side, Vec3::new(0.0, u, v), &down).unwrap();
+        assert!(close(level, 2.0 * (v - 1.0) - 3.0), "({u}, {v}): {level}");
+    }
+    // 1e8 above the world origin: the same rise of 2.
+    let far = 1e8;
+    let up = plane_raised(&raised(&xy(), far), &raised(&half_slope(), far), 2.0).unwrap();
+    let level = level_on_plane(&raised(&xy(), far), Vec3::new(4.0, 7.0, far), &up).unwrap();
+    assert!(close(level, 5.0), "{level}");
+    // A distance or an origin that is not finite is refused.
+    for by in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(plane_raised(&xy(), &half_slope(), by).is_err(), "{by}");
+    }
+    assert!(plane_raised(
+        &raised(&xy(), f64::MAX),
+        &raised(&half_slope(), f64::MAX),
+        f64::MAX
+    )
+    .is_err());
+    // Axes that are not finite, or a frame with no normal, are refused, not copied or ignored.
+    let mut bad = half_slope();
+    bad.x_axis = [f64::NAN, 0.0, 0.0];
+    assert!(plane_raised(&xy(), &bad, 1.0).is_err());
+    let mut bad = half_slope();
+    bad.y_axis = [0.0, f64::INFINITY, 0.0];
+    assert!(plane_raised(&xy(), &bad, 1.0).is_err());
+    let flat = Frame {
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [1.0, 0.0, 0.0],
+        ..xy()
+    };
+    assert!(plane_raised(&flat, &half_slope(), 1.0).is_err());
+    let mut bad = xy();
+    bad.y_axis = [0.0, f64::NAN, 0.0];
+    assert!(plane_raised(&bad, &half_slope(), 1.0).is_err());
+}
+
+#[test]
+fn a_plane_whose_normal_rounds_away_from_a_travel_in_it_is_refused() {
+    use crate::geom::vector3d::Vec3;
+    // A skewed plane (its axes not square, as a hostile record may hold) and a travel inside it,
+    // `t = a x + b y` up to the rounding of t's own sum: the exact `t·(x × y)` is 6.5e-20, but
+    // the rounded cross product's own error turns the computed `t·m` to -3.0e-18, past
+    // `gamma(3) |t| |m|`. Counting that error, `gamma(2) |t|_1 |x| |y|`, refuses the sign.
+    let skewed = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.7630602430259357, 0.5337981110040966, -0.6271414980178043],
+        y_axis: [
+            -0.2825470651847899,
+            -0.21302882140758705,
+            0.2364626900932829,
+        ],
+    };
+    let travel = Vec3::new(
+        -0.2427861617614619,
+        -0.17197831559588642,
+        0.20013036254154304,
+    );
+    assert!(slab_sides(travel, &skewed, &xy()).is_err());
+    assert!(slab_sides(travel, &xy(), &skewed).is_err());
+}
+
+#[test]
+fn the_cuts_between_two_planes_keep_the_side_each_plane_faces_along_the_travel() {
+    use crate::geom::vector3d::Vec3;
+    let up = Vec3::new(0.0, 0.0, 1.0);
+    // Which side of `plane` a point is on, `true` for the side its normal points to.
+    let side_of = |plane: &Frame, q: [f64; 3]| {
+        let (o, n) = (
+            Vec3::from(plane.origin),
+            Vec3::from(plane.x_axis).cross(Vec3::from(plane.y_axis)),
+        );
+        (Vec3::from(q) - o).dot(n) > 0.0
+    };
+    // Each answer is the side of its plane a point between the planes lies on: from z = 0 up
+    // to z = 1 + x / 2, the point (0, 0, 1/2); with either plane turned over, the other side.
+    let between = [0.0, 0.0, 0.5];
+    for (from, to) in [
+        (xy(), half_slope()),
+        (flipped(&xy()), half_slope()),
+        (xy(), flipped(&half_slope())),
+        (flipped(&xy()), flipped(&half_slope())),
+    ] {
+        let sides = slab_sides(up, &from, &to).unwrap();
+        assert_eq!(
+            sides,
+            (side_of(&from, between), side_of(&to, between)),
+            "{from:?} {to:?}"
+        );
+    }
+    assert_eq!(slab_sides(up, &xy(), &half_slope()).unwrap(), (true, false));
+    // The same two planes travelled downwards, from z = 1 + x / 2 to z = 0: past the slope is
+    // below it, short of z = 0 is above it.
+    let down = Vec3::new(0.0, 0.0, -1.0);
+    assert_eq!(
+        slab_sides(down, &half_slope(), &xy()).unwrap(),
+        (false, true)
+    );
+    // A travel along x past planes steeper than 45 degrees: z = 1 + 3 x faces -x, so past it
+    // along +x is its negative side; short of the plane x = 2 (normal +x) too.
+    let wall_at_two = Frame {
+        origin: [2.0, 0.0, 0.0],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let along_x = Vec3::new(1.0, 0.0, 0.0);
+    assert_eq!(
+        slab_sides(along_x, &sloped(3.0, 0.0), &wall_at_two).unwrap(),
+        (false, false)
+    );
+    // The answers do not change with the travel's length or the planes' distance from the
+    // world origin.
+    assert_eq!(
+        slab_sides(up * 1e-6, &raised(&xy(), 1e8), &raised(&half_slope(), 1e8)).unwrap(),
+        (true, false)
+    );
+    // A plane along the travel never ends it, and a travel that is zero or not finite has no
+    // direction: refused.
+    assert!(slab_sides(along_x, &xy(), &half_slope()).is_err());
+    assert!(slab_sides(up, &xy(), &wall_at_two).is_err());
+    for travel in [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, f64::NAN),
+        Vec3::new(0.0, 0.0, f64::INFINITY),
+    ] {
+        assert!(
+            slab_sides(travel, &xy(), &half_slope()).is_err(),
+            "{travel:?}"
+        );
+    }
 }
 
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to

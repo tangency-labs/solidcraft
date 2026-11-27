@@ -732,7 +732,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         .enumerate()
         .map(|(i, path)| {
             let missing = !crate::home::available(app, path);
-            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+            let shown = crate::display_user_path(path);
+            button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
     recent.push(FileRow::Separator);
@@ -1097,7 +1098,8 @@ pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
         let text = crate::i18n::tr_diagnostic(warning);
         app.messages.push(&text, false, crate::now_ms());
     }
-    let mut line = format!("Exported {path}");
+    let shown = crate::display_user_path(path);
+    let mut line = format!("Exported {shown}");
     if let Some(first) = warnings.first() {
         line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
     }
@@ -5082,8 +5084,9 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
-            // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
+            // The pin shown on the pointed-at icon pins it and again unpins it. A grid icon's pin
+            // takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY. A row has
+            // no pin (#11853): its ⋯ menu does it.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
@@ -5093,10 +5096,19 @@ mod dropdown_tests {
                     assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
                     h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
                 }
-                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                if grid {
+                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                } else {
+                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
+                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                    h.frames(3);
+                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
+                }
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
-                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}");
             }
             assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
         }
@@ -7010,6 +7022,31 @@ mod ribbon_gallery_tests {
         assert!(rect_of("ribbon:constraint:sketch.constraint.midpoint").is_none());
         assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
         assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
+    }
+
+    #[test]
+    fn re_pinned_concentric_returns_to_the_small_constraint_grid() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let id = "sketch.constraint.concentric";
+        let cell = format!("ribbon:constraint:{id}");
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let small = rect_of(&cell).unwrap();
+        assert_eq!(small.size(), first.size());
+
+        // Drag it out to a full-size button, remove it, then pin it again.
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", id, "CONSTRAIN", None);
+        h.frames(3);
+        assert!(rect_of(&cell).is_none());
+        assert!(rect_of(&format!("button:{id}")).unwrap().height() > small.height());
+        crate::toolbar_custom::remove(&mut h.app, "SKETCH", id);
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        assert_eq!(rect_of(&cell).map(|r| r.size()), Some(first.size()));
     }
 }
 

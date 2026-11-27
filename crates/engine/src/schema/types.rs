@@ -222,6 +222,12 @@ target_point!(
     "must be a finite point [x,y,z]"
 );
 
+target_point!(
+    /// Thread's `from`: a [`Point3`], with the handler's message.
+    ThreadFromPoint,
+    "must be a point [x, y, z] near the end the thread starts at"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -682,6 +688,14 @@ keyword_param!(
     "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `height_measure`.
+    CoilHeightMeasureParam,
+    "height measure",
+    &["center_line", "centre_line", "overall"],
+    "center_line or overall",
+    "What `height` measures: center_line (the default; centre_line is an alias), the helix's own height from the section's centre at one end to the other, or overall, end to end, from where the wire starts along the axis to where it stops. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
@@ -1002,6 +1016,30 @@ impl JsonSchema for ConventionParam {
     }
 }
 
+/// How a taper closes a sharp corner, as `extent_param` reads it (serde, case-sensitive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftCornerParam(pub solidcraft_kernel::DraftCorner);
+
+impl<'de> Deserialize<'de> for DraftCornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?)
+            .map(DraftCornerParam)
+            .map_err(|_| D::Error::custom("must be preserve_curvature, tangent or round"))
+    }
+}
+
+impl JsonSchema for DraftCornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DraftCorner".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["preserve_curvature", "tangent", "round"],
+            "How a taper closes the gap its offset opens at a sharp corner of the profile. preserve_curvature: each wall continues as itself (a line's plane, an arc's cone) until it meets its neighbour. tangent: each continues straight along its end tangent. round: an arc about the corner. Without it, a profile of lines and arcs preserves curvature and one with another curve at a corner takes tangent, and the feature's warning says so.",
+        )
+    }
+}
+
 /// A thin wall's side, as `ThinSide::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThinSideParam(pub ThinSide);
@@ -1096,6 +1134,20 @@ impl JsonSchema for ProfilesParam {
                     "description": "Internal selections written by the app.",
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": {"enum": ["sided_curves"]},
+                                "loops": {"type": "array", "minItems": 1, "maxItems": 128, "items": {
+                                    "type": "array", "minItems": 1, "maxItems": 512, "items": {
+                                        "type": "object",
+                                        "properties": {"curve": {"type": "string"}, "side": {"enum": ["inside", "outside", "left", "right"]}},
+                                        "required": ["curve", "side"], "additionalProperties": false
+                                    }
+                                }}
+                            },
+                            "required": ["type", "loops"]
+                        },
                         {
                             "type": "object", "properties": {"offset_boundaries": associations}, "required": ["offset_boundaries"],
                             "not": {"properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]}
@@ -1443,10 +1495,10 @@ impl JsonSchema for SweepRails {
     }
 }
 
-/// What `features::plane_param` says about `v` as a plane before it looks anything up, as a
+/// What `features::plane_param_named` says about `v` as a plane before it looks anything up, as a
 /// complete message, or `None`. Names and ids are the handler's to look up.
-fn plane_problem(v: &Value) -> Option<String> {
-    let forms = || whole(format!("`plane` must be {}", crate::cmd::PLANE_FORMS));
+pub(crate) fn plane_problem_named(v: &Value, key: &str) -> Option<String> {
+    let forms = || whole(format!("`{key}` must be {}", crate::cmd::PLANE_FORMS));
     match v {
         Value::String(_) => None,
         Value::Number(n) => n.as_u64().map_or_else(|| Some(forms()), |_| None),
@@ -1456,10 +1508,14 @@ fn plane_problem(v: &Value) -> Option<String> {
             if o.get("origin").is_some_and(|origin| PointExpr3::deserialize(origin).is_err()) {
                 return Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"));
             }
-            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole("plane needs x_dir and y_dir, or normal")), |_| None)
+            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole(format!("`{key}` needs x_dir and y_dir, or normal"))), |_| None)
         }
         _ => Some(forms()),
     }
+}
+
+fn plane_problem(v: &Value) -> Option<String> {
+    plane_problem_named(v, "plane")
 }
 
 /// A plane, as `features::plane_param` reads it: an origin plane's name or alias, a construction
