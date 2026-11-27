@@ -1296,6 +1296,25 @@ pub fn loft_sheet_with_rails_legacy_sides(sections: &[(Plane, Vec<Seg2>)], rails
     lofted_sheet(sections, rails, fit, false)
 }
 
+/// Whether the ends of an ordered planar section meet, at the sketch chain's join tolerance.
+/// This distinguishes a loop from an open chain; it does not validate the section.
+#[must_use]
+pub fn loft_section_closed(chain: &[Seg2]) -> bool {
+    solidcore_ops::sweep::loft_section_closed(chain, 1e-6)
+}
+
+/// An uncapped loft through two closed planar sketch sections with a single G1 end. The
+/// original segments are the position constraints and name the walls; `tangent_at` selects
+/// section 0 or 1, `crown` shapes that end, and `faced` sets the side of the sheet as in
+/// [`loft_sheet_with_rails`].
+pub fn loft_sheet_planar_g1(sections: &[(Plane, Vec<Seg2>); 2], tangent_at: usize, crown: f64, faced: bool) -> Result<Body> {
+    let sections = sections.each_ref().map(|(plane, chain)| solidcore_ops::sweep::LoftSection { plane: *plane, segs: chain.clone() });
+    let ops = |e| failed(format!("surface loft: {e}"));
+    let (r, sources) = solidcore_ops::sweep::loft_sheet_planar_g1(&sections, tangent_at, crown, faced).map_err(ops)?;
+    let h = sources.iter().map(record::profile).collect();
+    sheet_of(vec![(r, h)], false, &[])
+}
+
 fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit, faced: bool) -> Result<Body> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(invalid("a loft needs 2…50 sections"));
@@ -1303,7 +1322,7 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
     let closed: Vec<bool> = sections
         .iter()
         .map(|(_, c)| match (c.first(), c.last()) {
-            (Some(f), Some(l)) if c.len() <= 4096 => Ok(l.end().dist(f.start()) <= 1e-6),
+            (Some(_), Some(_)) if c.len() <= 4096 => Ok(loft_section_closed(c)),
             _ => Err(invalid("a loft section has no curves, or too many")),
         })
         .collect::<Result<_>>()?;

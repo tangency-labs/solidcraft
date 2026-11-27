@@ -2796,6 +2796,35 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
     p.cross(v).cross(p)
 }
 
+/// Not upstream (tangency-labs/solidcraft#22578): the UV points of the face use's other
+/// sectors at the vertex of vertex use `vu`, one per other vertex use of the vertex in that
+/// face use ([`sector_classify_curve_on`]'s retry, whose loop tells no two apart); `None`
+/// when one has no UV point.
+///
+/// # Errors
+///
+/// Those of the vertex use's links and of [`vertexuse::compute_uv_point`].
+fn other_sector_uvs(
+    k: &Kernel,
+    b: &mut Brep,
+    vu: crate::topology::VertexuseId,
+) -> Result<Option<Vec<Point2>>> {
+    let vertex =
+        vertexuse::vertex(b, vu)?.ok_or_else(|| null(OP_SECTOR, "vertex use without vertex"))?;
+    let faceuse = vertexuse::faceuse(b, vu)?;
+    let mut uvs = Vec::new();
+    for other in crate::topology::vertex::vertexuses(b, vertex)? {
+        if other != vu && vertexuse::faceuse(b, other)? == faceuse {
+            match vertexuse::compute_uv_point(k, b, other, true) {
+                Ok(uv) => uvs.push(uv),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+    Ok(Some(uvs))
+}
+
 /// Not upstream (#15247): whether face `f` holds `uv`, a point that its inner loop `hole`,
 /// measured clockwise, does not wind around ([`sector_classify_curve_on`]'s retry). The
 /// face holds it when its outer loop winds it counter-clockwise and none of its inner
@@ -3434,6 +3463,27 @@ pub fn sector_classify_curve_on(
         Err(_) => return Ok(res), // just revert to old behavior.
     };
 
+    // Not upstream (tangency-labs/solidcraft#22578): the loop says whether a point lies in
+    // the face, not in which of its sectors at the vertex. Where the face meets the vertex in
+    // more than one sector at different UV points (the vertex where its seam ends on its
+    // boundary, a period apart), a point the loop holds is in this sector only when it lies
+    // nearer this vertex use's UV point than every other's; nearer another's, it is in that
+    // sector. Read by the loop alone, the first sector tried took any curve into the face: a
+    // curve leaving a cone's seam vertex along its rim was put into the cusp between the rim
+    // and the curve leaving the other way, and the face piece the two curves cut off took the
+    // rim with it. With two sectors at one UV point the loop cannot tell them apart, and the
+    // sector's own reading stands.
+    let sector_uv = guess_uv;
+    let others = if cp_eu1 == cp_eu2 {
+        Vec::new()
+    } else {
+        match other_sector_uvs(k, b, vtxuse)? {
+            Some(uvs) => uvs,
+            None => return Ok(res),
+        }
+    };
+    let own_reading = res;
+
     // Some surface info:
     let srf_domain = face_surface(b, f, OP_SECTOR)?.natural_uv_domain_with_nurb(k)?;
     let lu1 = eu1::loopuse(b, cp_eu1)?.ok_or_else(|| null(OP_SECTOR, "edge use not in a loop"))?;
@@ -3519,7 +3569,15 @@ pub fn sector_classify_curve_on(
         }
 
         if cont == PointContainment::Inside && c.orientation == OrientType::Same {
-            res.inside = true;
+            let own = step_uv.distance(sector_uv);
+            let nearest_other = others
+                .iter()
+                .map(|uv| step_uv.distance(*uv))
+                .fold(f64::INFINITY, f64::min);
+            if nearest_other == own {
+                return Ok(own_reading);
+            }
+            res.inside = own < nearest_other;
             res.possible_problem = false;
             res.problem = ClassifyProblem::None;
             return Ok(res);
@@ -5429,6 +5487,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.containment, PointContainment::Outside);
+    }
+
+    /// tangency-labs/solidcraft#22578: a cylinder's side face meets each of its two seam
+    /// vertices in two sectors, one on each side of the seam, a period apart in u at the same
+    /// v; each of its caps meets the vertex in one sector, and has no other.
+    #[test]
+    fn a_seam_vertex_has_a_sector_on_each_side_of_the_seam() {
+        use crate::primitive::api_primitives::create_cylinder;
+        use crate::topology::brep::p1 as bp;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 3.0, 10.0).unwrap();
+        let mut seen = [0usize; 2];
+        for v in bp::vertices(&b, None).unwrap() {
+            for vu in crate::topology::vertex::vertexuses(&b, v).unwrap() {
+                let Some(fu) = vertexuse::faceuse(&b, vu).unwrap() else {
+                    continue;
+                };
+                let f = eu1::faceuse_face(&b, fu).unwrap().unwrap();
+                let surface = b.face(f).unwrap().surface.clone().unwrap();
+                let own = vertexuse::compute_uv_point(&k, &mut b, vu, true).unwrap();
+                let others = other_sector_uvs(&k, &mut b, vu).unwrap().unwrap();
+                if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                    assert!(others.is_empty(), "{others:?}");
+                    seen[0] += 1;
+                } else {
+                    let period = surface.natural_uv_domain_with_nurb(&k).unwrap().x_length();
+                    assert_eq!(others.len(), 1, "{others:?}");
+                    assert!(((others[0].x - own.x).abs() - period).abs() < 1e-12 * period);
+                    assert_eq!(others[0].y, own.y);
+                    seen[1] += 1;
+                }
+            }
+        }
+        // two vertices, each on both caps' two face uses and twice on each of the side's two
+        assert_eq!(seen, [4, 8]);
     }
 
     #[test]

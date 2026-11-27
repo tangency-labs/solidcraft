@@ -75,7 +75,13 @@ pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error 
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },
         Ops::Unsupported(_) => Error::Unsupported,
-        error @ Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { .. }, .. } => Error::Refused(error),
+        error @ Ops::OffsetRefused {
+            why:
+                solidcore_ops::OffsetRefusal::Phrase { .. }
+                | solidcore_ops::OffsetRefusal::DraftConeCloses
+                | solidcore_ops::OffsetRefusal::DraftNeutralPlanePastApex,
+            ..
+        } => Error::Refused(error),
         refusal => Error::RefusedWithDiagnostic { refusal, diagnostic },
     }
 }

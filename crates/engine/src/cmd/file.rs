@@ -1,8 +1,5 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
-
 #[path = "file_easyprint.rs"]
 mod easyprint;
 
@@ -86,6 +83,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "components?: bool (default true); ",
             "copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); ",
             "silkscreen?: bool (default true: the silk shapes and text); ",
+            "holes?: none|mounting|pads|all (default mounting: the board's mounting holes, every unplated hole and each hole of a MountingHole footprint; pads adds the plated holes of through-hole pads, all adds vias; a hole left out is solid board and closed copper, and a hole that reaches the board's edge or a cutout is always kept); ",
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
@@ -1380,6 +1378,10 @@ fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
             }
         };
     }
+    if let Some(v) = p.get("holes").filter(|v| !v.is_null()) {
+        let refused = || bad(cmd, "`holes` must be \"none\", \"mounting\", \"pads\" or \"all\"");
+        options.holes = solidcraft_io::KicadHoles::parse(v.as_str().ok_or_else(refused)?).ok_or_else(refused)?;
+    }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         options.color = Some(parse_kicad_color(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0-255"))?);
     }
@@ -1433,6 +1435,7 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
         "components": options.components,
         "copper": options.copper.as_str(),
         "silkscreen": options.silkscreen,
+        "holes": options.holes.as_str(),
     });
     if let Some(thickness) = options.thickness {
         record["thickness"] = json!(thickness);
@@ -2121,12 +2124,28 @@ fn reads_natively(path: &str) -> bool {
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
+/// For SolidCraft's own lock file (`.~<design>.lock`, #5467): what it is and which design to open,
+/// with the computer that has that design open while the lock is fresh (#22924). `None` for any
+/// other file, one only named like a lock, or a path this caller may not read.
+fn lock_file_advice(path: &str) -> Option<EngineError> {
+    solidcraft_io::vfs::check(path).ok()?;
+    let file = std::path::Path::new(path);
+    let name = file.file_name()?.to_str()?.strip_prefix(".~")?.strip_suffix(".lock")?;
+    let lock = solidcraft_io::design_lock::read(&file.with_file_name(name))?;
+    let held = !lock.is_stale(solidcraft_io::design_lock::now_secs()) && !lock.owner_is_gone();
+    let holder = if held { format!(" (open in SolidCraft on {})", lock.host) } else { String::new() };
+    Some(EngineError::Other(format!("{path}: this is SolidCraft's lock file for {name}{holder}. Open {name} instead.")))
+}
+
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
 /// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
 /// CAD program reaches the design reader because nothing else claims it, and its words about a
 /// "design container" or an environment resource say nothing of that. An importer plugin can add
 /// support for the format (Preferences › Plugins) (#19238).
 fn unreadable_design(path: &str, reason: &str) -> EngineError {
+    if let Some(error) = lock_file_advice(path) {
+        return error;
+    }
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
     if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
         return EngineError::Other(format!("{path}: {reason}"));
@@ -3099,7 +3118,7 @@ impl Session {
         let cache = cache && !(design.linked_bodies_left_out && !design.links.is_empty());
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
-        let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
+        let thumbnail = cache.then(|| crate::thumbnail::png(self)).flatten();
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -3429,7 +3448,7 @@ fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
 
 /// A picture of the part, drawn only for a format that has a place for it.
 fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
-    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| crate::thumbnail::exported(s, bodies)).flatten()
 }
 
 /// `physics` as `file.export` reads it: true writes the joints, grounding and each component's
@@ -6097,8 +6116,10 @@ mod tests {
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
-        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(saved_geometry(&session, &session.doc).is_some());
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
+        // The save as a whole also draws the design's picture, which does mesh.
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(solidcraft_io::read_design_geometry(&bytes).is_some());
         assert!(
             solidcraft_io::read_design_geometry(&session.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap()).is_none()

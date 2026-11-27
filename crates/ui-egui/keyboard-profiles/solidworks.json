@@ -1,0 +1,7 @@
+{
+  "label": "SolidWorks",
+  "provenance": "Written for SolidCraft. The keys are the defaults listed in Dassault Systèmes' public SOLIDWORKS blog posts on keyboard shortcuts.",
+  "keys": {
+    "view.fit": "F"
+  }
+}

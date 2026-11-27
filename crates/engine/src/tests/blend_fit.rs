@@ -76,3 +76,37 @@ fn blends_crossing_each_other_are_refused_naming_the_largest_that_fits() {
     assert!(e.contains("the largest radius that fits is 2 mm"), "{e}");
     assert!((volume(&mut s) - 3200.0).abs() < 1e-6, "the part stays as it was");
 }
+
+/// #10849: an oversized `solid.fillet` reports SMLib's largest fitting radius directly in its
+/// error payload (without searching by retrying builds), and applying that radius builds cleanly.
+#[test]
+fn oversized_fillet_reports_smlib_fit_size_that_applies_cleanly() {
+    use solidcraft_kernel::BlendFit;
+
+    // 14 x 6 x 10 bar, four upright edges: SMLib reports 3 mm directly, and applying 3 mm builds
+    // the full round cleanly.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 14, "width": 6, "height": 10, "corner": [14, 0, 0]}));
+    let uprights = json!([[14, 0, 5], [28, 0, 5], [14, 6, 5], [28, 6, 5]]);
+    let err = s.execute("solid.fillet", &json!({"edges": uprights, "radius": 3.5})).unwrap_err();
+    let Some(BlendFit::Radius(fit)) = err.largest_fit() else {
+        panic!("expected a largest fitting radius: {err}");
+    };
+    assert!((fit - 3.0).abs() < 1e-9, "got {fit}: {err}");
+    run(&mut s, "solid.fillet", json!({"edges": uprights, "radius": fit}));
+    let full = 840.0 - (4.0 - std::f64::consts::PI) * 9.0 * 10.0;
+    assert!((volume(&mut s) - full).abs() / full < 2e-4, "{} vs {full}", volume(&mut s));
+
+    // 80 x 15 x 20 bar, two upright edges on the 15 mm end: SMLib reports the open-margin fit
+    // size just below 7.5 mm directly, and applying it builds cleanly.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 15, "height": 20}));
+    let end_edges = json!([[80, 0, 10], [80, 15, 10]]);
+    let err = s.execute("solid.fillet", &json!({"edges": end_edges, "radius": 10})).unwrap_err();
+    let Some(BlendFit::Radius(fit)) = err.largest_fit() else {
+        panic!("expected a largest fitting radius: {err}");
+    };
+    assert!(fit > 7.4 && fit <= 7.5, "got {fit}: {err}");
+    run(&mut s, "solid.fillet", json!({"edges": end_edges, "radius": fit}));
+    assert!(volume(&mut s) < 24000.0 && volume(&mut s) > 20000.0, "{}", volume(&mut s));
+}
