@@ -36,7 +36,7 @@ use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::math::gamma;
-use crate::nurbs::math::CPoint;
+use crate::nurbs::math::{CPoint, NOW};
 use crate::surface::cone::Cone;
 use crate::surface::implicit::{lies_on, Implicit};
 use crate::surface::plane::Plane;
@@ -259,7 +259,7 @@ pub fn from_parameters(
                 .iter()
                 .map(|r| r.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect())
                 .collect();
-            let s = spline(u_knots, v_knots, &rows)?;
+            let s = spline(u_knots, v_knots, &rows, false)?;
             in_knots(u, u_knots)?;
             in_knots(v, v_knots)?;
             return Ok((s, given(u, v)));
@@ -269,7 +269,7 @@ pub fn from_parameters(
             v_knots,
             homogeneous,
         } => {
-            let s = spline(u_knots, v_knots, homogeneous)?;
+            let s = spline(u_knots, v_knots, homogeneous, true)?;
             in_knots(u, u_knots)?;
             in_knots(v, v_knots)?;
             return Ok((s, given(u, v)));
@@ -336,11 +336,7 @@ fn evaluates_as_record(
         })?;
     let (p, q) = net.degrees();
     let size = net.rows().flatten().fold(0.0_f64, |m, c| {
-        let w = if c.w == crate::nurbs::math::NOW {
-            1.0
-        } else {
-            c.w
-        };
+        let w = if c.w == NOW { 1.0 } else { c.w };
         m.max((c.x / w).abs())
             .max((c.y / w).abs())
             .max((c.z / w).abs())
@@ -523,7 +519,10 @@ pub fn axis_scale(axis: Vec3) -> f64 {
 /// A spline from its knots and homogeneous rows `(w x, w y, w z, w)` (`w = 1` for a
 /// polynomial one), as the kernel's: filled directly when both knot vectors are clamped, else
 /// clamped to its domain by the kernel's component constructor.
-fn spline(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Surface> {
+/// A spline net from its knots and its homogeneous rows `[x, y, z, w]`. A `rational` net keeps its
+/// weights; a polynomial one (`rational` false, its rows' `w` 1) is stored without weights, as the
+/// record holds it, so its kernel surface is not rational.
+fn spline(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>], rational: bool) -> Result<Surface> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let (nu, nv) = (rows.len(), rows.first().map_or(0, Vec::len));
     if nu == 0 || nv == 0 || rows.iter().any(|r| r.len() != nv) {
@@ -557,7 +556,7 @@ fn spline(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Surface> {
             .iter()
             .map(|r| {
                 r.iter()
-                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, if rational { w } else { NOW }))
                     .collect()
             })
             .collect();
@@ -605,7 +604,7 @@ fn spline(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Surface> {
         u_knots: &ku,
         v_knots: &kv,
         knot_type: KnotType::Unspecified,
-        weights: Some(&wts),
+        weights: rational.then_some(&wts),
         uv_domain: None,
     };
     Ok(Surface::from(BSplineSurface::create_canonical(&data)?))
