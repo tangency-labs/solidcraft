@@ -7,7 +7,7 @@
  {"click":{"handle":"panel:MODEL:CREATE"}},
  {"drag":[{"handle":"dropdown:solid.torus"},{"handle":"panel:MODEL:MODIFY"}],"steps":12},
  {"key":"Escape"},
- {"expect":{"handle_order":["button:solid.press_pull","button:solid.torus"],"dialog":null,"tool":null,"errors":0}},
+ {"expect":{"handle_order":["button:solid.lighten","button:solid.torus"],"dialog":null,"tool":null,"errors":0}},
  {"drag":[{"handle":"button:solid.torus"},{"handle":"panel:MODEL:CREATE"}],"steps":12},
  {"expect":{"handle_order":["button:solid.cylinder","button:solid.torus"]}},
  {"restart":"close"},
