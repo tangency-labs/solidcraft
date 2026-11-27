@@ -6939,14 +6939,14 @@ fn read_only_and_rolled_back_calls_emit_zero_spurious_notifications() {
     let _ = call(&mut s, 4, "ping", json!({}));
 
     // Failed edit, rolled-back batch, and check_parameters (which restores its checkpoint) also emit zero notifications.
-    let bad = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": -5, "width": 10, "height": 10}}));
+    let bad = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 0, "width": 10, "height": 10}}));
     assert_eq!(bad["result"]["isError"], true, "{bad}");
     let rolled = raw_tool(
         &mut s,
         "batch",
         json!({"commands": [
             {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}},
-            {"command": "solid.box", "params": {"length": -1, "width": 5, "height": 5}},
+            {"command": "solid.box", "params": {"length": 0, "width": 5, "height": 5}},
         ]}),
     );
     assert_eq!(rolled["result"]["isError"], true, "{rolled}");

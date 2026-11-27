@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::{
     Cancelled, Contents, Effect, Info, PROTOCOL_VERSION, ProgressReporter, Reference, ResourceError, SUPPORTED_VERSIONS, Server, Tools,
-    cancelled_notification, check_arguments, notification, object, progress_notification, progress_token, string, text_result, tool,
+    cancelled_notification, check_arguments, object, progress_notification, progress_token, string, text_result, tool,
 };
 
 /// One app's tools: `echo` and `level`, nothing behind them (no engine, no design). `log` records
@@ -532,9 +532,9 @@ fn resource_subscriptions_and_notifications_work_over_stdio() {
             vec![tool("mutate", "Mutate", "Change state.", object(json!({}), &[]), Effect::Edits)]
         }
         fn call(&mut self, _name: &str, _args: &Value) -> Value {
-            self.queued.push(notification("notifications/resources/list_changed", None));
+            self.queued.push(crate::notification("notifications/resources/list_changed", None));
             for uri in &self.subscribed {
-                self.queued.push(notification("notifications/resources/updated", Some(json!({"uri": uri}))));
+                self.queued.push(crate::notification("notifications/resources/updated", Some(json!({"uri": uri}))));
             }
             text_result("ok", false)
         }
