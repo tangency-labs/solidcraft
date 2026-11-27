@@ -478,7 +478,7 @@ impl<R: Read + Seek> Reader<R> {
 pub struct Thumbnail {
     /// The key's format tag.
     pub format: &'static str,
-    /// The build that wrote it: only the same build reads it back.
+    /// The build that wrote it, recorded in the key. A picture is a picture: any build reads it.
     pub app: &'static str,
     /// Its width and height in pixels.
     pub size: [usize; 2],
@@ -513,13 +513,12 @@ impl Thumbnail {
         writer.part("cache/thumbnail.png", png, false)
     }
 
-    /// The picture, when this build wrote it for exactly the file's own part (`document.json`,
+    /// The picture, when it was written (by any build, in this format) for exactly the file's own part (`document.json`,
     /// read within `document_limit`).
     pub fn read<R: Read + Seek>(&self, reader: &mut Reader<R>, document_limit: usize) -> Result<Vec<u8>, FormatError> {
         let key: Value = serde_json::from_slice(&reader.limited_part("cache/thumbnail.json", 4096)?).map_err(invalid)?;
         let document = reader.document(document_limit)?;
         if key.get("format").and_then(Value::as_str) != Some(self.format)
-            || key.get("app").and_then(Value::as_str) != Some(self.app)
             || key.get("document").and_then(Value::as_str) != Some(digest(&document).as_str())
         {
             return Err(invalid("thumbnail key"));

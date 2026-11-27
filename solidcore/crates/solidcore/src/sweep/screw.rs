@@ -37,10 +37,12 @@
 //!   is not a closed manifold solid is `SM_ERR` (`SMLIB_ERR_NOT_SOLID`). The `_body`
 //!   variants stop where the fork hands the body to its `finish`, without that check,
 //!   so a C API port can give `SMLIB_ERR_EMPTY` / `SMLIB_ERR_NOT_SOLID` itself.
-//! - **Bounds.** As the fork: at most [`MAX_TURNS`] turns, [`MAX_STATIONS`] spans in all
-//!   and [`MAX_LAW`] law pairs. Added: the span width's shrinking loop stops after
-//!   [`MAX_SHRINK`] steps, and a wall's control net holds at most [`MAX_NET_POINTS`]
-//!   points; past either the sweep is `InvalidInput`.
+//! - **Bounds.** As the fork: at most [`MAX_STATIONS`] spans in all and [`MAX_LAW`] law
+//!   pairs. The turns are bounded by the spans: at most [`MAX_TURNS`], as many as the spans
+//!   hold at a span of an eighth of a turn (the fork's 200 is no bound of the work). Added:
+//!   the span width's shrinking loop stops after [`MAX_SHRINK`] steps, and a wall's control
+//!   net holds at most [`MAX_NET_POINTS`] points; past either the sweep is `InvalidInput`.
+//!   The sweep checks for cancellation before each wall face.
 //! - **The caps.** A point at turn 0 is the point itself (moved by the radial shift), and
 //!   one at the last turn is the end cap's placement applied to it, so a wall's first and
 //!   last stations and the caps are the same points by construction; the fork computes
@@ -82,10 +84,13 @@ use crate::topology::{Brep, FaceId};
 
 const OP: &str = "sweep::screw::screw_sweep";
 
-/// The most turns a screw sweep takes (`SMLIB_SCREW_MAX_TURNS`).
-pub const MAX_TURNS: f64 = 200.0;
 /// The most spans a screw sweep's walls take in all (`SMLIB_SCREW_MAX_STATIONS`).
 pub const MAX_STATIONS: f64 = 12000.0;
+/// The most turns a screw sweep takes: as many as [`MAX_STATIONS`] spans hold at the widest
+/// span, an eighth of a turn, so more turns always take more spans. It only refuses early
+/// what the span bound refuses anyway (the fork's `SMLIB_SCREW_MAX_TURNS`, 200, has no
+/// reason of its own).
+pub const MAX_TURNS: f64 = MAX_STATIONS / 8.0;
 /// The most `(turn, offset)` pairs of a radial law (`SMLIB_SCREW_MAX_LAW`).
 pub const MAX_LAW: usize = 1024;
 /// The most steps the span width shrinks by 1% to meet the tolerance (not in the fork,
@@ -962,7 +967,9 @@ fn sweep(
         let n = ((b1 - b0) / piece).ceil();
         spans += n;
         if !(spans <= MAX_STATIONS) {
-            return Err(bad("too many spans"));
+            return Err(bad(
+                "too many turns for the tolerance: more spans than a screw sweep takes",
+            ));
         }
         pieces.push(Stations::new(b0, b1, n as usize));
     }
@@ -990,9 +997,12 @@ fn sweep(
         };
         let (t0, t1) = (first.start, last.end);
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
+            // A long thread is thousands of faces: a cancelled call stops between them.
+            k.check_cancelled(OP)?;
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
                 for st in group {
+                    k.check_cancelled(OP)?;
                     let at = r + m.offset(st.start);
                     cylinder_piece(k, &mut brep, m, ends.start, ends.end, at, st)?;
                 }

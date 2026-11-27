@@ -61,6 +61,12 @@ pub trait Backend {
     fn side_channel(&self) -> Option<Remote> {
         None
     }
+    /// Attach or clear a progress reporter for the active tool call (used by bridged waits such as
+    /// `control.pending`). Default does nothing.
+    fn set_progress(&mut self, _progress: Option<solidcraft_mcp_server::ProgressReporter>) {}
+    /// Attach or clear an out-of-band cancellation flag for the active tool call
+    /// (`notifications/cancelled`). Default does nothing.
+    fn set_cancel_flag(&mut self, _cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) {}
 }
 
 /// How a tool error starts when a request is still running in the app after the wait: the

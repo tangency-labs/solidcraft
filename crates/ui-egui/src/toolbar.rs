@@ -732,7 +732,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         .enumerate()
         .map(|(i, path)| {
             let missing = !crate::home::available(app, path);
-            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+            let shown = crate::display_user_path(path);
+            button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
     recent.push(FileRow::Separator);
@@ -1097,7 +1098,8 @@ pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
         let text = crate::i18n::tr_diagnostic(warning);
         app.messages.push(&text, false, crate::now_ms());
     }
-    let mut line = format!("Exported {path}");
+    let shown = crate::display_user_path(path);
+    let mut line = format!("Exported {shown}");
     if let Some(first) = warnings.first() {
         line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
     }
@@ -7020,6 +7022,31 @@ mod ribbon_gallery_tests {
         assert!(rect_of("ribbon:constraint:sketch.constraint.midpoint").is_none());
         assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
         assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
+    }
+
+    #[test]
+    fn re_pinned_concentric_returns_to_the_small_constraint_grid() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let id = "sketch.constraint.concentric";
+        let cell = format!("ribbon:constraint:{id}");
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let small = rect_of(&cell).unwrap();
+        assert_eq!(small.size(), first.size());
+
+        // Drag it out to a full-size button, remove it, then pin it again.
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", id, "CONSTRAIN", None);
+        h.frames(3);
+        assert!(rect_of(&cell).is_none());
+        assert!(rect_of(&format!("button:{id}")).unwrap().height() > small.height());
+        crate::toolbar_custom::remove(&mut h.app, "SKETCH", id);
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        assert_eq!(rect_of(&cell).map(|r| r.size()), Some(first.size()));
     }
 }
 

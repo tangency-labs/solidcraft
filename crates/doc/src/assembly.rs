@@ -1108,7 +1108,7 @@ impl Document {
 }
 
 /// The most occurrences a design holds.
-const MAX_OCCURRENCES: usize = 100_000;
+pub(crate) const MAX_OCCURRENCES: usize = 100_000;
 
 /// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
 /// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000
