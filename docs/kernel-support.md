@@ -21,3 +21,10 @@ later.
 | Kernel | Adapter | Maintained by | Build feature | Operations | Naming gate | Accuracy gate |
 |---|---|---|---|---|---|---|
 | solidcore | `crates/kernel` (`Solidcore`) | SolidCraft | always on | all (`OpKind::ALL`) | the reference | the reference |
+| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, boolean, fillet (constant radius, mitred turns) | not measured yet | not measured yet |
+
+The Open CASCADE row is an experiment that checks the interface fits a second kernel. It is not a
+kernel we plan to route anything to. OCCT is LGPL-2.1 with the Open CASCADE exception: it lives in
+its own shared library, linked dynamically and built only with the feature, so no build we ship
+holds it (`vendor/occt-capi/README.md`). Bodies cross to and from it as STEP, written and read by
+solidcore on our side, and its results carry no history yet.

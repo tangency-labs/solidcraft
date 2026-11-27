@@ -567,6 +567,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
+            Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Cell Grid (`dialogs_cell_grid`).
             CellGrid(crate::dialogs_cell_grid::CellGrid),
             /// Rotate Member (`dialogs_rotate_member`).
@@ -1415,6 +1417,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
                     .or_else(|| crate::dialogs_gusset::start(app, id))
@@ -1734,6 +1737,7 @@ impl Dialog {
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
             | Kind::CellGrid(_)
             | Kind::RotateMember(_)
             | Kind::FramePlate(_)
@@ -1812,6 +1816,7 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Dome { height, .. } => ("Height", ValueKind::Length, height),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Dogbone(c) => ("Diameter", ValueKind::Length, &mut c.diameter),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
                 if opts.tapped || opts.clearance {
@@ -3559,6 +3564,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
         Kind::FrameTrim(_) => "TRIM/EXTEND",
@@ -5842,6 +5848,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
             | Kind::CellGrid(_)
     )
 }
@@ -8580,6 +8587,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
         Kind::FrameTrim(k) => return crate::dialogs_frame::trim_commands(app, k, &d.inputs, &d.extra),
@@ -10999,6 +11007,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
+                .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
                 .or_else(|| crate::dialogs_cell_grid::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
                 .or_else(|| crate::dialogs_frame::trim_for_feature(app, other))
