@@ -188,7 +188,10 @@ pub(crate) fn thinner_walls(thickness: f64, largest: Option<f64>) -> Vec<f64> {
 
 /// The refusal of a shell of `thickness` with a hint that has been tried: the first of the
 /// thinner walls that `builds` is the one named, so the wall the message offers does work. Where
-/// none builds, the message says the wall is not the obstacle. `first` is the refusal itself.
+/// none builds and the kernel refused the wall for folding, a face curving tighter than the wall
+/// is thick, the message says the wall is not the obstacle. Any other cause is the kernel's own
+/// refusal, `first`, kept as it is: a result that is not a solid at every wall is not a property
+/// of the wall or of how the faces curve, and saying it is would blame valid input.
 pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: KernelError, mut builds: impl FnMut(f64) -> bool) -> KernelError {
     let largest = match failure {
         SmError::WallFolds { largest } => *largest,
@@ -206,7 +209,7 @@ pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: Kerne
         return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds"));
     }
     match first {
-        KernelError::Invalid(_) | KernelError::Failed(_) => KernelError::Invalid(format!(
+        KernelError::Invalid(_) | KernelError::Failed(_) if matches!(failure, SmError::WallFolds { .. }) => KernelError::Invalid(format!(
             "shell: a wall of {t} mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
              a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
              (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
