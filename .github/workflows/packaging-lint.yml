@@ -69,7 +69,7 @@ jobs:
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
           # Double-clicking a file runs the visible entry as it always has; solidcraft:// links have the hidden entry of their own.
           grep -qx 'Exec=solidcraft %f' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
-          ! grep -q 'x-scheme-handler' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          ! grep -q 'x-scheme-handler' assets/platforms/linux/io.tangencylabs.solidcraft.desktop || { echo '::error file=assets/platforms/linux/io.tangencylabs.solidcraft.desktop::solidcraft:// links belong to the hidden workshop-links entry, not the visible one'; exit 1; }
           grep -qx 'Exec=solidcraft --open-url %u' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
           grep -qx 'NoDisplay=true' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.

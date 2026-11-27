@@ -312,6 +312,7 @@ fn an_older_or_expired_index_is_refused() {
 
 #[test]
 fn the_question_shows_what_is_installed() {
+    crate::i18n::install();
     let _language = solidcraft_ui_text::scope("en");
     let plugin = run(signed(&index_json(&test_key().0)), "solidcraft://workshop/plugin/maker/gears", None).unwrap();
     let q = question(&plugin);
