@@ -56,7 +56,9 @@ A tapped hole can save its thread's tolerance class (`thread_class`) for drawing
 It changes neither the drill nor the thread. ISO metric takes ISO 965-1's internal
 classes: a grade 4 to 8 and G or H (`6H`), or a pitch diameter class then a minor
 diameter class (`5H6H`). UNC and UNF take ASME B1.1's `1B`, `2B` or `3B`. G, Rp,
-Rc and NPT take none: their internal threads have no class.
+Rc and NPT take none: their internal threads have no class. The Thread feature
+checks a metric class with the same rule, extended to external threads (`M8-6g`,
+[Threads](threads.md)).
 
 ## Taper Rc and NPT threads
 

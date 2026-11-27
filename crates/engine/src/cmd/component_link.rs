@@ -1861,6 +1861,18 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
     (images, warnings)
 }
 
+/// The name to read the STEP text of a design's bodies under: `shown`, unless its extension names a
+/// format with its own reader (FreeCAD, Rhino, IGES). The text is STEP whatever the design came
+/// from: a design an importer plugin wrote from `part.FCStd` is linked as `part.FCStd`, and routing
+/// that STEP by the name sent it to the FreeCAD reader, which refused it.
+fn step_label(shown: &str) -> String {
+    if solidcraft_io::is_native_cad_path(shown) || solidcraft_io::is_iges_path(shown) {
+        Path::new(shown).with_extension("step").to_string_lossy().into_owned()
+    } else {
+        shown.to_string()
+    }
+}
+
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature, and its mesh
 /// bodies, which a Mesh Import feature beside it holds (#20050).
 fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
@@ -1875,7 +1887,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     }
     let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let mut feature = solidcraft_io::step_import_feature(&step, &step_label(shown)).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
@@ -4088,9 +4100,231 @@ fn lone_placement(s: &Session, p: &Value, comp: u64, cmd: &str) -> Result<Option
     Ok((s.doc.occurrences.iter().filter(|o| o.component == comp).count() > 1).then_some(occurrence))
 }
 
+/// Built bodies of a linked component's `Import` or `MeshImport` feature as
+/// `(assembly_name, source_name)` pairs in build order.
+fn linked_body_entries(s: &Session, feature_id: u64) -> Vec<(String, String)> {
+    let Some(f) = s.doc.feature(feature_id) else {
+        return Vec::new();
+    };
+    let skip: std::collections::HashSet<u64> = match &f.kind {
+        FeatureKind::Import { skip, .. } => skip.iter().copied().collect(),
+        _ => std::collections::HashSet::new(),
+    };
+    let built: Vec<(usize, String)> = if let Some(r) = s.model.result(feature_id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) {
+        let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == feature_id).map(|b| b.name.clone()).collect();
+        f.body_name_slots(made.len()).into_iter().zip(made).collect()
+    } else {
+        let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == feature_id).map(|b| b.name.clone()).collect();
+        if !made.is_empty() {
+            f.body_name_slots(made.len()).into_iter().zip(made).collect()
+        } else {
+            f.body_names
+                .iter()
+                .enumerate()
+                .filter(|(k, n)| !skip.contains(&(*k as u64)) && !n.trim().is_empty())
+                .map(|(k, n)| (k, n.clone()))
+                .collect()
+        }
+    };
+    let source_names: Vec<String> = match &f.kind {
+        FeatureKind::Import { step, records, .. } => {
+            let imp = match records {
+                Some(r) => solidcraft_kernel::records_import_shared(r).ok(),
+                None if !step.is_empty() => solidcraft_kernel::step_import_shared(step).ok(),
+                None => None,
+            };
+            imp.map(|imp| imp.bodies.iter().map(|b| b.name.clone()).collect()).unwrap_or_default()
+        }
+        FeatureKind::MeshImport { meshes, .. } => meshes.iter().map(|m| m.name.clone()).collect(),
+        _ => Vec::new(),
+    };
+    built
+        .into_iter()
+        .map(|(slot, assembly)| {
+            let source = source_names.get(slot).filter(|n| !n.trim().is_empty()).cloned().unwrap_or_else(|| assembly.clone());
+            (assembly, source)
+        })
+        .collect()
+}
+
+/// Match bodies built by the old linked feature (`old`: `(assembly_name, source_name)`) to bodies
+/// built by the replacement linked feature (`new`: `(assembly_name, source_name)`) for retargeting
+/// downstream body patterns and mirrors of a relinked placement (#21378).
+///
+/// Only unambiguous 1-to-1 mappings are emitted:
+/// 1. Unique exact source-name matches (so disambiguated assembly names like `Block` -> `Block (2)`
+///    still pair cleanly).
+/// 2. Unique exact assembly-name matches against the replacement's remaining source names (for
+///    bodies renamed locally in the assembly).
+/// 3. When exactly one old body and one new body remain unclaimed (including the common 1 -> 1
+///    single-body swap where the new design names its sole body differently), pair them.
+fn match_relink_bodies(old: &[(String, String)], new: &[(String, String)]) -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
+    if old.is_empty() || new.is_empty() {
+        return map;
+    }
+    let mut claimed_old = vec![false; old.len()];
+    let mut claimed_new = vec![false; new.len()];
+
+    // Pass 1: unique exact source-name match.
+    let old_sources: Vec<String> = old.iter().map(|(_, src)| src.clone()).collect();
+    let new_sources: Vec<String> = new.iter().map(|(_, src)| src.clone()).collect();
+    let old_src_slots = unique_name_slots(&old_sources);
+    let new_src_slots = unique_name_slots(&new_sources);
+    for (name, &oi) in &old_src_slots {
+        if let Some(&ni) = new_src_slots.get(name) {
+            claimed_old[oi] = true;
+            claimed_new[ni] = true;
+            map.insert(old[oi].0.clone(), new[ni].0.clone());
+        }
+    }
+
+    // Pass 2: unique match between unclaimed old assembly names and unclaimed new source names.
+    let rem_old_asm: Vec<String> = old.iter().enumerate().map(|(i, (asm, _))| if claimed_old[i] { String::new() } else { asm.clone() }).collect();
+    let rem_new_src: Vec<String> = new.iter().enumerate().map(|(i, (_, src))| if claimed_new[i] { String::new() } else { src.clone() }).collect();
+    let old_asm_slots = unique_name_slots(&rem_old_asm);
+    let rem_new_src_slots = unique_name_slots(&rem_new_src);
+    for (name, &oi) in &old_asm_slots {
+        if let Some(&ni) = rem_new_src_slots.get(name) {
+            claimed_old[oi] = true;
+            claimed_new[ni] = true;
+            map.insert(old[oi].0.clone(), new[ni].0.clone());
+        }
+    }
+
+    // Pass 3: sole remaining old body <-> sole remaining new body.
+    let unclaimed_old: Vec<usize> = claimed_old.iter().enumerate().filter_map(|(i, c)| (!*c).then_some(i)).collect();
+    let unclaimed_new: Vec<usize> = claimed_new.iter().enumerate().filter_map(|(i, c)| (!*c).then_some(i)).collect();
+    if let ([oi], [ni]) = (unclaimed_old.as_slice(), unclaimed_new.as_slice()) {
+        map.insert(old[*oi].0.clone(), new[*ni].0.clone());
+    }
+
+    map
+}
+
+/// The deepest timeline folder spanning the insertion slot between `slot - 1` and `slot`.
+fn timeline_group_at_slot(doc: &Document, slot: usize) -> Option<u64> {
+    let before = doc.features.get(slot.checked_sub(1)?)?.id;
+    let after = doc.features.get(slot)?.id;
+    let direct = |feature| doc.timeline_groups.iter().find(|group| group.features.contains(&feature)).map(|group| group.id);
+    let parents: std::collections::BTreeMap<u64, Option<u64>> = doc.timeline_groups.iter().map(|group| (group.id, group.parent)).collect();
+    let mut before_ancestors = std::collections::BTreeSet::new();
+    let mut current = direct(before);
+    let mut steps = 0usize;
+    while let Some(id) = current {
+        if !before_ancestors.insert(id) || steps >= doc.timeline_groups.len() {
+            return None;
+        }
+        current = parents.get(&id).copied().flatten();
+        steps = steps.saturating_add(1);
+    }
+    current = direct(after);
+    steps = 0;
+    while let Some(id) = current {
+        if before_ancestors.contains(&id) {
+            return Some(id);
+        }
+        if steps >= doc.timeline_groups.len() {
+            return None;
+        }
+        current = parents.get(&id).copied().flatten();
+        steps = steps.saturating_add(1);
+    }
+    None
+}
+
+/// Move `moving_ids` earlier in `doc.features` to `raw_target` while keeping `doc.marker` and
+/// every `doc.timeline_groups` folder contiguous and ordered by timeline index.
+fn move_features_to(doc: &mut Document, moving_ids: &[u64], raw_target: usize) {
+    if moving_ids.is_empty() {
+        return;
+    }
+    let moving_set: std::collections::BTreeSet<u64> = moving_ids.iter().copied().collect();
+    let before_target = doc.features.iter().take(raw_target).filter(|f| moving_set.contains(&f.id)).count();
+    let target = raw_target.saturating_sub(before_target);
+    let crossed_marker =
+        doc.marker.map_or(0, |m| doc.features.iter().enumerate().filter(|(i, f)| moving_set.contains(&f.id) && *i >= m && target < m).count());
+    let mut moving = Vec::with_capacity(moving_ids.len());
+    doc.features.retain(|f| {
+        if moving_set.contains(&f.id) {
+            moving.push(f.clone());
+            false
+        } else {
+            true
+        }
+    });
+    if moving.is_empty() {
+        return;
+    }
+    for group in &mut doc.timeline_groups {
+        group.features.retain(|id| !moving_set.contains(id));
+    }
+    let insert_at = target.min(doc.features.len());
+    let spanning_group = timeline_group_at_slot(doc, insert_at);
+    let moved_ids: Vec<u64> = moving.iter().map(|f| f.id).collect();
+    doc.features.splice(insert_at..insert_at, moving);
+    if let Some(m) = &mut doc.marker {
+        *m = m.saturating_add(crossed_marker).min(doc.features.len());
+    }
+    if let Some(group_id) = spanning_group
+        && let Some(group) = doc.timeline_groups.iter_mut().find(|g| g.id == group_id)
+    {
+        group.features.extend(moved_ids);
+    }
+    if !doc.timeline_groups.is_empty() {
+        let positions: std::collections::BTreeMap<u64, usize> = doc.features.iter().enumerate().map(|(i, f)| (f.id, i)).collect();
+        for group in &mut doc.timeline_groups {
+            group.features.sort_by_key(|id| positions.get(id).copied().unwrap_or(usize::MAX));
+        }
+    }
+}
+
+/// The earliest timeline index of a body pattern or mirror referencing a body of `occurrence`
+/// that `body_map` can retarget.
+fn earliest_retargeted_consumer(doc: &Document, occurrence: u64, body_map: &std::collections::BTreeMap<String, String>) -> Option<usize> {
+    if body_map.is_empty() {
+        return None;
+    }
+    doc.features.iter().enumerate().find_map(|(i, f)| match &f.kind {
+        FeatureKind::Pattern { bodies, placements, .. } | FeatureKind::Mirror { bodies, placements, .. }
+            if bodies
+                .iter()
+                .zip(placements.iter())
+                .any(|(body, path)| path.last() == Some(&occurrence) && body_map.contains_key(body.0.as_str())) =>
+        {
+            Some(i)
+        }
+        _ => None,
+    })
+}
+
+/// Retarget body patterns and mirrors referencing `occurrence`'s old body names to the
+/// replacement linked component's matched body names (#21378).
+fn retarget_occurrence_copies(doc: &mut Document, occurrence: u64, body_map: &std::collections::BTreeMap<String, String>) {
+    if body_map.is_empty() {
+        return;
+    }
+    for f in &mut doc.features {
+        match &mut f.kind {
+            FeatureKind::Pattern { bodies, placements, .. } | FeatureKind::Mirror { bodies, placements, .. } => {
+                for (body, path) in bodies.iter_mut().zip(placements.iter()) {
+                    if path.last() == Some(&occurrence)
+                        && let Some(mapped) = body_map.get(body.0.as_str())
+                    {
+                        body.0.clone_from(mapped);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// One placement of `comp` comes to show the design at `file` instead: as a placement of a
 /// component already linked to it, or of a new one under the same parent. The placement keeps
-/// its id, position and grounding, so its joints stay; they are moved to the new bodies' faces.
+/// its id, position and grounding, so its joints stay (moved to the new bodies' faces), and
+/// downstream body patterns and mirrors referencing its bodies are retargeted when the new
+/// design has an unambiguous 1-to-1 body match (#21378).
 fn relink_placement(
     s: &mut Session,
     comp: u64,
@@ -4106,14 +4340,20 @@ fn relink_placement(
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
-    // A pattern or mirror of this placement can stop working: the reply names each feature that does.
+    // A pattern or mirror of this placement can still fail when the replacement has no unambiguous
+    // matching body: the reply names each feature that does.
     let failing_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect();
+    let warned_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.warning.is_some()).map(|r| r.id).collect();
+    let old_mesh_feature = link_mesh_feature(s, comp, link.feature).map(|(id, _)| id);
+    let old_solid_bodies = linked_body_entries(s, link.feature);
+    let old_mesh_bodies = old_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
     let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
     }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
+    let new_mesh_feature = link_mesh_feature(s, linked, feature).map(|(id, _)| id);
     let geometry_changed = match (s.doc.feature(link.feature), s.doc.feature(feature)) {
         (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind) || link_meshes(s, comp, link.feature) != link_meshes(s, linked, feature),
         _ => true,
@@ -4122,9 +4362,40 @@ fn relink_placement(
     if geometry_changed && s.doc.assembly.joints.iter().any(|j| j.a.occurrence == occurrence || j.b.occurrence == occurrence) {
         warnings.push("the linked geometry changed; check this placement's joints, even when the solver reports no error".to_string());
     }
+    // Pin evaluated body names before repositioning the replacement's Import feature or
+    // retargeting patterns/mirrors so moving an import earlier never renumbers existing bodies
+    // or shifts inherited materials/appearances.
+    s.pin_timeline_body_names();
+    let new_solid_bodies = linked_body_entries(s, feature);
+    let new_mesh_bodies = new_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
+    let mut body_map = match_relink_bodies(&old_solid_bodies, &new_solid_bodies);
+    for (old_name, new_name) in match_relink_bodies(&old_mesh_bodies, &new_mesh_bodies) {
+        body_map.entry(old_name).or_insert(new_name);
+    }
+    let earliest_consumer = earliest_retargeted_consumer(&s.doc, occurrence, &body_map);
     // Insert Design placed the design once; this placement takes that one's place and name.
     let added = made["occurrence"].as_u64().ok_or_else(|| bad(cmd, "the design was not placed"))?;
     let d = s.doc_mut();
+    if let Some(first) = earliest_consumer {
+        let mut moving_ids = Vec::new();
+        if d.feature_index(feature).is_some_and(|i| i >= first) {
+            moving_ids.push(feature);
+        }
+        if let Some(mesh_id) = new_mesh_feature
+            && d.feature_index(mesh_id).is_some_and(|i| i >= first)
+        {
+            moving_ids.push(mesh_id);
+        }
+        if !moving_ids.is_empty() {
+            let after_old = match (d.feature_index(link.feature), old_mesh_feature.and_then(|id| d.feature_index(id))) {
+                (Some(a), Some(b)) if b == a + 1 => b + 1,
+                (Some(a), _) => a + 1,
+                (None, _) => first,
+            };
+            move_features_to(d, &moving_ids, after_old.min(first));
+        }
+    }
+    retarget_occurrence_copies(d, occurrence, &body_map);
     let name = d.occurrences.iter().find(|o| o.id == added).map(|o| o.name.clone()).unwrap_or_default();
     d.occurrences.retain(|o| o.id != added);
     if let Some(o) = d.occurrences.iter_mut().find(|o| o.id == occurrence) {
@@ -4144,6 +4415,19 @@ fn relink_placement(
             .iter()
             .filter(|r| !failing_before.contains(&r.id))
             .filter_map(|r| r.error.as_ref().map(|e| format!("`{}` worked before this relink and fails now: {e}", r.name))),
+    );
+    warnings.extend(
+        s.model
+            .results
+            .iter()
+            .filter(|r| {
+                r.id != feature
+                    && Some(r.id) != new_mesh_feature
+                    && r.error.is_none()
+                    && !failing_before.contains(&r.id)
+                    && !warned_before.contains(&r.id)
+            })
+            .filter_map(|r| r.warning.as_ref().map(|w| format!("`{}` worked before this relink and now warns: {w}", r.name))),
     );
     let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
     reply(
@@ -5263,6 +5547,36 @@ mod tests {
 
     /// A one-face sheet at z = 0.15 bounded by spline edges lying on the plane z = 0, written
     /// without pcurves: its edges are 0.15 mm off their face and read with tolerances of 0.45 mm.
+    /// An importer plugin's design carries its geometry as an Import feature labelled with the file it
+    /// came from (`part.FCStd`) holding STEP. Linking it must read that STEP as STEP, as File > Open
+    /// does, not hand it to the FreeCAD reader because of the label.
+    #[test]
+    fn a_design_an_importer_wrote_from_a_freecad_file_links_its_step_geometry() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-importer-fcstd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
+        let step_file = dir.join("block.step");
+        run(&mut part, "file.export", json!({"path": step_file}));
+        let step = std::fs::read(&step_file).unwrap();
+        let mut kind = solidcraft_io::step_import_feature(&step, "block.step").unwrap().kind;
+        if let FeatureKind::Import { file, .. } = &mut kind {
+            *file = "part.FCStd".into();
+        }
+        let mut doc = Document::default();
+        doc.add_feature(kind, None).unwrap();
+        let bytes = solidcraft_io::write_design(&doc).unwrap();
+        for name in ["part.FCStd", "part.fcstd", "part.3dm"] {
+            let source = Source::File(dir.join(name));
+            let ((_, feature, ..), _) = design_bodies(&source, &bytes, None, Default::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(feature.body_names.len(), 1, "{name}");
+        }
+        assert_eq!(step_label("/a/part.FCStd"), "/a/part.step");
+        assert_eq!(step_label("/a/part.sc"), "/a/part.sc");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn loose_sheet_step() -> String {
         let mut t = String::from(
             "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\n\

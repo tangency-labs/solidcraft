@@ -670,33 +670,47 @@ fn moved_faces(b: &mut Brep) -> solidcore::Result<bool> {
 }
 
 /// A face the kernel cannot draft, as the operation's error: a pull in the neutral plane is
-/// the draft's own argument ([`Error::Argument`]); any other refusal names what the face is
-/// ([`Error::Unsupported`]). The app's own draft words the same refusals with it.
+/// the draft's own argument ([`Error::Argument`]); a cone that would close within the face or a
+/// neutral plane at or past its apex is a geometric refusal ([`Error::OffsetRefused`]); any other
+/// refusal names what the face is ([`Error::Unsupported`]). The app's own draft words the same
+/// refusals with it.
 pub fn draft_refused(r: DraftRefusal) -> Error {
-    Error::Unsupported(match r {
-        DraftRefusal::PullInNeutralPlane => return Error::Argument,
-        DraftRefusal::NotPlaneOrCone => "a drafted face is neither a plane nor a cone or cylinder",
-        DraftRefusal::PlaneAcrossPull => "a drafted plane is not parallel to the pull",
-        DraftRefusal::PlaneParallelToNeutral => {
+    match r {
+        DraftRefusal::PullInNeutralPlane => Error::Argument,
+        DraftRefusal::ConeCloses => Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::DraftConeCloses,
+        },
+        DraftRefusal::NeutralPlanePastApex => Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::DraftNeutralPlanePastApex,
+        },
+        DraftRefusal::NotPlaneOrCone => {
+            Error::Unsupported("a drafted face is neither a plane nor a cone or cylinder")
+        }
+        DraftRefusal::PlaneAcrossPull => {
+            Error::Unsupported("a drafted plane is not parallel to the pull")
+        }
+        DraftRefusal::PlaneParallelToNeutral => Error::Unsupported(
             "a drafted plane is parallel, or too near parallel, to the neutral plane: it has no \
-             line on it to turn about"
+             line on it to turn about",
+        ),
+        DraftRefusal::HingeAlongPull => {
+            Error::Unsupported("a drafted plane meets the neutral plane along the pull")
         }
-        DraftRefusal::HingeAlongPull => "a drafted plane meets the neutral plane along the pull",
-        DraftRefusal::AngleBeyondHinge => {
-            "a drafted plane's line on the neutral plane is too near the pull for the draft angle"
+        DraftRefusal::AngleBeyondHinge => Error::Unsupported(
+            "a drafted plane's line on the neutral plane is too near the pull for the draft angle",
+        ),
+        DraftRefusal::AxisNotAlongPull => {
+            Error::Unsupported("a drafted cone or cylinder's axis is not along the pull")
         }
-        DraftRefusal::AxisNotAlongPull => "a drafted cone or cylinder's axis is not along the pull",
         DraftRefusal::AxisInNeutralPlane => {
-            "a drafted cone or cylinder's axis lies in the neutral plane"
+            Error::Unsupported("a drafted cone or cylinder's axis lies in the neutral plane")
         }
-        DraftRefusal::SenseNotProved => {
-            "whether a drafted cone or cylinder faces away from its axis is not proved"
-        }
-        DraftRefusal::NeutralPlanePastApex => {
-            "the neutral plane is at or past a drafted cone's apex"
-        }
-        DraftRefusal::ConeCloses => "a drafted cone would close within the face",
-    })
+        DraftRefusal::SenseNotProved => Error::Unsupported(
+            "whether a drafted cone or cylinder faces away from its axis is not proved",
+        ),
+    }
 }
 
 /// The faces of the solid `body` with record indices `faces` (through `order`, its record's
@@ -715,10 +729,12 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
 /// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
 /// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
-/// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
-/// the wall); [`Error::DraftCutsThrough`] for a draft the kernel refuses without a reason of its
-/// own whose drafted face would cut through a face it does not meet ([`drafted_through`]); the
-/// kernel's other errors, its typed refusals passed on as they are;
+/// would close within the face: [`OffsetRefusal::DraftConeCloses`]; a neutral plane at or past a
+/// cone's apex: [`OffsetRefusal::DraftNeutralPlanePastApex`]; a drafted cone that would reach a
+/// cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps the wall);
+/// [`Error::DraftCutsThrough`] for a draft the kernel refuses without a reason of its own whose
+/// drafted face would cut through a face it does not meet ([`drafted_through`]); the kernel's
+/// other errors, its typed refusals passed on as they are;
 /// those of [`finish`].
 pub fn draft(
     body: &Body,

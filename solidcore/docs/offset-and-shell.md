@@ -123,6 +123,14 @@ such a round is the offset of its net. That breaks the one rule, and the ledger
 drops its bound: the face gets `BSplineSurface::from_nurb(made.surface, false)`, a bare net with no
 stored ε (`p1.rs`). Both are open (§9).
 
+The face's edges were built on the implicit offset and stay within their tolerances of the net,
+but a seam edge must lie on the net's own seam line: the check's seam test flags a vertex more
+than 1e-9 beside it, and a later cut across the seam puts its vertex on the edge. So each seam
+edge of a face given its net (its UV trim curve an iso line) gets the net's iso curve along the
+seam, exactly, where that curve runs between the edge's own vertices within its tolerance
+(`seams_onto_iso_curves`, `p1.rs`). The seam lifted from the implicit offset lay up to 8.5e-7 off
+the net's seam line on a thickened closed loft.
+
 ## 4. Folds, collapses and the largest wall
 
 ![Left: a parabolic face whose least radius of curvature is 10 at its apex, its offset by 10 towards the centre of curvature with a cusp on the focal curve, and the wall between them. Right: the same face offset by 14, a curve that crosses itself between two cusps.](offset-and-shell/fold.svg)
@@ -285,13 +293,18 @@ supporting planes. The first scope requires
 simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
 Every reconstructed vertex must lie on the support's outward side and in every exposed face's
 material halfspace. Toleranced stored vertices and trims do not decide this certificate.
-Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
-intersection. The branch contributes no cavity, so both its offset sheets and the support's
+Two exposed planes whose normals are opposite within the angular tolerance pair; their actual offset
+definitions (each sheet's stored origin and axes, its normal the exact cross product of the axes)
+certify that their material halfspaces have no common point in the cell: the sum of the two
+sheets' exact plane functions is positive at every reconstructed vertex (a Farkas certificate
+with unit multipliers), hence on their convex hull. For exactly opposite normals that sum is the
+constant crossing of the two planes; a branch turned by a rotation, whose normals are opposite only
+up to rounding, is decided the same way (#22784). The branch contributes no cavity, so both its offset sheets and the support's
 attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
 supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
 
-This is an empty-cell certificate within the mitred construction, using outward-rounded
-interval inequalities and exact opposite normals, without a tolerance or an alternate
+This is an empty-cell certificate within the mitred construction, using exact expansion
+inequalities on the cell's vertices, without a distance tolerance or an alternate
 construction. The source body remains intact for the shell difference. Curved or nonconvex
 branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
 plane pair still require the general arrangement and cavity rule. This event does not complete
