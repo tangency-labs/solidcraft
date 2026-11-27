@@ -120,7 +120,6 @@ crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
-crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
@@ -154,7 +153,6 @@ crates/doc/src/eval_frame.rs:cut_members dot
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
 crates/doc/src/eval_frame.rs:section_view normalized
-crates/doc/src/eval_frame.rs:straight dot,normalized
 crates/doc/src/eval_frame.rs:untrimmed_member_section dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
@@ -187,7 +185,6 @@ crates/doc/src/face_anchor.rs:Document::resolve_face_anchor_noted cross,dot
 crates/doc/src/face_anchor.rs:FaceAnchor::validate hypot
 crates/doc/src/face_anchor.rs:validate_face_anchor_json hypot
 crates/doc/src/frame.rs:group_axes cross,dot,normalized
-crates/doc/src/frame.rs:member_axes cross,dot,normalized
 crates/doc/src/frame.rs:rounded_polygon atan2,cross,dot,normalized
 crates/doc/src/frame_corners.rs:away normalized
 crates/doc/src/frame_corners.rs:corner_cuts dot,normalized
@@ -279,7 +276,6 @@ crates/doc/src/print_face.rs:Document::locate_print_face dot,normalized
 crates/doc/src/project.rs:arc_geom normalized
 crates/doc/src/project.rs:as_spline dot,normalized
 crates/doc/src/project.rs:at_vertices dot,normalized
-crates/doc/src/project.rs:cache_key triangles
 crates/doc/src/project.rs:circle3 cross,dot,normalized
 crates/doc/src/project.rs:closest_on_segment dot
 crates/doc/src/project.rs:closest_on_triangle cross,dot,normalized
@@ -429,7 +425,6 @@ crates/doc/src/sheet_surface_shadow.rs:Reader::slope cross,dot,normalized
 crates/doc/src/sheet_surface_shadow.rs:Slab::depth atan2,hypot
 crates/doc/src/sheet_surface_shadow.rs:crossed cross
 crates/doc/src/sheet_surface_shadow.rs:exact atan2,cross,dot
-crates/doc/src/sheet_surface_shadow.rs:same_surface cross,dot
 crates/doc/src/sheet_surface_shadow.rs:shadow cross,dot,normalized
 crates/doc/src/sheet_surface_tab.rs:SurfaceSheet::add_tab cross,dot
 crates/engine/src/cmd/board_import.rs:Edge::dist_to_segment dot
@@ -494,7 +489,6 @@ crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
 crates/engine/src/cmd/file.rs:mesh_data triangles
 crates/engine/src/cmd/file.rs:saved_preview triangles
-crates/engine/src/cmd/file_thumbnail.rs:scene triangles
 crates/engine/src/cmd/joints.rs:circle_centre dot
 crates/engine/src/cmd/joints.rs:origin_on_part cross
 crates/engine/src/cmd/joints.rs:reach atan2,cross,dot
@@ -666,6 +660,7 @@ crates/engine/src/snap.rs:axis_ends dot
 crates/engine/src/snap.rs:face_points normalized
 crates/engine/src/snap.rs:same_circle dot
 crates/engine/src/snap.rs:whole_arc dot,tangent_chain
+crates/engine/src/thumbnail.rs:scene triangles
 crates/engine/src/view.rs:SectionIndex::new triangles
 crates/engine/src/view.rs:SectionIndex::segments dot,triangles
 crates/engine/src/view.rs:build_scene cross,dot
@@ -844,7 +839,6 @@ crates/io/src/kicad_in.rs:glyph_polyline atan2
 crates/io/src/kicad_in.rs:kicad_board_mesh_noted triangles
 crates/io/src/kicad_in.rs:model_body_meshes triangles
 crates/io/src/kicad_in.rs:pad_drill_points atan2
-crates/io/src/kicad_in.rs:parse_kicad_board_with atan2
 crates/io/src/kicad_in.rs:read_kicad triangles
 crates/io/src/kicad_in.rs:region_loops hypot
 crates/io/src/kicad_in.rs:split_pinches hypot
@@ -1293,10 +1287,6 @@ crates/ui-egui/src/drawing_workspace/dimension.rs:shape_of cross,dot,normalized
 crates/ui-egui/src/drawing_workspace/dimension.rs:smaller_angle atan2,dot,normalized
 crates/ui-egui/src/drawing_workspace/placement.rs:Placement::target cross
 crates/ui-egui/src/edit_clipboard.rs:paste_placement dot
-crates/ui-egui/src/edit_in_place.rs:draw_context triangles
-crates/ui-egui/src/edit_in_place.rs:scene_key triangles
-crates/ui-egui/src/edit_in_place.rs:snapshot triangles
-crates/ui-egui/src/edit_in_place.rs:take_refresh triangles
 crates/ui-egui/src/extrude_face_snap.rs:flat_faces_of cross,dot,normalized,triangles
 crates/ui-egui/src/extrude_face_snap.rs:nearest distance
 crates/ui-egui/src/extrude_face_snap.rs:stops dot

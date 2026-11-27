@@ -747,6 +747,7 @@ fn benchmark_independent_step_solids() {
 }
 
 fn assert_same_import(serial: &StepImport, parallel: &StepImport) {
+    assert_eq!(serial.report.current(), parallel.report.current());
     assert_eq!(serial.tree, parallel.tree);
     assert_eq!(serial.warnings, parallel.warnings);
     assert_eq!((&serial.schema, &serial.system), (&parallel.schema, &parallel.system));
@@ -2141,6 +2142,40 @@ fn instanced_assembly_of(parts: u64, n: u64) -> String {
     }
     t += TAIL;
     t
+}
+
+#[test]
+fn finishing_a_partly_read_assembly_reuses_its_placed_parts() {
+    let text = instanced_assembly_of(4, (3 * MAX_WINDOW + 1) as u64);
+    let mut reading = StepReading::with_workers(&text, 3).unwrap();
+    assert!(reading.step());
+    assert_eq!(reading.progress().0, MAX_WINDOW);
+    let finished = reading.finish().unwrap();
+    assert_same_import(&step_import_with_workers(&text, 1).unwrap(), &finished);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cancelling_a_large_read_discards_work_ahead_and_allows_retry() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CancelAtWindow(AtomicBool);
+    impl crate::watch::Watch for CancelAtWindow {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+
+        fn progress(&self, stage: &'static str, done: usize, _: usize) {
+            if stage == "converting" && done == MAX_WINDOW {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let text = boxes_step(MAX_WINDOW * 2 + 3, "cancel work ahead");
+    let watch = Arc::new(CancelAtWindow(AtomicBool::new(false)));
+    let err = crate::watch::watching(watch, || StepReading::with_workers(&text, 3)?.finish_shared()).unwrap_err();
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    let imported = step_import_shared(&text).unwrap();
+    assert_eq!(imported.bodies.len(), MAX_WINDOW * 2 + 3);
 }
 
 /// A part placed many times is oriented (meshed whole) once, not once per instance (#2814:
@@ -3962,6 +3997,223 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
         assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
         let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
         assert!(check.is_valid(), "start {start}: {check}");
+    }
+}
+
+/// A tube 6 high whose wall is one polynomial cubic spline, of degree 1 up the axis and closed
+/// round it: eight Bézier arcs approximating the circle of radius 4, joined with double knots, as
+/// a CAD system writes a round wall it has fitted. The wall is three faces. Two cover arcs `first`
+/// to `first + 4` (through the knots' end when `first` is past 3), one below and one above a wavy
+/// edge at about half height; the third covers the other three arcs. The wavy edge is a cubic
+/// through points of the wall (Hermite pieces, double knots) whose parameter is not the wall's,
+/// as an intersection edge is written; every other edge is a piece of the wall's section or a
+/// line along it. The wavy edge runs round the wall at the speed `1 + 0.2 cos 2πs` along its
+/// parameter s, faster at its ends than in its middle. The file states its
+/// lengths to 1e-2 mm, so its edges' tolerance is 5e-3 mm. The seam split keeps a use's trim,
+/// split at the edge's parameter, only where the trim's point there is within a hundredth of
+/// the edge's tolerance of the edge's: here it is 1.4e-5 mm off, within the 5e-5 mm allowed,
+/// and the split keeps it, as it keeps the issue's file's (2.6e-6 mm against 5e-6 mm). Stated to
+/// 1e-3 mm, this file's would be dropped and made again from the edge. Returns the file and the
+/// solid's volume: the section's area, by Green's theorem over the arcs (three-point
+/// Gauss-Legendre, exact for the quintic `x y' - y x'`), times the height.
+fn tube_with_fitted_edge_step(first: usize) -> (String, f64) {
+    use std::f64::consts::{PI, TAU};
+    const ARCS: usize = 8;
+    const SPANS: usize = 5;
+    const PIECES: usize = 64;
+    let (r, h) = (4.0, 6.0);
+    let step = TAU / ARCS as f64;
+    let reach = 4.0 / 3.0 * (step / 4.0).tan() * r;
+    let joint = |i: usize| {
+        let a = step * i as f64;
+        [r * a.cos(), r * a.sin()]
+    };
+    // An arc's four Bézier points: its joints, and a point along each joint's tangent.
+    let arc = |i: usize| {
+        let (a, b) = (step * i as f64, step * (i + 1) as f64);
+        let (p, q) = (joint(i), joint(i + 1));
+        [p, [p[0] - reach * a.sin(), p[1] + reach * a.cos()], [q[0] + reach * b.sin(), q[1] - reach * b.cos()], q]
+    };
+    // The control points of arcs `from..from + count` with double knots: the end joints and each
+    // arc's two inner points (an inner joint is the midpoint of the points beside it).
+    let section = |from: usize, count: usize| {
+        let mut pts = vec![joint(from)];
+        for i in from..from + count {
+            let c = arc(i);
+            pts.extend([c[1], c[2]]);
+        }
+        pts.push(joint(from + count));
+        pts
+    };
+    // The section at arc coordinate `w` in [first, first + SPANS] and its derivative by `w`.
+    let on_section = |w: f64| {
+        let i = (w.floor() as usize).clamp(first, first + SPANS - 1);
+        let (t, c) = (w - i as f64, arc(i));
+        let s = 1.0 - t;
+        let p =
+            std::array::from_fn::<f64, 2, _>(|k| s * s * s * c[0][k] + 3.0 * s * s * t * c[1][k] + 3.0 * s * t * t * c[2][k] + t * t * t * c[3][k]);
+        let d = std::array::from_fn::<f64, 2, _>(|k| {
+            3.0 * (s * s * (c[1][k] - c[0][k]) + 2.0 * s * t * (c[2][k] - c[1][k]) + t * t * (c[3][k] - c[2][k]))
+        });
+        (p, d)
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        out.push(format!("#{}={s};", out.len() + 1));
+        out.len()
+    };
+    let point = |p: [f64; 3]| format!("CARTESIAN_POINT('',({:.17},{:.17},{:.17}))", p[0], p[1], p[2]);
+    let ids = |v: &[usize]| v.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+    let reals = |v: &[f64]| v.iter().map(|x| format!("{x:.17}")).collect::<Vec<_>>().join(",");
+    let mults = |pieces: usize| {
+        std::iter::once("4".to_string())
+            .chain(std::iter::repeat_n("2".to_string(), pieces - 1))
+            .chain(std::iter::once("4".to_string()))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let (a, b) = (first, first + SPANS);
+    let mut vertex = |j: usize, z: f64| {
+        let [x, y] = joint(j);
+        let p = add(point([x, y, z]));
+        add(format!("VERTEX_POINT('',#{p})"))
+    };
+    let va = [vertex(a, 0.0), vertex(a, h / 2.0), vertex(a, h)];
+    let vb = [vertex(b, 0.0), vertex(b, h / 2.0), vertex(b, h)];
+    let mut rim = |from: usize, count: usize, z: f64, ends: (usize, usize)| {
+        let pts: Vec<usize> = section(from, count).into_iter().map(|[x, y]| add(point([x, y, z]))).collect();
+        let knots: Vec<f64> = (0..=count).map(|k| k as f64).collect();
+        let c = add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+            ids(&pts),
+            mults(count),
+            reals(&knots)
+        ));
+        add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", ends.0, ends.1))
+    };
+    let low_a = rim(a, SPANS, 0.0, (va[0], vb[0]));
+    let top_a = rim(a, SPANS, h, (va[2], vb[2]));
+    let low_b = rim(b % ARCS, ARCS - SPANS, 0.0, (vb[0], va[0]));
+    let top_b = rim(b % ARCS, ARCS - SPANS, h, (vb[2], va[2]));
+    // The wavy edge at s in [0, 1]: round the wall faster at its ends than in its middle, up and
+    // down about half height; its point on the wall and its derivative by s.
+    let wave = |s: f64| {
+        let (g, dg) = (s + 0.2 * (TAU * s).sin() / TAU, 1.0 + 0.2 * (TAU * s).cos());
+        let ([x, y], [dx, dy]) = on_section(a as f64 + SPANS as f64 * g);
+        let z = h / 2.0 + 0.8 * (PI * s).sin() * (TAU * s).sin();
+        let dz = 0.8 * PI * ((PI * s).cos() * (TAU * s).sin() + 2.0 * (PI * s).sin() * (TAU * s).cos());
+        ([x, y, z], [dx * SPANS as f64 * dg, dy * SPANS as f64 * dg, dz])
+    };
+    let knots: Vec<f64> = (0..=PIECES).map(|i| i as f64 / PIECES as f64).collect();
+    let mut controls = vec![wave(0.0).0];
+    for pair in knots.windows(2) {
+        let (span, (p, dp), (q, dq)) = (pair[1] - pair[0], wave(pair[0]), wave(pair[1]));
+        controls.push(std::array::from_fn(|k| p[k] + dp[k] * span / 3.0));
+        controls.push(std::array::from_fn(|k| q[k] - dq[k] * span / 3.0));
+    }
+    controls.push(wave(1.0).0);
+    let controls: Vec<usize> = controls.into_iter().map(|p| add(point(p))).collect();
+    let curve = add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+        ids(&controls),
+        mults(PIECES),
+        reals(&knots)
+    ));
+    let wavy = add(format!("EDGE_CURVE('',#{},#{},#{curve},.T.)", va[1], vb[1]));
+    let up = add("DIRECTION('',(0.,0.,1.))".into());
+    let mut side = |j: usize, (z0, z1): (f64, f64), (v0, v1): (usize, usize)| {
+        let [x, y] = joint(j);
+        let o = add(point([x, y, z0]));
+        let d = add(format!("VECTOR('',#{up},{:.17})", z1 - z0));
+        let l = add(format!("LINE('',#{o},#{d})"));
+        add(format!("EDGE_CURVE('',#{v0},#{v1},#{l},.T.)"))
+    };
+    let (sa_low, sa_high) = (side(a, (0.0, h / 2.0), (va[0], va[1])), side(a, (h / 2.0, h), (va[1], va[2])));
+    let (sb_low, sb_high) = (side(b, (0.0, h / 2.0), (vb[0], vb[1])), side(b, (h / 2.0, h), (vb[1], vb[2])));
+    // The wall: u up the axis, v round it (closed); its normal points in.
+    let mut wall = || {
+        let rows: Vec<String> = [0.0, h]
+            .into_iter()
+            .map(|z| format!("({})", ids(&section(0, ARCS).into_iter().map(|[x, y]| add(point([x, y, z]))).collect::<Vec<_>>())))
+            .collect();
+        let knots: Vec<f64> = (0..=ARCS).map(|k| k as f64 / ARCS as f64).collect();
+        add(format!(
+            "B_SPLINE_SURFACE_WITH_KNOTS('',1,3,({}),.UNSPECIFIED.,.F.,.T.,.F.,(2,2),({}),(0.,1.),({}),.UNSPECIFIED.)",
+            rows.join(","),
+            mults(ARCS),
+            reals(&knots)
+        ))
+    };
+    let walls = [wall(), wall(), wall()];
+    let mut plane = |z: f64, n: f64| {
+        let (o, n, x) = (add(point([0.0, 0.0, z])), add(format!("DIRECTION('',(0.,0.,{n:.1}))")), add("DIRECTION('',(1.,0.,0.))".into()));
+        let p = add(format!("AXIS2_PLACEMENT_3D('',#{o},#{n},#{x})"));
+        add(format!("PLANE('',#{p})"))
+    };
+    let (bottom, top) = (plane(0.0, -1.0), plane(h, 1.0));
+    let mut face = |uses: &[(usize, bool)], surface: usize, sense: &str| {
+        let oes: Vec<usize> = uses.iter().map(|(e, o)| add(format!("ORIENTED_EDGE('',*,*,#{e},{})", if *o { ".T." } else { ".F." }))).collect();
+        let l = add(format!("EDGE_LOOP('',({}))", ids(&oes)));
+        let bound = add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        add(format!("ADVANCED_FACE('',(#{bound}),#{surface},{sense})"))
+    };
+    // Each face's loop runs counter-clockwise seen from outside the tube; the wall faces are
+    // against their surface's normal.
+    let faces = [
+        face(&[(low_a, true), (sb_low, true), (wavy, false), (sa_low, false)], walls[0], ".F."),
+        face(&[(wavy, true), (sb_high, true), (top_a, false), (sa_high, false)], walls[1], ".F."),
+        face(&[(low_b, true), (sa_low, true), (sa_high, true), (top_b, false), (sb_high, false), (sb_low, false)], walls[2], ".F."),
+        face(&[(low_b, false), (low_a, false)], bottom, ".T."),
+        face(&[(top_a, true), (top_b, true)], top, ".T."),
+    ];
+    let shell = add(format!("CLOSED_SHELL('',({}))", ids(&faces)));
+    let solid = add(format!("MANIFOLD_SOLID_BREP('tube',#{shell})"));
+    // Millimetres, stated to a hundredth (see above).
+    let mm = add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))".into());
+    let rad = add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))".into());
+    let accuracy = add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-2),#{mm},'distance_accuracy_value','')"));
+    let context = add(format!(
+        "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{accuracy}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{mm},#{rad}))REPRESENTATION_CONTEXT('',''))"
+    ));
+    add(format!("ADVANCED_BREP_SHAPE_REPRESENTATION('',(#{solid}),#{context})"));
+    let gauss = [(0.5 - 0.5 * 0.6_f64.sqrt(), 5.0 / 18.0), (0.5, 8.0 / 18.0), (0.5 + 0.5 * 0.6_f64.sqrt(), 5.0 / 18.0)];
+    let mut area = 0.0;
+    for i in 0..ARCS {
+        let c = arc(i);
+        for (t, weight) in gauss {
+            let s = 1.0 - t;
+            let p = |k: usize| s * s * s * c[0][k] + 3.0 * s * s * t * c[1][k] + 3.0 * s * t * t * c[2][k] + t * t * t * c[3][k];
+            let d = |k: usize| 3.0 * (s * s * (c[1][k] - c[0][k]) + 2.0 * s * t * (c[2][k] - c[1][k]) + t * t * (c[3][k] - c[2][k]));
+            area += weight * 0.5 * (p(0) * d(1) - p(1) * d(0));
+        }
+    }
+    (format!("{HEAD}{}\n{TAIL}", out.join("\n")), area * h)
+}
+
+/// The tube of [`tube_with_fitted_edge_step`] with its two faces across the start of the wall's
+/// knots (arcs 6 to 10), and turned so that they are not (arcs 0 to 4). Across the start the seam
+/// completion splits the wavy edge where it meets the wall's seam, and its trims at the same
+/// parameter; a trim fitted to the edge meets the seam a little away from there, so one piece ran
+/// a sliver across the seam, the completion refused the faces and the tube came in open with two
+/// faces left out (#22462). Both read closed with the section's volume. (With the wavy edge
+/// faster in its middle instead, the completion meets another defect, one piece's trim made again
+/// from the seam's other side, which this test does not cover.)
+#[test]
+fn a_tube_with_a_fitted_edge_across_its_closed_splines_start_reads_closed() {
+    for first in [6, 0] {
+        let (text, volume) = tube_with_fitted_edge_step(first);
+        let imp = step_import(&text).unwrap_or_else(|e| panic!("first {first}: {e}"));
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
+            "first {first}: {:?}",
+            imp.warnings
+        );
+        assert_eq!(imp.bodies.len(), 1, "first {first}");
+        assert!(imp.bodies[0].closed, "first {first}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert!(rel(m.volume, volume) < 1e-9, "first {first}: volume {}, {volume} expected", m.volume);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "first {first}: {check}");
     }
 }
 

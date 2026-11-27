@@ -12,7 +12,7 @@ use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_kernel::services::sketch_arc as arcs;
+use solidcraft_kernel::planar as arcs;
 
 use crate::SolveApp;
 use crate::tools::Tool;
@@ -524,6 +524,8 @@ fn fmt(app: &SolveApp, label: &str, kind: ValueKind, v: f64) -> String {
         }
         ValueKind::Unitless => format!("{}", v.round()),
         ValueKind::Length => crate::prefs::show_mm_bare(app, v),
+        // Sketch tools size lengths, angles and counts; anything else shows as the number it is.
+        ValueKind::Mass | ValueKind::Volume | ValueKind::Area => format!("{v}"),
     }
 }
 

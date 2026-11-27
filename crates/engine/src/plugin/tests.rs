@@ -951,6 +951,44 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// An entry asks `plugin.preview` whether it runs as a dialog's live preview (#22297): true in
+    /// a run of a preview session or with `preview: true`, false otherwise, and with no command
+    /// group. The flag stays with that run.
+    #[test]
+    fn an_entry_can_tell_that_it_runs_as_a_preview() {
+        let fixture = Fixture::new("call $box");
+        let mut manifest = manifest();
+        manifest["runtime"]["commands"] = json!(["plugin.preview"]);
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        // The entry runs `plugin.preview` and returns its reply (its result is the command's).
+        let source = component_template()
+            .replace("      call $box\n      call $box\n", "      call $box\n")
+            .replace("i32.const 9\n      i32.const 1024\n      i32.const 33", "i32.const 14\n      i32.const 1024\n      i32.const 2")
+            .replace("\"solid.box\"", "\"plugin.preview\"")
+            .replace(r#""{\22length\22:2,\22width\22:3,\22height\22:4}""#, r#""{}""#);
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let run = |s: &mut Session, preview: Option<bool>| {
+            let mut params = json!({"path":fixture.path(),"approval":approval,"entry":"make","params":{}});
+            if let Some(preview) = preview {
+                params["preview"] = json!(preview);
+            }
+            s.execute("plugin.run", &params).unwrap()["result"]["preview"].clone()
+        };
+        assert_eq!(run(&mut s, None), json!(false), "an ordinary run");
+        assert_eq!(run(&mut s, Some(true)), json!(true), "a script asks for the preview path");
+        assert!(!s.plugin_state.preview, "the flag stays with that run");
+        assert_eq!(run(&mut s, Some(false)), json!(false));
+        // A dialog's preview session (the host's dry run sets it) answers true without the param.
+        let mut preview = s.scratch();
+        preview.plugin_state.preview = true;
+        assert_eq!(run(&mut preview, None), json!(true));
+        // Outside any plugin run the command answers too.
+        assert_eq!(s.execute("plugin.preview", &json!({})).unwrap()["preview"], json!(false));
+        assert!(s.execute("plugin.preview", &json!({"x": 1})).is_err(), "it takes no parameters");
+    }
+
     /// A 0.41 plugin runs as before, alone and with a background shader added.
     #[test]
     fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {

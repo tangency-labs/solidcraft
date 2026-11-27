@@ -253,7 +253,7 @@ fn save(app: &mut SolveApp) {
         let written = if as_json { json } else { Ok(text) }
             .and_then(|body| solidcraft_engine::io::vfs::write(&path, body.as_bytes()).map_err(|e| e.to_string()));
         match written {
-            Ok(()) => app.set_status(format("import_report.saved", &[("path", &path)]), false),
+            Ok(()) => app.set_status(format("import_report.saved", &[("path", crate::display_user_path(&path))]), false),
             Err(error) => app.set_status(format("import_report.save_failed", &[("error", &error)]), true),
         }
     });
