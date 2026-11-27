@@ -1299,10 +1299,8 @@ impl Assembly<'_> {
         let mut reduced = 0;
         for fi in 0..self.faces.len() {
             let Some(surface) = self.faces.get(fi).map(|f| f.surface.clone()) else { continue };
+            let BSurface::PlacedRevolution { profile, origin, axis: rev_axis, matrix, forward } = &surface else { continue };
             let Some(ax) = axis(&surface) else { continue };
-            if ax.kind.winds_in() != 0 {
-                continue;
-            }
             let [Some(south), Some(north)] = ax.poles else { continue };
             let eval = SurfaceEval::new(&surface).map_err(|e| e.to_string())?;
             let Some((v_min, v_max)) = eval.domain().range.get(1).copied().flatten().filter(|(a, b)| a < b) else {
@@ -1357,86 +1355,83 @@ impl Assembly<'_> {
                     continue;
                 }
                 let needs_turn = wrap(u_meridian).abs() > 1e-12;
-                let mut reparam: Option<(BCurve, Vec<(u32, [u32; 2], [f64; 2])>)> = None;
-                let turned_surface = if let BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } = &surface {
-                    let mc = if needs_turn {
-                        let Ok(r) = meridian(profile, ax.origin, ax.z, u_meridian) else { continue };
-                        r
+                let mc = if needs_turn {
+                    let Ok(r) = meridian(profile, ax.origin, ax.z, u_meridian) else { continue };
+                    r
+                } else {
+                    (**profile).clone()
+                };
+                let Ok(mc_eval) = CurveEval::new(&mc) else { continue };
+                // Re-parameterize the private meridian seam edges onto the revolution's own
+                // profile so off-quarter-grid STEP curves lift to an exact linear pcurve.
+                let (mut segs, mut prev) = (Vec::new(), v_min);
+                for (idx, &(e, fwd)) in up.iter().enumerate() {
+                    let (va, vb) = (self.start((e, fwd))?, self.end((e, fwd))?);
+                    let next = if idx + 1 == up.len() {
+                        Some(v_max)
                     } else {
-                        (**profile).clone()
+                        eval.project(self.vpoint(vb)?, None, f64::INFINITY).map(|q| wrap_v(q[1])).filter(|&t| t > prev && t < v_max)
                     };
-                    if CurveEval::new(&mc).is_err() {
-                        continue;
-                    }
-                    // Re-parameterize the private meridian seam edges onto the revolution's own
-                    // profile so off-quarter-grid STEP curves lift to an exact linear pcurve.
-                    let (mut segs, mut prev) = (Vec::new(), v_min);
-                    for (idx, &(e, fwd)) in up.iter().enumerate() {
-                        let (va, vb) = (self.start((e, fwd))?, self.end((e, fwd))?);
-                        let next = if idx + 1 == up.len() {
-                            Some(v_max)
-                        } else {
-                            eval.project(self.vpoint(vb)?, None, f64::INFINITY).map(|q| wrap_v(q[1])).filter(|&t| t > prev && t < v_max)
-                        };
-                        let Some(tb) = next.filter(|&t| t > prev) else {
-                            segs.clear();
+                    let Some(tb) = next.filter(|&t| t > prev) else {
+                        segs.clear();
+                        break;
+                    };
+                    let (mut gaps, mut ends_ok) = ([0.0; 2], true);
+                    for ((slot, t), v) in gaps.iter_mut().zip([prev, tb]).zip([va, vb]) {
+                        let Some(pt) = mc_eval.point(t) else {
+                            ends_ok = false;
                             break;
                         };
-                        segs.push((e, [va, vb], [prev, tb]));
-                        prev = tb;
+                        let gap = pt.dist(self.vpoint(v)?);
+                        if !(super::VERTEX_GAP_MARGIN * gap <= super::MAX_TOLERANCE) {
+                            ends_ok = false;
+                            break;
+                        }
+                        *slot = gap;
                     }
-                    if segs.len() != up.len() {
-                        continue;
+                    if !ends_ok {
+                        segs.clear();
+                        break;
                     }
-                    reparam = Some((mc.clone(), segs));
-                    needs_turn.then(|| BSurface::PlacedRevolution {
-                        profile: Box::new(mc),
-                        origin: *origin,
-                        axis: *axis,
-                        matrix: *matrix,
-                        forward: *forward,
-                    })
-                } else if needs_turn {
-                    let Some(s) = (if matches!(surface, BSurface::Sphere { .. }) { crate::kernel::form::turned(&surface, u_meridian) } else { None })
-                    else {
-                        continue;
-                    };
-                    Some(s)
-                } else {
-                    None
-                };
-                let up_oriented: Vec<(u32, bool)> = if reparam.is_some() { up.iter().map(|&(e, _)| (e, true)).collect() } else { up };
+                    segs.push((e, [va, vb], [prev, tb], gaps));
+                    prev = tb;
+                }
+                if segs.len() != up.len() {
+                    continue;
+                }
+                let up_oriented: Vec<(u32, bool)> = up.iter().map(|&(e, _)| (e, true)).collect();
                 let mut down = up_oriented.clone();
                 super::reverse(&mut down);
                 let mut merged = down.clone();
                 merged.extend(&up_oriented);
                 let mut up_first = up_oriented;
                 up_first.extend(down);
-                let edges_changed = reparam.as_ref().is_some_and(|(mc, segs)| {
-                    segs.iter().any(|&(e, vs, iv)| {
-                        self.edges.get(e as usize).is_none_or(|edge| edge.curve != *mc || edge.interval != iv || edge.vertices != vs)
-                    })
+                let edges_changed = segs.iter().any(|&(e, vs, iv, _)| {
+                    self.edges.get(e as usize).is_none_or(|edge| edge.curve != mc || edge.interval != iv || edge.vertices != vs)
                 });
                 if !has_parallel && !needs_turn && !edges_changed && (*es == merged || *es == up_first) {
                     continue;
                 }
-                if let Some((mc, segs)) = reparam {
-                    let c = CurveEval::new(&mc).map_err(|m| m.to_string())?;
-                    for (e, vs, iv) in segs {
-                        for (t, v) in iv.into_iter().zip(vs) {
-                            let gap = c.point(t).ok_or("meridian seam point")?.dist(self.vpoint(v)?);
-                            if let Some(x) = self.vertices.get_mut(v as usize) {
-                                x.tolerance = x.tolerance.max(1.5 * gap);
-                            }
+                for (e, vs, iv, gaps) in segs {
+                    for (gap, v) in gaps.into_iter().zip(vs) {
+                        if let Some(x) = self.vertices.get_mut(v as usize) {
+                            x.tolerance = x.tolerance.max(super::VERTEX_GAP_MARGIN * gap);
                         }
-                        if let Some(edge) = self.edges.get_mut(e as usize) {
-                            (edge.curve, edge.interval, edge.vertices, edge.form) = (mc.clone(), iv, vs, None);
-                        }
+                    }
+                    if let Some(edge) = self.edges.get_mut(e as usize) {
+                        (edge.curve, edge.interval, edge.vertices, edge.form) = (mc.clone(), iv, vs, None);
                     }
                 }
                 if let Some(face) = self.faces.get_mut(fi) {
-                    if let Some(s) = turned_surface {
-                        (face.surface, face.extent) = (s, None);
+                    if needs_turn {
+                        let turned = BSurface::PlacedRevolution {
+                            profile: Box::new(mc),
+                            origin: *origin,
+                            axis: *rev_axis,
+                            matrix: *matrix,
+                            forward: *forward,
+                        };
+                        (face.surface, face.extent) = (turned, None);
                     }
                     if let Some(Bound::Edges(slot)) = face.loops.get_mut(li) {
                         *slot = merged;
