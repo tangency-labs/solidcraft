@@ -4170,6 +4170,64 @@ fn sample_plate_step_round_trip() {
     }
 }
 
+/// #22579: a bent strip with two cuts whose slanted sides cross 7e-5 mm inside the strip's
+/// outer line (edges about 7e-5 mm long), the lower cut kinked 1.85e-5 mm from the inner arc's
+/// end. The body passes SMLib's full check where it is built; read back from SolidCraft's own
+/// STEP export it must pass it too, not come back as "needs repair".
+#[test]
+fn bent_strip_with_micrometre_cuts_passes_the_check_after_a_step_round_trip() {
+    let mut s = Session::default();
+    let sketch = |s: &mut Session, origin: [f64; 3], x: [f64; 3], y: [f64; 3]| {
+        run(s, "sketch.create", json!({"plane": {"origin": origin, "x_dir": x, "y_dir": y}}));
+    };
+    sketch(&mut s, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "sketch.line", json!({"points": [[3.997905609150866, 3.599996344594674], [3.9987782701438714, 3.6999989338393013]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [3.956046636329481, 2.3013812901002098], "end": [3.9987782701438714, 3.6999989338393013], "through": [4.699673513585699, 2.9786230407531242]}),
+    );
+    run(&mut s, "sketch.line", json!({"points": [[3.956046636329481, 2.3013812901002098], [3.9623256882824123, 2.401183962943037]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [3.9623256882824123, 2.401183962943037], "end": [3.997905609150866, 3.599996344594674], "through": [4.59973591607163, 2.9822002535489336]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 7.6, "operation": "new", "direction": "symmetric", "name": "Bend"}));
+    sketch(&mut s, [0.0, 0.0, 3.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[1.8748913900000002, -1.5999999999999996], [5.0, -1.5999999999999996], [5.0, 5.0], [1.06309139, 5.0], [1.8748913900000002, -1.5999999999999996]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 1.0, "operation": "cut", "direction": "positive", "name": "CutAbove"}));
+    sketch(&mut s, [0.0, 0.0, 2.2], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[1.7, -0.5], [4.0, -0.5], [4.0, 5.0], [1.139459205, 5.0], [1.0030074657591372, 3.962344188282412], [0.7396074657591372, 1.9623441882824122], [1.7, -0.5]]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 0.8, "operation": "cut", "direction": "positive", "name": "CutBelow"}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1);
+    let source = &st.bodies[0].body;
+    assert_eq!(solidcraft_kernel::failing_check(source).unwrap(), None, "the body as built");
+    let p = std::env::temp_dir().join(format!("solidcraft-22579-{}.step", std::process::id()));
+    run(&mut s, "file.export", json!({"path": p.to_string_lossy()}));
+    let text = std::fs::read_to_string(&p).unwrap();
+    let _ = std::fs::remove_file(&p);
+    let imp = solidcraft_kernel::step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let back = &imp.bodies[0].body;
+    assert_eq!(solidcraft_kernel::failing_check(back).unwrap(), None, "read back: {:?}", imp.warnings);
+    let (ma, mb) = (solidcraft_kernel::measure(source).unwrap(), solidcraft_kernel::measure(back).unwrap());
+    assert!(rel(mb.volume, ma.volume) < 1e-6, "{} vs {}", mb.volume, ma.volume);
+    assert_eq!(back.face_count(), source.face_count());
+}
+
 /// Bodies export in the colour they are shown in: a material's look, an appearance over it,
 /// none for the default; and colours read from a STEP file survive the next export.
 #[test]
