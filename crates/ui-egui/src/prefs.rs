@@ -7653,7 +7653,7 @@ mod tests {
             ("dimension_text_scale", json!(1.5), PAGE_SKETCH),
             ("dimension_colour", json!([18, 52, 86]), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
-            ("select_hidden_edges", json!(true), PAGE_SKETCH),
+            ("select_hidden_edges", json!(false), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
@@ -12922,22 +12922,22 @@ mod tests {
     #[test]
     fn hidden_edge_preference_defaults_persists_and_uses_real_checkbox() {
         let mut h = crate::scenario::Harness::new();
-        assert!(!Prefs::default().select_hidden_edges);
-        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().select_hidden_edges);
+        assert!(Prefs::default().select_hidden_edges);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().select_hidden_edges);
         h.call("ui.prefs", json!({"open":"Sketch"}));
         super::reveal_preference(&mut h, "prefs:select_hidden_edges");
         h.step(&json!({"click":{"handle":"prefs:select_hidden_edges"}})).unwrap();
-        assert!(h.app.preferences.select_hidden_edges);
-        h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.select_hidden_edges);
-        h.call("ui.prefs", json!({"open":"Sketch","select_hidden_edges":true,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"open":"Sketch","select_hidden_edges":false,"button":"apply"}));
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.select_hidden_edges);
+        assert!(!restored.preferences.select_hidden_edges);
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.select_hidden_edges);
-        h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(h.app.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.select_hidden_edges);
     }
 
     #[test]

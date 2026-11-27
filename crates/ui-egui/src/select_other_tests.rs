@@ -1006,6 +1006,7 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
     h.app.ui.visual_style = 3;
+    h.app.preferences.select_hidden_edges = false;
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
     assert_eq!(h.call("ui.prefs", json!({"select_hidden_edges":true}))["ok"], true);
     assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target));
@@ -1159,6 +1160,52 @@ fn hidden_edge_mode_reaches_the_far_side_of_the_same_body() {
         hidden += 1;
     }
     assert!(hidden >= 3, "the three edges meeting at the far corner: {hidden}");
+}
+
+#[test]
+fn ordinary_hover_and_click_reach_the_back_edge_of_a_box_by_default() {
+    use crate::viewport::{Hit, build_highlight, projection};
+    for (command, opt_out) in [(None, false), (Some("solid.fillet"), true), (Some("solid.fillet"), false), (Some("solid.chamfer"), false)] {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        if opt_out {
+            h.app.preferences.select_hidden_edges = false;
+        }
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+        h.app.cam.yaw = 0.6;
+        h.app.cam.pitch = 0.5;
+        h.app.ui.perspective = false;
+        h.app.fit_view();
+        if let Some(cmd) = command {
+            h.app.start(cmd);
+        }
+        h.settle();
+        // The eye looks towards +X and +Y. The vertical edge at their maximum is behind the box.
+        let mid = solidcore_record::Vec3::new(40.0, 30.0, 10.0);
+        let mesh = h.app.session.world_state().unwrap().body("Box").unwrap().mesh();
+        let i = mesh.edges.iter().position(|e| e.len() == 2 && ((e[0] + e[1]) * 0.5).dist(mid) < 1e-6).unwrap();
+        let pos = projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(mid).unwrap() + egui::vec2(2.0, 0.0);
+        h.step(&json!({"move":[pos.x,pos.y]})).unwrap();
+        if opt_out {
+            assert!(matches!(&h.app.viewport.hover, Some(Hit::Face { body, .. }) if body == "Box"), "the face in front remains pickable");
+            #[cfg(not(target_arch = "wasm32"))]
+            save_hidden_edge_evidence(&h, "back-edge-off");
+            continue;
+        }
+        assert!(
+            matches!(&h.app.viewport.hover, Some(Hit::Edge {body,index,..}) if body == "Box" && *index == i),
+            "{command:?}: {:?}",
+            h.app.viewport.hover
+        );
+        assert!(!build_highlight(&h.app).merged().hidden.is_empty(), "{command:?}: the obscured edge must be drawn on hover");
+        #[cfg(not(target_arch = "wasm32"))]
+        if command == Some("solid.fillet") {
+            save_hidden_edge_evidence(&h, "back-edge-hover");
+        }
+        h.step(&json!({"click":[pos.x,pos.y]})).unwrap();
+        let selected = h.app.dialog.as_ref().map_or(&h.app.session.selection, |d| &d.inputs[0].items);
+        assert!(matches!(selected.as_slice(), [Sel::Edge {body,index,..}] if body == "Box" && *index == i), "{command:?}: {selected:?}");
+    }
 }
 
 #[test]

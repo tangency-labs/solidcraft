@@ -89,9 +89,9 @@ macro_rules! sketch_preferences {
             ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
             /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.
             select_3d_curve_points: bool = false, PAGE_SKETCH;
-            /// Allow ordinary edge picks through faces in Shaded with hidden edges.
+            /// Hover and select edges of shown bodies through faces in any visual style.
             /// Off preserves the visible-only picking used in v0.30.1.
-            select_hidden_edges: bool = false, PAGE_SKETCH;
+            select_hidden_edges: bool = true, PAGE_SKETCH;
             /// Include hidden geometry and a small pointer neighbourhood in Select Other.
             select_other_hidden: bool = true, PAGE_SKETCH;
             /// When true: Shift+click adds without removing; Primary toggles.
