@@ -995,8 +995,11 @@ fn a_thread_flank_moves_beside_its_root_and_crest() {
         let body = match offset_faces(&thread, &[pick], TOL, d) {
             Ok(body) => body,
             Err(e) => {
+                // only the stages after the reach may refuse (a pick that misses, a cancel
+                // or the reach itself would not): the offset's loops or its vanishing edges
                 let why = e.to_string();
-                assert!(!why.contains("no certified bound"), "d {d}: {why}");
+                let later = ["cannot be bridged", "closes to nothing", "could not be split"];
+                assert!(later.iter().any(|stage| why.contains(stage)), "d {d}: {why}");
                 eprintln!("d {d}: refused after the reach: {why}");
                 continue;
             }

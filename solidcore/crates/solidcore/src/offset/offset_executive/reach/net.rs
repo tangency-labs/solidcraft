@@ -240,9 +240,16 @@ impl Net {
             if !d.is_finite() || matches!(base.kind(), SurfaceKind::OffsetSurface(_)) {
                 return Ok(None);
             }
-            return Ok(Self::of_bare(k, base, tolerance, true)?.map(|n| Self {
+            let Some(net) = Self::of_bare(k, base, tolerance, true)? else {
+                return Ok(None);
+            };
+            // the offset is a surface only where the base's normal runs on across its knots
+            if !offset_is_continuous(&net.cn, d, tolerance) {
+                return Ok(None);
+            }
+            return Ok(Some(Self {
                 offset: Some(d),
-                ..n
+                ..net
             }));
         }
         Self::of_bare(k, surface, tolerance, false)
@@ -1382,6 +1389,101 @@ impl Net {
     }
 }
 
+/// Whether the offset of `cn` by `distance` has no jump across the base's inner knots of
+/// multiplicity `p`, where the base is only C0: there its normal, which the offset moves
+/// along, may turn, and the offset then jumps by `distance` times the turn, which the
+/// certificates' mean-value enclosures do not hold across. The base's tangent directions
+/// either side of such a knot line, at every control column, must agree within an angle
+/// whose offset moves a point by at most `tolerance` (and at most 1e-3 radian): a G1 join,
+/// such as one circle's arcs make, passes, a crease does not. A knot of lower multiplicity
+/// is C1 and its normal runs on.
+#[allow(clippy::float_cmp)] // a distance of exactly nought is no offset
+fn offset_is_continuous(cn: &Nurbs, distance: f64, tolerance: f64) -> bool {
+    if distance == 0.0 {
+        return true;
+    }
+    let limit = (tolerance / distance.abs()).min(1e-3);
+    // the homogeneous control point `(i, j)` (u-major)
+    let point = |i: usize, j: usize| -> Option<[f64; 4]> {
+        let at = i.checked_mul(cn.nv)?.checked_add(j)?.checked_mul(4)?;
+        match cn.pw.get(at..at.checked_add(4)?)? {
+            [x, y, z, w] => Some([*x, *y, *z, *w]),
+            _ => None,
+        }
+    };
+    joins_at_c0_knots(&cn.u, cn.p, cn.nv, &point, limit)
+        && joins_at_c0_knots(&cn.v, cn.q, cn.nu, &|k, c| point(c, k), limit)
+}
+
+/// [`offset_is_continuous`] along one direction: `at(k, c)` is the control point `k` along
+/// the direction in the column `c` of `across`. At a knot of multiplicity `p` the surface
+/// passes through control point `k` (the one before the knot's first position), and its
+/// one-sided derivative of the weighted points either side is along the step to the
+/// neighbour (the surface's, `D_xyz − S D_w` for the step `D` of the homogeneous points and
+/// the surface's point `S`, up to a positive factor).
+#[allow(clippy::float_cmp)] // knots repeated as stored
+fn joins_at_c0_knots(
+    knots: &[f64],
+    p: usize,
+    across: usize,
+    at: &dyn Fn(usize, usize) -> Option<[f64; 4]>,
+    limit: f64,
+) -> bool {
+    let end = knots.len().saturating_sub(p.saturating_add(1));
+    let mut first = p.saturating_add(1);
+    while first < end {
+        let Some(&knot) = knots.get(first) else {
+            return false;
+        };
+        let mut run = 1_usize;
+        while knots.get(first.saturating_add(run)) == Some(&knot) {
+            run = run.saturating_add(1);
+        }
+        if run == p {
+            let Some(k) = first.checked_sub(1) else {
+                return false;
+            };
+            for c in 0..across {
+                let (Some(before), Some(mid), Some(after)) = (
+                    k.checked_sub(1).and_then(|b| at(b, c)),
+                    at(k, c),
+                    at(k.saturating_add(1), c),
+                ) else {
+                    return false;
+                };
+                let step = |from: [f64; 4], to: [f64; 4]| -> Option<[f64; 3]> {
+                    if mid[3] <= 0.0 {
+                        return None;
+                    }
+                    let s = [mid[0] / mid[3], mid[1] / mid[3], mid[2] / mid[3]];
+                    let w = to[3] - from[3];
+                    Some([
+                        (to[0] - from[0]) - s[0] * w,
+                        (to[1] - from[1]) - s[1] * w,
+                        (to[2] - from[2]) - s[2] * w,
+                    ])
+                };
+                let (Some(a), Some(b)) = (step(before, mid), step(mid, after)) else {
+                    return false;
+                };
+                let len = |v: [f64; 3]| sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                let cross = [
+                    a[1] * b[2] - a[2] * b[1],
+                    a[2] * b[0] - a[0] * b[2],
+                    a[0] * b[1] - a[1] * b[0],
+                ];
+                let along = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+                let (la, lb) = (len(a), len(b));
+                if !(la > 0.0 && lb > 0.0 && along > 0.0 && len(cross) <= limit * la * lb) {
+                    return false;
+                }
+            }
+        }
+        first = first.saturating_add(run);
+    }
+    true
+}
+
 /// Whether the full knot vector `knots` of degree `p` is clamped at both ends (its first
 /// and last knots each exactly `p + 1` times: a longer run ends the surface on its last
 /// control row alone, at the end knot, where a net clamped `p + 1` times ends on the row
@@ -1670,9 +1772,12 @@ pub(super) fn plane_quadric_and_net_meet(
     let Some([u, v]) = krawczyk(root, c, &value, &jacobian)? else {
         return Ok(None);
     };
-    Ok(net
-        .jet_as_built(u, v, p)?
-        .map(|jet| length_bound(sub(jet.p, point(p)))))
+    let Some(jet) = net.jet_as_built(u, v, p)? else {
+        return Ok(None);
+    };
+    // the quadric's own nappe, as the meetings of two quadrics and a net: a cone's squared
+    // equation holds on both
+    Ok(super::quadric::on_nappe(q, jet.p).then(|| length_bound(sub(jet.p, point(p)))))
 }
 
 /// Where the quadrics `a` and `b` and the net meet, near the vertex `p`: an upper bound on
@@ -1905,6 +2010,36 @@ pub(super) fn section_quadric_meets(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bilinear net over three rows in u and two in v whose middle row is at height
+    /// `middle`: a plane at 0, a crease in u at its knot otherwise (degree 1: the knot of
+    /// multiplicity 1 is C0).
+    fn creased(middle: f64) -> Nurbs {
+        let mut pw = Vec::new();
+        for (x, z) in [(0.0, 0.0), (1.0, middle), (2.0, 0.0)] {
+            for y in [0.0, 1.0] {
+                pw.extend([x, y, z, 1.0]);
+            }
+        }
+        Nurbs {
+            p: 1,
+            q: 1,
+            nu: 3,
+            nv: 2,
+            u: vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            v: vec![0.0, 0.0, 1.0, 1.0],
+            pw,
+        }
+    }
+
+    /// An offset of a base whose normal turns across a C0 knot jumps there, and is not
+    /// taken as a net; a flat base, or a distance of nought, is.
+    #[test]
+    fn an_offset_is_continuous_only_across_joins_of_the_base_that_keep_its_normal() {
+        assert!(offset_is_continuous(&creased(0.0), 0.5, 1e-6));
+        assert!(!offset_is_continuous(&creased(0.75), 0.5, 1e-6));
+        assert!(offset_is_continuous(&creased(0.75), 0.0, 1e-6));
+    }
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::srf_basic::Surface as Patch;
