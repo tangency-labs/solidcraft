@@ -1,5 +1,5 @@
 //! Whether a device was lost, and GPU errors caught instead of reaching the device's handler.
-//! Both lived in SolidCraft's patched egui-wgpu until it went back to stock.
+//! Both used to live in a patched egui-wgpu; stock egui-wgpu has neither.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
