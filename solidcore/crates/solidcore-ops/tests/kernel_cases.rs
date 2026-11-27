@@ -784,8 +784,9 @@ fn call_with_copy(
                 in_place,
             ))
         }
-        // SolidCraft's boolean of its operands' tagged copies: the tags are history, which
-        // replay does not carry (`tagged` passes its body on), so it is the boolean
+        // `boolean_tagged` is SolidCraft's boolean of its operands tagged 0 and 1: the same
+        // result as `tagged` on each and then `boolean` (smlib's `Brep::boolean_tagged`), and
+        // tagging changes no geometry.
         "boolean" | "boolean_tagged" => {
             let operation = match p["op"].as_str() {
                 Some("union") => BooleanOp::Union,

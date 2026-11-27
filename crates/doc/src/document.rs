@@ -1061,6 +1061,10 @@ pub enum FeatureKind {
         /// Missing fields retain the angular placement of existing designs.
         #[serde(default)]
         convention: RevolveConvention,
+        /// Join pieces of a circular profile before turning it. Older designs retain their
+        /// separate faces and edges so their stored references still resolve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join_profile_arcs: bool,
         /// To Object: turn until the face, vertex or point here.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -5162,6 +5166,9 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Weld graphics, independent of timeline features and bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::weld::deserialize_records")]
+    pub welds: Vec<crate::weld::WeldRecord>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -5452,6 +5459,7 @@ impl Document {
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
             .chain(self.notes.iter().map(|n| n.id))
+            .chain(self.welds.iter().map(|w| w.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -5516,6 +5524,7 @@ impl Document {
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
+            welds: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
             plugin_data: Default::default(),
@@ -5809,10 +5818,10 @@ impl Document {
     }
 
     /// The copy-lineage source(s) of `body` from the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`).
     ///
-    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
-    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// A multi-seed `Pattern` with `join: true` (or `Mirror` with `combine: true`) splits
+    /// disconnected `lumps()` without a fixed per-seed slot layout in `body_names`; unmerged
     /// lumps resolve unanimously when every seed carries the same material.
     fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
         if body.is_empty() {
@@ -5841,8 +5850,14 @@ impl Document {
                         None
                     }
                 }
-                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
-                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                FeatureKind::Mirror { bodies, combine, .. } if !bodies.is_empty() => {
+                    if !*combine {
+                        bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                    } else if bodies.len() == 1 {
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
+                    }
                 }
                 FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
                     bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
@@ -5855,9 +5870,9 @@ impl Document {
     }
 
     /// The seed body `body` was copied from by the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
-    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
-    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`), when that lineage is unambiguous
+    /// from pinned `body_names`. Multi-seed joined patterns and combined mirrors emit unmerged
+    /// lumps without a single per-slot seed.
     pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
         match self.copy_material_sources(body) {
             CopyMaterialSources::Single(seed) => Some(seed),
