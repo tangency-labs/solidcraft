@@ -2904,7 +2904,7 @@ fn row_speed(row: &[[Ivl; 4]], breaks: &[f64], p: usize, [a, b]: [f64; 2]) -> Op
             return None;
         }
         let (mut w_max, mut w_min) = (0.0_f64, f64::INFINITY);
-        let mut points = Vec::with_capacity(seg.len());
+        let mut points = Vec::new();
         for &[x, y, z, w] in seg {
             if !w.is_positive() {
                 return None;
