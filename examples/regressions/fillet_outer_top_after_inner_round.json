@@ -1,10 +1,5 @@
 {
-  "about": {
-    "design": "Untitled",
-    "format": "solidcraft/58",
-    "replay": "solidcraft-cli eval script.json (timeline.add steps need a build that reads this design format)",
-    "version": "0.43.0"
-  },
+  "description": "Reproduction for #17356: a seven-lobed part 100 mm tall with a 7 degree taper on a 2 mm base, hollowed by a cut from its top, with its inner top edges rounded. The 2 mm fillet of its outer top edges was refused as cutting the part in pieces: the ray that classifies a point beside the new round crosses the inner round's face twice within one leaf of its search tree, and only the far crossing was found.",
   "commands": [
     {
       "command": "timeline.add",
@@ -1879,6 +1874,50 @@
           "suppressed": false,
           "type": "fillet"
         }
+      }
+    },
+    {
+      "command": "solid.fillet",
+      "params": {
+        "body": "Body1",
+        "edges": [
+          [
+            -68.17263939489757,
+            -1.0123466433191295,
+            100.0
+          ],
+          [
+            -43.29642990542931,
+            52.668327913815766,
+            100.0
+          ],
+          [
+            14.18287438904424,
+            66.68867731375074,
+            100.0
+          ],
+          [
+            60.98218499065432,
+            30.491092495327145,
+            100.0
+          ],
+          [
+            61.86066648442713,
+            -28.66690687701505,
+            100.0
+          ],
+          [
+            16.156804387795052,
+            -66.23814067263291,
+            100.0
+          ],
+          [
+            -41.71346095159383,
+            -53.93070352992657,
+            100.0
+          ]
+        ],
+        "radius": "2 mm"
       }
     }
   ]

@@ -1,4 +1,4 @@
-#### WR-17356. `SmLSIGlobalSolver::LocalSolve` finds one of two separated roots in a leaf
+#### WR-799. `SmLSIGlobalSolver::LocalSolve` finds one of two separated roots in a leaf
 - **Severity:** Wrong result
 - **Area:** Intersection
 - **Location:** `source/SMLib/src/SmSurface.cpp:18075` (`SmLSIGlobalSolver::LocalSolve`) at v1.0.1 (`3fd5b95`), as the unit's fixture cites it (`fixtures/surface.surface_p10/cases.json`, `upstream_ref`). In Rust: `crates/solidcore/src/surface/surface/p10.rs`, `LsiGlobalSolver::local_solve_branch`.
