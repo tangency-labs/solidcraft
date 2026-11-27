@@ -124,8 +124,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
         "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
-        // A wall grid's `face` is kept in the active component's frame, as its `anchor` is (#23010).
-        "solid.cell_grid" => &[("anchor", Make), ("face", Make), ("targets", Body), ("participants", Body)],
+        // A wall grid's `face` is a pick on the wall's body, mapped into that body's frame as
+        // `solid.dome`'s is (#23010).
+        "solid.cell_grid" => &[("anchor", Make), ("face", Pick), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],

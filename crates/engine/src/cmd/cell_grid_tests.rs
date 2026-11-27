@@ -822,6 +822,7 @@ fn square_cells_through_a_tubes_outside_wall_remove_exactly_their_sectors() {
     // sector of s / 30 rad, s high, through the wall: s / 30 / 2 (30² - 27²) s = 2.85 s².
     // V = 21488.5 - 54 x 2.85 x 71.7744 = 10442.4.
     let mut s = tube();
+    let faces_before: usize = s.model.state().bodies.iter().map(|b| b.body.face_count()).sum();
     wall(&mut s, json!({})).unwrap();
     let size = pitch_18(30.0) - 2.0;
     let expect = TUBE_V0 - 54.0 * 2.85 * size * size;
@@ -831,9 +832,10 @@ fn square_cells_through_a_tubes_outside_wall_remove_exactly_their_sectors() {
     let [body] = st.bodies.as_slice() else { panic!("one body: {}", st.bodies.len()) };
     assert_eq!(body.body.shell_count(), 1);
     assert!(body.body.validity().is_empty(), "{:?}", body.body.validity());
-    // The tube's 4 faces (outside, bore, two ends) and 4 cut faces per cell: its two sides and
-    // its top and bottom. The outside and the bore stay one face each.
-    assert_eq!(body.body.face_count(), 4 + 4 * 54);
+    // The tube's faces (4: outside, bore, two ends, unless the kernel splits a cylinder at its
+    // seam, so counted before) and 4 cut faces per cell: its two sides and its top and bottom.
+    // The outside and the bore are not split by the holes.
+    assert_eq!(body.body.face_count(), faces_before + 4 * 54);
     // Angle 0 is the record's own (+X for a cylinder made round Z): the seam sits mid-web, and
     // the first cell's centre is p/2 round, at 10 deg. Both at R = 28.5, inside the wall.
     let at = |deg: f64| {
