@@ -6754,6 +6754,37 @@ fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
     }
 }
 
+/// tangency-labs/solidcraft#21940: a round on the whole rim of a sphere centred on a plate's face
+/// square to y, the sphere first turned about x, which lies in the face. The turn moves only the
+/// sphere's poles and seam: the rim is one closed edge with a vertex where the seam leaves it,
+/// and the seam runs into the sphere's face up to a pole `r sin(turn)` from the rim. Between
+/// about 1e-5 rad and the turn at which that pole passes the round's contact line on the sphere
+/// (`asin(c / r)`, c the contact's distance from the face: 0.2375 rad here), the seam ends inside
+/// the band the round takes off, never meeting the rail, and the round failed ("Fillet Corner
+/// Error: Unable to Compute Geometry"). Every round now builds a valid solid and adds (nub) or
+/// takes off (socket) the ring's closed form, whatever the turn. 1e-4 and 2e-4 rad are left out:
+/// the join itself is refused there, a separate problem.
+#[test]
+fn a_round_on_a_turned_spheres_rim_builds_whatever_the_turn() {
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let (r, f) = (0.975, 0.3);
+    for radians in [1e-5_f64, 3e-5, 5e-4, 1e-3, 1e-2, 0.1, 0.2, 0.3] {
+        for op in [BooleanOp::Union, BooleanOp::Subtract] {
+            let case = format!("sphere turned {radians} rad about x, {op:?}");
+            round_sphere_rim(
+                &case,
+                r,
+                f,
+                1,
+                1.0,
+                &[turn_about(0, radians.to_degrees())],
+                op,
+            );
+        }
+    }
+}
+
 /// #18826's socket: a sphere of radius 1 cut with its centre on a block's face, its rim
 /// rounded by 0.1, 0.2 and 0.3, and the same as a nub; then the reported part, with a
 /// vertical channel (radius 0.9, its axis 0.35 outside the face) cut across the socket's top,
