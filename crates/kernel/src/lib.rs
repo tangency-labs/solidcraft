@@ -273,6 +273,7 @@ pub use bridge::curve_chain_of_edges;
 pub use bridge::frames;
 pub use bridge::frames_across;
 pub use bridge::sample_grid;
+pub use bridge::tangent_face_chain_of_faces;
 pub use build::PathSeg;
 pub use build::canonical_revolve_axis;
 pub use build::extrude_tapered;

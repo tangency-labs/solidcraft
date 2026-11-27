@@ -799,6 +799,94 @@ fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
     assert_eq!(volume(&mut s), v);
 }
 
+/// The point an Emboss feature saved for its face.
+fn saved_emboss_face(s: &Session, name: &str) -> solidcore_record::Vec3 {
+    match s.doc.find_feature(name).map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. }) => *face.at,
+        other => panic!("{name} saved no face: {other:?}"),
+    }
+}
+
+#[test]
+fn emboss_on_a_face_picked_elsewhere_on_a_tangent_ring_takes_the_face_under_the_text() {
+    // #22845: a slot-shaped side (two half cylinders joined by two flat sides, all tangent) is one
+    // smooth ring. Text on the back half cylinder, with the face picked on the back wall, on a
+    // flat side or on the front wall across the part, embosses the same: onto the ring's face
+    // under the text.
+    let mut vols = Vec::new();
+    for face in [[0.0, 25.0, 6.0], [10.0, 0.0, 6.0], [0.0, -25.0, 6.0]] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 12, "center": [0, 0, 6], "body_name": "b"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, -15, 0], "operation": "join", "targets": ["b"]}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, 15, 0], "operation": "join", "targets": ["b"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 25, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Back"}));
+        run(&mut s, "sketch.text", json!({"text": "CD", "at": [-4, 4], "height": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let done = s.execute("solid.emboss", &json!({"sketch": "Back", "depth": "0.2 mm", "targets": ["b"], "face": face, "name": "E"}));
+        assert!(done.is_ok(), "{face:?}: {:?}", done.err().map(|e| e.to_string()));
+        assert_eq!(measure(&mut s)["body_count"], 1, "{face:?}");
+        // The saved face is the back half cylinder under the text (axis x = 0, y = 15, radius
+        // 10), not the front one, which has the same radius and would give the same volume.
+        let at = saved_emboss_face(&s, "E");
+        assert!(((at.x * at.x + (at.y - 15.0).powi(2)).sqrt() - 10.0).abs() < 1e-9 && at.y > 15.0 + 1e-6, "{face:?}: saved {at:?}");
+        let state = s.model.state();
+        let body = &state.body("b").unwrap().body;
+        assert!(body.validity().is_empty(), "{face:?}: {:?}", body.validity());
+        drop(state);
+        let after = volume(&mut s);
+        assert!(after > before, "{face:?}: {before} -> {after}");
+        vols.push(after);
+    }
+    for v in &vols[1..] {
+        assert!(rel(*v, vols[0]) < 1e-9, "{vols:?}");
+    }
+    // The top meets the ring at sharp edges: it is off the ring, so a pick there is not moved
+    // onto the wall, and is refused as before.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 12, "center": [0, 0, 6], "body_name": "b"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, -15, 0], "operation": "join", "targets": ["b"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, 15, 0], "operation": "join", "targets": ["b"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 25, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Back"}));
+    run(&mut s, "sketch.text", json!({"text": "CD", "at": [-4, 4], "height": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let refused = s.execute("solid.emboss", &json!({"sketch": "Back", "depth": "0.2 mm", "targets": ["b"], "face": [0, 0, 12]}));
+    assert!(refused.is_err(), "a pick off the ring is refused");
+}
+
+#[test]
+fn emboss_on_a_round_of_a_tangent_ring_takes_the_flat_side_the_text_lies_on() {
+    // #22845: text drawn on a flat side of a slot-shaped part, with the face picked on either half
+    // cylinder of its ring, is raised from the flat side, as with the flat side picked.
+    let mut vols = Vec::new();
+    for face in [[10.0, 0.0, 6.0], [0.0, 25.0, 6.0], [0.0, -25.0, 6.0]] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 12, "center": [0, 0, 6], "body_name": "b"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, -15, 0], "operation": "join", "targets": ["b"]}));
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 12, "base": [0, 15, 0], "operation": "join", "targets": ["b"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [10, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Side"}));
+        run(&mut s, "sketch.text", json!({"text": "CD", "at": [-4, 4], "height": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let done = s.execute("solid.emboss", &json!({"sketch": "Side", "depth": "0.2 mm", "targets": ["b"], "face": face, "name": "E"}));
+        assert!(done.is_ok(), "{face:?}: {:?}", done.err().map(|e| e.to_string()));
+        assert_eq!(measure(&mut s)["body_count"], 1, "{face:?}");
+        // The saved face is the flat side at x = 10 the text lies on, not either half cylinder.
+        let at = saved_emboss_face(&s, "E");
+        assert!((at.x - 10.0).abs() < 1e-9 && at.y.abs() <= 15.0, "{face:?}: saved {at:?}");
+        let state = s.model.state();
+        let body = &state.body("b").unwrap().body;
+        assert!(body.validity().is_empty(), "{face:?}: {:?}", body.validity());
+        drop(state);
+        let after = volume(&mut s);
+        assert!(after > before, "{face:?}: {before} -> {after}");
+        vols.push(after);
+    }
+    for v in &vols[1..] {
+        assert!(rel(*v, vols[0]) < 1e-9, "{vols:?}");
+    }
+}
+
 #[test]
 fn emboss_with_no_face_raises_a_profile_on_a_flat_top_with_rounded_edges() {
     // #21195: the rounded top edges are cylinders touching the sketch's plane. A profile within
@@ -838,20 +926,35 @@ fn emboss_with_no_face_raises_a_profile_on_a_pocket_floor_with_rounded_inside_co
 }
 
 #[test]
-fn emboss_on_a_picked_round_with_the_profile_on_the_flat_top_beside_it_is_refused() {
-    // #21195: only an emboss with no face picked prefers the flat face the profile lies on. With
-    // a round picked as the target, it is refused as before; a projection onto the round could
-    // not check the profile against that round's corners and left a stray sliver.
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Plate"}));
-    run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 10], [0, -20, 10], [30, 0, 10], [-30, 0, 10]], "radius": 2}));
-    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -15], "p1": [10, 15]}));
-    run(&mut s, "sketch.finish", json!({}));
-    let saved = s.doc.to_json();
+fn emboss_on_a_picked_round_with_the_profile_on_the_flat_top_beside_it_takes_the_top() {
+    // #21195 refused a round picked as the target with the profile on the flat top beside it: a
+    // projection onto the round could not check the profile against that round's corners and
+    // left a stray sliver. The round and the top are one tangent ring, so the pick stands for the
+    // ring and the profile is raised from the top it lies on, as with the top picked (#22845);
+    // nothing is projected onto the round.
     let round = [0.0, 18.0 + std::f64::consts::FRAC_1_SQRT_2 * 2.0, 8.0 + std::f64::consts::FRAC_1_SQRT_2 * 2.0];
-    assert!(s.execute("solid.emboss", &json!({"sketch": "Label", "depth": 1, "face": round})).is_err());
-    assert_eq!(s.doc.to_json(), saved);
+    let mut vols = Vec::new();
+    for face in [[0.0, 0.0, 10.0], round] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Plate"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 10], [0, -20, 10], [30, 0, 10], [-30, 0, 10]], "radius": 2}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -15], "p1": [10, 15]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let done = s.execute("solid.emboss", &json!({"sketch": "Label", "depth": 1, "face": face}));
+        assert!(done.is_ok(), "{face:?}: {:?}", done.err().map(|e| e.to_string()));
+        assert_eq!(measure(&mut s)["body_count"], 1, "{face:?}");
+        let state = s.model.state();
+        let body = &state.body("Plate").unwrap().body;
+        assert!(body.validity().is_empty(), "{face:?}: {:?}", body.validity());
+        drop(state);
+        let after = volume(&mut s);
+        // The 20 x 30 mm profile raised 1 mm, and no sliver beside it.
+        assert!(rel(after - before, 600.0) < 1e-6, "{face:?}: {before} -> {after}");
+        vols.push(after);
+    }
+    assert!(rel(vols[1], vols[0]) < 1e-9, "{vols:?}");
 }
 
 #[test]
