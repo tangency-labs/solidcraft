@@ -1,0 +1,5097 @@
+{
+  "format": "vectorcraft",
+  "version": 4,
+  "generator": "VectorCraft 0.24.1",
+  "pdfCompatible": true,
+  "pdf": {
+    "mime": "application/pdf",
+    "blob": [
+      0,
+      20364
+    ]
+  },
+  "document": {
+    "version": 3,
+    "title": "develop.contour--long-arc-cut-short-at-its-corners",
+    "units": "Points",
+    "rulers": "artboard",
+    "color_mode": "Rgb",
+    "artboards": [
+      {
+        "id": 1,
+        "name": "Artboard 1",
+        "rect": {
+          "x0": 0.0,
+          "y0": 0.0,
+          "x1": 1000.0,
+          "y1": 580.0
+        },
+        "show_center_mark": false,
+        "show_cross_hairs": false
+      }
+    ],
+    "layers": [
+      {
+        "id": 1,
+        "name": "Layer 1",
+        "kind": {
+          "type": "layer",
+          "color": {
+            "Preset": 0
+          },
+          "template": false,
+          "printable": true,
+          "children": [
+            {
+              "id": 2,
+              "name": "background",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 1.0,
+                        "g": 1.0,
+                        "b": 1.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            0.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            1000.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            1000.0,
+                            580.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            0.0,
+                            580.0
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "rectangle",
+                  "w": 1000.0,
+                  "h": 580.0,
+                  "radii": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  500.0,
+                  42.0
+                ],
+                "runs": [
+                  {
+                    "text": "A long arc cut short at both its corners",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 20.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  500.0,
+                  64.0
+                ],
+                "runs": [
+                  {
+                    "text": "Circle of radius 10 cut by the chord y = ‚àí6, the closed profile moved 7.875 inside; angles in radians",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 5,
+              "name": "drawn arc L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            394.0,
+                            408.0
+                          ],
+                          "out": [
+                            449.6949025514871,
+                            333.74012993135057
+                          ]
+                        },
+                        {
+                          "p": [
+                            371.11893510064635,
+                            166.84518949701658
+                          ],
+                          "in": [
+                            439.7860109823629,
+                            229.3054421597053
+                          ],
+                          "out": [
+                            302.45185921892977,
+                            104.38493683432785
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            128.88106489935376,
+                            166.84518949701655
+                          ],
+                          "in": [
+                            197.54814078107032,
+                            104.38493683432785
+                          ],
+                          "out": [
+                            60.213989017637175,
+                            229.30544215970525
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            105.99999999999997,
+                            407.99999999999994
+                          ],
+                          "in": [
+                            50.305097448512925,
+                            333.7401299313505
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 6,
+              "name": "drawn chord L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            106.0,
+                            408.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            394.0,
+                            408.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 106.0,
+                    "y": 408.0
+                  },
+                  "b": {
+                    "x": 394.0,
+                    "y": 408.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 7,
+              "name": "moved circle L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            211.75,
+                            300.0
+                          ],
+                          "in": [
+                            211.75,
+                            321.12489168102786
+                          ],
+                          "out": [
+                            211.75,
+                            278.87510831897214
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            261.75
+                          ],
+                          "in": [
+                            228.87510831897214,
+                            261.75
+                          ],
+                          "out": [
+                            271.12489168102786,
+                            261.75
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            288.25,
+                            300.0
+                          ],
+                          "in": [
+                            288.25,
+                            278.87510831897214
+                          ],
+                          "out": [
+                            288.25,
+                            321.12489168102786
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            338.25
+                          ],
+                          "in": [
+                            271.12489168102786,
+                            338.25
+                          ],
+                          "out": [
+                            228.87510831897214,
+                            338.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 76.5,
+                  "h": 76.5,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    211.75,
+                    261.75
+                  ]
+                }
+              }
+            },
+            {
+              "id": 8,
+              "name": "moved chord L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            124.0,
+                            266.25
+                          ]
+                        },
+                        {
+                          "p": [
+                            376.0,
+                            266.25
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 124.0,
+                    "y": 266.25
+                  },
+                  "b": {
+                    "x": 376.0,
+                    "y": 266.25
+                  }
+                }
+              }
+            },
+            {
+              "id": 9,
+              "name": "result arc L (whole turn and more)",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            211.75,
+                            300.0
+                          ],
+                          "in": [
+                            211.75,
+                            321.12489168102786
+                          ],
+                          "out": [
+                            211.75,
+                            278.87510831897214
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            261.75
+                          ],
+                          "in": [
+                            228.87510831897214,
+                            261.75
+                          ],
+                          "out": [
+                            271.12489168102786,
+                            261.75
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            288.25,
+                            300.0
+                          ],
+                          "in": [
+                            288.25,
+                            278.87510831897214
+                          ],
+                          "out": [
+                            288.25,
+                            321.12489168102786
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            338.25
+                          ],
+                          "in": [
+                            271.12489168102786,
+                            338.25
+                          ],
+                          "out": [
+                            228.87510831897214,
+                            338.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 76.5,
+                  "h": 76.5,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    211.75,
+                    261.75
+                  ]
+                }
+              }
+            },
+            {
+              "id": 10,
+              "name": "result chord L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            232.0,
+                            266.25
+                          ]
+                        },
+                        {
+                          "p": [
+                            268.0,
+                            266.25
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 232.0,
+                    "y": 266.25
+                  },
+                  "b": {
+                    "x": 268.0,
+                    "y": 266.25
+                  }
+                }
+              }
+            },
+            {
+              "id": 11,
+              "name": "crossing L-",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            229.0,
+                            266.25
+                          ],
+                          "in": [
+                            229.0,
+                            267.90685424949237
+                          ],
+                          "out": [
+                            229.0,
+                            264.59314575050763
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            232.0,
+                            263.25
+                          ],
+                          "in": [
+                            230.34314575050763,
+                            263.25
+                          ],
+                          "out": [
+                            233.65685424949237,
+                            263.25
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            235.0,
+                            266.25
+                          ],
+                          "in": [
+                            235.0,
+                            264.59314575050763
+                          ],
+                          "out": [
+                            235.0,
+                            267.90685424949237
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            232.0,
+                            269.25
+                          ],
+                          "in": [
+                            233.65685424949237,
+                            269.25
+                          ],
+                          "out": [
+                            230.34314575050763,
+                            269.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 6.0,
+                  "h": 6.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    229.0,
+                    263.25
+                  ]
+                }
+              }
+            },
+            {
+              "id": 12,
+              "name": "crossing L+",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            265.0,
+                            266.25
+                          ],
+                          "in": [
+                            265.0,
+                            267.90685424949237
+                          ],
+                          "out": [
+                            265.0,
+                            264.59314575050763
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            268.0,
+                            263.25
+                          ],
+                          "in": [
+                            266.34314575050763,
+                            263.25
+                          ],
+                          "out": [
+                            269.65685424949237,
+                            263.25
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            271.0,
+                            266.25
+                          ],
+                          "in": [
+                            271.0,
+                            264.59314575050763
+                          ],
+                          "out": [
+                            271.0,
+                            267.90685424949237
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            268.0,
+                            269.25
+                          ],
+                          "in": [
+                            269.65685424949237,
+                            269.25
+                          ],
+                          "out": [
+                            266.34314575050763,
+                            269.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 6.0,
+                  "h": 6.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    265.0,
+                    263.25
+                  ]
+                }
+              }
+            },
+            {
+              "id": 13,
+              "name": "centre L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            247.5,
+                            300.0
+                          ],
+                          "in": [
+                            247.5,
+                            301.380711874577
+                          ],
+                          "out": [
+                            247.5,
+                            298.619288125423
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            297.5
+                          ],
+                          "in": [
+                            248.61928812542303,
+                            297.5
+                          ],
+                          "out": [
+                            251.38071187457697,
+                            297.5
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            252.5,
+                            300.0
+                          ],
+                          "in": [
+                            252.5,
+                            298.619288125423
+                          ],
+                          "out": [
+                            252.5,
+                            301.380711874577
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            302.5
+                          ],
+                          "in": [
+                            251.38071187457697,
+                            302.5
+                          ],
+                          "out": [
+                            248.61928812542303,
+                            302.5
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 5.0,
+                  "h": 5.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    247.5,
+                    297.5
+                  ]
+                }
+              }
+            },
+            {
+              "id": 14,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  95.0
+                ],
+                "runs": [
+                  {
+                    "text": "main: both end moves wrapped together",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 15,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  213.0
+                ],
+                "runs": [
+                  {
+                    "text": "result: sweep 7.26",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 16,
+              "name": "leader result L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            250.0,
+                            218.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            258.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 250.0,
+                    "y": 218.0
+                  },
+                  "b": {
+                    "x": 250.0,
+                    "y": 258.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 17,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  320.0,
+                  258.0
+                ],
+                "runs": [
+                  {
+                    "text": "moved chord",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 18,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  320.0,
+                  284.0
+                ],
+                "runs": [
+                  {
+                    "text": "y = 1.875",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 19,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  362.0
+                ],
+                "runs": [
+                  {
+                    "text": "moved circle",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 20,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  378.0
+                ],
+                "runs": [
+                  {
+                    "text": "radius 2.125",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 21,
+              "name": "leader circle L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            250.0,
+                            349.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            250.0,
+                            341.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 250.0,
+                    "y": 349.0
+                  },
+                  "b": {
+                    "x": 250.0,
+                    "y": 341.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 22,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  400.0,
+                  450.0
+                ],
+                "runs": [
+                  {
+                    "text": "drawn profile",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 23,
+              "name": "leader drawn L",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            400.0,
+                            438.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            396.0,
+                            412.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 400.0,
+                    "y": 438.0
+                  },
+                  "b": {
+                    "x": 396.0,
+                    "y": 412.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 24,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  515.0
+                ],
+                "runs": [
+                  {
+                    "text": "Both end moves wrapped as one: 0.98 ‚àí 4.43 = ‚àí3.45, past half a turn,",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 25,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  250.0,
+                  533.0
+                ],
+                "runs": [
+                  {
+                    "text": "so a turn was added: 4.43 ‚àí 3.45 + 2œÄ = 7.26.",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 26,
+              "name": "drawn arc R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            894.0,
+                            408.0
+                          ],
+                          "out": [
+                            949.6949025514871,
+                            333.74012993135057
+                          ]
+                        },
+                        {
+                          "p": [
+                            871.1189351006464,
+                            166.84518949701658
+                          ],
+                          "in": [
+                            939.7860109823629,
+                            229.3054421597053
+                          ],
+                          "out": [
+                            802.4518592189298,
+                            104.38493683432785
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            628.8810648993538,
+                            166.84518949701655
+                          ],
+                          "in": [
+                            697.5481407810703,
+                            104.38493683432785
+                          ],
+                          "out": [
+                            560.2139890176372,
+                            229.30544215970525
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            606.0,
+                            407.99999999999994
+                          ],
+                          "in": [
+                            550.3050974485129,
+                            333.7401299313505
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 27,
+              "name": "drawn chord R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.5
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            606.0,
+                            408.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            894.0,
+                            408.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 606.0,
+                    "y": 408.0
+                  },
+                  "b": {
+                    "x": 894.0,
+                    "y": 408.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 28,
+              "name": "moved circle R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            711.75,
+                            300.0
+                          ],
+                          "in": [
+                            711.75,
+                            321.12489168102786
+                          ],
+                          "out": [
+                            711.75,
+                            278.87510831897214
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            261.75
+                          ],
+                          "in": [
+                            728.8751083189721,
+                            261.75
+                          ],
+                          "out": [
+                            771.1248916810279,
+                            261.75
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            788.25,
+                            300.0
+                          ],
+                          "in": [
+                            788.25,
+                            278.87510831897214
+                          ],
+                          "out": [
+                            788.25,
+                            321.12489168102786
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            338.25
+                          ],
+                          "in": [
+                            771.1248916810279,
+                            338.25
+                          ],
+                          "out": [
+                            728.8751083189721,
+                            338.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 76.5,
+                  "h": 76.5,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    711.75,
+                    261.75
+                  ]
+                }
+              }
+            },
+            {
+              "id": 29,
+              "name": "moved chord R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            624.0,
+                            266.25
+                          ]
+                        },
+                        {
+                          "p": [
+                            876.0,
+                            266.25
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 624.0,
+                    "y": 266.25
+                  },
+                  "b": {
+                    "x": 876.0,
+                    "y": 266.25
+                  }
+                }
+              }
+            },
+            {
+              "id": 30,
+              "name": "ray drawn start R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            300.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            894.0,
+                            408.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 300.0
+                  },
+                  "b": {
+                    "x": 894.0,
+                    "y": 408.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 31,
+              "name": "ray drawn end R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            300.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            606.0,
+                            408.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 300.0
+                  },
+                  "b": {
+                    "x": 606.0,
+                    "y": 408.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 32,
+              "name": "ray new start R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            300.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            782.94,
+                            238.23
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 300.0
+                  },
+                  "b": {
+                    "x": 782.94,
+                    "y": 238.23
+                  }
+                }
+              }
+            },
+            {
+              "id": 33,
+              "name": "ray new end R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        6.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            300.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            717.06,
+                            238.23
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 300.0
+                  },
+                  "b": {
+                    "x": 717.06,
+                    "y": 238.23
+                  }
+                }
+              }
+            },
+            {
+              "id": 34,
+              "name": "start move R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            794.0,
+                            333.0
+                          ],
+                          "out": [
+                            803.6335569377238,
+                            320.15496782623654
+                          ]
+                        },
+                        {
+                          "p": [
+                            803.6896212836349,
+                            288.0679064435243
+                          ],
+                          "in": [
+                            807.1730985077419,
+                            303.7416315032066
+                          ],
+                          "out": [
+                            800.2061440595279,
+                            272.394181383842
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            775.88,
+                            251.47
+                          ],
+                          "in": [
+                            790.0475106415084,
+                            259.02525731131175
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 35,
+              "name": "end move R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            706.0,
+                            333.0
+                          ],
+                          "out": [
+                            696.3664430622762,
+                            320.15496782623654
+                          ]
+                        },
+                        {
+                          "p": [
+                            696.3103787163651,
+                            288.0679064435243
+                          ],
+                          "in": [
+                            692.8269014922581,
+                            303.7416315032066
+                          ],
+                          "out": [
+                            699.793855940472,
+                            272.394181383842
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            724.12,
+                            251.47
+                          ],
+                          "in": [
+                            709.9524893584916,
+                            259.02525731131175
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 37,
+              "name": "result arc R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            768.0,
+                            266.25
+                          ],
+                          "out": [
+                            756.75,
+                            260.25
+                          ]
+                        },
+                        {
+                          "p": [
+                            732.0,
+                            266.25
+                          ],
+                          "in": [
+                            743.25,
+                            260.25
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 38,
+              "name": "result chord R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            732.0,
+                            266.25
+                          ]
+                        },
+                        {
+                          "p": [
+                            768.0,
+                            266.25
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 732.0,
+                    "y": 266.25
+                  },
+                  "b": {
+                    "x": 768.0,
+                    "y": 266.25
+                  }
+                }
+              }
+            },
+            {
+              "id": 39,
+              "name": "crossing R-",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            729.0,
+                            266.25
+                          ],
+                          "in": [
+                            729.0,
+                            267.90685424949237
+                          ],
+                          "out": [
+                            729.0,
+                            264.59314575050763
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            732.0,
+                            263.25
+                          ],
+                          "in": [
+                            730.3431457505076,
+                            263.25
+                          ],
+                          "out": [
+                            733.6568542494924,
+                            263.25
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            735.0,
+                            266.25
+                          ],
+                          "in": [
+                            735.0,
+                            264.59314575050763
+                          ],
+                          "out": [
+                            735.0,
+                            267.90685424949237
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            732.0,
+                            269.25
+                          ],
+                          "in": [
+                            733.6568542494924,
+                            269.25
+                          ],
+                          "out": [
+                            730.3431457505076,
+                            269.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 6.0,
+                  "h": 6.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    729.0,
+                    263.25
+                  ]
+                }
+              }
+            },
+            {
+              "id": 40,
+              "name": "crossing R+",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            765.0,
+                            266.25
+                          ],
+                          "in": [
+                            765.0,
+                            267.90685424949237
+                          ],
+                          "out": [
+                            765.0,
+                            264.59314575050763
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            768.0,
+                            263.25
+                          ],
+                          "in": [
+                            766.3431457505076,
+                            263.25
+                          ],
+                          "out": [
+                            769.6568542494924,
+                            263.25
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            771.0,
+                            266.25
+                          ],
+                          "in": [
+                            771.0,
+                            264.59314575050763
+                          ],
+                          "out": [
+                            771.0,
+                            267.90685424949237
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            768.0,
+                            269.25
+                          ],
+                          "in": [
+                            769.6568542494924,
+                            269.25
+                          ],
+                          "out": [
+                            766.3431457505076,
+                            269.25
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 6.0,
+                  "h": 6.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    765.0,
+                    263.25
+                  ]
+                }
+              }
+            },
+            {
+              "id": 41,
+              "name": "centre R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            747.5,
+                            300.0
+                          ],
+                          "in": [
+                            747.5,
+                            301.380711874577
+                          ],
+                          "out": [
+                            747.5,
+                            298.619288125423
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            297.5
+                          ],
+                          "in": [
+                            748.619288125423,
+                            297.5
+                          ],
+                          "out": [
+                            751.380711874577,
+                            297.5
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            752.5,
+                            300.0
+                          ],
+                          "in": [
+                            752.5,
+                            298.619288125423
+                          ],
+                          "out": [
+                            752.5,
+                            301.380711874577
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            302.5
+                          ],
+                          "in": [
+                            751.380711874577,
+                            302.5
+                          ],
+                          "out": [
+                            748.619288125423,
+                            302.5
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 5.0,
+                  "h": 5.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    747.5,
+                    297.5
+                  ]
+                }
+              }
+            },
+            {
+              "id": 42,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  95.0
+                ],
+                "runs": [
+                  {
+                    "text": "this change: each end move wrapped alone",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 43,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  213.0
+                ],
+                "runs": [
+                  {
+                    "text": "result: sweep 0.98",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 44,
+              "name": "leader result R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            218.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            258.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 218.0
+                  },
+                  "b": {
+                    "x": 750.0,
+                    "y": 258.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 45,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  820.0,
+                  258.0
+                ],
+                "runs": [
+                  {
+                    "text": "moved chord",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 46,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  820.0,
+                  284.0
+                ],
+                "runs": [
+                  {
+                    "text": "y = 1.875",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 47,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  810.0,
+                  312.0
+                ],
+                "runs": [
+                  {
+                    "text": "start +1.72",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 48,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  690.0,
+                  312.0
+                ],
+                "runs": [
+                  {
+                    "text": "end ‚àí1.72",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Right",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 49,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  362.0
+                ],
+                "runs": [
+                  {
+                    "text": "moved circle",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 50,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  378.0
+                ],
+                "runs": [
+                  {
+                    "text": "radius 2.125",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 51,
+              "name": "leader circle R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            750.0,
+                            349.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            750.0,
+                            341.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 750.0,
+                    "y": 349.0
+                  },
+                  "b": {
+                    "x": 750.0,
+                    "y": 341.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 52,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  900.0,
+                  450.0
+                ],
+                "runs": [
+                  {
+                    "text": "drawn profile",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 53,
+              "name": "leader drawn R",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    },
+                    "width": 0.75
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            900.0,
+                            438.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            896.0,
+                            412.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 900.0,
+                    "y": 438.0
+                  },
+                  "b": {
+                    "x": 896.0,
+                    "y": 412.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 54,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  515.0
+                ],
+                "runs": [
+                  {
+                    "text": "Each end move wrapped alone: start +1.72, end ‚àí1.72,",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 55,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  750.0,
+                  533.0
+                ],
+                "runs": [
+                  {
+                    "text": "each under half a turn: 4.43 ‚àí 1.72 ‚àí 1.72 = 0.98.",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Center",
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "swatches": [
+      {
+        "name": "[None]",
+        "paint": {
+          "type": "none"
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 1.0,
+            "g": 1.0,
+            "b": 1.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Black",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.0,
+            "b": 0.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.10980392,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.94509804,
+            "g": 0.3529412,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.96862745,
+            "g": 0.5764706,
+            "b": 0.11764706
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Amber",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9843137,
+            "g": 0.6901961,
+            "b": 0.23137255
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9882353,
+            "g": 0.93333334,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.8509804,
+            "g": 0.8784314,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Lime",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.7764706,
+            "b": 0.24705882
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.22352941,
+            "g": 0.70980394,
+            "b": 0.2901961
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Emerald",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.57254905,
+            "b": 0.27058825
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Teal",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.40784314,
+            "b": 0.21568628
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Aqua",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.13333334,
+            "g": 0.70980394,
+            "b": 0.4509804
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.6627451,
+            "b": 0.6156863
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.16078432,
+            "g": 0.67058825,
+            "b": 0.8862745
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Azure",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.44313726,
+            "b": 0.7372549
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Blue",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.18039216,
+            "g": 0.19215687,
+            "b": 0.57254905
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Indigo",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.105882354,
+            "g": 0.078431375,
+            "b": 0.39215687
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Violet",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4,
+            "g": 0.1764706,
+            "b": 0.5686275
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Purple",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.5764706,
+            "g": 0.15294118,
+            "b": 0.56078434
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Magenta",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.61960787,
+            "g": 0.0,
+            "b": 0.3647059
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rose",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.83137256,
+            "g": 0.078431375,
+            "b": 0.3529412
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Pink",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.11764706,
+            "b": 0.4745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Brown",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.78039217,
+            "g": 0.69803923,
+            "b": 0.6
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Tan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6,
+            "g": 0.5254902,
+            "b": 0.45882353
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Coffee",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4509804,
+            "g": 0.3882353,
+            "b": 0.34117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Chocolate",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3254902,
+            "g": 0.2784314,
+            "b": 0.25490198
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sand",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.7764706,
+            "g": 0.6117647,
+            "b": 0.42745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Copper",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6509804,
+            "g": 0.4862745,
+            "b": 0.32156864
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rust",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.38431373,
+            "b": 0.22352941
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Walnut",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.45882353,
+            "g": 0.29803923,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Espresso",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3764706,
+            "g": 0.21960784,
+            "b": 0.07450981
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Radial White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Radial",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sunset",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.83137256,
+                  "g": 0.078431375,
+                  "b": 0.3529412
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Ocean",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.16078432,
+                  "g": 0.67058825,
+                  "b": 0.8862745
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.18039216,
+                  "g": 0.19215687,
+                  "b": 0.57254905
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      }
+    ],
+    "swatch_groups": [
+      {
+        "name": "Grays",
+        "swatches": [
+          {
+            "name": "K=90",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.9
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=80",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.8
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=70",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.7
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=60",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.6
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=50",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.5
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=40",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.4
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=30",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.3
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=20",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.2
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=10",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.1
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      },
+      {
+        "name": "Brights",
+        "swatches": [
+          {
+            "name": "Bright Red",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.11372549,
+                "b": 0.14509805
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Yellow",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.9019608,
+                "b": 0.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Green",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.0,
+                "g": 0.9019608,
+                "b": 0.4627451
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Blue",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.16078432,
+                "g": 0.4745098,
+                "b": 1.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Violet",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.8352941,
+                "g": 0.0,
+                "b": 0.9764706
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      }
+    ],
+    "graphic_styles": [
+      {
+        "name": "Default Graphic Style",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 1,
+        "unit_box": true
+      },
+      {
+        "name": "Black Outline",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "none"
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 2,
+        "unit_box": true
+      },
+      {
+        "name": "Heavy Ink",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.105882354,
+                  "g": 0.078431375,
+                  "b": 0.39215687
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 4.0
+            }
+          ]
+        },
+        "id": 3,
+        "unit_box": true
+      },
+      {
+        "name": "Sunshine",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.94509804,
+                  "g": 0.3529412,
+                  "b": 0.14117648
+                }
+              },
+              "width": 2.0
+            }
+          ]
+        },
+        "id": 4,
+        "unit_box": true
+      }
+    ],
+    "symbols": [],
+    "guides": [],
+    "grid": {
+      "spacing": 72.0,
+      "subdivisions": 8
+    },
+    "raster_effects_ppi": 72.0,
+    "images": {},
+    "next_id": 56,
+    "setup": {
+      "bleed": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "outlineImages": false,
+      "highlightSubstitutedFonts": true,
+      "highlightSubstitutedGlyphs": false,
+      "gridSize": "medium",
+      "gridColors": [
+        {
+          "model": "rgb",
+          "r": 1.0,
+          "g": 1.0,
+          "b": 1.0
+        },
+        {
+          "model": "rgb",
+          "r": 0.8,
+          "g": 0.8,
+          "b": 0.8
+        }
+      ],
+      "simulatePaper": false,
+      "flattenerPreset": null,
+      "discardWhiteOverprint": true,
+      "language": "English: USA",
+      "quotes": {
+        "double": [
+          "‚Äú",
+          "‚Äù"
+        ],
+        "single": [
+          "‚Äò",
+          "‚Äô"
+        ]
+      },
+      "typographersQuotes": true,
+      "superscript": {
+        "size": 58.3,
+        "position": 33.3
+      },
+      "subscript": {
+        "size": 58.3,
+        "position": 33.3
+      },
+      "smallCapsSize": 70.0,
+      "exportText": "editable",
+      "background": "white"
+    },
+    "metadata": {
+      "author": "",
+      "authorTitle": "",
+      "description": "",
+      "keywords": [],
+      "rating": 0,
+      "copyrightStatus": "unknown",
+      "copyrightNotice": "",
+      "copyrightUrl": "",
+      "created": 1795705290,
+      "modified": 1795705323
+    }
+  },
+  "images": {}
+}
+ VCBLOBS %PDF-1.7
+%ÄÄÄÄ
+
+1 0 obj
+<</Type/Pages/Count 1/Kids[9 0 R]>>
+endobj
+2 0 obj
+<</ProcSet[/PDF/Text/ImageC/ImageB]/Font<</f0 3 0 R/f1 6 0 R>>>>
+endobj
+3 0 obj
+<</Type/Font/Subtype/Type0/BaseFont/JAYUNO+SourceSans3-Bold/Encoding/Identity-H/DescendantFonts[4 0 R]/ToUnicode 11 0 R>>
+endobj
+4 0 obj
+<</Type/Font/Subtype/CIDFontType2/BaseFont/JAYUNO+SourceSans3-Bold/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 5 0 R/DW 0/CIDToGIDMap/Identity/W[0 0 690 1 1 573 2 2 200 3 3 286 4 4 555 5 5 572 6 6 534 7 7 527 8 8 398 9 9 467 10 10 568 11 11 383 12 12 443 13 13 571 14 14 573 15 15 276 16 16 518]>>
+endobj
+5 0 obj
+<</Type/FontDescriptor/FontName/JAYUNO+SourceSans3-Bold/Flags 131076/FontBBox[-83 -211 610 723]/ItalicAngle 0/Ascent 1000/Descent -326/CapHeight 660/StemV 168.6/CIDSet 10 0 R/FontFile2 12 0 R>>
+endobj
+6 0 obj
+<</Type/Font/Subtype/Type0/BaseFont/VRMSPS+SourceSans3-Regular/Encoding/Identity-H/DescendantFonts[7 0 R]/ToUnicode 14 0 R>>
+endobj
+7 0 obj
+<</Type/Font/Subtype/CIDFontType2/BaseFont/VRMSPS+SourceSans3-Regular/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 8 0 R/DW 0/CIDToGIDMap/Identity/W[0 0 653 1 1 571 2 2 246 3 3 347 4 4 456 5 5 255 6 6 496 7 7 200 8 8 542 9 9 292 10 10 504 11 11 555 12 12 544 13 13 419 14 15 497 16 16 338 17 17 553 18 18 467 19 19 544 20 22 497 23 23 249 24 24 555 25 25 829 26 26 467 27 27 497 28 28 249 29 30 497 31 31 547 32 32 249 33 33 504 34 34 249 35 35 719 36 36 497 37 37 588 38 41 497 42 42 586 43 43 527]>>
+endobj
+8 0 obj
+<</Type/FontDescriptor/FontName/VRMSPS+SourceSans3-Regular/Flags 131076/FontBBox[-55 -224 753 724]/ItalicAngle 0/Ascent 1000/Descent -326/CapHeight 660/StemV 95.4/CIDSet 13 0 R/FontFile2 15 0 R>>
+endobj
+9 0 obj
+<</Type/Page/Resources 2 0 R/MediaBox[0 0 1000 580]/BleedBox[0 0 1000 580]/TrimBox[0 0 1000 580]/Parent 1 0 R/Contents 16 0 R>>
+endobj
+10 0 obj
+<</Length 11/Filter/FlateDecode>>
+stream
+xú˚ˇˇ ﬁﬂ
+endstream
+endobj
+11 0 obj
+<</Length 417/Type/CMap/Filter/FlateDecode/WMode 0>>
+stream
+xúmíÀjÎ0Ü˜~ä9A∫»±úkB†ub¢ör∫v§I*à%!Àãº˝A9)•À|3ˇ\%ˆÁm?~îÊÄ„È_Ôÿôﬁ	óœçÕ€—∑®˝¢D9xªXgDá z[kÂ3∆j-ŒΩƒAÛõ‰	OJﬂ°î}ÁMõ1ˆ°¸W0"ƒû†ñ®ΩÚ‡wcˇ–u Ëc;-K”ÜÊ∫,O5 sFÏ—√QiÈR%8Ñ∫Y1©ÑOO—66Ô/ù«∂÷GSR…ﬁ&% @˛é'’ywÅQlÏ$…ÛÍ$:•O0ö˝Ê‹˜÷û14	<ZQÀ¯œ√/MãêßÅØ÷4%7”«≈bJê>9@A-
+#±≥ç@◊ËfkŒ9ﬂ¿∫™™j*˛
+;≈W„¢ºÿ¿öÛY±â4â4·D”HãíhFTÕâvD¢%—í(Âºè¥ú=êoJÙHæ9——å®$J -≈›ÌàRŒäË!R¿˘bê&´7~›ΩËùCÌ„Ö«Eá≠*ç◊ócçQÒãOnxΩÅ^´ˇΩøÛ1
+endstream
+endobj
+12 0 obj
+<</Length 5262/Filter/FlateDecode>>
+stream
+xú≠Z{P[ŸyˇùsØÆÑê Å$sƒE£+Å/∞Ö$∞1ÿ‡á¥/Kºlbcº6ÿﬁW≤I6ÈÜ›§ô8›Ï4ôv˙úÈLí97≠≥Ìv‹Nß›ùn”Œl¶ŸN€i2”tÚGˇdú&ìÒBÁú+dÆ7I'0pæsæﬂwæ˜9á   Ò"tÕ][e'˝ùüó ÈZº|ny∂≥¸” ˘†¬uÓ‚3ãg~∞DÄ üÂ_<øPò˝¡ªˇ^–w˛¸B°Ïª∂/Å; Zœ/Øﬁ`ˇNø˛¿‰≈ïπB£⁄¸q†±@˚r·∆eÚOïü≥ ÿ•¬Ú¬ΩÅu ç7 Ì‚Âï´´ﬁ˛Ω˜Ä!üπ|e·Ú˜æˆ¬oz@l¯u|}_¡3xÜV¥qÎ^√k∏éÎÙUÄ‹∂é–◊∑Óë˚[˜∂J¨‰m›£oíª[˜∂N.}[ÚO`	Kò∆¥2Fˇö\«èï3Ùm≤Çªt- ≠ö∂Óïm‰zI¶ì¨î‰vÿ"Ùm[Cﬂï˙Ü∞àE!èw∂∆ﬁ÷Å“~u•˝~™‘ïˆ˚)á¡8NeGsåM‹F≈‘◊fÀÚû oœÂŸ˙©,ß°¬∑p`nNüÉ9éîûﬁ A*üårbpñ_årjËA=Âä¡Êo)^í)^ìb˘|“§ﬁT“))NS'o0Ó“9M•
+Û\Õ‹ÿ†î¶ÚI\hä’ç
+I62NSzr£Ü‘§ÚIù#ì]»m¯â@Fπjp%¬}©¨–«˝©T`Ûåﬂ…p5¸ÿF;qßFÁFπ6ör%îõ~<‘ÉÅı,„ôL6»π „Ç»Âòi°Ûº=ìgåw	~ó@ﬁ…dŸ"[_/0ÓÃdÛ∆ô‡9’'®æ| üÀÂúÜ∏+5«1ùÂò‡ w•|è†ˆLnWaN n€0õÀÕrúDrπ¢96œ˝)=ôãrõ¡FWCÖy∆Ì©Lñ€ı$wË…@0ò„$Âö7W"lﬁ¥œ&ô`
+wñ˘‚7/ÀèŒq[GêqGä≠≥uN"fó-ƒ’T6ü	¶sY=Ã1ûò…r	à∏Mârª¡ÀRëP+ÕÉóÈIùqË…ß≥ãúÃqíÁˆé(/3ò∞∂"5w[≈,;D>' ˘¥¥÷ilîU 5öÏñ
+ß‹ÿ]H.k—9R\ÂŸË∫^Iï¡F@$Ñ≥ Oî∆ïê^H[*‹èÁ≠ô¨N|òPÖ®=yÀÌÇ2ö…z0◊åÚJ√§tîœ“Q^epígåW¶éäØ‘ì9^%f”Y∆´dæ<„U2(Ï∂äπuΩ¿=©<[œ3Ó—ìzîW'≥¶:üŒµr˜Ç~# kåâ©ÏƒåµÊZyç\˜&™Sß≤fuuäìBí{"¢Â8%ÕJÒ´äÜíú¯u∆ïP&käq5î\_gBmUGPÁ§∞M,æ°!πí„ï©√º*u8œÈÓd="Ö&P£ß9Iq‹ Ñ»l˘ò†£'≥ºZO≤Q^°'π[Áe˘$Àˇy]Å5H&ì"^=…I¡Ù:"¸ïH†%Â~√Ñ/ÂµÜIƒXgòTåıÜ©à±¡0U1”&∆F√‘ƒÿdòv1Ó1Láõ≥LåCﬂé?◊Ú'≥:ãqÚ§Ëñ(7v0˝%Ê”3∫É.1ØXLfÄWFÈ''ÖoYÆ
+?w˙4L∞Hî∑&£nòTå≠Ü©à1dò™√Üicõajbl7Lª˜¶CåÜY&∆ò¡Üd¡v,œÎÚ,•sí5QM5€eŒÔÏàÚ}cáŸ#≤©tq∞$" ºÔﬁN±Y°çää„˚:LÒçfªr“À¯é<
+”c∞^iyØÅ"fÙÉ:9â|®-b˛?ï˜r˙†>`ˆüµœ`CÏ#ÏÁH¢ºﬂà’E˘¿/ÇríöàÚ˝ÜI·±;,éNC„ÎÎáı√zÅeg‚‘’ìÑ¯ºQ~¿‡ÛZ=…’WCf∫ê‰Â©»¬zLglh}  w√XÃ⁄èkzrÕx^ú)â©Ï-ïŸX‡ñ∂5‰í‚§u¶ÿ∫.%Ù±<◊R∑k^úv÷≠§¶ÚÛ:∑•
+Ûô,WSÖ ∑•Ú‚§{X¶†3∆’∞>VË‹ô7ñ3%µ‰Ÿá)—≠3UKÂE2l°∑}`WÆÜÖ!aÑ œO“∫rQ>¥∆∑Öã±–á¢|∏ƒ‚N…”•"ãK!ŒXëÊ8ôç±!=(Ô€‚"vS¡µ∑Ö∆wæ]¨$~Xµ≥•ãí?¥√í‘v∫Ú‚ÅÛ∞À€)N:ãâ(éÒ⁄T6òŒeŸP.fvo$ Gvqßô]‹‰á ~îD ‡"•0m¡»:cC¢∆÷ÂZ*∆ª"Q>*]ı∂"_‡.=iπ.
+TgC,¶˜3LßJnã¸ä%}¯◊U≈¬'qéÈÅ‡éz	Êäv6LàlGÂàab09ÜΩ)Ö`‹‡Ymø—·51ﬁ◊ÂG±>aò ﬁﬁﬂÂìﬂﬂÂ«DGuccÎza;Z«Q–¸X$ O¿X$ 3∆à ¶å"W¶ç"WfÊp$ O
+å N	å Nå Œ∑ §"Qû5nâßS$ s∆-b≠=f‹"÷⁄„GıÑ¿IÍIÅì‘S'©≥BÁh$ ÛBß 
+Bß fÖNAÃ	ÃëHîœå Fã#às“Æt$ œKªµ$Ì‘«§]Ç∫ Ì‘Eió†ñ•]Ç∫$Ì‘äab®î¿Àr∆ë(⁄"G"Q~E]Œíë(øjò§àYµHÅYìRƒ\3LóvΩ.gR‚ÜE
+âg,R¿ü5LR<gëºE
+¿ÜâÉ•˝>.g˛	ã-R¿?iò§¯îE
+¿ß-R ^2L*Ì˜9ìœZ§ÄˇÜE
+¯ÀÜIäÄœY§ ¨[§ ºblîÀó-◊*UF≥z0ÃÂíÓX‡JkÊ∆ˆeÖÄŒ“/CA*Q˙qü∑¶⁄Se∑SÖLP(îs†Ñ–3†îúU	°‰P·∂©P†xlZm$Ó	zBÒ∂6›ﬁÔÔ◊kï˛6‚±ghıÊ˝a€^uÔ^µÉΩﬁ¸ÏŸ≥‰ÿSÙÀÔ_|¸ÿÏÏˇû‹¸ùoø±˘yrı˘GÒ÷œö¢Ø¢DÌ)ŸpÑ¨≥©î“5z‹Ètzúèßﬁ£π"5ˆx[8‹¶köRØ—€t˚WΩRÈ∏UW˝œﬂ1ﬂ˘Z˚ﬂ∑ì£CC˚.≈{ñ7?C_}ı´_¡»÷OH5}ï8˙-7%ì\œd^PBÒ"πvL!¿s8ÿµåBq9ópî9l**I•ÍˆGj[¬Ωû∏«Îèw˜ı◊j⁄[ìÉ7=N’ÆUªBÂèM“ñ˜ﬂ´´&‰¢Õ.|FÎ÷=j'˜Qâ ¢â(
+)ÄêéŸ•(®ñOA≠Ø*‡	îŸÖ"ÕÌèÿZ¬·ﬁûææx∑ﬂÔÛjZ[w_oOXo—|^?ÒZIßW∫îN_:ç≈¢±h‘5º6=≥:<º:3Ω6|˝Xbdrr$qLƒABÓ√ã©ÑS!
+jUË‰˜e≤â(
+
+Ñ ◊K·$j!Ê;¨-rr	7 /ºzM´ÃM‹ØçK#}›#Ì≥{Fn8Uv¨{j¸fklØ#wÌâ^xrÛÏkØØ›4°†e+*„“âA%u	óÓ¶™6¶—2õ∞Ãù…&år¢AµiÍíùC(ñ¿f++†¨Ïπc.‚p†‡$¿'p<`y”WíÅ›^˘e§Éôl¢g∑¥ÙäBœÇ“ÎèîMÏ+âπà√I‡¿¬G óœÂr	}xh_AzdËË—˛ﬁÆ¡}Ém-¨°æÆ÷ÔE'Èt[’ÓÌÈÔï•P˙‚›µqüÓìU°∑¥âÇàãx5MŸQ$5≠∑Ñ%‰«û8\`u{<’kø5„Ì…ˆ75W∑ÏÕ<QH?¥©≠≠©©≠mow¢-Ø∫√Ô6CÌ™ªΩ9–]•Vß#C'⁄]‘Ü–¿x´≥“_S=òäO≈»€{€€€€˜vlﬁl≠Ø≠Rî∫˙∆&Ptl›#ﬂ%˜Q/Y˘Ò∏	°{ö\ö™?Å™LZSTe2gÅÎ@-Ä“éiDUQPl¥ÿ´çXPîµ"ﬂ∂›≥æ@AÉ–}^O•”ÅzRo/ˆnO_XVi€v’äÉ•øªØøWa˙´tÊ•õ¥µΩ9ÍÈºp‡Ï¢®Â1{}∏Ê¯P≥ÎÃ°ÃôJˆ˚ÚM≠óÆn˛0ﬁ®_ı◊út∂7’äñëΩF~ì‹G5.XNT*Ñ¬SNJ'ùGâJ')≠ñº≠Ü8¨FTâ¢¨)«	ø’áî´©»»%\ ™Qjıÿ‹ı;∫∞÷~–ÉÅ…∞Ø—ŸËˆU5{…›3›˚l∂eo˜Ê˜Ö≠≠[˜»õ‰>–/JüíZUhÅ¢L>P)œá‚9E‡˜VUîŸ—@lªœ®¢bQã›‚\$çcOèπñéç7å∫ôø'qhﬂæ∂Õ'ãßTS›„Â‚|
+>ﬁ¡–÷=Ú3r^ú∑¬·tJ<îN∂'*•€—™Q!22òUKeQ[\U’5ãU™AUeÖ€)Nr/Òjü‰û∏Uˇ25~sk˚oﬁ(Wöè∫.<Iz6ˇ≥woC9≤Y52@‡Ÿ˙	Y°/£âƒ∞Fà‚%6‚#∞…∞≠S	! Y(äÏyÃj€¡´Ærª ùÚ6©%µ¢"m-·ﬁ^Ω∑ø?Ó-]∫Uû8ëûÙ<{˝∫ﬁ‰™w÷’Ï/ˇÿÈ∑ñµ◊_ø˙w!U=Á ﬂ÷=Úª‰>¬"áµD°u*ß%à2)éûbèà≠î√∆_çCCòÑEk[¬m˝~°∏∑'‹£Ω=ª”Y+Øüw˜ùlI5˜Ïo◊áCKß˙k>ËkhjåvÓœúwÖ[gæ⁄ö˙ÜJw˚˛ËiΩq⁄[Â˜¯Î*k∆¶û‹Ó
+˙&º»%*B†ÖàªH)^Ã¢ÖÆ}»≠#Ó£“¢∏Vœ~‘}‰≥‡>∫ioú(]GÙÕØÁÍ#ªÓ#äë≠{‘/mk∆ü;◊IlJS#UmJÒ§⁄πBúSM†ÙöHµRÄ¢ºpÃ.#¢´“Ú-¯Ñ¨ë≈˙$Ç;ÿ‚1ˆAL.ó®ı˚ıæfsÖÀa◊l¢ûV-µÈvΩÄØΩ≈ÓÛ˚…h0’§∫ÆﬁTõ“-CŸŒ°≥ŸpﬂicØ∑›dΩÙÕØO64|zÚ‘3ánåM~6˙’[[ËÙ]F5 ;<Xﬂ~◊êê˚––åT"—Hlj°6:	’F‘s¬‡m_l6Z∞Jü£«va|≠ø™¬ﬁÏhVhD∆ìÕÔ	+ª=ˆ†(LŸû¶~'Ô9|%ô∫8x¯©òJ7ﬂsÌËÔÌ
+ù%Ø¥≈€‚õK√k”S´á]H◊Ñ Ï±Ü&Qw[ﬂ†˚1CﬂE9⁄Lm>-.Ä‰dSà'¶Ï6îìr≈Ìèò“yQXwj(Öb1∫øC◊;ƒœv-„ª‰.‘iÒ¿X#«≈{äGqãgs‹3rì‹›î
+âœ·˜â∫÷óx∂rË'∞+?ÀﬂüÿCéS„ÎÔ?ø˘∑éeÂﬂ@†Ä?øq¸—ÊÄ„ı˜üﬂ4Àrßù_5t:ºısºê=°¥“!åP?Zh%:»0BﬁE+¿˘<‰/‡£É°√!^ÙS≠¿÷7àW˙u/‚E¸Q…qö†o(U iÂÎ è’#Ík∂[ÃˆíÌõ∂∑§5¯"\òG(é‡%|¿?V∏ ˛t ‹¯}( jÄWe\M–ÄWã4Ö\§$ÒÕ"≠¢wã¥Y‚-“πX§ÌxçlÔ„Äì∂È2‘Q£Hó£õ¶ã¥[aÙZëÆ@èÌ5¸	∫—Önƒ¡0Çy¨``h«y¨bóq ùËü—·:b(î01ÃaÀËƒ^`∏é%¨‚<¶±Ä´X¿\√Ê¡0Ü\¬*é£Äe°Å’a+X√ÃaÅ’ÔúÅa\¬U0ƒëƒ
+.bqƒ–Ö^tc#H#â‹%∑-G¥$eaO â—è–¡J¯”“Ú´Xí6≥]Zœc´“ÔK∏Ü}à…ü.b\¿ÇD,b7§énƒ–'ø»Œ›∂-Iª
+`X≈ı©·
+.ÄaãÂkI⁄*‚/fßpIf√ä˛VQê3kœKòG'VpEÓd…Z¯µ&ÛtK€°#É÷piƒ¿p§à˝ÂÎdœ‡2pÁã˛=®·˝"Vq]˙¯ ±$#"¢ey#¥Œ-ﬁˆw„ò√	πˇ•];OÓ⁄ATÍ√ﬁŒ"€aŸnΩÚq,·"
+ò≈E…yP˜"[c¡î§Wq Ï°Ë\≈úåÌe¨ Ë
+."&sqù8Å1L>d…/é—º≠¨Õb≠îwÀ;ëo—m#ò√8fXΩ¨v1«åå»å„$é‡N·§úè»O›Gp'1.;GDw)ú¿q§•ƒ∏§-ﬁò¨»„»Åa„#ˆ^(∆« òËãÀ“˙´“v´
+ó∞åÀ2Ê¬r·ˇ§áøzÜãªnÀ^ï2sX¬¢DäÏä®ú√
+8W¨
+ÅπÇeÀÌ⁄x–/VEÆ’K¯Á∞"œπ+≤ÁƒÆœ{YT´eì’±´øDVcˇØö)ﬁï[ﬂA˜á˛Hç¯o(2áS8ä4NaYú¡iL`ì8B(æg_ª¥‘ÔÍ«ƒmº5ù5	˘BéÎ#áÀ&Ï…D˘o·ÖÂ'ßF{QÜπ‚]w|JΩ‚òuú÷éjÜΩU-sY_“>Kü’>¶=°f‘§∑µS…™Jéî∑‹awÔ‘›Ò›©æSqß<Qñ@ ;L‘'G ë¯¿∑`~[‹™i≥ïº<ïÂâó≥b>ü6€≈¸∂÷“πÄŸ&ñﬁpº¢&^û;πÕ_	Ô´⁄KtUõ◊≤Í§:§≈laZV—qõl}Ü´ü7)“∑lÛ“i ˇŸuÀ˙
+endstream
+endobj
+13 0 obj
+<</Length 14/Filter/FlateDecode>>
+stream
+xú˚ˇˇˇˇˇ Ó¯
+endstream
+endobj
+14 0 obj
+<</Length 538/Type/CMap/Filter/FlateDecode/WMode 0>>
+stream
+xúmîMo‚0ÜÔ˘≥áHÙ¿€Å¥!A á~®Tªgà68Q>¸˚ï˝mµ⁄Càœÿ3ècˇx€èW∂>Úÿ¸LËùªzhKÁœá&ä„M]Wv˝≥e{èvsj⁄∫Ï∏ß|∑Ÿπ™è‚xÁ À`˘ûÛøî5ü+˜ï‡kP>t}}ç‚¯£Í/<ß(ÙD;ÀÆØ˙%Qˇ‚∂´j7'≈Ò÷Ÿºæ˙Ê∫h"5hÚ÷÷Âû{:UŒ∂Râéæn§4Ÿ™ÏÖ¬oy=4aÚ˛÷ı|›πSMYvh$ìàhÚŒÁ™Î€çBcd˘Ñ»kkπ≠‹ôF˜fø˜C”\ÿ7IIeg√{‚Â_W¶âéä%©Ø°è[√≤¿‰˜smÔ†–bY[ÓöC…Ì¡ù9Z$Ií,iQE±Ùˇâß”éßÚœ°ÈjIã$IÕ2ê4{ô@ô•àIÊîÉf†)(§–#bË	4≠@
+¥•†’eÕH™oôWÄPO˘Hí´(¯Õ‡†‡ó¡O¡oˆÇüŸÄºü÷JÊ¡œ†k%~pWÀ§∫¯…*Àd¸LÇüﬁÇ‡g§ÒÉªÇﬂô~f?¨©·gV ˘~?i|øTH¸∞/~;®·g∞Û~Z™?ì√]√/ùÜ£'gÃB◊>O}9¥-ª>\µpƒ˝yÆﬁŸ¶n¸¨ÑÀ~ˇﬂÙZ¸2|<^
+endstream
+endobj
+15 0 obj
+<</Length 7951/Filter/FlateDecode>>
+stream
+xú≠{p[YôÊ˜ü{u%YímYíe[~\˘˙≠+Ÿ±¸J¸í%˘?#')›I¨ÿé∫Û Ì$˝ò~˝†1Õn3,]µÃª5P%Cwvò@/lÿb†(`Äö©]¶j+P3‘2ùıB˜0moù{%?“ù¶gv‰äÔœˇüs˛˜ˇü#¿Åß!°cÈ özËÛ˙G¸Ä:N_\=w™›Ò@øäù´=z˙cﬂﬂ˙'†‰†˙˘3+ŸÂ∆o¸‡'Ä˛4Äû3gV≤ˆÀW˝ÄÜ3Á÷Iï⁄˛–ˇ¿çá.,eøø˛S¿âsŸG.“ﬂïº Ñ7 ®Á≥ÁVÆó¯+ÅàPé]º⁄gø<¯	†Î"ÄÁ/^Zπ¯„óü¯–ı@¸k|Ó√}√S V∂µÅ#8Ç$íÏ%Än[QˆÚ÷›Ÿ⁄ÿjﬂ¡mm∞[t{kckF`Ÿ¸Ü1å(¢“Ï;Ùa"ÈˆCzˇ∏≥áÿ`äÿikcõæü>º='Aœlœ€≈˚ãnÿ_˚5cCb>~¥5áø›JlØßoØ'Iza=í8tï„Hz4£™S7P|hä+«“º+¿[2ãß’ı#iŒ≥_±¡Ü•%ÌT ‰»p$¥‰5ãÒ0'ù´ãß√úÈZPÜπ§´À◊%ØÒ˜$‘≈≈xéyÒ\£î‡,q¯ï;5ŒâÏ2óÁπ∆K,∆yp•:(FØ˚(^≠rñ–‚◊<‰I,∆5é˘ÙJÊZ9	 0óu.Ö∏/ë˚ÒÚD"OPóU~sûÀM«Æµê+1∫4 ï—têKçô‘˝È†¨ßU>?üÚX&†Ú>ıe2jŒ§Œ.Ûñ˘t0ˇ¶ÚÅÔî7Á”Íiu}=´Ú¢˘Ùb@Â™¿	®G@=ãÅ≈L&‡¨ë;K©4«î rg"0≈kT;ïΩQä%Aq√ÇSôÃr6√)î…‰%»®Àº<°≈3an—’QïÀçŸeï[Ûin’‚‹¶≈¡`Ü”bò+Ü∫πRós÷SqU Ö∏ì}Òõ€Gó∏•-®r[B]W◊9ÖrñF.7J/Œ≤©LZÀ3*è-§9ÖB/yV¬‹™s{"tÃ4≥MÁv-Æ©Z<ÀŸ©”úñ8-rk[ò€uUp[úX∫!„î*V‡±≈å YL‹È◊Ï≈Hå∆€Ç€é„–˜:í”\ÖBGÇÀçãÍË∫ñF5îçÄ0W<∂≠0.5jŸ§πÖÎ”y√|ZLéΩ”§b·ˇZ¸∫À	it>h¡L[0ÃKÙc£|9õÛRù”¢™ÚíƒA±Ä K¥xÜóä∑TZÂ•ÜΩ‹∫ K•®7d,≠kYÓN,™Îã*wkq-ÃÀÙ©√ÈúºúÃ4p◊äˆHò{Ù©CÈ©s0Ã4pè1Ó’s(KIÁ  ú≤qÓâê„¨1û+øJYcúSπ¶r©q>ùÍ„rc|}]€ñ∂5NŸ0Òb
+k4F2º$1ŒK„ãúÌ5÷=Lò<ZíSÇcË÷ÚÈ»ÅçNÛ2-ÆéÚb-Œ]∑/∆’≈W+*nxè«ÖºZúS6ÁµÖ¯áCÅ˙LòóÎ9¯BaÓ◊s$ûzéâg•ûìƒ≥Jœ…‚–sÒ¨÷säx÷Ë9´x÷Í9õx÷È9ªxÜt≠†Æ,NNkjÑ”q-aÆÔBño#ﬂo"√ªêM€»K&R’¡KB˜îìSˆÀ¶®BŒ›Úı‘Pò◊Î9OMœ1Òl–síx6Í9Y<õÙúE<õıú"û-zŒ*û≠zŒ&ûmzŒ.û]0∂]Wy≈¢ö–8-
+ü»ä åüÌ–y{à∑∑Ö˘>]U«’{XSÀˆi"±ø+E@HﬂY0qÆX«˜µÂ,‰Mwd)£ª‘s/ö.]Ì68Ô÷ëß}˚ûúBÔ»ãG˘üu99§ıÂ∫»'dÌ—’u¸¸s$≤}aﬁ´G¸aﬁ˜ªH9%ñ˙¬|øûc(oT#Í∏H	ú5NÆØèk„ZVMü
+à¨´≈Øı˘ºma~@Á(Á~-ŒÂF.7d9'‚‹ë≠¨G4UXÔÛ˛Ωdjƒ\è+Zº@≠ÚEëSbá“◊e’¢ÆÀMñ™L\d⁄¢Ñ∫Æ3¥±EÆ$Ó◊EëÌÃ™$'ó5nIdóÁ”\Nd‹íXôÓÓ9YMUπ‹§çe˚/JåâäUî0vYTﬂiÕÃ©JbQ√“òÂñ∑≠ Â&¡D£`Bj\\Œg“ùΩ2a>P–Ö™™‹“î◊Ö6–ÊÉ€(^d‡«¥q±©∞‚–∂
+Ö0¶¶9ß#ÍÄ4Ím~P|ÂM¡ïFniú‹›ªòF|'oœ[K.?ºãìD¡\ã¢¡π[‰Çâc∫¶FÑ«∏?ëû§2iu …uê7Ê#{∞©¿¸l¸Áæ€åÑŒÑﬁm√§Œ˚CÎ™: |lΩÔﬁ§\IDxG(ÃGëÖ6ôöœrß7E™©jDÎÀØ?¶Áä‰∆xa ?”•«ˇµºX»$ÚÿÄ÷ÓÚó`&œÁ∏û√ÅPA+z˝°†∞ô`4/Õ∂
+&uüˆ◊ "‹·=ma~„Sz‰ıﬁ∂0ü÷˘˛∂0üZ’‘à:∂Æe⁄ö’ÖCÛôPòœÈ◊Ä±PòœÎ◊@8§_#c$•_#cdA–åá¬¸∞†¿A#Ä˚ç éÍ◊$Baû÷Øã÷)Ê˝:ôc«ÙÎdé›/ËH@::.ËËÑ†3†ìbœ—Pò/ä=ê{
+‡îÿS KÇf"ÊÀÇF +ÇF ßç Væí°0?c%†≥_zü¡óÄ4¯–C_:g%†Û_∫†Á0∞m¿ã∆èÖ¬¸˝&8
+ÛKBÈ∆[<ÊÎ9 ”¨ô††πl–PûÊäû√‡ˆ™Wç7c∆#&(f<jÇÇ¸1=GyÇ«MP¸û	
+Ç'ÙÜ∂◊{“x3»ü2AA˛¥	
+Úﬂ◊sî'¯Ä	
+ÇgLP<´Á0ºΩﬁs∆õA˛º	
+Úö† AœQû‡C&(÷MP|XøÊ0:[ÆÆ…LMk¡@0ìâá∏mÖKÛèäud ÷Õ>	vî†>Ùƒ¢>ØßÃ]jµ2â¶H“*;
+∆Ë§Lƒh(vYdHê‹≈ä∫ÉÓ∆`s≥fÌçˆˆj~©∑ô‹÷˝ÕÊKDì]rOèº/˛˜ÒGüzä“O≤èΩı–ÅgWWøy‚Í’Õè‹˛≈f'}˜ ][¨äΩåÏãEUNá,1ö€fAÙÿ$	YôÄ«1K®(/-∂[QC5Wy»Rﬂ‘‘›’”Ì,˜[õö¥zEÒyÀÀ£ù=Ω~E°Ö‘¶¶ü]Ë?^ÆJ¥ÔäéL÷ÖZN:}Ú¡˜}2’^≠ÆπíJ=◊Í;¬˚∞µÖ$ÄkÏ÷Ñ0 ˙„ÇÀ@'Ë‹¯ˆ∑œßcŒ“"Iú⁄	S‹!∆Ï2«Ÿt`ä{ﬁF∑ó$ì…òãïÅ1dâÄ´32I“ei6ød9ƒXAOÏ¬zÓ1Ô^S2ôLÃ	¿wCÉ€‚™E›QT(/Ø;´;ï¥Jm5˛2áß§.QI∑”ëû¢1IÍ⁄ºeX+≤µA_¢;®Fo¨ÀAå*ùLbUI⁄∂ŸwŸÃÔ3lVM’˜∂Y¡dûë3#uåV∂z⁄’–hÀ·D@yCÌús‡“|Í“ÄZŸÈ.o?“∑∞ZÂÌ¨—ûR[ø¡Oÿ-£9÷‡"˜!∫"TÄ¨T‡¬n≥»(¶bŸUÚ◊7uª£Ó¬∂üã¥¶äãd´‚(≥ÔÔbÀo}¬SJ4dCxkÉ˛;›Å*±XY‰Zb6Çl!yU!@ BíûòÅ≈¬≤VbÏq6k∑ï˛rwâMµ´V≤⁄\Â!™Wk¥´I⁄—Çœ´XÉ;N[Tªø’˙÷Ph‰¡°·ïæKåm~U9>®V÷™sÙ•öX◊¯¡Õ—ÅáÁÁ.˝ﬁWÖ3uÿÎÓ)Ø6Æò˚¸›A	«⁄ IyìXHh#ow©aïÄ;`∑¢ÑJîΩv,)Õù=›]¬<>o9ïÙØØˆú>=0<33<4;õ∑»¿•‘¸•Å‰Í¬·3g/¨ÇP–0˚!|»∆ä$1'ëƒ¶ß∏>´Å$±,ª2c!¿»-tu∆JärYôƒ`êàIgﬂõâï ¡Á.k–‹nõ´:uk›Ω›]yo“Í}æ®Os/NLåN˙€JÀj+ì´´ÙGCñôÉGÌ÷˚âôƒÊq°ßË÷ÂË™–à/∆äãâX]≠ﬂ•Xdúä†¨ ë¡È3
+…2≤íÖ⁄Àáfıít9O$ÿ6i<Ô∫∆ªO¡Í´ç’çÂæ≤RáUTeÕ˚nWOoó≤Õ¶πµfÕ0Yow1ÛyÀø1òzÈÂ≤PK€¡µ~È@f>iïÊ¸ZLK-∂v:'‚©√Ó∫M-ÎÛ∑úªÛØ‘¥&’∫gÏjDm—Ñ~⁄∑6ËßÏ<PÒÕXiY»_Œdõ.%ô¶L’fÑ≈í˜1´)¢≤GM¡ªàaMJeèÆ~«jÔa!°5øœ+"œ´˙‘íbó”¶¿C€∂ﬁGiÓé÷€ΩùÇﬁ∏ˇ|∂∑mHïíV©z∫26P∑ø∂y∏iÃ˘‹£s’V-|ı≠æ˝’≠£âÕj˚Bﬂ—%sÑ©≠˙.›Üy≈Ìdå(ÔA…^ëáN…{ù«üG…Úeø◊oﬁqÊ='	π›Ñ“íbWë»r^Ú*wg9w^‰üÕL,Ñ:ö˙ÎEÆØüvfèS◊ÊèìCÕ! lVM∑tò2Uom–3t≠ËäÌ´ âU í$¢∏æOÃÄhWíØ	î{m
+Z©U$y}SsØë”∫ªööö#l;DÛ≈_ÀDí˘~˜â˙&u4‹—°vV7ƒ[3s·ŸÍ¶ ﬁ`$t ‹4jùs6;™™√uïAëKÎnÈü´´h/Û∂UÎK]ΩzsºE;–´ÏI8±eãËV¶ßx`>´10¬”`lmFy—B≤|Y˙#ˆÙ‹L&Ê‡Ñ”ÌuªWU(*¶ªßß7Íé˙Ê˛`M©~6I’mÛóæı≠$Ù≠˙&[á˛›ywmoﬁu9	∑”ÔÚ[-pê£`%C9>Ôûú˚Ê‚πsã'œù;ŸóLˆıçé:ø¯ô?¸„?˛√œ|1˛‘ã/>˛¯ã/>%‰Æÿ˙ç±¿è≥±"/)‰#("Éi˘\+8 b'ebÏÍß¨yWx&=w/|&Ê#îï∫úé"ªÕ™Xd¯…_à$ëv{£F≤›.ﬁ?;81]4˙Ã3¡6Wu±€”nœLR—êÂÂóõ˙>ãı@ëC‰ñ‘÷˝÷Ã-‰4#•§à,Rmì-Añ¶ÛQ≤{òÃaœ;Qøçpª≥⁄N*˘mÊ∫Gä*r¢ﬂë¢ﬁyµ˜∞–])™ÿ)4[HQñ˙¶fÕ™π£>k°3ÿq	´ØºúZÎ'U…O±‡\À…S˝'«Ê˙GÎbö:Ï÷t≤[ﬂH◊4?ˇ˛Ö+C£´«ÊóÍ’≠jøœŒ≠v˙otUËàÖKãdQb	ƒ¶%”ÓD8%úÙQÀÂ>ß√jg'ñÖç{•®ßº\ÙåΩû®TÃéï÷8À ‹≠=%é◊é,9*≤√[tt˛Uw˚Ë˜9¶ÙáËÁõˇßn¢>8°íÎ≠;”·|/˝cv^Db!èÃÚáé+3ª∫ô1vôÕ¬´yÃ0‹—å[sõZqßRí6”93û“;˚Ÿ≠o,€≥«7øC≠…°¶∆Õœ ¢´Ø«M˙˝ê5¡áIÅá;‚ÚÓPéË∆÷«yw»‘U=ÖË{tjc’„'ƒ)»8Iä?‰È˙ÍÈã~›±µAﬂ6r@&b£~í•
+≤»u#H”∞($æΩ<Y6‹cMh}ªa©AVW˘<ŒWãôÚ£µêH•∑∑Œ;éBñ∫âZ€¯`{¨økh˘¿ËÖ·Æ©@ƒ”W>ÿŒjÁõñ∫é–Dã~¸‘Ã–‰Êí:˝ÙÀ„Õ5Q zu•1¥tjÅ.C˛ˆ≠˚-\BjbU2ÅhöìFæp≥MÃUÚ7˜Ù4+ı⁄ÆñÜ:à)¨Bk®T«˛§√3‹B5’Å∫Æp,k∆~î~Kwåæ‚Î±â,0¬÷MLñÚe≥K·T#Ç«®7èœ($IènåÇÊ)gO∑6BœÔ^Ì=,$b÷ÎÛ"≥¿”ÿ‡∂π*C˛¬	 ∞ÄVﬂ‘Ï˜yv¨(≤¡π–âS˝'˚ÍıÏ™Ø√¡°ød◊˚™[>¯˛‘ï°⁄™#ü%ew¿1¬^ß;‚”1ªZQ$…í\h+ ÕVëú€¨i˜â± êGêPñëêh7ÖÁ]Êø€T°ÉR Aµ2Õ”–‡∂ªjvNêÂ˛=ai›~
+®”°æ·í¶Y}j2•Gzí)ΩΩ'I∑«¥ˆ}zkW!Vß6?ì˘
+0Úï¡X≠BÜ‚Íå»Wfbp¡UÈñ]°Ëû¥Ù’/y¿·w»—áæ@∑7Ÿ0°i‰›ÚÅ†ãµŸìp!ˆeõ·ﬁfØ‡6¢‹®⁄˘]±Dˇ∞ö…ƒÊ÷nØ±ıÎv}≈íıÛJÀ°ëÕØ”ßlÛ…è|ÌsÈÒË‰≥/¸˚„∆û#[∏ÅKp†*Ê7"â:'3÷•ªZÅ'*5≠≤B”úZ†F”j‚®	≠[tã≠£:ˆ£;÷ŸÂ∑◊Ö√∑®˜ªNﬂë0!º?≤øπ—]Ç:™ÀwFΩÔŒT±˙ÃûLÍŸiB •|gt»ˇ8p¢WÎ≠’z:R—Öluã∑¶Sçw´⁄ÅnΩø5iÈÌòã4EÁú·˘Œ∂ë}•rÂDÁæÉ≠ãÉ˝Ì%r©>jü”ôöò÷ÔkoÍ‘6ø5ºØµ´©¨rLÔ5ÙTπµA_gOB≈˚bÆrbw©|∆Ú6™Öå,Ã»¢'YtßN«™!A∂HÚÍ6·.t&Ê!TUà€Æbq4PIµﬁ›≠ß*O–ßô©’PÕﬂM/[j¶˚˙
+∂◊Ë>˛ç€©ÈÕÙûrˆ{™√sâ¯AØßö¢„Ó,•GG≥ùÖ{£”xÒ°W<íQÍÚg„éƒÙÈBµ+úÃåÙ∂bX8º”Ã{NÅÎz[-d≠]e4iï¥ŸÌ:jÑÁÓ2∫µe÷˙k÷åjÄŒí±©=∫AgçÍ)!º•“/È:1ÑYjå9]LV&f∑Œ’=R [˘,¨÷B¢1œÉã˝$ÏˆÀ3N≤Ÿê-"‡©Ì^≠kÔÏ¬IêùÑ—«‹sÆÁˇcÁŸ¶BÛZl∏+JOœ∆fÙEá∫Ü¬mıÅ™ är/:©”µs¢7£qWP˙£>Õg:†VoF`4´fXö1ö/8¢˙4øŒ\l
+ñU÷{*ö;ÔÛ6∏>∑‚ÆËòÔlÆwï5Ó;q‰»¿˘È∂¡ÅPh`∞gÏp¥˝pq∞¥™bÍg…·∫˝Â≤£•∫.‚íΩ…P˜lõ’2,óv£”≠nG¿ÎØÌO∑Sn∏ª{`†ª{xÛÖ¡¶˙*Yˆ¥˘ö#füe‰π=>R}óè˜CÏU∫ç†∏Ø´.U$	4ùØFôı∆,5Ó J”cwg¯]π^ìööƒ°÷*˝áﬁ7n+Vd[âm‚ÿ§Ω‘*€ä≠„Ûœ<8b/∂…÷˚›ﬁ¸y0ﬁ‹RÂ.®ä‰˙D(în˛ì‡≠†ˇ ÷∑—Nc('&ÓjEv2Û+ìNÊ/Uhil6ÓSªáX!ÅÏd’ûûh‘◊≤¯¸ÿ¿`K≤:“rˇ`ÊÙË#≥U}ï7;O|ÙJ¥w,¨Ü√=´áá{~û…„fû?∞ˆ‹®ÇÜ˝±;Yå,ãÃ,´"ú∞&.Ë§BDói–Ç5Å™
+o‹(Z]‚í>ü√¨OíÚiNsÄcØ%VˆÔköæx…Ï·É33+óéú8~ﬂ%ˆí:v :S";f‚#GCÙËÅŒ˝om«˜ã^ÆekÉnÊ˚›ëÿê_a†Rí‰b‚6ê%»"ˇZ≤∞X÷åà…*Öv∑^TzÀD≥€PouUÑ<Ê9“hk=€	πß◊Ë´v_L^ÓÔW«ÎlÉëëtt¶*‚Ì≠^Y;ﬂíZÍ:^ﬁ?zû˛|h≤%|<;Û÷Õ’]˛ÍÆGN7ÈFáõ|aıÈóÖí‹ ˝à=	;º8+≤òãÖRS.óD–„Ú@!ãÂ≤≈∏`g`œÌ`ÛàL¨∏®®»[‰uªÀ™J≠Æ@®7*Z¯ßß;ÿM‚¯¢˘Œ‹íIvVG7ˇñ‹=zÁ+Uï~›øŸ≈{Ëìõkq.¸∞jkÉæ∆÷—Üdl§™íI≤FL_ç0iIF,®vWë#‘V˚}‚2»¶†ç⁄ﬁV·ö¥ÓŒBçﬂÒ‘ÇÉ¸r˙¥⁄V3€w‡`sf:9WﬂmI‘Ëç«˙äuòÔ;ÈÏ’zj#±Ó¶˝Í∞⁄lÔi®È“¬GfÙ ÆÖx_Jg(ú°Ô1Ë±V£'sÇÖ∞
+∆,'≤0ã8M9‡pãè°±n≠;⁄m‹+¯~Ú +#ØºrÊµ°◊^zMË§|Î7l›F=ûû‚ÕÛÈXqë\G
+©E\Ï`ä4ù1…*-#íOBñáçé,≥2`–∏ŸÉcl–$W É˘+ê⁄Írü◊„.u9Ì6‘SΩÕnú‘ªªÜXØÊ54ÿ≠u˜}Z1Û˙º—N„ˇ:âàæPÊXpóΩå~tä1÷·®t8U˚pøgÙË±ñ”}⁄≤˙”S√ñdÎâÃhYáeXVÑú« ˙Ï%8–”≈u∏Ã§Ua·Ìà7¥'|Ó.ıE›A_–P^–wå€¸Èõo“>ˆ“ÿw«ˇ∑ëWhÎ€Ï zŸ+p†9ß,'≈-4@ôBGJ8¥ª!Õ)H∫w5•uuuuÏ`MeEmmEeM·¨Çœ“mH®Ã˘ƒ
+˘»<*õy»ùJ—m≥≥ …5˜ùWﬂÙù,¯ø∞J‚€@¸ljˇ∆Û–‰˙[ü⁄¸©ÌÇÙ5cñˇª]ÒmÀ/6ˇ∞}Ú≠Om∞]0V⁄˝â∞è √˙—Ö_#I˜#E∑¡RÙ„¿j°T–à≤⁄ôä)˙#T”Îò£◊°S
+¨)˙úLEä^G}˛_ﬁD;!%öxAè71BØ£ï^G%”ê4Ù¬bú}Ù:Ÿ4é—Îh°◊·¶◊Q%÷cQŒJÑµ∑æç_Zú¿K¯4’—Y˙wÙ+˙€«ûë<“Ádè¸†¸y˘ÁñÀoïÂqÂ£ ≠nÎ∞ı∂€Ô€æj˚üˆ9˚´E5EÌév«à„ﬂ:~‡lt>Á¸Å+Í:Ó˙æk´∏µ8ë◊y/¬âUÿ¡0ÅgÒ YÏÑ¯ZWúk˛#$êl¢°w™bf(∆Œ√&ßyXﬁEcAˇîá4—·<l≈'Ë±<lC+Õ√vT∞™<Ï@'ÎÃ√.IeÀy∏]ñgÒ9®ËD:Öä,„Na*ZpkX√E@;⁄q’¯â ªM¡.‡⁄—
+*Æ‚,÷p*RX¡√X¡%\¡
+ñ°bpkP1ã,Œâ‘
+,‡.„ñ∞¢VÓ~ÉädqCE‘XoóÒ≤∏Ñ("Ë@7:—è$«˙˜Ã.Ãç"|◊\s∆‚≈}á„¨¡õ∫g›3∏Ä5CæÛ∏˚1˛u†Áê≈ÉX1(Ncè¸v"ÇÉ‚Ωq≤W⁄≥Ü§Y®X√%C«+∆>ó T\¿Èª¨s÷‡Xh[º¡yC˜¶Æ∞Ü¨ÒfÆyÀh«\2V2ÁXHwŸ∞ %ú5®#ªˆòG÷‡UE®ò»”æwØX√£∏à∆ôº|;^ §?ç5\5d‹—¿C8khDËÃîFÏ∫úÁ∏ Ô&1s∆˙Á˜¨<Ωg·ów€π`Kug{˜›±«dq÷∞ÿ)<d`vº\Xk#8d¿k8 ı.Ì<å%C∑±fhW"Ü-V—é9åa˙.N~∑éñçßiµS∏ºmwS:ao[#XÄäI,®ïP7ﬁ'±`h‰(&qò√6ﬁGêB
+#ò≈aLb‘ò;áî¯ésòE“ò1i¿&nÃ»Yd†b
+ìçX{%Ø”b":.‹?lnz·Yú√ECÁÇs!ˇV	ˇ˘Vq:øjaÓ√∆ú%ú≈iÉRXWhEƒ^´yØ4ópŒ–e¡7v‚≈ÙÅ5ciøäFVªdƒúXU≈£˘XﬁjÚdFÏ⁄{∞j‰_‰3¢€6>[ﬂEÁ;˛q|l¬4é`sòÄÑ&ëƒ8“∏^xp£x SPÒ+T¢òGUp#Ä
+B-¢«‡C#™·G9äÒi¥√è≠óœüÌàvÙò∫Å[©téËﬂd8ô6z1k<Ê¯8û8w¸–h7Ïh3FºÎ∂»ólßl˜)ï6›⁄ €ãÚ®?Pûgè)ÔSêÁÂ∏µ¥0Uq‘ﬂToVﬂ¨∏ÈªYv≥¯¶#fè¡G[ïÒbo˚»ØàÍõÃ5–á“<ˆBZº/'s-‚˝ÜÊ íô@ÆY˝ôÌiê{aÈp!>1Ôã ≥lMYV“Ú¥<†D,MÃ^‹vÉ∂û„ÚGr…ÎñeIÒNˇ√`» 
+endstream
+endobj
+16 0 obj
+<</Length 1765/Filter/FlateDecode>>
+stream
+xúÂZKo7æ˚W0è∂ﬁQ)R•kÅ"@oM}KrÒõlY»ﬂ/4zå4;≥ﬁoã:çëå8©è‘H"?Áh@@x÷#lÔA?˚OC«=hƒÿ∏Kç8Ê∆'¬›’Á´›’ÔW_FSÃ¨ƒÇeÌ≈ó˚OWø‹ ¬Õ˛Á!‹Ï⁄πnÓﬂ_@ƒà:?)?9?M~⁄¸tìq2<o7ì•ø∫˛$=§wöªæ›ÔæõÁvv$¢l¥øûÔ”ëŸêÎ«Ï'#V‘\—Óz¥*≥Ùxä˜ÑŸ€<l∑˘xÛ€’Ø7˝RêıäΩ´›¸Zh–t÷ZTºÀÎë◊°[ÉÏ/ÚÜÃı…+Q¢‰˙®Uk¶ç\éHÌ%Ω…S!ıüHJ<Ω∫ñ˚oùØ∞ea3ëÀ≤ÂôH÷! ¡æÌ¬‰Ê11‡ÓÖé. rZ¸€F¶⁄\ú3ÀúÒ≤ùºü˙ï1∞Ãnì.–©>¥ä/f=ŸùÎÙè≤õÍ√~vß’Ûß?f°˘Ó-he·+p0`–√=î&P:;jÜÉÔÄ((Fk∞h•µ⁄9Âç’∂¿H*64≈ﬁƒ˛  ØM˚éºÚ^£Î¥*“B3ç≈ÿ¿‡0Q-B›^˝Òd∑ã≠˚Äª#V]˝[ºw`>"¸	§uºg„=ïØºXM@—_±»•ã•πä°$„}Ìı^Qßû^D„€*P’™˙ÃI—bin«©Kg:™è»∑Wü◊yØ… 9Ìﬂã+¬±`j“÷y«Ä ∞•`4E„¡#‚8√◊ˇC\O”br˛î?≤ˆü‚Nk¨ÇQ6∞6@åäÕ–r<x8 ö[ fÂ"Ï±◊v ∂ÿ›fAT¿a|£Fª°ågMΩ®™<‚›&{ÁπÓl–Ωs◊áx◊]ò∏.∫U§‚˙ TÙçfÌ◊õYso∑ÔQ◊sZdD’ç3¥)xÂt` SÒlNªfhmÅ¨VÏQjuäÉò˜KnóÒE1ﬁyØ≠Ì8]Ó ¿äb≈9„ñf≠òosFs$gÃi√√‹•˚rö¢ÂCÀıBTÓh◊ﬂ›y«„πJóºZ∫˙K“TìßÖDáp£MìTΩ®"¢Ûƒ≈ºég≥àxq;Äù¨ä}óü∑nÔ¶’√ÊM∆€/…0˙’AöW√è«“Ω◊%«}$C~ﬁΩåáı◊¥tLÜñùIòòË)ﬂ„YiÏ)¿¨ì(∑
+Ëc5D)ÉñsÎ˘Pìü˛_èﬂiu„l£< \∑ÏkJÕ◊}ÄS¿ÀÀ_5õêøj6˙´6à†WπWùô∏˘jæ∆9ø<œ€Ëä·î‘;àÈ‘Å∑îŒÆ`"æ{Æ˜ƒ√L!z;Y"7s3™#}äﬂ˜~J*$˘áV#	◊'ë◊áäµNüÚ<^{ŸµMÔ∫jûªD¿ŒB≥,Hπ¨ πVze˛Œ4Zy#kÆ}wæØ ï?ì∫´Ê|r˛Ù¨Fë_ûπñ˝∑plÛêÕ¡I˜„Òœc·r///EÉ¯JÉÑLÉ4ƒC8`A|fAz√g§e<\fA\˚.≥ ¶”∂bZ$± ∫Å‚.»Å[˜’˚ïà¥µz∆b[&µ∫¥µ∫§Z;‘Œi©û_§“£µ÷ÆÍπó∂RØóŒi•.`@\ÀÄ¯”êc° 'º¿öTCeôülH<©K|Øà/`NãBwÇπrÀK0q'ƒÿ +«lMLuï∂&x•Ö50∆Õ¢ùI√|pf‡x–I6)*BßÅÑC öÅE
+
+…íÄàUë ±Z≈#˝l80ï1‹¡)vŒ∏õ§<π–`Üid◊bs!(	lT∞‘a#£"áı(∂	&9•{ÎÜ›œ"b2í§ëâ∫¿¨-≠%ó¢µ§•µíPËô“Z	AÊvdJkIGk%)s;I(ÙL´Fªô€igMΩ≠%ó£µ§•µíP—Oi≠Ô‚˙î÷íé÷JRqΩ£µZÕ‰\Kkµ≥Êﬁ.ng“Z“–Z©]Ÿ)I<πL^I√kI¶ßLÌÎà≠$Ê€•'∂FÕD_I√lç3Êæû⁄±Œ∏Ê»(4¥ö⁄:®:hˆ˜L=y–ˇ¢™•âfÚ˛»ıÖ∆ƒ⁄%+ùã÷8˝Ø&õÍf6OtœåËZ®«Œ+í•]≤Dt˘ÁBt˘ˇ—ÂuÃn˝™2∞≠b7§˚»≥ıÌfÏ0˙ı¸Wo¥≤~-»G∑|©	œÅ$œìîgŒJeeâﬂ;*;ËóÿAßù¬ïÏ‡Oﬂ‘}9sW]¸t *”ˇÛ¥Û•ù?˙ò∆rxMwz^¥[p°˛ﬁÌü‰(_∂CœÊé«ıiJ”ˆΩ‹P{|6‚
+endstream
+endobj
+17 0 obj
+<</Title(develop.contour--long-arc-cut-short-at-its-corners)/Creator(VectorCraft)/Producer(VectorCraft)/ModDate(D:20261126150203Z)/CreationDate(D:20261126150130Z)>>
+endobj
+18 0 obj
+<</Length 1100/Type/Metadata/Subtype/XML>>
+stream
+<?xpacket begin="Ôªø" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="xmp-writer"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:xmp="http://ns.adobe.com/xap/1.0/"  xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"  xmlns:xmpTPg="http://ns.adobe.com/xap/1.0/t/pg/"  xmlns:pdf="http://ns.adobe.com/pdf/1.3/" ><dc:title><rdf:Alt><rdf:li xml:lang="x-default">develop.contour--long-arc-cut-short-at-its-corners</rdf:li></rdf:Alt></dc:title><xmp:CreatorTool>VectorCraft</xmp:CreatorTool><pdf:Producer>VectorCraft</pdf:Producer><xmp:ModifyDate>2026-11-26T15:02:03+00:00</xmp:ModifyDate><xmp:CreateDate>2026-11-26T15:01:30+00:00</xmp:CreateDate><xmpTPg:NPages>1</xmpTPg:NPages><dc:format>application/pdf</dc:format><xmpMM:InstanceID>94nOk1mtMHCVU/Xnx4j6Nw==</xmpMM:InstanceID><xmpMM:DocumentID>94nOk1mtMHCVU/Xnx4j6Nw==</xmpMM:DocumentID><xmpMM:RenditionClass>default</xmpMM:RenditionClass><pdf:PDFVersion>1.7</pdf:PDFVersion></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>
+endstream
+endobj
+19 0 obj
+<</ViewerPreferences<</DisplayDocTitle true>>/Type/Catalog/Pages 1 0 R/Metadata 18 0 R>>
+endobj
+xref
+0 20
+0000000000 65535 f
+0000000016 00000 n
+0000000067 00000 n
+0000000147 00000 n
+0000000284 00000 n
+0000000634 00000 n
+0000000843 00000 n
+0000000983 00000 n
+0000001536 00000 n
+0000001747 00000 n
+0000001890 00000 n
+0000001969 00000 n
+0000002473 00000 n
+0000007805 00000 n
+0000007887 00000 n
+0000008512 00000 n
+0000016533 00000 n
+0000018368 00000 n
+0000018549 00000 n
+0000019726 00000 n
+trailer
+<</Size 20/Root 19 0 R/Info 17 0 R/ID[(94nOk1mtMHCVU/Xnx4j6Nw==)(94nOk1mtMHCVU/Xnx4j6Nw==)]>>
+startxref
+19831
+%%EOF

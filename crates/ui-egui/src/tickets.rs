@@ -106,6 +106,31 @@ pub enum Outcome {
     /// The server refused it, or something else went wrong (why).
     Failed(String),
     Cancelled,
+    /// The same report went to the server within [`REPEAT_WINDOW_MS`]: nothing was sent, and its
+    /// draft's page is offered instead (#21201).
+    AlreadySent(String),
+}
+
+/// How long a report that reached the server is offered again instead of being sent twice.
+pub const REPEAT_WINDOW_MS: f64 = 30.0 * 60.0 * 1000.0;
+
+/// A report that reached the server: what makes it the same report, its draft's page, and when.
+#[derive(Clone, Debug)]
+pub struct Sent {
+    pub same: String,
+    pub url: String,
+    /// When, in [`crate::now_ms`]'s milliseconds.
+    pub at_ms: f64,
+}
+
+/// What makes two reports the same one (#17556, #21201): the title and description typed, the
+/// failed operation and the design's hash. Attachments ticked or not, and when it was made, don't
+/// count.
+pub fn same_report(report: &payload::Outgoing) -> String {
+    let t = &report.ticket;
+    let repro = &t["repro"];
+    let key = serde_json::json!([t["title"], t["body"], repro["failing"], repro["design_sha256"]]);
+    api::sha256_hex(key.to_string().as_bytes())
 }
 
 #[derive(Default)]
@@ -118,6 +143,8 @@ pub struct Tickets {
     next_owner: u64,
     /// The last report sent, for Retry after a failure.
     pub last: Option<payload::Outgoing>,
+    /// The reports that reached the server in this run, newest last.
+    pub sent: Vec<Sent>,
     /// The queue folder; None: no queue (reports made offline wait in memory for this run).
     pub queue_dir: Option<PathBuf>,
     memory_queue: Vec<payload::Outgoing>,
@@ -173,6 +200,15 @@ pub fn send_for(app: &mut SolveApp, report: payload::Outgoing, owner: u64) {
     }
     app.tickets.owner = owner;
     app.tickets.outcome = None;
+    let same = same_report(&report);
+    let now = crate::now_ms();
+    app.tickets.sent.retain(|s| (now - s.at_ms).abs() < REPEAT_WINDOW_MS);
+    if let Some(earlier) = app.tickets.sent.iter().rev().find(|s| s.same == same) {
+        let url = earlier.url.clone();
+        log(app, "the same report was sent a few minutes ago: offered again, nothing sent");
+        app.tickets.outcome = Some(Outcome::AlreadySent(url));
+        return;
+    }
     start(app, report, None);
 }
 
@@ -285,6 +321,7 @@ fn finish(app: &mut SolveApp, s: Sending) {
     match s.draft {
         Some(draft) => {
             log(app, "opened in the browser");
+            app.tickets.sent.push(Sent { same: same_report(&s.report), url: draft.url.clone(), at_ms: crate::now_ms() });
             app.tickets.open_url = Some(draft.url.clone());
             app.tickets.outcome = Some(Outcome::Opened(draft.url));
         }

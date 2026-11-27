@@ -1076,6 +1076,8 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_more: "t:vmore",
     switcher: "t:switcher",
     group: "t:group:",
+    view_collapse: "t:vcollapse",
+    file_drop: "t:file_drop",
 };
 
 const GROUP_MENU: [TabMenuRow<'static>; 3] = [
@@ -1185,6 +1187,8 @@ struct TabsRig {
     /// The first two designs are in a tab group named "Parts" (or with no name, `unnamed`).
     grouped: std::cell::Cell<bool>,
     unnamed: std::cell::Cell<bool>,
+    /// The first design's sub-tabs are folded into its tab.
+    collapsed: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1218,6 +1222,7 @@ impl TabsRig {
             focused: std::cell::Cell::new(false),
             grouped: std::cell::Cell::new(false),
             unnamed: std::cell::Cell::new(false),
+            collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
         rig
@@ -1246,6 +1251,7 @@ impl TabsRig {
             views: &[],
             group: None,
             extra_menu: &[],
+            collapsed: false,
         };
         let grouped = self.grouped.get();
         fn in_group(grouped: bool, doc: DocTab<'_>) -> DocTab<'_> {
@@ -1264,7 +1270,7 @@ impl TabsRig {
         } else {
             &[]
         };
-        let first = in_group(grouped, DocTab { views, ..tab(self.name) });
+        let first = in_group(grouped, DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) });
         let groups = [GroupLabel {
             name: if self.unnamed.get() { "" } else { "Parts" },
             fill: egui::Color32::RED,
@@ -1297,6 +1303,8 @@ impl TabsRig {
                 new_view: "Open another view",
                 more: "{n} more",
                 switch_view: "Switch view",
+                collapse_views: "Hide views",
+                expand_views: "Show views",
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
@@ -1357,6 +1365,20 @@ fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
         let (_, dragged) = rig.frame_output(vec![egui::Event::PointerMoved(at + vec2(20.0, 0.0))]);
         assert_eq!(dragged.platform_output.cursor_icon, drag_cursor(true));
         rig.frame(vec![event(false)]);
+    }
+}
+
+/// The × on a design tab is a button, not part of the tab's drag handle: over it the pointer is the
+/// plain arrow, on the shown design's tab and on the others alike.
+#[test]
+fn a_design_tabs_close_button_shows_the_arrow_not_the_drag_hand() {
+    for close in ["t:close:0", "t:close:1"] {
+        let rig = TabsRig::new();
+        let at = rig.at(close);
+        for _ in 0..3 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default, "{close}");
+        }
     }
 }
 
@@ -1747,6 +1769,70 @@ fn a_grouped_design_shows_its_sub_tabs_after_the_label() {
         rig.frame(Vec::new());
         assert!(solidcraft_ui_registry::rect_of("t:menu:gblue").is_some(), "clear={clear}: the label's menu opens");
     }
+}
+
+/// A design with its sub-tabs folded keeps its place in its group: the group's label comes first,
+/// then the folded design with its +, its chevron and its ×, all inside its own tab, then the
+/// group's next design; the group's band runs behind all of them.
+#[test]
+fn a_folded_design_in_a_group_lays_out_after_its_label() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.grouped.set(true);
+        rig.collapsed.set(true);
+        rig.frame(Vec::new());
+        let (label, design, next) = (rect("t:group:0"), rect("t:tab:0"), rect("t:tab:1"));
+        assert!(solidcraft_ui_registry::rect_of("t:view:0").is_none(), "clear={clear}: folded, no sub-tabs");
+        assert!(label.right() <= design.left(), "clear={clear}: label {label:?} before the design {design:?}");
+        assert!(design.right() <= next.left(), "clear={clear}: the design {design:?} before the group's next design {next:?}");
+        for part in ["t:vnew", "t:vcollapse", "t:close:0"] {
+            let r = rect(part);
+            assert!(r.left() >= label.right() && r.right() <= next.left(), "clear={clear}: {part} {r:?} in the folded design's tab");
+        }
+        let band = rect("t:group:0:band");
+        assert!(band.contains_rect(label) && band.contains_rect(design) && band.contains_rect(next), "clear={clear}: band {band:?} around the group");
+    }
+}
+
+/// The chevron right after the selected design's + folds its sub-tabs into its tab, in both
+/// sub-tab styles: folded, the tab is a plain tab with its count, its + and the chevron (now
+/// between the + and ×), which shows them again. A pop-out's strip has no chevron.
+#[test]
+fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.frame(Vec::new());
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("the + is drawn");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("clear={clear}: the chevron is drawn");
+        assert!(chevron.left() >= plus.right() - 0.5, "clear={clear}: the chevron is right after the +");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(true)]);
+        rig.collapsed.set(true);
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:view:0").is_none(), "clear={clear}: folded, no sub-tabs");
+        let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("folded, the chevron stays to show them again");
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("and its +");
+        let close = solidcraft_ui_registry::rect_of("t:close:0").expect("and its ×");
+        assert!(tab.contains_rect(chevron) && plus.right() <= chevron.left() + 0.5 && chevron.right() <= close.left() + 0.5, "between the + and ×");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(false)]);
+    }
+    // In a narrow strip the folded tab keeps the room for its +, chevron and ×.
+    let mut rig = TabsRig::with(Some(true));
+    rig.room = Some(260.0);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+    for handle in ["t:vnew", "t:vcollapse", "t:close:0"] {
+        let rect = solidcraft_ui_registry::rect_of(handle).unwrap_or_else(|| panic!("{handle} is drawn"));
+        assert!(tab.contains_rect(rect), "{handle} fits in the folded tab {tab:?}: {rect:?}");
+    }
+    let mut rig = TabsRig::with(Some(true));
+    rig.pop_out = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "a pop-out's strip has no chevron");
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.

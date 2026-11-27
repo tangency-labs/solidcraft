@@ -64,6 +64,16 @@ fn type_into(h: &mut Harness, key: &str, text: &str) {
 }
 
 fn ok(h: &mut Harness) {
+    // The preview computes off the window thread and the window's height changes while it says
+    // so: wait for it, as a person does, so the click lands where OK now is.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(2);
     h.step(&json!({"click": {"handle": "dialog:OK"}})).unwrap();
     h.frames(2);
     assert!(h.app.dialog.is_none(), "OK closes the dialog: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -424,7 +434,10 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
         Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
             assert!(*reversed);
-            assert!(axis.0.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9);
+            assert!(
+                solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9),
+                "{axis:?}"
+            );
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));
@@ -627,13 +640,13 @@ fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
-        ("solid.extrude", &["10", "10", "", "", "2", "1"]),
+        ("solid.extrude", &["10", "10", "", "", "", "2", "1"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
-        ("solid.emboss", &["1"]),
+        ("solid.emboss", &["1", "", ""]),
         ("solid.offset_face", &["2"]),
         ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
         ("solid.pattern.path", &["20", ""]),
@@ -1314,6 +1327,151 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
         h.app.preferences.snap_points = false;
         assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
     }
+}
+
+/// Whether the open dialog's Body Name row can be typed in (#20776): it is always there for a
+/// feature that can make a body, greyed out unless the operation is New Body.
+fn shows_body_name(h: &Harness) -> bool {
+    let label = solidcraft_ui_text::tr("ui.body_name");
+    h.output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+}
+
+/// The `body_name` the open dialog's OK sends, if any.
+fn sent_body_name(h: &Harness) -> Option<String> {
+    // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+    let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+    let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+    params.get("body_name").and_then(Value::as_str).map(str::to_string)
+}
+
+#[test]
+fn the_body_name_row_shows_for_new_body_only_and_a_typed_name_names_the_body() {
+    for (cmd, _) in PRIMITIVES {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(shows_body_name(&h), "{cmd}: New Body shows Body Name");
+        assert_eq!(sent_body_name(&h), None, "{cmd}: empty sends no body_name");
+        for operation in [1, 2] {
+            if let Some(Kind::Primitive { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+                *op = operation;
+            }
+            h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Ignored"));
+            h.frames(2);
+            assert!(!shows_body_name(&h), "{cmd}: operation {operation} greys Body Name out");
+            assert_eq!(sent_body_name(&h), None, "{cmd}: operation {operation} sends no body_name");
+        }
+        if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 0;
+        }
+        h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("  Lid "));
+        h.frames(2);
+        assert!(shows_body_name(&h), "{cmd}: back to New Body shows it again");
+        assert_eq!(sent_body_name(&h).as_deref(), Some("Lid"), "{cmd}: a typed name is sent");
+    }
+    let mut h = design("mm");
+    h.app.start("solid.box");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Lid"));
+    h.frames(2);
+    ok(&mut h);
+    assert!(h.app.session.world_state().unwrap().body("Lid").is_some(), "the box's body is named Lid");
+}
+
+#[test]
+fn editing_a_primitive_shows_the_name_its_body_was_given() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Frame"})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(shows_body_name(&h));
+    assert_eq!(sent_body_name(&h).as_deref(), Some("Frame"));
+}
+
+/// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
+/// or height and revolutions; the command gets exactly the chosen pair. A height is the centre
+/// line's or, chosen beside it, the coil's end to end (#20736).
+#[test]
+fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.into_iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p).unwrap()
+    };
+    let shows = |h: &Harness, label: &str| {
+        let label = solidcraft_ui_text::tr(label);
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+    };
+    // Untouched: today's pair.
+    let keys = |p: &serde_json::Value| {
+        let mut keys: Vec<_> = p.as_object().unwrap().keys().filter(|k| matches!(k.as_str(), "height" | "pitch" | "revolutions")).cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.coil_path_height"));
+    // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "pitch"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
+    assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
+    // Back to the default pair: no height is sent.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    ok(&mut h);
+    let by_height = volume(&mut h.app.session);
+    // 20 high at pitch 8 is 2.5 turns.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 2.5, "pitch": 8, "section_size": 3, "operation": "new"})).unwrap();
+    let expected = volume(&mut reference.app.session);
+    assert!((by_height - expected).abs() <= expected * 1e-6, "{by_height} vs {expected}");
+    // Height and revolutions.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "revolutions"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
+    ok(&mut h);
+    // 20 high in 4 turns is a pitch of 5.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
+    let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
+    assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+    // #20736: the height measured end to end. The choice is sent only when it is Overall, and the
+    // coil then reaches 20 from end to end: its centre line is 17, a 3 mm section short.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    assert!(sent(&h).get("height_measure").is_none(), "the centre line is the default");
+    choose(&mut h, "ui.coil_height_measure", "ui.coil_overall");
+    assert_eq!(sent(&h)["height_measure"], "overall");
+    assert!(shows(&h, "ui.coil_overall_height") && !shows(&h, "ui.coil_path_height"));
+    ok(&mut h);
+    let m = h.app.run("inspect.measure", json!({})).unwrap();
+    let span = m["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(f64::NAN) - m["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((span - 20.0).abs() < 0.02, "{span}");
 }
 
 /// Combine's offset and rounding radius are lengths in the design's unit, as every other
