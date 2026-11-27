@@ -191,10 +191,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 act = Some((e.clone(), false));
                             }
                         });
-                        let file = e.path.clone().unwrap_or_else(|| solidcraft_ui_text::tr("recovery.never_saved").to_string());
+                        let file = e.path.as_deref().map_or_else(|| solidcraft_ui_text::tr("recovery.never_saved"), crate::display_user_path);
                         let detail = solidcraft_ui_text::format(
                             "recovery.detail",
-                            &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
+                            &[("file", file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
                         );
                         ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
                     }

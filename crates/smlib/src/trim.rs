@@ -40,6 +40,20 @@ impl Brep {
         r
     }
 
+    /// Copies of `self`, one for each connected region the complete bounded cutting `sheet` cuts
+    /// it into, as [`Brep::trim_sheet`] cuts it: the cutter's faces as they are, never extended.
+    /// Each copy keeps one region and drops the others. Together they are the whole of `self`.
+    /// The operands and their provenance are preserved. A cutter that separates no region is
+    /// [`crate::Error::Refused`] with `CurveDoesNotCut`.
+    pub fn split_sheet(&self, sheet: &Brep) -> Result<Vec<Brep>> {
+        let r = core::call::ops_as("split_sheet", &[("brep", self.core()), ("sheet", sheet.core())], trim_refusal, || {
+            solidcore_ops::trim::split_sheet(self.core(), sheet.core())
+        })
+        .map(|parts| parts.into_iter().map(Brep::made_core).collect::<Vec<_>>());
+        trace::call("split_sheet", &[self, sheet], &r, |o| o.iter().map(|b| b.id).collect(), || json!({}));
+        r
+    }
+
     /// The face nearest `point` (within `tolerance`) restored towards its surface: the holes
     /// `holes` names taken away and, with `outer`, its outer boundary back on the surface's
     /// parameter box (a free-form surface's own, an analytic one's the box of the face's span; one

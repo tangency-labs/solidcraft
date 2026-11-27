@@ -1293,24 +1293,24 @@ fn loft_blend(
             Piece::Points(pts) => frames.push(point_frames(pts, leave, stations)?),
         }
     }
-    // A 3D sketch chain runs the way its curves are listed and joined, not the way a sketch
-    // section of the plain loft is drawn, so in a loft through one each open section (a body's
-    // edge chain too) is turned to run the way the section before it does, as the plain loft
-    // turns its open sections; a closed one would need its winding and seam matched, as the
-    // plain loft does.
-    if sections.iter().any(|s| section_in_space(st, s)) {
-        let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
-        let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
-        let turns = solidcraft_kernel::sections::open_section_turns(&ends).map_err(|e| match e {
-            solidcraft_kernel::sections::TurnRefusal::Closed(_) => {
-                DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into())
-            }
-            e => DocError::Invalid(e.to_string()),
-        })?;
-        for (these, turn) in frames.iter_mut().zip(turns) {
-            if turn {
-                these.reverse();
-            }
+    // A body's edge chain and a 3D sketch chain run the way their edges or curves are listed
+    // and joined, not the way a planar section is drawn, so each open section is turned to run
+    // the way the section before it does, as the plain loft turns its open sections. A closed
+    // one would need its winding and seam matched, as the plain loft does: refused in a loft
+    // through 3D sketch curves, and left as it is otherwise.
+    let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
+    let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
+    let turns = match solidcraft_kernel::sections::open_section_turns(&ends) {
+        Ok(turns) => turns,
+        Err(solidcraft_kernel::sections::TurnRefusal::Closed(_)) if !sections.iter().any(|s| section_in_space(st, s)) => Vec::new(),
+        Err(solidcraft_kernel::sections::TurnRefusal::Closed(_)) => {
+            return Err(DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into()));
+        }
+        Err(e) => return Err(DocError::Invalid(e.to_string())),
+    };
+    for (these, turn) in frames.iter_mut().zip(turns) {
+        if turn {
+            these.reverse();
         }
     }
     let body = kernel::loft_blend(&frames, continuity, crown, stations)?;

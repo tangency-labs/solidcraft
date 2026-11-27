@@ -536,7 +536,6 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
-    #[cfg(any(test, feature = "test-support"))]
     pub fn set_wide_grab(&mut self, wide: bool) {
         let (docked_grab_width, floating_grab_reach) =
             if wide { (super::layout::DOCKED_GRAB_WIDTH, super::layout::FLOATING_GRAB_REACH) } else { (0.0, 0.0) };
