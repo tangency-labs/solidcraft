@@ -120,3 +120,91 @@ fn a_picture_fits_its_box_with_its_proportions() {
     assert_eq!(picture.fit(f64::NAN, 512.0), None);
     assert_eq!(picture.fit(-5.0, 512.0), None);
 }
+
+/// A container's bytes, with an archive comment when `comment` is not empty.
+fn container_bytes(parts: &[(&str, &[u8])], comment: &str) -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, bytes) in parts {
+        writer.start_file(*name, SimpleFileOptions::default()).unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+    if !comment.is_empty() {
+        writer.set_comment(comment).unwrap();
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+/// Where the end-of-central-directory record starts.
+fn record(bytes: &[u8]) -> usize {
+    bytes.windows(4).rposition(|w| w == b"PK\x05\x06").unwrap()
+}
+
+fn fits(bytes: &[u8]) -> bool {
+    directory_fits(&mut std::io::Cursor::new(bytes), bytes.len() as u64).is_some()
+}
+
+fn good() -> Vec<u8> {
+    container_bytes(&[("container.json", CONTAINER), ("document.json", DOCUMENT), ("cache/thumbnail.png", &png(240, 150))], "")
+}
+
+/// `bytes` with the record's little-endian field at `offset` (from the record's start) set.
+fn with_field(bytes: &[u8], offset: usize, value: &[u8]) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    let at = record(&out) + offset;
+    out[at..at + value.len()].copy_from_slice(value);
+    out
+}
+
+#[test]
+fn written_containers_pass_the_directory_checks() {
+    assert!(fits(&good()));
+    let commented =
+        container_bytes(&[("container.json", CONTAINER), ("document.json", DOCUMENT), ("cache/thumbnail.png", &png(240, 150))], "a comment");
+    assert!(fits(&commented));
+}
+
+#[test]
+fn a_directory_claiming_too_many_entries_is_refused() {
+    let bytes = good();
+    assert!(!fits(&with_field(&with_field(&bytes, 8, &10_001_u16.to_le_bytes()), 10, &10_001_u16.to_le_bytes())));
+    assert!(!fits(&with_field(&with_field(&bytes, 8, &0xFFFF_u16.to_le_bytes()), 10, &0xFFFF_u16.to_le_bytes())));
+    assert!(!fits(&with_field(&bytes, 10, &4_u16.to_le_bytes())));
+}
+
+#[test]
+fn a_directory_elsewhere_or_too_large_is_refused() {
+    let bytes = good();
+    assert!(!fits(&with_field(&bytes, 4, &1_u16.to_le_bytes())));
+    assert!(!fits(&with_field(&bytes, 6, &1_u16.to_le_bytes())));
+    assert!(!fits(&with_field(&bytes, 12, &((8_u32 << 20) + 1).to_le_bytes())));
+    assert!(!fits(&with_field(&bytes, 16, &0xFFFF_FFFF_u32.to_le_bytes())));
+    let own_position = record(&bytes) as u32;
+    assert!(!fits(&with_field(&bytes, 16, &own_position.to_le_bytes())));
+}
+
+#[test]
+fn a_zip64_locator_is_refused() {
+    let bytes = good();
+    let at = record(&bytes);
+    let mut with_locator = bytes[..at].to_vec();
+    with_locator.extend_from_slice(b"PK\x06\x07");
+    with_locator.extend_from_slice(&[0; 16]);
+    with_locator.extend_from_slice(&bytes[at..]);
+    assert!(!fits(&with_locator));
+}
+
+#[test]
+fn a_file_without_a_whole_record_is_refused() {
+    assert!(!fits(&good()[..21]));
+    assert!(!fits(&with_field(&good(), 20, &1_u16.to_le_bytes())));
+}
+
+#[test]
+fn the_path_reader_shares_the_directory_checks() {
+    let bytes = with_field(&with_field(&good(), 8, &0xFFFF_u16.to_le_bytes()), 10, &0xFFFF_u16.to_le_bytes());
+    let path = std::env::temp_dir().join(format!("solidcraft-design-preview-directory-{}.sc", std::process::id()));
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(picture(&path), None);
+    assert_eq!(model(&path), None);
+    let _ = std::fs::remove_file(&path);
+}

@@ -11,4 +11,6 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The picture key's SHA-256 digests (keyed.rs; already in the tree).
+sha2 = { workspace = true }
 zip = { workspace = true }
