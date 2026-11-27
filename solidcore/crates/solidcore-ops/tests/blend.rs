@@ -3507,6 +3507,66 @@ fn the_tangent_chain_runs_round_the_slot() {
     assert_eq!(chain(&[], 0.01), Err(Error::Argument));
 }
 
+/// A plate with a through slot 1.8 wide: its small end arc (radius 0.9) and the straight
+/// next to it, both on the top face, take a 1 mm chamfer together. SolidCraft #22092: the
+/// chamfer is wider than the slot is half-wide and the bands meet on the arc's tangent
+/// seams, which refused with "Fillet Corner Error: Unable to Compute Geometry"; the
+/// straight edge alone and the pair at 0.5 mm built. The slot is a run 8 long with a
+/// half-cylinder end, so the top rim is a straight 8 long and a half circle of radius 0.9
+/// that meet on the arc's tangent seams.
+fn slotted_plate() -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let run = make_box([-0.9, 0.0, 0.0], [1.8, 8.0, 12.0]).unwrap();
+    let end = make_cylinder([0.0, 8.0, 0.0], 0.9, 12.0).unwrap();
+    let slot = boolean(run, end, BooleanOp::Union).unwrap().unwrap();
+    boolean(plate, slot, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+fn slotted_plate_top_rim(body: &Body) -> [usize; 2] {
+    [
+        edge_at(body, [0.9, 4.0, 10.0]),
+        edge_at(body, [0.0, 8.9, 10.0]),
+    ]
+}
+
+/// The pair builds, valid, one solid, nothing dropped, at 1 mm — the reported refusal —
+/// and at 0.5 mm; the straight edge alone removes its bands' exact volume: a 45° chamfer
+/// of distance d takes a d²/2 section along a straight rim, here 8 d²/2.
+#[test]
+fn a_chamfer_wider_than_half_the_slot_builds_on_the_arc_and_its_straight() {
+    all_fixes();
+    let before = volume(&slotted_plate());
+    assert!(rel(before, 4000.0 - (1.8 * 8.0 + PI * 0.81 / 2.0) * 10.0) < 1e-9);
+    for (edges, size) in [(&[0][..], 1.0), (&[0, 1][..], 0.5), (&[0, 1][..], 1.0)] {
+        let body = slotted_plate();
+        let rim = slotted_plate_top_rim(&body);
+        let picked: Vec<usize> = edges.iter().map(|&i| rim[i]).collect();
+        let made = blend(
+            &body,
+            Blend::Chamfer,
+            &picked,
+            &[size],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2][..edges.len()]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        let after = volume(&body);
+        assert!(after < before, "{edges:?} at {size}: nothing removed");
+        if edges.len() == 1 {
+            assert!(
+                rel(after, before - 0.5 * size * size * 8.0) < 1e-9,
+                "{edges:?} at {size}"
+            );
+        }
+    }
+}
+
 /// The slot's seam, where its straight side runs into its round end, has no blend: its faces
 /// meet tangentially all along it. Refused with its index, the body as it came in.
 #[test]
@@ -7347,6 +7407,108 @@ fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
         let case =
             format!("face square to axis {axis}, plate on {side}, sphere turned {turn}, {op:?}");
         round_sphere_rim(&case, r, f, axis, side, &[turn_about(2, turn)], op);
+    }
+}
+
+/// tangency-labs/solidcraft#21941: one edge of a sphere's rim rounded alone, where the sphere
+/// is centred on a plate's face square to x or y, as a nub or a socket. The rim is split at the
+/// poles and where it crosses the sphere's seam, so each edge is a quarter or a half of it, and
+/// its round ends on the edges that run on smoothly from it, unrounded. Where the rim's edge
+/// ends on the seam, the cap's edge on the sphere ran the long way round the cap's circle, to
+/// the rim's point opposite, so the strip the round takes off the sphere stayed open and the
+/// round failed ("the trim leaks"); on the mirrored part, whose edge ends away from the seam,
+/// it built. Every edge's round now builds a valid solid and adds or takes off its share of the
+/// whole rim's ring, the ring's closed form times the edge's share of the circle (counted at
+/// every half degree, none on a split), with the command's turn (`Turn::Auto`). The rim of
+/// #21941's part (face square to y, plate on its positive side, a nub) must be split at the
+/// seam, so that the test holds an edge ending there.
+#[test]
+fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let (r, f) = (0.975, 0.3);
+    let ring = sphere_on_plane_round(r, f);
+    for (axis, side, op) in [
+        (1, 1.0, BooleanOp::Union),
+        (1, -1.0, BooleanOp::Union),
+        (0, 1.0, BooleanOp::Union),
+        (0, -1.0, BooleanOp::Union),
+        (1, 1.0, BooleanOp::Subtract),
+        (1, -1.0, BooleanOp::Subtract),
+        (0, 1.0, BooleanOp::Subtract),
+        (0, -1.0, BooleanOp::Subtract),
+    ] {
+        let b = sphere_on_plate(r, axis, side, &[], op);
+        // each rim edge with the number of half-degree samples of the circle on it
+        let (k, brep) = kernel_copy(&b);
+        let all = brep.edge_list();
+        let (u, v) = [(1, 2), (0, 2), (0, 1)][axis];
+        let mut shares: Vec<(usize, u32)> = Vec::new();
+        for i in 0..360_u32 {
+            let a = (0.5 + f64::from(i)).to_radians();
+            let mut p = [0.0; 3];
+            p[u] = r * a.cos();
+            p[v] = r * a.sin();
+            let q = Vec3::new(p[0], p[1], p[2]);
+            let on: Vec<usize> = (0..all.len())
+                .filter(|&e| {
+                    edge_closest_point(&k, &brep, all[e], q)
+                        .unwrap()
+                        .closest
+                        .distance
+                        < 1e-9 * r
+                })
+                .collect();
+            assert_eq!(on.len(), 1, "axis {axis}, side {side}, {op:?}: {a} rad");
+            match shares.iter_mut().find(|(e, _)| *e == on[0]) {
+                Some((_, n)) => *n += 1,
+                None => shares.push((on[0], 1)),
+            }
+        }
+        assert!(
+            shares.len() >= 2,
+            "axis {axis}, side {side}, {op:?}: {shares:?}"
+        );
+        // #21941's part: the rim is split at the poles and at the seam, (r, 0, 0), so two of
+        // its edges end on the seam
+        if (axis, side, op) == (1, 1.0, BooleanOp::Union) {
+            assert_eq!(
+                shares.len(),
+                3,
+                "the rim is not split at the seam: {shares:?}"
+            );
+        }
+        for (edge, n) in shares {
+            let case =
+                format!("axis {axis}, plate on {side}, {op:?}, rim edge {edge} ({n} of 360)");
+            let b = sphere_on_plate(r, axis, side, &[], op);
+            let before = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+            blend_with(
+                &b,
+                Blend::Round,
+                &[edge],
+                &[f],
+                &[],
+                Corners::Filled,
+                BlendOptions {
+                    turn: Turn::Auto,
+                    ..BlendOptions::default()
+                },
+            )
+            .unwrap_or_else(|e| panic!("{case}: the round does not build: {e:?}"));
+            assert!(b.is_manifold_solid().unwrap(), "{case}");
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{case}: {report}");
+            let after = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+            let sign = if op == BooleanOp::Union { 1.0 } else { -1.0 };
+            let want = sign * ring * f64::from(n) / 360.0;
+            let bound = RIM_VOLUME_ACCURACY * (before.abs() + after.abs()) + 1e-14 * want.abs();
+            assert!(
+                ((after - before) - want).abs() <= bound,
+                "{case}: the volume changed by {}, not {want}",
+                after - before
+            );
+        }
     }
 }
 

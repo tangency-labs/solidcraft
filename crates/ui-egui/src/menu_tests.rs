@@ -406,11 +406,14 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     let kept = body(&app);
     let t = Target::Body { name: kept.clone() };
     // #3504: each entry shows its key.
-    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == "Ctrl+I"));
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+I")));
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Exit Isolation");
+    assert!(
+        after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")),
+        "same menu offers Exit Isolation"
+    );
     // On what is already all that shows, Isolate would change nothing: Exit Isolation alone.
     assert!(!after.iter().any(|i| i.label == "Isolate"), "only Exit Isolation on the isolated body");
     let other = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).unwrap();
