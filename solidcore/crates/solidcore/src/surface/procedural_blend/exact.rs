@@ -36,6 +36,7 @@ use crate::blend::fillet_exact::{
 };
 use crate::blend::fillet_section::series::Trunc;
 use crate::blend::fillet_section::station::gn_solve_station;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -258,7 +259,13 @@ pub(crate) fn cylinder_support(
     let d = pb.evaluate_definition(k, s, 0.5, 1, 1)?;
     let partial = |i: usize, j: usize| {
         d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
-            SolidError::surface_failed(OP_CIRCLE, "the circular section has no requested partial")
+            SolidError::surface(
+                OP_CIRCLE,
+                SurfaceFailure::Defect {
+                    why: "the circular section's evaluation has no requested partial: \
+                          `evaluate_definition` returns every partial up to the order asked",
+                },
+            )
         })
     };
     let radial = partial(0, 0)? - inputs.centre;
