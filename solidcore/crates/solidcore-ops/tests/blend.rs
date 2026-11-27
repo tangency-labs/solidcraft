@@ -1317,6 +1317,93 @@ fn a_block_s_rounds_between_planes_take_their_closed_forms() {
 }
 
 #[test]
+fn rounds_meet_a_chord_round_at_a_chamfered_notch() {
+    all_fixes();
+    let b = built(|k| {
+        let stock = create_box(k, Vec3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 20.0)?;
+        let notch = create_box(k, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?;
+        boolean_difference(k, stock, notch)
+    });
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[edge_at(&b, [-5.0, 10.0, 0.0])],
+        &[10.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    blend(
+        &b,
+        Blend::Chord,
+        &[edge_at(&b, [0.0, 0.0, 5.0])],
+        &[6.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let r = 6.0 / std::f64::consts::SQRT_2;
+    // The cylinder meets the chamfer y=z. Its 45-degree point has
+    // x=y=z=R-3, since (x-R)^2 + (y-R)^2 = R^2 = 18.
+    let edges = [
+        edge_at(&b, [0.0, (10.0 + r) / 2.0, (10.0 + r) / 2.0]),
+        edge_at(&b, [r - 3.0, r - 3.0, r - 3.0]),
+        edge_at(&b, [(10.0 + r) / 2.0, 0.0, 0.0]),
+        edge_at(&b, [(-10.0 + r) / 2.0, 0.0, 0.0]),
+    ];
+    let (before_volume, before_faces) = (volume(&b), b.counts().unwrap()[0]);
+    let made = blend(&b, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
+    assert_eq!(made.dropped, vec![false; edges.len()]);
+    assert!(made.holes.is_empty());
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // the four rounds and the corner's two faces are new, and the body changed by about the
+    // rounds' slivers: (1 - pi/4) r^2 a length, under 4 of them at most 12 long
+    assert!(
+        b.counts().unwrap()[0] >= before_faces + 6,
+        "{before_faces} faces before"
+    );
+    let change = (volume(&b) - before_volume).abs();
+    assert!(
+        change > 1e-3 && change < 4.0 * (1.0 - PI / 4.0) * 4.0 * 12.0,
+        "{change}"
+    );
+    // the corner's faces, as the kernel reads the body back: the support torus of the
+    // 2 mm round on the floor and the chord round's cylinder (R = 6/sqrt 2: major radius
+    // R -+ 2, the ball beyond or within the cylinder), and the sphere patch on the ball
+    // that touches floor, chamfer and cylinder (radius 2)
+    let (_, made) = kernel_copy(&b);
+    let (mut tori, mut balls) = (0, 0);
+    for &f in made.face_list() {
+        let surface = made.face(f).unwrap().surface.as_ref().unwrap();
+        match surface.kind() {
+            SurfaceKind::Torus(t) if (t.minor_radius() - 2.0).abs() < 1e-6 => {
+                assert!(
+                    [r - 2.0, r + 2.0]
+                        .iter()
+                        .any(|major| (t.major_radius() - major).abs() < 1e-6),
+                    "a support torus of major radius {}",
+                    t.major_radius()
+                );
+                tori += 1;
+            }
+            SurfaceKind::BallPatch(bp) if (bp.radius() - 2.0).abs() < 1e-6 => {
+                assert!(BallPatch::is_on_sphere(
+                    bp.net(),
+                    bp.centre(),
+                    bp.radius(),
+                    ON_SPHERE_REL_TOL
+                )
+                .unwrap());
+                balls += 1;
+            }
+            _ => {}
+        }
+    }
+    assert!(tori >= 1, "no support torus");
+    assert!(balls >= 1, "no sphere patch");
+}
+
+#[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();
     let edges = |b: &Body| {
@@ -2065,6 +2152,81 @@ fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
     // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
     // floor, and eight rounds
     assert_eq!(b.counts().unwrap()[0], 18);
+}
+
+/// tangency-labs/solidcraft#22796 (stress corpus S3514, S2598): the notched block of
+/// [`auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room`] with a 2 radius blind hole
+/// 10 deep at x = -26, y = 0 (2 of wall to the -X side), the top's outer loop rounded r 2.8. The
+/// round is past the notch's 2.4 side edges and into the hole at once; each alone builds. The
+/// hole is 20 from the notch, so it changes the mitred volume of that test only by the hole,
+/// less the part of it the -X round already takes off: in the round's section at x in
+/// [-28, -27.2] the round takes off z from 22.2 + sqrt(r^2 - (x + 27.2)^2) to 25, across the
+/// hole's chord 2 sqrt(4 - (x + 26)^2).
+#[test]
+fn a_round_past_a_short_notch_edge_and_into_a_hole_builds() {
+    all_fixes();
+    let r: f64 = 2.8;
+    let mitred =
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+    let taken = |x: f64| {
+        let c = 4.0 - (x + 26.0) * (x + 26.0);
+        let s = r * r - (x + 30.0 - r) * (x + 30.0 - r);
+        2.0 * c.max(0.0).sqrt() * (r - s.max(0.0).sqrt())
+    };
+    // composite Simpson's rule, the integrand smooth inside (-28, -27.2)
+    let (a, z, n) = (-28.0, -30.0 + r, 20_000);
+    let h = (z - a) / f64::from(n);
+    let sum: f64 = (0..=n)
+        .map(|i| {
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * taken(a + h * f64::from(i))
+        })
+        .sum();
+    let want = mitred - 40.0 * PI + sum * h / 3.0;
+    for turn in [Turn::Mitre, Turn::Auto] {
+        let b = built(|k| {
+            let block = create_box(k, Vec3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0)?;
+            let hole = create_cylinder(k, Vec3::new(-26.0, 0.0, 15.0), 2.0, 10.0)?;
+            let block = boolean_difference(k, block, hole)?;
+            let notch = create_box(k, Vec3::new(-2.4, 17.6, 12.5), 4.8, 4.8, 12.5)?;
+            boolean_difference(k, block, notch)
+        });
+        let edges: Vec<usize> = [
+            [0.0, -20.0, 25.0],
+            [30.0, 0.0, 25.0],
+            [-30.0, 0.0, 25.0],
+            [-15.0, 20.0, 25.0],
+            [15.0, 20.0, 25.0],
+            [0.0, 17.6, 25.0],
+            [-2.4, 18.8, 25.0],
+            [2.4, 18.8, 25.0],
+        ]
+        .into_iter()
+        .map(|p| edge_at(&b, p))
+        .collect();
+        blend_with(
+            &b,
+            Blend::Round,
+            &edges,
+            &[r],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, want) < 1e-9, "{turn:?}: {v} against {want}");
+    }
 }
 
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it

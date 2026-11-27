@@ -4717,6 +4717,9 @@ impl SolveApp {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // The orbit's wrap setting covers label drags too; a synthetic drag (control channel,
+        // scripts) has no real cursor to move.
+        ui_kit::set_scrub_cursor_wrap(ctx, self.preferences.orbit_cursor_wrap && !self.synthetic_press);
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.

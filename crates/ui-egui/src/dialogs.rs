@@ -9333,9 +9333,11 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
         "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
-        "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
-        }
+        "construct.axis.normal_to_face" => (
+            "construct.axis.normal_to_face",
+            "AXIS PERPENDICULAR TO FACE OR PLANE",
+            &[("Face or plane", FACES | PLANES, "face", false), ("Point", POINT, "point", false)],
+        ),
         "construct.axis.two_planes" => {
             ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
