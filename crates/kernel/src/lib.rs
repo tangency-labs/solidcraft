@@ -48,6 +48,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;

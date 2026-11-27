@@ -1,12 +1,13 @@
 //! The router's planar helpers ([`solidcraft_kernel_api::Planar`]), as `solidcraft_kernel::planar`:
 //! the arcs a sketch tool draws from its picks, the side of a sketch curve a region lies on, the turn
-//! between two path directions, a frame section's corners, paper strokes, where a board's drilled
-//! hole reaches, and a sketch plane's normal and points as a sketch solver holds them.
+//! between two path directions, a frame section's corners, paper strokes and the runs a round-joined
+//! line is stroked in, where a board's drilled hole reaches, and a sketch plane's normal and points
+//! as a sketch solver holds them.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 use solidcraft_kernel_api::{OpKind, Planar};
 
-pub use solidcraft_kernel_api::planar::PlanarRefused;
+pub use solidcraft_kernel_api::planar::{PlanarRefused, StrokeRun};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -169,6 +170,17 @@ pub fn straight_length(a: [f64; 2], b: [f64; 2]) -> f64 {
     }
 }
 
+/// The runs a paper line through `points` is stroked in so that its sharp turns get round joins:
+/// cut at every turn sharper than the angle whose cosine is `smooth_turn_cos`. Points closer than
+/// `min_step` are one point, and so are the two ends of a `closed` line that repeats its start; a
+/// `closed` line without a sharp turn is one closed run.
+#[must_use]
+pub fn stroke_runs(points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f64) -> Vec<StrokeRun> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.stroke_runs(points, closed, min_step, smooth_turn_cos),
+    }
+}
+
 /// Whether a line's endpoints project to distinct points in the view plane `basis`.
 #[must_use]
 pub fn projected_endpoints_are_distinct(basis: Plane, ends: [Vec3; 2]) -> bool {
@@ -252,7 +264,7 @@ pub fn plane_point(plane: &Plane, point: Vec2) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_ops::{board_drill, constraint, joint_turn as turn, paper_gaps, sketch_arc};
+    use solidcore_ops::{board_drill, constraint, joint_turn as turn, paper_gaps, sketch_arc, stroke_runs as stroke};
 
     #[test]
     fn routed_planar_helpers_are_solidcores() {
@@ -286,6 +298,23 @@ mod tests {
         }
         let (o, x, y) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
         assert_eq!(circle_points(o, x, y, 2.5, 0.3), constraint::circle_points(o, x, y, 2.5, 0.3));
+        // a line's stroke runs are solidcore's, bit for bit
+        let lines: [(&[[f64; 2]], bool); 6] = [
+            (&[[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0], [0.0, 0.0]], true),
+            (&[[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]], false),
+            (&[[0.0, 0.0], [1.0, 0.1], [2.0, 0.3], [3.0, 0.6], [3.0, 0.6], [2.0, 2.0]], false),
+            (&[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0], [1.0, 0.0]], true),
+            (&[[0.0, 0.0], [0.0, 0.0]], false),
+            (&[], false),
+        ];
+        let bits = |runs: Vec<(Vec<[f64; 2]>, bool)>| -> Vec<(Vec<[u64; 2]>, bool)> {
+            runs.into_iter().map(|(p, c)| (p.iter().map(|q| [q[0].to_bits(), q[1].to_bits()]).collect(), c)).collect()
+        };
+        for (points, closed) in lines {
+            let routed = stroke_runs(points, closed, 1e-3, 0.866).into_iter().map(|r| (r.points, r.closed)).collect();
+            let ops = stroke::runs(points, closed, 1e-3, 0.866).into_iter().map(|r| (r.points, r.closed)).collect();
+            assert_eq!(bits(routed), bits(ops));
+        }
         // a refusal carries solidcore's words whole
         let words = turn::joint_turn([0.0, 0.0], [0.0, 1.0]).unwrap_err().to_string();
         assert_eq!(joint_turn([0.0, 0.0], [0.0, 1.0]), Err(PlanarRefused(words)));
