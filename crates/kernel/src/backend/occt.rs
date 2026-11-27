@@ -183,14 +183,10 @@ impl Modelling for Occt {
                 Shape::make_box(lo, size).map_err(failed)
             }
             Primitive::Cylinder { base, axis, radius, height } => {
-                if !finite(&[base.x, base.y, base.z, axis.x, axis.y, axis.z, radius, height])
-                    || radius <= 0.0
-                    || height <= 0.0
-                    || (axis.x == 0.0 && axis.y == 0.0 && axis.z == 0.0)
-                {
-                    return unsupported("a degenerate cylinder");
-                }
-                Shape::make_cylinder(xyz(base), xyz(axis), radius, height).map_err(failed)
+                // solidcore's own circle (its seam where solidcore puts it), extruded here.
+                let c = crate::build::cylinder_plan(base, axis, radius, height).map_err(refused)?;
+                let (circle, n) = crate::smlib_sweeps::cylinder_circle(&c.plane, c.radius, c.lo);
+                Shape::prism_profile(&encode_profile(std::slice::from_ref(&circle))?, n, c.hi - c.lo).map_err(failed)
             }
             Primitive::Sphere { center, radius } => {
                 if !finite(&[center.x, center.y, center.z, radius]) || radius <= 0.0 {
@@ -561,5 +557,21 @@ mod tests {
         // The top face up 2 (10 x 10 x 12); the side face at x = 10 in 1 (9 x 10 x 10).
         same_solid("a face moved out", 1200.0, || crate::route::offset_faces(&cube()?, &[v(5.0, 5.0, 10.0)], 2.0));
         same_solid("a face moved in", 900.0, || crate::route::offset_faces(&cube()?, &[v(10.0, 5.0, 5.0)], -1.0));
+    }
+
+    #[test]
+    fn cylinders_spheres_and_tori_carry_solidcore_s_names() {
+        use std::f64::consts::PI;
+        let one = |b: crate::Result<Body>| b.map(|b| vec![b]);
+        parity("a cylinder along z", Some(12.0 * PI), || one(crate::route::cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 2.0, 3.0)));
+        parity("a cylinder along (1, 1, 1)", Some(9.0 * PI), || one(crate::route::cylinder(v(1.0, -2.0, 0.5), v(1.0, 1.0, 1.0), 1.5, 4.0)));
+        parity("a cylinder downward", Some(4.0 * PI), || one(crate::route::cylinder(v(0.0, 0.0, 0.0), v(0.0, 1.0, 0.0), 1.0, -4.0)));
+        let named = |b: Body| {
+            assert!(b.history().is_some());
+            b
+        };
+        let sphere = named(crate::route::sphere(v(1.0, 2.0, 3.0), 1.5).unwrap());
+        assert!((crate::measure(&sphere).unwrap().volume - 4.5 * PI).abs() < 1e-9);
+        named(crate::route::torus(v(0.0, 0.0, 0.0), 3.0, 1.0).unwrap());
     }
 }

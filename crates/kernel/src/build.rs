@@ -423,6 +423,23 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 /// Cylinder with base centre `base`, axis direction `axis`, radius and height.
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "cylinder");
+    let c = cylinder_plan(base, axis, radius, height)?;
+    crate::smlib_sweeps::cylinder(&c.plane, c.radius, c.lo, c.hi, &c.region)
+}
+
+/// A cylinder as [`cylinder`] builds it: its base plane, radius, the span along the axis and the
+/// circle it extrudes (its seam at an odd angle), checked.
+pub(crate) struct CylinderPlan {
+    pub plane: Plane,
+    pub radius: f64,
+    pub lo: f64,
+    pub hi: f64,
+    pub region: Region2,
+}
+
+/// [`cylinder`]'s checks and plan: what another kernel builds the same cylinder from, and what
+/// names it after.
+pub(crate) fn cylinder_plan(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<CylinderPlan> {
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
     if !frame_ok(&plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
@@ -438,9 +455,9 @@ pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body
     }
     // The seams at an odd angle: on the frame's axes they would lie exactly where faces placed
     // on a grid cut the cylinder (along a seam edge, which booleans don't survive).
-    let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
-    region_ok(&r)?;
-    crate::smlib_sweeps::cylinder(&plane, radius, lo, hi, &r)
+    let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
+    region_ok(&region)?;
+    Ok(CylinderPlan { plane, radius, lo, hi, region })
 }
 
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half

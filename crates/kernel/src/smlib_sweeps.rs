@@ -81,9 +81,10 @@ pub(crate) struct Draft {
 #[cfg(test)]
 pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
-    body_from_record, curve, curve_tolerance, cylinder, extrude, extrude_drafted_with_holes, extrusion_curves, face_section, loft, loft_curves,
-    loft_many_rails, loft_to_point, loft_to_point_with_rails, name_extrusion, name_revolution, path_curve, project_onto_face, rail_curves,
-    railed_skin, revolution_curves, revolve, screw, screw_radial, skin_sections, sphere, sweep, sweep_controlled, torus,
+    body_from_record, curve, curve_tolerance, cylinder, cylinder_circle, extrude, extrude_drafted_with_holes, extrusion_curves, face_section, loft,
+    loft_curves, loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_extrusion, name_revolution, name_revolved_primitive,
+    path_curve, project_onto_face, rail_curves, railed_skin, revolution_curves, revolve, screw, screw_radial, skin_sections, sphere, sweep,
+    sweep_controlled, torus,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -457,9 +458,16 @@ mod imp {
     /// right cylinder) while skipping `number_regions`, `broken_at_seams`, and `roles()` curve
     /// sampling. Carries the exact same cap/wall history and construction sources.
     pub(crate) fn cylinder(plane: &Plane, radius: f64, lo: f64, hi: f64, region: &Region2) -> Result<Body> {
-        let distance = hi - lo;
+        let (circle, n) = cylinder_circle(plane, radius, lo);
+        let brep = Brep::extrude(&[circle], n, hi - lo, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
+        let body = body_of(brep, "extrude")?;
+        name_cylinder(body, plane, lo, hi, region)
+    }
+
+    /// The circle [`cylinder`] extrudes, at `lo` along the normal of `plane`, and the unit normal
+    /// it goes along.
+    pub(crate) fn cylinder_circle(plane: &Plane, radius: f64, lo: f64) -> (Curve, [f64; 3]) {
         let base = plane.offset(lo);
-        let top = plane.offset(hi);
         let n = plane.normal();
         let circle = Curve::Arc {
             center: p(base.origin),
@@ -469,8 +477,15 @@ mod imp {
             start: crate::build::SEAM_ANGLE,
             end: crate::build::SEAM_ANGLE + std::f64::consts::TAU,
         };
-        let brep = Brep::extrude(&[circle], p(n), distance, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
-        let body = body_of(brep, "extrude")?;
+        (circle, p(n))
+    }
+
+    /// `body`, a cylinder from `lo` to `hi` along `plane`'s normal, with the history and
+    /// construction sources [`cylinder`] gives its own: the wall swept from the circle, the caps.
+    pub(crate) fn name_cylinder(body: Body, plane: &Plane, lo: f64, hi: f64, region: &Region2) -> Result<Body> {
+        let distance = hi - lo;
+        let base = plane.offset(lo);
+        let top = plane.offset(hi);
         let r = body.record();
         let size = body.size().max(1e-9);
         let tol = (size * 1e-5 + 1e-9).min(0.25 * distance);
@@ -523,7 +538,12 @@ mod imp {
     /// a sphere revolves.
     pub(crate) fn sphere(center: Vec3, radius: f64) -> Result<Body> {
         let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
-        let body = body_of(brep, "sphere")?;
+        name_revolved_primitive(body_of(brep, "sphere")?)
+    }
+
+    /// A sphere's or torus's history as [`sphere`] and [`torus`] give it: every face swept from
+    /// the one profile segment the solid revolves.
+    pub(crate) fn name_revolved_primitive(body: Body) -> Result<Body> {
         let faces = body.face_count();
         Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
     }
@@ -532,9 +552,7 @@ mod imp {
     /// (segment 0) a torus revolves.
     pub(crate) fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
         let brep = Brep::make_torus(p(center), major, minor).map_err(|e| failed("torus", e))?;
-        let body = body_of(brep, "torus")?;
-        let faces = body.face_count();
-        Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
+        name_revolved_primitive(body_of(brep, "torus")?)
     }
 
     /// A point a wall is known by: on its edge in the start plane, or inside it; and the piece

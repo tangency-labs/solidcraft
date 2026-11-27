@@ -31,10 +31,30 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 fn primitive(p: &Primitive) -> Result<Body> {
     #[cfg(feature = "backend-occt")]
     if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::of_primitive(p), &[], |k, _| k.primitive(p).map(Some)) {
-        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the primitive is empty".into())));
+        let named =
+            made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the primitive is empty".into()))).and_then(|b| named_primitive(p, b));
+        match named {
+            Ok(b) => return Ok(b),
+            Err(e) => log::warn!("{}: Open CASCADE's faces don't name as solidcore's do ({e}); solidcore runs it", OpKind::of_primitive(p).name()),
+        }
     }
     match which(OpKind::of_primitive(p)) {
         Which::Solidcore => Solidcore.primitive(p),
+    }
+}
+
+/// Another kernel's primitive with the history and construction sources solidcore gives its own:
+/// a cylinder's wall and caps, a sphere's or torus's faces swept from its one profile segment. A
+/// box keeps what came back.
+#[cfg(feature = "backend-occt")]
+fn named_primitive(p: &Primitive, body: Body) -> Result<Body> {
+    match *p {
+        Primitive::Cylinder { base, axis, radius, height } => {
+            let c = crate::build::cylinder_plan(base, axis, radius, height)?;
+            crate::smlib_sweeps::name_cylinder(body, &c.plane, c.lo, c.hi, &c.region)
+        }
+        Primitive::Sphere { .. } | Primitive::Torus { .. } => crate::smlib_sweeps::name_revolved_primitive(body),
+        Primitive::Box { .. } => Ok(body),
     }
 }
 
