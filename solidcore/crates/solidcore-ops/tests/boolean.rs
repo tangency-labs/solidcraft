@@ -2937,28 +2937,41 @@ fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
 #[test]
 fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
     all_fixes();
-    let ([cx, cy, z0], r, h) = ([10.0, 22.5, 30.0], 2.5, 5.0);
-    let mut points = Vec::new();
-    for z in [z0, z0 + h] {
-        for a in [0.5, 1.5, 3.0] {
-            // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
-            points.extend([
-                [cx - a, cy + r, z],
-                [cx + a, cy + r, z],
-                [cx - a, cy - r, z],
-                [cx + a, cy - r, z],
-                [cx + r, cy - a, z],
-                [cx - r, cy + a, z],
-            ]);
-        }
-    }
     let mut wrong = Vec::new();
-    for tenth in (0..3600).step_by(50).chain([175, 200, 351, 425]) {
-        let seam = f64::from(tenth) / 10.0;
-        let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
-        for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
-            if l != Ok(PointLocation::Outside) {
-                wrong.push((seam, *p, l));
+    // the issue's scales: 0.05 and 1 failed, 40 did not
+    for scale in [0.05, 1.0, 40.0] {
+        let ([cx, cy, z0], r, h) = (
+            [10.0 * scale, 22.5 * scale, 30.0 * scale],
+            2.5 * scale,
+            5.0 * scale,
+        );
+        let mut points = Vec::new();
+        for z in [z0, z0 + h] {
+            for a in [0.5 * scale, 1.5 * scale, 3.0 * scale] {
+                // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
+                points.extend([
+                    [cx - a, cy + r, z],
+                    [cx + a, cy + r, z],
+                    [cx - a, cy - r, z],
+                    [cx + a, cy - r, z],
+                    [cx + r, cy - a, z],
+                    [cx - r, cy + a, z],
+                ]);
+            }
+        }
+        // every 5 degrees at scale 1; at the other scales, the seams that failed at scale 1
+        let seams: Vec<u16> = if scale == 1.0 {
+            (0..3600).step_by(50).chain([175, 200, 351, 425]).collect()
+        } else {
+            vec![0, 175, 200, 351, 425, 900]
+        };
+        for tenth in seams {
+            let seam = f64::from(tenth) / 10.0;
+            let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
+            for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
+                if l != Ok(PointLocation::Outside) {
+                    wrong.push((scale, seam, *p, l));
+                }
             }
         }
     }
@@ -2973,16 +2986,31 @@ fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
 #[test]
 fn a_box_and_a_cylinder_touching_at_a_rim_point_intersect_to_nothing() {
     all_fixes();
-    for seam in [0.0, 35.13, 90.0, 215.13] {
-        let a = || make_box([7.5, 25.0, 10.0], [5.0, 5.0, 20.0]).unwrap();
-        let b = || cylinder_with_seam([10.0, 22.5, 30.0], 2.5, 5.0, seam);
-        for (x, y) in [(a(), b()), (b(), a())] {
-            let r = boolean(x, y, BooleanOp::Intersect);
-            assert!(
-                matches!(r, Ok(None)),
-                "seam {seam}: {:?}",
-                r.map(|r| r.is_some())
-            );
+    for scale in [0.05, 1.0, 40.0] {
+        for seam in [0.0, 35.13, 90.0, 215.13] {
+            let a = || {
+                make_box(
+                    [7.5 * scale, 25.0 * scale, 10.0 * scale],
+                    [5.0 * scale, 5.0 * scale, 20.0 * scale],
+                )
+                .unwrap()
+            };
+            let b = || {
+                cylinder_with_seam(
+                    [10.0 * scale, 22.5 * scale, 30.0 * scale],
+                    2.5 * scale,
+                    5.0 * scale,
+                    seam,
+                )
+            };
+            for (x, y) in [(a(), b()), (b(), a())] {
+                let r = boolean(x, y, BooleanOp::Intersect);
+                assert!(
+                    matches!(r, Ok(None)),
+                    "scale {scale}, seam {seam}: {:?}",
+                    r.map(|r| r.is_some())
+                );
+            }
         }
     }
 }
