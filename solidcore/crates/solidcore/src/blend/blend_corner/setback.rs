@@ -2041,9 +2041,9 @@ struct Growth<'a> {
     /// The setbacks it grows from (the rule's, or the one asked for).
     base: Vec<f64>,
     /// The most each may grow to: for rule setbacks, the lesser of its room less the rule's
-    /// quarter radius and its round's certified rail reach less ease (at least its base); for
-    /// an asked setback, the least certified rail reach less ease across the corner's edges
-    /// (at least its base), or `BIG_DOUBLE` where no far corner cuts a round's rails.
+    /// quarter radius and its round's certified rail reach less the ease (at least its base);
+    /// for an asked setback, the least such reach across the corner's edges (at least the
+    /// setback), or `BIG_DOUBLE` where no reach holds it below twice it.
     most: Vec<f64>,
     /// The least rail reach (less ease) that holds a setback below twice it, where one does
     /// (#13647).
@@ -2161,10 +2161,11 @@ impl Growth<'_> {
 /// certificate's rounding bound (`Probe::rounding_margin`, #2243), so that the corner built
 /// afresh there, as the caller builds it or a caller asking that setback would, is certified
 /// too. None up to twice them: refused, naming none; where the rails' reach
-/// (`Growth::rail_bound`) held the growth, refused as [`BlendRefusal::SetbackUncertifiedWithinRails`] naming that
-/// reach. One asked for that certifies only grown: refused, naming the setback that builds,
-/// held at its `most` (or none, where that one does not fit with its ease). Returns the
-/// blends' ends where the setbacks found put them.
+/// (`Growth::rail_bound`) held the growth, refused as
+/// [`BlendRefusal::SetbackUncertifiedWithinRails`] naming that reach. One asked for that
+/// certifies only grown: refused, naming the setback that builds, held at its `most` (or
+/// none, where that one does not fit with its ease). Returns the blends' ends where the
+/// setbacks found put them.
 fn grow_curved<S: SetbackSolvers>(
     growth: &Growth<'_>,
     pseudo: &mut FilletBrep,
@@ -2183,11 +2184,16 @@ fn grow_curved<S: SetbackSolvers>(
                     fmt_g(reach)
                 )
             } else {
-                let list: Vec<String> = growth.most.iter().map(|&m| fmt_g(m)).collect();
+                let tried: Vec<String> = growth
+                    .base
+                    .iter()
+                    .zip(&growth.most)
+                    .map(|(&b, &m)| fmt_g(smin(2.0 * b, m)))
+                    .collect();
                 format!(
-                    "Fillet Error: no setbacks within the rounds' rail reach of {} (where a far corner cuts a round; the most that fit: {}) keep the setback corner's fill no more concave than its faces",
+                    "Fillet Error: no setbacks within the rounds' rail reach of {} (where a far corner cuts a round; tried up to: {}) keep the setback corner's fill no more concave than its faces",
                     fmt_g(reach),
-                    list.join(", ")
+                    tried.join(", ")
                 )
             };
             let refusal = SetbackRefusal::no_room(why, Some(0.0));
@@ -3076,24 +3082,26 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             // the rails' reach bounds the growth as the room does (#13647): each edge's
             // certified reach from a far corner that cuts its round's rails, less the ease
             // (the least of them for every edge where the setback is asked for, one setback);
-            // `rail_bound` is the least of those that holds a setback below twice it
+            // `rail_bound` is the least of those that holds a setback below twice it. Never
+            // below the setback it grows from: `gather_ends` admits that one up to `tol` past
+            // its reach, so the growth's range starts there.
             let mut rail_bound: Option<f64> = None;
             if ease.is_finite() {
                 if let Some(a) = asked {
                     let reach = rail_reaches.iter().copied().fold(BIG_DOUBLE, smin);
-                    let cap = smax(0.0, reach - ease);
+                    let cap = smax(a.setback, reach - ease);
                     if reach < BIG_DOUBLE && cap < hi_scale * a.setback {
                         rail_bound = Some(cap);
-                        most.fill(smax(a.setback, cap));
+                        most.fill(cap);
                     }
                 } else {
                     for ((m, &b), &reach) in most.iter_mut().zip(&base).zip(&rail_reaches) {
                         if reach < BIG_DOUBLE {
-                            let limit = smax(0.0, reach - ease);
+                            let limit = smax(b, reach - ease);
                             if limit < hi_scale * b && limit <= *m {
                                 rail_bound = Some(rail_bound.map_or(limit, |r| smin(r, limit)));
                             }
-                            *m = smin(*m, smax(b, limit));
+                            *m = smin(*m, limit);
                         }
                     }
                 }

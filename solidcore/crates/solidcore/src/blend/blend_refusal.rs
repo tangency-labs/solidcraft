@@ -98,13 +98,13 @@ pub enum BlendRefusal {
     /// At a Setback corner whose setbacks grow during fill construction (beside a curved
     /// face, or unequal planar G1 rounds on real rails), growth along an edge was stopped by
     /// where a far corner cuts one of its round's rails (less the fit margin and ease), and
-    /// no fill up to the rails' reach certifies. `reach` is the least such rail-reach bound
-    /// among the stopped edges (less the ease where one is asked): unlike
-    /// [`Self::SetbackTooLong`], no setback up to `reach` is certified to build.
+    /// no fill up to the rails' reach certifies. `reach` is the least such bound among the
+    /// stopped edges, less the ease, and never below the setback that edge grows from:
+    /// unlike [`Self::SetbackTooLong`], no setback up to `reach` is certified to build.
     SetbackUncertifiedWithinRails {
         /// The corner's vertex.
         vertex: VertexId,
-        /// The certified rail-reach bound (less the ease where asked) that stopped growth.
+        /// The certified rail-reach bound, less the ease, that stopped the growth.
         reach: f64,
     },
     /// A Swept turn at `vertex` that no radius of its rounds builds: its side edge is sharp
