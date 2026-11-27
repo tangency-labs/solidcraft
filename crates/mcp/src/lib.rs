@@ -30,8 +30,10 @@ pub use options::Options;
 pub use server::Server;
 pub use solidcraft_mcp_server::PROTOCOL_VERSION;
 pub use solidcraft_mcp_server::SUPPORTED_VERSIONS;
+pub use tools::CallContext;
 pub use tools::call_tool;
 pub use tools::call_tool_with;
+pub use tools::call_tool_with_context;
 pub use tools::tool_definitions;
 pub use tools::tool_definitions_with;
 
