@@ -323,6 +323,42 @@ fn a_small_notch_cut_into_a_large_base_flanges_edge_is_a_pocket() {
     assert_eq!(pockets(&mut s).len(), 1, "{:?}", pockets(&mut s));
 }
 
+/// #22818: a 2.9 × 2.9 × 3 mm half-depth edge notch at the flattest spot `(0, 720)` of a 6 mm
+/// thick, 2400 mm periodic spline-outline sheet-metal flange must succeed as a pocket and keep
+/// the body valid with the exact removed volume (previously refused with "planar regions: not
+/// supported yet: a loop whose turning its area does not decide" because the trimmed spline edge
+/// on the notch floor was flattened to its chord under the body-scaled reading tolerance).
+#[test]
+fn a_half_depth_edge_notch_on_a_large_spline_flange_is_a_pocket() {
+    let mut s = session();
+    rule(&mut s, "Stock", 6.0, 0.44, 6.0, 1.0);
+    let outline = json!([[1200, 0], [908, 604], [0, 720], [-908, 604], [-1200, 0], [-788, -524], [0, -880], [788, -524]]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let v0 = exact_volume(&s);
+    let notch = json!({
+        "length": 2.9,
+        "width": 2.9,
+        "height": 3.0,
+        "corner": [-1.45, 720.0 - 1.45, 3.0],
+        "operation": "cut",
+        "targets": ["Plate"]
+    });
+    run(&mut s, "solid.box", notch);
+    let st = s.model.state();
+    let body = &st.bodies.iter().find(|b| b.name == "Plate").expect("Plate").body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    assert_eq!(body.classify_point(Vec3::new(0.0, 719.0, 4.5)).expect("classify notch"), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, 719.0, 1.5)).expect("classify below floor"), solidcraft_kernel::PointClass::Inside);
+    let removed = v0 - exact_volume(&s);
+    let box_half = 2.9 * 1.45 * 3.0;
+    assert!((removed - box_half).abs() < 0.05, "removed {removed} vs ~{box_half} mm³");
+    let p = pockets(&mut s);
+    assert!(p.len() == 1 && (p[0]["depth_mm"].as_f64().unwrap_or(0.0) - 3.0).abs() < 1e-6, "{p:?}");
+}
+
 /// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
 /// 100 · 60 · 2.5 = 15000 mm³.
 fn default_plate() -> Session {
