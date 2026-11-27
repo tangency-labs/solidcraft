@@ -2819,11 +2819,20 @@ fn face_closing_tangent(
 /// faces, which a blend cannot cross to (as a tangent chain does not run on into an edge of the
 /// other convexity): no blend of any size fits. Where both are convex or both concave the blend
 /// may run over the other edge, so that is not this case; nor are two edges that run on into
-/// each other (opposite senses), two uses of one edge, a pair both or neither blended, an edge
-/// not blended whose faces are tangent (no convexity), and a tangent that cannot be evaluated
-/// or is shorter than `SM_EFF_ZERO`. Convexity is the blend's own
-/// ([`crate::blend::fillet_solver::p5::is_concave_edge`]). The walk is
-/// [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
+/// each other (opposite senses), two uses of one edge, a pair neither blended, an edge not
+/// blended whose faces are tangent (no convexity), and a tangent that cannot be evaluated or is
+/// shorter than `SM_EFF_ZERO`.
+///
+/// A pair both blended and of one convexity closes the face to a cusp too, where the corner
+/// factory built no corner (`corner_built` false): the two blends' contact lines on that face
+/// are each set back from their own edge, and between two edges leaving the vertex along one
+/// tangent the face has no width for either near it (a tangent chain from a hole's rim on to the
+/// bottom edge the hole wall touches, #1390). Where the factory builds a corner there, it is
+/// left to build. A pair both blended and of the two convexities is the mixed-convexity corner,
+/// with its own refusal.
+///
+/// Convexity is the blend's own ([`crate::blend::fillet_solver::p5::is_concave_edge`]). The walk
+/// is [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
 /// the edge use leaving it and its clockwise neighbour arriving at it. `solver_eus`: the
 /// blended edge uses at the vertex, the first leaving it.
 ///
@@ -2837,6 +2846,7 @@ pub fn face_closes_to_a_point(
     b: &mut Brep,
     solver_eus: &[EdgeuseId],
     tangency_tol_radians: f64,
+    corner_built: bool,
 ) -> Result<bool> {
     let Some(&start_eu) = solver_eus.first() else {
         return Ok(false);
@@ -2868,7 +2878,15 @@ pub fn face_closes_to_a_point(
         let arriving = eu1::cw_edgeuse(b, leaving)?
             .ok_or_else(|| invalid(OP_CREATE, "edge use without clockwise neighbour"))?;
         let (e0, e1) = (edge_of(b, leaving)?, edge_of(b, arriving)?);
-        if e0 != e1 && blended.contains(&e0) != blended.contains(&e1) {
+        // which of the pair the test reads: one blended, or both where no corner was built
+        let (blended0, blended1) = (blended.contains(&e0), blended.contains(&e1));
+        let both = blended0 && blended1;
+        let read = if both {
+            !corner_built
+        } else {
+            blended0 || blended1
+        };
+        if e0 != e1 && read {
             // both pointing away from the vertex
             let cusp = match (tangent(b, leaving, 0.0)?, tangent(b, arriving, 1.0)?) {
                 (Some(d0), Some(d1)) => {
@@ -2876,16 +2894,18 @@ pub fn face_closes_to_a_point(
                 }
                 _ => false,
             };
-            // the edge not blended there: a smooth one (its faces tangent) has no convexity
-            let other = if blended.contains(&e0) {
-                arriving
+            let closes = if !cusp {
+                false
+            } else if both {
+                // two blended edges of one convexity; of two, the mixed corner
+                is_concave_edge(k, b, e0)? == is_concave_edge(k, b, e1)?
             } else {
-                leaving
+                // the edge not blended there: a smooth one (its faces tangent) has no convexity
+                let other = if blended0 { arriving } else { leaving };
+                !eu2::is_tangent_sector(k, b, other, tan_tol_deg, false, false)?
+                    && is_concave_edge(k, b, e0)? != is_concave_edge(k, b, e1)?
             };
-            if cusp
-                && !eu2::is_tangent_sector(k, b, other, tan_tol_deg, false, false)?
-                && is_concave_edge(k, b, e0)? != is_concave_edge(k, b, e1)?
-            {
+            if closes {
                 return Ok(true);
             }
         }

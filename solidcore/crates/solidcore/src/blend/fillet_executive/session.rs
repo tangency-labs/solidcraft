@@ -2491,7 +2491,11 @@ impl<'target> FilletSession<'target> {
                 // otherwise be (a corner the factory builds there still fails to make its
                 // topology: the boss's base circle touching the rim of the face it stands on).
                 // A round that runs out at the vertex (the degenerate corner) has no width
-                // there and builds, so it keeps its existing path.
+                // there and builds, so it keeps its existing path. Two blended edges of one
+                // convexity closing a face to a point are read only where the factory built
+                // no corner, so a corner that builds there is never refused (a chamfer's
+                // tangent chain from a hole's rim on to the bottom edge the hole touches,
+                // #1390).
                 if !made
                     .as_ref()
                     .is_some_and(|c| c.kind == FilletCornerKind::Degenerate)
@@ -2518,6 +2522,7 @@ impl<'target> FilletSession<'target> {
                             target,
                             &edgeuses,
                             tangency_tol_radians,
+                            made.is_some(),
                         )?
                     {
                         let location = crate::topology::vertex::point(target, vertex).ok();
