@@ -13,6 +13,7 @@ use serde_json::Value as Json;
 
 pub mod expr;
 mod grammar;
+pub mod installed;
 mod table;
 mod template;
 
@@ -257,6 +258,7 @@ pub struct Meta {
     pub sources: Vec<(String, String, String, String)>,
 }
 
+#[derive(Debug)]
 struct Lookup {
     table: String,
     name: String,
@@ -264,18 +266,21 @@ struct Lookup {
     missing: Option<String>,
 }
 
+#[derive(Debug)]
 struct Rule {
     when: Expr,
     refuse: String,
     kind: RefusalKind,
 }
 
+#[derive(Debug)]
 struct Repeat {
     var: String,
     count: Expr,
     max: usize,
 }
 
+#[derive(Debug)]
 struct Step {
     command: String,
     params: Tmpl,
@@ -284,6 +289,7 @@ struct Step {
 }
 
 /// A package, loaded and checked, ready to turn codes into command lists.
+#[derive(Debug)]
 pub struct Generator {
     pub meta: Meta,
     pub checks: Vec<Check>,

@@ -229,6 +229,10 @@ frame.profile.properties          a profile's section properties from the librar
 frame.remove_member               removes a tube from a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.rotate_member               turns a member about its own axis; tested in crates/engine/src/cmd/frame_tests.rs
 frame.trim                        frame member ends; tested in crates/engine/src/cmd/frame_tests.rs
+generator.build                   an ordering code built into a part from a data-only package: crates/engine/src/generator/tests.rs and crates/engine/src/cmd/generator_tests.rs
+generator.check                   runs a package's own checks in scratch designs: crates/engine/src/cmd/generator_tests.rs
+generator.list                    lists installed generator packages: crates/engine/src/cmd/generator_tests.rs
+generator.parse                   reads an ordering code against a package, no geometry: crates/engine/src/generator/tests.rs and crates/engine/src/cmd/generator_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.classify_points           exact read query: crates/engine/src/schema/inspect_tests.rs classification, normals, trim, tolerance and hostile inputs

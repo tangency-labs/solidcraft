@@ -590,6 +590,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             PartSize(crate::dialogs_part_size::Resize),
             /// Insert Pulley: a timing-belt pulley (`dialogs_pulley`).
             Pulley(crate::dialogs_pulley::Pulley),
+            /// Insert from an ordering code: a data-only generator package (`dialogs_generator`).
+            Generator(crate::dialogs_generator::Gen),
             /// Edit Text: a sketch text's content and placement (`sketch_text`).
             Text(Box<crate::sketch_text::Tx>),
             TextMove(crate::sketch_text_move::TextMove),
@@ -1430,6 +1432,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::dialogs_part_size::start(app, id))
                     .or_else(|| crate::dialogs_pulley::start(app, id))
+                    .or_else(|| crate::dialogs_generator::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
                     .or_else(|| crate::sketch_text_move::start(app, id))
                     .or_else(|| crate::sketch_modify_ui::start(app, id))?;
@@ -3580,6 +3583,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Part(_) => "INSERT PART",
         Kind::PartSize(_) => "Change Part Size",
         Kind::Pulley(_) => "ui.pulley.title",
+        Kind::Generator(_) => "ui.generator.title",
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
         Kind::SketchModify(k) => k.title(),
@@ -8650,6 +8654,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
         Kind::PartSize(k) => return crate::dialogs_part_size::commands(app, k),
         Kind::Pulley(k) => return crate::dialogs_pulley::commands(app, k),
+        Kind::Generator(k) => return crate::dialogs_generator::commands(app, k),
         Kind::Text(k) => return crate::sketch_text::commands(app, k),
         Kind::TextMove(k) => return crate::sketch_text_move::commands(app, k),
     };
