@@ -1,13 +1,16 @@
 //! `solid.cell_grid`: fill the closed profiles of a sketch with cells of one shape and cut them
 //! out of the bodies, or with `mode: raised` stand them on the sketch plane and join them (#14044). The cells are planned by solidcore and cut in one operation; the
-//! feature is `FeatureKind::CellGrid`, evaluated in `crates/doc/src/eval_cell_grid.rs`.
+//! feature is `FeatureKind::CellGrid`, evaluated in `crates/doc/src/eval_cell_grid.rs`. With a
+//! `face` instead of a sketch, square cells are cut round a whole-turn cylinder wall (#23010),
+//! planned on the unrolled wall in `crates/doc/src/eval_cell_grid_wall.rs`.
 
 use serde_json::Value;
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::{BodyName, CELL_GRID_MAX_SIDES, CELL_GRID_MIN_SIZE, CellGridMode, Direction, FeatureKind, MAX_CUT_CELLS, SketchId};
+use solidcraft_doc::{BodyName, CELL_GRID_MAX_SIDES, CELL_GRID_MIN_SIZE, CellGridMode, Direction, FacePick, FeatureKind, MAX_CUT_CELLS, SketchId};
 
 use super::CommandSpec;
-use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, point_param, profiles, sketch_key};
+use super::face::FacesBody;
+use super::features::{add_face_feature, add_feature, check_expr, default_extrude_profiles, feature_sketch, point_param, profiles, sketch_key};
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list};
 use crate::schema::cell_grid::CellGridParams;
 use crate::schema::features::FeatureResult;
@@ -16,7 +19,7 @@ use crate::{Result, Session};
 
 const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
-const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter; not with shape sketch); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon|sketch (default hexagon; sketch repeats the one closed profile of the sketch cell_sketch, on a lattice: it needs cell_sketch, pitch_x and pitch_y, ignores size, sides and dot_grid, and clip defaults to whole, snap is refused); cell_sketch?: id|name (shape sketch: the sketch holding the cell, exactly one closed profile without holes); pitch_x?, pitch_y?: expr (shape sketch: the distance between cell origins along a row, and between rows, at least 0.001 mm; a cell that overlaps a neighbour or comes nearer than web is refused); stagger?: expr (shape sketch: how far each row shifts along the row as a fraction of pitch_x, 0 to 1, default 0; 0.5 gives hexagonal and brick layouts); cell_angle?: expr (shape sketch: the cell's turn about its own origin, apart from angle, which turns the whole grid; default 0); flip?: bool (shape sketch: mirror every other cell, those with row plus column odd, in the vertical axis through its origin; default false); cell_origin?: [x,y] (shape sketch: the cell's origin in the cell sketch's own coordinates, the point at each lattice point; default the profile's centroid, anchor is where cell (0,0)'s origin sits); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap, whole with shape sketch); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
+const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter; not with shape sketch); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon|sketch (default hexagon; sketch repeats the one closed profile of the sketch cell_sketch, on a lattice: it needs cell_sketch, pitch_x and pitch_y, ignores size, sides and dot_grid, and clip defaults to whole, snap is refused); cell_sketch?: id|name (shape sketch: the sketch holding the cell, exactly one closed profile without holes); pitch_x?, pitch_y?: expr (shape sketch: the distance between cell origins along a row, and between rows, at least 0.001 mm; a cell that overlaps a neighbour or comes nearer than web is refused); stagger?: expr (shape sketch: how far each row shifts along the row as a fraction of pitch_x, 0 to 1, default 0; 0.5 gives hexagonal and brick layouts); cell_angle?: expr (shape sketch: the cell's turn about its own origin, apart from angle, which turns the whole grid; default 0); flip?: bool (shape sketch: mirror every other cell, those with row plus column odd, in the vertical axis through its origin; default false); cell_origin?: [x,y] (shape sketch: the cell's origin in the cell sketch's own coordinates, the point at each lattice point; default the profile's centroid, anchor is where cell (0,0)'s origin sits); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap, whole with shape sketch); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; face?: [x,y,z]|name (instead of sketch: a whole-turn cylinder wall, outside or bore, cut with square cells at angle 0 or 90 that go round evenly, through the wall unless depth; no direction or raised); targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
 const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
 const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
@@ -184,10 +187,52 @@ fn sketched(s: &Session, p: &Value, cmd: &str) -> Result<Sketched> {
     Ok(Sketched { sketch: SketchId(id), pitch_x, pitch_y, stagger, cell_angle, flip, origin })
 }
 
+/// The wall of a grid given a `face` (#23010): the picked point, and the body it lies on, as
+/// `solid.dome` finds them. A wall grid fills no sketch, so `sketch` and `profiles` are refused,
+/// and it cuts the wall's own body, so `targets` names that body or nothing.
+fn wall_face(s: &Session, p: &Value, cmd: &str) -> Result<Option<(FacePick, FacesBody)>> {
+    let Some(raw) = p.get("face") else { return Ok(None) };
+    for key in ["sketch", "profiles"] {
+        if p.get(key).is_some() {
+            return Err(bad(cmd, format!("`{key}` is for a grid in a sketch: a grid on a wall `face` takes none (a field sketch on a wall is a later step)")));
+        }
+    }
+    let targets = string_list(cmd, p, "targets")?;
+    if targets.len() > 1 || targets.iter().any(|t| t == "*") {
+        return Err(bad(cmd, "a grid on a wall `face` cuts the wall's own body: give that one body in `targets`, or leave it out"));
+    }
+    let body = targets.first().map(String::as_str);
+    let face = super::face::face_ref(s, raw, body, cmd)?;
+    let mut picked = super::face::faces_body(s, p, std::slice::from_ref(raw), &[face]);
+    if let Some(b) = body {
+        picked.body = Some(b.to_string());
+    }
+    Ok(Some((FacePick(face), picked)))
+}
+
+/// What a wall grid refuses before a feature is made (#23010): raised cells and a `direction`
+/// (the cells go into the wall), and every shape but a square.
+fn refuse_wall_params(p: &Value, mode: CellGridMode, cmd: &str) -> Result<()> {
+    if mode == CellGridMode::Raised {
+        return Err(bad(cmd, "raised cells on a cylinder wall are not supported yet: a wall grid cuts"));
+    }
+    if p.get("direction").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`direction` is not for a grid on a wall `face`: the cells go into the wall, through it or `depth` deep"));
+    }
+    if p.get("shape").and_then(Value::as_str).is_none_or(|shape| shape != "square") {
+        return Err(bad(cmd, "on a cylinder wall only square cells at 0° or 90° are supported yet: give `shape: square`"));
+    }
+    Ok(())
+}
+
 fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.cell_grid";
-    let sketch = feature_sketch(s, p, cmd)?;
+    let wall = wall_face(s, p, cmd)?;
+    let sketch = if wall.is_some() { None } else { Some(feature_sketch(s, p, cmd)?) };
     let mode: CellGridMode = keyword(p, "mode", cmd, CellGridMode::Cut, "cut or raised")?;
+    if wall.is_some() {
+        refuse_wall_params(p, mode, cmd)?;
+    }
     // `sketch` is not one of the record's shapes: a sketched cell is the feature's `cell_sketch`,
     // and its `shape` stays the default, unused.
     let is_sketch = p.get("shape").and_then(Value::as_str) == Some("sketch");
@@ -278,7 +323,8 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     if through_all && mode == CellGridMode::Raised {
         return Err(bad(cmd, "`through_all` cuts through bodies: a raised grid stands `depth` high, so give `depth`"));
     }
-    let depth = if through_all {
+    // On a wall no `depth` cuts through it, as `through_all` does.
+    let depth = if through_all || (wall.is_some() && p.get("depth").is_none_or(Value::is_null)) {
         None
     } else {
         let d = req_expr(cmd, p, "depth").map_err(|_| bad(cmd, "give `depth` or `through_all: true`"))?;
@@ -296,39 +342,55 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}`"))),
     };
     let targets = string_list(cmd, p, "targets")?;
-    let profiles = if p.get("profiles").is_none() { default_extrude_profiles(s, sketch) } else { profiles(p, cmd)? };
-    add_feature(
-        s,
-        p,
-        FeatureKind::CellGrid {
-            sketch: SketchId(sketch),
-            profiles,
-            mode,
-            shape,
-            sides,
-            dot_grid,
-            size,
-            cell_sketch: cell.as_ref().map(|c| c.sketch),
-            pitch_x: cell.as_ref().map(|c| c.pitch_x.clone()),
-            pitch_y: cell.as_ref().map(|c| c.pitch_y.clone()),
-            stagger: cell.as_ref().and_then(|c| c.stagger.clone()),
-            cell_angle: cell.as_ref().and_then(|c| c.cell_angle.clone()),
-            flip: cell.as_ref().is_some_and(|c| c.flip),
-            cell_origin_x: cell.as_ref().and_then(|c| c.origin.as_ref().map(|o| o.0.clone())),
-            cell_origin_y: cell.as_ref().and_then(|c| c.origin.as_ref().map(|o| o.1.clone())),
-            web,
-            angle,
-            anchor,
-            clip,
-            keepout_clip,
-            snap_inset,
-            margin,
-            depth,
-            through_all,
-            direction,
-            targets: targets.into_iter().map(BodyName).collect(),
-        },
-    )
+    let profiles = match sketch {
+        Some(sketch) if p.get("profiles").is_none() => default_extrude_profiles(s, sketch),
+        Some(_) => profiles(p, cmd)?,
+        // A wall grid has no profiles: every one, as an older design leaving them out reads.
+        None => solidcraft_doc::ProfileSel::All,
+    };
+    // A wall grid keeps its body as the face features do; its targets are that body, if found.
+    let (face, body) = match &wall {
+        Some((face, picked)) => (Some(*face), picked.body.clone().map(BodyName)),
+        None => (None, None),
+    };
+    let targets: Vec<BodyName> = match &body {
+        Some(b) => vec![b.clone()],
+        None => targets.into_iter().map(BodyName).collect(),
+    };
+    let kind = FeatureKind::CellGrid {
+        sketch: sketch.map(SketchId),
+        profiles,
+        face,
+        body,
+        mode,
+        shape,
+        sides,
+        dot_grid,
+        size,
+        cell_sketch: cell.as_ref().map(|c| c.sketch),
+        pitch_x: cell.as_ref().map(|c| c.pitch_x.clone()),
+        pitch_y: cell.as_ref().map(|c| c.pitch_y.clone()),
+        stagger: cell.as_ref().and_then(|c| c.stagger.clone()),
+        cell_angle: cell.as_ref().and_then(|c| c.cell_angle.clone()),
+        flip: cell.as_ref().is_some_and(|c| c.flip),
+        cell_origin_x: cell.as_ref().and_then(|c| c.origin.as_ref().map(|o| o.0.clone())),
+        cell_origin_y: cell.as_ref().and_then(|c| c.origin.as_ref().map(|o| o.1.clone())),
+        web,
+        angle,
+        anchor,
+        clip,
+        keepout_clip,
+        snap_inset,
+        margin,
+        depth,
+        through_all,
+        direction,
+            targets,
+        };
+    match &wall {
+        Some((_, picked)) => add_face_feature(picked, s, p, kind),
+        None => add_feature(s, p, kind),
+    }
 }
 
 #[cfg(test)]
