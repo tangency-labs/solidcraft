@@ -48,6 +48,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;
@@ -483,8 +484,10 @@ pub use route::mesh;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::plan_sketch_cell_grid;
 pub use route::planar;
 pub use route::points;
+pub use route::profiles;
 pub use route::projection;
 pub use route::query;
 pub use route::read_cadir;
@@ -620,6 +623,7 @@ pub use surface_ruled::ruled_surface;
 pub use surface_ruled::ruled_surface_with;
 pub use surface_trim::TrimKeep;
 pub use surface_trim::mutual_trim;
+pub use surface_trim::split_sheet_where_it_cuts;
 pub use surface_trim::stop_at_bodies;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
@@ -895,3 +899,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

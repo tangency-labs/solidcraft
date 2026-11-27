@@ -65,7 +65,7 @@ pub fn offset_contour(
 /// other: at a sharp one beside an arc, both moved pieces end where the shifted curves cross
 /// nearest the corner. A lip's band edge is its face's loop moved this way. Only neighbouring
 /// pieces are met: moved past a neck, the loop can cross itself, so a caller checks the moved loop
-/// as a region before it builds on it.
+/// ([`crate::prism::profile::loop_crosses`]) before it builds on it.
 ///
 /// # Errors
 /// A [`ContourRefusal`] naming why the shifted profile does not hold together.

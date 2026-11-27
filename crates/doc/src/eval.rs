@@ -2058,6 +2058,9 @@ pub struct Model {
     told_imports: Vec<(u64, kernel::ImportChecks)>,
     /// Import heals were settled into the model that no evaluation has brought in yet.
     import_heals_owed: bool,
+    /// The reads of the imports whose SMLib check of their parts has not been settled yet
+    /// ([`HeldReads`]).
+    held_reads: HeldReads,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -2195,6 +2198,96 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
         }
     }
     h.finish()
+}
+
+/// The reads of a model's imports whose SMLib check of their parts runs on after the import
+/// shows, by import feature, held until the model has settled what the check found
+/// ([`Model::settle_import_checks`]). A check that heals parts makes the import its healed
+/// bodies, and the evaluation that brings them in takes the read held here from the cache of
+/// recent reads. Without it a large file, which that cache holds only while someone uses it, was
+/// parsed and converted again, and checked again, on the window thread, while the model still
+/// held every body of the first read: a 240 MB assembly needed twice its memory minutes after it
+/// opened, and the system killed the app.
+#[derive(Clone, Default)]
+struct HeldReads(Vec<(u64, Arc<kernel::StepImport>)>);
+
+impl std::fmt::Debug for HeldReads {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the reads themselves: their bodies.
+        f.debug_list().entries(self.0.iter().map(|(id, _)| id)).finish()
+    }
+}
+
+impl HeldReads {
+    /// Hold `read` for import `feature`, in place of what was held for it.
+    fn hold(&mut self, feature: u64, read: Arc<kernel::StepImport>) {
+        self.0.retain(|(id, _)| *id != feature);
+        self.0.push((feature, read));
+    }
+
+    /// Let go of import `feature`'s read.
+    fn release(&mut self, feature: u64) {
+        self.0.retain(|(id, _)| *id != feature);
+    }
+
+    /// Keep only the reads whose check is still the one its feature's result shows: another
+    /// read of the feature (its file changed), or no result for it, lets go of the read.
+    fn keep_current(&mut self, results: &[FeatureResult]) {
+        self.0.retain(|(id, read)| {
+            results
+                .iter()
+                .find(|r| r.id == *id)
+                .and_then(|r| r.import_report.as_deref())
+                .is_some_and(|report| !report.checks.is_empty() && report.checks == read.report.checks)
+        });
+    }
+
+    #[cfg(test)]
+    fn holds(&self, feature: u64) -> bool {
+        self.0.iter().any(|(id, _)| *id == feature)
+    }
+}
+
+/// The reads of the imports the evaluation on this thread made, whose check runs on after them
+/// ([`HeldReads`]): collected only while a [`Model::evaluate`] runs here (`None` otherwise, so a
+/// worker thread that evaluates a feature keeps nothing).
+struct ImportReads {
+    outer: Option<Vec<(u64, Arc<kernel::StepImport>)>>,
+}
+
+impl ImportReads {
+    /// Collect the reads from here until [`Self::finish`]; an evaluation already collecting on
+    /// this thread (a linked design's, inside the design's) gets its own back after.
+    fn begin() -> ImportReads {
+        ImportReads { outer: IMPORT_READS.with(|r| r.borrow_mut().replace(Vec::new())) }
+    }
+
+    fn finish(mut self) -> Vec<(u64, Arc<kernel::StepImport>)> {
+        let outer = self.outer.take();
+        IMPORT_READS.with(|r| std::mem::replace(&mut *r.borrow_mut(), outer)).unwrap_or_default()
+    }
+
+    /// Note the read `imp` of import `feature`, when an evaluation collects them and its check
+    /// runs on after it.
+    fn note(feature: u64, imp: &Arc<kernel::StepImport>) {
+        if imp.report.checks.is_empty() {
+            return;
+        }
+        IMPORT_READS.with(|r| {
+            if let Some(reads) = r.borrow_mut().as_mut() {
+                reads.push((feature, imp.clone()));
+            }
+        });
+    }
+}
+
+impl Drop for ImportReads {
+    fn drop(&mut self) {
+        // Not finished (a panic unwinding through the evaluation): the outer evaluation's own.
+        if let Some(outer) = self.outer.take() {
+            IMPORT_READS.with(|r| *r.borrow_mut() = Some(outer));
+        }
+    }
 }
 
 /// The healed state of an import feature in [`ImportDigests`].
@@ -5070,6 +5163,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, tool);
             }
         }
+        FeatureKind::FingerJoint { bodies, .. } => {
+            frame = bodies.first().and_then(|name| st.and_then(|st| st.body(name))).map(|b| body_world(doc, b));
+            for body in bodies {
+                reads.placed_body(st, body);
+                reads.body(doc, st, body);
+            }
+        }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
@@ -5560,6 +5660,7 @@ impl Model {
     pub(crate) fn settle_import_checks_under(&mut self, heal: bool) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
         let digests = &mut self.import_digests;
+        let held = &mut self.held_reads;
         let mut stale_from: Option<usize> = None;
         for (i, r) in self.results.iter_mut().enumerate() {
             let Some(report) = r.import_report.as_ref() else { continue };
@@ -5567,10 +5668,14 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
-            // The read that brings healed parts in checks and heals the file again: that run ends
-            // with the heals the model already has, and is not news.
+            // The evaluation that brings healed parts in takes the read the model holds, whose
+            // run ended with the heals the model then has, and is not news.
             let heals = run.heals();
             let known = heals.as_ref().is_some_and(|h| digests.heal_digest(r.id) == Some(h.digest()));
+            // The read is needed only by that evaluation: heals the model takes now.
+            if !(heal && heals.is_some() && !known) {
+                held.release(r.id);
+            }
             // With the heal preference off, a run that healed (begun while it was on) is not taken,
             // nor its notes (the heal's note over the part as read): the run is dropped, so no
             // view of the report shows them, and the import is read again.
@@ -5608,6 +5713,20 @@ impl Model {
             self.import_heals_owed = true;
         }
         self.import_heals_owed
+    }
+
+    /// How many imports' reads the model holds until what their checks found is settled
+    /// ([`HeldReads`]): for callers' tests.
+    #[doc(hidden)]
+    pub fn held_import_reads(&self) -> usize {
+        self.held_reads.0.len()
+    }
+
+    /// The model holds import `feature`'s read until what its check found is settled
+    /// ([`HeldReads`]).
+    #[cfg(test)]
+    pub(crate) fn holds_import_read(&self, feature: u64) -> bool {
+        self.held_reads.holds(feature)
     }
 
     /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
@@ -5947,6 +6066,7 @@ impl Model {
         // before, which would keep showing the sketch as it was before the edit.
         self.held = None;
         self.import_heals_owed = false;
+        let reads = ImportReads::begin();
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.note_states();
         self.placement_inputs = None;
@@ -6647,6 +6767,10 @@ impl Model {
         self.component_keys = component_keys;
         self.results = out;
         self.note_states();
+        for (feature, read) in reads.finish() {
+            self.held_reads.hold(feature, read);
+        }
+        self.held_reads.keep_current(&self.results);
         // A cached import's result is as its check left it, not as the import first showed.
         self.settle_import_checks();
         self.last_recomputed = recomputed;
@@ -7282,17 +7406,17 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
-            crate::profile_selection_indices_lenient(ss, sel)?
-                .0
-                .into_iter()
-                .map(|index| {
-                    ps.get(index)
-                        .map(|profile| profile.region.clone())
-                        .ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
-                })
-                .collect::<Result<Vec<_>>>()?
-        }
+        ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }
+        | ProfileSel::SidedCurves { .. } => crate::profile_selection_indices_lenient(ss, sel)?
+            .0
+            .into_iter()
+            .map(|index| {
+                ps.get(index).map(|profile| profile.region.clone()).ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
+            })
+            .collect::<Result<Vec<_>>>()?,
         ProfileSel::Points { points } => {
             let mut v = Vec::new();
             let mut taken = std::collections::BTreeSet::new();
@@ -8002,6 +8126,8 @@ thread_local! {
     /// The heals of the import being evaluated, as its fingerprint has them
     /// ([`ImportDigests::heals`]); set by [`Model::evaluate`] for that one feature.
     static IMPORT_HEALS: std::cell::RefCell<Option<Arc<kernel::ImportHeals>>> = const { std::cell::RefCell::new(None) };
+    /// The reads [`ImportReads`] collects for the evaluation running on this thread.
+    static IMPORT_READS: std::cell::RefCell<Option<Vec<(u64, Arc<kernel::StepImport>)>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
@@ -16905,7 +17031,35 @@ pub(crate) fn lost_sheet_face(plane: &PlaneRef) -> DocError {
 fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> Result<(Plane, Option<String>)> {
     let n = picked.normal();
     if let Some(name) = name {
-        let hit = crate::naming::locate_face(st, name, at).ok_or_else(|| DocError::reselect(name))?;
+        let Some(hit) = crate::naming::locate_face(st, name, at) else {
+            // A name worked out from geometry when the design was saved (an Align that kept no
+            // history guessed the names of the faces it moved, #20308) finds nothing once the same
+            // face has its exact name (#22919). When the saved point still lies on a flat face
+            // that is exactly the picked plane (same normal, no farther along it than rounding),
+            // the plane the sketch sits on is unchanged, and so is the sketch. A face that moved,
+            // turned or is gone from under the point still fails, asking for it to be picked again.
+            let same_plane = crate::name_lookup::refound_at_saved_point(name, &st.bodies)
+                && at.is_finite()
+                && st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
+                    let rounding = (b.body.size() * 1e-6).max(1e-6);
+                    let Ok(faces) = b.body.faces((b.body.size() * 1e-3).max(1e-3)) else { return false };
+                    crate::name_lookup::faces_at_saved_point(b, at).into_iter().any(|(index, _)| {
+                        faces.iter().any(|f| {
+                            f.index == index
+                                && f.plane_normal.is_some_and(|fnrm| fnrm.dot(n) > 1.0 - 1e-9)
+                                && (f.centroid.dot(n) - picked.origin.dot(n)).abs() <= rounding
+                        })
+                    })
+                });
+            if !same_plane {
+                return Err(DocError::reselect(name));
+            }
+            let note = format!(
+                "face `{}` has a new name; the sketch stays on the same plane, found again at its saved point",
+                crate::name_lookup::quoted(name)
+            );
+            return Ok((*picked, Some(note)));
+        };
         let b = st.bodies.get(hit.body).ok_or_else(|| DocError::reselect(name))?;
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let face = b.body.faces(tol)?.into_iter().find(|f| f.index == hit.face).ok_or_else(|| DocError::reselect(name))?;
@@ -17033,6 +17187,175 @@ fn chamfer_with(
             other => other?,
         },
     })
+}
+
+#[cfg(test)]
+type FingerJointInterval = solidcraft_kernel::services::finger_joint::Interval;
+
+/// Generate logical intervals without constructing geometry or applying allowances.
+#[cfg(test)]
+fn finger_joint_pattern(span: (f64, f64), count: usize) -> Result<Vec<FingerJointInterval>> {
+    solidcraft_kernel::services::finger_joint::pattern([span.0, span.1], count).map_err(|error| DocError::Invalid(error.to_string()))
+}
+
+/// Apply edge offsets and validate clearance without changing the interval sequence.
+#[cfg(test)]
+fn finger_joint_allowances(pattern: &mut [FingerJointInterval], span: (f64, f64), edge_offset: f64, clearance: f64) -> Result<()> {
+    solidcraft_kernel::services::finger_joint::allowances(pattern, [span.0, span.1], edge_offset, clearance)
+        .map_err(|error| DocError::Invalid(error.to_string()))
+}
+
+fn eval_finger_joint_pair(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() != 2 || bodies.first() == bodies.get(1) {
+        return Err(DocError::Invalid("a finger joint needs two different bodies".into()));
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let first_name = bodies.first().map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let second_name = bodies.get(1).map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let named = [first_name, second_name];
+    let first = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    if first.component != f.component || second.component != f.component {
+        return Err(DocError::Invalid("both finger-joint bodies must be in the feature's active component".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let first_world = body_world(doc, first);
+    let second_world = body_world(doc, second);
+    let skipped = |warning: &mut Option<String>, why: String| {
+        append_warning(warning, format!("finger joint left both bodies unchanged: {why}"));
+        Ok(())
+    };
+    let clearance = val(vals, clearance, Kind::Length)?;
+    let edge_offset = match edge_offset {
+        Some(edge_offset) => val(vals, edge_offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !edge_offset.is_finite() || edge_offset < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    if !clearance.is_finite() || clearance < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    let Some((first_tool, second_tool)) = kernel::finger_joint::pair_tools(
+        &first.body,
+        &second.body,
+        first_world,
+        second_world,
+        feature_world,
+        count,
+        clearance,
+        edge_offset,
+        inverted,
+    )?
+    else {
+        return skipped(warning, "the bodies are not unambiguous crossing plates with a usable overlap".into());
+    };
+    if first_tool.is_none() && second_tool.is_none() {
+        return skipped(warning, "the pattern has no material to cut".into());
+    }
+    for (name, tool) in named.into_iter().zip([first_tool, second_tool]) {
+        if let Some(tool) = tool {
+            apply_traced(doc, st, f, vec![Traced::unnamed(tool)], Operation::Cut, &[name.to_owned()])?;
+        }
+    }
+    let first_result = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second_result = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    if kernel::finger_joint::pair_intersects(&first_result.body, &second_result.body, first_world, second_world, feature_world)? {
+        return Err(DocError::Invalid("the finger joint leaves an intersection between its bodies".into()));
+    }
+    Ok(())
+}
+
+fn eval_finger_joint(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() < 2 || bodies.len() > crate::MAX_FINGER_JOINT_BODIES {
+        return Err(DocError::Invalid(format!("a finger joint needs 2 to {} different bodies", crate::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for name in bodies {
+        if !seen.insert(&name.0) {
+            return Err(DocError::Invalid(format!("body `{name}` appears more than once in the finger joint")));
+        }
+        let body = st.body(&name.0).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+        if body.component != f.component {
+            return Err(DocError::Invalid("finger-joint bodies must be in the feature's active component".into()));
+        }
+    }
+    if bodies.len() == 2 {
+        return eval_finger_joint_pair(doc, vals, f, st, bodies, count, clearance, inverted, edge_offset, warning);
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let clearance_value = val(vals, clearance, Kind::Length)?;
+    let offset_value = match edge_offset {
+        Some(offset) => val(vals, offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !clearance_value.is_finite() || clearance_value < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    if !offset_value.is_finite() || offset_value < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let inverse = crate::mat_inverse(&feature_world).ok_or_else(|| DocError::Invalid("the active component has an invalid placement".into()))?;
+    let mut applied = 0usize;
+    let anchor = bodies.first().ok_or_else(|| DocError::Invalid("a finger joint needs at least two bodies".into()))?;
+    for second in bodies.iter().skip(1) {
+        let pair = [anchor.clone(), second.clone()];
+        let result = (|| -> Result<Option<ModelState>> {
+            let a = st.body(&anchor.0).ok_or_else(|| DocError::Unknown(format!("body `{anchor}`")))?;
+            let b = st.body(&second.0).ok_or_else(|| DocError::Unknown(format!("body `{second}`")))?;
+            let a = kernel::transform_matrix(&a.body, crate::mat_mul(&inverse, &body_world(doc, a)))?;
+            let b = kernel::transform_matrix(&b.body, crate::mat_mul(&inverse, &body_world(doc, b)))?;
+            if kernel::boolean(&a, &b, BoolOp::Intersect)?.is_none() {
+                return Ok(None);
+            }
+            let mut trial = st.clone();
+            let mut pair_warning = None;
+            eval_finger_joint_pair(doc, vals, f, &mut trial, &pair, count, clearance, inverted, edge_offset, &mut pair_warning)?;
+            if let Some(why) = pair_warning {
+                return Err(DocError::Invalid(why));
+            }
+            Ok(Some(trial))
+        })();
+        match result {
+            Ok(Some(trial)) => {
+                *st = trial;
+                applied += 1;
+            }
+            Ok(None) => {}
+            Err(error) => append_warning(warning, format!("finger joint `{anchor}` / `{second}` was not applied: {error}")),
+        }
+    }
+    if applied == 0 && warning.is_none() {
+        append_warning(warning, "finger joint found no intersecting body pairs".into());
+    }
+    Ok(())
 }
 
 /// Adapt the one SolidCore converter's record to the document body. Recognition and faceted
@@ -17795,8 +18118,10 @@ fn eval_feature_kind(
                                     .collect::<Result<Vec<_>>>()?;
                                 traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
-                            // Every face of a surface body as it is (#9305).
-                            crate::SplitSheet::Body if tool_bodies.is_empty() => {
+                            // Every face of a surface body as it is (#9305). A surface body to
+                            // split, a closed one too, takes the arm below, which splits a sheet
+                            // as well (#22525).
+                            crate::SplitSheet::Body if tool_bodies.is_empty() && !mb.is_surface() => {
                                 if !tb.body.is_surface() {
                                     return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
                                 }
@@ -17806,7 +18131,9 @@ fn eval_feature_kind(
                             // Several surface bodies, each whole and as it is (#13303): each in turn
                             // cuts the pieces it crosses into closed solids and leaves the others,
                             // and each must cut one. The tool face gives the first body's sides,
-                            // the first face each other body's.
+                            // the first face each other body's. A surface body to split is cut
+                            // into its connected regions instead, each its own surface body
+                            // (#22525): a sheet has no sides to keep.
                             crate::SplitSheet::Body => {
                                 let names: Vec<&crate::BodyName> = std::iter::once(&t.body).chain(tool_bodies).collect();
                                 // A further placement's body (`Sheet (Part:2)`) is not in the model,
@@ -17840,7 +18167,14 @@ fn eval_feature_kind(
                                     let mut next = Vec::with_capacity(pieces.len() + 1);
                                     let mut cut = false;
                                     for piece in pieces {
-                                        match kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)? {
+                                        // Every piece of a surface body is one too; a closed
+                                        // sheet's shells close, so the body's kind decides.
+                                        let parts = if mb.is_surface() {
+                                            kernel::split_sheet_where_it_cuts(&piece.body, &tool)?
+                                        } else {
+                                            kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)?
+                                        };
+                                        match parts {
                                             Some(parts) => {
                                                 cut = true;
                                                 for part in parts {
@@ -18421,6 +18755,9 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            eval_finger_joint(doc, vals, f, st, bodies, *count, clearance, *inverted, edge_offset.as_ref(), warning)
+        }
         FeatureKind::Scale { bodies, origin, about, factor, factors } => {
             let k = match factors {
                 Some(fs) => [val(vals, &fs[0], Kind::Unitless)?, val(vals, &fs[1], Kind::Unitless)?, val(vals, &fs[2], Kind::Unitless)?],
@@ -18760,6 +19097,8 @@ fn eval_feature_kind(
                     None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
                 },
             };
+            // Its check may heal parts after it shows: the model holds the read until then.
+            ImportReads::note(f.id, &imp);
             let names = import_body_names(st, &f.body_names, &imp, skip);
             // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
             let heals = IMPORT_HEALS.with(|h| h.borrow().clone());
@@ -19981,6 +20320,28 @@ pub fn world_body_paths(doc: &Document, st: &ModelState) -> Vec<Vec<u64>> {
         out.extend((0..owned.get(&comp).copied().unwrap_or(0)).map(|_| path.clone()));
     }
     out
+}
+
+#[cfg(test)]
+mod finger_joint_pattern_tests {
+    use super::{finger_joint_allowances, finger_joint_pattern};
+
+    #[test]
+    fn pattern_and_allowances_keep_alternating_intervals() {
+        let span = (10.0, 60.0);
+        let mut pattern = finger_joint_pattern(span, 2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 20.0, true), (20.0, 30.0, false), (30.0, 40.0, true), (40.0, 50.0, false), (50.0, 60.0, true)]
+        );
+        finger_joint_allowances(&mut pattern, span, 5.0, 0.2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 23.0, true), (23.0, 31.0, false), (31.0, 39.0, true), (39.0, 47.0, false), (47.0, 60.0, true)]
+        );
+        assert!(finger_joint_allowances(&mut pattern, span, 25.0, 0.0).is_err());
+        assert!(finger_joint_allowances(&mut pattern, span, 5.0, 8.0).is_err());
+    }
 }
 
 #[cfg(test)]
