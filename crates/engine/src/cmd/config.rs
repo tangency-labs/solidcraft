@@ -585,7 +585,7 @@ fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
         s.row_models.insert(0, left);
         s.row_models.truncate(2);
     }
-    let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
+    let errors: Vec<String> = s.model.results.iter().filter_map(crate::schema::parameters::FailedFeature::message).collect();
     let trace = put.trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
 }
@@ -604,7 +604,8 @@ pub(crate) struct PutRow {
 /// `config.activate` and `config.preview` refuse a row whose features fail to build, and a drawing
 /// view draws what it builds, so the failures are returned, not refused.
 pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<PutRow> {
-    let failing: BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
+    let failing: BTreeMap<u64, String> =
+        s.model.results.iter().filter_map(|r| Some((r.id, crate::schema::parameters::FailedFeature::message(r)?))).collect();
     let solved_before = s.solved_sketches();
     let trace = s.doc_mut().apply_configuration_with_trace(key).map_err(|e| bad(cmd, e.to_string()))?;
     s.settle_value_edit(&solved_before)?;
@@ -612,7 +613,10 @@ pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<Put
         .model
         .results
         .iter()
-        .filter_map(|r| r.error.as_ref().filter(|error| failing.get(&r.id) != Some(*error)).map(|error| format!("{}: {error}", r.name)))
+        .filter_map(|r| {
+            let error = crate::schema::parameters::FailedFeature::message(r)?;
+            (failing.get(&r.id) != Some(&error)).then(|| format!("{}: {error}", r.name))
+        })
         .collect();
     Ok(PutRow { trace, new_errors })
 }

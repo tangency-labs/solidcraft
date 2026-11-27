@@ -512,9 +512,25 @@ pub struct FailedFeature {
 }
 
 impl FailedFeature {
+    /// A failed sketch solve can retain its previous geometry and have a warning
+    /// instead of a feature error. Include it in rebuild diagnostics as well.
+    pub(crate) fn message(r: &solidcraft_doc::FeatureResult) -> Option<String> {
+        if let Some(error) = &r.error {
+            return Some(error.clone());
+        }
+        if r.skipped || r.stale {
+            return None;
+        }
+        let sketch = r.state.sketch(r.id)?;
+        if sketch.report.ok() {
+            return None;
+        }
+        Some(r.warning.clone().unwrap_or_else(|| sketch.report.failure(|f| format!("sketch constraints could not be satisfied ({f})"))))
+    }
+
     /// The features of `results` that failed.
     pub fn of(results: &[solidcraft_doc::FeatureResult]) -> Vec<FailedFeature> {
-        results.iter().filter_map(|r| r.error.as_ref().map(|e| FailedFeature { feature: r.name.clone(), error: e.clone() })).collect()
+        results.iter().filter_map(|r| Self::message(r).map(|error| FailedFeature { feature: r.name.clone(), error })).collect()
     }
 }
 
