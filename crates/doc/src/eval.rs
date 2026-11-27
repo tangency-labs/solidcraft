@@ -5886,6 +5886,15 @@ fn now() -> web_time::Instant {
     web_time::Instant::now()
 }
 
+/// A feature may recover from a kernel call before failing for a different reason. Only
+/// associate a code when the returned kernel error matches the recorded failure.
+fn feature_failure_code(error: &DocError) -> Option<kernel::ErrorCode> {
+    match error {
+        DocError::Kernel(error) => kernel::failure::code_for(error),
+        _ => None,
+    }
+}
+
 impl Model {
     pub fn new() -> Self {
         Model::default()
@@ -6903,9 +6912,9 @@ impl Model {
                 // The bodies whose check runs beside the features after this one.
                 let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
-                // The feature failed in the kernel (not for a parameter, a reference or a rule of
-                // the design's): its kernel call's code is the last that failed on this thread.
-                let kernel_failed = std::cell::Cell::new(false);
+                // Capture the code only if the returned error matches the failed call.
+                // A recovered failure earlier in this feature is not the feature's error.
+                let mut kernel_error_code = None;
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
                     Some(e) => Err(kernel::KernelError::Failed(e)),
@@ -6943,7 +6952,7 @@ impl Model {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
                             e => {
-                                kernel_failed.set(matches!(e, crate::DocError::Kernel(_)));
+                                kernel_error_code = feature_failure_code(&e);
                                 if let crate::DocError::LostProjections { links, .. } = &e {
                                     lost_projections = Some(Arc::new(links.clone()));
                                 }
@@ -7096,8 +7105,7 @@ impl Model {
                 // cache keeps the code it was made with.
                 let error_code = match (&cached, &error) {
                     (Some(c), Some(_)) => c.error_code.clone(),
-                    (None, Some(_)) if kernel_failed.get() => kernel::failure::last(),
-                    (None, Some(_)) => None,
+                    (None, Some(_)) => kernel_error_code,
                     (_, None) => None,
                 };
                 let lost_projections = lost_projections.filter(|_| error.is_some());

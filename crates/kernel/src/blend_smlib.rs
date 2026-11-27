@@ -452,7 +452,7 @@ mod imp {
         guard(what, || {
             let (sb, order) = smlib_body_ordered(body)?;
             let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
-            let (r, extra) = op(&tagged).map_err(|e| match e {
+            let (r, extra) = op(&tagged).map_err(|e| crate::failure::translated(e, |e| match e {
                 SmError::Unsupported => super::unsupported(&format!("this {what}, which SMLib cannot build exactly")),
                 SmError::CornerRefused { corner } => match corners.get(corner) {
                     // The same words as `super::unsupported`, the reason after them.
@@ -509,7 +509,7 @@ mod imp {
                     })
                 }
                 e => failed(what, "operation", e),
-            })?;
+            }))?;
             let step = crate::validation::step();
             let (out, result_order) = body_from_smlib_ordered(&r)?;
             // Checked here when the evaluation's validation mode checks each step
