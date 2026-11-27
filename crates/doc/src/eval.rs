@@ -2058,6 +2058,9 @@ pub struct Model {
     told_imports: Vec<(u64, kernel::ImportChecks)>,
     /// Import heals were settled into the model that no evaluation has brought in yet.
     import_heals_owed: bool,
+    /// The reads of the imports whose SMLib check of their parts has not been settled yet
+    /// ([`HeldReads`]).
+    held_reads: HeldReads,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -2195,6 +2198,96 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
         }
     }
     h.finish()
+}
+
+/// The reads of a model's imports whose SMLib check of their parts runs on after the import
+/// shows, by import feature, held until the model has settled what the check found
+/// ([`Model::settle_import_checks`]). A check that heals parts makes the import its healed
+/// bodies, and the evaluation that brings them in takes the read held here from the cache of
+/// recent reads. Without it a large file, which that cache holds only while someone uses it, was
+/// parsed and converted again, and checked again, on the window thread, while the model still
+/// held every body of the first read: a 240 MB assembly needed twice its memory minutes after it
+/// opened, and the system killed the app.
+#[derive(Clone, Default)]
+struct HeldReads(Vec<(u64, Arc<kernel::StepImport>)>);
+
+impl std::fmt::Debug for HeldReads {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the reads themselves: their bodies.
+        f.debug_list().entries(self.0.iter().map(|(id, _)| id)).finish()
+    }
+}
+
+impl HeldReads {
+    /// Hold `read` for import `feature`, in place of what was held for it.
+    fn hold(&mut self, feature: u64, read: Arc<kernel::StepImport>) {
+        self.0.retain(|(id, _)| *id != feature);
+        self.0.push((feature, read));
+    }
+
+    /// Let go of import `feature`'s read.
+    fn release(&mut self, feature: u64) {
+        self.0.retain(|(id, _)| *id != feature);
+    }
+
+    /// Keep only the reads whose check is still the one its feature's result shows: another
+    /// read of the feature (its file changed), or no result for it, lets go of the read.
+    fn keep_current(&mut self, results: &[FeatureResult]) {
+        self.0.retain(|(id, read)| {
+            results
+                .iter()
+                .find(|r| r.id == *id)
+                .and_then(|r| r.import_report.as_deref())
+                .is_some_and(|report| !report.checks.is_empty() && report.checks == read.report.checks)
+        });
+    }
+
+    #[cfg(test)]
+    fn holds(&self, feature: u64) -> bool {
+        self.0.iter().any(|(id, _)| *id == feature)
+    }
+}
+
+/// The reads of the imports the evaluation on this thread made, whose check runs on after them
+/// ([`HeldReads`]): collected only while a [`Model::evaluate`] runs here (`None` otherwise, so a
+/// worker thread that evaluates a feature keeps nothing).
+struct ImportReads {
+    outer: Option<Vec<(u64, Arc<kernel::StepImport>)>>,
+}
+
+impl ImportReads {
+    /// Collect the reads from here until [`Self::finish`]; an evaluation already collecting on
+    /// this thread (a linked design's, inside the design's) gets its own back after.
+    fn begin() -> ImportReads {
+        ImportReads { outer: IMPORT_READS.with(|r| r.borrow_mut().replace(Vec::new())) }
+    }
+
+    fn finish(mut self) -> Vec<(u64, Arc<kernel::StepImport>)> {
+        let outer = self.outer.take();
+        IMPORT_READS.with(|r| std::mem::replace(&mut *r.borrow_mut(), outer)).unwrap_or_default()
+    }
+
+    /// Note the read `imp` of import `feature`, when an evaluation collects them and its check
+    /// runs on after it.
+    fn note(feature: u64, imp: &Arc<kernel::StepImport>) {
+        if imp.report.checks.is_empty() {
+            return;
+        }
+        IMPORT_READS.with(|r| {
+            if let Some(reads) = r.borrow_mut().as_mut() {
+                reads.push((feature, imp.clone()));
+            }
+        });
+    }
+}
+
+impl Drop for ImportReads {
+    fn drop(&mut self) {
+        // Not finished (a panic unwinding through the evaluation): the outer evaluation's own.
+        if let Some(outer) = self.outer.take() {
+            IMPORT_READS.with(|r| *r.borrow_mut() = Some(outer));
+        }
+    }
 }
 
 /// The healed state of an import feature in [`ImportDigests`].
@@ -5560,6 +5653,7 @@ impl Model {
     pub(crate) fn settle_import_checks_under(&mut self, heal: bool) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
         let digests = &mut self.import_digests;
+        let held = &mut self.held_reads;
         let mut stale_from: Option<usize> = None;
         for (i, r) in self.results.iter_mut().enumerate() {
             let Some(report) = r.import_report.as_ref() else { continue };
@@ -5567,10 +5661,14 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
-            // The read that brings healed parts in checks and heals the file again: that run ends
-            // with the heals the model already has, and is not news.
+            // The evaluation that brings healed parts in takes the read the model holds, whose
+            // run ended with the heals the model then has, and is not news.
             let heals = run.heals();
             let known = heals.as_ref().is_some_and(|h| digests.heal_digest(r.id) == Some(h.digest()));
+            // The read is needed only by that evaluation: heals the model takes now.
+            if !(heal && heals.is_some() && !known) {
+                held.release(r.id);
+            }
             // With the heal preference off, a run that healed (begun while it was on) is not taken,
             // nor its notes (the heal's note over the part as read): the run is dropped, so no
             // view of the report shows them, and the import is read again.
@@ -5608,6 +5706,20 @@ impl Model {
             self.import_heals_owed = true;
         }
         self.import_heals_owed
+    }
+
+    /// How many imports' reads the model holds until what their checks found is settled
+    /// ([`HeldReads`]): for callers' tests.
+    #[doc(hidden)]
+    pub fn held_import_reads(&self) -> usize {
+        self.held_reads.0.len()
+    }
+
+    /// The model holds import `feature`'s read until what its check found is settled
+    /// ([`HeldReads`]).
+    #[cfg(test)]
+    pub(crate) fn holds_import_read(&self, feature: u64) -> bool {
+        self.held_reads.holds(feature)
     }
 
     /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
@@ -5947,6 +6059,7 @@ impl Model {
         // before, which would keep showing the sketch as it was before the edit.
         self.held = None;
         self.import_heals_owed = false;
+        let reads = ImportReads::begin();
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.note_states();
         self.placement_inputs = None;
@@ -6647,6 +6760,10 @@ impl Model {
         self.component_keys = component_keys;
         self.results = out;
         self.note_states();
+        for (feature, read) in reads.finish() {
+            self.held_reads.hold(feature, read);
+        }
+        self.held_reads.keep_current(&self.results);
         // A cached import's result is as its check left it, not as the import first showed.
         self.settle_import_checks();
         self.last_recomputed = recomputed;
@@ -8002,6 +8119,8 @@ thread_local! {
     /// The heals of the import being evaluated, as its fingerprint has them
     /// ([`ImportDigests::heals`]); set by [`Model::evaluate`] for that one feature.
     static IMPORT_HEALS: std::cell::RefCell<Option<Arc<kernel::ImportHeals>>> = const { std::cell::RefCell::new(None) };
+    /// The reads [`ImportReads`] collects for the evaluation running on this thread.
+    static IMPORT_READS: std::cell::RefCell<Option<Vec<(u64, Arc<kernel::StepImport>)>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
@@ -18760,6 +18879,8 @@ fn eval_feature_kind(
                     None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
                 },
             };
+            // Its check may heal parts after it shows: the model holds the read until then.
+            ImportReads::note(f.id, &imp);
             let names = import_body_names(st, &f.body_names, &imp, skip);
             // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
             let heals = IMPORT_HEALS.with(|h| h.borrow().clone());

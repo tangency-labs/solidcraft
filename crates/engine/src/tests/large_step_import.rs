@@ -21,6 +21,21 @@ fn step_file(name: &str, count: usize) -> String {
     path.to_string_lossy().to_string()
 }
 
+/// Cancel `progress` from another thread as soon as it reports work (a file being read). Joined,
+/// it fails the test when no work came within a minute, instead of waiting for ever: an
+/// evaluation that reads nothing never reports any.
+fn cancel_once_working(progress: &Arc<Progress>) -> std::thread::JoinHandle<()> {
+    let progress = progress.clone();
+    std::thread::spawn(move || {
+        let began = std::time::Instant::now();
+        while progress.work().is_none() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "nothing was read within a minute: there was nothing to cancel");
+            std::thread::yield_now();
+        }
+        progress.cancel();
+    })
+}
+
 fn step_text(s: &Session) -> Arc<str> {
     s.doc.features.iter().find_map(|f| if let FeatureKind::Import { step, .. } = &f.kind { Some(step.clone()) } else { None }).unwrap()
 }
@@ -59,17 +74,9 @@ fn cancelled_import_stops_and_leaves_the_design_alone() {
     let before = s.model.state().bodies.len();
     // Cancel from the window thread while the worker reads the file.
     let progress = Arc::new(Progress::default());
-    let canceller = {
-        let progress = progress.clone();
-        std::thread::spawn(move || {
-            while progress.work().is_none() {
-                std::thread::yield_now();
-            }
-            progress.cancel();
-        })
-    };
+    let canceller = cancel_once_working(&progress);
     let r = solidcraft_doc::progress::watch(progress.clone(), || s.execute("file.insert_step", &json!({"path": path})));
-    canceller.join().unwrap();
+    canceller.join().expect("the read was cancelled");
     let err = r.unwrap_err().to_string();
     assert!(err.contains("cancelled"), "{err}");
     assert_eq!(s.model.state().bodies.len(), before);
@@ -89,27 +96,57 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
     s.execute("file.insert_step", &json!({"path": path})).unwrap();
     let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    // The model holds the import's read until what its check of the parts found is settled, and
+    // an evaluation before then takes that read. Here the evaluation must read the file again, so
+    // let the check end and settle it first.
+    if let Some(checks) = s.model.results[import].import_report.as_ref().map(|r| r.checks.clone()) {
+        checks.wait();
+    }
+    s.settle_import_checks();
     // Changing document units changes the shared evaluation context, forcing the import to
     // evaluate again on new inputs.
     let change_units = json!({"units": "in"});
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
-    let canceller = {
-        let progress = progress.clone();
-        std::thread::spawn(move || {
-            while progress.work().is_none() {
-                std::thread::yield_now();
-            }
-            progress.cancel();
-        })
-    };
+    let canceller = cancel_once_working(&progress);
     let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("document.units", &change_units));
-    canceller.join().unwrap();
+    canceller.join().expect("the read was cancelled");
     let (_, done, total) = progress.work().unwrap();
     assert!(done < total, "the preview's import stopped part way ({done} of {total})");
     s.execute("document.units", &change_units).unwrap();
     let result = &s.model.results[import];
     assert!(result.error.is_none() && !result.skipped, "the design imports in full: {:?}", result.error);
+    let _ = std::fs::remove_file(path);
+}
+
+/// A preview cancelled while the model still holds the import's read (its check of the parts not
+/// settled yet) reads nothing again and leaves no failure in the shared cache: the design then
+/// evaluates the same inputs in full. Once the check is settled, the read is let go.
+#[test]
+fn a_preview_cancelled_while_the_read_is_held_leaves_no_failure_in_the_shared_cache() {
+    let path = step_file("preview-held", 300);
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
+    // The check runs on after the import, as a large file's does.
+    let open = solidcraft_kernel::ImportChecks::hold_open_for_tests();
+    s.execute("file.insert_step", &json!({"path": path})).unwrap();
+    let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    let checks = s.model.results[import].import_report.as_ref().map(|r| r.checks.clone()).expect("the import's check");
+    assert!(checks.is_running());
+    assert_eq!(s.model.held_import_reads(), 1, "the model holds the read while its check runs");
+    let change_units = json!({"units": "in"});
+    let mut scratch = s.scratch();
+    let progress = Arc::new(Progress::default());
+    progress.cancel();
+    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("document.units", &change_units));
+    drop(scratch);
+    s.execute("document.units", &change_units).unwrap();
+    let result = &s.model.results[import];
+    assert!(result.error.is_none() && !result.skipped, "the design imports in full: {:?}", result.error);
+    drop(open);
+    assert!(checks.wait().is_some());
+    s.settle_import_checks();
+    assert_eq!(s.model.held_import_reads(), 0, "let go once its check is settled");
     let _ = std::fs::remove_file(path);
 }
 
