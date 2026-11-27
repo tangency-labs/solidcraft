@@ -1963,14 +1963,18 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.pattern_names_in_order = nf.pins_every_body_name();
         } else {
             if f.pins_every_body_name() && !f.pattern_names_in_order {
-                let made: Vec<String> = s
+                let pinned: Vec<String> = s
                     .model
                     .result(id)
                     .filter(|r| r.error.is_none() && !r.skipped)
-                    .map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect())
+                    .map(|r| {
+                        let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+                        let left_out = r.state.pattern_left_out(id);
+                        f.pattern_pins(&made, left_out).map_or(made, |(names, _)| names)
+                    })
                     .unwrap_or_default();
-                if !made.is_empty() && made.len() != nf.body_names.len() {
-                    nf.body_names = made;
+                if !pinned.is_empty() && pinned.len() != nf.body_names.len() {
+                    nf.body_names = pinned;
                 }
             }
             nf.keep_pattern_names_with_sources(old);
