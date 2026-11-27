@@ -2306,6 +2306,26 @@ fn closed_spline_seam_mapping_preserves_sense_and_geometry() {
     }
 }
 
+/// A vertex on a helix-like spline whose turns lie closer together than its samples (#22991):
+/// the nearest sample is on the next turn, yet the edge ends at the vertex, on its own turn.
+#[test]
+fn an_edge_on_a_tightly_wound_spline_ends_on_its_vertexs_own_turn() {
+    let points = (0..30)
+        .map(|i| {
+            let a = f64::from(i) * 100f64.to_radians();
+            [10.0 * a.cos(), 10.0 * a.sin(), 0.5 * a / TAU]
+        })
+        .collect();
+    let knots = [vec![0.0; 3], (1..28).map(f64::from).collect(), vec![28.0; 3]].concat();
+    let curve = BCurve::Spline { knots, points };
+    let eval = CurveEval::new(&curve).unwrap();
+    let array = |p: Vec3| [p.x, p.y, p.z];
+    let (ps, pe) = (array(eval.point(0.0).unwrap()), array(eval.point(14.07).unwrap()));
+    let m = open_or_closed(curve, ps, pe, true, false, 1e-7).unwrap();
+    assert!(m.with_step);
+    assert!(m.interval[0] == 0.0 && (m.interval[1] - 14.07).abs() < 1e-9, "{:?}", m.interval);
+}
+
 #[test]
 fn vertex_parameters_on_lines_conics_and_splines() {
     let tol = 1e-7;
