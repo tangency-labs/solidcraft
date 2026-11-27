@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
@@ -477,6 +477,14 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
 
 ### keyboard profile
 

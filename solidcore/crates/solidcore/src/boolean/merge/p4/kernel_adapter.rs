@@ -62,6 +62,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         tolerances: k.tolerances,
         seed: k.seed,
         caches: crate::kernel::Caches {
+            fit_gap_memo: std::sync::Arc::clone(&k.caches.fit_gap_memo),
             prove_lazy_trim_raise: k.caches.prove_lazy_trim_raise,
             ..crate::kernel::Caches::default()
         },

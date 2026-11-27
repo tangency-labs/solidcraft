@@ -1480,6 +1480,7 @@ fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
         angle2: None,
         symmetric: false,
         convention: Default::default(),
+        join_profile_arcs: false,
         to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
     };
     let revolve = add_named(&mut doc, kind);
@@ -6255,6 +6256,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevB"),
@@ -6323,6 +6325,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevC"),
@@ -7698,6 +7701,71 @@ fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
 }
 
 #[test]
+fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
+    use crate::joints::{Constraint, Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("last valid Center pose");
+    let slot = doc.add_component(Some("Slot"), 0).unwrap();
+    let slider = doc.add_component(Some("Slider"), 0).unwrap();
+    let wall_occ = doc.occurrences.iter_mut().find(|o| o.component == slot).unwrap();
+    wall_occ.grounded = true;
+    wall_occ.base_transform = Some(IDENTITY);
+    let wall_occ = wall_occ.id;
+    let slider_occ = doc.occurrences.iter().find(|o| o.component == slider).unwrap().id;
+    for (x, name) in [(0.0, "Left"), (30.0, "Right")] {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(x, 0.0, 0.0)),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = slot;
+        f.body_names = vec![name.into()];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let [a, b] = [10.0, 30.0].map(|x| joints::between_face_pick(&doc, &model.state(), slot, Vec3::new(x, 5.0, 5.0)).unwrap());
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "Center1".into(),
+        kind: JointKind::Planar,
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
+        values: vec![0.0; 3],
+        limits: vec![None; 3],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: Some(Constraint::Center),
+    });
+
+    // No intervening feature reads the pose. The solve must still see both walls once.
+    let rem = doc.add_feature(FeatureKind::Remove { bodies: vec!["Right".into()] }, Some("RemoveRight")).unwrap();
+    doc.feature_mut(rem).unwrap().component = slot;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "Center after wall removal");
+    let landed = apply_point(&model.resolved_occurrences()[&slider_occ], Vec3::ZERO);
+    assert!((landed.x - 20.0).abs() < 1e-6, "last valid Center pose was at x = 20, got {landed:?}");
+}
+
+#[test]
 fn capture_position_revolute_joint_on_built_faces_matches_eager_solve() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
     let mut doc = Document::new("revolute built faces vs eager");
@@ -7975,6 +8043,7 @@ fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevRoot"),

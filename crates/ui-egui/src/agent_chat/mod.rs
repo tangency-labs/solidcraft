@@ -28,6 +28,8 @@ pub mod backend;
 pub mod context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod discover;
+#[cfg(not(target_arch = "wasm32"))]
+mod export;
 pub mod gate;
 mod markdown;
 mod markdown_view;
@@ -54,9 +56,13 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::finish_native_window;
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
 pub(crate) use panel::prepare_shared;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::request_export;
 pub(crate) use panel::request_new_chat;
 pub(crate) use panel::shared_content;
 pub use panel::show;
@@ -476,6 +482,13 @@ struct ModelRevert {
     saved: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+struct ServiceTierChoice {
+    agent_id: String,
+    endpoint: String,
+    tier: agents::ServiceTier,
+}
+
 /// A switch that starts on (`#[derive(Default)]` would start it off). Read and set it through `*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OnByDefault(pub bool);
@@ -572,6 +585,9 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// The export dialog is open, with this choice for including tool details.
+    #[cfg(not(target_arch = "wasm32"))]
+    export_tools: Option<bool>,
     /// What the panel recorded this frame, run after it is drawn (`panel::run`).
     pub actions: Vec<panel::PanelAction>,
     /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
@@ -627,6 +643,9 @@ pub struct AgentChat {
     typed_model: Option<String>,
     pub config_options: Option<Vec<acp::ConfigOption>>,
     pub config_pending: bool,
+    /// An endpoint's tier override for this conversation.
+    #[cfg(not(target_arch = "wasm32"))]
+    api_service_tier: Option<ServiceTierChoice>,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
     models_cache: std::collections::HashMap<String, Vec<acp::ModelInfo>>,
     /// The running API agent's endpoint (empty for other agents).
@@ -718,6 +737,14 @@ impl AgentChat {
             Some(options) => options.iter().any(|o| o.category == "model"),
             None => !self.running_endpoint.is_empty() || !self.models.is_empty(),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn service_tier(&self, entry: &agents::Entry) -> agents::ServiceTier {
+        self.api_service_tier
+            .as_ref()
+            .filter(|choice| choice.agent_id == entry.id && choice.endpoint == entry.base_url && entry.service_tiers().contains(&choice.tier))
+            .map_or(agents::ServiceTier::Default, |choice| choice.tier)
     }
 }
 
@@ -1391,6 +1418,10 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     match started {
         Ok(mut b) => {
             b.set_instructions(&app.preferences.agent_instructions);
+            let tier = chat.service_tier(&entry);
+            if tier != agents::ServiceTier::Default {
+                b.set_service_tier(tier);
+            }
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
             chat.argv = entry.argv.clone();
@@ -2133,6 +2164,10 @@ pub fn new_chat(app: &mut SolveApp) {
     end_turn(app);
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chat.export_tools = None;
+    }
     chat.items.clear();
     chat.model_changes_shown = None;
     chat.all_selected = false;
@@ -2154,6 +2189,14 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.seen_design = None;
     chat.discard_end |= running;
     chat.model_revert = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The running endpoint can still hold a tier after its saved URL changes.
+        chat.api_service_tier = None;
+        if let Some(b) = chat.backend.as_mut() {
+            b.set_service_tier(agents::ServiceTier::Default);
+        }
+    }
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
@@ -3196,6 +3239,24 @@ pub fn set_mode(app: &mut SolveApp, mode: &str) {
 /// Change a reported modern ACP configuration option; only acknowledged snapshots change state.
 pub fn set_config_option(app: &mut SolveApp, id: &str, value: &str) {
     set_config_option_checked(app, id, value, true);
+}
+
+/// Set the tier for the selected endpoint's next turn. A disconnected chat applies it on connect.
+#[cfg(not(target_arch = "wasm32"))]
+fn set_service_tier(app: &mut SolveApp, tier: agents::ServiceTier) {
+    let Some(entry) = agents::current(app) else { return };
+    if !entry.service_tiers().contains(&tier) {
+        return;
+    }
+    let chat = &mut app.agent_chat;
+    if chat.running_id == entry.id
+        && chat.running_endpoint == entry.base_url
+        && let Some(b) = chat.backend.as_mut()
+    {
+        b.set_service_tier(tier);
+    }
+    chat.api_service_tier =
+        (tier != agents::ServiceTier::Default).then_some(ServiceTierChoice { agent_id: entry.id, endpoint: entry.base_url, tier });
 }
 
 /// [`set_config_option`], with a choice the agent did not list (`listed_only` false: a typed
