@@ -475,22 +475,40 @@ fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
     Some(Seg2::Arc { center, radius, start, sweep })
 }
 
-/// Whether the arc `next` goes on along the circle of the arc `last` from where it ends, each
-/// `(center, radius, start, sweep)`: centre and radius to 1e-9 of the radius, the start to 1e-9.
-pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (c, r, s, _): (Vec2, f64, f64, f64)) -> bool {
+/// Whether the arc `next` goes on along the circle of the arc `last` from where it ends, in the same
+/// sweep direction. Each is `(center, radius, start, sweep)`: centre and radius to 1e-9 of the
+/// radius, the start to 1e-9. Both sweeps are finite and `sweep * turn > 0`; a product, not `signum`:
+/// `0.0_f64.signum()` is `1.0`, so a zero sweep would look positive. Opposite signs, zero, NaN or
+/// infinity do not continue.
+pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (c, r, s, turn): (Vec2, f64, f64, f64)) -> bool {
     let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
     let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
-    c.dist(center) <= radius * 1e-9 && (r - radius).abs() <= radius * 1e-9 && on_from_last <= 1e-9
+    sweep.is_finite()
+        && turn.is_finite()
+        && sweep * turn > 0.0
+        && c.dist(center) <= radius * 1e-9
+        && (r - radius).abs() <= radius * 1e-9
+        && on_from_last <= 1e-9
 }
 
-/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined: `None` past a
-/// whole turn. Each joint is only within 1e-9 of the last arc's end, so the rounded sum of the pieces'
-/// sweeps can fall either side of a whole turn when they close the circle; a sum within 1e-9 of one
-/// is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined. `None` when
+/// either sweep is not finite, they oppose or either is zero (`sweep * turn <= 0`), the sum is not
+/// finite, or it is past a whole turn. Each joint is only within 1e-9 of the last arc's end, so the
+/// rounded sum of the pieces' sweeps can fall either side of a whole turn when they close the circle;
+/// a sum within 1e-9 of one is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+/// `(2π ± 1e-9) - 2π` rounds just past 1e-9, so the window allows one ulp of 2π.
 pub(super) fn joined_sweep(sweep: f64, turn: f64) -> Option<f64> {
+    if !(sweep.is_finite() && turn.is_finite() && sweep * turn > 0.0) {
+        return None;
+    }
     let full = std::f64::consts::TAU;
     let sum = sweep + turn;
-    if (sum.abs() - full).abs() <= 1e-9 {
+    if !sum.is_finite() {
+        return None;
+    }
+    // `(full ± 1e-9) - full` is 1e-9 plus about 8e-17; one ulp of a full turn covers it, 1e-8 does not.
+    let near_full = 1e-9 + (full.next_up() - full);
+    if (sum.abs() - full).abs() <= near_full {
         return Some(full.copysign(sum));
     }
     (sum.abs() < full).then_some(sum)
