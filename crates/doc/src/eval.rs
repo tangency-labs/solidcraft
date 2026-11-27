@@ -5966,6 +5966,27 @@ impl Model {
             })
     }
 
+    /// The imports whose SMLib check of their parts is still running, by feature, with how far
+    /// each is: the operations panel's rows ([`kernel::ImportChecks::progress`]).
+    pub fn running_import_checks(&self) -> impl Iterator<Item = (u64, kernel::ImportChecks)> + '_ {
+        self.results.iter().filter_map(|r| {
+            let report = r.import_report.as_ref()?;
+            report.checking().then(|| (r.id, report.checks.clone()))
+        })
+    }
+
+    /// Ask import `id`'s SMLib check of its parts to stop at its next check (the operations
+    /// panel's Cancel): the import stays as read and nothing the check found is kept.
+    pub fn cancel_import_check(&self, id: u64) -> bool {
+        let Some(checks) = self.results.iter().find(|r| r.id == id).and_then(|r| r.import_report.as_ref()).map(|r| &r.checks) else {
+            return false;
+        };
+        if !checks.is_running() {
+            return false;
+        }
+        checks.cancel();
+        true
+    }
     /// Fold what the ended checks of each import found into its result: its report's issues and
     /// its warning, as an import that waited for them has them. An import whose checks found a
     /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
@@ -6035,6 +6056,14 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
+            // A token stopped this run (the operations panel's Cancel, or a stopped file
+            // operation): what it found is incomplete and no part was healed, so none of it is
+            // kept. The import stays as read, and a later evaluation checks it again.
+            if run.stopped() {
+                let as_read = kernel::ImportReport { checks: Default::default(), ..(**report).clone() };
+                r.import_report = (!as_read.issues.is_empty()).then(|| Arc::new(as_read));
+                continue;
+            }
             // The evaluation that brings healed parts in takes the read the model holds, whose
             // run ended with the heals the model then has, and is not news.
             let heals = run.heals();
