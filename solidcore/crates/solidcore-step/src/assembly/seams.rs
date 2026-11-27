@@ -176,8 +176,9 @@ struct Axis {
 
 /// How an edge of a seam-only loop sits on a pole-closed surface of revolution.
 enum SeamEdgeKind {
-    /// Runs monotonically in `v` along a single meridian (`forward` = increasing `v`).
-    Meridian { forward: bool, v_mid: f64 },
+    /// Runs monotonically in `v` along a meridian at longitude `u` (measured at its sample
+    /// farthest from the axis, at squared radial distance `radial2`; `forward` = increasing `v`).
+    Meridian { u: f64, radial2: f64, forward: bool, v_mid: f64 },
     /// Runs along a constant interior `v` strictly off both poles.
     Parallel,
     /// Neither a meridian nor an interior parallel.
@@ -1307,6 +1308,8 @@ impl Assembly<'_> {
             let Some((v_min, v_max)) = eval.domain().range.get(1).copied().flatten().filter(|(a, b)| a < b) else {
                 continue;
             };
+            let pv = eval.domain().period.get(1).copied().flatten().filter(|&p| p > 0.0);
+            let wrap_v = |v: f64| pv.map_or(v, |p| v_min + (v - v_min).rem_euclid(p));
             let loop_count = self.faces.get(fi).map_or(0, |f| f.loops.len());
             for li in 0..loop_count {
                 let Some(Bound::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else {
@@ -1315,82 +1318,125 @@ impl Assembly<'_> {
                 if !super::seam_only(es) || !es.iter().all(|(e, _)| edge_uses.get(e).copied() == Some(2)) {
                     continue;
                 }
-                let mut unique = Vec::new();
+                let (mut unique, mut meridians, mut has_parallel, mut valid) = (Vec::new(), Vec::new(), false, true);
                 for &(e, _) in es {
                     if !unique.contains(&e) {
                         unique.push(e);
                     }
                 }
-                let mut u_ref: Option<f64> = None;
-                let mut meridians: Vec<(u32, bool, f64)> = Vec::new();
-                let mut parallels: Vec<u32> = Vec::new();
-                let mut valid = true;
                 for &e in &unique {
-                    match self.classify_pole_closed_seam_edge(e, &ax, &eval, (v_min, v_max), &mut u_ref)? {
-                        SeamEdgeKind::Meridian { forward, v_mid } => meridians.push((e, forward, v_mid)),
-                        SeamEdgeKind::Parallel => parallels.push(e),
+                    match self.classify_pole_closed_seam_edge(e, &ax, &eval, (v_min, v_max))? {
+                        SeamEdgeKind::Meridian { u, radial2, forward, v_mid } => meridians.push((e, forward, v_mid, u, radial2)),
+                        SeamEdgeKind::Parallel => has_parallel = true,
                         SeamEdgeKind::Other => {
                             valid = false;
                             break;
                         }
                     }
                 }
-                let Some(u_meridian) = u_ref else { continue };
-                if !valid || meridians.is_empty() {
+                let Some(&(_, _, _, u_meridian, _)) = valid.then(|| meridians.iter().max_by(|a, b| a.4.total_cmp(&b.4))).flatten() else {
                     continue;
-                }
+                };
                 meridians.sort_by(|a, b| a.2.total_cmp(&b.2));
-                let up: Vec<(u32, bool)> = meridians.iter().map(|&(e, fwd, _)| (e, fwd)).collect();
+                let up: Vec<(u32, bool)> = meridians.iter().map(|&(e, fwd, _, _, _)| (e, fwd)).collect();
                 let (Some(&first), Some(&last)) = (up.first(), up.last()) else { continue };
-                if !self.at(self.start(first)?, south)? || !self.at(self.end(last)?, north)? {
+                if !self.on_meridian_at(&up, &ax, &eval, u_meridian)? || !self.at(self.start(first)?, south)? || !self.at(self.end(last)?, north)? {
                     continue;
                 }
                 let mut chained = true;
                 for pair in up.windows(2) {
-                    let [a, b] = pair else { continue };
-                    let mid = self.end(*a)?;
-                    if mid != self.start(*b)? || self.at(mid, south)? || self.at(mid, north)? {
-                        chained = false;
-                        break;
+                    if let [a, b] = pair {
+                        let mid = self.end(*a)?;
+                        if mid != self.start(*b)? || self.at(mid, south)? || self.at(mid, north)? {
+                            chained = false;
+                            break;
+                        }
                     }
                 }
                 if !chained {
                     continue;
                 }
-                let mut down = up.clone();
-                super::reverse(&mut down);
-                let mut merged = down.clone();
-                merged.extend(&up);
-                let mut up_first = up;
-                up_first.extend(down);
                 let needs_turn = wrap(u_meridian).abs() > 1e-12;
-                if parallels.is_empty() && !needs_turn && (*es == merged || *es == up_first) {
-                    continue;
-                }
-                let turned_surface = if needs_turn {
-                    let turned = match &surface {
-                        BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
-                            let rotated = meridian(profile, ax.origin, ax.z, u_meridian)?;
-                            Some(BSurface::PlacedRevolution {
-                                profile: Box::new(rotated),
-                                origin: *origin,
-                                axis: *axis,
-                                matrix: *matrix,
-                                forward: *forward,
-                            })
-                        }
-                        BSurface::Sphere { .. } => crate::kernel::form::turned(&surface, u_meridian),
-                        _ => None,
+                let mut reparam: Option<(BCurve, Vec<(u32, [u32; 2], [f64; 2])>)> = None;
+                let turned_surface = if let BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } = &surface {
+                    let mc = if needs_turn {
+                        let Ok(r) = meridian(profile, ax.origin, ax.z, u_meridian) else { continue };
+                        r
+                    } else {
+                        (**profile).clone()
                     };
-                    let Some(s) = turned else { continue };
+                    if CurveEval::new(&mc).is_err() {
+                        continue;
+                    }
+                    // Re-parameterize the private meridian seam edges onto the revolution's own
+                    // profile so off-quarter-grid STEP curves lift to an exact linear pcurve.
+                    let (mut segs, mut prev) = (Vec::new(), v_min);
+                    for (idx, &(e, fwd)) in up.iter().enumerate() {
+                        let (va, vb) = (self.start((e, fwd))?, self.end((e, fwd))?);
+                        let next = if idx + 1 == up.len() {
+                            Some(v_max)
+                        } else {
+                            eval.project(self.vpoint(vb)?, None, f64::INFINITY).map(|q| wrap_v(q[1])).filter(|&t| t > prev && t < v_max)
+                        };
+                        let Some(tb) = next.filter(|&t| t > prev) else {
+                            segs.clear();
+                            break;
+                        };
+                        segs.push((e, [va, vb], [prev, tb]));
+                        prev = tb;
+                    }
+                    if segs.len() != up.len() {
+                        continue;
+                    }
+                    reparam = Some((mc.clone(), segs));
+                    needs_turn.then(|| BSurface::PlacedRevolution {
+                        profile: Box::new(mc),
+                        origin: *origin,
+                        axis: *axis,
+                        matrix: *matrix,
+                        forward: *forward,
+                    })
+                } else if needs_turn {
+                    let Some(s) = (if matches!(surface, BSurface::Sphere { .. }) { crate::kernel::form::turned(&surface, u_meridian) } else { None })
+                    else {
+                        continue;
+                    };
                     Some(s)
                 } else {
                     None
                 };
+                let up_oriented: Vec<(u32, bool)> = if reparam.is_some() { up.iter().map(|&(e, _)| (e, true)).collect() } else { up };
+                let mut down = up_oriented.clone();
+                super::reverse(&mut down);
+                let mut merged = down.clone();
+                merged.extend(&up_oriented);
+                let mut up_first = up_oriented;
+                up_first.extend(down);
+                let edges_changed = reparam.as_ref().is_some_and(|(mc, segs)| {
+                    segs.iter().any(|&(e, vs, iv)| {
+                        self.edges.get(e as usize).is_none_or(|edge| edge.curve != *mc || edge.interval != iv || edge.vertices != vs)
+                    })
+                });
+                if !has_parallel && !needs_turn && !edges_changed && (*es == merged || *es == up_first) {
+                    continue;
+                }
+                if let Some((mc, segs)) = reparam {
+                    let c = CurveEval::new(&mc).map_err(|m| m.to_string())?;
+                    for (e, vs, iv) in segs {
+                        for (t, v) in iv.into_iter().zip(vs) {
+                            let gap = c.point(t).ok_or("meridian seam point")?.dist(self.vpoint(v)?);
+                            if let Some(x) = self.vertices.get_mut(v as usize) {
+                                x.tolerance = x.tolerance.max(1.5 * gap);
+                            }
+                        }
+                        if let Some(edge) = self.edges.get_mut(e as usize) {
+                            (edge.curve, edge.interval, edge.vertices, edge.form) = (mc.clone(), iv, vs, None);
+                        }
+                    }
+                }
                 if let Some(face) = self.faces.get_mut(fi) {
                     if let Some(s) = turned_surface {
-                        face.surface = s;
-                        face.extent = None;
+                        (face.surface, face.extent) = (s, None);
                     }
                     if let Some(Bound::Edges(slot)) = face.loops.get_mut(li) {
                         *slot = merged;
@@ -1403,17 +1449,10 @@ impl Assembly<'_> {
         Ok(reduced)
     }
 
-    /// Classifies an edge of a seam-only loop on a pole-closed surface as lying along the single
-    /// meridian `u_ref` (strictly monotone in `v`), along an interior constant-`v` parallel off
-    /// both poles, or neither.
-    fn classify_pole_closed_seam_edge(
-        &self,
-        e: u32,
-        ax: &Axis,
-        eval: &SurfaceEval,
-        (v_min, v_max): (f64, f64),
-        u_ref: &mut Option<f64>,
-    ) -> R<SeamEdgeKind> {
+    /// Classifies an edge of a seam-only loop on a pole-closed surface as lying along a meridian
+    /// (strictly monotone in `v`, recording its longitude at the sample farthest from the axis),
+    /// along an interior constant-`v` parallel off both poles, or neither.
+    fn classify_pole_closed_seam_edge(&self, e: u32, ax: &Axis, eval: &SurfaceEval, (v_min, v_max): (f64, f64)) -> R<SeamEdgeKind> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let ([lo, hi], reach) = (edge.interval, self.tol.max(edge.tolerance));
@@ -1425,24 +1464,22 @@ impl Assembly<'_> {
             samples.push((p, at_pole));
         }
 
-        // First check whether all non-pole samples lie on a single meridian `u_cand` and move
-        // strictly monotonically in `v`. When no reference longitude is fixed yet, read it from
-        // the sample farthest from the axis so near-pole rounding is not magnified.
+        // First check whether all non-pole samples lie on a single meridian (reading its angle at
+        // the sample farthest from the axis) and move strictly monotonically in `v`.
+        let pv = eval.domain().period.get(1).copied().flatten().filter(|&p| p > 0.0);
+        let wrap_v = |v: f64| pv.map_or(v, |p| v_min + (v - v_min).rem_euclid(p));
         let radial_dist2 = |p: Vec3| {
             let d = p - ax.origin;
             (d - ax.z * d.dot(ax.z)).len2()
         };
-        let u_cand = match *u_ref {
-            Some(u) => Some(u),
-            None => samples
-                .iter()
-                .filter(|&&(_, at_pole)| !at_pole)
-                .max_by(|(a, _), (b, _)| radial_dist2(*a).total_cmp(&radial_dist2(*b)))
-                .and_then(|&(p, _)| eval.project(p, None, f64::INFINITY).map(|q| q[0])),
-        };
+        let farthest = samples
+            .iter()
+            .filter(|&&(_, at_pole)| !at_pole)
+            .max_by(|(a, _), (b, _)| radial_dist2(*a).total_cmp(&radial_dist2(*b)))
+            .and_then(|&(p, _)| eval.project(p, None, f64::INFINITY).map(|q| (q[0], radial_dist2(p))));
         let mut vs = Vec::new();
-        let mut on_meridian = u_cand.is_some();
-        if let Some(u) = u_cand {
+        let mut on_meridian = farthest.is_some();
+        if let Some((u, _)) = farthest {
             for &(p, at_pole) in &samples {
                 if at_pole {
                     continue;
@@ -1451,20 +1488,23 @@ impl Assembly<'_> {
                     on_meridian = false;
                     break;
                 };
-                if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
+                let v = wrap_v(q[1]);
+                if !eval.point([u, v]).is_some_and(|m| m.dist(p) <= reach) {
                     on_meridian = false;
                     break;
                 }
-                vs.push(q[1]);
+                vs.push(v);
             }
         }
-        if on_meridian && vs.len() >= 2 {
+        if let Some((u, radial2)) = farthest
+            && on_meridian
+            && vs.len() >= 2
+        {
             let inc = vs.windows(2).all(|w| matches!(w, [a, b] if a < b));
             let dec = vs.windows(2).all(|w| matches!(w, [a, b] if a > b));
             if inc || dec {
                 let v_mid = vs.get(vs.len() / 2).copied().ok_or("meridian midpoint")?;
-                *u_ref = u_cand;
-                return Ok(SeamEdgeKind::Meridian { forward: inc, v_mid });
+                return Ok(SeamEdgeKind::Meridian { u, radial2, forward: inc, v_mid });
             }
         }
 
@@ -1478,7 +1518,7 @@ impl Assembly<'_> {
             let Some(q) = eval.project(p, None, f64::INFINITY) else {
                 return Ok(SeamEdgeKind::Other);
             };
-            let v = *v_const.get_or_insert(q[1]);
+            let v = *v_const.get_or_insert(wrap_v(q[1]));
             if !(v > v_min && v < v_max) || !eval.point([q[0], v]).is_some_and(|m| m.dist(p) <= reach) {
                 return Ok(SeamEdgeKind::Other);
             }
@@ -1515,10 +1555,37 @@ impl Assembly<'_> {
     /// Every point of the path's edges lies on one meridian of the surface (the spline's
     /// boundary column for [`Kind::Iso`]), the poles apart.
     fn on_meridian(&self, path: &[(u32, bool)], ax: &Axis, eval: &SurfaceEval) -> R<bool> {
-        let mut u_ref = match ax.kind {
+        let u_ref = match ax.kind {
             Kind::Iso { start, .. } => Some(start),
-            _ => None,
+            _ => {
+                // Choose the reference longitude at the non-pole sample farthest from the axis so
+                // near-pole rounding is not magnified across the meridian.
+                let mut best: Option<(f64, Vec3)> = None;
+                for &(e, _) in path {
+                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                    let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                    let ([lo, hi], reach) = (edge.interval, self.tol.max(edge.tolerance));
+                    for k in 0..=SAMPLES {
+                        let p = c.point(lo + (hi - lo) * k as f64 / SAMPLES as f64).ok_or("edge point")?;
+                        if ax.poles.iter().flatten().any(|q| q.dist(p) <= reach) {
+                            continue;
+                        }
+                        let d = p - ax.origin;
+                        let r2 = (d - ax.z * d.dot(ax.z)).len2();
+                        if best.is_none_or(|(b, _)| r2 > b) {
+                            best = Some((r2, p));
+                        }
+                    }
+                }
+                best.and_then(|(_, p)| eval.project(p, None, f64::INFINITY).map(|q| q[0]))
+            }
         };
+        let Some(u) = u_ref else { return Ok(false) };
+        self.on_meridian_at(path, ax, eval, u)
+    }
+
+    /// Every non-pole sample of `path`'s edges lies on meridian `u` within each edge's tolerance.
+    fn on_meridian_at(&self, path: &[(u32, bool)], ax: &Axis, eval: &SurfaceEval, u: f64) -> R<bool> {
         for &(e, _) in path {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
@@ -1529,13 +1596,12 @@ impl Assembly<'_> {
                     continue;
                 }
                 let Some(q) = eval.project(p, None, f64::INFINITY) else { return Ok(false) };
-                let u = *u_ref.get_or_insert(q[0]);
                 if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
                     return Ok(false);
                 }
             }
         }
-        Ok(u_ref.is_some())
+        Ok(true)
     }
 
     /// A slit along a meridian of a surface closed at both poles, run on to them: the meridian

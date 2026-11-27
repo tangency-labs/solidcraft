@@ -1529,6 +1529,7 @@ fn a_full_horn_torus_with_meridian_and_equator_imports_as_a_valid_solid() {
         ("tilted off-origin", [17.3, -9.4, 5.2], [1.0, 2.0, 3.0], [2.0, -1.0, 0.0], 5.0, 0.0, 0.0, false, 1e-7),
         ("meridian off ref_direction", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 0.0, false, 1e-7),
         ("parallel at top circle", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, std::f64::consts::FRAC_PI_2, false, 1e-7),
+        ("parallel near pinch pole", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 3.0, false, 1e-7),
         ("degenerate toroidal surface", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, 0.0, true, 2e-5),
     ];
     for (label, origin, axis, ref_dir, r, lon, par, degen, tol) in cases {
@@ -1548,7 +1549,9 @@ fn a_full_horn_torus_with_meridian_and_equator_imports_as_a_valid_solid() {
 /// or starting at the pinch pole) also imports as a valid manifold solid with closed-form volume.
 #[test]
 fn a_full_horn_torus_with_meridian_slit_only_imports_as_a_valid_solid() {
-    for (label, start_tube, expected_counts) in [("equator start", 0.0, [2, 1, 1, 2, 2]), ("pole start", PI, [2, 1, 1, 1, 1])] {
+    for (label, start_tube, expected_counts) in
+        [("equator start", 0.0, [2, 1, 1, 2, 2]), ("off-grid start", 0.3, [2, 1, 1, 2, 2]), ("pole start", PI, [2, 1, 1, 1, 1])]
+    {
         let mut w = W::default();
         let f = full_horn_torus_face(&mut w, [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.4, None, start_tube, false, true);
         let shell = closed_shell(&mut w, &[f]);
