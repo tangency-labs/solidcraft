@@ -4887,9 +4887,11 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         plane_extents,
         plugin_data,
         linked_bodies_left_out,
+        container_generator,
     } = a;
     *plugin_data == b.plugin_data
         && *linked_bodies_left_out == b.linked_bodies_left_out
+        && *container_generator == b.container_generator
         && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending

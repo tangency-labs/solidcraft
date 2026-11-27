@@ -12,6 +12,14 @@ The independent versions let document migrations evolve without changing blob en
 Existing serialized document fields are retained automatically, without a second copy
 of the document schema or a deep clone of embedded payloads.
 
+A design's `container.json` may also have an optional `generator` string or JSON object,
+such as `{"format":"solidcraft-container/1","generator":{"name":"ExampleTool","version":"1.2.3"}}`.
+Container saves preserve this metadata, including nested fields, without a newer-file
+warning for the generator alone. Unknown header fields, extension parts or later
+container versions still trigger the existing compatibility handling for marked files. The entire header remains limited
+to 4096 bytes. The generator is self-declared metadata, not authenticated provenance;
+it is not carried by plain JSON export.
+
 Within `document.json`:
 
 - Import features have empty `step` and a `step_blob` reference.

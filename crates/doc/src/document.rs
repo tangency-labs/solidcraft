@@ -4907,6 +4907,10 @@ pub struct Document {
     /// this build couldn't read and keeps for the next save ([`crate::newer_file`]).
     #[serde(skip)]
     pub newer_file: Option<std::sync::Arc<crate::newer_file::NewerFile>>,
+    /// Self-declared generator metadata from container.json, kept on container saves.
+    /// This is informational, not verified provenance, and is not part of document.json.
+    #[serde(skip)]
+    pub container_generator: Option<serde_json::Value>,
     /// Named image intent and immutable embedded HDR sources. Active jobs and device state are not saved.
     #[serde(default, skip_serializing_if = "crate::render_settings::RenderSettings::is_empty")]
     pub render: std::sync::Arc<crate::render_settings::RenderSettings>,
@@ -5348,6 +5352,7 @@ impl Document {
     pub fn new(name: &str) -> Self {
         Document {
             newer_file: None,
+            container_generator: None,
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
