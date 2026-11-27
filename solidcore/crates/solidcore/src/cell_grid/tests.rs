@@ -4137,7 +4137,7 @@ mod wall_tests {
         let highest = plan.sectors.iter().map(top).fold(f64::NEG_INFINITY, f64::max);
         assert!((lowest - (0.0 - ov)).abs() < 1e-9, "{lowest}");
         assert!((highest - (40.0 + ov)).abs() < 1e-9, "{highest}");
-        assert_eq!(plan.sectors.iter().filter(|s| (top(s) - 40.6).abs() < 1e-9).count(), 18);
+        assert_eq!(plan.sectors.iter().filter(|&s| (top(s) - 40.6).abs() < 1e-9).count(), 18);
         let closed = CylinderWall {
             open_hi: false,
             ..wall

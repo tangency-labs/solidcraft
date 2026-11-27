@@ -330,8 +330,10 @@ pub fn plan_wall(
                 cell.i, cell.j
             ))
         })?;
-        if cell.kind == CellKind::Whole {
-            // Whole cells from the lattice's own numbers, so their masters are bit-equal.
+        let whole = cell.kind == CellKind::Whole;
+        if whole {
+            // Whole cells from the lattice's own numbers, so their masters are bit-equal: the
+            // width and height below are `spec.size` itself, never a difference of two floats.
             let h = spec.size / 2.0;
             (x0, x1, z0, z1) = (
                 cell.center.x - h,
@@ -347,20 +349,23 @@ pub fn plan_wall(
             )
         };
         let (mut lo, mut hi) = (z0, z1);
+        let mut pushed = false;
         if (z0 - wall.z_lo).abs() <= wall.tol {
             if !wall.open_lo {
                 return Err(closed_end());
             }
             lo = wall.z_lo - ov;
+            pushed = true;
         }
         if (z1 - wall.z_hi).abs() <= wall.tol {
             if !wall.open_hi {
                 return Err(closed_end());
             }
             hi = wall.z_hi + ov;
+            pushed = true;
         }
-        let sweep = (x1 - x0) / r;
-        let height = hi - lo;
+        let sweep = (if whole { spec.size } else { x1 - x0 }) / r;
+        let height = if whole && !pushed { spec.size } else { hi - lo };
         let key = [
             sweep.to_bits(),
             height.to_bits(),
