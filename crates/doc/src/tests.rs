@@ -951,6 +951,84 @@ fn a_pattern_reads_the_bodies_its_source_cuts() {
     assert_eq!(summary(&m.state()), from_scratch(&doc));
 }
 
+/// A pattern that holds several features builds with all of them (#14305): the bore it holds is
+/// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
+/// feature that points at a face with its To Object is built where the feature was built, so the
+/// face that the feature's own join took is still there and the copy is that feature's own tool,
+/// moved.
+#[test]
+fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
+    let mut doc = Document::new("cap with a pattern of several features");
+    // A disc with a conical hollow in its top.
+    add_in(
+        &mut doc,
+        0,
+        "Body1",
+        serde_json::json!({"type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "20", "height": "20", "operation": "new_body"}),
+    );
+    add_in(
+        &mut doc,
+        0,
+        "Hollow",
+        serde_json::json!({"type": "cone", "base": ["0", "0", "20"], "axis": [0.0, 0.0, -1.0], "radius": "5", "top_radius": "0", "height": "10", "operation": "cut"}),
+    );
+    // A bore through the disc, clear of the hollow.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(15.0, 0.0), 1.0, None, None).unwrap();
+    let bore_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Bore sketch")).unwrap();
+    add_in(
+        &mut doc,
+        0,
+        "Bore",
+        serde_json::json!({"type": "extrude", "sketch": bore_sketch, "profiles": {"type": "all"}, "extent": {"distance": "30", "through_all": true}, "operation": "cut"}),
+    );
+    // A post in the hollow, up to the hollow's conical wall, joined to the disc.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(3.0, 0.0), 0.6, None, None).unwrap();
+    let post_sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "18".into() },
+                sketch: sk,
+            },
+            Some("Post sketch"),
+        )
+        .unwrap();
+    add_in(
+        &mut doc,
+        0,
+        "Post",
+        serde_json::json!({"type": "extrude", "sketch": post_sketch, "profiles": {"type": "all"}, "extent": {"convention": "total_distance", "direction": "negative", "distance": "4", "to": [3.0, 0.0, 14.0]}, "operation": "join", "targets": ["Body1"]}),
+    );
+    for f in doc.features.iter_mut().filter(|f| f.name == "Body1") {
+        f.body_names = vec!["Body1".into()];
+    }
+    let bore = doc.find_feature("Bore").map_or(0, |f| f.id);
+    let post = doc.find_feature("Post").map_or(0, |f| f.id);
+    add_in(
+        &mut doc,
+        0,
+        "Pattern",
+        serde_json::json!({"type": "pattern", "features": [bore, post], "pattern": {"type": "circular", "origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0], "count": "4", "angle": "360 deg"}}),
+    );
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // One body: the disc with the hollow in it, the four bores the pattern cut and the four
+    // posts it added.
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 1);
+    let pi = std::f64::consts::PI;
+    let disc = pi * 400.0 * 20.0;
+    let hollow = pi * 25.0 * 10.0 / 3.0;
+    let bores = 4.0 * pi * 20.0;
+    let v = measure(&st.bodies[0].body).unwrap().volume;
+    assert!(v < disc - hollow - bores + 100.0, "the bores are cut and the posts are added: {v} mm³");
+    assert!(v > disc - hollow - bores, "the bores are cut and the posts are added: {v} mm³");
+}
+
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
 /// move, keeps the very body its earlier cut gave, while the cap `w` sizes is cut again.
 #[test]
