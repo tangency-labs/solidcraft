@@ -591,7 +591,8 @@ impl Encoded {
             slices.push(json!([data.len(), bytes.len()]));
             data.extend_from_slice(bytes);
         }
-        let kernel = solidcraft_kernel::persistent_cache_backend().ok_or_else(|| invalid("model cache disabled after an explicit kernel override"))?;
+        let kernel =
+            solidcraft_kernel::persistent_cache_backend().ok_or_else(|| invalid("model cache disabled after an explicit kernel override"))?;
         let manifest = serde_json::to_vec(&Manifest {
             app: env!("CARGO_PKG_VERSION"),
             bodies: table,
