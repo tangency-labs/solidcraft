@@ -153,7 +153,7 @@ impl Filter {
             return false;
         }
         let haystack = Self::haystack(item);
-        self.query.split_whitespace().take(32).all(|word| haystack.contains(&word.to_lowercase()))
+        self.query.split_whitespace().all(|word| haystack.contains(&word.to_lowercase()))
     }
 
     /// The kept items, in the catalog's order.
@@ -201,5 +201,9 @@ mod tests {
         assert_eq!(ids(&Filter { query: "maker".into(), ..Filter::default() }), ["gears", "shelf", "fasteners"]);
         assert!(ids(&Filter { query: "gear shelf".into(), ..Filter::default() }).is_empty());
         assert!(ids(&Filter { kind: Some(Kind::Plugin), tier: Some(Tier::Official), ..Filter::default() }).is_empty());
+        // Every word counts, however many: a last word that matches nothing drops the item.
+        let many = std::format!("{}zzzz", "a ".repeat(32));
+        assert!(ids(&Filter { query: many, ..Filter::default() }).is_empty());
+        assert_eq!(ids(&Filter { query: "a ".repeat(32), ..Filter::default() }), ["gears", "shelf", "fasteners"]);
     }
 }

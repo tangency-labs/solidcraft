@@ -23,8 +23,8 @@ pub mod link;
 mod tests;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use solidcraft_ui_text::{format, tr};
 
@@ -143,7 +143,10 @@ pub(crate) fn fetch_index(
 ) -> Result<index::Index, Refusal> {
     let answer = get(index::INDEX_URL).map_err(Refusal::Unreachable)?;
     let index = index::verify_with(keys, &answer.body, answer.signature.as_deref(), answer.key_id.as_deref())?;
-    let highest = seen.and_then(|path| std::fs::read_to_string(path).ok()).and_then(|s| s.trim().parse::<u64>().ok());
+    // Read, check and write the sequence as one step: a link's lookup and a window read running
+    // together can't leave the older sequence written last.
+    let _one_at_a_time = SEQUENCE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    let highest = stored_sequence(seen);
     index::check_fresh(&index, highest.max(Some(floor)), now)?;
     if let Some(path) = seen
         && highest.is_none_or(|h| index.sequence > h)
@@ -152,6 +155,14 @@ pub(crate) fn fetch_index(
         let _ = solidcraft_engine::io::safe_write::write_atomic(path, index.sequence.to_string().as_bytes(), false);
     }
     Ok(index)
+}
+
+/// Orders the read, check and write of the sequence file in [`fetch_index`].
+static SEQUENCE_LOCK: Mutex<()> = Mutex::new(());
+
+/// The highest index sequence the file `seen` remembers (none when it is missing or unreadable).
+pub(crate) fn stored_sequence(seen: Option<&Path>) -> Option<u64> {
+    seen.and_then(|path| std::fs::read_to_string(path).ok()).and_then(|s| s.trim().parse::<u64>().ok())
 }
 
 fn sequence_file() -> Option<PathBuf> {

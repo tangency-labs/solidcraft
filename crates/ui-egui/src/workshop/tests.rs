@@ -849,6 +849,48 @@ fn choosing_from_an_old_list_reads_it_again_first() {
     assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
 }
 
+/// A link's lookup that stored a newer sequence than the window's list stops the window offering
+/// that list's items: `choose` reads again instead of asking.
+#[test]
+fn choosing_from_a_list_older_than_a_stored_sequence_reads_again() {
+    use solidcraft_engine::workshop::Kind as K;
+    let mut h = crate::scenario::Harness::new();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| Err("offline".to_string())));
+    browser::choose_after(&mut h.app, K::Plugin, "gears", Some(43));
+    assert!(h.app.workshop.ask.is_none(), "a list below the stored sequence asks nothing");
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    browser::choose_after(&mut h.app, K::Plugin, "gears", Some(42));
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
+}
+
+/// Lookups and window reads that run together never leave a lower sequence in the file.
+#[test]
+fn the_stored_sequence_never_goes_down_under_concurrent_reads() {
+    let dir = std::env::temp_dir().join(std::format!("sc-workshop-seq-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let seen = dir.join("index-sequence");
+    let keys = keys();
+    let mut answers = Vec::new();
+    for sequence in [40u64, 44, 41, 43, 42, 45, 39, 44] {
+        let mut value = lasting_index();
+        value["sequence"] = json!(sequence);
+        answers.push(signed(&value));
+    }
+    std::thread::scope(|scope| {
+        for answer in &answers {
+            let (keys, seen) = (&keys, &seen);
+            scope.spawn(move || {
+                let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+                let _ = fetch_index(&keys, &|_| Ok(answer.clone()), Some(seen), 0, NOW);
+            });
+        }
+    });
+    assert_eq!(stored_sequence(Some(&seen)), Some(45));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The window's filtering is worked out once per query, kind or list, and gives what the filter
 /// keeps (any case, every word).
 #[test]

@@ -161,7 +161,10 @@ const KIND_IDS: &[&str] = &["all", "plugin", "model", "part"];
 /// `ui.workshop {open?, query?, kind?, choose?}`: the Workshop window as a click would drive it.
 /// `open` shows or hides it (opening reads the list when it hasn't been read), `query` and `kind`
 /// (`all`, `plugin`, `model`, `part`) set its search and filter, and `choose` (a listed id) asks
-/// the item's question, as Open… or Install… does. Returns the window's state and the shown ids.
+/// the item's question, as Open… or Install… does. A list older than five minutes, or older than
+/// an index a link has read since, asks nothing: `choose` reads the list again, so send it again
+/// once the state is `ready` (a failed read leaves the list stale and `choose` refuses again).
+/// Returns the window's state and the shown ids.
 pub(crate) fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Value, String> {
     if !offered(app) {
         return Err("not supported yet: this app has no way to reach the Workshop (the desktop app has)".into());
@@ -394,6 +397,12 @@ pub(crate) fn items(index: &index::Index, app_version: &semver::Version) -> Vec<
 /// Open or install the listed item `id`: resolve it again in the index it came from (still
 /// fresh) and ask, as a link does.
 pub(crate) fn choose(app: &mut SolveApp, kind: catalog::Kind, id: &str) {
+    choose_after(app, kind, id, super::stored_sequence(super::sequence_file().as_deref()));
+}
+
+/// [`choose`] with the highest sequence a lookup has stored (`stored`): a list below it is one a
+/// newer index may have delisted or revoked from, so it is read again instead.
+fn choose_after(app: &mut SolveApp, kind: catalog::Kind, id: &str, stored: Option<u64>) {
     if app.workshop.job.is_some() || app.workshop.ask.is_some() {
         app.set_status(tr("workshop.busy").to_string(), true);
         return;
@@ -407,7 +416,7 @@ pub(crate) fn choose(app: &mut SolveApp, kind: catalog::Kind, id: &str) {
         return;
     };
     // A list read a while ago can't show what was blocked since: read it again, ask after.
-    if fetched_at.is_none_or(|at| super::unix_now().abs_diff(at) > STALE_SECS) {
+    if fetched_at.is_none_or(|at| super::unix_now().abs_diff(at) > STALE_SECS) || stored.is_some_and(|s| index.sequence < s) {
         app.set_status(tr("workshop.stale").to_string(), false);
         refresh(app);
         return;
