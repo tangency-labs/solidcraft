@@ -1142,6 +1142,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// What dogbone `feature` relieved and skipped in this evaluation.
+    pub fn dogbone_report(&self, feature: u64) -> Option<&crate::dogbone::DogboneReport> {
+        self.dogbones.get(&feature)
+    }
+
     /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
     pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
@@ -1264,6 +1269,8 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// What each dogbone feature relieved and skipped (by feature id), for its result.
+    pub(crate) dogbones: BTreeMap<u64, crate::dogbone::DogboneReport>,
     /// The sources (indices into its `bodies`) each body Pattern could not copy and left out (by
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
@@ -1338,6 +1345,7 @@ impl ModelState {
             pattern_left_out,
             legacy_picks,
             cut_extents,
+            dogbones,
         } = self;
         ModelState {
             frame_bodies: frame_bodies.clone(),
@@ -1360,6 +1368,7 @@ impl ModelState {
             pattern_left_out: pattern_left_out.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
+            dogbones: dogbones.clone(),
         }
     }
 
@@ -8640,7 +8649,7 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
 }
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
-fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
+pub(crate) fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     apply_traced_with(doc, state, f, tools, op, targets, &[])
 }
 
@@ -9474,7 +9483,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets:
 
 /// The body a face-based feature applies to: by name, or the one whose surface is nearest the
 /// first point.
-fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> Result<usize> {
+pub(crate) fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
         return st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
     }
@@ -10039,7 +10048,7 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
 /// A name that no longer finds exactly its edge fails the blend, asking for the edge to be picked
 /// again; so does a name a build stored for the wrong body (see `trusted_edge_name`).
 /// `placed`: an earlier feature can have moved the body whole ([`bodies_placed_before`]).
-fn blend_edges_on(
+pub(crate) fn blend_edges_on(
     mb: &ModelBody,
     f: &Feature,
     edges: &[crate::Position],
@@ -10119,7 +10128,7 @@ fn blend_edges_on(
 /// or an Align, or a pattern or mirror of bodies. Such a step can move a body and keep its box
 /// (half a turn about an axis through the box's centre), so the box saved with a pick does not
 /// show that the body has not moved since (#22230).
-fn bodies_placed_before(doc: &Document, f: &Feature) -> bool {
+pub(crate) fn bodies_placed_before(doc: &Document, f: &Feature) -> bool {
     let Some(end) = doc.feature_index(f.id) else { return true };
     doc.features.iter().take(end).filter(|g| !g.suppressed).any(|g| match &g.kind {
         FeatureKind::Move { .. } | FeatureKind::Align { .. } => true,
@@ -17380,7 +17389,35 @@ pub(crate) fn lost_sheet_face(plane: &PlaneRef) -> DocError {
 fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> Result<(Plane, Option<String>)> {
     let n = picked.normal();
     if let Some(name) = name {
-        let hit = crate::naming::locate_face(st, name, at).ok_or_else(|| DocError::reselect(name))?;
+        let Some(hit) = crate::naming::locate_face(st, name, at) else {
+            // A name worked out from geometry when the design was saved (an Align that kept no
+            // history guessed the names of the faces it moved, #20308) finds nothing once the same
+            // face has its exact name (#22919). When the saved point still lies on a flat face
+            // that is exactly the picked plane (same normal, no farther along it than rounding),
+            // the plane the sketch sits on is unchanged, and so is the sketch. A face that moved,
+            // turned or is gone from under the point still fails, asking for it to be picked again.
+            let same_plane = crate::name_lookup::refound_at_saved_point(name, &st.bodies)
+                && at.is_finite()
+                && st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
+                    let rounding = (b.body.size() * 1e-6).max(1e-6);
+                    let Ok(faces) = b.body.faces((b.body.size() * 1e-3).max(1e-3)) else { return false };
+                    crate::name_lookup::faces_at_saved_point(b, at).into_iter().any(|(index, _)| {
+                        faces.iter().any(|f| {
+                            f.index == index
+                                && f.plane_normal.is_some_and(|fnrm| fnrm.dot(n) > 1.0 - 1e-9)
+                                && (f.centroid.dot(n) - picked.origin.dot(n)).abs() <= rounding
+                        })
+                    })
+                });
+            if !same_plane {
+                return Err(DocError::reselect(name));
+            }
+            let note = format!(
+                "face `{}` has a new name; the sketch stays on the same plane, found again at its saved point",
+                crate::name_lookup::quoted(name)
+            );
+            return Ok((*picked, Some(note)));
+        };
         let b = st.bodies.get(hit.body).ok_or_else(|| DocError::reselect(name))?;
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let face = b.body.faces(tol)?.into_iter().find(|f| f.index == hit.face).ok_or_else(|| DocError::reselect(name))?;
@@ -19187,6 +19224,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
+        FeatureKind::Dogbone { .. } => crate::dogbone::evaluate(doc, vals, f, st, warning),
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
