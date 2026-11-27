@@ -15,7 +15,7 @@
 //! `SOLIDCRAFT_KERNEL=solidcore` keeps every operation on solidcore in such a build, and
 //! [`set_kernel`] changes the choice while the program runs, so one build can compare both.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use solidcraft_kernel_api::{Backend, BackendError, OpKind, Support};
 
@@ -46,6 +46,20 @@ const SOLIDCORE: u8 = 1;
 const OCCT: u8 = 2;
 
 static CHOICE: AtomicU8 = AtomicU8::new(UNREAD);
+
+static FELL_BACK: AtomicUsize = AtomicUsize::new(0);
+
+/// How many operations so far went to solidcore although Open CASCADE was chosen (it doesn't
+/// take the operation or an operand, or the body didn't cross): what a measurement counts as
+/// unsupported.
+pub fn fell_back() -> usize {
+    FELL_BACK.load(Ordering::Relaxed)
+}
+
+/// The Open CASCADE build compiled in, as its adapter reports it.
+pub fn occt_version() -> &'static str {
+    crate::backend::Occt.version()
+}
 
 /// The kernel chosen: [`set_kernel`]'s, else `SOLIDCRAFT_KERNEL`'s, else Open CASCADE (the build
 /// asked for it). An unknown name is logged and ignored.
@@ -91,7 +105,11 @@ pub(crate) fn run<B: Backend>(
     operands: &[&Body],
     run: impl FnOnce(&B, &[B::Form]) -> std::result::Result<Option<B::Form>, B::Error>,
 ) -> Option<Result<Option<Body>>> {
-    if kernel() != Kernel::Occt || backend.supports(op) == Support::No || operands.iter().any(|b| b.is_mesh()) {
+    if kernel() != Kernel::Occt {
+        return None;
+    }
+    if backend.supports(op) == Support::No || operands.iter().any(|b| b.is_mesh()) {
+        FELL_BACK.fetch_add(1, Ordering::Relaxed);
         return None;
     }
     let what = op.name();
@@ -119,10 +137,12 @@ pub(crate) fn run<B: Backend>(
         Ok(Ok(body)) => Some(Ok(body)),
         Ok(Err(BackendError::Unsupported(why))) => {
             log::debug!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
         Ok(Err(BackendError::Exchange(why))) => {
             log::warn!("{what}: {} couldn't exchange the body ({why}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
         Ok(Err(e)) => Some(Err(KernelError::from(e))),

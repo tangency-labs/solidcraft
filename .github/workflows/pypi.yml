@@ -1,0 +1,87 @@
+# Publishing a GitHub release uploads its Python wheels (solidcraft-*.whl, made by release.yml's
+# python job from the release's own solidcraft-cli) to PyPI. A pre-release goes to TestPyPI
+# instead, never to PyPI. Uploads use PyPI trusted publishing (this workflow's OIDC identity), so no
+# token is stored. Nightlies are published with GITHUB_TOKEN, which starts no other workflow (as for
+# flatpak-pages.yml), so a nightly reaches TestPyPI only when this workflow is run by hand with its tag.
+#
+# Off until the maintainer turns it on (docs/releasing.md, "Python packages"): the repository
+# variable PYTHON_PUBLISH set to "true", the environments `pypi` and `testpypi`, and this workflow
+# registered as the trusted publisher of the `solidcraft` project on pypi.org and test.pypi.org.
+# Both environments deploy from `v*` tags only (Settings > Environments > Deployment branches and
+# tags): PyPI trusts this file's name and the environment, not the ref, and workflow_dispatch runs
+# from any ref, so a changed copy of this file dispatched from a branch must not reach the upload
+# job. A release event runs from its tag; run it by hand with `--ref v<version>`.
+# A release published before the python job existed has no wheels: nothing is uploaded.
+name: Python packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag whose wheels to upload (e.g. v0.52.0)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  wheels:
+    name: Fetch the release's wheels
+    if: vars.PYTHON_PUBLISH == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      found: ${{ steps.fetch.outputs.found }}
+      index: ${{ steps.fetch.outputs.index }}
+    steps:
+      - id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          prerelease="$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease)"
+          if [ "$prerelease" = true ]; then index=testpypi; else index=pypi; fi
+          mkdir -p dist
+          gh release download "$TAG" --pattern 'solidcraft-*.whl' --dir dist || true
+          if compgen -G 'dist/*.whl' >/dev/null; then found=true; else found=false; fi
+          echo "$TAG: prerelease=$prerelease, wheels: $found, index: $index"
+          ls -l dist
+          { echo "found=$found"; echo "index=$index"; } >>"$GITHUB_OUTPUT"
+      - if: steps.fetch.outputs.found == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheels
+          path: dist/*.whl
+          if-no-files-found: error
+
+  upload:
+    name: Upload to ${{ needs.wheels.outputs.index == 'pypi' && 'PyPI' || 'TestPyPI' }}
+    needs: wheels
+    if: needs.wheels.outputs.found == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Deploys from `v*` tags only (the environment's rule, docs/releasing.md "Python packages").
+    environment: ${{ needs.wheels.outputs.index }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wheels
+          path: dist
+      - name: Upload to PyPI
+        if: needs.wheels.outputs.index == 'pypi'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+      - name: Upload to TestPyPI
+        if: needs.wheels.outputs.index == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
