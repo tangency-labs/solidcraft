@@ -45,10 +45,8 @@ use solidcore::Kernel;
 
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
-    "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
     "fillet_patch_keeps_fillet_edges",
@@ -59,13 +57,9 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "linear_sweep_arc_is_cylinder",
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
-    "offset_analytic_mate_edges",
-    "offset_extension_as_itself",
-    "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",
-    "uv_trim_corner_end_points_only",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
@@ -141,10 +135,10 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The flags the failure needed together with the passed-on query statuses
-/// (`offset_extension_from_base`, `offset_extension_as_itself`; it also needed
-/// `keep_operand_uv_trims`, always on since that flag was retired).
+/// The default kernel: the failure needed, together with the passed-on query statuses, the
+/// offsets extended from the base and continued as themselves (once two flags, now the only
+/// path, #18921) and `keep_operand_uv_trims`, always on since that flag was retired.
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
+    check_round(&[]);
 }

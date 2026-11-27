@@ -1,6 +1,7 @@
-//! Trim: a face cut along curves that lie on it into the regions they bound, each with a point
-//! inside it, faces taken out of a body (the regions an application discards), and a body cut
-//! along curves dropped square onto its faces, keeping the regions points pick.
+//! Trim: a face cut along curves into regions with interior points, a sheet cut by another
+//! complete sheet into picked connected regions (or split into all of them), faces discarded
+//! from a body, and a body cut along curves dropped square onto its faces, keeping the regions
+//! points pick.
 //!
 //! A face is cut by the kernel's merge of curves on a surface (`MergeCurvesOnSurface`, as
 //! `SmBrep::ProjectAndTrim` merges its projections): the curves, each within the tolerance of
@@ -10,6 +11,11 @@
 //! another curve) is refused, as is a cut that splits nothing. Each region's point is the
 //! kernel's interior point of its face (`SmApiFaceInternalPoint`). Faces are taken out by the
 //! kernel's `SmBrep::RemoveFaces`, with the edges and vertices only they used.
+//!
+//! A sheet is cut by the boolean's imprint of both trimmed boundaries, with its common edge
+//! identities delimiting connected regions. Exact distances to the trimmed faces pick regions
+//! to retain; the remaining faces are removed with the same operation. A split keeps every
+//! region, each as its own copy with the other regions' faces removed.
 //!
 //! A body is cut along dropped curves face by face and chain by chain (a chain: curves that
 //! meet end to end): the kernel's drop of a chain's curves square onto the face's surface
@@ -29,11 +35,15 @@
 use std::collections::{BTreeMap, HashSet};
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
+use solidcore::boolean::api_brep::boolean_with_curves;
+use solidcore::boolean::operand_tolerances::matched_tolerances;
 use solidcore::curve::curve::Curve as KCurve;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::face_internal_point;
 use solidcore::topology::brep::p10::merge_curves_on_surface;
+use solidcore::topology::brep::p2::{is_manifold_solid, is_sheets};
 use solidcore::topology::brep::p3::{
     brep_copy, brep_copy_mapped, edit_brep, with_kernel_callbacks,
 };
@@ -54,6 +64,9 @@ use crate::{Error, Result};
 
 /// The most curves one cut takes.
 pub const MAX_CURVES: usize = 4096;
+
+/// The most points one whole-sheet trim takes.
+pub const MAX_REGION_PICKS: usize = 10_000;
 
 /// The most points one trim picks the regions it keeps by.
 pub const MAX_PICKS: usize = 10_000;
@@ -249,6 +262,205 @@ pub fn split_face_by_curves(
     }
     regions.sort_by_key(|r| r.face);
     Ok((b, regions))
+}
+
+/// Sheet `body` imprinted with the complete bounded cutting `sheet` in a copy: the copy, its
+/// record order, the connected region of each record face (named by the region's lowest
+/// face), and the copy's tolerance. Faces are in one region when they meet at an edge the
+/// imprint did not make; the imprint's common edges delimit the regions. Original face joins
+/// remain traversable unless the cutter meets them. With `closed`, `body` may also be one
+/// closed manifold shell (a closed sheet), whose regions are cut the same way. Both operands
+/// are unchanged.
+///
+/// # Errors
+/// [`Error::Argument`] for the same operand twice or an operand that is not one or more sheets
+/// (nor, with `closed`, a closed manifold body); [`Error::CurveDoesNotCut`] when no common edge
+/// separates two regions; the kernel's errors.
+fn sheet_regions(
+    name: &'static str,
+    body: &Body,
+    sheet: &Body,
+    closed: bool,
+) -> Result<(Body, Order, Vec<usize>, f64)> {
+    fn root(region: &[usize], mut i: usize) -> Result<usize> {
+        for _ in 0..=region.len() {
+            let next = *region.get(i).ok_or(Error::Exception)?;
+            if next == i {
+                return Ok(i);
+            }
+            i = next;
+        }
+        Err(Error::Exception)
+    }
+    if std::ptr::eq(body, sheet) {
+        return Err(Error::Argument);
+    }
+    let (cut, common, tolerance) = run_on(name, &[("brep", body), ("sheet", sheet)], |k| {
+        let mut a = {
+            let b = body.lock();
+            if !(is_sheets(k, &b)? || (closed && is_manifold_solid(&b)?)) {
+                return Ok(Err(Error::Argument));
+            }
+            brep_copy(k, &b)?
+        };
+        let mut t = {
+            let b = sheet.lock();
+            if !is_sheets(k, &b)? {
+                return Ok(Err(Error::Argument));
+            }
+            brep_copy(k, &b)?
+        };
+        matched_tolerances(k, &mut a, &mut t)?;
+        let intersection = boolean_with_curves(k, a, t, BooleanOperation::Imprint)?;
+        let cut = match finish(k, intersection.outcome.result, Expect::FACES)? {
+            Ok(cut) => cut,
+            Err(error) => return Ok(Err(error)),
+        };
+        let tolerance = cut.tolerance();
+        Ok(Ok((cut, intersection.intersection_edges, tolerance)))
+    })??;
+    let common: HashSet<_> = common.into_iter().collect();
+    let cut = Body::new(cut);
+    let (record, order) = cut.to_record()?;
+    let mut region: Vec<usize> = (0..record.faces.len()).collect();
+    for (edge, id) in record.edges.iter().zip(&order.edges) {
+        if common.contains(id) {
+            continue;
+        }
+        let Some(first) = edge.uses.first() else {
+            continue;
+        };
+        for other in edge.uses.iter().skip(1) {
+            let a = root(&region, first.face as usize)?;
+            let b = root(&region, other.face as usize)?;
+            *region.get_mut(a.max(b)).ok_or(Error::Exception)? = a.min(b);
+        }
+    }
+    let region = (0..region.len())
+        .map(|i| root(&region, i))
+        .collect::<Result<Vec<_>>>()?;
+    let mut separated = false;
+    for (edge, id) in record.edges.iter().zip(&order.edges) {
+        if !common.contains(id) {
+            continue;
+        }
+        if let Some(first) = edge.uses.first() {
+            let first = region.get(first.face as usize).ok_or(Error::Exception)?;
+            separated |= edge
+                .uses
+                .iter()
+                .skip(1)
+                .any(|u| region.get(u.face as usize) != Some(first));
+        }
+    }
+    if !separated {
+        return Err(Error::CurveDoesNotCut);
+    }
+    Ok((cut, order, region, tolerance))
+}
+
+/// A copy of sheet `body` trimmed by the complete bounded cutting `sheet`, retaining the
+/// connected regions nearest `points`. Intersections are the boolean's common edges, not
+/// extended face surfaces; original face joins remain traversable unless the cutter meets
+/// them ([`sheet_regions`]). Picks use distances to exact trimmed faces, with the body's own
+/// tolerance deciding an ambiguous pick on the cut. Both operands and their provenance are
+/// preserved.
+///
+/// # Errors
+/// [`Error::Argument`] for an empty or excessive pick list, nonfinite coordinates, the same
+/// operand twice, or an operand that is not one or more sheets; [`Error::CurveDoesNotCut`] when the
+/// intersection does not separate the target; [`Error::Unsupported`] for an ambiguous pick;
+/// the kernel's errors.
+pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body> {
+    if points.is_empty()
+        || points.len() > MAX_REGION_PICKS
+        || points.iter().flatten().any(|x| !x.is_finite())
+    {
+        return Err(Error::Argument);
+    }
+    let (cut, order, region, tolerance) = sheet_regions("trim_sheet", body, sheet, false)?;
+    // Each region's nearest face decides its distance. Two faces in the same region do not
+    // make a pick ambiguous (a point can lie on an original face join). Only the two nearest
+    // distinct regions matter. The second nearest distance never increases, so a discarded
+    // region's previous faces cannot enter a later nearest pair. A nearer face of that region
+    // is considered when it is visited, so discarding the previous minimum loses no candidate.
+    // Thus storage is bounded by the picks, not the product of picks and regions.
+    let mut distances: Vec<Vec<(usize, f64)>> = points.iter().map(|_| Vec::new()).collect();
+    for (face, &r) in region.iter().enumerate() {
+        for (row, distance) in distances
+            .iter_mut()
+            .zip(cut.face_distances(&order, face, points)?)
+        {
+            let distance = distance.ok_or(Error::Unsupported(
+                "a trim region has no exact nearest point",
+            ))?;
+            if !distance.is_finite() {
+                return Err(Error::Unsupported("a trim region's distance is not finite"));
+            }
+            if let Some((_, previous)) = row.iter_mut().find(|(id, _)| *id == r) {
+                *previous = previous.min(distance);
+            } else {
+                row.push((r, distance));
+            }
+            row.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+            row.truncate(2);
+        }
+    }
+    let mut kept = Vec::new();
+    for row in distances {
+        let &(r, nearest) = row.first().ok_or(Error::Argument)?;
+        if row
+            .get(1)
+            .is_some_and(|(_, second)| are_same_to_tol(*second, nearest, tolerance))
+        {
+            return Err(Error::Unsupported(
+                "a point to keep is on the cut between regions",
+            ));
+        }
+        kept.push(r);
+    }
+    let dropped: Vec<usize> = region
+        .iter()
+        .enumerate()
+        .filter_map(|(f, r)| (!kept.contains(r)).then_some(f))
+        .collect();
+    if dropped.is_empty() {
+        Ok(cut)
+    } else {
+        remove_faces(&cut, &order, &dropped)
+    }
+}
+
+/// Sheet `body` split by the complete bounded cutting `sheet` into its connected regions, each
+/// region a copy of `body` cut where `sheet` meets it, with the faces of every other region
+/// taken away. The regions are those [`trim_sheet`] picks from (the boolean's common edges
+/// delimit them; the cutter's faces are never extended), in the order of their lowest record
+/// face in the cut copy. Every face of the cut copy is in exactly one region, so the regions
+/// together are the whole of `body`. `body` may also be closed (a closed sheet: a full turn of
+/// a surface), whose regions are then open sheets. Both operands and their provenance are
+/// preserved.
+///
+/// # Errors
+/// [`Error::Argument`] for the same operand twice, a `sheet` that is not one or more sheets, or
+/// a `body` that is neither that nor a closed manifold body;
+/// [`Error::CurveDoesNotCut`] when the intersection does not separate the target; the kernel's
+/// errors.
+pub fn split_sheet(body: &Body, sheet: &Body) -> Result<Vec<Body>> {
+    let (cut, order, region, _) = sheet_regions("split_sheet", body, sheet, true)?;
+    let mut roots: Vec<usize> = region.clone();
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+        .iter()
+        .map(|r| {
+            let others: Vec<usize> = region
+                .iter()
+                .enumerate()
+                .filter_map(|(f, x)| (x != r).then_some(f))
+                .collect();
+            remove_faces(&cut, &order, &others)
+        })
+        .collect()
 }
 
 /// A body cut along dropped curves in a copy of it: the copy, the cut lines' edges and the
@@ -504,6 +716,29 @@ pub fn remove_feature_with_crossing_patches(
     order: &Order,
     faces: &[usize],
 ) -> Result<Option<(Body, History)>> {
+    remove_extended_feature(body, order, faces, true)
+}
+
+/// Remove a connected group of rolling-ball faces by extending their neighbours
+/// into its single boundary loop. The caller identifies the round and its end caps.
+/// Return `None` when the selection is disconnected or the loop cannot be closed.
+///
+/// # Errors
+/// As [`remove_feature_with_crossing_patches`].
+pub fn remove_round_junction(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    remove_extended_feature(body, order, faces, false)
+}
+
+fn remove_extended_feature(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+    crossing_pair: bool,
+) -> Result<Option<(Body, History)>> {
     if faces.is_empty() || faces.len() > MAX_FACES {
         return Err(Error::Argument);
     }
@@ -516,9 +751,15 @@ pub fn remove_feature_with_crossing_patches(
     if selection.len() != picked.len() {
         return Err(Error::Argument);
     }
+    let operation = if crossing_pair {
+        "remove_feature_with_crossing_patches"
+    } else {
+        "remove_round_junction"
+    };
+    let boundary_count = if crossing_pair { 2 } else { 1 };
     let mut trimmed = false;
     let history = history::recorded(&result, &mapped, Made::Plain, || {
-        trimmed = with_body("remove_feature_with_crossing_patches", &result, |k, b| {
+        trimmed = with_body(operation, &result, |k, b| {
             let mut executive = FeatureExecutive::new(k, b)?;
             let Some(i) = executive.add_feature(
                 k,
@@ -532,17 +773,33 @@ pub fn remove_feature_with_crossing_patches(
             // add_feature starts at the first face. A second disconnected selection
             // must not be silently left behind.
             if !executive.features().get(i).is_some_and(|feature| {
-                feature.loops.len() == 2
+                feature.loops.len() == boundary_count
                     && feature.faces.len() == selection.len()
                     && feature.faces.iter().all(|face| selection.contains(face))
             }) {
                 return Ok(false);
             }
-            Ok(executive.do_defeature(k)?.is_empty()
-                && executive
+            if !executive.do_defeature(k)?.is_empty() {
+                return Ok(false);
+            }
+            if crossing_pair {
+                return Ok(executive
                     .features()
                     .get(i)
-                    .is_some_and(|feature| feature.trimmed_crossing_base_patches))
+                    .is_some_and(|feature| feature.trimmed_crossing_base_patches));
+            }
+            drop(executive);
+            // The extensions can leave their attachment edges as seams on the
+            // original supports. Remove only joins between a patch and an old face.
+            let original: HashSet<_> = mapped.faces.iter().copied().collect();
+            let patches: Vec<_> = b
+                .face_list()
+                .iter()
+                .copied()
+                .filter(|face| !original.contains(face))
+                .collect();
+            solidcore::blend::feature_executive::remove_patch_rims(k, b, &mapped.faces, &patches)?;
+            Ok(true)
         })?;
         Ok(())
     })?;

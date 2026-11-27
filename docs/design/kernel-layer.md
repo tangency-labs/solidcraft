@@ -1,10 +1,6 @@
 # A swappable kernel layer in SolidCraft
 
-Status: approved by the owner on 2026-11-24 for **phase 1 only**: the seam (§12). Phase 1 is the
-kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel
-only through that interface. No second kernel is planned or being built. The later sections
-describe what the seam must allow, so that the interface is right the first time; they are not
-a plan to add another kernel.
+Status: approved by the owner in full. He approved phase 1, the seam (§12), on 2026-11-24, and on 2026-11-26 every later phase of §12 as well: "I asked for it". Phase 1 is the kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel only through that interface. No second kernel is planned or being built. The later sections describe what the seam must allow, so that the interface is right the first time; they are not a plan to add another kernel.
 
 The owner's brief (2026-11-24):
 
@@ -60,6 +56,7 @@ Decisions the owner has made. The rest of this document follows them; the open q
 | 2026-11-24 | **We write and maintain the solidcore adapter, and only it.** It adapts `solidcore-ops`, solidcore's own API, and lives in SolidCraft. Anyone else writes and maintains their own kernel's adapter to our interface; it must pass our naming gate and an accuracy gate (tolerance equal to or tighter than solidcore's) and appear in the support matrix (§8). |
 | 2026-11-24 | **Run-time selection comes later.** In phase 1, build features alone decide which kernels are compiled in, and solidcore is the only one. The launch-time switch, per-operation routes and hot swap described below are later work. This supersedes the launch-time switch in the compile-time decision above. |
 | 2026-11-24 | **STEP stays in solidcore** (§2, §10). |
+| 2026-11-26 | **Build all of it.** Every later phase of §12 is approved too (steps 6 to 16: smlib onto `solidcore-ops`, the adapter split, sweep and loft in the trait, exchange, measurement, run-time selection and designs recording their kernel). Each step still follows §12's rules. Still no second kernel. |
 
 Contents:
 0. [Decisions](#decisions)
@@ -1027,10 +1024,10 @@ Results don't change, because they are the same functions.
 | engine | `cmd/canvas_sketch.rs:to_sketch`; `cmd/component_link.rs:design_images`; `cmd/file.rs:usd_decals`, `urdf_decals`; `cmd/sketch_canvas.rs:corners_in_sketch` | `affine::*` |
 | engine | `cmd/hole_stacks.rs:hole_stacks`; `cmd/inspect.rs:classify_points` | `hole_stacks::*`, `ClassifiedPoint`, `PointNormalFace` |
 | engine | `cmd/sketch_freeform.rs:project`, `recorded`, `support_hits`, `record_crossings`; `cmd/sketch_import.rs:insert_airfoil`; `cmd/sketch_rational.rs:interval` | `curve::*`, `sweep::Curve::from_seg2`, `curve_fit::fit_spline_bounds` |
-| engine | `drawing_scene/fill.rs:dot_item`; `drawing_view_hatch.rs`; `drawing_scene/sketch.rs:check_arc_sweep` | `hatch::*`, `prism::counterclockwise_sweep` |
+| engine | `drawing_scene/fill.rs:dot_item`; `drawing_view_hatch.rs`; `drawing_scene/sketch.rs:check_arc_sweep` | `profile::*`, `prism::counterclockwise_sweep` |
 | engine | `plugin/form.rs:pick_exists` | `Body::from_record`; use a `solidcraft_kernel::Body` method instead |
 | geom | `brep/eval.rs:face_flux`; `brep/placement.rs:frame`, `surface`, `revolution`; `hlr.rs`, `section.rs`; `network.rs:network_surface` | `pcurve::*`, `affine::*`, `hlr::*`, `measure::points_meet`. geom is L0, below the adapter, so these functions **move up into the adapter**; their callers call them through `crates/kernel` |
-| io | `airfoil.rs:normalized_points`; `dxf.rs:layered_ellipse`; `dxf/text_entity.rs:read_text_entity`; `dxf_out.rs:admit_bulged`, `sample_bulged_edge`, `shape_preflight`, `shape_emission_preflight`, `extend_extents`; `dxf_out/file_model*.rs` (`transformed`, `bounds`, `export_error`, `union`, `supporting_circle`, `point_bounds`, `ellipse_bounds`, `transformed_point`, `transformed_shape`); `dxf_out/path.rs`; `native_cad/cadir_textures.rs:decal_quad`; `urdf.rs:decal_dae`; `svg.rs:cubic` | `import_geometry::*`, `export_geometry::*`, `path_export::*`, `affine::lifted_quad`, `curve::cubic_pieces` |
+| io | `airfoil.rs:normalized_points`; `dxf.rs:layered_ellipse`; `dxf/text_entity.rs:read_text_entity`; `dxf_out.rs:admit_bulged`, `sample_bulged_edge`, `shape_preflight`, `shape_emission_preflight`, `extend_extents`; `dxf_out/file_model*.rs` (`transformed`, `bounds`, `export_error`, `union`, `supporting_circle`, `point_bounds`, `ellipse_bounds`, `transformed_point`, `transformed_shape`); `dxf_out/path.rs`; `native_cad/cadir_textures.rs:decal_quad`; `urdf.rs:decal_dae`; `svg.rs:cubic` | `dxf::import::*`, `dxf::export::*`, `affine::{chord_coordinates, lifted_quad}`, `curve::cubic_pieces` |
 | sketch | `cancel.rs`; `curves.rs:fit_spans`, `fit_beziers`, `fit_beziers_mode`; `link.rs:update_link_read`; `link_rebuild.rs:named_curve_identities`; `nurbs.rs:from_fit_points`, `check`, `homogeneous`, `reversed`, `linear_image`; `periodic.rs:validate_periodic_points`, `periodic_beziers`; `solver.rs:freeform_dist` | `cancel::CancelToken`, `fit_projection::*`, `point_identity::*`, `curve::closest_point`. sketch then depends on `crates/kernel` (both are L1, and there is no cycle) |
 | ui-egui | `dialogs_assembly.rs:world_preview`, `placed_snap`; `dialogs_gusset.rs:for_feature`; `navigation.rs`; `pencil.rs:filter`; `ref_images.rs:show` | `affine::*`, `frame_gusset::support_pick`, `point_displacement`, `point_distance`, `point_set_summary` |
 | tools/bench | `tess/src/main.rs` | `face_surface::FaceSurface` |
@@ -1101,7 +1098,7 @@ Rules for every step:
 
 The steps that move existing call sites don't change any function that runs.
 
-### Phase 1: the seam (approved, being built)
+### Phase 1: the seam (approved, built)
 
 1. **This document**, docs only.
 2. **`crates/kernel-api`.** The `Backend` trait, `OpKind`, `Support`, `BackendError` and the
@@ -1129,10 +1126,10 @@ The steps that move existing call sites don't change any function that runs.
 Phase 1 ends when every crate but the adapter, geom (step 6) and the shared display crates
 (§13, question 2) reaches solidcore only through `crates/kernel`.
 
-### Later phases (not approved yet)
+### Later phases (approved 2026-11-26)
 
 These finish "solidcore only through ops" and make the seam usable by another kernel's adapter.
-They need the owner's yes before they start.
+The owner approved them on 2026-11-26. Each step follows the rules at the top of this section.
 
 6. **geom's ops and seam uses move up.**
    - Before any move, the missing `solidcore-ops` curve-evaluation entry points go in as their

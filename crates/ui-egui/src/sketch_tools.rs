@@ -52,6 +52,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.construction_line.tangent_two", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.construction_line.bisector", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.repair_link", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.fit_curves_to_section", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -99,17 +100,24 @@ thread_local! {
     /// The side of the glyphs drawn this frame (screen pixels), for [`glyph_at`] (#10794).
     static GLYPH_PX: Cell<f32> = const { Cell::new(GLYPH) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Simulated break-off Coincident glyph shown when hovering a shared endpoint of a selected curve.
+    static DETACH_PREVIEW: RefCell<Option<DetachPreview>> = const { RefCell::new(None) };
     /// Active automatic constraint/snap badges and target entities at the cursor.
     static SNAP: RefCell<Option<SnapState>> = const { RefCell::new(None) };
     /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
-    /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
-    /// click takes the tool out of the app while it runs, and must place what the hover showed.
-    static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
+    /// The drawing tool's points so far, whether it is the Line tool, and whether it is the
+    /// 3-Point Arc waiting for its third point, from the last hover: a click takes the tool out of
+    /// the app while it runs, and must place what the hover showed.
+    static TOOL: RefCell<(Vec<Vec2>, bool, bool)> = const { RefCell::new((Vec::new(), true, false)) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The link the Repair Link tool gives a new source.
+    static REPAIR: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The tool finished its job with this click and ends.
+    static ENDED: Cell<bool> = const { Cell::new(false) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
@@ -788,16 +796,19 @@ pub fn refine_snap(
     let tol = 7.0 * px;
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
-    let (own, line_tool) = match app.tool.as_ref() {
+    let (own, line_tool, arc_tool) = match app.tool.as_ref() {
         Some(t) => {
-            let own: (Vec<Vec2>, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line");
+            let own: (Vec<Vec2>, bool, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line", t.cmd == "sketch.arc.three_point");
             TOOL.with(|c| *c.borrow_mut() = own.clone());
             own
         }
         None => TOOL.with(|c| c.borrow().clone()),
     };
     // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
+    // The 3-Point Arc takes none of them, on hover or on click, when its tangent snap is on (#20719).
+    let arc_snap = arc_tool && app.preferences.sketch_arc_tangent_snap;
     let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
+    let line_tool = line_tool && !arc_snap;
     let prev = own.last().copied();
     let mid_only = crate::tool_modifiers::target_midpoint();
     // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
@@ -904,6 +915,30 @@ pub fn refine_snap(
             }
         }
     }
+    // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
+    // on (#20719), exact: the point of that tangent circle nearest the cursor. It and the centre
+    // snap below win over an earlier snap when their point is nearer the cursor.
+    let mut arc_locked = false;
+    if !mid_only
+        && arc_snap
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
+    // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
+    if !mid_only
+        && arc_snap
+        && !(arc_locked && locked.as_ref().is_some_and(|l| l.1 == "T"))
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
     if let Some((p, label, arg, lock_targets, inf)) = locked {
         let mut state = SnapState::new(p);
         state.push_label(label);
@@ -936,7 +971,18 @@ pub fn refine_snap(
             }
         }
         let allow_lined = !matches!(label, "End" | "Pt");
-        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points && !has_crossing, allow_lined, p, &mut state, &mut lined);
+        add_constraints_at_point(
+            sk,
+            prev,
+            &targets,
+            line_tool,
+            mid_only,
+            align_points && !has_crossing && !arc_locked,
+            allow_lined,
+            p,
+            &mut state,
+            &mut lined,
+        );
         return finish(state, lined, arg);
     }
 
@@ -1254,14 +1300,101 @@ pub fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule.
-fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
 /// Constraint glyphs drawn last frame: (constraint id, screen centre).
 pub fn glyph_positions() -> Vec<(String, Pos2)> {
     GLYPHS.with(|g| g.borrow().clone())
+}
+
+#[derive(Clone, Debug)]
+struct DetachPreview {
+    curve_id: String,
+    point_id: String,
+    point_rect: egui::Rect,
+    glyph_rect: egui::Rect,
+    distance_mm: f64,
+}
+
+/// If `pos` is over the simulated coincident break-off glyph, detach that curve from the point.
+pub fn detach_simulated_at(app: &mut SolveApp, pos: Pos2) -> bool {
+    if active_sketch(app).is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") {
+        return false;
+    }
+    let hit = DETACH_PREVIEW.with(|cell| {
+        let mut st = cell.borrow_mut();
+        let preview = st.as_ref()?;
+        if preview.glyph_rect.expand(3.0).contains(pos) {
+            let out = (preview.curve_id.clone(), preview.point_id.clone(), preview.distance_mm);
+            *st = None;
+            Some(out)
+        } else {
+            None
+        }
+    });
+    let Some((curve, point, distance)) = hit else { return false };
+    let _ = app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance }));
+    true
+}
+
+fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &solidcraft_engine::sketch::Sketch) -> Option<(String, usize)> {
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
+        return None;
+    }
+    app.session.selection.iter().rev().find_map(|sel| match sel {
+        solidcraft_engine::Sel::SketchCurve { id, sketch } if sketch.is_none_or(|s| s == sid) => {
+            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci))
+        }
+        solidcraft_engine::Sel::SketchMidpoint { id } => sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci)),
+        _ => None,
+    })
+}
+
+fn point_is_detachable_for_curve(sk: &solidcraft_engine::sketch::Sketch, ci: usize, pi: usize) -> bool {
+    if !sk.curves.get(ci).is_some_and(|c| c.kind.uses(pi)) {
+        return false;
+    }
+    let users = sk.curves.iter().filter(|c| c.kind.uses(pi)).count();
+    let has_coincident =
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Coincident { p, q } if p == pi || q == pi));
+    users > 1 || has_coincident || pi == 0
+}
+
+fn resolve_detach_target(
+    app: &SolveApp,
+    sid: u64,
+    sk: &solidcraft_engine::sketch::Sketch,
+    hover: Option<Pos2>,
+    scale: f32,
+) -> Option<(String, usize, String)> {
+    let (curve_id, ci) = selected_detach_curve(app, sid, sk)?;
+    let curve = sk.curves.get(ci)?;
+    if let Some(Hit::SketchPoint { sketch, id, .. }) = app.viewport.hover.as_ref()
+        && *sketch == sid
+        && let Some(hovered_pi) = sk.resolve_point(id)
+        && curve.kind.uses(hovered_pi)
+        && point_is_detachable_for_curve(sk, ci, hovered_pi)
+        && let Some(pt) = sk.points.get(hovered_pi)
+    {
+        return Some((curve_id, hovered_pi, pt.id.clone()));
+    }
+    let h = hover?;
+    DETACH_PREVIEW.with(|cell| {
+        let st = cell.borrow();
+        let prev = st.as_ref()?;
+        if prev.curve_id != curve_id {
+            return None;
+        }
+        let keep = prev.glyph_rect.expand(10.0 * scale).contains(h) || prev.point_rect.expand(8.0 * scale).contains(h);
+        if !keep {
+            return None;
+        }
+        let target_pi = sk.resolve_point(&prev.point_id)?;
+        if point_is_detachable_for_curve(sk, ci, target_pi) { Some((curve_id, target_pi, prev.point_id.clone())) } else { None }
+    })
 }
 
 /// Delete the selected constraint glyph (true when one was selected).
@@ -1274,7 +1407,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
             _ => None,
         })
         .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities }));
+    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
     true
 }
 
@@ -1319,6 +1452,7 @@ fn mode(id: &str) -> Option<Mode> {
     }
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.repair_link" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -1364,6 +1498,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         chain: Default::default(),
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
+        arc_modes: false,
         preselected: false,
         finished: false,
     })
@@ -1381,6 +1516,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
+            "sketch.repair_link" => "Repair Link: click the edge, face, vertex or sketch curve the projection should follow now",
             "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
@@ -1470,6 +1606,73 @@ fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value
 }
 
 /// A model reference for a hit (for Project and friends).
+/// Did the last click end its tool (the job is done)? Reading it resets it.
+pub(crate) fn take_ended() -> bool {
+    ENDED.with(|e| e.replace(false))
+}
+
+/// Start Repair Link for `link` of the sketch being edited: the next model reference clicked
+/// becomes its source.
+pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
+    REPAIR.with(|l| *l.borrow_mut() = Some(link.to_string()));
+    app.start("sketch.repair_link");
+}
+
+/// Translate Project's default-off session choice into explicit command inputs. Shared by dialog preview,
+/// deferred requests and immediate commands; an explicit caller's choice is kept.
+pub(crate) fn projection_policy(app: &SolveApp, command: &str, params: &mut Value) {
+    if matches!(command, "sketch.project" | "sketch.intersect" | "sketch.include_3d") {
+        if let Some(object) = params.as_object_mut() {
+            object.entry("strict_occurrence_references").or_insert(json!(app.ui.project_link_tools));
+        }
+        if app.ui.project_link_tools && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
+            projection_paths(app, params);
+        }
+    }
+    if matches!(command, "sketch.delete" | "selection.delete")
+        && let Some(object) = params.as_object_mut()
+    {
+        object.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+    }
+}
+
+/// Put the placement actually displayed by the viewport into opt-in projection requests.
+/// Model bodies carry a world instance name; sketches are displayed at their first placement
+/// (`world_state`), so a repeated sketch pick must name that path rather than become ambiguous.
+pub(crate) fn projection_paths(app: &SolveApp, params: &mut Value) {
+    let doc = &app.session.doc;
+    let state = app.session.model.state();
+    let bodies = doc.body_frames_with_source(&state);
+    let one = |value: &mut Value| {
+        let Some(reference) = value.as_object_mut() else { return };
+        if reference.contains_key("path") {
+            return;
+        }
+        let path = if let Some(body) = reference.get("body").and_then(Value::as_str) {
+            bodies.iter().find(|(world, ..)| world == body).map(|(_, _, _, path, _)| path.clone())
+        } else if let Some(sketch) = reference.get("sketch") {
+            let key = sketch.as_str().map(str::to_string).or_else(|| sketch.as_u64().map(|id| id.to_string()));
+            key.and_then(|key| doc.find_feature(&key)).map(|feature| doc.first_path(feature.component))
+        } else {
+            None
+        };
+        if let Some(path) = path {
+            reference.insert("path".into(), json!(path));
+        }
+    };
+    if let Some(refs) = params.get_mut("refs") {
+        if let Some(refs) = refs.as_array_mut() {
+            for reference in refs.iter_mut().take(1000) {
+                one(reference);
+            }
+        } else {
+            one(refs);
+        }
+    } else if let Some(reference) = params.get_mut("ref") {
+        one(reference);
+    }
+}
+
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
     Some(match h {
@@ -1748,6 +1951,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     if r.get("face").is_some() {
                         let along = SHIFT.with(Cell::get);
                         let _ = app.run(cmd, json!({"face": r["face"], "body": r["body"], "direction": if along { "v" } else { "u" }}));
+                    }
+                }
+                "sketch.repair_link" => {
+                    let Some(link) = REPAIR.with(|l| l.borrow().clone()) else { return };
+                    if app.run(cmd, json!({"link": link, "ref": r})).is_ok() {
+                        REPAIR.with(|l| *l.borrow_mut() = None);
+                        app.set_status(solidcraft_ui_text::tr("sketch.projection_repaired"), false);
+                        ENDED.with(|e| e.set(true));
                     }
                 }
                 _ => {
@@ -2416,24 +2627,33 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 }
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
-    let Some(sid) = active_sketch(app) else { return };
+    let Some(sid) = active_sketch(app) else {
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
+        return;
+    };
     // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
     let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
-    let Some(ss) = st.sketch(sid) else { return };
+    let Some(ss) = st.sketch(sid) else {
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
+        return;
+    };
     // The badge's side, from Preferences › Sketch (#10794); 15 px at the default.
     let glyph = glyph_px(app.preferences.constraint_glyph_scale);
     let scale = glyph / GLYPH;
     GLYPH_PX.with(|g| g.set(glyph));
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
     // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
     // sketch still spreads them across the view (#10518).
-    if let Some(scale) = sketch_px_per_mm(&ss.plane, proj)
+    let px_per_mm = sketch_px_per_mm(&ss.plane, proj);
+    if let Some(scale) = px_per_mm
         && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
     let tk = solidcraft_theme::Tokens::get();
@@ -2546,7 +2766,54 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         }
         drawn.push((id.clone(), *sp));
     }
-    if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
+    // Simulated coincident break-off glyph (selected curve + hovered shared endpoint).
+    let mut detach_tooltip: Option<(egui::Rect, String)> = None;
+    let next_detach = resolve_detach_target(app, sid, &ss.sketch, hover, scale).and_then(|(curve_id, pi, point_id)| {
+        let base = proj.to_screen(ss.plane.to_world(ss.sketch.point(pi)?))?;
+        let point_rect = egui::Rect::from_center_size(base, egui::vec2(6.0 * scale, 6.0 * scale));
+        let reused = DETACH_PREVIEW.with(|c| {
+            c.borrow()
+                .as_ref()
+                .filter(|p| p.curve_id == curve_id && p.point_id == point_id && p.point_rect.center().distance(base) < 2.0)
+                .map(|p| p.glyph_rect)
+        });
+        let glyph_rect = reused.unwrap_or_else(|| {
+            let dirs = [
+                egui::vec2(0.7, -0.7),
+                egui::vec2(-0.7, -0.7),
+                egui::vec2(0.7, 0.7),
+                egui::vec2(-0.7, 0.7),
+                egui::vec2(1.0, 0.0),
+                egui::vec2(-1.0, 0.0),
+                egui::vec2(0.0, -1.0),
+                egui::vec2(0.0, 1.0),
+            ];
+            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < glyph + 2.0) && !on_dim(sp);
+            let center = dirs.iter().map(|d| base + *d * (glyph * 1.15)).find(|&sp| free(sp)).unwrap_or(base + dirs[0] * (glyph * 1.15));
+            egui::Rect::from_center_size(center, egui::vec2(glyph, glyph))
+        });
+        let lit = hover.is_some_and(|h| glyph_rect.expand(2.0).contains(h));
+        painter.line_segment([base, glyph_rect.center()], Stroke::new(1.0, tk.accent.gamma_multiply(0.8)));
+        let rounding = tk.radius_sm.saturating_sub(1);
+        painter.rect_filled(glyph_rect, rounding, if lit { tk.accent_soft } else { tk.glyph_bg });
+        painter.rect_stroke(glyph_rect, rounding, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
+        crate::icons::paint_icon(painter, glyph_rect.shrink(2.0 * scale), "c_coincident", 1.0);
+        if lit {
+            detach_tooltip = Some((glyph_rect, format!("Coincident on {curve_id} (right-click to detach)")));
+        }
+        let distance_mm = 10.0 / px_per_mm.unwrap_or(1.0).max(1e-3) as f64;
+        Some(DetachPreview { curve_id, point_id, point_rect, glyph_rect, distance_mm })
+    });
+    DETACH_PREVIEW.with(|c| *c.borrow_mut() = next_detach);
+
+    if let (Some((anchor_rect, label)), Some(h)) = (detach_tooltip, hover) {
+        let g =
+            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
+        let chip = glyph_label_rect(h, anchor_rect, g.size() + egui::vec2(6.0, 6.0), proj.rect);
+        crate::scenario::publish_rect("sketch:glyph_label", chip);
+        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
+        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
+    } else if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
         && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
     {
         let ids = glyph_group(&ss.sketch, &id).join(", ");
@@ -3037,6 +3304,8 @@ mod glyph_zoom_tests {
         for cmd in [
             "sketch.constraint.parallel",
             "sketch.constraint.coincident",
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.constraint.horizontal_vertical",
             "sketch.constraint.curvature",
             "sketch.constrainer",

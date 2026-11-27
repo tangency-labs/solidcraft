@@ -162,6 +162,9 @@ struct App {
     window_move: native_frame::WindowMove,
     /// After a lost device: the first frame stores it, since the setup's frames save nothing.
     clear_stored_background: bool,
+    /// Brackets the touchpad's swipes (winit sends pixels only for it, #15353).
+    #[cfg(target_os = "windows")]
+    wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
 }
 
 /// Flushes the stored settings with the background effect off; false when none was stored.
@@ -225,6 +228,13 @@ impl PrefsWriter {
         due
     }
 
+    /// Compare the settings [`Self::INTERVAL`] from now (or when a check already waiting is due),
+    /// for input that comes in every frame while it lasts. Returns how long that is: the caller
+    /// asks for a frame then, so an idle app still writes a change.
+    fn check_later(&mut self, now: std::time::Instant) -> std::time::Duration {
+        self.pending_until.get_or_insert(now + Self::INTERVAL).saturating_duration_since(now)
+    }
+
     /// Write `prefs` and flush them to disk if they differ from the settings written last and the
     /// last write is at least [`Self::INTERVAL`] old. Returns how long a change waits otherwise:
     /// the caller asks for a frame then, so an idle app still writes it.
@@ -253,8 +263,9 @@ fn pointer_in_points(x: f64, y: f64, pixels_per_point: f32) -> Option<egui::Pos2
     (pixels_per_point > 0.0 && pos.is_finite()).then_some(pos)
 }
 
-/// Input that can change a setting: a click, a key, typed or pasted text, a wheel or a pinch.
-/// Pointer motion, which comes every frame while the mouse moves, cannot by itself.
+/// Input that can change a setting: a click, a key or typed or pasted text. Pointer motion,
+/// which comes every frame while the mouse moves, cannot by itself; a wheel or a pinch, which
+/// also come every frame while the view zooms or a list scrolls, are [`settles_settings_later`].
 fn changes_settings(event: &egui::Event) -> bool {
     matches!(
         event,
@@ -264,11 +275,16 @@ fn changes_settings(event: &egui::Event) -> bool {
             | egui::Event::Paste(_)
             | egui::Event::Cut
             | egui::Event::Ime(_)
-            | egui::Event::MouseWheel { .. }
-            | egui::Event::Zoom(_)
-            | egui::Event::Rotate(_)
             | egui::Event::AccessKitActionRequest(_)
     )
+}
+
+/// Input that can change a setting but comes in every frame while it lasts: a wheel (a value
+/// stepped over its box) or a pinch. The settings are compared once [`PrefsWriter::INTERVAL`]
+/// after it, not in each of its frames: reading them out takes about 2 ms, as long as the rest
+/// of a zooming frame.
+fn settles_settings_later(event: &egui::Event) -> bool {
+    matches!(event, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_) | egui::Event::Rotate(_))
 }
 
 impl eframe::App for App {
@@ -390,6 +406,14 @@ impl eframe::App for App {
         solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         // A native dialog or lost focus may have kept a release (#16460).
         solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+        // Windows touchpad: winit sends its two-finger scroll as pixels, which this brackets (#15353).
+        #[cfg(target_os = "windows")]
+        {
+            let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
+            if let Some(delay) = self.wheel_gestures.update(raw, now, solidcraft_ui_egui::prefs::BrowserScrollWheel::Automatic) {
+                ctx.request_repaint_after(delay);
+            }
+        }
         // Wayland shows the last program's cursor until the window sets its own again (#16581).
         solidcraft_ui_egui::window_chrome::reapply_cursor_on_return(ctx, raw);
         #[cfg(target_os = "macos")]
@@ -514,7 +538,11 @@ impl eframe::App for App {
         self.solve.retain_view_pictures(frame.wgpu_render_state());
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
-        if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
+        let (input, later) = ui.input(|i| (i.events.iter().any(changes_settings), i.events.iter().any(settles_settings_later)));
+        if later {
+            ui.ctx().request_repaint_after(self.prefs_writer.check_later(now));
+        }
+        if self.prefs_writer.due(input, now)
             && let Some(storage) = frame.storage_mut()
             && let Ok(prefs) = self.prefs_for_storage(storage)
             && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
@@ -1207,6 +1235,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
         install_app: None,
+        persist_design: None,
         can_restore: None,
         restore_file: None,
         download_design: None,
@@ -1777,12 +1806,19 @@ fn main() -> eframe::Result {
     // The crash guard (#18683): an API whose driver crashed the process while the last launch
     // started it is skipped from now on (until the next version), and each API this launch
     // probes or starts is named on disk first.
-    // Standard startup (`gpu_startup`) names no API on disk and skips none.
+    // Standard startup (`gpu_startup`) names an API on disk only while Intel's Vulkan driver
+    // creates the window's device on Windows (`gpu_startup::guards_device_creation`, #22110), and
+    // skips only an API that crashed there.
     let gpu_startup = gpu_startup::GpuStartup::current();
     solidcraft_engine::note!("SolidCraft graphics: {} startup", gpu_startup.name());
     let (backend_guard, skipped) = match (&settings, &backend_path) {
-        (Some(dir), Some(path)) if gpu_startup.legacy() => {
-            let (guard, skipped) = startup::BackendGuard::begin(dir, path, solidcraft_ui_egui::help::VERSION);
+        (Some(dir), Some(path)) => {
+            let version = solidcraft_ui_egui::help::VERSION;
+            let (guard, skipped) = if gpu_startup.legacy() {
+                startup::BackendGuard::begin(dir, path, version)
+            } else {
+                startup::BackendGuard::begin_standard(dir, path, version)
+            };
             (Some(guard), skipped)
         }
         _ => (None, startup::SkippedBackends::default()),
@@ -1848,18 +1884,34 @@ fn main() -> eframe::Result {
     }
     let saved_samples = if safe_mode { None } else { msaa() };
     let wgpu_options = if safe {
-        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed)
+        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed, backend_launch.backend.as_deref())
     } else {
         wgpu_options(gpu_startup, cpu_renderer, backend_launch.backend.as_deref(), skipped, backend_guard.as_ref())
     };
     // Named on disk when egui-wgpu creates the instance that loads the drivers (`startup_step`),
     // not before: the window system's event loop comes first, and a panic there (a missing
     // libxkbcommon-x11, #19643) is no driver's crash. Cleared once the first frame is presented
-    // (`App::backend_guard`) or startup returns.
+    // (`App::backend_guard`) or startup returns. Legacy startup only: standard startup names the
+    // API from its adapter choice, and only for Intel's Vulkan driver on Windows.
     if let Some(guard) = &backend_guard
+        && gpu_startup.legacy()
         && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
     {
         guard.attempt_when_the_instance_starts(setup.instance_descriptor.backends);
+    }
+    // Standard startup on Windows, in Automatic: OpenGL is named on disk while the instance
+    // starts, since its driver loads there before any adapter or vendor is known (#22917: AMD's
+    // `atio6axx.dll` crashed every start, safe mode included). After a crash there the launches of
+    // this version start Vulkan and D3D12 (`gpu_startup::standard_backends`); a clean start only
+    // writes the attempt file and removes it once the adapter is chosen.
+    let automatic =
+        !cpu_renderer && !backend_override && gpu_startup::chosen_backends(retry_backend.as_deref().or(backend_launch.backend.as_deref())).is_none();
+    if let Some(guard) = &backend_guard
+        && !gpu_startup.legacy()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
+        && gpu_startup::guards_instance_creation(cfg!(target_os = "windows"), setup.instance_descriptor.backends, automatic)
+    {
+        guard.attempt_while_the_instance_starts(eframe::wgpu::Backends::GL);
     }
     // A tracked full launch notes the API it starts, for the safe launch after a failure.
     if !safe
@@ -1970,6 +2022,10 @@ fn main() -> eframe::Result {
     // 3D mouse driver then too.
     #[cfg(target_os = "macos")]
     let _driver_client = DriverClient;
+    // Windows touchpad two-finger scroll arrives as pixels, not wheel notches (#15353). winit reads
+    // this when the event loop is built, so it is set before eframe builds it.
+    #[cfg(target_os = "windows")]
+    winit::platform::windows::set_touchpad_wheels(true);
     mark("run_native");
     let result = eframe::run_native(
         "SolidCraft",
@@ -1989,6 +2045,16 @@ fn main() -> eframe::Result {
             desktop_chooser::start(&cc.egui_ctx);
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
+            // Windows with OpenGL picked among every backend (the standard GPU startup): the
+            // system title bar after all, as an OpenGL-only start gets it (#22530, #2063).
+            let picked = cc.wgpu_render_state.as_ref().map(|rs| rs.adapter.get_info().backend);
+            let opengl_window = picked.is_some_and(|b| startup::system_title_bar_for_adapter(cfg!(target_os = "windows"), b));
+            let switch_to_system = custom_titlebar && opengl_window;
+            let custom_titlebar = custom_titlebar && !opengl_window;
+            if switch_to_system {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+                solidcraft_engine::note!("SolidCraft window: OpenGL adapter; using the system title bar");
+            }
             app.custom_titlebar = custom_titlebar;
             #[cfg(target_os = "windows")]
             {
@@ -2010,7 +2076,7 @@ fn main() -> eframe::Result {
             // macOS: AppKit must not move the window from a press on a tab or a bar button.
             #[cfg(target_os = "macos")]
             if !native_titlebar_macos::install(cc) {
-                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
+                solidcraft_engine::note!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;
@@ -2281,6 +2347,8 @@ fn main() -> eframe::Result {
                 ctx: cc.egui_ctx.clone(),
                 #[cfg(target_os = "windows")]
                 window_move,
+                #[cfg(target_os = "windows")]
+                wheel_gestures: solidcraft_ui_egui::WebWheelGestures::every_point_swipes(),
             }))
         }),
     );
@@ -2383,6 +2451,8 @@ fn startup_step(step: &'static str, detail: &str) {
         startup::instance_starting();
     }
     if step == eframe::egui_wgpu::STEP_ADAPTER_CHOSEN {
+        // The instance came up: standard startup's OpenGL guard is over (#22917).
+        startup::adapter_chosen();
         solidcraft_engine::crash::set_environment(&format!("Renderer: {detail}"));
     }
     solidcraft_engine::crash::startup_step(step);
@@ -2426,7 +2496,7 @@ fn wgpu_options(
         let chosen = if startup_strategy.legacy() {
             startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed, probe)
         } else {
-            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference)
+            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed)
         };
         if let Some(backends) = chosen {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
@@ -2443,12 +2513,20 @@ fn wgpu_options(
             startup::configure_adapter(setup, cpu, environment, adapter);
         } else {
             // An adapter named by WGPU_ADAPTER_NAME or Preferences first, else a hardware Vulkan
-            // one, else wgpu's own request.
+            // one, else wgpu's own request. Intel's Vulkan driver on Windows is named on disk before
+            // it creates the device (#22110): a crash there makes the next launches start another
+            // API (`gpu_startup::standard_backends`). No other adapter writes anything.
+            let guard = guard.cloned();
             setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
                 let names: Vec<_> = adapters.iter().map(|a| startup::AdapterChoice::of(a, surface)).collect();
                 let kinds: Vec<_> = adapters.iter().map(|a| gpu_startup::AdapterKind::of(a, surface)).collect();
                 let picked =
                     startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
+                if let (Some(guard), Some(kind)) = (&guard, picked.and_then(|i| kinds.get(i)))
+                    && gpu_startup::guards_device_creation(cfg!(target_os = "windows"), kind.backend, kind.vendor)
+                {
+                    guard.attempt(eframe::wgpu::Backends::from(kind.backend));
+                }
                 Ok(picked.and_then(|i| adapters.get(i)).cloned())
             }));
         }
@@ -2468,12 +2546,20 @@ fn wgpu_options(
 
 /// Safe graphics mode's renderer settings (`startup::SafeGraphics`): wgpu's own backend and adapter
 /// choice, as v0.1.0 had, with no API order, no retries, no adapter preference and no float depth.
+/// A graphics API chosen in Preferences › Graphics (`preference`, `graphics.json`'s `backend`) is
+/// the only one started, so a driver the user moved away from is never loaded (#22110: with
+/// OpenGL or Direct3D 12 chosen, safe graphics still started Vulkan, whose driver crashed).
 /// After a failure, the API the failed launch used is left out (`failed`, [`startup::safe_backends`]),
 /// and so is every API that crashed while starting (`crashed`), the software renderer's included.
 /// Kept: two frames in flight ([`WINDOW_SURFACE`]), the D3D12 shader compiler that never loads a
 /// `dxcompiler.dll` from PATH (#6756), and the Intel Mac validation fix (#3080); with `cpu`, the
 /// software adapter.
-fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Backends) -> eframe::egui_wgpu::WgpuConfiguration {
+fn safe_wgpu_options(
+    cpu: bool,
+    failed: Option<&str>,
+    crashed: eframe::wgpu::Backends,
+    preference: Option<&str>,
+) -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(WINDOW_SURFACE);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
@@ -2485,9 +2571,17 @@ fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Bac
         }
         if std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| v.trim().is_empty()) || std::env::var_os(startup::WGPU_BACKEND_ENV).is_none() {
             // WGPU_BACKEND always has priority; otherwise the failed API (not for the software
-            // renderer, which picks its own adapter) and the crashed ones are left out.
+            // renderer, which picks its own adapter) and the crashed ones are left out. A chosen API
+            // takes the place of wgpu's own set (not for the software renderer).
+            // The software renderer starts D3D12 alone on Windows, its WARP adapter's API, so no
+            // Vulkan or OpenGL driver loads beside it (#22917).
             let failed = if cpu { None } else { failed };
-            setup.instance_descriptor.backends = startup::safe_backends(setup.instance_descriptor.backends, failed, crashed);
+            let chosen = if cpu {
+                gpu_startup::safe_software_backends(cfg!(target_os = "windows"), crashed)
+            } else {
+                gpu_startup::chosen_backends(preference)
+            };
+            setup.instance_descriptor.backends = startup::safe_backends(chosen.unwrap_or(setup.instance_descriptor.backends), failed, crashed);
         }
     }
     solidcraft_engine::note!("SolidCraft graphics: safe graphics mode, wgpu's own backend choice");
@@ -3013,6 +3107,44 @@ mod prefs_writer_tests {
         assert!(!super::changes_settings(&egui::Event::MouseMoved(egui::Vec2::X)));
     }
 
+    /// A wheel or a pinch comes in every frame while the view zooms: its frames don't read the
+    /// settings out, but one a second after it does, so a value stepped with the wheel is still
+    /// on disk within a second, and an idle app gets a frame for it.
+    #[test]
+    fn wheel_frames_are_checked_once_a_second_after_not_each_frame() {
+        let mut app = new_app();
+        let mut disk = Disk::default();
+        let mut writer = PrefsWriter::read(app.prefs());
+        let start = Instant::now();
+        let frame = Duration::from_millis(16);
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        assert!(!super::changes_settings(&wheel) && super::settles_settings_later(&wheel));
+        assert!(super::settles_settings_later(&egui::Event::Zoom(1.1)));
+        // Half a second of zooming: no frame reads the settings.
+        let mut checked = 0;
+        for n in 0..30u32 {
+            let now = start + frame * n;
+            assert!(writer.check_later(now) <= PrefsWriter::INTERVAL);
+            if writer.due(false, now) {
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 0, "no frame of the zoom reads the settings");
+        // A value stepped with the wheel in that time is written when the second is up.
+        app.preferences.ui_scale = 1.5;
+        let then = start + PrefsWriter::INTERVAL;
+        assert!(writer.due(false, then), "the frame asked for a second after the wheel");
+        assert_eq!(writer.store(&mut disk, app.prefs(), then), None);
+        assert_eq!(disk.flushes, 1);
+        assert!(!writer.due(false, then + frame), "nothing waits after it");
+    }
+
     /// A window position in physical pixels is egui's points at the window's scale; a scale or
     /// position that is not a usable number answers nothing, so eframe's repaint stands.
     #[test]
@@ -3271,19 +3403,21 @@ mod msaa_tests {
     #[test]
     fn safe_graphics_renderer_is_wgpus_own_choice() {
         let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
-        let eframe::egui_wgpu::WgpuSetup::CreateNew(safe) = super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty()).wgpu_setup else {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(safe) = super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty(), None).wgpu_setup
+        else {
             panic!()
         };
         assert_eq!(safe.instance_descriptor.backends, default.instance_descriptor.backends, "wgpu's own backends");
         assert!(safe.native_adapter_selector.is_none(), "no adapter preference");
         assert_eq!(safe.power_preference, default.power_preference);
-        let eframe::egui_wgpu::WgpuSetup::CreateNew(cpu) = super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty()).wgpu_setup else {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(cpu) = super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty(), None).wgpu_setup
+        else {
             panic!()
         };
         assert!(cpu.native_adapter_selector.is_some(), "the last-resort software renderer");
         if std::env::var_os("WGPU_BACKEND").is_none() {
             let eframe::egui_wgpu::WgpuSetup::CreateNew(after) =
-                super::safe_wgpu_options(false, Some("vulkan"), eframe::wgpu::Backends::empty()).wgpu_setup
+                super::safe_wgpu_options(false, Some("vulkan"), eframe::wgpu::Backends::empty(), None).wgpu_setup
             else {
                 panic!()
             };
@@ -3292,10 +3426,73 @@ mod msaa_tests {
             // in safe graphics mode and for the software renderer too: its driver is never loaded.
             for cpu in [false, true] {
                 let crashed = eframe::wgpu::Backends::VULKAN;
-                let eframe::egui_wgpu::WgpuSetup::CreateNew(guarded) = super::safe_wgpu_options(cpu, None, crashed).wgpu_setup else { panic!() };
+                let eframe::egui_wgpu::WgpuSetup::CreateNew(guarded) = super::safe_wgpu_options(cpu, None, crashed, None).wgpu_setup else {
+                    panic!()
+                };
                 assert!(!guarded.instance_descriptor.backends.contains(crashed), "software renderer {cpu}: no Vulkan");
                 assert!(!guarded.instance_descriptor.backends.is_empty());
             }
+        }
+    }
+
+    /// #22110: a graphics API chosen in Preferences › Graphics is the only one safe graphics mode
+    /// starts, so with OpenGL or Direct3D 12 chosen the Vulkan driver is never loaded; Automatic
+    /// keeps wgpu's own set, and the software renderer its own adapter.
+    #[test]
+    fn safe_graphics_starts_only_the_chosen_api() {
+        use eframe::wgpu::Backends;
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let backends = |cpu, failed, crashed, preference| {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = super::safe_wgpu_options(cpu, failed, crashed, preference).wgpu_setup else {
+                panic!()
+            };
+            setup.instance_descriptor.backends
+        };
+        let none = Backends::empty();
+        let own = backends(false, None, none, None);
+        assert_eq!(backends(false, None, none, Some("gl")), Backends::GL, "OpenGL chosen");
+        assert_eq!(backends(false, None, none, Some("dx12")), Backends::DX12, "Direct3D 12 chosen");
+        assert_eq!(backends(false, None, Backends::VULKAN, Some("gl")), Backends::GL);
+        assert_eq!(backends(false, None, none, Some("auto")), own, "Automatic: wgpu's own set");
+        assert_eq!(backends(false, None, none, Some("cpu")), own);
+        assert_eq!(backends(true, None, none, Some("gl")), backends(true, None, none, None), "the software renderer ignores the choice");
+        // After a failure of the API in use, the chosen ones less it, never none.
+        assert_eq!(backends(false, Some("dx12"), none, Some("dx12,gl")), Backends::GL);
+        assert_eq!(backends(false, Some("gl"), none, Some("gl")), Backends::GL);
+    }
+
+    /// #22917: the software renderer in safe graphics mode (`--safe-mode`, or after failed starts)
+    /// starts D3D12 alone on Windows, so AMD's OpenGL driver is never loaded; elsewhere, or once
+    /// D3D12 crashed, wgpu's own set less the crashed APIs as before.
+    #[test]
+    fn safe_software_renderer_never_starts_opengl_on_windows() {
+        use eframe::wgpu::Backends;
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let backends = |crashed, preference| {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = super::safe_wgpu_options(true, None, crashed, preference).wgpu_setup else {
+                panic!()
+            };
+            assert!(setup.native_adapter_selector.is_some(), "the software adapter");
+            setup.instance_descriptor.backends
+        };
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
+        let own = default.instance_descriptor.backends;
+        for preference in [None, Some("gl"), Some("vulkan"), Some("dx12")] {
+            for crashed in [Backends::empty(), Backends::GL, Backends::VULKAN] {
+                let started = backends(crashed, preference);
+                if cfg!(target_os = "windows") {
+                    assert_eq!(started, Backends::DX12, "{preference:?} {crashed:?}");
+                } else {
+                    assert_eq!(started, crate::startup::safe_backends(own, None, crashed), "as before");
+                }
+            }
+        }
+        if cfg!(target_os = "windows") {
+            assert_eq!(backends(Backends::DX12, None), own - Backends::DX12, "WARP's API crashed");
         }
     }
 
@@ -3304,8 +3501,8 @@ mod msaa_tests {
     #[test]
     fn the_window_keeps_two_frames_in_flight() {
         for options in [
-            super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty()),
-            super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty()),
+            super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty(), None),
+            super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty(), None),
         ] {
             assert_eq!(options.surface.desired_maximum_frame_latency, Some(2));
             assert_eq!(options.surface.present_mode, eframe::wgpu::PresentMode::AutoVsync);
