@@ -42,6 +42,79 @@ Picking screenshot `pixels` requires a connection to the running SolidCraft app;
 "model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
 See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
+### Reuse a headless session from another program
+
+For a program that makes many parts, keep one `solidcraft-cli mcp --headless`
+process running and use its stdio connection for successive tool calls. The
+server holds one active design, including its parameters and history, until
+the process exits. Use `new_design` or `open` between independent jobs,
+and save each result before replacing the active design. Use separate server
+processes for independent concurrent jobs; do not interleave edits to different
+designs on one connection.
+
+For example, install the Python MCP SDK (`pip install mcp==2.3.0` for this example) in your application's
+environment and run this script with the CLI on your PATH. It creates two
+independent parts, measures them, and saves a design and STEP file for each:
+
+```python
+import asyncio
+import json
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main():
+    output = Path("headless-parts").resolve()
+    output.mkdir()  # A fresh directory: do not overwrite an earlier job.
+    server = StdioServerParameters(
+        command="solidcraft-cli",
+        args=["mcp", "--headless", "--allow-path", str(output),
+              "--require-allow-path"],
+    )
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            info = await session.initialize()
+            print("SolidCraft version:", info.server_info.version)
+
+            async def call(name, arguments):
+                result = await session.call_tool(name, arguments)
+                if result.is_error:
+                    raise RuntimeError(result.content)
+                return result
+
+            # Both parts use the same server process and connection.
+            for length in (10, 20):
+                name = f"Part-{length}"
+                await call("new_design", {"name": name})
+                await call("execute", {
+                    "command": "solid.box",
+                    "params": {"length": length, "width": 5, "height": 2},
+                })
+                measured = await call("measure", {})
+                print(json.loads(measured.content[0].text)["total"]["volume_mm3"])
+                await call("save", {"path": str(output / f"{name}.sc")})
+                await call("export", {"path": str(output / f"{name}.step")})
+
+
+asyncio.run(main())
+```
+
+Expected volumes are 100 and 200 mm³. The output directory is explicitly
+allowed; see [file access rules](#which-files-the-agent-can-reach).
+For sheet-metal jobs, call the flat-pattern and bend-table commands through
+`execute`, using `describe_command` to discover their inputs.
+
+The MCP protocol revision is negotiated at initialization. For production
+integrations, record the server version, pin the SolidCraft release used for
+your jobs, and test your command inputs and result handling before upgrading.
+Use `tools/list`, `list_commands` and `describe_command` to discover the
+available tools and command contracts. Check tool errors before proceeding.
+A negotiated MCP revision does not pin SolidCraft's command schemas or CAD
+results across releases. This example uses the process interface; it does not
+require Python bindings to the Rust engine.
+
 ### The app listens when turned on
 
 The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that

@@ -6246,3 +6246,51 @@ fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
     };
     assert!(matches!(surface::ball_sphere(&plane), Ok(None)));
 }
+
+#[test]
+fn placement_grid_matches_linear_scan_on_many_body_scene() {
+    // 81 small boxes on a 9x9 grid at two depths plus 1 large plate behind them (spanning all
+    // 10x10 = 100 grid cells > 64, exercising both `buckets` and `large` in `PlacementIndex`).
+    // Both solids are symmetric about the origin so `def.offset == Vec3::ZERO`.
+    let unit = prepare(&cuboid([-3., -3., -2.], [3., 3., 2.]), &Options::default()).unwrap();
+    let plate = prepare(
+        &cuboid([-100., -100., -1.], [100., 100., 1.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [unit, plate];
+    let mut scene = Vec::new();
+    for row in 0..9 {
+        for col in 0..9 {
+            let z = if (row + col) % 2 == 0 { 0. } else { -8. };
+            scene.push(identity(
+                0,
+                [col as f64 * 20. - 80., row as f64 * 20. - 80., z],
+            ));
+        }
+    }
+    scene.push(identity(1, [0., 0., -20.]));
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let opts = Options::default();
+    let ctx_indexed = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    let index = ctx_indexed.placement_index.as_ref().unwrap();
+    assert_eq!(index.large, [81]);
+    let mut ctx_linear = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    ctx_linear.placement_index = None;
+
+    for z in [-15., -25.] {
+        for i in 0..12 {
+            for j in 0..10 {
+                let p = Vec3::new(-95. + i as f64 * 17.5, -95. + j as f64 * 21.0, z);
+                let (mut t1, mut t2) = (0, 0);
+                let a =
+                    classify_point_counted(&ctx_indexed, 81, &[], ctx_indexed.eps_own, p, &mut t1);
+                let b =
+                    classify_point_counted(&ctx_linear, 81, &[], ctx_linear.eps_own, p, &mut t2);
+                assert_eq!(a, b, "mismatch at {p:?}");
+            }
+        }
+    }
+    let drawing = hidden_lines(&defs, &scene, &view, &opts, &never).unwrap();
+    assert!(!drawing.lines.is_empty());
+}
