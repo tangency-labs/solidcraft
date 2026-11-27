@@ -195,6 +195,17 @@ impl ExactClass {
             Self::NodalQuartic => "nodal quartic",
         }
     }
+
+    /// Whether the round's surface kind offsets exactly to a surface of its own kind: the
+    /// cylinder, the torus and the sphere of the line, circle and point classes do (to the
+    /// cylinder, torus or sphere of the moved radius). The rational classes' surface is a
+    /// B-spline, whose offset is an offset surface with no NURBS form, so no net of the moved
+    /// radius comes from it; and the chord's plane offsets as a plane, but no definition of a
+    /// chamfer of other sizes is built yet.
+    #[must_use]
+    pub const fn offsets_as_its_kind(self) -> bool {
+        matches!(self, Self::Line | Self::Circle | Self::Point)
+    }
 }
 
 /// The definition of an exact round: its supports, its ball, its section, its leader and

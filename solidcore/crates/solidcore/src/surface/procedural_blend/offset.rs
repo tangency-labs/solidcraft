@@ -14,10 +14,14 @@
 //!   map; its net is built on the definition's stations and certified
 //!   ([`crate::blend::fillet_section::recertify::net_of_definition`]), its bound recorded,
 //!   and the result re-certified against it;
-//! - a round of an exact class ([`ExactRound`]) offsets to its kind's own exact offset (a
-//!   cylinder of r to the cylinder of `r'`), which carries the definition of radius `r'`
-//!   on the offset supports, re-certified (an identity: the supports classified again give
-//!   the class, the offset on its surface).
+//! - a round of an exact class ([`ExactRound`]) whose kind offsets as itself (the line,
+//!   circle and point classes: [`super::exact::ExactClass::offsets_as_its_kind`]) offsets to
+//!   its kind's own exact offset (a cylinder of r to the cylinder of `r'`), which carries the
+//!   definition of radius `r'` on the offset supports, re-certified (an identity: the
+//!   supports classified again give the class, the offset on its surface). A round of a
+//!   rational class is not offset here: its net is a B-spline, whose offset is an offset
+//!   surface with no NURBS form to re-certify, so it offsets as its net does (exactly, its
+//!   net being S) and keeps no definition.
 //!
 //! Where `r'` is not positive (an inward offset at or past the radius) the round collapses
 //! onto its spine: no surface, as a cylinder's offset collapses
