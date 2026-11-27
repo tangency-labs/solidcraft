@@ -685,6 +685,12 @@ pub struct Solution<O> {
     /// stand for ([`ContactId`]); `None`, or an id no other solution of the solve carries,
     /// for a solution that is its own contact.
     pub shared_contact: Option<ContactId>,
+    /// (not upstream) a crossing certified on a leaf whose certified pass stopped at its box
+    /// limit, before every box it left: one of the leaf's crossings, whose partner past those
+    /// boxes may be unreported. A count or parity of the solve's crossings is not shown where
+    /// one of them is such a root; the nearest crossing and the crossing's position are. A
+    /// solution merged with one carries it.
+    pub limit_root: bool,
 }
 
 impl<O: Copy> Default for Solution<O> {
@@ -708,6 +714,7 @@ impl<O: Copy> Solution<O> {
             contact: Contact::Unclassified,
             unique: None,
             shared_contact: None,
+            limit_root: false,
         }
     }
 
@@ -1811,6 +1818,7 @@ impl<O: SolutionObject> SolutionArray<O> {
                 contact: s.contact,
                 unique: s.unique,
                 shared_contact: s.shared_contact,
+                limit_root: s.limit_root,
             });
         }
         // (the same solve's: the record names no object)
@@ -1959,10 +1967,12 @@ impl<O: SolutionObject> SolutionArray<O> {
                 // save the better solution - improve tolerances
                 // (not upstream) the kept solution carries both contacts
                 let contact = old.contact.merged(new.contact);
+                let limit_root = old.limit_root || new.limit_root;
                 if new.start.solution_value.abs() < old.start.solution_value.abs() {
                     *old = *new;
                 }
                 old.contact = contact;
+                old.limit_root = limit_root;
                 old.shared_contact = None;
                 // (a unique box is a crossing's, by the root it carries: a merged solution
                 // that is not a crossing carries none, whichever of the two was kept)

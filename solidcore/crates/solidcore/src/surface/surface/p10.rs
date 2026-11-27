@@ -1151,9 +1151,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
     /// One certified root of `leaf`, added as a guess's hit is, unless a solution of the
     /// solve already stands for it; `reach` is the tolerance as a stretch of the line's
-    /// parameter. Of a leaf whose pass stopped at its limit (`at_limit`) it is added
-    /// [`Contact::Undecided`], as the typing after finds it where it places it (its component
-    /// holds a leaf at its limit) and stays where it places it nowhere.
+    /// parameter. Of a leaf whose pass stopped at its limit (`at_limit`) it is added as a
+    /// limit root ([`Solution::limit_root`]: a count of the solve's crossings is not shown by
+    /// it), and [`Contact::Undecided`], as the typing after finds it where it places it (its
+    /// component holds a leaf at its limit) and stays where it places it nowhere.
     fn add_certified_root(
         &mut self,
         k: &Kernel,
@@ -1184,6 +1185,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let mut solution = leaf.solution(t, uv, deviation)?;
         if at_limit {
             solution.contact = Contact::Undecided;
+            solution.limit_root = true;
         }
 
         // skip negative parameter ray/surface intersections
@@ -1861,6 +1863,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 // (not upstream) the point kept stands for both, and keeps a unique box only
                 // as a crossing (the box is the certified root's it carries)
                 kept.contact = last_sol.contact.merged(curr.contact);
+                kept.limit_root = last_sol.limit_root || curr.limit_root;
                 kept.shared_contact = None;
                 if kept.contact != Contact::Crossing {
                     kept.unique = None;
@@ -2516,9 +2519,9 @@ mod tests {
     /// budget on this input, not of the geometry (with a smaller one, a leaf would add
     /// nothing, and the solve could publish one crossing of the two). Here both are
     /// published (the work counter of roots added at the leaf-to-solution boundary), at the
-    /// implicit equation's roots. The leaves there stop at their limit, so the contact of
-    /// every solution is undecided, which is what a ray's parity count reads
-    /// (`topology_traverser::is_inner_shell` abandons a ray with an undecided hit).
+    /// implicit equation's roots, each a limit root (`Solution::limit_root`), which a ray's
+    /// parity count reads (`topology_traverser::is_inner_shell` abandons a ray with one).
+    /// The leaves there stop at their limit, so the contact of every solution is undecided.
     #[test]
     fn a_leaf_the_pass_does_not_finish_adds_the_crossings_before_the_boxes_it_left() {
         let k = Kernel::default();
@@ -2546,6 +2549,13 @@ mod tests {
                 .count();
             assert_eq!(at, 1, "{e}: {:?}", sols.as_slice());
         }
+        // each crossing is a limit root, and nothing else is
+        assert_eq!(
+            sols.as_slice().iter().filter(|sol| sol.limit_root).count(),
+            2,
+            "{:?}",
+            sols.as_slice()
+        );
         // the leaves there stop at their limit: every contact is undecided
         assert!(
             sols.as_slice()

@@ -2097,6 +2097,7 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
                 // (not upstream) the solution kept carries both contacts
                 let mut kept = if keep { *solution } else { *test };
                 kept.contact = test.contact.merged(solution.contact);
+                kept.limit_root = test.limit_root || solution.limit_root;
                 kept.shared_contact = None;
                 // (a unique box is a crossing's, by the root it carries: a merged solution
                 // that is not a crossing carries none, whichever of the two was kept)

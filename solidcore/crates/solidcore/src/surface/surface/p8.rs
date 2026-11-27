@@ -3432,6 +3432,7 @@ fn remove_repeated_solutions<O: SolutionObject>(
                     }
                     (a, b) => a.merged(b),
                 };
+                kept.limit_root = si.limit_root || sj.limit_root;
                 kept.shared_contact = None;
                 // (a unique box is a crossing's, by the root it carries: a solution merged
                 // into anything else carries none)
@@ -3516,6 +3517,7 @@ fn join_across_coincidence<O: SolutionObject>(
             } else {
                 last_original_contact.merged(curr_sol.contact)
             };
+            last_sol.limit_root |= curr_sol.limit_root;
         } else {
             // set LastSolution end value
             last_sol.end = curr_sol.start;

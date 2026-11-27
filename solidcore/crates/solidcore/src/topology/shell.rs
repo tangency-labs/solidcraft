@@ -73,6 +73,8 @@
 //! does no checks upstream; here it returns `InvalidInput` for a member that some list
 //! still holds (upstream would splice it into a second list), or for a face use
 //! going into a shell whose head is a wire or vertex use.
+//! (Not upstream) `IsInnerShellOf` takes no answer from a ray with a crossing past its start
+//! that is a limit root (`Solution::limit_root`), and tries the next sample.
 
 use crate::error::topology::TopologyFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -1759,6 +1761,15 @@ fn ray_brep_solve(
     )
 }
 
+/// (Not upstream) Whether a ray of [`is_inner_shell_of`] has a crossing past its start (the
+/// first solution, on the shell the ray leaves, which the ray's classification skips) that
+/// is a limit root ([`crate::geom::solution_array::Solution::limit_root`]): one of two
+/// crossings of a leaf whose certified pass stopped at its limit, the other perhaps
+/// unreported, which would unbalance the ray's stack of shells.
+fn limit_crossing<O>(solutions: &[crate::geom::solution_array::Solution<O>]) -> bool {
+    solutions.iter().skip(1).any(|s| s.limit_root)
+}
+
 /// The outcome of a call whose status upstream ignores (see [`checked`]).
 enum Checked<T> {
     /// It succeeded.
@@ -1798,7 +1809,9 @@ pub fn is_inner_shell_of_tri(
 /// from three sample points of each face use of the shell (along its normal), or from
 /// a wire shell's first edge or a vertex shell's vertex in random directions
 /// (ND-1), against the whole B-rep; the first ray whose crossings are
-/// all simple face crossings decides, by the stack of shells it exits and enters.
+/// all simple face crossings decides, by the stack of shells it exits and enters. (Not
+/// upstream) A ray with a crossing past its start that is a limit root decides nothing, and
+/// the next sample is tried.
 /// Returns [`SM_TRUE`], [`SM_FALSE`] or [`SM_UNSURE`] (no ray decided).
 ///
 /// The random directions and the face samples' dithers come from one generator the call
@@ -2053,6 +2066,12 @@ pub fn is_inner_shell_of(
             if !found_solution {
                 continue;
             }
+            // (not upstream) a limit root past the start: the ray decides nothing, and the
+            // next sample is tried
+            if limit_crossing(solutions.as_slice()) {
+                found_solution = false;
+                continue;
+            }
 
             // load solution into a CurveClassification
             let line_handle = CacheObject::Other(crate::geom::object::ObjectRef {
@@ -2195,6 +2214,41 @@ pub fn is_inner_shell_of(
 mod tests {
     use super::*;
     use crate::topology::Faceuse;
+
+    /// A ray of `is_inner_shell_of` decides nothing when a crossing past its start (the
+    /// first solution) is a limit root; a limit root at the start, or crossings that are no
+    /// limit root (whatever their contact), leave it to decide as upstream does.
+    #[test]
+    fn a_limit_root_past_the_start_stops_the_ray() {
+        use crate::geom::solution_array::{Contact, Solution};
+        let sols =
+            |roots: &[(bool, Contact)]| -> Vec<Solution<crate::topology::brep_cache::CacheObject>> {
+                roots
+                    .iter()
+                    .map(|&(limit_root, contact)| Solution {
+                        contact,
+                        limit_root,
+                        ..Solution::default()
+                    })
+                    .collect()
+            };
+        let (limit, plain) = (true, false);
+        assert!(!limit_crossing(&sols(&[
+            (limit, Contact::Undecided),
+            (plain, Contact::Undecided),
+            (plain, Contact::Crossing),
+        ])));
+        assert!(!limit_crossing(&sols(&[(limit, Contact::Undecided)])));
+        assert!(!limit_crossing(&sols(&[])));
+        assert!(limit_crossing(&sols(&[
+            (plain, Contact::Crossing),
+            (limit, Contact::Undecided)
+        ])));
+        assert!(limit_crossing(&sols(&[
+            (limit, Contact::Undecided),
+            (limit, Contact::Undecided)
+        ])));
+    }
 
     #[test]
     fn region_order_rotates_the_circular_head_without_moving_other_links() {
