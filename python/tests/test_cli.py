@@ -77,3 +77,12 @@ def test_a_missing_solidcraft_cli_path_is_a_clear_error(tmp_path):
     r = run(["--version"], env_with(SOLIDCRAFT_CLI=str(tmp_path / "nope")))
     assert r.returncode == 127
     assert "Traceback" not in r.stderr and "nope" in r.stderr
+
+
+def test_a_bare_solidcraft_cli_name_is_found_on_path(tmp_path):
+    cli = fake_cli(tmp_path)
+    env = env_with(SOLIDCRAFT_CLI=cli.name)
+    env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+    r = run(["--version"], env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == '["--version"]'

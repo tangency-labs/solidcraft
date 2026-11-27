@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         if os.name != "nt":
             sys.stdout.flush()
             sys.stderr.flush()
-            os.execv(cli, [cli, *args])  # replaces this process: stdio, signals and exit code are the CLI's
+            os.execvp(cli, [cli, *args])  # a bare SOLIDCRAFT_CLI is looked up on PATH, as Popen does; replaces this process: stdio, signals and exit code are the CLI's
         p = subprocess.Popen([cli, *args])
     except OSError as e:
         print(f"solidcraft: cannot run {cli}: {e}", file=sys.stderr)

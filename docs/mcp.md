@@ -18,7 +18,8 @@ document remains the reference implementation today.
 
 With [uv](https://docs.astral.sh/uv/) there is nothing to install first: `uvx solidcraft mcp` runs
 the MCP server over stdio from the `solidcraft` package on PyPI, whose wheel carries
-`solidcraft-cli` for your platform (`pip install solidcraft` installs the same `solidcraft`
+`solidcraft-cli` on Linux (x86_64, aarch64), macOS and Windows (elsewhere the package finds an
+installed `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI`) (`pip install solidcraft` installs the same `solidcraft`
 command). Any MCP client takes it as command `uvx`, args `["solidcraft", "mcp"]`:
 
 ```json
