@@ -571,7 +571,7 @@ struct RequestHead {
 }
 
 impl RequestHead {
-    fn header_values<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
+    fn header_values<'a, 'b>(&'a self, name: &'b str) -> impl Iterator<Item = &'a str> + use<'a, 'b> {
         self.headers.iter().filter(move |(k, _)| k == name).map(|(_, v)| v.as_str())
     }
 
