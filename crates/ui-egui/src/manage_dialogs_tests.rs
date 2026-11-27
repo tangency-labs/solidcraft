@@ -63,12 +63,31 @@ fn parameter_columns_fit_controls_and_headers_share_cell_left_edges() {
         assert!(unit.width() >= mm.galley.size().x + 2.0 * Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing);
         assert!(mm.pos.x + mm.galley.size().x + Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing <= unit.right());
         let actions = scenario::rect_of("dialog:table:parameters:user:width:cell:Actions").unwrap();
-        assert!(actions.contains_rect(scenario::rect_of("dialog:button:Actions:Delete").unwrap()));
-        // More content widens the scroll area, never the card.
+        assert!(actions.contains_rect(scenario::rect_of("dialog:button:Actions:…").unwrap()));
+        h.step(&json!({"click":{"handle":"param:menu:width"}})).unwrap();
+        assert!(h.widget("Delete").is_some(), "Delete remains reachable through the row menu");
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        // Narrow Named rows keep the primary columns aligned and put secondary controls in the menu.
         h.call("ui.resize", json!({"width":640,"height":1000}));
+        h.ctx.data_mut(|data| data.insert_persisted(egui::Id::unique("sc_params_width"), 520.0_f32));
         h.frames(4);
         assert!(h.ctx.content_rect().contains_rect(scenario::rect_of("dialog:header").unwrap()));
-        assert_eq!(scenario::rect_of("dialog:column:parameters:Unit").unwrap().width(), unit.width());
+        for label in ["Name", "Expression", "Value"] {
+            let header = scenario::rect_of(&format!("dialog:column:parameters:{label}")).unwrap();
+            let cell = scenario::rect_of(&format!("dialog:table:parameters:user:width:cell:{label}")).unwrap();
+            assert_eq!(header.left(), cell.left(), "narrow {label}: {layout:?}");
+            assert_eq!(header.width(), cell.width());
+        }
+        assert!(scenario::rect_of("dialog:column:parameters:Unit").is_none());
+        assert!(scenario::rect_of("dialog:column:parameters:Comment").is_none());
+        h.step(&json!({"click":{"handle":"param:menu:width"}})).unwrap();
+        h.step(&json!({"widget":"mm"})).unwrap();
+        h.step(&json!({"widget":"cm"})).unwrap();
+        h.frames(3);
+        let listed = h.app.session.execute("parameters.list", &json!({})).unwrap();
+        let width = listed["parameters"].as_array().unwrap().iter().find(|p| p["name"] == "width").unwrap();
+        assert_eq!(width["unit"], "cm", "the narrow row still exposes an editable unit");
+        h.app.run("edit.undo", json!({})).unwrap();
     }
 }
 
@@ -122,9 +141,16 @@ fn chrome(h: &Harness) {
         assert!(scenario::handle_at(key).is_some(), "missing {key}");
     }
     assert_eq!(scenario::rect_of("dialog:header").unwrap().height(), Tokens::get().form_header_height);
-    assert!(scenario::rect_of("dialog:hint:manage").is_some());
     let footer = scenario::rect_of("dialog:footer").unwrap();
     assert!(h.ctx.content_rect().contains_rect(footer));
+    if h.app.params.is_some() {
+        assert!(scenario::rect_of("dialog:hint:manage").is_none(), "Parameters puts apply guidance in the footer");
+        assert!(footer.contains_rect(scenario::rect_of("params:apply_live").unwrap()));
+        assert!(scenario::handle_at("params:view:named").is_some());
+        assert!(scenario::handle_at("params:view:dimensions").is_some());
+    } else {
+        assert!(scenario::rect_of("dialog:hint:manage").is_some());
+    }
 }
 
 fn form(command: &str, labels: &[&str]) {
@@ -342,6 +368,7 @@ fn parameters_are_dense_and_keep_inline_edits_order_and_undo() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("height").unwrap().expr, "25 mm");
     assert!(h.app.params.is_some(), "cell Enter does not close the editor");
+    h.step(&json!({"click":{"handle":"param:menu:height"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:before:height"}})).unwrap();
     let names: Vec<_> = h.app.session.doc.params.iter().filter(|p| !p.model).map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["height", "width"]);
@@ -404,11 +431,16 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
-    for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters"] {
-        assert!(h.widget(label).is_some(), "missing inventory control {label}");
+    for handle in ["dialog:Filter", "params:import", "params:export_csv", "params:export_json", "params:view:named", "params:view:dimensions"] {
+        assert!(scenario::handle_at(handle).is_some(), "missing inventory control {handle}");
     }
-    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
-    assert_eq!(scenario::rect_of("dialog:table:parameters:new").unwrap().height(), crate::ui_kit::table_row_height());
+    h.step(&json!({"click":{"handle":"params:view:dimensions"}})).unwrap();
+    assert!(scenario::handle_at("param:width").is_none(), "Named inputs stay out of Dimensions");
+    assert_eq!(scenario::count_of("params:dimensions:count"), Some(3.0));
+    h.step(&json!({"click":{"handle":"params:view:named"}})).unwrap();
+    assert!(scenario::handle_at("param:width").is_some());
+    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+    assert_eq!(scenario::rect_of("dialog:table:user:new").unwrap().height(), crate::ui_kit::table_row_height());
     for label in ["name", "unit", "expression", "comment"] {
         assert!(scenario::handle_at(&format!("param:new:{label}")).is_some());
     }
@@ -420,7 +452,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("pitch").unwrap().expr, "10 mm");
     assert!(h.app.params.is_some());
-    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:new:unit"}})).unwrap();
     for unit in ["mm", "cm", "m", "in", "ft", "deg", "rad", "none", "um"] {
         assert!(scenario::handle_at(&format!("dialog:Unit:{unit}")).is_some(), "unit {unit}");
@@ -444,10 +476,10 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.session.doc.param("span").is_some(), "double-click rename still commits");
     h.step(&json!({"click":{"handle":"param:star:span"}})).unwrap();
-    assert!(h.widget("Favorites").is_some());
+    assert!(h.widget("Key parameters").is_some());
     assert!(scenario::handle_at("param:favorite:span").is_some());
-    // #4952: a favourite, listed under Favourites and User, renames by double-click too (two
-    // editors on one name took each other's focus and the rename closed at once).
+    assert!(scenario::rect_of("dialog:table:user:span").is_none(), "a Key parameter appears only once");
+    // #4952: the Key band's one editor retains focus throughout a double-click rename.
     h.frames(40);
     h.step(&json!({"click":{"handle":"param:name:span"},"double":true})).unwrap();
     h.frames(4);
@@ -666,10 +698,11 @@ fn scroll_card(h: &mut Harness, delta: f32) {
     h.frames(40);
 }
 
-fn assert_card_top() {
+fn assert_card_top(h: &Harness) {
     assert_eq!(scenario::count_of("dialog:body:scroll_y"), Some(0.0));
     let viewport = scenario::rect_of("dialog:body:viewport").unwrap();
-    assert!(viewport.contains_rect(scenario::rect_of("dialog:hint:manage").unwrap()));
+    let first = if h.app.params.is_some() { "params:view:named" } else { "dialog:hint:manage" };
+    assert!(viewport.contains_rect(scenario::rect_of(first).unwrap()));
 }
 
 #[test]
@@ -686,9 +719,9 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         h.app.run("parameters.favorite", json!({"name":"width","favorite":true})).unwrap();
         h.app.start("parameters.change");
         h.frames(8);
-        assert_card_top();
+        assert_card_top(&h);
         let viewport = scenario::rect_of("dialog:body:viewport").unwrap();
-        assert!(viewport.contains_rect(scenario::rect_of("dialog:row:Filter").unwrap()));
+        assert!(viewport.contains_rect(scenario::rect_of("dialog:Filter").unwrap()));
         assert!(viewport.contains_rect(scenario::rect_of("dialog:table:parameters:group:fav").unwrap()));
         assert!(!h.app.params.as_ref().unwrap().adding);
         assert!(h.ctx.memory(|m| m.focused().is_none()));
@@ -700,13 +733,13 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
         h.app.start("parameters.change");
         h.frames(8);
-        assert_card_top();
-        // Put the add prompt at the bottom edge. The taller draft must be revealed only
+        assert_card_top(&h);
+        // Partly clip the add prompt: the regular-height draft must become fully visible only
         // after clicking it, with focus on Name even inside the horizontal table scroller.
-        let prompt = scenario::rect_of("dialog:table:parameters:add").unwrap();
-        scroll_card(&mut h, viewport.bottom() - prompt.bottom() - 1.0);
+        let prompt = scenario::rect_of("dialog:table:user:add").unwrap();
+        scroll_card(&mut h, viewport.bottom() - prompt.bottom() + crate::ui_kit::table_row_height() * 0.25);
         let before = scenario::count_of("dialog:body:scroll_y").unwrap();
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         h.frames(40);
         assert!(h.app.params.as_ref().unwrap().adding);
         let name = scenario::handle_at("param:new:name").unwrap();
@@ -736,7 +769,7 @@ fn configuration_and_appearance_open_at_top_and_retain_user_scroll() {
         }
         h.app.start(command);
         h.frames(8);
-        assert_card_top();
+        assert_card_top(&h);
         scroll_card(&mut h, -250.0);
         let offset = scenario::count_of("dialog:body:scroll_y").unwrap();
         assert!(offset > 0.0, "{command} fixture must overflow");
@@ -745,7 +778,7 @@ fn configuration_and_appearance_open_at_top_and_retain_user_scroll() {
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.app.start(command);
         h.frames(8);
-        assert_card_top();
+        assert_card_top(&h);
     }
 }
 

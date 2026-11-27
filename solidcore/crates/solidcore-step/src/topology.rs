@@ -423,13 +423,13 @@ fn read_with<'a>(
 ) -> R<Solid> {
     let stated = tolerance(&context);
     let before = *budget;
-    let first = read_at(ex, reader, item, stated, budget, trims, left_out, sheets)?;
+    let first = read_at(ex, reader, item, stated, stated, budget, trims, left_out, sheets)?;
     let Some(fine) = feature_tolerance(&first.brep, stated) else { return Ok(first) };
     // Read again at the tolerance its own features set; the faces count against the budget once.
     let after = *budget;
     *budget = before;
     let shortest = shortest_edge(&first.brep);
-    match read_at(ex, reader, item, fine, budget, trims, left_out, sheets) {
+    match read_at(ex, reader, item, fine, stated, budget, trims, left_out, sheets) {
         // Its edges' own gaps undo the finer read: as the file states it, with a note why.
         Ok(solid) if !fine_read_holds(&solid.brep, shortest) => {
             *budget = after;
@@ -465,6 +465,7 @@ fn read_at<'a>(
     reader: &mut Reader<'a>,
     item: u64,
     tol: f64,
+    stated: f64,
     budget: &mut usize,
     trims: Option<&dyn Trims>,
     left_out: &HashSet<u64>,
@@ -473,6 +474,7 @@ fn read_at<'a>(
     let e = entity(ex, item)?;
     let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
     let mut b = Builder::new(ex, reader, tol, budget, trims);
+    b.asm.stated = stated.max(tol);
     // The file's faces, edges, vertices and their geometry read into the builder.
     let (ids, kind) = item_shells(ex, item)?;
     let mut shells = Vec::with_capacity(ids.len());

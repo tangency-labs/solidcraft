@@ -1443,8 +1443,40 @@ pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value
     let key = doc_len.to_bits();
     let hit = LAST.with(|last| {
         let mut last = last.borrow_mut();
-        let at = last.iter().position(|(defs, len, _)| *len == key && defs.as_slice() == params)?;
-        let entry = last.remove(at);
+        if let Some(at) = last.iter().position(|(defs, len, _)| *len == key && defs.as_slice() == params) {
+            let entry = last.remove(at);
+            let out = entry.2.clone();
+            last.push(entry);
+            return Some(out);
+        }
+        // A design built command by command appends literal feature inputs at the end of an
+        // otherwise unchanged parameter list. When the prefix had no errors, none of its values
+        // can change (no unresolved name could be satisfied by the new inputs), and literal inputs
+        // with fresh names evaluate independently in O(added).
+        let at = last.iter().position(|(defs, len, (_, errs))| {
+            *len == key && errs.is_empty() && !defs.is_empty() && params.len() > defs.len() && params[..defs.len()] == defs[..]
+        })?;
+        let added = &params[last[at].0.len()..];
+        {
+            let done = &last[at].2.0;
+            let mut seen = std::collections::HashSet::with_capacity(added.len());
+            if !added.iter().all(|p| !done.contains_key(&p.name) && seen.insert(p.name.as_str()) && references(&p.expr).is_empty()) {
+                return None;
+            }
+        }
+        let mut entry = last.remove(at);
+        for p in added {
+            match eval_constant(p, doc_len) {
+                Ok(v) => {
+                    entry.2.0.insert(p.name.clone(), v);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    entry.2.1.insert(p.name.clone(), msg.strip_prefix("expression: ").unwrap_or(&msg).to_string());
+                }
+            }
+        }
+        entry.0.extend_from_slice(added);
         let out = entry.2.clone();
         last.push(entry);
         Some(out)
@@ -1546,21 +1578,26 @@ pub fn eval_def(p: &ParamDef, lookup: &dyn Fn(&str) -> Result<Value, DocError>, 
 /// [`eval_def`] of a parameter whose expression names no other parameter, remembered by its
 /// expression, unit and the design's length unit.
 fn eval_constant(p: &ParamDef, doc_len: f64) -> Result<Value, DocError> {
-    type Key = (String, String, u64);
+    type Seen = std::collections::HashMap<u64, std::collections::HashMap<String, std::collections::HashMap<String, Result<Value, DocError>>>>;
     thread_local! {
-        static SEEN: std::cell::RefCell<std::collections::HashMap<Key, Result<Value, DocError>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+        static SEEN: std::cell::RefCell<(Seen, usize)> = std::cell::RefCell::new((std::collections::HashMap::new(), 0));
     }
-    let key = (p.expr.clone(), p.unit.clone(), doc_len.to_bits());
-    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(&key).cloned()) {
+    let len_bits = doc_len.to_bits();
+    if let Some(hit) =
+        SEEN.with(|seen| seen.borrow().0.get(&len_bits).and_then(|u| u.get(p.unit.as_str())).and_then(|e| e.get(p.expr.as_str())).cloned())
+    {
         return hit;
     }
     let out = eval_def(p, &|n| Err(DocError::Expr(format!("unknown parameter `{n}`"))), doc_len);
     SEEN.with(|seen| {
         let mut seen = seen.borrow_mut();
-        if seen.len() >= 1 << 16 {
-            seen.clear();
+        if seen.1 >= 1 << 16 {
+            seen.0.clear();
+            seen.1 = 0;
         }
-        seen.insert(key, out.clone());
+        if seen.0.entry(len_bits).or_default().entry(p.unit.clone()).or_default().insert(p.expr.clone(), out.clone()).is_none() {
+            seen.1 += 1;
+        }
     });
     out
 }

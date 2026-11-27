@@ -687,6 +687,80 @@ pub fn shell_post_insert_faceuse(
     refresh_faceuse_sibling_links(brep, shell)
 }
 
+/// Remove every face use in `removed` from `shell`'s face-use list in one linear pass and
+/// refresh sibling links once. Face use records may already have been deleted from the arena.
+pub(crate) fn shell_retain_faceuses(
+    brep: &mut Brep,
+    shell: ShellId,
+    removed: &std::collections::BTreeSet<FaceuseId>,
+) -> Result<()> {
+    if removed.is_empty() {
+        return Ok(());
+    }
+    let changed = {
+        let members = &mut brep.shell_mut(shell)?.members;
+        if let ShellMembers::Faceuses(list) = members {
+            let before = list.len();
+            list.retain(|fu| !removed.contains(fu));
+            let shrunk = list.len() != before;
+            if list.is_empty() {
+                *members = ShellMembers::Empty;
+            }
+            shrunk
+        } else {
+            false
+        }
+    };
+    if changed {
+        refresh_faceuse_sibling_links(brep, shell)?;
+    }
+    Ok(())
+}
+
+/// Replace `shell`'s face-use list with `faceuses`, updating each face use's owner shell
+/// and refreshing sibling links once in `O(faceuses.len())`.
+pub(crate) fn shell_set_faceuses(
+    brep: &mut Brep,
+    shell: ShellId,
+    faceuses: Vec<FaceuseId>,
+) -> Result<()> {
+    for &fu in &faceuses {
+        brep.faceuse_mut(fu)?.shell = Some(shell);
+    }
+    brep.shell_mut(shell)?.members = if faceuses.is_empty() {
+        ShellMembers::Empty
+    } else {
+        ShellMembers::Faceuses(faceuses)
+    };
+    refresh_faceuse_sibling_links(brep, shell)
+}
+
+/// Move `faceuses` from `source` to `recipient` in one linear pass, preserving the relative
+/// order of remaining face uses in `source` and appending unique `faceuses` in order to
+/// `recipient`.
+pub(crate) fn shell_move_faceuses(
+    brep: &mut Brep,
+    source: ShellId,
+    recipient: ShellId,
+    faceuses: &[FaceuseId],
+) -> Result<()> {
+    if faceuses.is_empty() {
+        return Ok(());
+    }
+    for &fu in faceuses {
+        if brep.faceuse(fu)?.shell != Some(source) {
+            return Err(SolidError::topology(
+                "topology::shell::shell_move_faceuses",
+                TopologyFailure::FaceUseNotInShell,
+            ));
+        }
+    }
+    if source == recipient {
+        return Ok(());
+    }
+    move_faceuses_to_shell(brep, faceuses, recipient)
+}
+
 /// Move a shell's vertex, wire edges and face uses to another shell.
 ///
 /// `wire_candidates` is the native optional list of B-rep wire edges. When it
@@ -780,11 +854,25 @@ pub fn transfer_children(
             target.shell_type = ShellType::Faceuse;
             target.members = ShellMembers::Empty;
         }
-        for faceuse in faceuses {
+        for &faceuse in &faceuses {
             if brep.faceuse(faceuse)?.shell != Some(source) {
                 return Err(invalid_members());
             }
-            remove_and_post_insert(brep, faceuse, source, recipient)?;
+        }
+        if source != recipient {
+            brep.shell_mut(source)?.members = ShellMembers::Empty;
+            match &mut brep.shell_mut(recipient)?.members {
+                ShellMembers::Empty => {
+                    brep.shell_mut(recipient)?.members = ShellMembers::Faceuses(faceuses.clone());
+                }
+                ShellMembers::Faceuses(list) => list.extend_from_slice(&faceuses),
+                _ => return Err(invalid_members()),
+            }
+            for &faceuse in &faceuses {
+                let record = brep.faceuse_mut(faceuse)?;
+                record.shell = Some(recipient);
+                record.sibling_links = None;
+            }
         }
         // Self-transfer clears the shell head but leaves this face-use cycle
         // connected. Preserve those native links independently of the head.
@@ -848,6 +936,86 @@ pub fn move_faceuse(brep: &mut Brep, faceuse: FaceuseId, recipient: ShellId) -> 
     brep.shell(recipient)?;
     remove_and_post_insert(brep, faceuse, source, recipient)?;
     refresh_faceuse_sibling_links(brep, source)?;
+    refresh_faceuse_sibling_links(brep, recipient)
+}
+
+/// Move every face use in `faceuses` not already owned by `recipient` to the tail of
+/// `recipient` in slice order, preserving remaining relative order in every source shell
+/// and refreshing each affected shell's sibling links once.
+pub(crate) fn move_faceuses_to_shell(
+    brep: &mut Brep,
+    faceuses: &[FaceuseId],
+    recipient: ShellId,
+) -> Result<()> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    if faceuses.is_empty() {
+        return Ok(());
+    }
+    let mut by_source: BTreeMap<ShellId, BTreeSet<FaceuseId>> = BTreeMap::new();
+    let mut ordered: Vec<FaceuseId> = Vec::new();
+    let mut seen: BTreeSet<FaceuseId> = BTreeSet::new();
+    for &fu in faceuses {
+        if !seen.insert(fu) {
+            continue;
+        }
+        let source = brep.faceuse(fu)?.shell.ok_or_else(|| {
+            SolidError::topology(
+                "topology::shell::move_faceuse",
+                TopologyFailure::FaceUseWithoutShell,
+            )
+        })?;
+        if source == recipient {
+            continue;
+        }
+        by_source.entry(source).or_default().insert(fu);
+        ordered.push(fu);
+    }
+    if ordered.is_empty() {
+        return Ok(());
+    }
+    match &brep.shell(recipient)?.members {
+        ShellMembers::Empty | ShellMembers::Faceuses(_) => {}
+        _ => return Err(invalid_members()),
+    }
+    // Validate every source shell's member list before mutating any shell so a partial
+    // mismatch (e.g. `[u, v]` claiming `source` when `source` lists only `u`) never
+    // leaves `u` unlinked on error.
+    for (&source, moving) in &by_source {
+        match &brep.shell(source)?.members {
+            ShellMembers::Faceuses(list) => {
+                let mut remaining = moving.clone();
+                for fu in list {
+                    remaining.remove(fu);
+                }
+                if !remaining.is_empty() {
+                    return Err(invalid_members());
+                }
+            }
+            _ => return Err(invalid_members()),
+        }
+    }
+    for (source, moving) in by_source {
+        let members = &mut brep.shell_mut(source)?.members;
+        if let ShellMembers::Faceuses(list) = members {
+            list.retain(|fu| !moving.contains(fu));
+            if list.is_empty() {
+                *members = ShellMembers::Empty;
+            }
+        }
+        refresh_faceuse_sibling_links(brep, source)?;
+    }
+    {
+        let target = &mut brep.shell_mut(recipient)?.members;
+        match target {
+            ShellMembers::Empty => *target = ShellMembers::Faceuses(ordered.clone()),
+            ShellMembers::Faceuses(list) => list.extend_from_slice(&ordered),
+            _ => return Err(invalid_members()),
+        }
+    }
+    for &fu in &ordered {
+        brep.faceuse_mut(fu)?.shell = Some(recipient);
+    }
     refresh_faceuse_sibling_links(brep, recipient)
 }
 
@@ -1223,16 +1391,42 @@ impl ShellRayTarget {
         let mut bbox = crate::geom::extent3d::Extent3d::new();
         let mut bbox_ok = true;
         for &(_, face) in &faces {
-            match crate::query::face::p1::calculate_bounding_box(kernel, &mut *brep, face, false) {
-                Ok(fb) if fb.is_defined() && fb.is_bounded() => {
-                    bbox = bbox.union(&fb);
-                }
+            let mut fb = match crate::query::face::p1::calculate_bounding_box(
+                kernel, &mut *brep, face, false,
+            ) {
+                Ok(fb) if !fb.has_negative_volume() && fb.is_defined() && fb.is_bounded() => fb,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Ok(_) | Err(_) => {
                     bbox_ok = false;
                     break;
                 }
+            };
+            // A fitted procedural definition (`ProceduralSweep`, `ProceduralBlend`) stores a
+            // B-spline net approximating the true surface within `def.bound()`, which
+            // `calculate_bounding_box` does not include. Expand by that certified bound, or
+            // fall back to uncullable (`bbox = None`) if the bound is unavailable or non-finite.
+            if let Some(surface) = brep.face(face).ok().and_then(|f| f.surface.as_ref()) {
+                if let Some(def) = surface.procedural_definition() {
+                    let bound = def.bound();
+                    if bound.is_finite() && bound >= 0.0 {
+                        fb.expand_absolute(bound);
+                    } else {
+                        bbox_ok = false;
+                        break;
+                    }
+                } else if surface.net_is_fitted() {
+                    bbox_ok = false;
+                    break;
+                }
+            } else {
+                bbox_ok = false;
+                break;
             }
+            if fb.has_negative_volume() || !fb.is_defined() || !fb.is_bounded() {
+                bbox_ok = false;
+                break;
+            }
+            bbox = bbox.union(&fb);
         }
         Ok(Self {
             brep_id,
@@ -2521,5 +2715,129 @@ mod tests {
             assert_eq!(attempt.state.region, Some(solid_region));
             assert!(target.shape.is_some());
         }
+    }
+
+    #[test]
+    fn shell_ray_target_expands_bbox_for_fitted_procedural_sweep_face() {
+        use crate::math::{Point3, Vec3};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::primitive::api_primitives::create_box;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::surface::surface::Surface;
+        use crate::topology::BrepId;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let solid_region = b
+            .regions
+            .iter()
+            .find(|&(id, r)| !r.is_infinite_region(&b, id))
+            .map(|(id, _)| id)
+            .unwrap();
+        let inner_shell = b.region(solid_region).unwrap().shells[0];
+
+        // Attach a `ProceduralSweep` definition with a positive certified bound to a B-spline
+        // face of the box so its net box alone would be narrower than the true swept wall.
+        let face_id = b
+            .shell(inner_shell)
+            .unwrap()
+            .get_faceuses()
+            .unwrap()
+            .into_iter()
+            .find_map(|fu| b.faceuse(fu).ok().and_then(|u| u.face))
+            .unwrap();
+        let bare = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 0.0),
+                Vec3::new(0.0, 10.0, 0.0),
+                Vec3::new(10.0, 10.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let line = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        let sweep =
+            ProceduralSweep::create(&line, motion, &[0.0, 0.5, 1.0], &[0.25, 0.25]).unwrap();
+        let bound = sweep.bound();
+        assert!(
+            bound > 1e-4,
+            "expected non-trivial sweep bound, got {bound}"
+        );
+        let mut swept = bare;
+        swept.set_sweep_definition(sweep);
+        let eval_copy = swept.clone_for_evaluation().unwrap();
+        b.face_mut(face_id).unwrap().surface = Some(swept);
+
+        let target =
+            ShellRayTarget::new(&mut k, &mut b, BrepId::from_index(0), inner_shell).unwrap();
+        // A point outside `[0, 10]^3` but within `bound` must NOT be culled; a point well beyond
+        // `bound` is still culled.
+        assert!(target.may_contain(Point3::new(10.0 + 0.5 * bound, 5.0, 5.0), 1e-6));
+        assert!(!target.may_contain(Point3::new(10.0 + bound + 5.0, 5.0, 5.0), 1e-6));
+
+        // When the fitted surface drops its definition (evaluation copy), culling is disabled.
+        b.face_mut(face_id).unwrap().surface = Some(eval_copy);
+        let target_copy =
+            ShellRayTarget::new(&mut k, &mut b, BrepId::from_index(0), inner_shell).unwrap();
+        assert!(target_copy.bbox.is_none());
+        assert!(target_copy.may_contain(Point3::new(1000.0, 5.0, 5.0), 1e-6));
+    }
+
+    #[test]
+    fn move_faceuses_to_shell_validates_all_sources_before_editing() {
+        use crate::topology::Faceuse;
+
+        let mut b = Brep::new();
+        let src = b.add_shell_record(Shell::default()).unwrap();
+        let dst = b.add_shell_record(Shell::default()).unwrap();
+
+        let fu_keep = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let fu_u = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let fu_v = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        // `src` lists `fu_keep` and `fu_u`, but NOT `fu_v` (even though `fu_v.shell == Some(src)`).
+        b.shell_mut(src).unwrap().members = ShellMembers::Faceuses(vec![fu_keep, fu_u]);
+
+        assert!(move_faceuses_to_shell(&mut b, &[fu_u, fu_v], dst).is_err());
+        // `src` must still list both `fu_keep` and `fu_u`, and `dst` must still be empty.
+        assert_eq!(
+            b.shell(src).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_keep, fu_u])
+        );
+        assert_eq!(b.shell(dst).unwrap().members, ShellMembers::Empty);
+        assert_eq!(b.faceuse(fu_u).unwrap().shell, Some(src));
+
+        // Moving just `fu_u` while `src` also retains `fu_keep` succeeds.
+        move_faceuses_to_shell(&mut b, &[fu_u], dst).unwrap();
+        assert_eq!(
+            b.shell(src).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_keep])
+        );
+        assert_eq!(
+            b.shell(dst).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_u])
+        );
+        assert_eq!(b.faceuse(fu_u).unwrap().shell, Some(dst));
     }
 }

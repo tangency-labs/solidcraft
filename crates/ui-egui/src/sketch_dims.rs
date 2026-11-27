@@ -823,10 +823,56 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     if t.classic {
         crate::sketch_construction::line_type_switch(ui, &mut t);
     }
+    rectangle_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
     }
+}
+
+thread_local! {
+    static LAST_RECTANGLE_ROTATABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a rectangle tool starts drawing rectangles that can be turned: the choice last made on
+/// its switch while the app runs, else Fixed.
+pub(crate) fn last_rectangle_rotatable() -> bool {
+    LAST_RECTANGLE_ROTATABLE.with(std::cell::Cell::get)
+}
+
+/// The 2-Point and Center Rectangle tools' Fixed/Can turn switch under the Width box (#21467). Can
+/// turn holds the sides parallel and perpendicular with only the bottom one horizontal, so
+/// deleting that constraint turns the rectangle; Fixed keeps each side horizontal or vertical. It
+/// belongs to the tool alone, as the construction line tools' Construction/Normal switch does.
+fn rectangle_switch(ui: &mut egui::Ui, t: &mut Tool) {
+    if !matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center") {
+        return;
+    }
+    let Some(i) = t.dims.iter().position(|b| b.label == "Width") else { return };
+    let Some(width_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
+    let tokens = Tokens::get();
+    let options = [solidcraft_ui_text::tr("sketch.rectangle.fixed"), solidcraft_ui_text::tr("sketch.rectangle.can_turn")];
+    let mut selected = usize::from(t.rotatable);
+    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
+    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::unique("sc_rectangle_switch"))
+        .fixed_pos(width_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
+        .order(egui::Order::Background)
+        .show(ui.ctx(), |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                let segments = crate::ui_kit::Segments {
+                    targets: &["rectangle_switch:fixed", "rectangle_switch:can_turn"],
+                    small: true,
+                    intrinsic: true,
+                    compact: true,
+                    ..Default::default()
+                };
+                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
+                    t.rotatable = selected == 1;
+                    LAST_RECTANGLE_ROTATABLE.with(|last| last.set(t.rotatable));
+                }
+            });
+        });
 }
 
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
