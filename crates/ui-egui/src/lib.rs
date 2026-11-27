@@ -3424,6 +3424,10 @@ impl SolveApp {
             if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            // An open sketch window would keep the keyboard from the tool's size boxes.
+            if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(_))) {
+                dialogs::cancel(self);
+            }
             self.tool = Some(t);
             self.set_tool_hint(tools::hint(id));
             return;

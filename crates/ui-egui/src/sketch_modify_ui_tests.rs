@@ -1472,3 +1472,23 @@ fn construction_switches_a_selected_point_and_the_menu_offers_it() {
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }
+
+/// A drawing tool started over an open sketch window closes it: the window kept the keyboard,
+/// so typing a size did nothing and Tab walked the window's buttons instead of the boxes.
+#[test]
+fn starting_a_drawing_tool_closes_the_open_sketch_window() {
+    let mut h = line_and_circle();
+    let before = curve_ids(&h).len();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert!(h.app.dialog.is_some());
+    h.step(&json!({"start": "sketch.rectangle.two_point"})).unwrap();
+    assert!(h.app.dialog.is_none(), "the Mirror window is closed");
+    h.step(&json!({"click": {"sketch": [40, 40]}})).unwrap();
+    h.step(&json!({"move": {"sketch": [55, 48]}})).unwrap();
+    h.step(&json!({"text": "20"})).unwrap();
+    h.step(&json!({"key": "Tab"})).unwrap();
+    h.step(&json!({"text": "30"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert_eq!(curve_ids(&h).len(), before + 4, "the typed rectangle is drawn");
+}
