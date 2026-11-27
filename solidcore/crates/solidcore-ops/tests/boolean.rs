@@ -5218,3 +5218,80 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
         }
     }
 }
+
+/// Cutting a pocket whose top face is coplanar with the target and whose boundary has two
+/// parallel edges separated by `d in (1e-5, 2e-5]` must not split the pocket's own edge at
+/// unrelated vertices across the gap during coincident face-pair classification, regardless of
+/// whether either operand was round-tripped through `to_record`/`from_record` (which puts the
+/// coplanar cap face first in canonical order).
+#[test]
+fn coplanar_pocket_with_narrow_gap_cuts_cleanly_across_record_roundtrip() {
+    all_fixes();
+    let d = 1.3169768e-5;
+    let b1 = make_box([-16.5, -47.5, -102.25], [33.0, 95.0, 102.25]).unwrap();
+    // Build a C-shaped pocket at 10x scale so the narrow wall (10*d > 2e-5) is cleanly
+    // preserved by the setup cut, then scale by 0.1 so the two parallel edges on z = 0 are
+    // separated by d = 1.3169768e-5 (in (1e-5, 2e-5]).
+    let s = 10.0;
+    let b2_outer = make_box(
+        [-14.625 * s, -45.375 * s, -100.5 * s],
+        [29.25 * s, 90.75 * s, 100.5 * s],
+    )
+    .unwrap();
+    let notch = make_box(
+        [-20.0 * s, 37.875 * s, -101.0 * s],
+        [(34.625 - d) * s, 2.0 * s, 102.0 * s],
+    )
+    .unwrap();
+    let b2 = boolean(b2_outer, notch, BooleanOp::Subtract)
+        .unwrap()
+        .expect("non-empty pocket");
+    let inv = 1.0 / s;
+    b2.transform(&[
+        [inv, 0.0, 0.0, 0.0],
+        [0.0, inv, 0.0, 0.0],
+        [0.0, 0.0, inv, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    assert_eq!(
+        b2.counts().unwrap(),
+        [10, 24, 16],
+        "pocket must keep its narrow wall"
+    );
+    // Closed-form volume: b1 (33 * 95 * 102.25) - (b2_outer (29.25 * 90.75 * 100.5) - notch
+    // ((29.25 - d) * 2 * 100.5)) = 59662.03125 - 201 * d. The narrow wall's volume is
+    // 201 * d ~= 2.65e-3, so a 1e-4 bound catches wall loss.
+    let expected_vol = 59662.03125 - 201.0 * d;
+    let (rec1, _) = b1.to_record().unwrap();
+    let (rec2, _) = b2.to_record().unwrap();
+    let (b1_rt, _) = Body::from_record(&rec1, true).unwrap();
+    let (b2_rt, _) = Body::from_record(&rec2, true).unwrap();
+    for (name, a, b) in [
+        ("native_native", b1.copy().unwrap(), b2.copy().unwrap()),
+        ("rt_native", b1_rt.copy().unwrap(), b2.copy().unwrap()),
+        ("native_rt", b1.copy().unwrap(), b2_rt.copy().unwrap()),
+        ("rt_rt", b1_rt, b2_rt),
+    ] {
+        let r = boolean(a, b, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"))
+            .expect("non-empty cut");
+        let rep = r.check(CheckLevel::All).unwrap();
+        assert!(rep.is_valid(), "{name}: {}", rep.text);
+        assert!(r.is_manifold_solid().unwrap(), "{name}: not manifold solid");
+        let vol = volume(&r);
+        assert!(
+            (vol - expected_vol).abs() < 1e-4,
+            "{name}: got {vol}, want {expected_vol} (b2_counts={:?}, r_counts={:?})",
+            b2.counts(),
+            r.counts()
+        );
+        // 6 outer faces + 1 pocket floor + 8 C-shaped pocket walls = 15 faces, 36 edges, 24 verts.
+        assert_eq!(
+            r.counts().unwrap(),
+            [15, 36, 24],
+            "{name}: unexpected counts (b2_counts={:?})",
+            b2.counts()
+        );
+    }
+}

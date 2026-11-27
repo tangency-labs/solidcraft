@@ -2306,6 +2306,38 @@ pub fn curve_on_classify_mut_with_seams<O: ClassObject>(
     uv_space_okay: bool,
     face_has_seam_known: Option<bool>,
 ) -> Result<bool> {
+    curve_on_classify_mut_with_seams_and_own_edge(
+        k,
+        f,
+        objects,
+        do_point_classify,
+        cc,
+        has_big_gaps,
+        do_check_3d,
+        uv_space_okay,
+        face_has_seam_known,
+        None,
+    )
+}
+
+/// [`curve_on_classify_mut_with_seams`], when the curve being classified is already known to be
+/// boundary edge `own_edge` of face `f` (as in a coincident face-pair intersection). Restricting
+/// the self-classification of `own_edge` on its own face to `own_edge` and its own endpoints
+/// prevents an unrelated vertex or parallel edge of `f` across a narrow `(1e-5, 2e-5]` gap from
+/// falsely splitting `own_edge` on its own face.
+#[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
+pub(crate) fn curve_on_classify_mut_with_seams_and_own_edge<O: ClassObject>(
+    k: &Kernel,
+    f: FaceId,
+    objects: &mut impl CurveOnClassifyBrep<O>,
+    do_point_classify: bool,
+    cc: &mut CurveClassification<O>,
+    has_big_gaps: bool,
+    do_check_3d: bool,
+    uv_space_okay: bool,
+    face_has_seam_known: Option<bool>,
+    own_edge: Option<EdgeId>,
+) -> Result<bool> {
     let earlier = cc.seam_hint();
     cc.set_seam_hint(face_has_seam_known.map(|s| (objects.face(f), s)));
     let result = curve_on_classify_body(
@@ -2317,13 +2349,14 @@ pub fn curve_on_classify_mut_with_seams<O: ClassObject>(
         has_big_gaps,
         do_check_3d,
         uv_space_okay,
+        own_edge,
     );
     cc.set_seam_hint(earlier);
     result
 }
 
 /// The body of [`curve_on_classify_mut_with_seams`].
-#[allow(clippy::fn_params_excessive_bools)]
+#[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
 fn curve_on_classify_body<O: ClassObject>(
     k: &Kernel,
     f: FaceId,
@@ -2333,6 +2366,7 @@ fn curve_on_classify_body<O: ClassObject>(
     has_big_gaps: bool,
     do_check_3d: bool,
     uv_space_okay: bool,
+    own_edge: Option<EdgeId>,
 ) -> Result<bool> {
     // init output
     reset_classification(k, cc)?;
@@ -2376,7 +2410,21 @@ fn curve_on_classify_body<O: ClassObject>(
                         .ok_or_else(|| null(OP_CURVE, "unresolvable target loop"))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let vertices = face_vertices(objects.brep(), f, cc.tgt_loops_only(), Some(&tgt_loops))?;
+            let vertices = if let Some(e) = own_edge.filter(|_| !cc.tgt_loops_only()) {
+                let (v0, v1) = crate::topology::edge::start_end_vertices(objects.brep(), e)?;
+                let mut vs = Vec::with_capacity(2);
+                if let Some(v) = v0 {
+                    vs.push(v);
+                }
+                if let Some(v) = v1 {
+                    if !vs.contains(&v) {
+                        vs.push(v);
+                    }
+                }
+                vs
+            } else {
+                face_vertices(objects.brep(), f, cc.tgt_loops_only(), Some(&tgt_loops))?
+            };
             if objects.classify_surface(f)?.is_none() {
                 return Err(null(OP_CURVE, "face without surface"));
             }
@@ -2425,7 +2473,11 @@ fn curve_on_classify_body<O: ClassObject>(
             cc.intersect_vertices_mut(k, &mut geometry, &vertices, &surface, has_big_gaps, true)?;
 
             // 2nd intersect face edges with the curve
-            let edges = face_edges(objects.brep(), f, cc.tgt_loops_only(), Some(&tgt_loops))?;
+            let edges = if let Some(e) = own_edge.filter(|_| !cc.tgt_loops_only()) {
+                vec![e]
+            } else {
+                face_edges(objects.brep(), f, cc.tgt_loops_only(), Some(&tgt_loops))?
+            };
             intersect_edges(k, objects, cc, &edges, f, has_big_gaps)?;
         }
     }

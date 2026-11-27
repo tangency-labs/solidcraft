@@ -2824,6 +2824,7 @@ pub fn face_intersect_breps_cached(
     let mut uv_curves1: Vec<Option<Curve>> = Vec::new();
     let mut uv_curves2: Vec<Option<Curve>> = Vec::new();
     let mut curve_types: Vec<TsectCurveType> = Vec::new();
+    let mut curve_own_edges: Vec<Option<(usize, EdgeId)>> = Vec::new();
 
     let (are_coincident, coinc_dist) = if let Some(c) = options.coincidence {
         (c, 0.0)
@@ -2848,7 +2849,10 @@ pub fn face_intersect_breps_cached(
                 .filter(|x| !x.has_negative_volume())
         };
         let boxes = [face_box(ob, other), face_box(b, f)];
-        'faces: for ((fb, face), apart_from) in [(b, f), (ob, other)].into_iter().zip(boxes) {
+        let distinct_faces = other_side || f != other;
+        'faces: for (side_idx, ((fb, face), apart_from)) in
+            [(b, f), (ob, other)].into_iter().zip(boxes).enumerate()
+        {
             for e in face_edges(fb, face)? {
                 if let Some(far) = &apart_from {
                     if edge_box(k, fb, e).is_some_and(|x| x.are_disjoint(far, reach)) {
@@ -2875,6 +2879,7 @@ pub fn face_intersect_breps_cached(
                 uv_curves1.push(None);
                 uv_curves2.push(None);
                 curve_types.push(TsectCurveType::RegionBoundary);
+                curve_own_edges.push(distinct_faces.then_some((side_idx, e)));
                 k.work_counters.add_coincident_curve_classified();
             }
         }
@@ -2952,6 +2957,7 @@ pub fn face_intersect_breps_cached(
         uv_curves1 = r.surface1_uv_curves;
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
+        curve_own_edges.clear();
 
         // A crossing curve that bounds a cap within the tolerance is a touch at the
         // B-rep's tolerance (not upstream; WR-79, #2412): it becomes the touching point at
@@ -3151,7 +3157,17 @@ pub fn face_intersect_breps_cached(
             other_side,
         )));
         cc2.set_tangency_partner(Some(IntersectObject::Topology(EntityRef::Face(f), false)));
-        qf2::curve_on_classify_mut_with_seams(
+        let own_edge_0 = curve_own_edges
+            .get(ii)
+            .copied()
+            .flatten()
+            .and_then(|(s, e)| (s == 0).then_some(e));
+        let own_edge_1 = curve_own_edges
+            .get(ii)
+            .copied()
+            .flatten()
+            .and_then(|(s, e)| (s == 1).then_some(e));
+        qf2::curve_on_classify_mut_with_seams_and_own_edge(
             k,
             f,
             &mut objects,
@@ -3161,9 +3177,10 @@ pub fn face_intersect_breps_cached(
             false,
             true,
             face_seams[0],
+            own_edge_0,
         )?;
         objects.side = other_side;
-        qf2::curve_on_classify_mut_with_seams(
+        qf2::curve_on_classify_mut_with_seams_and_own_edge(
             k,
             other,
             &mut objects,
@@ -3173,6 +3190,7 @@ pub fn face_intersect_breps_cached(
             false,
             true,
             face_seams[1],
+            own_edge_1,
         )?;
         cc1.set_tangency_partner(None);
         cc2.set_tangency_partner(None);
