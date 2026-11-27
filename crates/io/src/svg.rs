@@ -21,7 +21,16 @@ const MAX_USE_DEPTH: usize = 16;
 /// Elements read while following references (#15538): a reference to a group that holds more
 /// references draws the same element many times over.
 const MAX_USE_WORK: usize = 4 * MAX_ENTITIES;
-const PX_MM: f64 = 25.4 / 96.0;
+#[cfg(test)]
+const PX_MM: f64 = 25.4 / SVG_DEFAULT_DPI;
+
+/// The dots per inch an SVG's pixels are read at when nothing else is said: CSS's 96.
+pub const SVG_DEFAULT_DPI: f64 = 96.0;
+
+/// One pixel in millimetres at `dpi` dots per inch.
+fn px_mm_at(dpi: f64) -> f64 {
+    25.4 / dpi
+}
 
 /// Affine map [a c e; b d f].
 #[derive(Clone, Copy, Debug)]
@@ -171,7 +180,7 @@ fn num_attr(a: &[(String, String)], k: &str) -> f64 {
 }
 
 /// Length with a unit, in millimetres (None without a unit or for %).
-fn length_mm(s: &str) -> Option<f64> {
+fn length_mm(s: &str, px_mm: f64) -> Option<f64> {
     let v = numbers(s).first().copied()?;
     let u = s.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E');
     Some(match u.trim() {
@@ -180,7 +189,7 @@ fn length_mm(s: &str) -> Option<f64> {
         "in" => v * 25.4,
         "pt" => v * 25.4 / 72.0,
         "pc" => v * 25.4 / 6.0,
-        "px" | "" => v * PX_MM,
+        "px" | "" => v * px_mm,
         _ => return None,
     })
 }
@@ -230,7 +239,9 @@ pub struct SvgDrawing {
 impl Out {
     fn push(&mut self, g: Geom2) -> Result<()> {
         if self.g.len() >= MAX_ENTITIES {
-            return Err(IoError::Invalid("too many SVG elements".into()));
+            return Err(IoError::Invalid(format!(
+                "the drawing has more than {MAX_ENTITIES} elements (lines, arcs, shapes and texts): simplify it in its own program, or split it across files"
+            )));
         }
         if !geom_is_finite(&g) {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
@@ -521,14 +532,14 @@ fn not_drawn(name: &str, a: &[(String, String)], referenced: bool) -> bool {
 
 /// The root element's transformation (user units to millimetres, y flipped) and its sheet in
 /// user units (`viewBox`, else `width` and `height` as a box at the origin), when it has one.
-fn root_transform(a: &[(String, String)]) -> (Tf, Option<[f64; 4]>) {
+fn root_transform(a: &[(String, String)], px_mm: f64) -> (Tf, Option<[f64; 4]>) {
     let vb = attr(a, "viewBox").map(numbers).filter(|v| v.len() == 4);
-    let (w, h) = (attr(a, "width").and_then(length_mm), attr(a, "height").and_then(length_mm));
+    let (w, h) = (attr(a, "width").and_then(|v| length_mm(v, px_mm)), attr(a, "height").and_then(|v| length_mm(v, px_mm)));
     let (sx, sy, ox, oy, sheet) = match (vb, w, h) {
         (Some(v), Some(w), Some(h)) if v[2] > 0.0 && v[3] > 0.0 => (w / v[2], h / v[3], v[0], v[1], Some([v[0], v[1], v[2], v[3]])),
-        (Some(v), _, _) => (PX_MM, PX_MM, v[0], v[1], (v[2] > 0.0 && v[3] > 0.0).then_some([v[0], v[1], v[2], v[3]])),
-        (None, Some(w), Some(h)) if w > 0.0 && h > 0.0 => (PX_MM, PX_MM, 0.0, 0.0, Some([0.0, 0.0, w / PX_MM, h / PX_MM])),
-        _ => (PX_MM, PX_MM, 0.0, 0.0, None),
+        (Some(v), _, _) => (px_mm, px_mm, v[0], v[1], (v[2] > 0.0 && v[3] > 0.0).then_some([v[0], v[1], v[2], v[3]])),
+        (None, Some(w), Some(h)) if w > 0.0 && h > 0.0 => (px_mm, px_mm, 0.0, 0.0, Some([0.0, 0.0, w / px_mm, h / px_mm])),
+        _ => (px_mm, px_mm, 0.0, 0.0, None),
     };
     (Tf([sx, 0.0, 0.0, -sy, -ox * sx, oy * sy]), sheet)
 }
@@ -546,14 +557,14 @@ fn length_in(a: &[(String, String)], k: &str, viewport: Option<f64>) -> Option<f
 
 /// The viewport the root element establishes, in user units: its `viewBox` when it has one, else
 /// its `width` and `height` as a box of pixels.
-fn root_viewport(a: &[(String, String)]) -> Viewport {
+fn root_viewport(a: &[(String, String)], px_mm: f64) -> Viewport {
     if let Some(vb) = attr(a, "viewBox").map(numbers).filter(|v| v.len() == 4)
         && vb[2] > 0.0
         && vb[3] > 0.0
     {
         return Viewport { width: Some(vb[2]), height: Some(vb[3]) };
     }
-    let px = |k: &str| attr(a, k).and_then(length_mm).map(|mm| mm / PX_MM);
+    let px = |k: &str| attr(a, k).and_then(|v| length_mm(v, px_mm)).map(|mm| mm / px_mm);
     Viewport { width: px("width"), height: px("height") }
 }
 
@@ -604,6 +615,12 @@ fn reference_tf(a: &[(String, String)], r: Reference) -> Ref {
 /// root's `viewBox` (else its `width` and `height`) through the same transformation. None when
 /// the file gives no sheet.
 pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
+    svg_sheet_at(text, SVG_DEFAULT_DPI)
+}
+
+/// [`svg_sheet`] with the file's pixels read at `dpi` dots per inch ([`read_svg_drawing_at`]).
+pub fn svg_sheet_at(text: &str, dpi: f64) -> Option<(Vec2, Vec2)> {
+    let px_mm = px_mm_at(dpi);
     if text.len() > MAX_DRAWING_BYTES {
         return None;
     }
@@ -616,7 +633,7 @@ pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
             Ok(Event::Start(e) | Event::Empty(e)) => {
                 elements += 1;
                 if e.local_name().as_ref() == b"svg" {
-                    let (tf, sheet) = root_transform(&attrs(&e));
+                    let (tf, sheet) = root_transform(&attrs(&e), px_mm);
                     let [x, y, w, h] = sheet?;
                     let (a, b) = (tf.apply(Vec2::new(x, y)), tf.apply(Vec2::new(x + w, y + h)));
                     let (lo, hi) = (Vec2::new(a.x.min(b.x), a.y.min(b.y)), Vec2::new(a.x.max(b.x), a.y.max(b.y)));
@@ -653,6 +670,8 @@ struct Reference {
 struct SvgReader<'a> {
     /// The file.
     text: &'a str,
+    /// One pixel (a user unit, or a length without a unit) in millimetres.
+    px_mm: f64,
     /// The elements the file names with `id`, and where each one is in it, so that a reference
     /// (`use`) to one of them can be read where the reference stands (#15538).
     ids: HashMap<String, Range<usize>>,
@@ -759,11 +778,11 @@ impl SvgReader<'_> {
                 None => parent,
             };
             if name == "svg" && depth == 0 && root.is_none() {
-                let (r, _) = root_transform(&a);
+                let (r, _) = root_transform(&a, self.px_mm);
                 root = Some(r);
                 tf = r;
                 // The root establishes the viewport its contents stand in.
-                containing = root_viewport(&a);
+                containing = root_viewport(&a, self.px_mm);
             }
             if let Some((t, box_)) = pointed {
                 // The element a reference points at is drawn in the box the reference gives it,
@@ -875,11 +894,25 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
 /// drawn that the curve check refuses. A reference (a `use` element) is followed: the element it
 /// points at is read where the reference stands (#15538).
 pub fn read_svg_drawing(text: &str) -> Result<SvgDrawing> {
+    read_svg_drawing_at(text, SVG_DEFAULT_DPI)
+}
+
+/// [`read_svg_drawing`] with the file's pixels (user units, and lengths without a unit) read at
+/// `dpi` dots per inch instead of the 96 of CSS: a file drawn at 72 dpi then comes in at the size
+/// it was drawn at (#20240). Lengths with their own unit (`mm`, `in`, `pt`…) keep it.
+pub fn read_svg_drawing_at(text: &str, dpi: f64) -> Result<SvgDrawing> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid("the SVG file is too large".into()));
     }
-    let mut reader =
-        SvgReader { text, ids: HashMap::new(), indexed: false, out: Out { g: Vec::new(), warnings: Vec::new() }, chain: Vec::new(), work: 0 };
+    let mut reader = SvgReader {
+        text,
+        px_mm: px_mm_at(dpi),
+        ids: HashMap::new(),
+        indexed: false,
+        out: Out { g: Vec::new(), warnings: Vec::new() },
+        chain: Vec::new(),
+        work: 0,
+    };
     reader.read_span(0..text.len(), Tf::ID, 0, None)?;
     Ok(SvgDrawing { geometry: reader.out.g, warnings: reader.out.warnings })
 }

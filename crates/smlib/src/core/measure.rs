@@ -196,6 +196,21 @@ pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scop
     Ok(CheckReport { failures: c.failures, text: c.text })
 }
 
+/// [`check`]'s tests of faces `faces` with their loops and edges `edges` with their vertices
+/// (indices in the body's face and edge orders), and no other: not the pointer check, the
+/// tolerance pass or the body's, regions' and shells' own tests ([`Body::check_local`]). A body
+/// others read: never stopped part way, as [`check`].
+pub(crate) fn check_local(body: &Body, faces: &[usize], edges: &[usize], level: CheckLevel) -> Result<CheckReport> {
+    let lv = match level {
+        CheckLevel::Basic => solidcore_ops::check::CheckLevel::Basic,
+        CheckLevel::Geometry => solidcore_ops::check::CheckLevel::Geometry,
+        CheckLevel::All => solidcore_ops::check::CheckLevel::All,
+    };
+    let order = body.own_order();
+    let c = crate::stop::unstoppable(|| ops_as("check local", &[("brep", body)], refused, || body.check_local(&order, faces, edges, lv)))?;
+    Ok(CheckReport { failures: c.failures, text: c.text })
+}
+
 /// The check's refusal as the capi words it: a test solidcore has not ported, or a body whose
 /// geometry owners' identities the check cannot know, is "not supported yet".
 fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {

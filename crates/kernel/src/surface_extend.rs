@@ -528,7 +528,8 @@ fn law(body: &Body, at: &[Vec3], count: usize, angle: f64, distance: f64) -> Res
 /// the strip built long ([`REACH`] body sizes), cut where the target meets it keeping the piece
 /// on the edges, and sewn to the surface. The surface itself is never cut. A strip the target
 /// misses, wholly or in part (the piece kept still holds part of the strip's far edge), is
-/// refused. Where the long strip folds over itself, a shorter one is built
+/// refused. Where the long strip folds over itself (or its corners cut one of its strips away),
+/// a shorter one is built
 /// ([`solidcore_ops::ruled_strip::up_to_target`] picks the lengths): only a target the strip
 /// reaches before it folds is accepted; one past the fold (or so near it the strip can't be
 /// built) is refused as a fold.
@@ -536,7 +537,9 @@ fn law_up_to(body: &Body, at: &[Vec3], record: &brep::Brep, edges: &BTreeSet<usi
     let reach = body.size().max(1e-6) * REACH;
     let on_edges = edges.iter().map(|e| edge_middle(record, *e)).collect::<Result<Vec<_>>>()?;
     let missed = || KernelError::Invalid("the extension never reaches the face it extends up to (all along the edges)".into());
-    let folds = |e: &KernelError| matches!(e, KernelError::Invalid(m) if m.contains("fold over itself"));
+    // A strip too long for its corners (the mitres meet and cut a strip away) is shortened as a
+    // folding one is: a shorter strip keeps that strip.
+    let folds = |e: &KernelError| matches!(e, KernelError::Invalid(m) if m.contains("fold over itself") || m.contains("cut a strip away entirely"));
     // The strip `length` long cut at the target, or `None` where the target misses it (wholly
     // or in part); `Err` with the fold's message where that strip folds.
     let attempt = |length: f64| -> Result<Option<Body>> {
@@ -1059,6 +1062,31 @@ mod tests {
         let out = extend_surface(&s, &[Vec3::new(10.0, 5.0, 0.0)], &law(0.0, ExtendLimit::UpTo(&x500))).unwrap();
         assert!(rel(area(&out), 5000.0) < 1e-9, "{}", area(&out));
         assert!((measure(&out).unwrap().bbox.max.x - 500.0).abs() < 1e-9);
+    }
+
+    /// The square with the notch [2, 10] × (4, 6) cut out, its three notch edges extended at 30°
+    /// into the notch: the strips' corners at (2, 4) and (2, 6) are mitred, and the strip on the
+    /// short edge x = 2 (2 long) is cut away where its rulings reach 1 across, 1 / cos 30° = 1.155
+    /// long (a strip 1.5 long is refused). Up to the plane z = 0.5 the rulings are 0.5 / sin 30°
+    /// = 1 long, short of that, so the long strip (whose corners cut the short strip away) is
+    /// shortened as a folding one is and the target is reached: each strip loses
+    /// c = 1² cos 30° / 2 per mitred corner, 84 + 1 · (8 + 2 + 8) − 4c = 102 − 2 cos 30°. Up to
+    /// z = 0.7 (rulings 1.4 long, past the corners meeting) it is refused as a fold.
+    #[test]
+    fn a_law_extension_up_to_a_target_short_of_its_corners_meeting() {
+        let pts = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (2.0, 4.0), (2.0, 6.0), (10.0, 6.0), (10.0, 10.0), (0.0, 10.0)];
+        let r = Region2 { outer: Loop2::polygon(&pts.map(|(x, y)| Vec2::new(x, y))), holes: vec![] };
+        let notched = patch_region(&Plane::XY, &r).unwrap();
+        let at = [Vec3::new(6.0, 4.0, 0.0), Vec3::new(2.0, 5.0, 0.0), Vec3::new(6.0, 6.0, 0.0)];
+        let e = extend_surface(&notched, &at, &law(30.0, ExtendLimit::Distance(1.5))).unwrap_err();
+        assert!(e.to_string().contains("cut a strip away"), "{e}");
+        let plane = |z: f64| SplitTool::Plane(Plane::from_normal(Vec3::new(0.0, 0.0, z), Vec3::Z).unwrap());
+        let out = extend_surface(&notched, &at, &law(30.0, ExtendLimit::UpTo(&plane(0.5)))).unwrap();
+        let want = 102.0 - 2.0 * 30f64.to_radians().cos();
+        assert!(rel(area(&out), want) < 1e-9, "{} vs {want}", area(&out));
+        assert!((measure(&out).unwrap().bbox.max.z - 0.5).abs() < 1e-9);
+        let e = extend_surface(&notched, &at, &law(30.0, ExtendLimit::UpTo(&plane(0.7)))).unwrap_err();
+        assert!(e.to_string().contains("fold"), "{e}");
     }
 
     /// Refused: an angle at or past ±90° or not finite; a strip folding over itself (the cylinder

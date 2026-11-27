@@ -243,31 +243,17 @@ const SURFACE_BALL_PATCH_I: i64 = SURFACE_BALL_PATCH as i64;
 
 /// The `SmBSplineCurve` part of a curve that is one (`IsKindOf(SmBSplineCurve_TYPE)`), with its
 /// NURB (`GetOrCreateGwNurbPointer`: a lazy line or conic makes it on a copy); `None` for the
-/// other kinds.
+/// other kinds. The kernel's [`Curve::bspline_part`], its failure named by the call that made
+/// the NURB.
 pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
-    Ok(Some(match c.kind() {
-        CurveKind::BSpline(b) => Cow::Borrowed(b),
-        CurveKind::Line(l) => l.base_with_nurb().map_err(sc("SmLine::GetOrCreateGwNurbPointer"))?,
-        CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => {
-            let mut made = e.clone();
-            made.make_nurb(k).map_err(sc("SmEllipse::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Ellipse(e) => Cow::Borrowed(e.base()),
-        CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => {
-            let mut made = h.clone();
-            made.make_nurb(None).map_err(sc("SmHyperbola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Hyperbola(h) => Cow::Borrowed(h.base()),
-        CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => {
-            let mut made = p.clone();
-            made.make_nurb(None).map_err(sc("SmParabola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Parabola(p) => Cow::Borrowed(p.base()),
-        _ => return Ok(None),
-    }))
+    let call = match c.kind() {
+        CurveKind::Line(_) => "SmLine::GetOrCreateGwNurbPointer",
+        CurveKind::Ellipse(_) => "SmEllipse::MakeNurb",
+        CurveKind::Hyperbola(_) => "SmHyperbola::MakeNurb",
+        CurveKind::Parabola(_) => "SmParabola::MakeNurb",
+        _ => "SmCurve::GetOrCreateGwNurbPointer",
+    };
+    c.bspline_part(k).map_err(sc(call))
 }
 
 /// The `SmBSplineSurface` part of a surface that is one (`IsKindOf(SmBSplineSurface_TYPE)`), its
@@ -2094,6 +2080,26 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
     Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
 }
 
+/// `TorusOfArrays`: the torus of the arrays' own numbers (torus `j`'s frame and radii) on the face's
+/// NURBS form, where the reader needs it and the kernel proves it
+/// (`Torus::from_label_unless_found_stands`). `found` is what SMLib's test ([`analytic_of_nurbs`])
+/// worked back out of the form, from circles through three points of each meridian. Where the form
+/// lies on it, it is the face's torus as this reader has always made it, to the last bit, and this
+/// is `None`. A tube that shows only a short arc fixes those circles to its rounding over the
+/// square of the arc's angle: the torus found was 1e-10 to 1e-9 off the form it was found in (a
+/// 1.2 degree arc of a tube of radius 13.7), which the body's own check then refused, and below
+/// about 0.3 degrees none was found. There the arrays' own numbers, the ones the torus was made
+/// with, are the face's torus where the kernel proves the form on them. `None` too where it does
+/// not, and where the arrays name no frame for the torus (too short, or axes that make none).
+fn torus_of_arrays(k: &Kernel, f: &In<'_>, j: usize, nurbs: &BSplineSurface, found: Option<&Surface>) -> Result<Option<Surface>> {
+    let numbers = || -> Result<(Axis2Placement, f64, f64)> {
+        let p = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)?;
+        Ok((p, get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?))
+    };
+    let Ok((p, major, minor)) = numbers() else { return Ok(None) };
+    Torus::from_label_unless_found_stands(k, p, major, minor, nurbs, found).map_err(sc("Torus::from_label_unless_found_stands"))
+}
+
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
 fn placement(origin: Point3, z: Vec3, x: Vec3) -> Result<Axis2Placement> {
     let mut p = Axis2Placement::default();
@@ -2374,14 +2380,28 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_sphere += usize::from(ty == SURFACE_SPHERE_I);
             i_cyl += usize::from(ty == SURFACE_CYLINDER_I);
             i_cone += usize::from(ty == SURFACE_CONE_I);
+            let j_torus = i_torus;
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+            let found = analytic_of_nurbs(k, &nurbs, ty, xsect)?;
+            // a torus the form does not lie on, or that was not found: the arrays' own, where
+            // the kernel proves the form on it
+            let found = if ty == SURFACE_TORUS_I {
+                match torus_of_arrays(k, f, j_torus, &nurbs, found.as_ref())? {
+                    Some(own) => Some(own),
+                    None => found,
+                }
+            } else {
+                found
+            };
+            match found {
                 Some(analytic) => analytic,
                 // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
                 // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
-                // keeps that, on the range and trims it already carries.
-                None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                // keeps that, on the range and trims it already carries. So is a torus no reading
+                // gives: its tube shows too short an arc for SMLib's test to find it, and the
+                // arrays' own numbers are not proved on the form.
+                None if ty == SURFACE_CONE_I || ty == SURFACE_TORUS_I => Surface::from(nurbs),
                 None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
             }
         } else if ty == SURFACE_SPHERE_I {

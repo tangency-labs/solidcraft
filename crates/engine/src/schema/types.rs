@@ -200,14 +200,68 @@ macro_rules! target_point {
 }
 
 target_point!(
-    /// Extrude's `to`: a [`Point3`], with the handler's message.
+    /// Extrude's `to2` and Surface Extrude's `to`: a [`Point3`], with the handler's message.
     ToPoint,
     "must be a point [x, y, z] on the face, vertex or point to extrude to"
 );
-target_point!(
-    /// Extrude's `from`: a [`Point3`], with the handler's message.
-    FromPoint,
-    "must be a point [x, y, z] on the face or point to start from"
+
+/// Extrude's `to` and `from`: a [`Point3`], or a construction plane or point the extent follows
+/// (#8527), as `extent_param` reads them. Kept as given, for the handler.
+macro_rules! object_target {
+    ($(#[$doc:meta])* $name:ident, $message:literal) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $name(pub Value);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                use crate::cmd::GeoForm;
+                use solidcraft_doc::construct::GeoRef;
+                let v = Value::deserialize(d)?;
+                let fits = params::vec3(&v).is_some()
+                    || (v.is_object() || v.is_string())
+                        && match crate::cmd::geo_form(&v) {
+                            Ok(GeoForm::Plane(plane)) => plane_problem(plane).is_none(),
+                            Ok(GeoForm::ConstructPoint(_)) => true,
+                            Ok(GeoForm::Saved(g)) => matches!(g, GeoRef::Plane { .. } | GeoRef::ConstructPoint { .. } | GeoRef::Origin),
+                            _ => false,
+                        };
+                if fits { Ok($name(v)) } else { Err(D::Error::custom($message)) }
+            }
+        }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn inline_schema() -> bool {
+                true
+            }
+            fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+                let point = generator.subschema_for::<Point3>();
+                let plane = generator.subschema_for::<PlaneParam>();
+                json_schema!({
+                    "anyOf": [
+                        point,
+                        {"type": "object", "properties": {"plane": plane}, "required": ["plane"], "description": "A plane the extent follows when it moves: XY, XZ, YZ or a construction plane's name. A plane parallel to the sketch ends the extrude on it; a plane at a slant cuts the end along it; a plane the extrusion runs along is refused."},
+                        {"type": "object", "properties": {"construct_point": {"type": "string"}}, "required": ["construct_point"], "description": "A construction point by name: the extrude ends on the plane through it, parallel to the sketch, and follows it when it moves."},
+                        {"type": "string", "description": "A plane's name, as {plane: name}."}
+                    ]
+                })
+            }
+        }
+    };
+}
+
+object_target!(
+    /// Extrude's `to`: a point, a plane or a construction point, with the handler's message.
+    ToObject,
+    "must be a point [x, y, z] on the face, vertex or point to extrude to, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
+);
+object_target!(
+    /// Extrude's `from`: a point, a plane or a construction point, with the handler's message.
+    FromObject,
+    "must be a point [x, y, z] on the face or point to start from, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
 );
 
 target_point!(
@@ -220,6 +274,12 @@ target_point!(
     /// Emboss's `face`: a [`Point3`], with the handler's message.
     EmbossFacePoint,
     "must be a finite point [x,y,z]"
+);
+
+target_point!(
+    /// Thread's `from`: a [`Point3`], with the handler's message.
+    ThreadFromPoint,
+    "must be a point [x, y, z] near the end the thread starts at"
 );
 
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
@@ -473,6 +533,44 @@ impl JsonSchema for PointExpr3 {
     }
 }
 
+/// A point of a sketch's own plane: `[x, y]` or `{"x", "y"}`, each a number or a length
+/// expression, as `cell_grid::cell_origin` reads it. Whether the expressions evaluate is checked
+/// by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointExpr2(pub [Expr; 2]);
+
+impl<'de> Deserialize<'de> for PointExpr2 {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let coords: Option<Vec<&Value>> = match &v {
+            Value::Array(a) if a.len() == 2 => Some(a.iter().collect()),
+            Value::Object(o) => ["x", "y"].iter().map(|k| o.get(*k)).collect(),
+            _ => None,
+        };
+        coords
+            .and_then(|c| c.into_iter().map(|c| params::expr(&wrap(c.clone()), "v")).collect::<Option<Vec<Expr>>>())
+            .and_then(|c| <[Expr; 2]>::try_from(c).ok())
+            .map(PointExpr2)
+            .ok_or_else(|| D::Error::custom("must be a point [x, y] of numbers or length expressions"))
+    }
+}
+
+impl JsonSchema for PointExpr2 {
+    fn schema_name() -> Cow<'static, str> {
+        "PointExpr2".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let c = generator.subschema_for::<LengthExpr>();
+        json_schema!({
+            "description": "A point of a sketch: [x, y] or {\"x\", \"y\"}, each a number in mm or a length expression.",
+            "anyOf": [
+                {"type": "array", "items": c, "minItems": 2, "maxItems": 2},
+                {"type": "object", "properties": {"x": c, "y": c}, "required": ["x", "y"]}
+            ]
+        })
+    }
+}
+
 /// A feature referred to by its id (a number) or its name (a string).
 #[derive(Clone, Debug, PartialEq)]
 pub struct IdOrName(pub String);
@@ -682,6 +780,14 @@ keyword_param!(
     "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `height_measure`.
+    CoilHeightMeasureParam,
+    "height measure",
+    &["center_line", "centre_line", "overall"],
+    "center_line or overall",
+    "What `height` measures: center_line (the default; centre_line is an alias), the helix's own height from the section's centre at one end to the other, or overall, end to end, from where the wire starts along the axis to where it stops. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
@@ -760,6 +866,22 @@ keyword_param!(
     &["inside", "outside"],
     "inside or outside",
     "Which edge of the rim face the band runs along: inside (the default) or outside. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.dogbone`'s `style`.
+    DogboneStyleParam,
+    "style",
+    &["normal", "minimal", "t_bone", "tbone"],
+    "normal, minimal or t_bone",
+    "Where each relief sits in its corner: normal (the default), on the corner's bisector, the circle through the sharp corner; minimal, on the bisector, stopping `gap` short of the sharp corner; or t_bone (alias tbone), centred on one wall's line, the longer or the shorter one (`side`), the circle through the corner: at a square corner it bites that wall only, at a sharper corner it also bites the other wall. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.dogbone`'s `side`.
+    DogboneSideParam,
+    "side",
+    &["longer", "long", "shorter", "short"],
+    "longer or shorter",
+    "T-bone style only: which wall at each corner a relief bites, longer (the default; alias long) or shorter (alias short). Matching ignores case."
 );
 
 /// How a feature combines with existing bodies, as `features::operation` reads it.
@@ -1002,6 +1124,30 @@ impl JsonSchema for ConventionParam {
     }
 }
 
+/// How a taper closes a sharp corner, as `extent_param` reads it (serde, case-sensitive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftCornerParam(pub solidcraft_kernel::DraftCorner);
+
+impl<'de> Deserialize<'de> for DraftCornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?)
+            .map(DraftCornerParam)
+            .map_err(|_| D::Error::custom("must be preserve_curvature, tangent or round"))
+    }
+}
+
+impl JsonSchema for DraftCornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DraftCorner".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["preserve_curvature", "tangent", "round"],
+            "How a taper closes the gap its offset opens at a sharp corner of the profile. preserve_curvature: each wall continues as itself (a line's plane, an arc's cone) until it meets its neighbour. tangent: each continues straight along its end tangent. round: an arc about the corner. Without it, a profile of lines and arcs preserves curvature and one with another curve at a corner takes tangent, and the feature's warning says so.",
+        )
+    }
+}
+
 /// A thin wall's side, as `ThinSide::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThinSideParam(pub ThinSide);
@@ -1096,6 +1242,21 @@ impl JsonSchema for ProfilesParam {
                     "description": "Internal selections written by the app.",
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
+                        {"type": "object", "properties": {"type": {"enum": ["text_regions"]}, "links": associations}, "required": ["type", "links"]},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": {"enum": ["sided_curves"]},
+                                "loops": {"type": "array", "minItems": 1, "maxItems": 128, "items": {
+                                    "type": "array", "minItems": 1, "maxItems": 512, "items": {
+                                        "type": "object",
+                                        "properties": {"curve": {"type": "string"}, "side": {"enum": ["inside", "outside", "left", "right"]}},
+                                        "required": ["curve", "side"], "additionalProperties": false
+                                    }
+                                }}
+                            },
+                            "required": ["type", "loops"]
+                        },
                         {
                             "type": "object", "properties": {"offset_boundaries": associations}, "required": ["offset_boundaries"],
                             "not": {"properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]}
@@ -1443,10 +1604,10 @@ impl JsonSchema for SweepRails {
     }
 }
 
-/// What `features::plane_param` says about `v` as a plane before it looks anything up, as a
+/// What `features::plane_param_named` says about `v` as a plane before it looks anything up, as a
 /// complete message, or `None`. Names and ids are the handler's to look up.
-fn plane_problem(v: &Value) -> Option<String> {
-    let forms = || whole(format!("`plane` must be {}", crate::cmd::PLANE_FORMS));
+pub(crate) fn plane_problem_named(v: &Value, key: &str) -> Option<String> {
+    let forms = || whole(format!("`{key}` must be {}", crate::cmd::PLANE_FORMS));
     match v {
         Value::String(_) => None,
         Value::Number(n) => n.as_u64().map_or_else(|| Some(forms()), |_| None),
@@ -1456,10 +1617,14 @@ fn plane_problem(v: &Value) -> Option<String> {
             if o.get("origin").is_some_and(|origin| PointExpr3::deserialize(origin).is_err()) {
                 return Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"));
             }
-            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole("plane needs x_dir and y_dir, or normal")), |_| None)
+            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole(format!("`{key}` needs x_dir and y_dir, or normal"))), |_| None)
         }
         _ => Some(forms()),
     }
+}
+
+fn plane_problem(v: &Value) -> Option<String> {
+    plane_problem_named(v, "plane")
 }
 
 /// A plane, as `features::plane_param` reads it: an origin plane's name or alias, a construction

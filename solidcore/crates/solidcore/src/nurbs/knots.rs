@@ -931,7 +931,8 @@ pub fn span_midpoints(knots: &[f64], [t0, t1]: [f64; 2]) -> Vec<f64> {
     knots
         .windows(2)
         .filter_map(|w| match *w {
-            [a, z] if z > a && a >= t0 && z <= t1 => Some(0.5 * (a + z)),
+            // Halved first: `a + z` overflows for knots near the largest finite number.
+            [a, z] if z > a && a >= t0 && z <= t1 => Some(0.5 * a + 0.5 * z),
             _ => None,
         })
         .collect()
@@ -953,6 +954,17 @@ mod tests {
         // No span, or knots that are not numbers: none.
         assert!(span_midpoints(&[1.0, 1.0], [0.0, 2.0]).is_empty());
         assert!(span_midpoints(&[0.0, f64::NAN, 1.0], [0.0, 1.0]).is_empty());
+        // Knots near the largest finite number, whose sum overflows: the middle is still
+        // (a + z) / 2, 1.1e308 and 0, inside the span.
+        let huge = span_midpoints(&[1e308, 1.2e308], [1e308, 1.2e308]);
+        assert!(
+            huge.len() == 1 && huge.iter().all(|m| (m / 1.1e308 - 1.0).abs() < 1e-15),
+            "{huge:?}"
+        );
+        assert_eq!(
+            span_midpoints(&[-1.5e308, 1.5e308], [-1.5e308, 1.5e308]),
+            vec![0.0]
+        );
     }
 
     #[test]

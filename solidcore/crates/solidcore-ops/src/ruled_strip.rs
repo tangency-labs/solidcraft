@@ -96,7 +96,7 @@ pub fn up_to_target<T, E>(
             }
             Err(e) if folds(&e) => {
                 fold_at = Some(length);
-                length *= 0.5;
+                length = kernel::halved_length(length);
             }
             Err(e) => return Err(e),
         }
@@ -110,7 +110,7 @@ pub fn up_to_target<T, E>(
         (None, Some(mut hi)) => {
             let mut lo = length;
             for _ in 0..FOLD_BISECTIONS {
-                let mid = 0.5 * (lo + hi);
+                let mid = kernel::length_between(lo, hi);
                 match attempt(mid) {
                     Ok(Some(cut)) => return Ok(Reach::Cut(cut)),
                     Ok(None) => lo = mid,

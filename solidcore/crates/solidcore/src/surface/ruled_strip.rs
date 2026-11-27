@@ -43,7 +43,7 @@ pub const MAX_HALVINGS: usize = 6;
 /// `±`[`ANGLE_LIMIT`].
 #[must_use]
 pub fn ruling_angle(angle: f64) -> Option<f64> {
-    (angle.is_finite() && angle.abs() <= ANGLE_LIMIT).then(|| std::f64::consts::FRAC_PI_2 - angle)
+    (angle.is_finite() && angle.abs() <= ANGLE_LIMIT).then_some(std::f64::consts::FRAC_PI_2 - angle)
 }
 
 /// How near its rulings' ends the far edge of a law strip `length` long, on a body of `size`,
@@ -59,7 +59,8 @@ pub fn far_tolerance(size: f64, length: f64) -> f64 {
 /// crossed. A tangent that is not a number folds.
 #[must_use]
 pub fn folds(along: Vec3, far: Vec3) -> bool {
-    !(far.dot(along) > 1e-9 * along.length_squared())
+    let ahead = far.dot(along).partial_cmp(&(1e-9 * along.length_squared()));
+    ahead != Some(std::cmp::Ordering::Greater)
 }
 
 /// Whether a strip folds anywhere at [`FOLD_SAMPLES`] parameters `f` from 0 to 1, `at(f)`
@@ -77,15 +78,36 @@ pub fn strip_folds(mut at: impl FnMut(f64) -> Option<(Vec3, Vec3)>) -> Option<bo
 
 /// Whether a far edge strays more than `tol` from its rulings' ends at any of [`STRAY_SAMPLES`]
 /// parameters `f` from 0 to 1, `at(f)` giving the far edge's point and the ruling's end there.
-/// `None` where `at` cannot evaluate one.
+/// `None` where `at` cannot evaluate one, where a distance is not a number, or for a tolerance
+/// that is not a finite, non-negative number: nothing is accepted that was not measured.
 pub fn strays(tol: f64, mut at: impl FnMut(f64) -> Option<(Vec3, Vec3)>) -> Option<bool> {
+    if !(tol.is_finite() && tol >= 0.0) {
+        return None;
+    }
     for i in 0..=STRAY_SAMPLES {
         let (far, end) = at(i as f64 / STRAY_SAMPLES as f64)?;
-        if (far - end).length() > tol {
+        let off = (far - end).length();
+        if !off.is_finite() {
+            return None;
+        }
+        if off > tol {
             return Some(true);
         }
     }
     Some(false)
+}
+
+/// The next, shorter length tried for a strip up to a target while it folds: half of `length`.
+#[must_use]
+pub fn halved_length(length: f64) -> f64 {
+    0.5 * length
+}
+
+/// The length halfway between a strip `lo` long that the target missed and one `hi` long that
+/// folded, tried next; halved first, so lengths near the largest finite number do not overflow.
+#[must_use]
+pub fn length_between(lo: f64, hi: f64) -> f64 {
+    0.5 * lo + 0.5 * hi
 }
 
 /// Whether a straight strip's far edge, from corner to corner (`step`), leaves no more than
@@ -158,6 +180,29 @@ mod tests {
         assert_eq!(strays(5e-5, at), Some(true));
         assert_eq!(strays(2e-4, at), Some(false));
         assert_eq!(strays(1.0, |_| None), None);
+    }
+
+    /// A distance that is not a number (a NaN point), or a tolerance that is not a finite,
+    /// non-negative number, is no measurement: `None`, never an accepted far edge. A tolerance of
+    /// 0 still accepts a far edge exactly on its rulings' ends.
+    #[test]
+    fn a_far_edge_not_measured_is_not_accepted() {
+        let on = |f: f64| Some((Vec3::new(f, 0.0, 0.0), Vec3::new(f, 0.0, 0.0)));
+        let nan = |f: f64| Some((Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(f, 0.0, 0.0)));
+        assert_eq!(strays(1.0, nan), None);
+        for tol in [f64::NAN, f64::INFINITY, -1.0] {
+            assert_eq!(strays(tol, on), None, "{tol}");
+        }
+        assert_eq!(strays(0.0, on), Some(false));
+    }
+
+    /// Halved: 2000 → 1000; between 7.8125 and 15.625: 11.71875 (all exact in binary); between
+    /// 1e308 and 1.6e308, whose sum overflows: 1.3e308.
+    #[test]
+    fn lengths_are_halved_and_bisected() {
+        assert_eq!(halved_length(2000.0), 1000.0);
+        assert_eq!(length_between(7.8125, 15.625), 11.71875);
+        assert!((length_between(1e308, 1.6e308) / 1.3e308 - 1.0).abs() < 1e-15);
     }
 
     #[test]

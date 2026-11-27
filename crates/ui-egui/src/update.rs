@@ -166,8 +166,12 @@ pub enum InstallKind {
     Rpm,
     /// The plain `.tar.gz`, unpacked somewhere.
     LinuxTarball,
-    /// Installed by the `.msi` (under Program Files, or in the folder the installer recorded).
+    /// Installed by the `.msi` for all users (under Program Files, or in the folder the installer
+    /// recorded).
     WindowsMsi,
+    /// Installed by the `.msi` just for this user (`%LocalAppData%\Programs\SolidCraft` by default,
+    /// recorded under HKCU): updates run in that per-user context, with no administrator.
+    WindowsMsiPerUser,
     /// The portable `.zip`, unpacked somewhere.
     WindowsPortable,
     /// The lone `SolidCraft-<version>-windows-x64.exe`.
@@ -190,6 +194,8 @@ pub struct Probe<'a> {
     /// Where the Windows installer put SolidCraft (`HKLM\Software\SolidCraft`, `InstallDir`): a
     /// folder chosen in its wizard can be anywhere, not only under Program Files (#1870).
     pub msi_dir: Option<PathBuf>,
+    /// The same record for a "just for me" install (`HKCU\Software\SolidCraft`, `InstallDir`).
+    pub msi_user_dir: Option<PathBuf>,
 }
 
 pub fn detect(p: &Probe) -> InstallKind {
@@ -227,7 +233,14 @@ pub fn detect(p: &Probe) -> InstallKind {
         }
         "windows" => {
             let under = |k: &str| env(k).is_some_and(|dir| starts_with_ci(&exe, Path::new(&dir)));
-            let installed = p.msi_dir.as_deref().is_some_and(|dir| starts_with_ci(&exe, dir));
+            // The recorded folder holding the executable; when both do (one inside the other), the
+            // deeper one is the install it belongs to.
+            let holds = |dir: Option<&Path>| dir.filter(|d| starts_with_ci(&exe, d)).map(|d| d.to_string_lossy().trim_end_matches(['\\', '/']).len());
+            let (machine, user) = (holds(p.msi_dir.as_deref()), holds(p.msi_user_dir.as_deref()));
+            if user.is_some_and(|u| machine.is_none_or(|m| u > m)) {
+                return InstallKind::WindowsMsiPerUser;
+            }
+            let installed = machine.is_some();
             if installed || under("ProgramFiles") || under("ProgramW6432") || under("ProgramFiles(x86)") {
                 return InstallKind::WindowsMsi;
             }
@@ -272,7 +285,8 @@ pub fn this_install() -> InstallKind {
     {
         let env = |k: &str| std::env::var(k).ok();
         let exists = |p: &Path| p.exists();
-        let msi_dir = msi_install_dir();
+        let msi_dir = msi_install_dir(true);
+        let msi_user_dir = msi_install_dir(false);
         detect(&Probe {
             os: std::env::consts::OS,
             release_build: release_build(),
@@ -280,19 +294,22 @@ pub fn this_install() -> InstallKind {
             exe: std::env::current_exe().ok(),
             exists: &exists,
             msi_dir,
+            msi_user_dir,
         })
     }
 }
 
-/// The folder the Windows installer recorded (solidcraft.wxs writes it for upgrades), if any.
+/// The folder the Windows installer recorded (solidcraft.wxs writes it for upgrades), if any:
+/// under HKLM for an all-users install (`machine`), under HKCU for a "just for me" one.
 #[cfg(windows)]
-fn msi_install_dir() -> Option<PathBuf> {
-    let key = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(r"Software\SolidCraft").ok()?;
+fn msi_install_dir(machine: bool) -> Option<PathBuf> {
+    let hive = if machine { winreg::enums::HKEY_LOCAL_MACHINE } else { winreg::enums::HKEY_CURRENT_USER };
+    let key = winreg::RegKey::predef(hive).open_subkey(r"Software\SolidCraft").ok()?;
     key.get_value::<String, _>("InstallDir").ok().map(PathBuf::from)
 }
 
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
-fn msi_install_dir() -> Option<PathBuf> {
+fn msi_install_dir(_machine: bool) -> Option<PathBuf> {
     None
 }
 
@@ -422,6 +439,7 @@ impl InstallKind {
             InstallKind::Rpm => ".rpm package",
             InstallKind::LinuxTarball => ".tar.gz",
             InstallKind::WindowsMsi => "Windows installer (.msi)",
+            InstallKind::WindowsMsiPerUser => "Windows installer (.msi), just for me",
             InstallKind::WindowsPortable => "portable .zip",
             InstallKind::WindowsExe => "standalone .exe",
             InstallKind::MacApp(_) => "macOS app",
@@ -472,7 +490,7 @@ pub fn asset_name(kind: &InstallKind, arch: &str, version: &str) -> Option<Strin
         InstallKind::Deb => format!("solidcraft-linux-{}.deb", linux?),
         InstallKind::Rpm => format!("solidcraft-linux-{}.rpm", linux?),
         InstallKind::LinuxTarball => format!("solidcraft-{version}-linux-{}.tar.gz", linux?),
-        InstallKind::WindowsMsi => format!("solidcraft-windows-{}.msi", windows?),
+        InstallKind::WindowsMsi | InstallKind::WindowsMsiPerUser => format!("solidcraft-windows-{}.msi", windows?),
         InstallKind::WindowsPortable => format!("solidcraft-windows-{}-portable.zip", windows?),
         // Only x64 has the lone .exe; elsewhere the portable zip is the same thing.
         InstallKind::WindowsExe if windows == Some("x64") => format!("SolidCraft-{version}-windows-x64.exe"),
@@ -1023,7 +1041,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => State::Offer,
     };
     let primary = match (&install, one_click) {
-        (Some(install::Method::Msi), true) => solidcraft_ui_text::tr("update.install_msi"),
+        (Some(install::Method::Msi { .. }), true) => solidcraft_ui_text::tr("update.install_msi"),
         (Some(install::Method::Dmg), true) => solidcraft_ui_text::tr("update.download_open"),
         (Some(_), true) => solidcraft_ui_text::tr("update.update_now"),
         _ if kind.system_managed() => solidcraft_ui_text::tr("update.release_page"),

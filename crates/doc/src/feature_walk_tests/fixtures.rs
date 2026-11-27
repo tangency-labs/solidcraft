@@ -36,6 +36,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "dogbone",
+            json!({"type": "dogbone", "edges": [o], "faces": [o], "diameter": "dogbone.diameter", "style": "minimal", "gap": "dogbone.gap",
+                "max_angle": "dogbone.max_angle", "along": [0, 0, 1]}),
+        ),
+        (
             "frame_gusset",
             json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
         ),
@@ -79,6 +84,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
         (
+            "finger_joint",
+            json!({"type": "finger_joint", "bodies": ["A", "B"], "count": 4, "clearance": "joint.clearance",
+                "inverted": true, "edge_offset": "joint.edge_offset"}),
+        ),
+        (
             "pattern_rectangular",
             pattern(
                 json!({"type": "rectangular", "dir1": [1, 0, 0], "count1": "rect.count1", "spacing1": "rect.spacing1", "dir2": [0, 1, 0], "count2": "rect.count2", "spacing2": "rect.spacing2"}),
@@ -96,7 +106,30 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             h["references"] = json!([{"edge": o, "distance": "hole.reference1"}, {"edge": o, "distance": "hole.reference2"}]);
             h
         }),
+        ("hole_hardware", {
+            let mut h = hole(json!({"type": "simple"}));
+            h["hardware"] = json!({"kind": "stud", "thread": "M3", "length": "hole.hardware_length", "part": "stud.m3"});
+            h
+        }),
         ("thread", json!({"type": "thread", "face": o, "length": "thread.length"})),
+        (
+            "shaft_spline",
+            json!({"type": "shaft_spline", "shaft": o, "shaft_start": o, "bore": o, "bore_start": o, "form": "involute",
+                "teeth": "shaft_spline.teeth", "length": "shaft_spline.length",
+                "module": "shaft_spline.module", "pressure_angle": "shaft_spline.pressure_angle", "addendum": "shaft_spline.addendum",
+                "dedendum": "shaft_spline.dedendum", "root_fillet": "shaft_spline.root_fillet", "profile_shift": "shaft_spline.profile_shift",
+                "thinning": "shaft_spline.thinning", "hub_addendum": "shaft_spline.hub_addendum", "tip_clearance": "shaft_spline.tip_clearance",
+                "form_clearance": "shaft_spline.form_clearance", "major_diameter": "shaft_spline.major_diameter",
+                "minor_diameter": "shaft_spline.minor_diameter", "tooth_width": "shaft_spline.tooth_width", "flank_angle": "shaft_spline.flank_angle",
+                "root_round": "shaft_spline.root_round", "tip_size": "shaft_spline.tip_size", "major_clearance": "shaft_spline.major_clearance",
+                "minor_clearance": "shaft_spline.minor_clearance", "hub_tip_round": "shaft_spline.hub_tip_round",
+                "side_clearance": "shaft_spline.side_clearance", "hub_root_round": "shaft_spline.hub_root_round",
+                "hub_diameter": "shaft_spline.hub_diameter", "master_angle": "shaft_spline.master_angle",
+                "cutter_diameter": "shaft_spline.cutter_diameter", "end_chamfer": "shaft_spline.end_chamfer",
+                "entry_chamfer": "shaft_spline.entry_chamfer", "end_chamfer_distance2": "shaft_spline.end_chamfer_distance2",
+                "end_chamfer_angle": "shaft_spline.end_chamfer_angle", "entry_chamfer_distance2": "shaft_spline.entry_chamfer_distance2",
+                "entry_chamfer_angle": "shaft_spline.entry_chamfer_angle"}),
+        ),
         ("loft", json!({"type": "loft", "sections": []})),
         ("sweep", json!({"type": "sweep", "sketch": 1, "profiles": {"type": "all"}, "path_sketch": 2, "path": ["l1"]})),
         (
@@ -176,6 +209,19 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         (
             "sheet_flange",
             json!({"type": "sheet_flange", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief"}),
+        ),
+        (
+            "sheet_flange_with_corners",
+            json!({"type": "sheet_flange", "body": "B", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief",
+            "corners": [
+                {"covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner", "kind": "partial_overlap", "overlap": "flange.corner_overlap", "gap": "flange.corner_gap"},
+                {"covering": "F12:tab(F7:cap.surface)|F12:bend.inner", "covered": "F9:cap.surface|F9:bend.inner", "kind": "full_overlap", "overlap": "flange.inactive_overlap", "gap": "flange.second_corner_gap"}
+            ]}),
+        ),
+        (
+            "sheet_corner_join",
+            json!({"type": "sheet_corner_join", "body": "B", "covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner",
+                "kind": "partial_overlap", "overlap": "corner.overlap", "gap": "corner.gap"}),
         ),
         ("sheet_hem", json!({"type": "sheet_hem", "edges": [o], "length": "hem.length", "gap": "hem.gap"})),
         (
@@ -336,6 +382,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
         "sheet_fold" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
+        "dogbone" => json!({"body": "B"}),
         _ => json!({}),
     };
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
