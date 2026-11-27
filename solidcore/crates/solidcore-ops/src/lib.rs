@@ -72,6 +72,7 @@ pub mod facing_trough;
 pub mod file;
 pub mod finger_joint;
 pub mod fit_projection;
+pub mod footprint;
 pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;

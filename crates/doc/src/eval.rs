@@ -16997,27 +16997,23 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
 
 /// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
 /// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
-/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
-/// between two samples crosses one of its loops (a profile narrower than the steps).
+/// make: their exact curves, sampled finely, meet a region where they run through its inside, so
+/// also across a profile narrower than the steps between the samples, not where they only run
+/// along its outline or through one of its corners (#7330); the kernel answers that from the
+/// samples and the outline's polylines.
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let tol = (b.body.size() * 1e-4).max(1e-4);
     let Ok(edges) = b.body.edges(tol) else { return true };
     let own = kernel::face_edge_indices(&b.body, fi);
-    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
-    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
-        return true;
-    }
-    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
-}
-
-/// Whether segments `p`-`q` and `a`-`b` cross or touch.
-fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
-    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
-    let (d1, d2) = (side(a, b, p), side(a, b, q));
-    let (d3, d4) = (side(p, q, a), side(p, q, b));
-    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
+    let xy = |q: Vec2| [q.x, q.y];
+    let curves: Vec<Vec<[f64; 2]>> =
+        own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| xy(plane.to_local(*q))).collect()).collect();
+    let regions: Vec<Vec<Vec<[f64; 2]>>> =
+        regions.iter().map(|r| r.loops().map(|l| l.polyline(1e-3).into_vec().into_iter().map(xy).collect()).collect()).collect();
+    // Off the outline is farther than the wall's samples (`tol`) and the outline's (1e-3) can
+    // stray from each other: a round wall flush with a round profile crosses its chords.
+    curves.iter().any(|c| kernel::planar::path_runs_inside(c, &regions, tol + 1e-3))
 }
 
 /// The body at `p` when the face there is not planar.

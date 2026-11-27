@@ -1,7 +1,7 @@
 //! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the side of a sketch
 //! curve a region lies on, the turn between two path directions, a frame section's corners, paper
 //! strokes and the runs a round-joined line is stroked in, where a board's drilled hole reaches,
-//! and a sketch plane's normal and points as a sketch solver holds them. Plain numbers and the
+//! whether a path runs through a profile's inside, and a sketch plane's normal and points as a sketch solver holds them. Plain numbers and the
 //! record's values in, plain numbers out.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
@@ -115,6 +115,12 @@ pub trait Planar: Backend {
     /// chords) or 0.6 % of the hole's radius, whichever is larger. No points, or a non-finite or
     /// negative input, is on no wall.
     fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool;
+    /// Whether the polyline `path` runs through the inside of one of `regions` (each its outer
+    /// loop and then its holes, each loop a list of corners that closes back to its first), not
+    /// only along their outline or through one of its corners: a piece of it lies in a region
+    /// farther than `margin` from every loop, or it crosses a profile thinner than that from one
+    /// side to the other.
+    fn path_runs_inside(&self, path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool;
     /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
     /// `c`, at `radius` and starting `from` radians.
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3];

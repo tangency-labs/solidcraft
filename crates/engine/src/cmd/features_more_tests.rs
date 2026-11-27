@@ -4626,6 +4626,83 @@ fn a_cut_to_a_point_on_a_wall_along_the_cut_stops_at_that_height() {
     assert!((removed - 12.0 * 12.0 * 12.5).abs() < 1e-3 * 1800.0, "removed {removed} vs 1800");
 }
 
+/// A cut To a point on a side wall of a box, from a profile flush with that wall (#7330): the
+/// wall runs along the cut and only touches the profile's outline, so the point stands for the
+/// plane through it, as it does for a profile inside the wall. The end face of a 10 x 6 x 40 box
+/// cut To a point on its side wall 5 up takes a 10 x 6 x 5 slice; a 10 x 4 strip on that face,
+/// flush with the end walls and short of the long ones, takes a 10 x 4 x 5 slot.
+#[test]
+fn a_cut_to_a_point_on_a_wall_flush_with_the_profile_stops_at_that_height() {
+    let block = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":10,"width":6,"height":40,"body_name":"B"}));
+        s
+    };
+    let mut s = block();
+    run(&mut s, "solid.extrude", json!({"face":[5,3,0],"to":[10,3,5],"operation":"cut"}));
+    let removed = 2400.0 - body_volume(&s, "B");
+    assert!((removed - 300.0).abs() < 1e-3, "the end face removed {removed} vs 300");
+    let mut s = block();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Strip"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0.0,1.0],"p1":[10.0,5.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Strip","to":[10,3,5],"operation":"cut"}));
+    let removed = 2400.0 - body_volume(&s, "B");
+    assert!((removed - 200.0).abs() < 1e-3, "the strip removed {removed} vs 200");
+}
+
+/// The same for a round wall flush with the profile (#7330), where the wall's samples and the
+/// outline's only meet within their tolerances: the end face of a cylinder (r 5, 40 tall) cut To
+/// a point on its side 5 up takes a disc 5 thick, and a ring (r 5 to 8) round a post of r 5 under
+/// a plate at z 10, extruded To a point on the post at z 2, ends at z 2 instead of at the plate.
+#[test]
+fn a_cut_to_a_point_on_a_round_wall_flush_with_the_profile_stops_at_that_height() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,0],"axis":[0,0,1],"radius":5,"height":40,"body_name":"B"}));
+    let before = body_volume(&s, "B");
+    run(&mut s, "solid.extrude", json!({"face":[0,0,0],"to":[5,0,5],"operation":"cut"}));
+    let removed = before - body_volume(&s, "B");
+    let disc = std::f64::consts::PI * 25.0 * 5.0;
+    assert!((removed - disc).abs() < 1e-3 * disc, "the end face removed {removed} vs {disc}");
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,0],"axis":[0,0,1],"radius":5,"height":40,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-10,-10,10],"length":20,"width":20,"height":2,"body_name":"Plate"}));
+    run(&mut s, "solid.combine", json!({"target":"Post","tools":["Plate"],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Ring"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0.0,0.0],"radius":8.0}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0.0,0.0],"radius":5.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Ring","to":[5,0,2],"body_name":"W"}));
+    let v = body_volume(&s, "W");
+    let ring = std::f64::consts::PI * (64.0 - 25.0) * 2.0;
+    assert!((v - ring).abs() < 1e-3 * ring, "the ring made {v}: ended at z 2 is {ring}, trimmed to the body is {}", ring * 5.0);
+}
+
+/// A wall that crosses the profile still meets it when it passes through two of its corners or
+/// runs along its outline for part of the way (#7330). A 10 x 10 post under a plate at z 10: a
+/// diamond with two corners on the post's wall at x 10, extruded To a point on that wall at z 2,
+/// is trimmed to the body (its half outside the post from z 0 to the plate, 9 x 10) and does
+/// not end at z 2 (18 x 2); so is an L along that wall from y 6 to 10 and across the post from
+/// y 2 to 6 (24 x 10, not 36 x 2).
+#[test]
+fn a_wall_through_two_corners_or_partly_along_the_profile_still_crosses_it() {
+    let extruded = |outline: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":10,"width":10,"height":40,"body_name":"Post"}));
+        run(&mut s, "solid.box", json!({"corner":[-10,-10,10],"length":30,"width":30,"height":2,"body_name":"Plate"}));
+        run(&mut s, "solid.combine", json!({"target":"Post","tools":["Plate"],"operation":"join"}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"P"}));
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"P","to":[10,5,2],"body_name":"W"}));
+        body_volume(&s, "W")
+    };
+    let diamond = extruded(json!([[10, 2], [13, 5], [10, 8], [7, 5]]));
+    assert!((diamond - 90.0).abs() < 1e-3, "the diamond made {diamond}: trimmed to the body is 90, ended at z 2 is 36");
+    let ell = extruded(json!([[7, 2], [13, 2], [13, 10], [10, 10], [10, 6], [7, 6]]));
+    assert!((ell - 240.0).abs() < 1e-3, "the L made {ell}: trimmed to the body is 240, ended at z 2 is 72");
+}
+
 /// #11923 keeps main's trim where the wall crosses the profile, even a profile too narrow to hold
 /// a vertex of the wall's mesh: a 0.05 mm slot from x 18 to 22 at y 3 crosses a post (r 20, axis
 /// Z) under a plate at z 10. Extruded To a point on the post's wall at z 2, the tool is trimmed
@@ -4647,6 +4724,30 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         "volume {v}: trimmed to the body is {}, ended at z 2 is {}",
         outside * 10.0,
         0.2 * 2.0
+    );
+}
+
+/// The same trim for a slot thinner than the margin the wall must keep from the outline to count
+/// as inside (#7330): a 0.01 mm slot from x 18 to 22 at y 3 across the post (r 20, axis Z) under
+/// the plate at z 10, extruded To a point on the post's wall at z 2, is still trimmed to the body,
+/// the piece outside the post from z 0 to the plate, not ended at z 2.
+#[test]
+fn a_profile_thinner_than_the_outline_margin_across_a_wall_keeps_the_trim_to_the_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,0],"axis":[0,0,1],"radius":20,"height":40,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-30,-30,10],"length":60,"width":60,"height":2,"body_name":"Plate"}));
+    run(&mut s, "solid.combine", json!({"target":"Post","tools":["Plate"],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[18.0,2.995],"p1":[22.0,3.005]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Slot","to":[20,0,2],"body_name":"W"}));
+    let outside = (22.0 - (20.0f64 * 20.0 - 9.0).sqrt()) * 0.01;
+    let v = body_volume(&s, "W");
+    assert!(
+        (v - outside * 10.0).abs() < 0.02 * outside * 10.0,
+        "volume {v}: trimmed to the body is {}, ended at z 2 is {}",
+        outside * 10.0,
+        0.04 * 2.0
     );
 }
 
