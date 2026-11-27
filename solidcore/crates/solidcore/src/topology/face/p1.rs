@@ -4818,7 +4818,7 @@ mod seam_completion_fault_tests {
         assert!(b.face(face).is_ok());
         assert_eq!(b.edge_list().len(), 2);
         assert_eq!(
-            super::p4::upward_edgeuses(&b, face, false, None)
+            crate::topology::face::p4::upward_edgeuses(&b, face, false, None)
                 .unwrap()
                 .len(),
             4
