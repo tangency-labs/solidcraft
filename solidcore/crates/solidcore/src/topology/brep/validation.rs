@@ -1,4 +1,4 @@
-//! B-rep pointer validation and ordered coincidence checks.
+//! B-rep pointer validation, the B-rep check and its soundness tests.
 //!
 //! Upstream: `source/SMLib/src/SmBrep.cpp`, `source/SMLib/inc/SmBrep.h`,
 //! `source/SMLib/src/SmEdge.cpp`, `source/SMLib/src/NL_CrvBasic.cpp`.
@@ -6,8 +6,8 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
-//! | [`contains_coincident_topology`] | `SmBrep::ContainsCoincidentTopology` |
 //! | [`soundness`], [`standing`], [`volume`] | (not upstream) the check at level 2, the manifold test and the volume |
+//! | [`update_tolerances_after_boolean`] | (not upstream) a boolean result's tolerance update, wide vertices centred first |
 //! | `check_edge_geometry` | `SmEdge::ValidateGeometry(FALSE)` |
 //! | `check_edgeuse_geometry` | `sm_CheckEdgeuseGeometry` |
 //!
@@ -21,20 +21,24 @@
 
 mod assert_valid;
 pub(crate) use assert_valid::standalone_curve_assert_valid;
-mod coincidence;
 mod pointers;
 mod soundness;
 pub(crate) mod spatial;
+mod wide_vertices;
 
 pub use assert_valid::{
-    assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
+    assert_valid, assert_valid_scoped, check_brep, check_brep_full, check_brep_scoped,
+    check_brep_with_keys, check_brep_with_keys_scoped, curve_assert_valid,
     validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
+    ValidityScope,
 };
-pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
-pub use pointers::validate_pointers;
+pub(crate) use pointers::GROWTH_PAST_RATIO;
+pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches, PointerCheck};
+pub(crate) use pointers::{validate_pointers_excluding, validate_pointers_traced};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
+pub use wide_vertices::update_tolerances_after_boolean;
 
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
@@ -43,8 +47,6 @@ use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 const OP: &str = "topology::brep::validation";
 const BREP_TYPE: i64 = 16011;
-use crate::error::SM_ERR as ERROR;
-use crate::error::SM_SUCCESS as SUCCESS;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -106,7 +108,7 @@ fn object_info(b: &Brep, object: Object) -> Result<(ObjectKey, i64, &'static str
 
 struct Reports<'a> {
     array: Option<&'a mut AssertArray>,
-    level: u8,
+    failed: bool,
 }
 
 impl Reports<'_> {
@@ -117,16 +119,7 @@ impl Reports<'_> {
         passed: bool,
         owner: impl Into<Object>,
     ) -> Result<bool> {
-        self.record(
-            b,
-            1,
-            index,
-            passed,
-            owner.into(),
-            None,
-            UNDEF_DOUBLE,
-            UNDEF_DOUBLE,
-        )
+        self.record(b, index, passed, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)
     }
 
     fn value(
@@ -138,42 +131,29 @@ impl Reports<'_> {
         tol: f64,
         value: f64,
     ) -> Result<bool> {
-        self.record(b, 1, index, passed, owner.into(), None, tol, value)
+        self.record(b, index, passed, owner.into(), tol, value)
     }
 
-    fn pair(
-        &mut self,
-        b: &Brep,
-        index: u64,
-        passed: bool,
-        owner: EntityRef,
-        other: EntityRef,
-        tol: f64,
-        value: f64,
-    ) -> Result<bool> {
-        self.record(
-            b,
-            3,
-            index,
-            self.level < 2 || passed,
-            owner.into(),
-            Some(other.into()),
-            tol,
-            value,
-        )
+    /// Not upstream (#21105): a warning of list 1 ([`crate::geom::assert_array::labels::WARNINGS`]),
+    /// reported (`!m_bOK`) without failing the pass.
+    fn warning(&mut self, b: &Brep, index: u64, owner: impl Into<Object>) -> Result<()> {
+        let failed = self.failed;
+        self.record(b, index, false, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+        self.failed = failed;
+        Ok(())
     }
 
+    /// A report of list 1 (`SmBrep`'s pointer tests), which names no other object.
     fn record(
         &mut self,
         b: &Brep,
-        list: u64,
         index: u64,
         passed: bool,
         owner: Object,
-        other: Option<Object>,
         tol: f64,
         value: f64,
     ) -> Result<bool> {
+        self.failed |= !passed;
         let Some(array) = self.array.as_deref_mut() else {
             return Ok(passed);
         };
@@ -182,13 +162,6 @@ impl Reports<'_> {
             return Ok(true);
         }
         let (owner, owner_type, owner_name) = object_info(b, owner)?;
-        let (other, other_type, other_name) = match other {
-            Some(o) => {
-                let (key, ty, name) = object_info(b, o)?;
-                (Some(key), ty, name)
-            }
-            None => (None, 0, "NULL"),
-        };
         array.add_unique_delete_duplicate(AssertReport::new(ReportSpec {
             reporter: Some(
                 object_info(b, Object::Topology(EntityRef::Brep(BrepId::from_index(0))))?.0,
@@ -198,12 +171,12 @@ impl Reports<'_> {
             owner: Some(owner),
             owner_type,
             owner_type_string: Some(owner_name),
-            other,
-            other_type,
-            other_type_string: Some(other_name),
+            other: None,
+            other_type: 0,
+            other_type_string: Some("NULL"),
             tol3d: crate::geom::tol::tol3d(tol),
             value,
-            list_index: list,
+            list_index: 1,
             message: None,
         })?);
         Ok(false)

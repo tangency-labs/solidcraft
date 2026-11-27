@@ -1,0 +1,29 @@
+{
+  "en": {
+    "nav.buttons.numbered": "Button {number} drag"
+  },
+  "ar": {
+    "nav.buttons.numbered": "سحب الزر {number}"
+  },
+  "de": {
+    "nav.buttons.numbered": "Ziehen mit Taste {number}"
+  },
+  "he": {
+    "nav.buttons.numbered": "גרירה בלחצן {number}"
+  },
+  "ja": {
+    "nav.buttons.numbered": "ボタン{number}のドラッグ"
+  },
+  "ko": {
+    "nav.buttons.numbered": "버튼 {number} 드래그"
+  },
+  "vi": {
+    "nav.buttons.numbered": "Kéo nút {number}"
+  },
+  "zh": {
+    "nav.buttons.numbered": "按键 {number} 拖动"
+  },
+  "fr": {
+    "nav.buttons.numbered": "Glissement du bouton {number}"
+  }
+}

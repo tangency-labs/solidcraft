@@ -166,6 +166,7 @@ pub struct CameraAnim {
     pub to: Camera,
     pub start: f64,
     pub duration: f64,
+    screen_up_turn: Option<f64>,
 }
 
 impl CameraAnim {
@@ -174,10 +175,33 @@ impl CameraAnim {
     /// A view change: half a second, longer for turns past a quarter turn (so a big turn, such
     /// as from the home view to the bottom, never sweeps more than about 9 degrees a frame).
     pub fn new(from: Camera, to: Camera, now: f64) -> CameraAnim {
-        let dy = (to.yaw - from.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-        let turn = dy.abs().max((to.pitch - from.pitch).abs());
+        let turn = if Camera::level_blend(&from, &to) {
+            let dy = (to.yaw - from.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+            dy.abs().max((to.pitch - from.pitch).abs())
+        } else {
+            // The angle of the one turn a rolled glide makes.
+            2.0 * from.orientation().dot(to.orientation()).abs().clamp(0.0, 1.0).acos()
+        };
         let k = if turn.is_finite() { (turn / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0) } else { 1.0 };
-        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k }
+        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k, screen_up_turn: None }
+    }
+    /// Animate a signed turn about screen up, as measured by the caller's kernel service.
+    /// `None` retains ordinary interpolation. A duration multiplier already applied by the
+    /// caller stays; this shared renderer does not select or compute the geometric angle.
+    pub fn around_screen_up(mut self, angle: Option<f64>) -> Self {
+        let Some(angle) = angle.filter(|angle| angle.is_finite()) else {
+            self.screen_up_turn = None;
+            return self;
+        };
+        let duration = |angle: f64| CameraAnim::DURATION * (angle.abs() / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0);
+        let previous = self.screen_up_turn.map_or_else(|| Self::new(self.from, self.to, self.start).duration, duration);
+        self.duration *= duration(angle) / previous;
+        self.screen_up_turn = Some(angle);
+        self
+    }
+    /// Whether this move keeps the screen's vertical axis fixed.
+    pub fn is_screen_up_turn(&self) -> bool {
+        self.screen_up_turn.is_some()
     }
     /// The camera at time `now`, and whether the move has finished.
     pub fn sample(&self, now: f64) -> (Camera, bool) {
@@ -185,7 +209,19 @@ impl CameraAnim {
         if !(t < 1.0) {
             return (self.to, true);
         }
-        (Camera::interpolate(&self.from, &self.to, ease_in_out(t)), false)
+        let eased = ease_in_out(t);
+        let mut camera = Camera::interpolate(&self.from, &self.to, eased);
+        if let Some(angle) = self.screen_up_turn
+            && eased > 0.0
+            && eased < 1.0
+        {
+            let mut orientation = self.from;
+            orientation.rotate_in_view(Vec3::new(0.0, angle * eased, 0.0));
+            camera.yaw = orientation.yaw;
+            camera.pitch = orientation.pitch;
+            camera.roll = orientation.roll;
+        }
+        (camera, false)
     }
 }
 
@@ -327,8 +363,9 @@ impl Camera {
             return (near, far);
         }
         // A box crossing the eye uses the minimum positive near plane; points behind the eye
-        // still cannot be projected. Keep the existing one-micrometre lower limit.
-        (near.min((depth * 0.5).max(1e-3)), far)
+        // still cannot be projected. The floor is one micrometre, scaled down with the distance
+        // so a close view (see `hold_min_distance`) still sees what is in front of the eye (#16628).
+        (near.min((depth * 0.5).max((self.distance * 1e-3).clamp(1e-6, 1e-3))), far)
     }
     /// Projection to clip space (OpenGL/wgpu style, depth 0..1).
     pub fn proj(&self, aspect: f64, near: f64, far: f64) -> Mat4 {
@@ -381,9 +418,31 @@ impl Camera {
         let f = if factor.is_finite() { factor.clamp(0.05, 20.0) } else { 1.0 };
         let nd = (self.distance * f).clamp(1e-3, 1e7);
         if let Some(a) = anchor {
-            self.target = a + (self.target - a) * (nd / self.distance);
+            if self.fov > 0.0 {
+                self.target = a + (self.target - a) * (nd / self.distance);
+            } else {
+                // Orthographic: the view scale changes, the depth does not. The target moves only within the
+                // view plane, so zooming at a point nearer or farther than the target never drifts it along the
+                // view direction (#16601).
+                let (_, _, b) = self.basis();
+                let d = a - self.target;
+                let plane = d - b * d.dot(b);
+                self.target += plane * (1.0 - nd / self.distance);
+            }
         }
         self.distance = nd;
+    }
+    /// Keep a perspective eye at least `min` from the target (#16628). Zooming in shrinks the
+    /// distance geometrically, so left alone it collapses toward zero: the near plane then clips the
+    /// model and the origin planes fill the screen. At the bound the eye keeps going where the
+    /// zoom put it, and the TARGET is dollied forward along the view ray instead (eye and target
+    /// move together, the eye does not jump): the view never degenerates, and the user can still
+    /// fly close, in steps that shrink with the bound. Orthographic views have no eye, so are left alone.
+    pub fn hold_min_distance(&mut self, min: f64) {
+        if self.fov > 0.0 && min.is_finite() && min > 0.0 && self.distance.is_finite() && self.distance < min {
+            self.target -= self.back() * (min - self.distance);
+            self.distance = min;
+        }
     }
     /// Pan by a screen delta in pixels for a viewport of height `h`.
     pub fn pan(&mut self, dx: f64, dy: f64, h: f64) {
@@ -437,19 +496,22 @@ impl Camera {
         let Some(axis) = (right * (radians.x / angle) + up * (radians.y / angle) + back * (radians.z / angle)).normalized() else { return };
         let (sin, cos) = angle.sin_cos();
         let rotate = |v: Vec3| v * cos + axis.cross(v) * sin + axis * (axis.dot(v) * (1.0 - cos));
-        let rotated_right = rotate(right);
-        let Some(rotated_back) = rotate(back).normalized() else { return };
-        let framed = self.up.to_frame(rotated_back);
+        if let Some(turned) = self.with_frame(rotate(right), rotate(back)) {
+            *self = turned;
+        }
+    }
+    /// The same camera turned so its screen right and back are `right` and `back` (world
+    /// directions). Straight up or down the heading is kept and roll carries the turn. `None`
+    /// when the frame gives no finite angles.
+    fn with_frame(&self, right: Vec3, back: Vec3) -> Option<Camera> {
+        let back = back.normalized()?;
+        let framed = self.up.to_frame(back);
         let yaw = if framed.x.hypot(framed.y) < 1e-10 { self.yaw } else { (-framed.x).atan2(-framed.y) };
         let pitch = framed.z.clamp(-1.0, 1.0).asin();
         let base_right = self.up.from_frame(Vec3::new(yaw.cos(), -yaw.sin(), 0.0));
-        let Some(base_up) = rotated_back.cross(base_right).normalized() else { return };
-        let roll = rotated_right.dot(base_up).atan2(rotated_right.dot(base_right));
-        if yaw.is_finite() && pitch.is_finite() && roll.is_finite() {
-            self.yaw = yaw;
-            self.pitch = pitch;
-            self.roll = roll;
-        }
+        let base_up = back.cross(base_right).normalized()?;
+        let roll = right.dot(base_up).atan2(right.dot(base_right));
+        (yaw.is_finite() && pitch.is_finite() && roll.is_finite()).then_some(Camera { yaw, pitch, roll, ..*self })
     }
     /// Orbit by pixel deltas like [`Camera::orbit`], without its pole limit: sideways turns
     /// about the world's up axis and up/down tilts about the screen's right, on over the top.
@@ -463,6 +525,27 @@ impl Camera {
         let turn = if upright { dx } else { -dx } * 0.008;
         self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
         self.rotate_in_view(Vec3::new(-dy * 0.008, 0.0, 0.0));
+    }
+    /// [`Camera::orbit_unlimited`] with the pointer's motion taken through the view's roll
+    /// (#12458): the part of it across the world's up axis as the screen shows it turns about
+    /// that axis, the part along it tilts about the level axis across the screen. The model
+    /// follows the cursor upright, upside down or rolled on its side, and the roll is kept.
+    /// Upright and upside down it is the same as [`Camera::orbit_unlimited`]; looking straight
+    /// along the up axis, the screen's own axes are used.
+    pub fn orbit_unlimited_through_roll(&mut self, dx: f64, dy: f64) {
+        if !self.is_valid() || !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
+        let (right, up, _) = self.basis();
+        let world_up = self.up_dir();
+        // The world's up axis on screen (y down).
+        let (ux, uy) = (world_up.dot(right), -world_up.dot(up));
+        let len = ux.hypot(uy);
+        let (ux, uy) = if len > 1e-6 { (ux / len, uy / len) } else { (0.0, -1.0) };
+        let turn = (dy * ux - dx * uy) * 0.008;
+        let along = dx * ux + dy * uy;
+        self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
+        self.rotate_in_view(Vec3::new(-along * uy * 0.008, -along * ux * 0.008, 0.0));
     }
     pub fn set_view(&mut self, v: StandardView) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
@@ -533,6 +616,51 @@ impl Camera {
         *self = fitted;
         true
     }
+    /// The same camera turned the shortest way to look from `back` (target → eye), as a
+    /// navigator click turns the view (#21480). The axis of the turn keeps its place on the
+    /// screen, so how the screen is turned carries over: from Top, looking from X keeps Y up
+    /// and swings Z to the side. Turning right round has no shortest way, so it turns about the
+    /// screen's up axis. With `square`, for a view along a world axis, the picture then turns
+    /// to the nearest quarter turn that lays a world axis across the screen; a halfway tie takes
+    /// the first of X, Y, Z, −X, −Y, −Z in the up-axis frame. Unchanged for a direction that
+    /// isn't finite and nonzero.
+    pub fn turned_to(&self, back: Vec3, square: bool) -> Camera {
+        let Some(back) = back.normalized() else { return *self };
+        let (right, up, old_back) = self.basis();
+        // The new direction in screen coordinates; the turn is about their cross product.
+        let (x, y, z) = (back.dot(right), back.dot(up), back.dot(old_back));
+        let side = x.hypot(y);
+        let mut cam = *self;
+        if side > 1e-12 {
+            cam.rotate_in_view(Vec3::new(-y, x, 0.0) * (side.atan2(z) / side));
+        } else if z < 0.0 {
+            cam.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        }
+        let right = cam.basis().0;
+        let mut across = right;
+        if square {
+            let mut best = f64::NEG_INFINITY;
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::X * -1.0, Vec3::Y * -1.0, Vec3::Z * -1.0] {
+                let axis = self.up.from_frame(axis);
+                if axis.dot(right) > best + 1e-9 {
+                    best = axis.dot(right);
+                    across = axis;
+                }
+            }
+        }
+        // Rebuilt on the exact direction, so the view looks along it without rounding drift.
+        let Some(mut to) = cam.with_frame(across, back) else { return cam };
+        // Straight up or down, heading and roll turn the picture the same way. Keep the turn in
+        // the heading, so a square Top or Bottom is stored upright as before: other code reads
+        // the heading alone there, and an upright view keeps the usual glide (#21480).
+        let pole = to.pitch.signum();
+        if (to.pitch.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9 && to.roll != 0.0 {
+            let yaw = to.yaw - pole * to.roll;
+            to.yaw = yaw.sin().atan2(yaw.cos());
+            to.roll = 0.0;
+        }
+        to
+    }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {
@@ -552,7 +680,18 @@ impl Camera {
         let (r, u, b) = self.basis();
         Quat::from_basis(r, u, b)
     }
-    /// Blend between two cameras at `s` in [0, 1]: heading and roll take the shorter way.
+    /// Whether a blend from `a` to `b` keeps the world's up axis level on screen: both ends
+    /// are upright (no roll). Otherwise a blend of the angles one by one would wobble, so the
+    /// glide turns the shortest way instead (#15633).
+    fn level_blend(a: &Camera, b: &Camera) -> bool {
+        let upright = |c: &Camera| {
+            let r = c.roll.rem_euclid(std::f64::consts::TAU);
+            r < 1e-9 || std::f64::consts::TAU - r < 1e-9
+        };
+        upright(a) && upright(b)
+    }
+    /// Blend between two cameras at `s` in [0, 1]. Upright ends blend heading and elevation,
+    /// heading taking the shorter way; a rolled end turns the shortest way about one axis.
     pub fn interpolate(a: &Camera, b: &Camera, s: f64) -> Camera {
         if !(s > 0.0) {
             return *a;
@@ -560,21 +699,23 @@ impl Camera {
         if s >= 1.0 {
             return *b;
         }
-        // Keep heading and elevation smooth near straight up or down. A quaternion slerp
-        // swings the heading sharply there when moving to Top.
         let dy = (b.yaw - a.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-        let yaw = a.yaw + dy * s;
-        let dr = (b.roll - a.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-        let pitch = a.pitch + (b.pitch - a.pitch) * s;
-        Camera {
+        let blended = Camera {
             target: a.target + (b.target - a.target) * s,
-            yaw,
-            pitch,
-            roll: a.roll + dr * s,
+            yaw: a.yaw + dy * s,
+            pitch: a.pitch + (b.pitch - a.pitch) * s,
+            roll: 0.0,
             distance: a.distance + (b.distance - a.distance) * s,
             fov: a.fov + (b.fov - a.fov) * s,
             up: b.up,
+        };
+        // Keep heading and elevation smooth near straight up or down. A quaternion slerp
+        // swings the heading sharply there when moving to Top.
+        if Camera::level_blend(a, b) {
+            return blended;
         }
+        let (right, _, back) = a.orientation().slerp(b.orientation(), s).basis();
+        blended.with_frame(right, back).unwrap_or(blended)
     }
     pub fn is_valid(&self) -> bool {
         self.target.is_finite()
@@ -583,6 +724,7 @@ impl Camera {
             && self.roll.is_finite()
             && self.distance.is_finite()
             && self.distance > 0.0
+            && (0.0..std::f64::consts::PI).contains(&self.fov)
     }
     /// The view's orientation in degrees, as the viewport's View angles readout shows it (#6032).
     /// These are the camera's own angles: yaw in (−180, 180], pitch in [−90, 90], roll in
@@ -647,6 +789,16 @@ fn wrap_half_turn(a: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_validation_refuses_nonfinite_and_inverted_perspective_lenses() {
+        for fov in [0.0, 0.6, std::f64::consts::PI - 1e-6] {
+            assert!(Camera { fov, ..Default::default() }.is_valid());
+        }
+        for fov in [-0.1, std::f64::consts::PI, 4.0, f64::NAN, f64::INFINITY] {
+            assert!(!Camera { fov, ..Default::default() }.is_valid());
+        }
+    }
 
     /// With the eye inside a large assembly's box the near plane is tiny beside the scene. The
     /// depth turned round in f64 still tells a nearer point from a farther one in f32; turned
@@ -730,6 +882,84 @@ mod tests {
         cam.rotate_in_view(motion);
         cam.rotate_in_view(-motion);
         assert!(cam.basis().0.dist(initial.basis().0) < 1e-12 && cam.back().dist(initial.back()) < 1e-12);
+    }
+
+    #[test]
+    fn screen_up_half_turn_animations_keep_the_axis_at_every_frame() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (pitch, roll) in [(0.6, 0.4), (0.0, 0.0), (FRAC_PI_2, 0.7), (-FRAC_PI_2, -1.2)] {
+                let from = Camera { target: Vec3::new(4.0, 8.0, -3.0), distance: 120.0, yaw: 0.3, pitch, roll, up, ..Default::default() };
+                let mut to = from;
+                to.rotate_in_view(Vec3::new(0.0, PI, 0.0));
+                let anim = CameraAnim::new(from, to, 7.0).around_screen_up(Some(PI));
+                assert!(anim.is_screen_up_turn());
+                assert!((anim.duration - 1.0).abs() < 1e-12, "a half turn takes twice the quarter-turn duration");
+                assert_eq!(anim.sample(6.0), (from, false));
+                assert_eq!(anim.sample(7.0), (from, false));
+                assert_eq!(anim.sample(8.0), (to, true));
+                assert_eq!(anim.sample(9.0), (to, true));
+                assert_eq!(anim.sample(f64::NAN), (to, true));
+                assert_eq!(anim.sample(f64::INFINITY), (to, true));
+                assert_eq!(anim.sample(f64::NEG_INFINITY), (to, false), "retain the ordinary non-finite-time fallback");
+                let (right, screen_up, back) = from.basis();
+                for frame in 1..60 {
+                    let fraction = f64::from(frame) / 60.0;
+                    let (at, done) = anim.sample(7.0 + fraction);
+                    let angle = PI * ease_in_out(fraction);
+                    let (_, at_up, at_back) = at.basis();
+                    assert!(!done && at.is_valid());
+                    assert!(at_up.dist(screen_up) < 1e-9, "{up:?}, pitch {pitch}, roll {roll}, frame {frame}");
+                    assert!((at_back.dot(back) - angle.cos()).abs() < 1e-9);
+                    assert!((at_back.dot(right) - angle.sin()).abs() < 1e-9);
+                    assert_eq!((at.target, at.distance, at.fov, at.up), (from.target, from.distance, from.fov, from.up));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn screen_up_animations_keep_fit_interpolation_and_the_callers_speed() {
+        let from = Camera { roll: 0.9, target: Vec3::new(10.0, 20.0, 30.0), distance: 120.0, ..Default::default() };
+        let mut to = from;
+        to.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        to.target = Vec3::new(20.0, -10.0, 40.0);
+        to.distance = 80.0;
+        to.fov = 0.6;
+        let mut anim = CameraAnim::new(from, to, 3.0);
+        anim.duration /= 2.5;
+        let anim = anim.around_screen_up(Some(std::f64::consts::PI));
+        assert!((anim.duration - 0.4).abs() < 1e-12);
+        assert_eq!(anim.around_screen_up(Some(std::f64::consts::PI)), anim, "applying the policy twice does not change the speed");
+        let (at, done) = anim.sample(3.2);
+        assert!(!done);
+        assert!(at.target.dist(Vec3::new(15.0, 5.0, 35.0)) < 1e-9);
+        assert!((at.distance - 100.0).abs() < 1e-9);
+        assert!((at.fov - 0.3).abs() < 1e-9);
+        assert!(at.back().dist(from.basis().0) < 1e-9, "at halfway, back points along the old screen right");
+        assert!(at.basis().1.dist(from.basis().1) < 1e-9);
+        assert_eq!(anim.sample(3.5), (to, true));
+    }
+
+    #[test]
+    fn a_second_screen_up_turn_can_return_from_the_middle_of_the_first() {
+        let from = Camera { roll: -0.7, up: UpAxis::Y, ..Default::default() };
+        let mut opposite = from;
+        opposite.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        let first = CameraAnim::new(from, opposite, 0.0).around_screen_up(Some(std::f64::consts::PI));
+        let middle = first.sample(0.35).0;
+        let reverse_angle = -std::f64::consts::PI * ease_in_out(0.35 / first.duration);
+        let reverse = CameraAnim::new(middle, from, 0.35).around_screen_up(Some(reverse_angle));
+        assert!(reverse.is_screen_up_turn());
+        let mut previous = middle.back().dist(from.back());
+        for frame in 1..=60 {
+            let (at, _) = reverse.sample(0.35 + reverse.duration * f64::from(frame) / 60.0);
+            assert!(at.basis().1.dist(from.basis().1) < 1e-9);
+            let remaining = at.back().dist(from.back());
+            assert!(remaining <= previous + 1e-9, "the new click returns directly instead of adding another half turn");
+            previous = remaining;
+        }
+        assert_eq!(reverse.sample(0.35 + reverse.duration), (from, true));
     }
 
     #[test]
@@ -899,6 +1129,21 @@ mod tests {
     }
 
     #[test]
+    fn a_close_perspective_eye_is_held_off_the_target_and_keeps_its_place() {
+        let mut cam = Camera { distance: 0.01, fov: 0.6, ..Camera::default() };
+        let eye = cam.eye();
+        cam.hold_min_distance(0.5);
+        assert_eq!(cam.distance, 0.5);
+        assert!(cam.eye().dist(eye) < 1e-9, "the eye must not jump");
+        let mut ortho = Camera { distance: 0.01, ..Camera::default() };
+        ortho.hold_min_distance(0.5);
+        assert_eq!(ortho.distance, 0.01);
+        let cam = Camera { distance: 0.01, fov: 0.6, ..Camera::default() };
+        let (near, _) = cam.clip_bounds(&Bounds { min: Vec3::new(-1.0, -1.0, -1.0), max: Vec3::new(1.0, 1.0, 1.0) });
+        assert!(near > 0.0 && near <= 1e-5 + 1e-12, "near {near}");
+    }
+
+    #[test]
     fn bounds_clipping_handles_eye_crossing_and_invalid_bounds() {
         let cam = Camera { yaw: 0.0, pitch: 0.0, distance: 10_000.0, fov: 0.6, ..Default::default() };
         let crossing = Bounds { min: Vec3::new(-1.0, -10_001.0, -1.0), max: Vec3::new(1.0, 10_001.0, 1.0) };
@@ -944,6 +1189,100 @@ mod tests {
         assert!(c.is_valid());
         c.fit(&Bounds::EMPTY);
         assert!(c.is_valid());
+    }
+
+    /// #21480: a navigator click turns the view the shortest way. The turn's axis keeps its place
+    /// on the screen, so from Top, looking from X keeps Y up and swings Z to the side. A view
+    /// along an axis squares up to a quarter turn; a slanted one keeps its exact tilt.
+    #[test]
+    fn turned_to_turns_the_shortest_way_and_squares_views_along_an_axis() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
+        let frame = |c: &Camera| c.basis();
+        // The issue's case: Top, then X. Y stays up the screen and Z points left.
+        let front = Camera { yaw: 0.0, pitch: 0.0, roll: 0.0, ..Camera::default() };
+        let top = Camera { pitch: FRAC_PI_2, ..front };
+        let (r, u, b) = frame(&top.turned_to(Vec3::X, true));
+        assert!(near(b, Vec3::X) && near(u, Vec3::Y) && near(r, Vec3::Z * -1.0), "{r:?} {u:?} {b:?}");
+        // Upright views turn as they always did: Front to Top has Y up, Front to Right has Z up.
+        let (_, u, b) = frame(&front.turned_to(Vec3::Z, true));
+        assert!(near(b, Vec3::Z) && near(u, Vec3::Y), "{u:?} {b:?}");
+        let (_, u, b) = frame(&front.turned_to(Vec3::X, true));
+        assert!(near(b, Vec3::X) && near(u, Vec3::Z), "{u:?} {b:?}");
+        // From the isometric view, Top squares up; the halfway tie lays X across the screen.
+        let iso = Camera { yaw: -PI / 4.0, pitch: 0.6155, ..front };
+        let (r, u, b) = frame(&iso.turned_to(Vec3::Z, true));
+        assert!(near(b, Vec3::Z) && near(r, Vec3::X) && near(u, Vec3::Y), "{r:?} {u:?} {b:?}");
+        // Straight up or down a view is stored upright, its turn kept in the heading, as the
+        // old upright views were: Iso to Top is heading 0, and from the back-left -90.
+        let deg = |c: Camera| (c.yaw.to_degrees(), c.roll.to_degrees());
+        let (yaw, roll) = deg(iso.turned_to(Vec3::Z, true));
+        assert!(yaw.abs() < 1e-6 && roll == 0.0, "{yaw} {roll}");
+        let back_left = Camera { yaw: -3.0 * PI / 4.0, ..iso };
+        let (yaw, roll) = deg(back_left.turned_to(Vec3::Z, true));
+        assert!((yaw + 90.0).abs() < 1e-6 && roll == 0.0, "{yaw} {roll}");
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (FRAC_PI_2, 0.0), (0.0, FRAC_PI_2), (PI, -FRAC_PI_2)] {
+                for roll in [0.0, FRAC_PI_2, PI, -FRAC_PI_2] {
+                    // A square start (along an axis, a quarter turn) to each axis: the turn's axis
+                    // keeps its place on screen, and the result is square without squaring.
+                    let cam = Camera { up, yaw, pitch, roll, ..Camera::default() };
+                    let (r0, u0, b0) = frame(&cam);
+                    for axis in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::X * -1.0, Vec3::Y * -1.0, Vec3::Z * -1.0] {
+                        let to = cam.turned_to(axis, true);
+                        let msg = format!("{axis:?} from {cam:?}");
+                        let (r, u, b) = frame(&to);
+                        assert!(near(b, axis), "looks from {axis:?}: {msg}");
+                        let pivot = match b0.cross(axis).normalized() {
+                            Some(p) => p,
+                            // Right round: the screen's up axis; no turn: anything stays.
+                            None => u0,
+                        };
+                        assert!((pivot.dot(r) - pivot.dot(r0)).abs() < 1e-9 && (pivot.dot(u) - pivot.dot(u0)).abs() < 1e-9, "{msg}");
+                    }
+                    // A slanted direction: the turn's axis keeps its place and the tilt is exact.
+                    for dir in [Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 0.3, -0.9), Vec3::new(-0.2, 0.7, 0.1)] {
+                        let to = cam.turned_to(dir, false);
+                        let (r, u, b) = frame(&to);
+                        let d = dir.normalized().unwrap();
+                        let pivot = b0.cross(d).normalized().unwrap();
+                        assert!(near(b, d), "{dir:?} from {cam:?}");
+                        assert!((pivot.dot(r) - pivot.dot(r0)).abs() < 1e-9 && (pivot.dot(u) - pivot.dot(u0)).abs() < 1e-9, "{dir:?} from {cam:?}");
+                    }
+                }
+            }
+        }
+        // Nothing to look from leaves the camera alone.
+        for bad in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0), Vec3::new(f64::INFINITY, 0.0, 0.0)] {
+            assert_eq!(top.turned_to(bad, true), top);
+        }
+    }
+
+    /// #15633: a quarter turn about a screen axis glides about that axis, over the top too: from
+    /// Top to an upside-down Back the blend keeps the heading instead of swinging sideways. A
+    /// rolled glide turns the shortest way, and the ends stay exactly as they were.
+    #[test]
+    fn quarter_turns_glide_about_the_screen_axis_across_the_poles() {
+        use std::f64::consts::FRAC_PI_2;
+        let front = Camera { yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        for start in [front, Camera { roll: 0.7, ..front }, Camera { up: UpAxis::Y, ..front }] {
+            for (about, keep) in [(Vec3::new(-FRAC_PI_2, 0.0, 0.0), 0), (Vec3::new(0.0, FRAC_PI_2, 0.0), 1)] {
+                let mut from = start;
+                for turn in 1..=4 {
+                    let mut to = from;
+                    to.rotate_in_view(about);
+                    let anim = CameraAnim::new(from, to, 0.0);
+                    assert!((anim.duration - CameraAnim::DURATION).abs() < 1e-6, "a quarter turn takes the usual time");
+                    assert_eq!((anim.sample(0.0).0, anim.sample(anim.duration).0), (from, to));
+                    let axis = |c: &Camera| [c.basis().0, c.basis().1][keep];
+                    for f in 1..20 {
+                        let m = anim.sample(anim.duration * f64::from(f) / 20.0).0;
+                        assert!(axis(&m).dist(axis(&from)) < 1e-9, "turn {turn} frame {f} keeps its axis from {start:?}");
+                    }
+                    from = to;
+                }
+            }
+        }
     }
 
     /// A view change sampled every frame (60 fps) moves smoothly to the very end: no frame

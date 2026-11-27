@@ -90,8 +90,7 @@ only definitions is `blend::definition_check::is_definition`, which is
 own surface kind (a torus stays a torus, so every match on the kind still sees it) and carries its
 definition beside it.
 
-The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` builds and
-reads them, and every `UpstreamFixes` flag is off by default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
+The blend definitions are always built and read.
 
 ### 3.2 Exact nets: lines, arcs and quadrics
 
@@ -115,7 +114,8 @@ vanishes, and each coefficient is checked against the rounding of computing it (
 Fixed-radius rolling-ball rounds of the configurations Dahl and Krasauskas classify are rational
 [2, 12]. `ExactClass` (`surface/procedural_blend/exact.rs`) names them: `Line` (the cylinder about
 a straight spine), `Circle` (the section turned about a common axis), `Point` (a piece of the
-ball), `Chord` (a chamfer between planes: the plane through the feet), `Conic`, `ConicPair` and
+ball), `Chord` (a chamfer between planes: the plane through the feet; with a sagitta, a weld bead's
+arc: the circular cylinder through the feet's lines, `fillet_exact::arc_section_implicit`), `Conic`, `ConicPair` and
 `NodalQuartic` (canal surfaces on those spines). `ExactClass::of_spine` maps the classifier's
 `BlendSpine`; `BlendSpine::Traced` has no exact class and is built as a procedural blend.
 
@@ -272,14 +272,32 @@ written as the operations it counts:
 | where | count | what it bounds |
 |---|---|---|
 | `eval::collapse` (private `de_boor`) | γ_(12p+4) of the largest coordinate | de Boor's p levels, three operations for each coefficient and four for each convex combination |
+| `eval::collapse` (private `bezier_piece`, `rational_partial_bound`) | G γ_(12p+4) of the largest coordinate, G the levels' growth (\|1 − α\| + \|α\| past a span); γ_6, γ_3 and γ_2 on lengths, weight products and weights; the bound × (1 + γ_32); the moved net's gap √3 γ_2 (\|c₀\| w + \|h\|) / w | a rational net's rows in Bézier form over a piece, blossomed past their span, and its partial bound, taken on the net moved by minus its box's middle c₀ |
 | `eval::sphere` (`Coefficient::finish`) | γ_(8 + 8·degree + terms) | a Bernstein coefficient of \|H − CW\|² − R²W² |
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
 | `surface::implicit::lies_on` | γ_K, K = 4d(p + 1)(q + 1) + 16 | an implicit equation's Bernstein coefficient |
-| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
+| `surface::implicit::side_bounds` | the patches' points widened by `off_surface_bound`'s γ_(8L+16) A (and γ W_max in the weights), then rounded interval arithmetic: the move to the placement's frame and every Bernstein coefficient of W^d F, each binomial weight an exact integer | \|F\| over a Bézier patch of a net of a sphere, cone or torus, the certified line solve's side test dividing it by F's other factor |
+| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`, `acute_piece_bound`, `obtuse_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/atan2/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
 | `sweep::stations` (`rail_crossing`) | γ_5 S_i, S_i = Σ_j (\|x_ij\| + \|p_j\| w_i) \|t_j\| | a rail's Bernstein distance coefficient from a station's plane; within it, taken as 0 |
 | `surface::extend::analytic` (private `certify_iso`) | γ_(12L+6) A_j, plus the plane's own (a parallel's height γ_(12L+7), a meridian's normal γ_(12L+8) + γ_12), × (1 + γ_16) | an extended analytic's iso control point off its plane; L de Boor levels, A_j its stencil's size (#15039) |
 | `surface::sphere::meridian_rounding` | S · 1.75 (γ_K + γ_33) \|P\| + 3.5 γ_4 \|P\| + γ_31 π r, K = 16(p + q + 2) | a half meridian's end angle as `IsArc` fits it; S its first-order conditioning, read off the fit (`end_angle_conditioning`) (#15039) |
+| `primitive::primitive_creation::p2::taper_walls` (`touch_bound`, `circles_may_meet`) | γ_16 (\|w\| + \|q\| + r); γ_12 (D² + (r_a ∓ r_b)²) | a draft's line's foot q off its circle (\|q\| − r) and circle/circle reach at a section crossing; within it, taken as touching |
+| `teeth::bound` (`sin_cos_at`, `atan_at`, `off`, `apart`) | sine, cosine and arc tangent enclosed from their series after taking off quarter turns (against pi enclosed) or halving the angle, the remainder of each series added as an interval; a length by a square root; every operation an outward-rounded `Ivl` one. Nothing is taken from the platform's sin, cos, atan or hypot, whose precision Rust leaves unspecified | the enclosures the tooth module's certificates below are made of, and the distance of a computed point from the true one |
+| `teeth::outline::sampled` (`teeth::bound::chord_bound`) | h²/8 · max \|P″\|, or its part across the chord where P′ runs along the chord on the whole stretch, from enclosures of P′ and P″ over the stretch; plus E, the larger of the proved distances of the chord's two computed ends from the curve; the width h rounded up | a chord between two computed points of a flank, a fillet or a spline piece, off its curve (Hausdorff) |
+| `teeth::involute` (`Flank::off`, `Fillet::off`, `HubFlank::off`) | the computed point (the platform's functions) measured against the true point enclosed in `Ivl` with `teeth::bound`'s series: `bound::off`, the largest distance from the point to the box. A root fillet's box widens by about ρ/\|v_c\| where the tip round's centre nears the line of rolling, and its bound with it | E of `sampled` for the three tooth curves, each point by itself |
+| `teeth::bspline::stretch_bend` (with `span_bend` and `teeth::outline::stretch_bends`) | 2 γ_(12p+4) of the largest active control coordinate, over the span of a break stretch's start and of its end; the Bezier points of the part of the span in hand, by blossoms in `Ivl`, and the hulls of their first and second differences, each cut to the whole span's hodograph hull | E, P′ and P″ of `sampled` for a part of a spline piece |
+| `teeth::outline::arc_steps` (with `Piece::chain`) | the sagitta 2 r sin²(δ/4) of the widest step δ = \|sweep\|/n + 2 γ_3 (\|start\| + \|sweep\|), plus an allowance E = 2 (256u r + γ_2 (\|c_x\| + \|c_y\| + 2r)) for a point; every point the chain computes is measured against the arc's true point enclosed (`bound::off`) and the arc refused where one lies farther off than E | a chord of an arc between two computed points, off the arc |
+| `teeth::outline::less_gap` (with `curve_tolerance`) | the gap as `bound::apart` bounds it (differences, squares and a square root in `Ivl`), taken off the tolerance in `Ivl`; a curve given as points, whose chords an outline cannot prove again, is proved to 63/64 of the tolerance by the tooth modules and its gap must fit in the rest | the chord that closes a piece on the next piece's start, pieces joining only within the join allowance |
+| `teeth::involute` (`Fillet::separation`) | a second-order Taylor form of the test's function over each stretch, value and slope at the middle (or an end) and the second derivative over the stretch, all in `Ivl` | a root fillet strictly inside the wedge between the middle of its tooth and the middle of the next space |
+| `teeth::fit` (private `certificate`) | `nurbs::crv_deviation::certified_distance` between the spline and the source as the spline of degree 1 through its points, each point at its own parameter of the spline (its foot; the parameters never go back, a run of equal ones spread apart); a chord the spline bends on (2 · du²/8 · max \|S″\| from `span_bend` over a quarter of the allowance) is first cut at points of the chord itself, each such point 6 γ_4 m off the chord, added to the bound; the sum rounded up | a fitted spline off the points of its source and the chords between them (Hausdorff) |
+| `nurbs::b_spline_surface::closure` (`boundary_gap_bound`) | γ_2 \|x\| + `MIN_POSITIVE` on each Euclidean point whose weight is not 1 (a reciprocal and a product; none for weight 1), each length × (1 + γ_8) (a length whose largest component is below 2^−500 taken as twice that component), the spread as (ρ_max/ρ_min) × (1 + γ_6) − 1 (exactly 0 for weights equal pair by pair), the sum × (1 + γ_4); each factor leaves about 3u spare, which covers the `− 1` after the ratio and the arithmetic inside each length | the gap between a net's two boundary curves in a direction clamped with exactly degree + 1 end knots (the other direction too): max \|b_j − a_j\| + (ρ_max/ρ_min − 1) max \|a_j − a_0\|, ρ_j the lines' weight ratios; 0 for a pair of bit-equal homogeneous points; every weight of the net must be a positive normal number with a normal reciprocal and every ratio normal, and an overflow certifies nothing; `move_seam` closes a direction where it is within the face's tolerance and the boundary weights are equal (`closes_within`) |
+| `surface::implicit::off_surface_bound` | γ_(8L+16) A, A = max \|H\|∞ + \|O\|∞ W_max of the source net (the net the patch was cut from), slack 2γA (1/W₀ + (1 + γ) W_max / (W₀ (W₀ − γ W_max))) | a Bézier patch's points after extraction and decomposition: L ≤ L_u + L_v knot-insertion levels, L_u = 2p + p(p − 1)/2 (the extraction's p − mul and p − mur, and the decomposition's chain through the points saved at up to p − 1 earlier knots, Σ_{i=1}^{p−1} i; derived loop by loop in the fn's docs and checked against the loops for degrees 1 to 10 by `the_rounding_count_covers_the_insertion_chains`), L_v alike in q; γ_8 a level (the ratio's two subtractions and division, its complement, `CPoint::combine2`'s two products and sum), 1 for the size's feedback, 8 more for the coefficients' scale |
+| `eval::pcurve` (`knot_shift_bound`, `boundary_gap_of`) | δ = γ₇ (max(\|t₀\|, \|t₁\|) + (t₁ − t₀)) + 4·2⁻¹⁰⁷⁴ a knot of the affine map onto an edge's interval (the underflow of the map taken as four subnormal steps); the curve's shift is the largest over t of Σ of the legs whose window holds t, each \|ΔP_i\| min(1, p δ / g_i), a leg with g_i = 0 (zero-width) counting its whole \|ΔP_i\|; each \|ΔP_i\| is `norm_up` of the coordinate differences, scaled so its squares cannot underflow and rounded up (γ₈, the subtractions included), the share and weight γ₄, so a weight is within γ₁₂ ≤ γ₁₆; the prefix sums' allowance 2 γ_(n+2) · total (total the sum of every leg's weight) and × (1 + γ₁₆), plus 4·2⁻¹⁰⁷⁴ a leg for a weight that underflows; the sum of three terms (the formed curve's `moved`, the certified distance, the shift; the extraction is a copy, 0) × (1 + γ₈) | a boundary iso-curve's control row on the edge's knots, mapped, against its exact image (the proof is in the fns' docs: the cumulative sums of the B-spline basis are the CDFs of the Curry–Schoenberg densities, which two knot vectors within δ couple within δ) |
+| `eval::pcurve` (`edge_form`) | 2 γ₄ S (1 + 2 max \|t\|) + 4·2⁻¹⁰⁷⁴, S the line's largest coordinate; 0 where both interval ends are 0 or 1 (the line's own ends); a B-spline edge, rational or not, is its own, 0 | a line edge formed as the degree-1 spline through its points at the interval's ends (the proof is in the fn's docs: three roundings a coordinate, the norm of three √3 of one) |
+| `eval::pcurve` (`rational_gap_of`) | the largest `norm_up` of the differences of the Cartesian control points (each a quotient `fl(x / w)`) of a rational edge and a rational boundary iso-curve on bit-for-bit equal knots (the iso's mapped onto the edge's interval), degree and weights, plus 8 γ₂ S (S the largest coordinate of either set), × (1 + γ₈) | the distance of two rational curves on one knot vector and one set of positive weights `w_i`: both are `Σ R_i(t) X_i` with the same non-negative `R_i = N_i w_i / Σ N_j w_j` summing to 1, so their difference is a convex combination of the `X_i` differences (the proof is in the fn's docs); any other pair of rational curves is not bounded and goes to the kernel |
+| `eval::boundary_reparam` (`certify`) | `(certified_distance(edge, R) + 2 e + δ p D) (1 + γ₈)`, `R` the spline of the pieces of the boundary on `[γ_k, γ_(k+1)]` at the pace of `[τ_k, τ_(k+1)]` (knots `τ_k`, multiplicity `p`); `e = γ_(12 (I + 1)) · 2 M` (the boundary's Bézier decomposition, `I` insertions, `M` the largest coordinate of the boundary's and the edge's nets) `+ γ_(8 p² + 8) M` (the blossom at the two ends of each piece); `δ = γ₂` the rounding of a local parameter `(γ − κ_j) / (κ_(j+1) − κ_j)`, `D` the largest difference of consecutive Bézier points of any span | the distance, at every parameter, of an edge from the lift of the pcurve `(g(t), v₀)` with `g` piecewise linear through `(τ_k, γ_k)` (any monotone points, however found): a polynomial's restriction to an interval has Bézier points that do not depend on the pace, so each piece is the blossom of its span's points at the interval's ends and `R` is exactly the lift; every piece in one span of the boundary (a breakpoint at each interior knot `g` passes); a computed local parameter is within `δ` of the intended one, which moves a point by at most `δ p D` (`p D` bounds a Bézier curve's derivative); the net's rounding moves a point by at most twice its per-coordinate error (the proof is in the module's docs) |
+| `offset::construction::bernstein::Bounded` (`product_rounding`; `sheets::own_frame`, `RegularityForms::certified`, `tangent_certified`) | a product γ_K \|a\|∞ \|b\|∞, K = 2(d_u + d_v) + (d_u + 1)(d_v + 1) + 7, plus \|a\|∞ e_b + e_a \|b\|∞ + e_a e_b; a sum, both raised to its degrees, γ_(K+2) of the summands' sizes plus their e; a derivative γ_2 of its own size plus 2n e; a quarter γ_(d_u + d_v) of the size plus e; each × (1 + γ_16) plus 2⁻¹⁰²² for underflow; the move to the patch's frame, one fused multiply-add a coefficient, γ_1 of the moved net; the range comparison γ_8 of the two sides; the tangent bound R = q0 − q1 (x2 + c²) / (2c), its own rounding as above, plus γ_2 max \|q1 (x2 + c²)\| / (2c) for c² and 1 / (2c), compared with γ_4 | each coefficient of the shell's regularity forms q0, q1, x2 off the exact forms of the patch's net as the Bezier decomposition computed it (a running error bound, [14, §3.3]), e an operand's bound; each form's range is widened by its bound before a patch is certified, and a form with a coefficient or bound that is not finite certifies nothing |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the
@@ -307,7 +325,11 @@ definition, rebuilds the span's Hermite rows H, bounds |B − H| on the net's pi
 and |H − S| by `gn_certify_span`, and refuses the net where the sum with one floor passes ε, where
 a piece runs across a station, or where a foot crosses a support's knot line between two stations.
 `recertify_faces` does this for every blend face of a body, as a body rebuilt from a record must be
-before its faces are operands.
+before its faces are operands. A kernel remembers each re-certification it finished
+(`Kernel::recertify_memo`, on with `memoize_curve_caches`), keyed on every bit of the blend's
+record and on the kernel's tolerances and fixes: a record read again on that kernel, its blend
+unchanged, gets the answer the proof gave, which is the answer running it again gives. Only a
+finished proof is kept, never a refusal or a cancel.
 
 ### 4.6 Worked example: a patch on a sphere
 
@@ -347,7 +369,7 @@ Every face is in one of three classes:
 
 | class | meaning | ε | kinds |
 |---|---|---|---|
-| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds and chamfers between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
+| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds, and chamfers and weld beads (the chord with a sagitta) between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
 | **certified** | B is within a proved ε of S | > 0, stored | `ProceduralBlend` (traced spines, Gⁿ sections, radius laws, rounds on rounds); `ProceduralSweep`; Mixed corners (the construction's tolerance); B-spline extensions past a side (§6) |
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
@@ -411,6 +433,8 @@ most 1e-6 d. `Extended::extension` is the extension's own certified bound agains
 An extension that cannot be made exactly is refused with `SolidError::ExtendRefused` and an
 `ExtendRefusal`, naming a distance that works: `WeightVanishes` (a weight would not be positive),
 `PastPole`, `PastApex`, `OverATurn`, `NotExact` (the length could not be measured to the stop).
+A curve's proportional extension (§6.7) refuses with `LengthNotMet`, naming no distance: the
+growth asked was not bracketed or found, or its certified enclosure is not within 1e-7 d of d.
 
 ### 6.4 Extended by the definition
 
@@ -460,8 +484,26 @@ derived reach is zero and the operation has no offset to add past it.
 ### 6.7 Curves
 
 Curve extension on main is still upstream's `Curve::extend_by_dist` (`nurbs/crv_adv`,
-`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. An exact curve
-extension by arc length is open work; until it lands, a curve extension is not in the exact class.
+`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. That extension
+is not in the exact class.
+
+The proportional extension, `Curve::extend_keeping_proportion` (`nurbs/crv_proportion.rs`,
+`CurveExtension::Proportion` in solidcore-ops), keeps the knots, degree and weights and stretches
+the control polygon along itself from the pinned end. Its stretch is bracketed by doubling (the
+arc length is not monotone in it where the polygon turns back) and solved by Illinois false
+position on the middles of certified length enclosures. The arc lengths of the curve and of the
+result are enclosed per Bézier piece: the chord below and the control polygon above (corner
+cutting, which holds for positive weights too); for a polynomial piece also a third-order bound
+from its squared speed q (Taylor's theorem about q's mean, with q's mean, its variance and its
+Bernstein hull computed exactly up to counted rounding); for a rational piece also a bound from
+its derivative; the tighter taken at each end. A polynomial piece's rounding is counted once per
+halving as a change in length, not carried into every piece below it. Pieces are halved until
+each enclosure is within d/4 · 1e-7, and the result is returned only when the enclosures differ
+by within 1e-7 d of d. The margin is
+relative to d, not to the curve's length, so no growth short of d (1 − 1e-7) is returned; a growth
+too small for the lengths to resolve is refused (`LengthNotMet`, §6.3). It moves the curve over its
+old domain, so it is not an extension of the curve in the sense of §6.1; what it certifies is the
+length.
 
 ## 7. Invariants
 
@@ -489,8 +531,13 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored. `convert::rebuild`, `exact_rebuild` and
-   `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   A chamfer whose setbacks hold at every station has a record (`ChamferKindRecord::Setbacks`)
+   but no construction yet: reading one is refused, never read as offsets.
+   `convert::rebuild`, `exact_rebuild` and
+   `corner_rebuild` make the definition exactly and certify the net again before it is an operand
+(or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.
@@ -501,7 +548,18 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
     the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
-    on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
+    on cells and mirror steps) with no recursion, and poll the kernel's cancel token. The Gⁿ
+    section's certificate (`fillet_section::section`) halves at most 3 spans per first span (two
+    full levels of halving; first spans are the solver's stations and the knot-line crossings)
+    plus 128 (`GN_HALVINGS_PER_SPAN`, `GN_HALVING_BUDGET`). A round of halvings that would pass
+    that budget, or a certificate past the fork's 4096 stations, is refused as not certified
+    (`BlendFailure::NotCertified`). It names no size: invariant 3 names one only where the
+    cause's geometry gives it. The budget counts spans, so a model scaled with its tolerance,
+    which makes the same spans, gets the same budget. With the tolerance held, the solver placed
+    more first spans on larger copies of the tightest measured rounds, and the budget grew with
+    them. A budget predicted from each span's own bound is not enough: a round whose ball's
+    offset tube nearly collapses converges at its bounds' h⁴ rate once its spans are proved, so a
+    convergence budget allows its whole cost.
 
 ## 8. If you're stuck
 

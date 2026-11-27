@@ -1056,7 +1056,7 @@ mod checkbox_in_use {
                     };
                     appearance.pbr = Some(Default::default());
                     appearance.local.overwrite = true;
-                    app.ui.pick_bodies = true;
+                    app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
                     if name == "preferences" {
                         // Find the redesigned Layout checkbox by its current visible label.
                         crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
@@ -1474,9 +1474,12 @@ fn kit_code_names_no_host_message_ids() {
             failures.push(format!("{relative}: {found:?}"));
         }
     }
-    // The kit, and of its components the theme files, their options and the navigation bar.
+    // The kit, and of its components the panel runtime, theme files, their options and the navigation bar.
     for (path, name) in crate::test_support::kit_files() {
-        if crate::test_support::in_kit(&path) || ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"].contains(&name.as_str()) {
+        if crate::test_support::in_kit(&path)
+            || name.starts_with("panel_runtime/")
+            || ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"].contains(&name.as_str())
+        {
             scan(&path, &name, &names, &mut failures);
         }
     }

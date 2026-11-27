@@ -1,7 +1,7 @@
 # UI localization
 
-SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
-Japanese, Georgian, Korean, Latvian, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
+SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Basque, Finnish, French, Galician, Hebrew, Croatian, Italian,
+Japanese, Georgian, Korean, Latvian, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, European Portuguese, Russian, Serbian (Cyrillic and Latin script), Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
 
@@ -62,7 +62,7 @@ that looks untranslated. Two guards catch that in the build:
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
   Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian, Serbian, Georgian and Latvian carry
-  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Basque, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, European Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
@@ -108,8 +108,12 @@ Sačuvaj/Spremi/Sačuvaj (Save). A timeline feature is Operacija in Bosnian and 
 Croatian; the Browser panel is Stablo modela, so it is never confused with a web browser
 (preglednik/pregledač); the undo history is Historija/Povijest/Istorija and the timeline Vremenska
 traka. In Serbian, brand and file names, acronyms, units, key names and placeholders stay in Latin
-script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
-are not translated.
+script inside the Cyrillic text. Serbian in Latin script (`sr-Latn`, Srpski (latinica)) has no catalog file
+of its own: `crates/ui-egui/build.rs` transliterates `sr.json`, pending messages included, letter for
+letter (Љ, Њ and Џ become Lj, Nj and Dž, or LJ, NJ and DŽ inside capitals), so translate Serbian once,
+in Cyrillic, and both scripts follow. Latin script is used only when chosen in the preferences:
+every Serbian system language, `sr-Latn-RS` included, keeps Cyrillic. Command IDs, shortcuts, file
+formats, units and user-provided names are not translated.
 
 The Georgian catalog (`ka`, shown as ქართული) uses ესკიზი (Sketch), სხეული (Body), ოპერაცია (timeline Feature), შეზღუდვა (Constraint), ზომა (Dimension), ამოწევა (Extrude), ბრუნვით აგება (Revolve), მომრგვალება (Fillet), ფასკა (Chamfer), მასივი (Pattern), შეერთება (Joint), წახნაგი (Face), წიბო (Edge) and წვერო (Vertex); a design is a პროექტი. The Browser panel is მოდელის ხე (model tree) and the timeline ქრონოლოგია, apart from the undo history (ისტორია). Georgian has no letter case, so capitalised English labels are written in ordinary Mkhedruli, never in Mtavruli; a count stays singular after its number, so counted labels are written as `კომპონენტი: {count}`. The catalog is written in Mkhedruli; where no Georgian system font is found, egui's built-in Hack draws it in its monospace design. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged. Written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker (@devius).
 
@@ -146,7 +150,8 @@ widgets; UTF-8 byte lengths do not describe their displayed width.
 
 The desktop host tries system CJK fonts across Windows, macOS and Linux, the Flatpak host font
 folders (`/run/host/fonts`, `/run/host/user-fonts`), the folders listed in `SOLIDCRAFT_FONT_DIRS`
-and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. Chinese uses its own fallback
+and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. The lists of known fonts per script are in
+`sketch::fonts::fallback`. Chinese uses its own fallback
 chain after the general CJK font: many Japanese CJK fonts (Hiragino Gothic, Meiryo, Yu Gothic)
 match the CJK font search but lack simplified characters, so a second fallback found by the
 Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) covers them per
@@ -166,13 +171,19 @@ third-party servers:
 
 A CJK interface language fetches the matching face on demand. With any other interface language, the
 first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
-typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
-downloads no script font. If the needed face fails to load, the web interface shows English for that
-session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
-visit tries again. The Korean subset covers the whole Hangul syllable block and the Hangul jamo, so
-Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs): a Korean
-interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the Japanese
-face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
+typed text) is drawn, the Japanese face is fetched (#720).
+
+A drawing's text takes whole fonts, not the interface's subsets, each fetched once from the same origin
+the first time a drawing's text needs it: BIZ UDPGothic for kana and Japanese Han, Noto Sans KR for
+Hangul and Korean Han, Noto Sans SC or TC for simplified or traditional Chinese Han (by the drawing's
+language, as on the desktop), and Noto Sans Arabic (`./fonts/noto-sans-*/`, each with its OFL.txt). A
+script none of them has (Thai) is refused by name. A session that never shows such text downloads no
+script font. If the needed face fails to load, the web interface
+shows English for that session only to prevent missing glyphs (tofu); the saved language preference is
+kept, so the next visit tries again. The Korean subset covers the whole Hangul syllable block and the
+Hangul jamo, so Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs):
+a Korean interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the
+Japanese face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
 
 ## Right-to-left text
 
@@ -211,6 +222,11 @@ its lines read bottom to top. Names people type in Hebrew are shown as stored. T
 appends a system Hebrew font (Arial Hebrew or SF Hebrew on macOS, Segoe UI or Arial on Windows,
 Noto Sans Hebrew or DejaVu Sans on Linux); the web build has no Hebrew font yet, so a Hebrew
 interface shows empty boxes there.
+Georgian is the same: the desktop host appends a system Georgian font (SF Georgian on macOS,
+Sylfaen or Segoe UI on Windows, Noto Sans Georgian or DejaVu Sans on Linux); in a Georgian interface it
+comes ahead of Hack, elsewhere after it, so other interfaces keep Hack's symbols. The web
+build has no Georgian font yet: there egui's built-in Hack draws the Mkhedruli letters in its
+monospace design, and Asomtavruli and Mtavruli show as empty boxes.
 
 The current messages support named substitution, not locale-specific plural selection,
 number/date formatting, right-to-left layout mirroring, or shaping for joining scripts such as Arabic. Add those capabilities when

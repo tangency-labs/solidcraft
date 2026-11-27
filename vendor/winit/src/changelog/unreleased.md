@@ -46,3 +46,13 @@ changelog entry.
   delivered through the `zwp_pointer_gestures_v1` protocol when the compositor implements it.
   SolidCraft: backport of the gesture part of rust-windowing/winit#4338 (winit 0.31 only
   upstream), so a trackpad pinch reaches the application on Linux.
+- On Windows, add `platform::windows::set_touchpad_wheels`, off by default: on, a touchpad's
+  two-finger scroll is reported as `MouseScrollDelta::PixelDelta` instead of lines.
+  SolidCraft: Windows sends it as mouse wheel messages, so the app had no pixels to pan with
+  (#15353).
+
+### Fixed
+
+- On Windows 11, a window that isn't maximized or fullscreen takes the rect `WM_DPICHANGED`
+  suggests. SolidCraft: same behaviour as rust-windowing/winit#4341 (winit 0.31 only upstream),
+  so a window moved to a monitor with another scale doesn't stay on the boundary.

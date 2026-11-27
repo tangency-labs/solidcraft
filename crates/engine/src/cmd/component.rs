@@ -4,25 +4,28 @@
 //! share contents, "paste new" copies them) and can be grounded and moved.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
+use solidcraft_doc::bom;
+use solidcraft_doc::metadata::{BOM_QUANTITY, VIRTUAL};
+use solidcraft_doc::{CapturedJoint, CapturedOccurrenceMove, Document, Expr, Feature, FeatureKind, Mat, MoveSpace, Occurrence};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
-    CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
-    FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult, ListParams, ListResult, MoveBodiesParams,
-    MoveBodiesResult, MoveFeaturesParams, MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams,
-    OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
-    RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    CopyResult, CreateParams, CreateResult, CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
+    HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams,
+    MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult,
+    NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
+    PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams,
+    ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{Result, Session};
+use crate::{EngineError, Result, Session};
 
 const ACTIVATE_CONTRACT: TypedContract<ActivateParams> = TypedContract::new();
 const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
@@ -32,6 +35,8 @@ const LIST_CONTRACT: TypedContract<ListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<PropertiesParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<RenameParams> = TypedContract::new();
 const UNLOCK_CONTRACT: TypedContract<UnlockParams> = TypedContract::new();
+const HISTORY_VISIBILITY_CONTRACT: TypedContract<HistoryVisibilityParams> = TypedContract::new();
+const CYCLE_COLOR_CONTRACT: TypedContract<CycleColorParams> = TypedContract::new();
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
@@ -81,22 +86,28 @@ mod history_tests;
 mod occurrence_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
-        .icon("colored_components").doc_only()
+    CommandSpec::new("component.cycle_color", "Cycle Component Color", crate::checked!("component.cycle_color", cycle_color))
+        .icon("colored_components").doc_only().contract(&CYCLE_COLOR_CONTRACT).output(output_schema_for::<CycleColorResult>)
         .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
-    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
-        .icon("eye").doc_only()
+    CommandSpec::new("component.hide_history", "Hide Component History", crate::checked!("component.hide_history", hide_history))
+        .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
-    CommandSpec::new("component.show_history", "Show Component History", show_history)
-        .icon("eye").doc_only()
+    CommandSpec::new("component.show_history", "Show Component History", crate::checked!("component.show_history", show_history))
+        .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
-    CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component))
+    CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
-    CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies))
+        .params(
+            "name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool \
+             (default true); grounded?: bool (default: true for the design's first part, false otherwise); bom_quantity?: what \
+             one placement means in a bill of materials (component.metadata.set's); virtual?: true, a component with no geometry \
+             (grease, paint, a label): listed in bills of materials with its quantity, never active (default activate false; true \
+             is refused), and nothing can be put in it",
+        ),
+    CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies)).begins_edit()
         .icon("component")
         .contract(&FROM_BODIES_CONTRACT)
         .output(output_schema_for::<FromBodiesResult>)
@@ -104,6 +115,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.activate", "Activate Component", crate::checked!("component.activate", activate))
         .icon("activate")
         .noundo()
+        .doc_only()
         .contract(&ACTIVATE_CONTRACT)
         .output(output_schema_for::<ActivateResult>)
         .params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
@@ -134,22 +146,35 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListResult>)
         .params(
             "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
-             identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
+             identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count). An occurrence's \
+             transform is a column-major 4×4 (m[column][row]) with the translation in the last column. occurrence.move's matrix is that \
+             same placement row by row: three rows, the translation in the last column of each",
         ),
     CommandSpec::new("component.properties", "Component Physical Properties", crate::checked!("component.properties", properties::component))
         .icon("measure").noundo()
         .contract(&PROPERTIES_CONTRACT)
         .output(output_schema_for::<PropertiesResult>)
-        .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
+        .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; the placement measured counts whatever its type"),
+    CommandSpec::new("body.collision", "Collision Shape", crate::checked!("body.collision", properties::body_collision))
+        .icon("body")
+        .contract(&properties::BODY_COLLISION_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
+        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
+    CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
+        .icon("measure")
+        .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::PhysicalOverrideResult>)
+        .params("component; mass?: kg; com?: [x, y, z] mm; inertia?: [xx, yy, zz, xy, xz, yz] kg m² (omit all to clear): what robot exports use for the component's own bodies"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", crate::checked!("occurrence.properties", properties::occurrence))
         .icon("measure").noundo()
         .contract(&OCCURRENCE_PROPERTIES_CONTRACT)
         .output(output_schema_for::<OccurrencePropertiesResult>)
-        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties"),
+        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; this placement counts whatever its type. placement: where the occurrence sits, in_parent and world, each {position (mm), axis, angle_deg, matrix (the 3×4 rows occurrence.move takes)}"),
     CommandSpec::new("component.rename", "Rename Component", crate::checked!("component.rename", rename))
         .icon("rename")
         .contract(&RENAME_CONTRACT)
@@ -168,7 +193,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "component: removes the rigid joints that hold its contents together (an imported assembly's rigid group), so its parts \
              move and take joints one by one → joints (the ids removed)",
         ),
-    CommandSpec::new("component.move_bodies", "Move Bodies to Component", crate::checked!("component.move_bodies", move_bodies))
+    CommandSpec::new("component.move_bodies", "Move Bodies to Component", crate::checked!("component.move_bodies", move_bodies)).begins_edit()
         .icon("move")
         .contract(&MOVE_BODIES_CONTRACT)
         .output(output_schema_for::<MoveBodiesResult>)
@@ -177,21 +202,23 @@ pub static COMMANDS: &[CommandSpec] = &[
          one; a component placed more than once gets them in every instance); from_path?: the placement of their component they \
          move from (default: its only one, else its first, where its bodies have their own names)",
     ),
-    CommandSpec::new("component.copy_bodies", "Paste Bodies", copy_bodies).icon("paste").params(
+    CommandSpec::new("component.copy_bodies", "Paste Bodies", copy_bodies).begins_edit().icon("paste").params(
         "bodies: [names, as the Browser shows them: a body seen in another placement of its component (`Cube (B:2)`) is copied \
          from there]; component?: where the copies go (default: the active one); component_path?: its placement to place them \
          by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
          copy stays where its body is in the world; the copies' names come back as `bodies`",
     ),
-    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).icon("paste").params(
+    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).begins_edit().icon("paste").params(
         "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
-         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         only one); placement?: `world` (default) or `origin`, where copied components go: at the same world coordinates, or \
+         with the first one's origin on the target's origin, the others kept where they are from it (bodies always keep \
+         their world coordinates). Pastes what was copied in another design: its bodies as imported bodies \
          (no history) in one Import feature, or its components as independent copies with their history, appearances, \
          joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
          A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
          `bodies` and `feature`, or the pasted components' `paths`",
     ),
-    CommandSpec::new("component.move_sketches", "Move Sketches to Component", crate::checked!("component.move_sketches", move_sketches))
+    CommandSpec::new("component.move_sketches", "Move Sketches to Component", crate::checked!("component.move_sketches", move_sketches)).begins_edit()
         .icon("move")
         .contract(&MOVE_SKETCHES_CONTRACT)
         .output(output_schema_for::<MoveSketchesResult>)
@@ -200,7 +227,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component.move_sketches.to_parts",
         "Move Sketches to Their Parts",
         crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
-    )
+    ).begins_edit()
     .icon("move")
     .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
     .output(output_schema_for::<MoveSketchesToPartsResult>)
@@ -210,7 +237,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
          plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
     ),
-    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
+    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features)).begins_edit()
         .icon("move")
         .contract(&MOVE_FEATURES_CONTRACT)
         .output(output_schema_for::<MoveFeaturesResult>)
@@ -230,22 +257,22 @@ pub static COMMANDS: &[CommandSpec] = &[
              nothing: placements move first (taking what they hold), then features (taking the bodies they made), then the bodies \
              still elsewhere (a body transfer, which leaves its features behind)",
         ),
-    CommandSpec::new("occurrence.copy", "Paste (Instance)", crate::checked!("occurrence.copy", copy_occurrence))
+    CommandSpec::new("occurrence.copy", "Paste (Instance)", crate::checked!("occurrence.copy", copy_occurrence)).begins_edit()
         .icon("copy")
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<CopyResult>)
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
-    CommandSpec::new("component.paste_new", "Paste New", crate::checked!("component.paste_new", paste_new))
+    CommandSpec::new("component.paste_new", "Paste New", crate::checked!("component.paste_new", paste_new)).begins_edit()
         .icon("paste")
         .contract(&PASTE_NEW_CONTRACT)
         .output(output_schema_for::<PasteNewResult>)
         .params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
-    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence))
+    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence)).begins_edit_when(crate::edit_start::captures_history)
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
-        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z] (numbers or length expressions: an occurrence moved by expressions that name parameters keeps them and moves with them when the parameters change, along the axes the move was given in; other moves of it stay; a parameter they use can't be deleted, and a renamed one carries into them); axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
-    CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag))
+        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z] (numbers or length expressions: an occurrence moved by expressions that name parameters keeps them and moves with them when the parameters change, along the axes the move was given in; other moves of it stay; a parameter they use can't be deleted, and a renamed one carries into them); axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z] (numbers or length expressions, kept like translate's: the point the turn is about moves the part by what the turn leaves behind when a parameter in it changes); to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, its translation column (entries 4, 8 and 12) numbers or length expressions that are kept and followed like translate's; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
+    CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag)).begins_edit()
         .icon("move")
         .contract(&DRAG_CONTRACT)
         .output(output_schema_for::<DragResult>)
@@ -254,7 +281,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
-    CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align))
+    CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align)).begins_edit()
         .icon("align")
         .contract(&ALIGN_CONTRACT)
         .output(output_schema_for::<OccurrenceAlignResult>)
@@ -268,7 +295,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("ground")
         .contract(&GROUND_CONTRACT)
         .output(output_schema_for::<GroundResult>)
-        .params("occurrence; grounded?: bool (default toggles)"),
+        .params("occurrence; grounded?: bool (default toggles) → grounded; transform: placement within its parent; moved: names of occurrences whose world placement changed; errors, conflicts: joint issues in the assembly solve"),
     CommandSpec::new("occurrence.reparent", "Move to Component", reparent::reparent).icon("move").params(
         "occurrence; path?: exact placement; parent: component id or name (0 or \"root\" for the design); parent_path?: the parent's \
          placement to place it by (default: its only one, else the active one; every instance of the parent gets it). The placement \
@@ -306,14 +333,31 @@ fn key(v: Option<&Value>) -> Option<String> {
     }
 }
 
-fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
+pub(super) fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
     let kk = key(p.get(k)).ok_or_else(|| bad(cmd, format!("`{k}` must be a component id or name")))?;
     s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
 }
 
-fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
+pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
-    s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{kk}`")))
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == kk || o.name == kk) {
+        return Ok(o.id);
+    }
+    // A component name: its occurrence when it has exactly one (a name that is only digits is an id, never a component).
+    let component = match kk.parse::<u64>() {
+        Ok(_) => None,
+        Err(_) => s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.filter(|c| *c != 0),
+    };
+    let Some(component) = component else { return Err(bad(cmd, format!("no occurrence `{kk}`"))) };
+    let of: Vec<_> = s.doc.active_occurrences().filter(|o| o.component == component).collect();
+    match of.as_slice() {
+        [only] => Ok(only.id),
+        [] => Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` is not placed anywhere"))),
+        many => {
+            let names = many.iter().map(|o| format!("`{}`", o.name)).collect::<Vec<_>>().join(", ");
+            Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` has {names}; name one of them")))
+        }
+    }
 }
 
 fn translation(t: Vec3) -> Mat {
@@ -331,49 +375,188 @@ pub(crate) fn move_vector(p: &Value, key: &str, default: Vec3, coordinate: bool,
     Ok(v)
 }
 
-/// `translate` given with length expressions (`["0 mm", "dy", 0]`, #8192): what it works out to
-/// now, and per axis the expression to keep, for those that name a parameter (text that names
-/// none, such as `"5 mm"`, is kept as its number).
-fn expressed_translate(s: &Session, entries: &[Value], cmd: &str) -> Result<(Vec3, [Option<String>; 3])> {
-    let mut v = [0.0; 3];
+fn set_part_property(s: &mut Session, id: u64, key: &str, value: Value) -> Result<()> {
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.metadata.set(solidcraft_doc::metadata::Owner::Component, key, value)?;
+    }
+    Ok(())
+}
+
+/// Refuse a change that puts something into a virtual component (`Document::virtual_holding`),
+/// naming it; one a damaged file already filled is left as it is.
+pub(crate) fn refuse_filled_virtual(before: &Document, after: &Document) -> Result<()> {
+    let held = after.virtual_holding();
+    if held.is_empty() {
+        return Ok(());
+    }
+    let was = before.virtual_holding();
+    let Some(id) = held.into_iter().find(|id| !was.contains(id)) else { return Ok(()) };
+    let name = after.components.iter().find(|c| c.id == id).map_or("", |c| c.name.as_str());
+    Err(EngineError::Other(format!("`{name}` is a virtual component: it can't hold bodies, sketches or components")))
+}
+
+/// A point of `occurrence.move` (`translate`, `origin`), numbers or length expressions
+/// (`["0 mm", "dy", 0]`, #8192): what it works out to now, and per axis the expression to keep,
+/// for those that name a parameter (text that names none, such as `"5 mm"`, is kept as its number).
+fn expressed_point(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(Vec3, [Option<String>; 3])> {
     let mut kept: [Option<String>; 3] = Default::default();
+    let entries = match p.get(key) {
+        Some(Value::Array(a)) if a.len() == 3 && a.iter().any(Value::is_string) => a,
+        _ => return Ok((move_vector(p, key, Vec3::ZERO, true, cmd)?, kept)),
+    };
+    let mut v = [0.0; 3];
     for ((entry, slot), keep) in entries.iter().zip(v.iter_mut()).zip(kept.iter_mut()) {
         *slot = match entry {
-            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, "translate entries must be numbers or length expressions"))?,
+            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, format!("{key} entries must be numbers or length expressions")))?,
             Value::String(e) => {
-                let x = s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| bad(cmd, format!("translate: {err}")))?;
+                let x = s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
                 if !solidcraft_doc::expr::references(e).is_empty() {
                     *keep = Some(e.trim().to_string());
                 }
                 x
             }
-            _ => return Err(bad(cmd, "translate entries must be numbers or length expressions")),
+            _ => return Err(bad(cmd, format!("{key} entries must be numbers or length expressions"))),
         };
     }
     if v.iter().any(|x| !x.is_finite() || x.abs() > 1e9) {
-        return Err(bad(cmd, "translate exceeds supported numeric range"));
+        return Err(bad(cmd, format!("{key} exceeds supported numeric range")));
     }
     Ok((Vec3::new(v[0], v[1], v[2]), kept))
+}
+
+/// An expressed move as typed, before its frame (`space`) is known.
+fn kept_move(
+    translate: [Option<String>; 3],
+    at: [f64; 3],
+    origin: [Option<String>; 3],
+    origin_at: [f64; 3],
+    rotation: Mat,
+) -> solidcraft_doc::ExpressedMove {
+    solidcraft_doc::ExpressedMove { translate, at, frame: solidcraft_doc::IDENTITY, world: false, origin, origin_at, rotation, grounded_ok: false }
 }
 
 /// Move the occurrences whose expressed moves a parameter change moved (#8192), pending moves of
 /// them included. True when one moved.
 pub(crate) fn follow_expressed_moves(s: &mut Session) -> bool {
+    let mut moved_any = false;
     let shifts = s.doc.expressed_move_shifts();
-    if shifts.is_empty() {
+    if !shifts.is_empty() {
+        let before: Vec<(u64, Mat)> = shifts
+            .iter()
+            .filter(|x| x.shift != Vec3::ZERO)
+            .filter_map(|x| s.doc.occurrences.iter().find(|o| o.id == x.occurrence).map(|o| (o.id, o.transform)))
+            .collect();
+        for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
+            if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
+                *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+            }
+            // The exploded view's entry is what makes a pending move display only: it moves with it.
+            if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
+                *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+            }
+        }
+        s.doc_mut().apply_expressed_shifts(&shifts);
+        for (id, prev) in before {
+            if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+                let next = o.transform;
+                o.adjust_base_for_direct_move(&prev, &next);
+            }
+        }
+        moved_any |= shifts.iter().any(|x| x.shift != Vec3::ZERO);
+    }
+    if replay_pending_move_records(s) {
+        moved_any = true;
+    }
+    moved_any
+}
+
+fn replay_pending_move_records(s: &mut Session) -> bool {
+    if s.pending_move_records.is_empty() {
         return false;
     }
-    for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
-        if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
-            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
-        }
-        // The exploded view's entry is what makes a pending move display only: it moves with it.
-        if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
-            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+    let (vals, _) = s.doc.param_values();
+    let occs = s.doc.occurrences.clone();
+    let mut transforms: HashMap<u64, Mat> = occs.iter().map(|o| (o.id, o.transform)).collect();
+    let mut first_of: HashMap<u64, usize> = HashMap::with_capacity(occs.len());
+    let mut by_id: HashMap<u64, usize> = HashMap::with_capacity(occs.len());
+    for (idx, occ) in occs.iter().enumerate() {
+        by_id.entry(occ.id).or_insert(idx);
+        first_of.entry(occ.component).or_insert(idx);
+    }
+    let mut latest: BTreeMap<u64, Mat> = BTreeMap::new();
+    let mut changed = false;
+    for record in &mut s.pending_move_records {
+        let Some(&idx) = by_id.get(&record.occurrence) else { continue };
+        let Some(occ) = occs.get(idx) else { continue };
+        let Ok(delta) = record.step.eval_delta(&vals) else {
+            transforms.insert(record.occurrence, record.after);
+            latest.insert(record.occurrence, record.after);
+            continue;
+        };
+        let cur = transforms.get(&record.occurrence).copied().unwrap_or(occ.transform);
+        let local_delta = if record.step.space == MoveSpace::Local || occ.parent == 0 {
+            delta
+        } else {
+            let parent_world = record
+                .step
+                .path
+                .as_deref()
+                .and_then(|path| {
+                    let (&last, prefix) = path.split_last()?;
+                    if last != occ.id {
+                        return None;
+                    }
+                    let (mut m, mut c) = (solidcraft_doc::IDENTITY, 0);
+                    for id in prefix {
+                        let o = occs.iter().find(|o| o.id == *id && o.parent == c)?;
+                        let t = transforms.get(&o.id).copied().unwrap_or(o.transform);
+                        m = solidcraft_doc::mat_mul(&m, &t);
+                        c = o.component;
+                    }
+                    (c == occ.parent).then_some(m)
+                })
+                .unwrap_or_else(|| {
+                    let mut m = solidcraft_doc::IDENTITY;
+                    let mut c = occ.parent;
+                    for _ in 0..solidcraft_doc::MAX_PLACEMENT_DEPTH {
+                        if c == 0 {
+                            break;
+                        }
+                        let Some(&p_idx) = first_of.get(&c) else { break };
+                        let Some(p_occ) = occs.get(p_idx) else { break };
+                        let t = transforms.get(&p_occ.id).copied().unwrap_or(p_occ.transform);
+                        m = solidcraft_doc::mat_mul(&t, &m);
+                        c = p_occ.parent;
+                    }
+                    m
+                });
+            let Some(inv) = solidcraft_doc::mat_inverse(&parent_world) else {
+                transforms.insert(record.occurrence, record.after);
+                latest.insert(record.occurrence, record.after);
+                continue;
+            };
+            solidcraft_doc::mat_mul(&solidcraft_doc::mat_mul(&inv, &delta), &parent_world)
+        };
+        let next = solidcraft_doc::mat_mul(&local_delta, &cur);
+        if solidcraft_doc::is_placement(&next) {
+            if record.after != next {
+                record.after = next;
+                changed = true;
+            }
+            transforms.insert(record.occurrence, next);
+            latest.insert(record.occurrence, next);
         }
     }
-    s.doc_mut().apply_expressed_shifts(&shifts);
-    shifts.iter().any(|x| x.shift != Vec3::ZERO)
+    for (id, next) in latest {
+        if s.pending_moves.get(&id) != Some(&next) {
+            s.pending_moves.insert(id, next);
+            changed = true;
+        }
+    }
+    if changed {
+        s.revision += 1;
+    }
+    changed
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
@@ -383,10 +566,15 @@ pub(super) fn valid_position(m: &Mat) -> bool {
 pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.create";
     if let Some(params) = p.as_object()
-        && let Some(key) = params.keys().find(|key| !matches!(key.as_str(), "name" | "parent" | "parent_path" | "activate" | "grounded"))
+        && let Some(key) = params
+            .keys()
+            .find(|key| !matches!(key.as_str(), "name" | "parent" | "parent_path" | "activate" | "grounded" | "bom_quantity" | "virtual"))
     {
         let hint = if params.contains_key("bodies") { "; use component.move_bodies or component.from_bodies to move bodies" } else { "" };
-        return Err(bad(cmd, format!("unknown parameter `{key}`; accepted parameters: name, parent, parent_path, activate, grounded{hint}")));
+        return Err(bad(
+            cmd,
+            format!("unknown parameter `{key}`; accepted parameters: name, parent, parent_path, activate, grounded, bom_quantity, virtual{hint}"),
+        ));
     }
     let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { s.active_component };
     let parent_path = if let Some(value) = p.get("parent_path") {
@@ -408,6 +596,11 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     if parent_path.len() >= 64 {
         return Err(bad(cmd, "new component exceeds occurrence depth limit"));
     }
+    let made_virtual = p.get("virtual").and_then(Value::as_bool) == Some(true);
+    let activate = p.get("activate").and_then(Value::as_bool);
+    if made_virtual && activate == Some(true) {
+        return Err(bad(cmd, "a virtual component can't be the active component"));
+    }
     let grounded = match p.get("grounded") {
         None => None,
         Some(v) => Some(v.as_bool().ok_or_else(|| bad(cmd, "grounded must be true or false"))?),
@@ -418,7 +611,15 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     {
         o.grounded = grounded;
     }
-    if p.get("activate").and_then(Value::as_bool).unwrap_or(true) {
+    if let Some(text) = p.get(BOM_QUANTITY).filter(|q| !q.is_null()) {
+        let text = text.as_str().ok_or_else(|| bad(cmd, format!("`{BOM_QUANTITY}` is an expression, as text")))?;
+        bom::amount(&s.doc, text).map_err(|e| bad(cmd, format!("`{BOM_QUANTITY}`: {e}")))?;
+        set_part_property(s, id, BOM_QUANTITY, json!(text))?;
+    }
+    if made_virtual {
+        set_part_property(s, id, VIRTUAL, json!(true))?;
+    }
+    if activate.unwrap_or(!made_virtual) {
         let mut path = parent_path;
         if let Some(o) = s.doc.occurrence_of(id) {
             path.push(o.id);
@@ -447,7 +648,7 @@ fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.edit_in_place";
     let id = component(s, p, "component", cmd)?;
-    if !s.doc.links.contains_key(&id) {
+    if !s.doc.links.get(&id).is_some_and(|link| link.is_design()) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let path = match p.get("path") {
@@ -468,6 +669,9 @@ fn finish_edit(_s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component(s, p, "component", "component.activate")?;
+    if s.doc.components.iter().any(|c| c.id == id && c.metadata.is_virtual()) {
+        return Err(bad("component.activate", "a virtual component can't be the active component: it holds no geometry"));
+    }
     let path = if p.get("path").is_some() || p.get("occurrence").is_some() {
         let occurrence = occurrence(s, p, "component.activate")?;
         let path = occurrence_path(s, p, occurrence, "component.activate")?;
@@ -502,6 +706,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
             parent: o.parent,
             grounded: o.grounded,
             transform: moved.then_some(o.transform),
+            bom_type: o.bom_type,
         })
     };
     // Each component's bodies, features, occurrences and children, grouped once rather than
@@ -515,7 +720,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         features_of.entry(f.component).or_default().push(f);
     }
     let (mut occurrences_of, mut children_of): (HashMap<u64, Vec<&Occurrence>>, HashMap<u64, Vec<&Occurrence>>) = Default::default();
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         occurrences_of.entry(o.component).or_default().push(o);
         children_of.entry(o.parent).or_default().push(o);
     }
@@ -553,6 +758,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     }
     reply(ListResult {
         active: s.active_component,
+        active_path: s.active_occurrence_path.clone().unwrap_or_default(),
         components: out,
         pending_moves: s.pending_moves.keys().copied().collect(),
         param_warnings: Vec::new(),
@@ -562,8 +768,10 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.rename";
     let id = component(s, p, "component", cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     let st = s.model.state();
     let placed = s.doc.body_frames_with_source(&st);
     let d = s.doc_mut();
@@ -590,15 +798,92 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
+    // Pin surviving features' evaluated body names before removing this component, so even a
+    // design loaded in memory without `Session::opened_at` keeps disambiguated names stable.
+    s.pin_body_names();
+    let imported = imported_bodies_within(s, id);
+    let body_owners: Vec<(String, u64, u64)> =
+        s.model.state().bodies.iter().map(|b| (b.name.clone(), b.feature, s.doc.model_body_component(b))).collect();
+    let prev_links: Vec<(u64, Vec<String>)> =
+        s.doc.links.iter().map(|(&c, l)| (c, l.inherited.iter().map(|p| p.material.clone()).collect())).collect();
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
+    let d = s.doc_mut();
+    let mut prune_candidates: std::collections::HashSet<String> = prev_links
+        .into_iter()
+        .filter(|(comp, _)| removed.components.contains(comp))
+        .flat_map(|(_, mats)| mats)
+        .map(|m| m.to_ascii_lowercase())
+        .collect();
+    for (body, feat, _) in &body_owners {
+        if removed.features.contains(feat) {
+            d.materials.remove(body);
+        }
+    }
+    for (feature, made, skipped) in imported {
+        // A body an outside Import keeps building only drops its material when it is one of the
+        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        if let Some(f) = d.feature(feature) {
+            let slots = f.body_name_slots(made.len());
+            for (slot, name) in slots.iter().zip(&made) {
+                if skipped.contains(&(*slot as u64)) {
+                    d.materials.remove(name);
+                }
+            }
+        }
+        for link in d.links.values_mut().filter(|l| l.feature == feature) {
+            for &slot in &skipped {
+                if let Some(snap) = link.inherited.get_mut(slot as usize) {
+                    if !snap.material.is_empty() {
+                        prune_candidates.insert(snap.material.to_ascii_lowercase());
+                        snap.material.clear();
+                    }
+                    snap.material_fingerprint = None;
+                }
+            }
+        }
+        let Some(f) = d.feature_mut(feature) else { continue };
+        // The bodies left keep the names they have now, though a skipped one had a name first.
+        f.pin_body_names(&made, &[]);
+        if let FeatureKind::Import { skip, .. } = &mut f.kind {
+            skip.extend(skipped);
+            skip.sort_unstable();
+            skip.dedup();
+        }
+    }
+    super::component_link::prune_unused_linked_materials(d, &prune_candidates);
     let gone = removed.components;
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }
     reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
+}
+
+/// The bodies of the component tree `root` that an Import feature outside it builds (#17578): an
+/// inserted STEP assembly's Import sits in the assembly's own component and builds every part's
+/// bodies there, so deleting a part's component deletes no feature of its own. For each such
+/// Import: its id, the names of the bodies it builds now (in the order it builds them), and the
+/// file's body indices of those inside `root`, for its `skip` list.
+fn imported_bodies_within(s: &Session, root: u64) -> Vec<(u64, Vec<String>, Vec<u64>)> {
+    let doc = &s.doc;
+    let inside = |c: u64| doc.component_within(c, root);
+    doc.features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Import { .. }) && !inside(f.component))
+        .filter_map(|f| {
+            let made: Vec<String> = s.model.result(f.id)?.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect();
+            let slots = f.body_name_slots(made.len());
+            let skipped: Vec<u64> = slots
+                .iter()
+                .zip(&made)
+                .filter(|(_, name)| doc.body_components.get(*name).is_some_and(|c| inside(*c)))
+                .map(|(k, _)| *k as u64)
+                .collect();
+            (!skipped.is_empty()).then_some((f.id, made, skipped))
+        })
+        .collect()
 }
 
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
@@ -608,17 +893,34 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "pick a component, not the design"));
     }
     let gone = s.contents_joints(id);
-    if gone.is_empty() {
+    let group = s.doc.rigid_group_of(id).map(|g| g.id);
+    // Another group (the import this component came in with) holding a part inside it would
+    // still hold it after this one went.
+    let outer = s
+        .doc
+        .occurrences
+        .iter()
+        .filter(|o| o.parent != 0 && s.doc.component_within(o.parent, id))
+        .find_map(|o| s.doc.rigid_group_holding(o.id).filter(|g| Some(g.id) != group));
+    if let Some(outer) = outer {
+        return Err(bad(cmd, format!("the rigid group of `{}` holds this component's contents: unlock that one", outer.name)));
+    }
+    if gone.is_empty() && group.is_none() {
+        // A part of an import: its group holds it with the rest.
+        if let Some(holder) = s.doc.occurrences.iter().filter(|o| o.component == id).find_map(|o| s.doc.rigid_group_holding(o.id)) {
+            return Err(bad(cmd, format!("the rigid group of `{}` holds this component with the rest of it: unlock that one", holder.name)));
+        }
         return Err(bad(cmd, "nothing holds this component's contents together"));
     }
     let doc = s.doc_mut();
+    doc.assembly.rigid_groups.retain(|g| Some(g.id) != group);
     doc.assembly.joints.retain(|j| !gone.contains(&j.id));
     for group in &mut doc.timeline_groups {
         group.joints.retain(|id| !gone.contains(id));
     }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
-    reply(UnlockResult { component: id, joints: gone, param_warnings: Vec::new() })
+    reply(UnlockResult { component: id, joints: gone, rigid_group: group, param_warnings: Vec::new() })
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
@@ -689,7 +991,7 @@ fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     // The steps above are this command's one undo step.
     scratch.undo.clear();
     scratch.selection = copies.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"bodies": copies, "component": to}))
 }
 
@@ -795,20 +1097,25 @@ fn paste_new(s: &mut Session, p: &Value) -> Result<Value> {
     super::component_clone::paste(s, comp, occ, transform, parent, p)
 }
 
+/// An occurrence path as a command takes it: 1 to 64 occurrence ids.
+pub(crate) fn path_ids(value: &Value) -> std::result::Result<Vec<u64>, &'static str> {
+    value
+        .as_array()
+        .filter(|a| !a.is_empty() && a.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH)
+        .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+        .ok_or("`path` must list 1..64 occurrence ids")
+}
+
 pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Result<Vec<u64>> {
     let path = if let Some(value) = p.get("path") {
-        value
-            .as_array()
-            .filter(|a| !a.is_empty() && a.len() <= 64)
-            .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
-            .ok_or_else(|| bad(cmd, "`path` must list 1..64 occurrence ids"))?
+        path_ids(value).map_err(|e| bad(cmd, e))?
     } else {
         let o = s.doc.occurrences.iter().find(|o| o.id == id).ok_or_else(|| bad(cmd, "no occurrence"))?;
         let mut path = s.doc.first_path(o.parent);
         // A world frame requires an explicit containing placement when any ancestor is instanced.
         for ancestor in &path {
             if let Some(a) = s.doc.occurrences.iter().find(|a| a.id == *ancestor)
-                && s.doc.occurrences.iter().filter(|x| x.component == a.component).count() > 1
+                && s.doc.active_occurrences().filter(|x| x.component == a.component).take(2).count() > 1
             {
                 return Err(bad(cmd, "occurrence has multiple placements; supply its `path`"));
             }
@@ -821,6 +1128,22 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
     }
     s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(path)
+}
+
+fn raw_point_exprs(p: &Value, key: &str, fallback: Vec3) -> [Expr; 3] {
+    let from_val = |v: Option<&Value>, f: f64| match v {
+        Some(Value::String(s)) => Expr::new(s.trim()),
+        _ => crate::occurrences::format_mm_expr(f),
+    };
+    match p.get(key) {
+        Some(Value::Array(a)) if a.len() == 3 => [from_val(a.first(), fallback.x), from_val(a.get(1), fallback.y), from_val(a.get(2), fallback.z)],
+        Some(Value::Object(o)) => [from_val(o.get("x"), fallback.x), from_val(o.get("y"), fallback.y), from_val(o.get("z"), fallback.z)],
+        _ => [
+            crate::occurrences::format_mm_expr(fallback.x),
+            crate::occurrences::format_mm_expr(fallback.y),
+            crate::occurrences::format_mm_expr(fallback.z),
+        ],
+    }
 }
 
 fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
@@ -844,25 +1167,45 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
+    let space = match p.get("space") {
+        None => "local",
+        Some(Value::String(space)) => space.as_str(),
+        _ => return Err(bad(cmd, "space must be local or world")),
+    };
+    if !matches!(space, "local" | "world") {
+        return Err(bad(cmd, "space must be local or world"));
+    }
+    let move_space = if space == "world" { MoveSpace::World } else { MoveSpace::Local };
+    let capture = bool_(p, "capture").unwrap_or(true);
     let target = absolute_target(s, p, cmd)?;
-    // Expressions in `translate` that name parameters: the occurrence keeps them and follows them.
-    let mut expressed = None;
+    // Expressions in `translate`, `origin` or the translation column of `matrix` that name
+    // parameters: the occurrence keeps them and follows them.
+    let mut expressed: Option<solidcraft_doc::ExpressedMove> = None;
+    let mut pending_builder: Option<([Expr; 3], Option<[Expr; 3]>, Option<[f64; 3]>, Option<Expr>, Option<Mat>)> = None;
     let delta = if target.is_some() {
         solidcraft_doc::IDENTITY
     } else if let Some(m) = p.get("matrix") {
         if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, format!("give either matrix or {k}, not both")));
         }
-        matrix::rigid(m, matrix::tolerance(p, cmd)?, cmd)?
+        let (numbers, kept) = matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+        let delta = matrix::rigid(&numbers, matrix::tolerance(p, cmd)?, cmd)?;
+        if kept.iter().any(Option::is_some) {
+            expressed = Some(kept_move(kept, [delta[3][0], delta[3][1], delta[3][2]], Default::default(), [0.0; 3], solidcraft_doc::IDENTITY));
+        }
+        if !capture {
+            let raw_exprs = matrix::translation_exprs(m);
+            let translate =
+                std::array::from_fn(|i| raw_exprs[i].as_deref().map(Expr::new).unwrap_or_else(|| crate::occurrences::format_mm_expr(delta[3][i])));
+            let mut rot = delta;
+            rot[3] = [0.0, 0.0, 0.0, 1.0];
+            let rotation = (!solidcraft_doc::is_identity(&rot)).then_some(rot);
+            pending_builder = Some((translate, None, None, None, rotation));
+        }
+        delta
     } else {
-        let t = match p.get("translate") {
-            Some(Value::Array(a)) if a.len() == 3 && a.iter().any(Value::is_string) => {
-                let (t, kept) = expressed_translate(s, a, cmd)?;
-                expressed = kept.iter().any(Option::is_some).then_some((kept, [t.x, t.y, t.z]));
-                t
-            }
-            _ => move_vector(p, "translate", Vec3::ZERO, true, cmd)?,
-        };
+        let (t, kept) = expressed_point(s, p, "translate", cmd)?;
+        let (origin, origin_kept) = expressed_point(s, p, "origin", cmd)?;
         let axis = move_vector(p, "axis", Vec3::Z, false, cmd)?;
         let angle = match p.get("angle") {
             Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
@@ -875,25 +1218,29 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         if angle != 0.0 && axis.normalized().is_none() {
             return Err(bad(cmd, "rotation axis must have a finite nonzero length"));
         }
-        let origin = move_vector(p, "origin", Vec3::ZERO, true, cmd)?;
+        let has_origin_expr = origin_kept.iter().any(Option::is_some);
+        if kept.iter().chain(&origin_kept).any(Option::is_some) {
+            let mut turn = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, axis, angle);
+            turn[3] = [0.0, 0.0, 0.0, 1.0];
+            // Only an origin that follows a parameter needs the turn and where it is kept.
+            let (rotation, at) = if has_origin_expr { (turn, [origin.x, origin.y, origin.z]) } else { (solidcraft_doc::IDENTITY, [0.0; 3]) };
+            expressed = Some(kept_move(kept, [t.x, t.y, t.z], origin_kept, at, rotation));
+        }
+        if !capture {
+            let translate = raw_point_exprs(p, "translate", t);
+            let angle_expr = match p.get("angle") {
+                Some(Value::String(e)) => Some(Expr::new(e.trim())),
+                Some(Value::Number(_)) if angle != 0.0 => Some(Expr::new(format!("{angle} rad"))),
+                _ => None,
+            };
+            let rotate_axis = angle_expr.as_ref().map(|_| [axis.x, axis.y, axis.z]);
+            let origin_exprs = (p.get("origin").is_some() && (angle_expr.is_some() || has_origin_expr)).then(|| raw_point_exprs(p, "origin", origin));
+            pending_builder = Some((translate, origin_exprs, rotate_axis, angle_expr, None));
+        }
         solidcraft_doc::rigid(t, origin, axis, angle)
     };
-    let space = match p.get("space") {
-        None => "local",
-        Some(Value::String(space)) => space.as_str(),
-        _ => return Err(bad(cmd, "space must be local or world")),
-    };
-    if !matches!(space, "local" | "world") {
-        return Err(bad(cmd, "space must be local or world"));
-    }
-    let capture = bool_(p, "capture").unwrap_or(true);
-    if expressed.is_some() {
-        if !capture {
-            return Err(bad(cmd, "a move by expressions is captured: leave out `capture: false`, or give numbers"));
-        }
-        if o.expressed_moves.len() >= solidcraft_doc::MAX_EXPRESSED_MOVES {
-            return Err(bad(cmd, format!("{} already follows {} moves by expressions", o.name, solidcraft_doc::MAX_EXPRESSED_MOVES)));
-        }
+    if expressed.is_some() && capture && o.expressed_moves.len() >= solidcraft_doc::MAX_EXPRESSED_MOVES {
+        return Err(bad(cmd, format!("{} already follows {} moves by expressions", o.name, solidcraft_doc::MAX_EXPRESSED_MOVES)));
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
     if let Some(target) = target {
@@ -904,7 +1251,13 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             target
         };
-        return place_occurrence(s, p, id, local, None, cmd);
+        let pending_step = if !capture {
+            let cur = s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform);
+            crate::occurrences::captured_delta_move(id, &cur, &local)
+        } else {
+            None
+        };
+        return place_occurrence(s, p, id, local, None, pending_step, cmd);
     }
     // Takes a translation along the axes it was given in into the parent's frame.
     let mut frame = solidcraft_doc::IDENTITY;
@@ -923,8 +1276,23 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
-    let kept = expressed.map(|(translate, at)| solidcraft_doc::ExpressedMove { translate, at, frame, world: space == "world" });
-    place_occurrence(s, p, id, next, kept, cmd)
+    let kept = expressed.map(|m| solidcraft_doc::ExpressedMove {
+        frame,
+        world: space == "world",
+        grounded_ok: o.grounded && bool_(p, "move_grounded") == Some(true),
+        ..m
+    });
+    let pending_step = pending_builder.map(|(translate, origin, rotate_axis, angle, rotation)| CapturedOccurrenceMove {
+        occurrence: id,
+        space: move_space,
+        translate,
+        origin,
+        rotate_axis,
+        angle,
+        rotation,
+        path,
+    });
+    place_occurrence(s, p, id, next, kept, pending_step, cmd)
 }
 
 /// `occurrence.move`'s target pose in `space` (#12150): `to: {position, axis?, angle?}` or
@@ -971,30 +1339,58 @@ fn absolute_target(s: &Session, p: &Value, cmd: &str) -> Result<Option<Mat>> {
 /// Make `next` the occurrence's placement in its parent: captured (and the joints solved) or
 /// pending, as `capture` says. `expressed` is the move's expressions (#8192), kept on the
 /// occurrence with a captured move.
-fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: Option<solidcraft_doc::ExpressedMove>, cmd: &str) -> Result<Value> {
+fn place_occurrence(
+    s: &mut Session,
+    p: &Value,
+    id: u64,
+    next: Mat,
+    expressed: Option<solidcraft_doc::ExpressedMove>,
+    pending_step: Option<CapturedOccurrenceMove>,
+    cmd: &str,
+) -> Result<Value> {
     if !valid_position(&next) {
         return Err(bad(cmd, "move transform exceeds supported numeric range"));
     }
     let capture = bool_(p, "capture").unwrap_or(true);
     if capture {
-        s.pending_moves.remove(&id);
+        s.clear_pending_move(id);
         let kept = expressed.is_some();
+        let mut prev_move = None;
         if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+            let prev = x.transform;
+            let prev_base = x.base_transform;
             x.transform = next;
+            x.adjust_base_for_direct_move(&prev, &next);
             x.expressed_moves.extend(expressed);
+            prev_move = Some((prev, prev_base));
         }
         if !s.doc.assembly.joints.is_empty() {
             let result = after_joints(s, p, id, next, cmd);
-            if kept && result.reverted {
+            if result.reverted {
                 // The joints put it back: the move doesn't hold, so nothing follows it.
                 if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
-                    x.expressed_moves.pop();
+                    if let Some((prev, prev_base)) = prev_move {
+                        let now = x.transform;
+                        x.base_transform = prev_base;
+                        x.adjust_base_for_direct_move(&prev, &now);
+                    }
+                    if kept {
+                        x.expressed_moves.pop();
+                    }
                 }
             }
+            repin_after_move(s, id);
             return reply(result);
         }
+        repin_after_move(s, id);
     } else {
+        let doc_transform = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform).unwrap_or(solidcraft_doc::IDENTITY);
+        let prior_uncaptured = s.uncaptured_moves().get(&id).copied();
+        let base_opt = p.get("base_transform").map(base_transform).transpose().map_err(|message| bad(cmd, message))?;
         s.pending_moves.insert(id, next);
+        if let Some(step) = pending_step {
+            s.record_pending_move(id, doc_transform, prior_uncaptured, base_opt, next, step);
+        }
         s.revision += 1;
     }
     reply(MoveResult { occurrence: id, transform: next, pending: !capture, reverted: false, warning: None, param_warnings: Vec::new() })
@@ -1066,22 +1462,325 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let o = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?;
     o.grounded = want.unwrap_or(!o.grounded);
     let g = o.grounded;
-    reply(GroundResult { occurrence: id, grounded: g, param_warnings: Vec::new() })
+    let before = super::motion::positions(s);
+    // Even a repeated grounded:false request must report existing joint issues. Use the normal
+    // refresh loop so features that read a changed placement are evaluated before the reply.
+    s.joints_settled = None;
+    let solved = s.refresh_with_joint_report().unwrap_or_default();
+    let moved = super::motion::moved(&before, &super::motion::positions(s)).map(|(name, _)| name.clone()).collect();
+    let transform = s.doc.occurrences.iter().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?.transform;
+    reply(GroundResult {
+        occurrence: id,
+        grounded: g,
+        transform,
+        moved,
+        solved: super::joints::solve_report(&solved, &json!({"quiet": true})),
+        param_warnings: Vec::new(),
+    })
 }
 
-fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
+fn capture(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.capture_position";
+    let explicit = p.get("moves").is_some_and(|v| !v.is_null()) || p.get("joints").is_some_and(|v| !v.is_null());
+    let has_name = p.get("name").is_some_and(|v| !v.is_null());
+    let params = if explicit || has_name {
+        serde_json::from_value::<CapturePositionParams>(p.clone()).map_err(|e| bad(cmd, e.to_string()))?
+    } else {
+        CapturePositionParams::default()
+    };
+    if let Some(ref name) = params.name
+        && name.len() > 256
+    {
+        return Err(bad(cmd, "feature name is too long"));
+    }
+    let feature_name = params.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+
+    if explicit {
+        let raw_moves = params.moves.unwrap_or_default();
+        let raw_joints = params.joints.unwrap_or_default();
+        if raw_moves.is_empty() && raw_joints.is_empty() {
+            return Err(bad(cmd, "explicit capture requires at least one move or joint"));
+        }
+        if raw_moves.len() > solidcraft_doc::MAX_PLACEMENTS {
+            return Err(bad(cmd, format!("too many moves (at most {})", solidcraft_doc::MAX_PLACEMENTS)));
+        }
+        if raw_joints.len() > 10_000 {
+            return Err(bad(cmd, "too many joints (at most 10000)"));
+        }
+        let mut captured_moves = Vec::with_capacity(raw_moves.len());
+        for m in raw_moves {
+            if !s.doc.occurrences.iter().any(|o| o.id == m.occurrence) {
+                return Err(bad(cmd, format!("no occurrence `{}`", m.occurrence)));
+            }
+            if let Some(ref path) = m.path {
+                if path.0.last() != Some(&m.occurrence) {
+                    return Err(bad(cmd, "path and occurrence disagree"));
+                }
+                s.occurrence_placement(&path.0).map_err(|e| bad(cmd, e.to_string()))?;
+            }
+            if let Some(rot) = m.rotation
+                && (!solidcraft_doc::is_placement(&rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+            {
+                return Err(bad(cmd, "invalid rotation matrix"));
+            }
+            let space = match m.space {
+                Some(crate::schema::component::MoveSpace::World) => MoveSpace::World,
+                _ => MoveSpace::Local,
+            };
+            let translate = m.translate.map(|[x, y, z]| [x.0, y.0, z.0]).unwrap_or_else(|| [Expr::new("0"), Expr::new("0"), Expr::new("0")]);
+            let origin = m.origin.map(|[x, y, z]| [x.0, y.0, z.0]);
+            let rotate_axis = m.rotate_axis.map(|v| [v.0.x, v.0.y, v.0.z]);
+            let angle = m.angle.map(|a| a.0);
+            captured_moves.push(CapturedOccurrenceMove {
+                occurrence: m.occurrence,
+                space,
+                translate,
+                origin,
+                rotate_axis,
+                angle,
+                rotation: m.rotation,
+                path: m.path.map(|p| p.0),
+            });
+        }
+        let mut captured_joints = Vec::with_capacity(raw_joints.len());
+        for j in raw_joints {
+            let Some(doc_joint) = s.doc.assembly.joints.iter().find(|dj| dj.id == j.joint) else {
+                return Err(bad(cmd, format!("no joint `{}`", j.joint)));
+            };
+            if doc_joint.kind == solidcraft_doc::joints::JointKind::Rigid {
+                return Err(bad(cmd, format!("joint `{}` is rigid", doc_joint.name)));
+            }
+            if j.values.len() > 64 || j.exprs.len() > 64 {
+                return Err(bad(cmd, "joint values exceed supported DOF count"));
+            }
+            if j.values.iter().any(|v| !v.is_finite() || v.abs() >= 1e9) {
+                return Err(bad(cmd, "joint values must be finite and within range"));
+            }
+            if j.exprs.iter().flatten().any(|e| e.trim().is_empty() || e.len() > 4096) {
+                return Err(bad(cmd, "joint expressions must be non-empty and at most 4096 characters"));
+            }
+            captured_joints.push(CapturedJoint { joint: j.joint, values: j.values, exprs: j.exprs });
+        }
+        let (vals, _) = s.doc.param_values();
+        let updates = s.doc.compute_capture_position_step(&vals, &captured_moves).map_err(|e| bad(cmd, e.to_string()))?;
+        let resolved_joints: Vec<CapturedJoint> = captured_joints
+            .iter()
+            .map(|cj| solidcraft_doc::eval_captured_joint(&s.doc, &vals, cj))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| bad(cmd, e.to_string()))?;
+
+        let occ_ids: BTreeSet<u64> = captured_moves.iter().map(|m| m.occurrence).collect();
+        for id in &occ_ids {
+            s.clear_pending_move(*id);
+        }
+        let active_component = s.active_component;
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let feature_id = {
+            let doc = s.doc_mut();
+            for o in &mut doc.occurrences {
+                if occ_ids.contains(&o.id) {
+                    o.base_transform.get_or_insert(o.transform);
+                }
+            }
+            for (idx, next) in updates {
+                if let Some(o) = doc.occurrences.get_mut(idx) {
+                    o.transform = next;
+                }
+            }
+            for cj in &resolved_joints {
+                if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                    let dofs = j.kind.dofs().len();
+                    if j.base_values.is_none() {
+                        let (base_vals, base_exprs) =
+                            pending_bases.remove(&j.id).unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                        j.base_values = Some(base_vals);
+                        j.base_exprs = base_exprs;
+                    } else {
+                        pending_bases.remove(&j.id);
+                    }
+                    let mut q = cj.values.clone();
+                    q.resize(dofs, 0.0);
+                    solidcraft_doc::joints::clamp(j, &mut q);
+                    j.captured = Some(cj.values.clone());
+                    if j.values.len() < dofs {
+                        j.values.resize(dofs, 0.0);
+                    }
+                    for (i, val) in q.into_iter().enumerate() {
+                        if let Some(slot) = j.values.get_mut(i) {
+                            *slot = val;
+                        }
+                        j.exprs.set_value(i, cj.exprs.get(i).and_then(|e| e.clone()));
+                    }
+                }
+            }
+            let feature_id = doc.add_feature(FeatureKind::CapturePosition { moves: captured_moves, joints: captured_joints }, feature_name)?;
+            if active_component != 0
+                && let Some(f) = doc.feature_mut(feature_id)
+            {
+                f.component = active_component;
+            }
+            feature_id
+        };
+        s.pending_joint_bases = pending_bases;
+        s.revision += 1;
+        return reply(CapturePositionResult {
+            captured: occ_ids.len(),
+            joints: resolved_joints.len(),
+            feature: Some(feature_id),
+            param_warnings: Vec::new(),
+        });
+    }
+
+    // Interactive Capture Pos. `{}`:
     // The exploded view is shown, never captured: it stays shown, the design keeps its placements.
-    let moves = s.uncaptured_moves().into_owned();
-    s.pending_moves.retain(|id, _| !moves.contains_key(id));
-    let n = moves.len();
-    for (id, m) in moves {
+    let uncaptured = s.uncaptured_moves().into_owned();
+    let (vals, _) = s.doc.param_values();
+    let mut captured_moves: Vec<CapturedOccurrenceMove> =
+        s.pending_move_records.iter().filter(|r| uncaptured.contains_key(&r.occurrence)).map(|r| r.step.clone()).collect();
+    let close = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= 1e-6);
+    let fast_ok = s.doc.compute_capture_position_step(&vals, &captured_moves).ok().is_some_and(|updates| {
+        let step_ok: BTreeMap<u64, Mat> = updates.into_iter().filter_map(|(idx, mat)| s.doc.occurrences.get(idx).map(|o| (o.id, mat))).collect();
+        uncaptured.iter().all(|(&id, target_mat)| step_ok.get(&id).is_some_and(|m| close(m, target_mat)))
+    });
+    if !fast_ok {
+        let mut working = (*s.doc).clone();
+        let mut failed_occs: BTreeSet<u64> = BTreeSet::new();
+        for m in &captured_moves {
+            if failed_occs.contains(&m.occurrence) {
+                continue;
+            }
+            if working.apply_capture_position_step(&vals, std::slice::from_ref(m)).is_err() {
+                failed_occs.insert(m.occurrence);
+                if let (Some(o), Some(&target_mat)) = (working.occurrences.iter_mut().find(|o| o.id == m.occurrence), uncaptured.get(&m.occurrence)) {
+                    o.transform = target_mat;
+                }
+            }
+        }
+        let replace_with_delta = |doc: &Document, moves: &mut Vec<CapturedOccurrenceMove>, id: u64, target_mat: &Mat| {
+            let first_pos = moves.iter().position(|m| m.occurrence == id);
+            moves.retain(|m| m.occurrence != id);
+            if let Some(o) = doc.occurrences.iter().find(|o| o.id == id)
+                && let Some(delta_step) = crate::occurrences::captured_delta_move(id, &o.transform, target_mat)
+            {
+                let pos = first_pos.map_or(moves.len(), |p| p.min(moves.len()));
+                moves.insert(pos, delta_step);
+            }
+        };
+        for (&id, &target_mat) in &uncaptured {
+            let matched =
+                !failed_occs.contains(&id) && working.occurrences.iter().find(|o| o.id == id).is_some_and(|o| close(&o.transform, &target_mat));
+            if !matched {
+                replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+            }
+        }
+        if let Ok(updates) = s.doc.compute_capture_position_step(&vals, &captured_moves) {
+            let final_ok: BTreeMap<u64, Mat> = updates.into_iter().filter_map(|(idx, mat)| s.doc.occurrences.get(idx).map(|o| (o.id, mat))).collect();
+            for (&id, &target_mat) in &uncaptured {
+                if !final_ok.get(&id).is_some_and(|m| close(m, &target_mat)) {
+                    replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+                }
+            }
+        } else {
+            let mut verify = (*s.doc).clone();
+            let mut extra_failed: BTreeSet<u64> = BTreeSet::new();
+            for m in &captured_moves {
+                if extra_failed.contains(&m.occurrence) {
+                    continue;
+                }
+                if verify.apply_capture_position_step(&vals, std::slice::from_ref(m)).is_err() {
+                    extra_failed.insert(m.occurrence);
+                    if let (Some(o), Some(&target_mat)) =
+                        (verify.occurrences.iter_mut().find(|o| o.id == m.occurrence), uncaptured.get(&m.occurrence))
+                    {
+                        o.transform = target_mat;
+                    }
+                }
+            }
+            for (&id, &target_mat) in &uncaptured {
+                let matched =
+                    !extra_failed.contains(&id) && verify.occurrences.iter().find(|o| o.id == id).is_some_and(|o| close(&o.transform, &target_mat));
+                if !matched {
+                    replace_with_delta(&s.doc, &mut captured_moves, id, &target_mat);
+                }
+            }
+        }
+    }
+
+    let current_joints = solidcraft_doc::joints::joint_values(&s.doc.assembly);
+    let resolved_joints = s.doc.has_capture_position_timeline().then(|| s.model.resolved_joints());
+    let mut captured_joints = Vec::new();
+    let mut any_joint_changed = false;
+    for j in s.doc.assembly.joints.iter().filter(|j| j.kind != solidcraft_doc::joints::JointKind::Rigid) {
+        let dofs = j.kind.dofs().len();
+        let mut q = current_joints.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(dofs, 0.0);
+        let mut e = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+        for (i, slot) in e.iter_mut().enumerate() {
+            if s.doc.assembly.links.iter().any(|l| (l.b, l.ib) == (j.id, i)) {
+                *slot = None;
+            }
+        }
+        let exprs = crate::normalize_joint_exprs(&e, dofs);
+        let prev_exprs: Vec<Option<String>> = if let Some(cj) = resolved_joints.and_then(|m| m.get(&j.id)) {
+            crate::normalize_joint_exprs(&cj.exprs, dofs)
+        } else if let Some((_, base_exprs)) = s.pending_joint_bases.get(&j.id) {
+            crate::normalize_joint_exprs(base_exprs, dofs)
+        } else if j.base_values.is_none() && j.captured.is_some() {
+            exprs.clone()
+        } else {
+            Vec::new()
+        };
+        if j.captured.as_ref() != Some(&q) || exprs != prev_exprs {
+            any_joint_changed = true;
+        }
+        captured_joints.push(CapturedJoint { joint: j.id, values: q, exprs });
+    }
+
+    if uncaptured.is_empty() && !any_joint_changed {
+        return reply(CapturePositionResult { captured: 0, joints: 0, feature: None, param_warnings: Vec::new() });
+    }
+
+    let n = uncaptured.len();
+    s.pending_moves.retain(|id, _| !uncaptured.contains_key(id));
+    s.pending_move_records.retain(|r| !uncaptured.contains_key(&r.occurrence));
+    for (&id, &m) in &uncaptured {
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+            o.base_transform.get_or_insert(o.transform);
             o.transform = m;
         }
     }
+    if !captured_joints.is_empty() {
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let doc = s.doc_mut();
+        for cj in &captured_joints {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                let dofs = j.kind.dofs().len();
+                if j.base_values.is_none() {
+                    let (base_vals, base_exprs) =
+                        pending_bases.remove(&j.id).unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                    j.base_values = Some(base_vals);
+                    j.base_exprs = base_exprs;
+                } else {
+                    pending_bases.remove(&j.id);
+                }
+            }
+        }
+        s.pending_joint_bases = pending_bases;
+    }
     let joints = super::joints::capture_values(s);
+    let active_component = s.active_component;
+    let feature_id = {
+        let doc = s.doc_mut();
+        let id = doc.add_feature(FeatureKind::CapturePosition { moves: captured_moves, joints: captured_joints }, feature_name)?;
+        if active_component != 0
+            && let Some(f) = doc.feature_mut(id)
+        {
+            f.component = active_component;
+        }
+        id
+    };
     s.revision += 1;
-    reply(CapturePositionResult { captured: n, joints, param_warnings: Vec::new() })
+    reply(CapturePositionResult { captured: n, joints, feature: Some(feature_id), param_warnings: Vec::new() })
 }
 
 fn revert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1096,10 +1795,10 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad("component.revert_position", "no occurrence"));
         }
         for id in ids {
-            s.pending_moves.remove(&id);
+            s.clear_pending_move(id);
         }
     } else {
-        s.pending_moves.clear();
+        s.clear_pending_moves();
     }
     let n = before - s.pending_moves.len();
     // Every occurrence going back takes the joints back too; a revert of some occurrences
@@ -1115,12 +1814,90 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     if s.active_component == 0 || crate::frames::mapped() {
         return;
     }
+    to_active_frame_geometry(s, kind);
+}
+
+/// The active component's frame from world coordinates, for a command whose picks `frames` maps
+/// but whose other geometry is still in the world: a sweep's path on a body's edges and the
+/// direction its profile follows.
+pub fn to_active_frame_geometry(s: &Session, kind: &mut FeatureKind) {
+    if s.active_component == 0 {
+        return;
+    }
     let m = s.active_component_frame();
     if solidcraft_doc::is_identity(&m) {
         return;
     }
     if let Some(inv) = solidcraft_doc::mat_inverse(&m) {
         kind.transform_geometry(&inv);
+    }
+}
+
+/// Pins where each component with bodies stands, relative to the active one, on an extrude that
+/// ends To Object or starts From Object (#16732). The pick was made against the model as shown,
+/// so the extrude keeps measuring against that: a joint that slides the drawer must not
+/// stretch a body that was built to the frame's face.
+pub fn pin_picked_placements(s: &Session, kind: &mut FeatureKind) {
+    let state = s.model.state();
+    pin_picked_placements_in(s, kind, s.active_component, &state);
+}
+
+/// [`pin_picked_placements`] for a feature of `own`, with the bodies of `state` (the model
+/// before the feature when an edit picks again). Placements are the design's as shown: the
+/// uncaptured moves count, the exploded view does not.
+pub fn pin_picked_placements_in(s: &Session, kind: &mut FeatureKind, own: u64, state: &solidcraft_doc::ModelState) {
+    let FeatureKind::Extrude { extent, .. } = kind else { return };
+    extent.picked_placements.clear();
+    if (extent.to.is_none() && extent.from.is_none() && extent.to2.is_none()) || s.doc.occurrences.is_empty() {
+        return;
+    }
+    let doc = s.design_document();
+    let Some(inverse) = solidcraft_doc::mat_inverse(&doc.component_transform(own)) else { return };
+    let mut owners = s.doc.model_body_components(state);
+    owners.sort_unstable();
+    owners.dedup();
+    for component in owners.into_iter().filter(|c| *c != own) {
+        let placement = solidcraft_doc::mat_mul(&inverse, &doc.component_transform(component));
+        extent.picked_placements.push(solidcraft_doc::PickedPlacement { component, placement });
+    }
+}
+
+/// A move the user makes (not a joint's) changes where a component stands for good, so each
+/// To / From Object extrude that keeps placements ([`pin_picked_placements`]) with that component
+/// as its own or as a pinned one picks again against the placements shown now (#16732): a face in
+/// a component that was moved is followed, as it always was.
+fn repin_after_move(s: &mut Session, occurrence: u64) {
+    let Some(component) = s.doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.component) else { return };
+    let affected: Vec<u64> = s
+        .doc
+        .features
+        .iter()
+        .filter(|f| matches!(&f.kind, FeatureKind::Extrude { extent, .. }
+            if !extent.picked_placements.is_empty() && (f.component == component || extent.picked_placements.iter().any(|p| p.component == component))))
+        .map(|f| f.id)
+        .collect();
+    for id in affected {
+        let Some(feature) = s.doc.feature(id) else { continue };
+        let (own, mut kind) = (feature.component, feature.kind.clone());
+        let before = s.model.state_before(id);
+        pin_picked_placements_in(s, &mut kind, own, &before);
+        if let Some(f) = s.doc_mut().feature_mut(id) {
+            f.kind = kind;
+        }
+    }
+}
+
+/// [`to_active_frame`] for one plane, of a feature whose other planes are already in the frame.
+pub fn plane_to_active_frame(s: &Session, plane: &mut solidcraft_doc::PlaneRef) {
+    if s.active_component == 0 || crate::frames::mapped() {
+        return;
+    }
+    let m = s.active_component_frame();
+    if solidcraft_doc::is_identity(&m) {
+        return;
+    }
+    if let Some(inv) = solidcraft_doc::mat_inverse(&m) {
+        solidcraft_doc::map_plane_ref(&inv, plane);
     }
 }
 
@@ -1131,7 +1908,7 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
     c.identification_color = Some(next);
     s.colored_components = Some(());
-    Ok(json!({"component": id, "color": next}))
+    reply(CycleColorResult { component: id, color: next, param_warnings: Vec::new() })
 }
 
 /// Mark a component's features out of the History bar, or back in (#10393). The features still
@@ -1141,7 +1918,7 @@ fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value>
     let id = component(s, p, "component", cmd)?;
     let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
     c.history_hidden = hidden;
-    Ok(json!({"component": id, "history_hidden": hidden}))
+    reply(HistoryVisibilityResult { component: id, history_hidden: hidden, param_warnings: Vec::new() })
 }
 
 fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {

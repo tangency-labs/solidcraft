@@ -48,6 +48,7 @@ back (volume, errors, cylinder axes), or change them in one `batch` with `coales
 then set them back the same way before saving.\n\n\
 Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
 (`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
+The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it.\n\n\
 A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -120,6 +121,20 @@ struct Agent {
 }
 
 impl Agent {
+    /// The selection block for a reply, `None` when nothing is selected or the backend cannot say
+    /// (no app listening, an app from before `document.selection`).
+    fn selection(&mut self, tool: &str, result: &Value) -> Option<String> {
+        // `running` and `pending` ask how an earlier request is getting on: they never wait for
+        // another question to the app. Neither does a reply that says a request is still running,
+        // or one that never reached the app.
+        let says = |what: &str| result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(what))));
+        if matches!(tool, "running" | "pending") || says(crate::backend::NOT_RUNNING) || says(crate::backend::STILL_RUNNING) {
+            return None;
+        }
+        let reply = self.backend.call("document.selection", json!({})).ok()?;
+        reply["selection"].as_str().map(str::to_owned)
+    }
+
     /// The options tools use now: the server's own, with what the app's Preferences turn on. The
     /// app is asked until it answers once (it may start after the server, or be busy), and its
     /// answer then holds for this session, so the tools an agent listed keep their shape.
@@ -140,7 +155,20 @@ impl Tools for Agent {
 
     fn list(&mut self) -> Vec<Value> {
         self.listed = self.options();
-        tool_definitions_with(self.listed)
+        let mut tools = tool_definitions_with(self.listed);
+        // Every installed, enabled plugin's entries, read afresh: a plugin turned off or removed
+        // since the last listing is gone from this one.
+        tools.extend(crate::plugin_tools::definitions(self.backend.as_mut()));
+        tools
+    }
+
+    fn definition(&mut self, name: &str) -> Option<Value> {
+        self.listed = self.options();
+        if crate::plugin_tools::is_plugin_tool(name) {
+            crate::plugin_tools::definition_for(self.backend.as_mut(), name)
+        } else {
+            tool_definitions_with(self.listed).into_iter().find(|t| t["name"].as_str() == Some(name))
+        }
     }
 
     fn call(&mut self, name: &str, args: &Value) -> Value {
@@ -165,6 +193,12 @@ impl Tools for Agent {
         {
             content.push(json!({"type": "text", "text": note}));
         }
+        // What the user has selected goes with every reply, so "this" and "these" mean something.
+        if let Some(block) = self.selection(name, &result)
+            && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
+        {
+            content.push(json!({"type": "text", "text": block}));
+        }
         result
     }
 
@@ -177,10 +211,8 @@ impl Tools for Agent {
 
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
         let read = match uri {
-            // The solvecraft:// URIs are what earlier releases listed (compatibility shim,
-            // docs/compatibility.md); clients that saved them still read the resource.
-            "solidcraft://design" | "solvecraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" | "solvecraft://commands" => self.backend.call("engine.commands", json!({})),
+            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
+            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
             _ => return None,
         };
         Some(read.map(|v| Contents::json(&v)))

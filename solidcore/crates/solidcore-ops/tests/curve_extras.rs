@@ -1,6 +1,7 @@
 //! An arc about a centre and a curve extended keeping its control points' proportions, through
 //! ops on record curves.
 
+#![allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -114,4 +115,97 @@ fn a_proportional_extension_stretches_the_cvs_along_the_curve() {
         extend_curve(&c, CurveEndAt::End, -1.0, CurveExtension::Proportion).err(),
         Some(Error::Argument)
     );
+}
+
+/// The length of the polyline through `c` at `n` even steps of each quarter of its parameter
+/// (a comb has at most 2000 teeth): below the curve's arc length (an inscribed polygon), and
+/// within the polyline's chord error of it.
+fn inscribed_length(c: &Curve, n: usize) -> f64 {
+    let mut total = 0.0;
+    for q in 0..4 {
+        let range = [f64::from(q) / 4.0, f64::from(q + 1) / 4.0];
+        let pts: Vec<[f64; 3]> = curve_comb(c, range, n)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.at)
+            .collect();
+        total += pts
+            .windows(2)
+            .map(|w| {
+                let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            })
+            .sum::<f64>();
+    }
+    total
+}
+
+/// #16635: a hooked cubic (its polygon turns back at its end), length 9.848846342765029, grown
+/// by 0.5 and 3 keeping its proportions. On main both came back Ok short of the length asked
+/// (8.77 and 7.53, shorter than the curve). The inscribed polyline at 4 x 1000 stations is below
+/// the arc length, which is within 1e-7 of the length asked (relative), so it is at most that;
+/// and it is within its chord error (well under 1e-3 here) of it.
+#[test]
+fn a_hooked_cubic_extended_keeping_proportion_has_the_length_asked() {
+    let c = Curve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 0.1, 0.0],
+            [9.0, 0.1, 0.0],
+        ],
+    };
+    let before = 9.848_846_342_765_029;
+    assert!((inscribed_length(&c, 1000) - before).abs() < 1e-3);
+    for dist in [0.5, 3.0] {
+        let out = extend_curve(&c, CurveEndAt::End, dist, CurveExtension::Proportion)
+            .unwrap_or_else(|e| panic!("{dist}: {e:?}"));
+        let target = before + dist;
+        let got = inscribed_length(&out, 1000);
+        assert!(
+            got <= target * (1.0 + 1e-7) && got >= target - 1e-3,
+            "{dist}: inscribed length {got}, asked {target}"
+        );
+    }
+}
+
+/// #3384: flat arcs about a far centre, from (h, 0, 0) to (-h, 0, 0) about +Z with the centre at
+/// (0, cy, 0), so over the top: radius r = hypot(h, cy), sagitta h^2 / (r - cy), 1.5e-4 for
+/// (h, cy) = (0.1, -33.3) and 5e-4 for (20, -sqrt(4e5^2 - 400)) (r = 4e5). The arc's points sit
+/// next to the world origin, r from its centre; on main its record was refused as "off its own
+/// frame and radii". Every point is on the circle to rounding at the circle's size and between the
+/// chord and the sagitta.
+#[test]
+fn a_flat_arc_about_a_far_centre_is_built_on_its_circle() {
+    for (h, cy) in [
+        (0.1_f64, -33.3_f64),
+        (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
+    ] {
+        let r = h.hypot(cy);
+        let sagitta = h * h / (r - cy);
+        let arc = arc_about(
+            [0.0, cy, 0.0],
+            [0.0, 0.0, 1.0],
+            [h, 0.0, 0.0],
+            [-h, 0.0, 0.0],
+        )
+        .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        let p = along(&arc);
+        assert!(
+            near(p[0], [h, 0.0, 0.0]) && near(p[32], [-h, 0.0, 0.0]),
+            "h = {h}: {:?} {:?}",
+            p[0],
+            p[32]
+        );
+        for q in &p {
+            assert!(
+                (q[0].hypot(q[1] - cy) - r).abs() <= 1e-12 * r
+                    && q[1] >= -1e-12 * r
+                    && q[1] <= sagitta + 1e-12 * r
+                    && q[2].abs() <= 1e-12 * r,
+                "h = {h}: {q:?} off the circle of radius {r} or past the sagitta {sagitta}"
+            );
+        }
+    }
 }

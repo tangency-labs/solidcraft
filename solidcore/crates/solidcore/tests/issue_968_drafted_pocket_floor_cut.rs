@@ -109,9 +109,7 @@ fn rounded_pocket(k: &mut Kernel) -> Brep {
         .collect();
     let refs: Vec<Option<&Curve>> = square.iter().map(Some).collect();
     // the walls meet at corner edges (WR-521), as a drafted pocket's do
-    k.fixes.taper_tangent_corner_planes = true;
     let tool = create_taper_extrude(k, &refs, 20.0, -10.0, 3, false).unwrap();
-    k.fixes.taper_tangent_corner_planes = false;
     let mut pocketed = boolean_difference(k, block, tool).unwrap();
 
     // R3 on the rim edges (z = 40) and the slanted corner edges of the pocket

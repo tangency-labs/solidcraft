@@ -5,14 +5,19 @@ use super::*;
 const DEPTH_SHADER: &str = r#"
 struct U { vp: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
+// As viewport.wgsl's `FACE_PUSH` and `face_pushed` (`split_push`).
+override FACE_PUSH: f32 = 0.0;
+fn face_pushed(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.xy, c.z * (1.0 - FACE_PUSH * 1.1920929e-7), c.w);
+}
 @vertex
 fn vs(@location(0) p: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return u.vp * vec4<f32>(p, 1.0);
+    return face_pushed(u.vp * vec4<f32>(p, 1.0));
 }
 @vertex
 fn vs_inst(@location(0) p: vec3<f32>, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>) -> @builtin(position) vec4<f32> {
     let q = vec4<f32>(p, 1.0);
-    return u.vp * vec4<f32>(dot(r0,q), dot(r1,q), dot(r2,q), 1.0);
+    return face_pushed(u.vp * vec4<f32>(dot(r0,q), dot(r1,q), dot(r2,q), 1.0));
 }
 @fragment
 fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.0); }
@@ -38,6 +43,14 @@ impl DepthPipelines {
             immediate_size: 0,
         });
         let pipeline = |buffers: &[Option<wgpu::VertexBufferLayout<'_>>], instanced: bool| {
+            let (depth_stencil, push) = split_push(target.depth.map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(depth_compare(target.reversed_depth(), wgpu::CompareFunction::Less)),
+                stencil: Default::default(),
+                bias: depth_bias(target.reversed_depth(), FACE_BIAS),
+            }));
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sc_product_highlight_depth"),
                 layout: Some(&layout),
@@ -45,16 +58,10 @@ impl DepthPipelines {
                     module: &module,
                     entry_point: Some(if instanced { "vs_inst" } else { "vs" }),
                     buffers,
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: target.depth.map(|format| wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(depth_compare(target.reversed_depth(), wgpu::CompareFunction::Less)),
-                    stencil: Default::default(),
-                    bias: depth_bias(target.reversed_depth(), FACE_BIAS),
-                }),
+                depth_stencil,
                 multisample: wgpu::MultisampleState { count: target.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -74,6 +81,8 @@ impl DepthPipelines {
         });
         let feedback = |source: TriSource| {
             let fragment = source.fragment("fs_tri");
+            let (depth_stencil, push) = split_push(highlight_depth(target.depth));
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sc_product_highlight_instanced"),
                 layout: Some(&layout),
@@ -81,10 +90,10 @@ impl DepthPipelines {
                     module: &feedback_module,
                     entry_point: Some(source.entry()),
                     buffers: &[Some(shared_layout()), Some(instance_layout())],
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: highlight_depth(target.depth),
+                depth_stencil,
                 multisample: wgpu::MultisampleState { count: target.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &feedback_module,
@@ -114,48 +123,73 @@ impl DepthPipelines {
 impl Renderer {
     /// Shared product upload and camera setup for ordinary colour and transparent feedback.
     pub(super) fn prepare_product_geometry(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) -> bool {
-        let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation]
-            .map(|filter| device.push_error_scope(filter));
-        self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false);
-        let mut failed = None;
-        for scope in scopes.into_iter().rev() {
-            if let Some(error) = crate::popped(scope.pop()) {
-                failed.get_or_insert(error.to_string());
-            }
-        }
-        if let Some(error) = failed {
-            log::error!("product preview upload failed: {error}");
+        // A large product scene can exceed what the device will allocate. Its upload runs under
+        // its own error scopes, so the failure reaches the preview instead of the device's
+        // uncaptured-error handler, and nothing half-uploaded is drawn.
+        let scopes = crate::error_scopes(device);
+        let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
+        let caught = crate::caught(scopes);
+        let highlight_refused =
+            self.pic.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
+        // Only a failed product upload drops the product batches; a refused highlight keeps the
+        // product picture and is reported below. A refused scene stays in its slot, so the batches
+        // carry no key and the next frame retries it. A scope error means the scene was taken and
+        // what it uploaded can't be trusted, so its key stays and nothing half-uploaded is drawn.
+        if caught.is_some() {
             self.product = Batches { key: Some(frame.key), ..Batches::default() };
-            if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
-                *sink = Some(error);
-            }
-            return false;
+        } else if refused.is_some() {
+            self.product = Batches::default();
         }
-        self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false);
+        let product_failed = caught.or(refused);
+        let failed = product_failed.or(highlight_refused);
+        if let Some(error) = &failed {
+            log::error!("product preview upload failed: {error}");
+            self.refused_upload = Some(error.clone());
+            if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
+                *sink = Some(error.clone());
+            }
+        }
         queue.write_buffer(
             &self.uniform,
             0,
             &uniform_bytes(frame, frame.size_px[0], frame.size_px[1], self.linear_out, self.target.reversed_depth()),
         );
-        true
+        failed.is_none()
     }
 
     /// Prepare a transparent product selection/hover image with its own depth and MSAA.
     /// Emit this instead of the ordinary product callback when live pixels are displayed.
     pub fn prepare_product_highlights(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        self.activate(0);
+        self.pic.isolated = false;
+        self.prepare_product_highlights_frame(device, queue, encoder, frame);
+    }
+
+    /// Render feedback into the picture belonging to one tiled view. Its uniform writes and
+    /// draws must reach the GPU together, like the corresponding shaded tile.
+    pub fn prepare_product_highlights_view(&mut self, slot: u64, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
+        self.activate(slot);
+        self.pic.isolated = true;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_product_highlight_view") });
+        self.prepare_product_highlights_frame(device, queue, &mut encoder, frame);
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    fn prepare_product_highlights_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        self.refused_upload = None;
         let key = frame_key(frame);
-        if self.product_highlights && can_reuse(self.ss_ready && self.ss.is_some(), self.ss_key, key) {
-            let filter = self.ss_scaled && self.cached.is_none();
+        if self.pic.product_highlights && can_reuse(self.pic.ss_ready && self.pic.ss.is_some(), self.pic.ss_key, key) {
+            let filter = self.pic.ss_scaled && self.pic.cached.is_none();
             if filter {
                 self.cache_picture(device, encoder, frame.size_px);
             }
-            self.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
+            self.pic.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
             return;
         }
-        self.product_highlights = true;
-        self.cached = None;
-        self.ss_ready = false;
-        self.ss_key = None;
+        self.pic.product_highlights = true;
+        self.pic.cached = None;
+        self.pic.ss_ready = false;
+        self.pic.ss_key = None;
         // Feedback without product depth would light occluded faces as if visible.
         if !frame.product || self.target.depth.is_none() {
             return;
@@ -166,14 +200,19 @@ impl Renderer {
         if !self.prepare_product_geometry(device, queue, frame) {
             return;
         }
-        self.ss_ready = self.supersample(device, encoder, frame, false);
-        self.ss_key = self.ss_ready.then_some(key);
+        self.pic.ss_ready = self.supersample(device, encoder, frame, false);
+        self.pic.ss_key = self.pic.ss_ready.then_some(key);
     }
 
     /// Alpha-blit only the prepared feedback. There is no shaded-model fallback.
     pub fn paint_product_highlights(&self, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
-        if self.product_highlights && self.ss_ready {
-            self.paint(frame, pass, viewport);
+        self.paint_product_highlights_view(0, frame, pass, viewport);
+    }
+
+    /// Alpha-blit the feedback prepared for this tile.
+    pub fn paint_product_highlights_view(&self, slot: u64, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
+        if self.picture(slot).is_some_and(|picture| picture.product_highlights && picture.ss_ready) {
+            self.paint_view(slot, frame, pass, viewport);
         }
     }
 
@@ -231,7 +270,7 @@ impl Renderer {
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
-        let highlight = &self.highlight;
+        let highlight = &self.pic.highlight;
         pass.set_bind_group(0, scene_bind(highlight, &self.bind), &[]);
         for draw in highlight.hover_instanced.iter().chain(&highlight.selected_instanced).filter(|draw| draw.look == InstanceLook::Opaque) {
             draw.draw(pass, &depth.feedback_smooth, &depth.feedback_flat, tally);

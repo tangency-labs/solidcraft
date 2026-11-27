@@ -57,6 +57,10 @@
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
 //! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
 //! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
+//! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
+//! | [`Extent3d::span_along`]               | (not upstream) the box's reach along a direction |
+//! | [`Extent3d::meets_ray`]                | (not upstream) whether a forward ray meets the padded box |
+//! | [`Extent3d::meets_line`]               | (not upstream) whether an endless line meets the box, within a share of its size |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -729,6 +733,44 @@ impl Extent3d {
         sqrt(self.max_distance_squared(other))
     }
 
+    /// (not upstream) The largest distance from `p` to a point of the box: the distance to
+    /// the farthest of its eight corners, which on each axis is the bound farther from `p`.
+    #[must_use]
+    pub fn max_distance_to_point(&self, p: Point3) -> f64 {
+        let far = |lo: f64, hi: f64, x: f64| {
+            if (x - lo).abs() >= (hi - x).abs() {
+                x - lo
+            } else {
+                hi - x
+            }
+        };
+        Vec3::new(
+            far(self.min.x, self.max.x, p.x),
+            far(self.min.y, self.max.y, p.y),
+            far(self.min.z, self.max.z, p.z),
+        )
+        .length()
+    }
+
+    /// (not upstream) How far the box reaches from `origin` along `direction`, `[low, high]`:
+    /// the least and the greatest [`Vec3::distance_along`] of its points, as many lengths as
+    /// `direction` is long. Those are corners; on each axis the bound farther along `direction`
+    /// adds to `high` and the other to `low`.
+    #[must_use]
+    pub fn span_along(&self, origin: Point3, direction: Vec3) -> [f64; 2] {
+        let (mut low, mut high) = (0.0, 0.0);
+        for i in 0..3 {
+            let d = direction.component(i);
+            let ends = [
+                (self.min_at(i) - origin.component(i)) * d,
+                (self.max_at(i) - origin.component(i)) * d,
+            ];
+            low += ends[0].min(ends[1]);
+            high += ends[0].max(ends[1]);
+        }
+        [low, high]
+    }
+
     /// Square root of [`Extent3d::min_distance_squared`] (`MinimumDistance`).
     #[must_use]
     pub fn min_distance(&self, other: &Self) -> f64 {
@@ -926,14 +968,11 @@ impl Extent3d {
         let scale = 1.0 + sph_cent.max_dimension();
         if dist < sph_rad + EFF_ZERO * scale {
             let axis = if vec.length_squared() > EFF_ZERO * scale {
-                // `Unitize` fails only below EFF_ZERO_SQ, which the test above
-                // excludes; upstream then returns SM_ERR.
-                vec.unitize().map_err(|_| {
-                    SolidError::geom_failed(
-                        "geom::extent3d::Extent3d::cone_bound_to",
-                        "the axis to the sphere's centre has no direction",
-                    )
-                })?
+                // `Unitize` fails only below EFF_ZERO_SQ, which the test above excludes
+                // (`scale >= 1`, so the squared length exceeds SM_EFF_ZERO; a NaN fails the
+                // test): upstream's SM_ERR exit is unreachable and not ported, and the
+                // non-failing unitize gives the same vector here.
+                vec.unitize_or_z()
             } else {
                 Vec3::new(0.0, 0.0, 1.0)
             };
@@ -1067,6 +1106,84 @@ impl Extent3d {
         Ok(LineHit::Miss)
     }
 
+    /// (not upstream) Whether the forward ray `origin + t * dir` (`t >= 0`) meets this finite box
+    /// inflated by a conservative margin derived from its diagonal and `tolerance`.
+    ///
+    /// Conservative on non-finite inputs: returns `true` when the box, `origin`, `dir`, or the
+    /// padded bounds are non-finite or when any slab endpoint is `NaN`, so callers using this for
+    /// culling never skip a box prematurely. Returns `false` for an empty box
+    /// (`has_negative_volume`).
+    #[must_use]
+    pub fn meets_ray(&self, origin: Point3, dir: Vec3, tolerance: f64) -> bool {
+        if self.has_negative_volume() {
+            return false;
+        }
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self.min) || !finite(self.max) || !finite(origin) || !finite(dir) {
+            return true;
+        }
+        let tol_pad = if tolerance.is_finite() && tolerance > 0.0 {
+            tolerance * 10.0
+        } else {
+            0.0
+        };
+        let pad = (self.size().length() * 1e-6).max(tol_pad).max(1e-4);
+        if !pad.is_finite() {
+            return true;
+        }
+        let lo = Vec3::new(self.min.x - pad, self.min.y - pad, self.min.z - pad);
+        let hi = Vec3::new(self.max.x + pad, self.max.y + pad, self.max.z + pad);
+        if !finite(lo) || !finite(hi) {
+            return true;
+        }
+        let (mut t_lo, mut t_hi) = (0.0_f64, f64::INFINITY);
+        for (oo, dd, min, max) in [
+            (origin.x, dir.x, lo.x, hi.x),
+            (origin.y, dir.y, lo.y, hi.y),
+            (origin.z, dir.z, lo.z, hi.z),
+        ] {
+            if dd == 0.0 {
+                if !(min..=max).contains(&oo) {
+                    return false;
+                }
+                continue;
+            }
+            let (a, c) = ((min - oo) / dd, (max - oo) / dd);
+            if a.is_nan() || c.is_nan() {
+                return true;
+            }
+            t_lo = t_lo.max(a.min(c));
+            t_hi = t_hi.min(a.max(c));
+            if t_lo > t_hi {
+                return false;
+            }
+        }
+        t_lo <= t_hi
+    }
+
+    /// (not upstream) Whether the endless line `point + t * dir` meets the box, its sides
+    /// included. Each side counts `share` of the box's size on that axis beyond it, at least
+    /// `share` of a unit, so a line read back from a face of the solid the box bounds still
+    /// meets it. Never for an empty box (inside out, as [`Extent3d::new`] makes it), one that is
+    /// not [defined](Extent3d::is_defined), or a zero `dir`.
+    #[must_use]
+    pub fn meets_line(&self, point: Point3, dir: Vec3, share: f64) -> bool {
+        if !self.is_defined() || self.has_negative_volume() {
+            return false;
+        }
+        let size = self.size();
+        let tol = Vec3::new(
+            size.x.abs().max(1.0),
+            size.y.abs().max(1.0),
+            size.z.abs().max(1.0),
+        ) * share;
+        let grown = Extent3d::from_points(self.min - tol, self.max + tol);
+        matches!(
+            grown.intersect_line(point, dir),
+            Ok(LineHit::Touch { .. } | LineHit::Through { .. })
+        )
+    }
+
     /// True when `min > max` on some axis (e.g. a fresh extent)
     /// (`HasNegativeVolume`).
     #[must_use]
@@ -1182,6 +1299,83 @@ mod tests {
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Vec3::new(x, y, z)
+    }
+
+    /// An endless line meets a box it runs through, one that grazes a side within the given
+    /// share of the box's size, and never one that passes farther off, a zero direction or a
+    /// fresh box.
+    #[test]
+    fn a_line_meets_a_box_it_runs_through_or_grazes_within_the_share() {
+        let e = Extent3d::from_points(p(0.0, 0.0, 0.0), p(20.0, 20.0, 10.0));
+        let up = p(0.0, 0.0, 1.0);
+        assert!(
+            e.meets_line(p(10.0, 10.0, -5.0), up, 1e-6),
+            "through the middle"
+        );
+        assert!(e.meets_line(p(20.0, 10.0, 0.0), up, 1e-6), "along a side");
+        assert!(
+            e.meets_line(p(20.0 + 1e-6, 10.0, 0.0), up, 1e-6),
+            "a millionth off"
+        );
+        assert!(!e.meets_line(p(20.1, 10.0, 0.0), up, 1e-6), "farther off");
+        assert!(
+            !e.meets_line(p(10.0, 10.0, 0.0), Vec3::ZERO, 1e-6),
+            "no direction"
+        );
+        let mut fresh = e;
+        fresh.init();
+        assert!(
+            !fresh.meets_line(p(10.0, 10.0, 0.0), up, 1e-6),
+            "a fresh box"
+        );
+    }
+
+    /// The farthest point of a box from a point is its farthest corner, from inside, from
+    /// outside and from a corner itself.
+    #[test]
+    fn the_largest_distance_to_a_point_is_to_the_farthest_corner() {
+        let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
+        for at in [
+            p(0.0, 1.0, 3.0),
+            p(10.0, -2.0, 0.0),
+            p(-1.0, 0.0, 2.0),
+            p(1.0, 2.5, 3.0),
+        ] {
+            let want = e
+                .corners()
+                .iter()
+                .map(|c| (*c - at).length())
+                .fold(0.0, f64::max);
+            assert!((e.max_distance_to_point(at) - want).abs() < 1e-12, "{at:?}");
+        }
+        assert!((e.max_distance_to_point(p(-1.0, 0.0, 2.0)) - e.max_distance(&e)).abs() < 1e-12);
+    }
+
+    /// A box's reach along a direction runs from its lowest corner to its highest, each axis
+    /// taking the bound on its side, along an axis, a slanted direction, one pointing back, a
+    /// longer one and from an origin inside the box.
+    #[test]
+    fn the_span_along_a_direction_runs_from_the_lowest_corner_to_the_highest() {
+        let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
+        for (origin, direction, want) in [
+            (p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0), [2.0, 4.0]),
+            (p(0.0, 0.0, 0.0), p(0.6, 0.0, -0.8), [-3.8, 0.2]),
+            (p(1.0, 1.0, 1.0), p(-1.0, 0.0, 0.0), [-2.0, 2.0]),
+            (p(1.0, 1.0, 1.0), p(1.0, 2.0, 2.0), [-2.0, 16.0]),
+        ] {
+            let got = e.span_along(origin, direction);
+            let corners = e.corners().map(|c| c.distance_along(origin, direction));
+            let lowest = corners.iter().copied().fold(f64::INFINITY, f64::min);
+            let highest = corners.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            for (a, b) in [
+                (got[0], want[0]),
+                (got[1], want[1]),
+                (lowest, want[0]),
+                (highest, want[1]),
+            ] {
+                assert!((a - b).abs() < 1e-12, "{direction:?}: {got:?} vs {want:?}");
+            }
+        }
     }
 
     /// upstream `my_test_extent3d` (`tests/prog_test/src/smCurveTest.cpp`).
@@ -1583,5 +1777,23 @@ mod tests {
                 1.0
             ))
         );
+    }
+
+    #[test]
+    fn meets_ray_handles_hits_misses_interior_and_degenerate_boxes() {
+        let b = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        assert!(b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -7.0), 1e-6));
+        assert!(b.meets_ray(p(5.0, 5.0, 5.0), p(1.0, 0.0, 0.0), 1e-6));
+        assert!(b.meets_ray(p(-10.0, -10.0, 5.0), p(1.0, 1.0, 0.0), 1e-6));
+        // Grazing just outside the exact face is still kept within the conservative tolerance pad.
+        assert!(b.meets_ray(p(10.05, 5.0, 50.0), p(0.0, 0.0, -1.0), 0.01));
+        assert!(!b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, 1.0), 1e-6));
+        assert!(!b.meets_ray(p(25.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(!Extent3d::new().meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        // Non-finite inputs return true conservatively.
+        let nan_box = Extent3d::from_bounds(f64::NAN, 0.0, 0.0, 10.0, 10.0, 10.0);
+        assert!(nan_box.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(b.meets_ray(p(f64::NAN, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
     }
 }

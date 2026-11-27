@@ -1289,10 +1289,11 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     if kind == "selene_appearances" && !drag {
                         let bodies: Vec<_> = app
                             .session
-                            .selection
-                            .iter()
+                            .selected_items()
+                            .unwrap_or_default()
+                            .into_iter()
                             .filter_map(|selection| match selection {
-                                solidcraft_engine::Sel::Body { name } => Some(name.clone()),
+                                solidcraft_engine::Sel::Body { name } => Some(name),
                                 _ => None,
                             })
                             .collect();
@@ -1308,7 +1309,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                                 },
                             );
                         }
-                        if !app.session.selection.is_empty() {
+                        if app.session.has_selection() {
                             return Err(app.tr("render.material_choose_body").to_string());
                         }
                     }
@@ -1967,8 +1968,25 @@ mod studio_browser_tests {
         assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), selected);
         assert!(h.app.render_workspace.view.job.is_none());
+        // The catalogue is below Scene in the same column. Give its footer room
+        // for the source preview and mapping controls before pressing Save.
+        h.call("ui.resize", json!({"width":1600,"height":1800}));
+        h.frames(3);
+        let footer = crate::scenario::rect_of("render:surface:catalog:footer").unwrap();
+        h.frame_with(vec![
+            egui::Event::PointerMoved(footer.center()),
+            egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1000.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]);
+        h.frames(12);
+        h.step(&json!({"move":{"handle":"render:surface:save-maps"}})).unwrap();
         h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
-        assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review");
+        assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review: {:?}", h.app.status);
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));
         h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -2297,7 +2315,7 @@ mod studio_browser_tests {
             assert_eq!(h.app.session.doc, before);
             h.app.run("edit.redo", json!({})).unwrap();
             assert_eq!(h.app.session.doc, saved);
-            let reopened = solidcraft_engine::doc::Document::from_json(&saved.to_json()).unwrap();
+            let reopened = solidcraft_engine::io::read_design(&solidcraft_engine::io::write_design_container(&saved).unwrap()).unwrap();
             h.app.session = solidcraft_engine::Session::new(reopened);
             h.app.session.set_render_job_host(Some(host.clone())).unwrap();
             super::super::reset_document(&mut h.app);

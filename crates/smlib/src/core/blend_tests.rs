@@ -190,7 +190,7 @@ fn case(name: &str) -> Case {
                     vec![[10.0 - d, 5.0 + d, 20.0], [10.0 + d, 5.0 - d, 20.0], [5.0, 0.0, 20.0], [15.0, 0.0, 20.0]],
                     3.0,
                 ),
-                Expect::Fails(Error::CornerUnsupported),
+                Expect::Fails(Error::CornerUnsupported { why: None, at: None }),
             )
         }
         // √3 from all three edges at the corner (0, 0, 10).
@@ -257,7 +257,11 @@ type Got = std::result::Result<Measured, Error>;
 /// `e` without the size solidcore names for a blend too large ([`Error::TooLarge`]): the C++
 /// kernel's [`Error::NoRoom`], which the capi here does not size.
 fn without_size(e: Error) -> Error {
-    if matches!(e, Error::TooLarge { .. }) { Error::NoRoom } else { e }
+    match e {
+        Error::TooLarge { .. } => Error::NoRoom,
+        Error::CornerUnsupported { .. } => Error::CornerUnsupported { why: None, at: None },
+        e => e,
+    }
 }
 
 /// Checks a kernel's result against the case's closed form; what it measured, or its error.
@@ -316,18 +320,18 @@ cases!(
     pick_ambiguous,
 );
 
-/// What solidcore does not have yet is refused as not supported, after the capi's own checks.
+/// A cornered radius law builds, and a chamfer pick that misses still reports no match.
 #[test]
-fn fork_only_blends_are_not_supported_yet() {
-    let r = timed("unsupported", || {
+fn cornered_variable_fillet_builds_and_chamfer_pick_reports_no_match() {
+    let r = timed("cornered_fillet_and_missing_chamfer_edge", || {
         let b = BLOCK.core();
         // 1 to 2 and back to 1: a corner at the middle.
-        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).err();
+        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).map(|_| ());
         // A pick that fails still says so first.
         let far = chamfer_sides(&b, &[[100.0; 3]], TOL, 2.0, ChamferSecond::Distance(3.0), [0.0, 0.0, 1.0]).err();
         (bent, far)
     });
-    assert_eq!(r.0, Some(Error::Unsupported));
+    assert_eq!(r.0, Ok(()));
     assert_eq!(r.1, Some(Error::NoMatch { point: 0 }));
 }
 
@@ -357,7 +361,7 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
 /// ([`solidcore_ops::blend::session_refusal`]), one case per reason a SolidCraft blend of
 /// boxes and cylinders gives, each the kernel's or ops' own case of that reason
 /// (solidcore's `wr696_fit_sizes.rs`): the L's inner edge past its
-/// wall's top, a can's rim chamfered across its top, a bossed can's rim past the boss, both
+/// wall's top, a square top chamfered across, a bossed can's rim past the boss, both
 /// edges of a narrow end, a cube's corner. The collapsed offset's is solidcraft-kernel's
 /// `a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why`. ops' thin wall
 /// (`BreaksThrough`) builds with SolidCraft's fixes, and the rest reach SolidCraft only from
@@ -381,16 +385,17 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
             K::Radius,
             [7.98, 8.0],
         ),
-        // the cone takes the whole top: an offset of 10 less the margin, as its distance
+        // the chamfers take the whole top of a 10 cube at its depth 5, less the margin, as
+        // their distance (a can's rim chamfered across its top builds a cone, #17198)
         (
-            "can_top",
-            Shape::Cylinder([0.0; 3], 10.0, 20.0).core(),
+            "square_top",
+            Shape::Box([0.0; 3], [10.0; 3]).core(),
             Blend::Chamfer,
-            vec![rim(10.0, 20.0)],
-            10.0,
+            vec![[5.0, 0.0, 10.0], [10.0, 5.0, 10.0], [5.0, 10.0, 10.0], [0.0, 5.0, 10.0]],
+            5.0,
             R::FaceConsumed,
             K::Distance,
-            [0.0, 10.0],
+            [0.0, 5.0],
         ),
         // the rail on the top, a circle of radius 7 - r, reaches the boss at r = 4.3
         (
@@ -429,7 +434,7 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
     for (name, body, kind, points, size, reason, fit, [lo, hi]) in cases {
         let e = timed(name, move || blend(&body, kind, &points, &[size], TOL, &[], &[], Corners::Filled).map(|_| ()).err());
         let Some(e) = e else { panic!("{name}: built") };
-        let Error::TooLarge { size, kind, at: Some(_), why: Some(why) } = e else { panic!("{name}: {e:?}") };
+        let Error::TooLarge { size, kind, at: Some(_), why: Some(why), .. } = e else { panic!("{name}: {e:?}") };
         assert_eq!((why, kind), (reason, fit), "{name}");
         assert!(size > lo && size < hi, "{name}: {size} outside ({lo}, {hi})");
     }
@@ -447,7 +452,7 @@ fn a_distance_angle_chamfer_with_equal_setbacks_too_large_names_its_distance() {
     const TOP: [[f64; 3]; 2] = [[20.0, 0.0, 20.0], [20.0, 4.0, 20.0]];
     let sides = |d: f64| chamfer_sides(&RIB.core(), &TOP, TOL, d, ChamferSecond::Angle(PI / 4.0), [0.0, 0.0, 1.0]);
     let e = timed("angle_fit", move || sides(3.0).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap) } = e else {
+    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap), .. } = e else {
         panic!("{e:?}")
     };
     assert!((size - 2.0).abs() < 1e-9, "{size}");
@@ -475,16 +480,14 @@ fn a_setback_short_of_where_the_rails_cross_names_the_least() {
 }
 
 /// A knife edge (the cusp of `knife_edge_chamfers`' profile: an arc of radius 21 running out
-/// tangent into the top line) chamfered 200: refused naming the distance 21 less the fit margin
-/// (a thousand edge tolerances, 20.99). A knife edge's chamfer has no wedge, so its solver
-/// keeps no chamfer definition; its offsets are its distance (the chord between the contacts
-/// of the ball of that radius), so the radius that fits is the distance that fits
-/// (`FilletSession::chamfer_fit`). The named distance builds the closed form's chamfer:
-/// the triangle flat contact, tip, wall contact less the wall's circular segment. The size
-/// named is the wall contact's limit (the ball's contact leaves the arc at d = 21), the value
-/// SolidCraft named before its refusals were ops'; it is not the chamfer's largest buildable
-/// size (184.033 by construction, where the overflowed chord takes the whole part), which
-/// the kernel does not compute yet (#15250).
+/// tangent into the top line) chamfered 200: refused naming the distance at which the chord
+/// takes the whole part, TIP² / R = 184.033 (its far bottom corner, the chord pivoting about
+/// the point opposite the tip), less the fit margin (a thousand edge tolerances). A knife
+/// edge's chamfer has no wedge, so its solver keeps no chamfer definition; its offsets are its
+/// distance (the chord between the contacts of the ball of that radius), so the radius that
+/// fits is the distance that fits (`FilletSession::chamfer_fit`). The named distance builds
+/// the closed form's chamfer: the sliver at the far bottom corner that the chord through
+/// (0, -2R) and the flat contact (-2 sqrt(R d), 0), from the tip, cuts off (#15250).
 #[test]
 fn a_knife_edge_chamfer_too_large_names_its_distance() {
     use super::sweep::extrude;
@@ -501,22 +504,67 @@ fn a_knife_edge_chamfer_too_large_names_its_distance() {
     ];
     let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
     let again = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
-    let before = (TIP - R) * R * H + R * R * (1.0 - PI / 4.0) * H;
     let tip = [TIP, 0.0, H / 2.0];
     let e = timed("knife_fit", move || blend(&again, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
     let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(at), .. } = e else { panic!("{e:?}") };
-    assert!((d - 20.99).abs() < 1e-9, "{d}");
+    let closed = TIP * TIP / R - 0.01;
+    assert!((d - closed).abs() < 1e-9, "{d}");
     assert!((0..3).all(|i| (at[i] - tip[i]).abs() < 1e-9), "{at:?}");
     let cut = timed("knife_fit_builds", move || blend(&part, Blend::Chamfer, &[tip], &[d], TOL, &[], &[], Corners::Filled).unwrap());
-    let flat = TIP - (4.0 * R * d).sqrt();
-    let wy = -R + (R - d) * R / (R + d);
-    let b = ((R - d) / (R + d)).acos();
-    let removed = (0.5 * ((TIP - flat) * wy).abs() - 0.5 * R * R * (b - b.sin())) * H;
+    let s = (R * d).sqrt();
+    let kept = 0.5 * (R * TIP / s - R) * (TIP - s) * H;
     let v = volume(&cut, 1e-8).unwrap();
-    assert!((v - (before - removed)).abs() < 1e-9 * v, "{v} vs {}", before - removed);
+    // the sliver's bound is the contact solve's, as in solidcore's
+    // `the_distance_named_builds_the_sliver_the_chord_keeps`: its legs lie on exact faces, so
+    // the error is in the chord; each station's Newton stops at `1e-9 * max(1, |m|)`
+    // (`fillet_section/section.rs`, `solve_tol`), m the ball's centre (TIP - 2s, -d, z), so the
+    // volume moves by at most `solve_tol * hypotenuse * H` (3.5e-9 absolute, 7e-4 of the sliver)
+    let hypotenuse = ((TIP - s).powi(2) + (R * TIP / s - R).powi(2)).sqrt();
+    let centre = ((TIP - 2.0 * s).powi(2) + d * d + H * H).sqrt();
+    let solve_tol = 1.0e-9 * centre.max(1.0);
+    assert!((v - kept).abs() <= solve_tol * hypotenuse * H, "{v} vs {kept}");
+    // the sliver's volume goes as the square of what the named distance falls short of
+    // TIP² / R, so its check is ill-conditioned; d = 100 keeps 611.83, well conditioned
+    let third = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let cut = timed("knife_100_builds", move || blend(&third, Blend::Chamfer, &[tip], &[100.0], TOL, &[], &[], Corners::Filled).unwrap());
+    let s = (R * 100.0_f64).sqrt();
+    let kept = 0.5 * (R * TIP / s - R) * (TIP - s) * H;
+    let v = volume(&cut, 1e-8).unwrap();
+    assert!((v - kept).abs() < 1e-9 * v, "{v} vs {kept}");
 }
 
-/// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the
+/// The knife edge of `a_knife_edge_chamfer_too_large_names_its_distance` chamfered 200: the
+/// reason is an overflow that keeps nothing, not corners that take the whole edge (the knife
+/// edge's ends have no corners), and the distance named is where the chord takes all the
+/// part, `TIP² / R` (its far bottom corner, at x = -TIP, y = -R from the tip, the chord
+/// pivoting about the point opposite the tip, so `d = R (TIP / (2R - R))²`), less the fit
+/// margin (#15250).
+#[test]
+fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    const R: f64 = 21.0;
+    const TIP: f64 = 62.0 + 1.0 / 6.0;
+    const H: f64 = 10.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([0.0, 0.0], [0.0, -R]),
+        line([0.0, -R], [TIP - R, -R]),
+        Curve::Arc { center: [TIP, -R, 0.0], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: R, start: PI, end: 1.5 * PI },
+        line([TIP, 0.0], [0.0, 0.0]),
+    ];
+    let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let tip = [TIP, 0.0, H / 2.0];
+    let e =
+        timed("knife_keeps_nothing", move || blend(&part, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why, .. } = e else { panic!("{e:?}") };
+    assert_eq!(why, Some(crate::RoomReason::OverflowKeepsNothing));
+    assert_ne!(why, Some(crate::RoomReason::CornersTakeWholeEdge));
+    let closed = TIP * TIP / R - 0.01;
+    assert!((d - closed).abs() < 1e-9, "{d} vs {closed}");
+}
+
+/// A cliff overflow the fork refuses too (solidcore#960): the
 /// three edges at a 20 mm cube's corner rounded r20, their fillet's boundary on two faces'
 /// surfaces, has no room, as on the fork, not "not supported": too large, the largest radius that
 /// builds 19.99 (the whole edge less solidcore's fit margin), which builds.
@@ -531,6 +579,34 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     timed("cliff_fit", move || {
         blend(&Shape::Box([0.0; 3], [20.0; 3]).core(), Blend::Round, &corner, &[size; 3], TOL, &[], &[], Corners::Filled).unwrap()
     });
+}
+
+/// Two chamfers that overlap (#18178): a 40 high disc of radius 14.5 with a hole of radius 10 off
+/// centre by 2, so its top ring is 2.5 wide at the narrowest place. A 1.5 chamfer on the outer
+/// circle and on the hole's rim alone each builds, and together their contact lines on the top
+/// cross there (1.5 + 1.5 > 2.5): refused as too large for the faces, not as "not a closed solid".
+#[test]
+fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
+    let ring = || {
+        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+        let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
+        boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [2.0, 10.0, 40.0]);
+    timed("overlap_alone", move || {
+        blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+        blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+    });
+    let both = timed("overlap_both", move || {
+        blend(&ring(), Blend::Chamfer, &[outer, rim], &[1.5; 2], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
+    });
+    assert!(overlap_refusal(&both), "{both:?}");
+}
+
+/// The refusal of blends whose contact lines on a face they share cross: unsized, or sized with
+/// the bands' reason.
+fn overlap_refusal(e: &Error) -> bool {
+    matches!(e, Error::NoRoom | Error::TooLarge { why: Some(crate::RoomReason::BandsOverlap), .. })
 }
 
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
@@ -572,7 +648,7 @@ fn overflow_goes_first() {
     }
 }
 
-/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (`fixes.fillet_mitre_concave_face_corners`,
+/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (WR-642,
 /// fork 4f06e72): each edge loses (convex) or gains (concave) the spandrel r²(1 - π/4) along its
 /// length, and in the quadrant beyond both walls the mitred rounds take or add r³(5/3 - π/2): a
 /// 60 x 40 x 10 plate's 30 x 20 x 5 pocket rim at r2 (15 faces) and r5 (11), a 60 x 60 x 5 plate's
@@ -635,7 +711,7 @@ fn rounds_turning_round_a_boss_edge_mitred_or_swept() {
         rec.validate().unwrap();
         let mut tori = Vec::new();
         {
-            let g = b.0.lock().unwrap();
+            let g = b.kernel();
             for f in solidcore::query::api_queries::get_faces(&g).unwrap() {
                 if let Some(s) = solidcore::topology::face::p2::surface(&g, f).unwrap()
                     && let SurfaceKind::Torus(t) = s.kind()
@@ -694,10 +770,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     let block = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 10.0).unwrap();
     let notch = create_box(&mut k, p(35.0, -1.0, -1.0), 6.0, 6.0, 4.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();
@@ -719,10 +792,10 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
 }
 
-/// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
-/// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
+/// Solidcore alone: the pocket rim chamfered 5.5, as WR-642's own test
+/// does it, on the body the boolean gives (with the operand's exact UV trims, WR-361):
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
-/// arrays). Without `fillet_run_on_bspline_trims` it is refused: error 3, Corner Edge Computation
+/// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
 /// Failure (solidcore#1981).
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
@@ -733,13 +806,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     use solidcore::{Kernel, Point3};
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.keep_operand_uv_trims = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();
@@ -763,9 +830,47 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!(r.is_ok(), "{} {}", s.error_info().code, s.error_info().comment);
     drop(s);
     b.refresh_cached_topology();
-    let v = volume(&Body::new(b), 1e-8).unwrap();
+    let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
+}
+
+/// A Ø20 x 20 cylinder with a Ø2 x 4 blind hole in its top face, and a Ø20 x 5 cap joined on top:
+/// the cap seals the hole into a void inside one solid (tangency-labs/solidcraft#18287). A 2 mm
+/// chamfer or round on the top or the bottom rim keeps the void: two shells, the void's three
+/// faces untouched (4 planes, 2 cylinders, and the chamfer's cone or the round's torus as a
+/// rational spline), and the record validates (the solid's region lists its outer shell first).
+/// Pappus for the rim: the chamfer takes the triangle d²/2, its centroid d/3 in from the rim; the
+/// round takes the spandrel, its centroid (10 - 3π)/(12 - 3π) r in.
+#[test]
+fn a_blend_on_a_cap_that_seals_a_hole_keeps_the_void() {
+    let (big, d) = (10.0, 2.0);
+    let sealed = move || {
+        let body = make_cylinder([0.0; 3], big, 20.0).unwrap();
+        let hole = make_cylinder([-4.0, 0.0, 16.0], 1.0, 4.0).unwrap();
+        let body = boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+        let cap = make_cylinder([0.0, 0.0, 20.0], big, 5.0).unwrap();
+        boolean(&body, &cap, BooleanOp::Union).unwrap().unwrap()
+    };
+    let whole = PI * big * big * 25.0 - PI * 4.0;
+    let chamfer_inset = d / 3.0;
+    let round_inset = (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI) * d;
+    for (kind, area, inset) in [(Blend::Chamfer, d * d / 2.0, chamfer_inset), (Blend::Round, spandrel(d), round_inset)] {
+        for z in [25.0, 0.0] {
+            let b = timed("sealed_cap_rim", move || blend(&sealed(), kind, &[[0.0, -big, z]], &[d], TOL, &[], &[], Corners::Filled).unwrap());
+            let v = volume(&b, 1e-10).unwrap();
+            let want = whole - 2.0 * PI * (big - inset) * area;
+            assert!(rel(v, want) < 1e-9, "{kind:?} at z {z}: volume {v}, want {want}");
+            let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e:?}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e}"));
+            assert_eq!(rec.shells.len(), 2, "{kind:?} at z {z}");
+            assert_eq!(rec.regions.iter().filter(|r| r.void).count(), 1, "{kind:?} at z {z}");
+            assert_eq!(counts(&b).unwrap(), [7, 8, 5], "{kind:?} at z {z}");
+            let face = if matches!(kind, Blend::Chamfer) { "cone" } else { "rational_spline" };
+            let surfaces = BTreeMap::from([("cylinder".to_owned(), 2), ("plane".to_owned(), 4), (face.to_owned(), 1)]);
+            assert_eq!(kinds(&rec), surfaces, "{kind:?} at z {z}");
+        }
+    }
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
@@ -806,10 +911,9 @@ fn a_setback_corner_left_open_returns_its_hole() {
 /// does, r² (cot(α/2) - (π - α)/2) per unit length on a wedge α (solidcore#2261): on a 40 x 30 x 20
 /// box with its top back edge chamfered 5, r 2 along the chamfer's top edge (α 135°) takes
 /// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call are
-/// refused: every edge takes the first one's thumbweight, so the other would take 17% too little
-/// or 21% too much (solidcore#2250's comment 6563419897), whichever order they come in.
+/// built, each with its own in either order and G2 to its faces (#13930); this corner is refused.
 #[test]
-fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() {
+fn a_curvature_round_takes_each_wedges_equal_area_in_one_call() {
     let r = 2.0;
     let cut = |alpha: f64| r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
     let chamfered =
@@ -825,11 +929,28 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
+    let want = 40.0 * cut(0.75 * PI) + 40.0 * cut(0.5 * PI);
     for both in [[a, b], [b, a]] {
-        let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
-        assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
-        assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
+        let round = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).unwrap();
+        let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
+        let removed = v0 - volume(&round, 1e-8).unwrap();
+        assert!(rel(removed, want) < 1e-6, "{both:?}: {removed} vs {want}");
+        let (_, order) = round.to_record().unwrap();
+        let tol = solidcore_ops::continuity::ContinuityTolerances {
+            gap_mm: 1e-3,
+            angle_rad: PI / 180.0,
+            curvature_per_mm: 1e-2,
+            curvature_change_per_mm2: 1e-3,
+            curvature_change_rate_per_mm3: 1e-4,
+        };
+        let report = round.continuity_report(&order, &[], 9, tol).unwrap();
+        let rails: Vec<_> = report.seams.iter().filter(|s| s.order_at_stations >= Some(1)).map(|s| s.order_at_stations).collect();
+        assert_eq!(rails.len(), 4, "{both:?}: {rails:?}");
+        assert!(rails.iter().all(|o| *o >= Some(2)), "{both:?}: every rail G2: {rails:?}");
     }
+    let corner = [a, [40.0, 27.5, 17.5]];
+    assert!(blend(&chamfered, Blend::Curvature, &corner, &[r], TOL, &[], &[], Corners::Filled).is_err());
     // Edges of one wedge go together.
     let two = blend(&chamfered, Blend::Curvature, &[b, [20.0, 0.0, 20.0]], &[r], TOL, &[], &[], Corners::Filled).unwrap();
     assert!(rel(v0 - volume(&two, 1e-8).unwrap(), 80.0 * cut(0.5 * PI)) < 1e-6);
@@ -1118,4 +1239,63 @@ mod history {
     fn tags_cross_a_chamfer() {
         check(Blend::Chamfer, 2.0);
     }
+}
+
+/// A ledge between two parabolas that thins to nothing at (−10, −10); its straight rim chamfered 1 mm
+/// runs off the ledge before the corner, where solidcore's Nx1 corner has no topology to make.
+#[test]
+fn a_chamfer_ending_where_its_face_comes_to_a_point_is_refused_with_a_reason() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    let para = |a: [f64; 2], c: [f64; 2], b: [f64; 2], t: f64| -> [f64; 2] {
+        let w = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        [a[0] * w[0] + c[0] * w[1] + b[0] * w[2], a[1] * w[0] + c[1] * w[1] + b[1] * w[2]]
+    };
+    let (a3, c3, b3) = ([-12.5, -12.5], [12.5, -12.5], [12.5, 12.5]);
+    // Where the outer parabola crosses y = -10 (t0) and, by symmetry, x = 10 (1 - t0).
+    let (mut lo, mut hi) = (0.0, 0.5);
+    for _ in 0..80 {
+        let m = 0.5 * (lo + hi);
+        if para(a3, c3, b3, m)[1] < -10.0 { lo = m } else { hi = m }
+    }
+    let (t0, t1) = (0.5 * (lo + hi), 1.0 - 0.5 * (lo + hi));
+    // The piece t0..t1 of the parabola as a quadratic Bezier: its end tangents meet at the control point.
+    let d = |t: f64| [2.0 * ((1.0 - t) * (c3[0] - a3[0]) + t * (b3[0] - c3[0])), 2.0 * ((1.0 - t) * (c3[1] - a3[1]) + t * (b3[1] - c3[1]))];
+    let (p0, p1, d0, d1) = (para(a3, c3, b3, t0), para(a3, c3, b3, t1), d(t0), d(t1));
+    let s = ((p1[0] - p0[0]) * d1[1] - (p1[1] - p0[1]) * d1[0]) / (d0[0] * d1[1] - d0[1] * d1[0]);
+    let ctrl = [p0[0] + d0[0] * s, p0[1] + d0[1] * s];
+    let z = 0.0;
+    let nurbs = |pts: [[f64; 2]; 3], z: f64| Curve::Nurbs {
+        degree: 2,
+        points: vec![[pts[0][0], pts[0][1], z, 1.0], [pts[1][0], pts[1][1], z, 1.0], [pts[2][0], pts[2][1], z, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let line = |a: [f64; 2], b: [f64; 2], z: f64| Curve::Line { start: [a[0], a[1], z], end: [b[0], b[1], z] };
+    let lower = vec![
+        line([-10.0, -10.0], p0, z),
+        nurbs([p0, ctrl, p1], z),
+        line(p1, [10.0, 10.0], z),
+        line([10.0, 10.0], [-10.0, 10.0], z),
+        line([-10.0, 10.0], [-10.0, -10.0], z),
+    ];
+    let upper = vec![
+        nurbs([[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0]], 10.0),
+        line([10.0, 10.0], [-10.0, 10.0], 10.0),
+        line([-10.0, 10.0], [-10.0, -10.0], 10.0),
+    ];
+    let base = extrude(&lower, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let top = extrude(&upper, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let body = boolean(&base, &top, BooleanOp::Union).unwrap().unwrap();
+    // The ledge's straight rim: the side y = -10 from the corner to the outer parabola, at z = 10.
+    let side = [0.5 * (-10.0 + p0[0]), -10.0, 10.0];
+    let e = blend(&body, Blend::Chamfer, &[side], &[1.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err();
+    // No room, the rail leaving its face (main: Status(1001)); a chamfer's words name no rolling ball.
+    assert_eq!(e, Error::NoRoom);
+    assert!(!e.to_string().contains("ball"), "{e}");
+    // The wide part of the ledge takes the chamfer: one face more, 0.5 mm² along ~14 mm of parabola.
+    let mid = para(a3, c3, b3, 0.5);
+    let chamfered = blend(&body, Blend::Chamfer, &[[mid[0], mid[1], 10.0]], &[1.0], TOL, &[], &[], Corners::Filled).unwrap();
+    assert_eq!(counts(&chamfered).unwrap()[0], counts(&body).unwrap()[0] + 1);
+    let removed = volume(&body, 1e-7).unwrap() - volume(&chamfered, 1e-7).unwrap();
+    assert!(removed > 5.0 && removed < 9.0, "removed {removed}");
 }

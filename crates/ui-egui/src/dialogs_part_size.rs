@@ -45,6 +45,9 @@ pub struct Resize {
     pub size: usize,
     pub length: Option<f64>,
     original_size: usize,
+    /// The part's thread is cut into its body, not cosmetic.
+    pub modeled: bool,
+    original_modeled: bool,
     family: Family,
     source: Arc<Document>,
 }
@@ -76,13 +79,13 @@ pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
 }
 
 pub fn selected_component(app: &SolveApp) -> Option<u64> {
-    if app.session.selection.is_empty() {
+    if !app.session.has_selection() {
         let [id] = app.tree.picked_components.as_slice() else { return None };
         return app.session.doc.parts.contains_key(id).then_some(*id);
     }
     let mut bodies = Vec::new();
     let mut component = None;
-    for sel in &app.session.selection {
+    for sel in &app.session.selected_items().unwrap_or_default() {
         match sel {
             Sel::Body { name } => bodies.push(name.clone()),
             Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => bodies.push(body.clone()),
@@ -127,7 +130,17 @@ impl Resize {
             "bearing" => s == part.size.trim(),
             _ => s.eq_ignore_ascii_case(&part.size),
         })?;
-        Some(Self { component, size, original_size: size, length: part.length, family, source: app.session.doc.clone() })
+        let modeled = part.thread.as_deref() == Some("modeled");
+        Some(Self {
+            component,
+            size,
+            original_size: size,
+            length: part.length,
+            modeled,
+            original_modeled: modeled,
+            family,
+            source: app.session.doc.clone(),
+        })
     }
 
     fn current(&self, app: &SolveApp) -> Result<(), String> {
@@ -174,7 +187,7 @@ pub fn open(app: &mut SolveApp, component: u64) {
         needs_a_part(app);
         return;
     }
-    app.session.selection.clear();
+    app.session.clear_selection();
     app.tree.picked_components = vec![component];
     app.start("parts.resize");
 }
@@ -192,6 +205,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
         choice_row(ui, "Length", "part_resize_length", &mut index, &labels);
         k.length = lengths.get(index).copied();
     }
+    crate::dialogs_parts::thread_row(ui, &k.family, &mut k.modeled);
     if let Some((size, _)) = k.family.sizes.get(k.size) {
         row(ui, "Configuration", |ui| {
             ui.label(configuration_name(&k.family.id, size, k.length));
@@ -199,6 +213,23 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     }
     crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
     false
+}
+
+/// The live preview's commands: a modelled thread takes seconds to cut, so a resize that would
+/// cut one, asked for or kept from the part as it is, shows a cosmetic thread; OK cuts it.
+pub(crate) fn preview(k: &Resize, cmds: &mut [(String, Value)]) {
+    for (id, p) in cmds {
+        let modeled = match p.get("thread") {
+            Some(thread) => thread.as_str() == Some("modeled"),
+            None => k.original_modeled,
+        };
+        if id == "parts.resize"
+            && modeled
+            && let Value::Object(m) = p
+        {
+            m.insert("thread".into(), json!("cosmetic"));
+        }
+    }
 }
 
 pub fn commands(app: &SolveApp, k: &Resize) -> Result<Vec<(String, Value)>, String> {
@@ -211,7 +242,9 @@ pub fn commands(app: &SolveApp, k: &Resize) -> Result<Vec<(String, Value)>, Stri
         }
         params["length"] = json!(length);
     }
-    if k.size == k.original_size && k.source.parts.get(&k.component).is_some_and(|part| part.length == k.length) {
+    if k.modeled != k.original_modeled {
+        params["thread"] = json!(if k.modeled { "modeled" } else { "cosmetic" });
+    } else if k.size == k.original_size && k.source.parts.get(&k.component).is_some_and(|part| part.length == k.length) {
         return Ok(Vec::new());
     }
     Ok(vec![("parts.resize".into(), params)])
@@ -261,6 +294,43 @@ mod tests {
         crate::dialogs::cancel(app);
     }
 
+    /// The Modeled thread checkbox starts on how the part was made, and a change of it alone
+    /// reaches `parts.resize`; leaving everything as it was runs nothing.
+    #[test]
+    fn the_modeled_thread_checkbox_changes_a_placed_part() {
+        let (mut app, id) = part("hex_nut", "M6", None);
+        open(&mut app, id);
+        assert!(!editor(&app).modeled);
+        assert!(crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap().is_empty());
+        let Kind::PartSize(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("not a part-size dialog") };
+        k.modeled = true;
+        let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands[0].1["thread"], "modeled", "{commands:?}");
+        apply(&mut app);
+        assert_eq!(app.session.doc.parts.get(&id).and_then(|p| p.thread.clone()).as_deref(), Some("modeled"));
+        open(&mut app, id);
+        assert!(editor(&app).modeled, "it reopens on the thread the part has");
+        let Kind::PartSize(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("not a part-size dialog") };
+        k.modeled = false;
+        let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands[0].1["thread"], "cosmetic", "{commands:?}");
+    }
+
+    /// A part with a modelled thread previews a new size with a cosmetic thread, though the
+    /// command leaves `thread` out; OK's command still leaves it out, so the thread stays modelled.
+    #[test]
+    fn a_resize_preview_of_a_modeled_part_stays_cosmetic() {
+        let (mut app, id) = part("hex_nut", "M6", None);
+        app.run("parts.resize", json!({"component": id, "thread": "modeled"})).unwrap();
+        open(&mut app, id);
+        let Kind::PartSize(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("not a part-size dialog") };
+        k.size += 1;
+        let preview = crate::dialogs::preview_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(preview[0].1["thread"], "cosmetic", "{preview:?}");
+        let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert!(commands[0].1.get("thread").is_none(), "{commands:?}");
+    }
+
     #[test]
     fn part_size_browser_configuration_edits_the_same_part_and_follows_history_and_reopen() {
         let (mut app, component) = part("socket_head_cap_screw", "M6", Some(20.0));
@@ -273,7 +343,7 @@ mod tests {
         let before = app.session.doc.clone();
         let undo = app.session.undo.len();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         for id in [first, second] {
             h.app.tree.collapsed.insert(format!("o:{id}"));
@@ -486,6 +556,14 @@ mod tests {
             ("set_screw", "M5", Some(10.0)),
             ("dowel_pin", "6", Some(20.0)),
             ("bearing", "608", None),
+            ("hex_bolt_gost", "M6", Some(20.0)),
+            ("socket_head_cap_screw_gost", "M6", Some(20.0)),
+            ("set_screw_gost", "M6", Some(10.0)),
+            ("hex_nut_gost", "M6", None),
+            ("hex_nut_thin_gost", "M6", None),
+            ("washer_gost", "M6", None),
+            ("washer_large_gost", "M6", None),
+            ("dowel_pin_gost", "6", Some(20.0)),
             ("hex_cap_screw_inch", "1/2-13 UNC", Some(2.0 * 25.4)),
             ("hex_nut_inch", "1/2-13 UNC", None),
             ("washer_sae", "1/2", None),
@@ -540,7 +618,7 @@ mod tests {
         let (mut app, id) = part("socket_head_cap_screw", "M5", Some(20.5));
         app.run("document.units", json!({"units":"in"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         menu(&mut h.app, Target::Component { id });
         h.frames(3);
@@ -559,7 +637,7 @@ mod tests {
         let (app, id) = part("hex_cap_screw_inch", "1/2-13 UNC", Some(1.5 * 25.4));
         assert_eq!(configuration(&app, id).as_deref(), Some("1/2-13 UNC×1-1/2 in"));
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         menu(&mut h.app, Target::Component { id });
         h.frames(3);
@@ -573,7 +651,7 @@ mod tests {
     fn part_size_real_widgets_change_size_length_and_confirm_once() {
         let (app, id) = part("socket_head_cap_screw", "M5", Some(20.5));
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         h.frames(3);
         let undo = h.app.session.undo.len();

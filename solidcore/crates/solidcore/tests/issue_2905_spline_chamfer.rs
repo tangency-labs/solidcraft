@@ -10,17 +10,31 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::blend::blend_refusal::tangent_chain;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::arc::ArcDefinition;
+use solidcore::curve::curve::Curve;
+use solidcore::curve::line::Line;
+use solidcore::curve::path::PathPiece;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::surface::procedural_blend::chamfer::ChamferSize;
+use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+use solidcore::surface::procedural_blend::record::RadiusRecord;
+use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::is_outward_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::face::p2::surface;
 use solidcore::topology::{Brep, EdgeId};
-use solidcore::Kernel;
+use solidcore::{Kernel, Vec3};
 
 const R: f64 = 3.0;
 const D: f64 = 0.473;
@@ -50,9 +64,7 @@ fn nearest(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
 
 /// A kernel with the chamfer's definition on.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// A 40 x 30 x 20 box with its top front edge rounded `R`, and its chain round the side face
@@ -168,4 +180,165 @@ fn offsets_within_the_loop_gap_are_not_refused_by_name() {
     if let Err((why, ..)) = chamfer(&mut k, &mut b, &chain, [D, near, D]) {
         assert_ne!(why, Some(NoRoomReason::JoinOffsetsDiffer));
     }
+}
+
+const SLANTED_END: f64 = (22.266243 - 17.733757) / 60.0;
+
+fn bar_with_cut_end(k: &mut Kernel, slope: f64) -> Brep {
+    let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+    let arc = |x, z, quarter| {
+        let step = 0.5 * PI;
+        PathPiece::of_arc(
+            k,
+            &ArcDefinition {
+                centre: Point3::new(x, 0.0, z),
+                axis: -Vec3::Y,
+                reference: Vec3::X,
+                radius: 1.0,
+                start: quarter * step,
+                end: (quarter + 1.0) * step,
+            },
+        )
+        .unwrap()
+        .curve()
+        .clone()
+    };
+    let p = |x, z| Point3::new(x, 0.0, z);
+    let profile = [
+        line(p(-19.0, 0.0), p(19.0, 0.0)),
+        arc(19.0, 1.0, -1.0),
+        line(p(20.0, 1.0), p(20.0, 5.0)),
+        arc(19.0, 5.0, 0.0),
+        line(p(19.0, 6.0), p(-19.0, 6.0)),
+        arc(-19.0, 5.0, 1.0),
+        line(p(-20.0, 5.0), p(-20.0, 1.0)),
+        arc(-19.0, 1.0, 2.0),
+    ];
+    let bar = create_linear_sweep(k, &profile.each_ref().map(Some), Vec3::Y, 40.0, true).unwrap();
+
+    let cut = [
+        Point3::new(-30.0, -5.0, -5.0),
+        Point3::new(30.0, -5.0, -5.0),
+        Point3::new(30.0, 20.0 + 30.0 * slope, -5.0),
+        Point3::new(-30.0, 20.0 - 30.0 * slope, -5.0),
+    ];
+    let profile = std::array::from_fn::<_, 4, _>(|i| line(cut[i], cut[(i + 1) % cut.len()]));
+    let cutter =
+        create_linear_sweep(k, &profile.each_ref().map(Some), Vec3::Z, 25.0, true).unwrap();
+    boolean_difference(k, bar, cutter).unwrap()
+}
+
+fn end_rim(k: &Kernel, body: &mut Brep) -> Vec<EdgeId> {
+    let start = nearest(k, body, Point3::new(0.0, 20.0, 6.0));
+    let chain = tangent_chain(k, body, &[start], 0.5_f64.to_radians()).unwrap();
+    assert_eq!(chain.len(), 8);
+    chain
+}
+
+fn assert_on_rail(k: &Kernel, body: &Brep, point: Point3, tolerance: f64) {
+    let rail = nearest(k, body, point);
+    let distance = edge_closest_point(k, body, rail, point)
+        .unwrap()
+        .closest
+        .distance;
+    assert!(distance < tolerance, "rail at {point:?}: gap {distance}");
+}
+
+#[test]
+fn a_chamfer_on_a_cut_rounded_bar_keeps_its_setbacks() {
+    for (slope, width) in [(0.0_f64, 0.2), (SLANTED_END, 0.2), (SLANTED_END, 0.0123)] {
+        let mut k = kernel();
+        let mut body = bar_with_cut_end(&mut k, slope);
+        let before = volume(&k, &mut body);
+        assert!((before - 20.0 * (236.0 + PI)).abs() < 1e-6);
+
+        let chain = end_rim(&k, &mut body);
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_chamfers_along(&k, &chain, &[ChamferSize::Distances([width; 2])], &[])
+            .unwrap();
+        if let Err(err) = session.do_fillet(&mut k) {
+            panic!(
+                "slope {slope}, width {width}: {err:?}, {:?}",
+                session.error_info().no_room_reason()
+            );
+        }
+        drop(session);
+
+        let findings = check_brep(&mut k, &mut body, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(findings.is_empty(), "{findings:?}");
+        assert!(is_outward_solid(&mut k, &mut body).unwrap());
+        assert_eq!(body.face_list().len(), 18);
+        assert!(volume(&k, &mut body) < before);
+
+        // In each plane, the rail is the requested width from the original straight rim.
+        let normal_scale = 1.0_f64.hypot(slope);
+        let mut rails = vec![
+            Point3::new(0.0, 20.0 + width * normal_scale, 6.0),
+            Point3::new(0.0, 20.0, 6.0 - width),
+        ];
+        for side in [-1.0, 1.0] {
+            let x = side * 20.0;
+            let on_cap = x - side * width / normal_scale;
+            rails.push(Point3::new(x, 20.0 + slope * x + width, 3.0));
+            rails.push(Point3::new(on_cap, 20.0 + slope * on_cap, 3.0));
+        }
+        for point in rails {
+            assert_on_rail(&k, &body, point, 1e-6);
+        }
+
+        // At each upper arc's 45-degree station, shift the two tangent planes by
+        // the radius for the requested width in their wedge. The cylinder's radial normal has
+        // zero Y component, so its contact lies at the original X and Z.
+        let cap_inward = Vec3::new(-slope, 1.0, 0.0) / normal_scale;
+        let across = std::f64::consts::FRAC_1_SQRT_2;
+        for side in [-1.0, 1.0] {
+            let lateral_inward = Vec3::new(-side * across, 0.0, -across);
+            let wedge = (-lateral_inward.dot(cap_inward)).acos();
+            let radius = width * (0.5 * wedge).tan();
+            let x = side * (19.0 + across);
+            let y = 20.0 + slope * (x + radius * lateral_inward.x) + radius * normal_scale;
+            let lateral = Point3::new(x, y, 5.0 + across);
+            let cap = lateral + radius * (lateral_inward - cap_inward);
+            assert_on_rail(&k, &body, lateral, 1e-5);
+            assert_on_rail(&k, &body, cap, 1e-5);
+        }
+
+        if slope != 0.0 {
+            let definitions: Vec<_> = body
+                .face_list()
+                .iter()
+                .filter_map(|&id| match surface(&body, id).unwrap().map(Surface::kind) {
+                    Some(SurfaceKind::ProceduralBlend(blend)) => {
+                        Some(to_record(&k, blend).unwrap())
+                    }
+                    _ => None,
+                })
+                .filter(|record| matches!(record.definition.radius, RadiusRecord::EqualSetback))
+                .collect();
+            assert_eq!(definitions.len(), 4);
+            let restored = rebuild(&k, &definitions[0]).unwrap();
+            assert!(restored.recertify(&k).unwrap() <= restored.bound());
+        }
+    }
+}
+
+#[test]
+fn a_cut_bar_chamfer_with_mismatched_setbacks_is_refused_at_the_join() {
+    let mut k = kernel();
+    let mut body = bar_with_cut_end(&mut k, SLANTED_END);
+    let chain = end_rim(&k, &mut body);
+    let mut sizes = vec![ChamferSize::Distances([0.2; 2]); chain.len()];
+    sizes[0] = ChamferSize::Distances([0.4; 2]); // the top run
+    let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+    session
+        .prepare_chamfers_along(&k, &chain, &sizes, &[])
+        .unwrap();
+    session.do_fillet(&mut k).unwrap_err();
+    assert_eq!(
+        session.error_info().no_room_reason(),
+        Some(NoRoomReason::JoinOffsetsDiffer)
+    );
 }

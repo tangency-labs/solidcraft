@@ -58,14 +58,14 @@ pub const KNOWN: &[Known] = &[
         retired: false,
         reports_version: true,
     },
-    // Google's `agy` command line has no ACP mode; its ACP server is a separate download that the
-    // ACP registry lists (`agy_acp_server.par`, `agy_acp_server.exe` on Windows).
+    // Google's `agy` CLI supports ACP with `agy acp` (#22487); its standalone ACP server is also
+    // supported (`agy_acp_server.par`, `agy_acp_server.exe` on Windows).
     Known {
         id: "antigravity",
         name: "Google Antigravity",
-        programs: &["agy_acp_server.par", "agy_acp_server"],
+        programs: &["agy_acp_server.par", "agy_acp_server", "agy"],
         args: &[],
-        install: "download the Antigravity ACP server for your system (see agentclientprotocol.com/registry), unzip it and put agy_acp_server.par on your PATH",
+        install: "download the Antigravity ACP server for your system (see agentclientprotocol.com/registry), unzip it and put agy_acp_server.par on your PATH, or install the agy CLI",
         credentials: Some(".gemini/antigravity-acp/acp_token.json"),
         config_dir_var: None,
         key_vars: &["GEMINI_API_KEY"],
@@ -226,6 +226,15 @@ pub fn search_dirs() -> Vec<PathBuf> {
     search_dirs_in(&|name| std::env::var_os(name), cfg!(windows))
 }
 
+/// `v22.14.0` (or `22.14.0`) as (major, minor, patch); None when the name isn't a version.
+fn node_version(name: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = name.strip_prefix('v').unwrap_or(name).split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((major, minor, patch))
+}
+
 /// [`search_dirs`] in the environment `var` reads, on Windows or not.
 fn search_dirs_in(var: &dyn Fn(&str) -> Option<OsString>, windows: bool) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = var("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
@@ -238,9 +247,11 @@ fn search_dirs_in(var: &dyn Fn(&str) -> Option<OsString>, windows: bool) -> Vec<
         }
         // nvm: every installed Node version's bin.
         if let Ok(rd) = std::fs::read_dir(h.join(".nvm/versions/node")) {
-            let mut v: Vec<PathBuf> = rd.flatten().take(64).map(|e| e.path().join("bin")).collect();
-            v.sort();
-            dirs.extend(v.into_iter().rev());
+            let mut v: Vec<(Option<(u64, u64, u64)>, PathBuf)> =
+                rd.flatten().map(|e| (e.file_name().to_str().and_then(node_version), e.path().join("bin"))).collect();
+            // Newest version first by number (v22 before v8); a folder that isn't a version goes last.
+            v.sort_by(|a, b| b.cmp(a));
+            dirs.extend(v.into_iter().take(64).map(|(_, p)| p));
         }
     }
     if windows {
@@ -453,8 +464,16 @@ fn login_of(k: &Known, home: Option<&Path>) -> Login {
         None => k.credentials.zip(home).map(|(rel, h)| h.join(rel)),
     };
     let key = || k.key_vars.iter().any(|v| std::env::var_os(v).is_some_and(|x| !x.is_empty()));
+    if file.as_ref().is_some_and(|f| f.is_file()) {
+        return Login::LooksLoggedIn;
+    }
+    if k.id == "antigravity"
+        && let Some(h) = home
+        && h.join(".gemini/antigravity-cli/antigravity-oauth-token").is_file()
+    {
+        return Login::LooksLoggedIn;
+    }
     match file {
-        Some(f) if f.is_file() => Login::LooksLoggedIn,
         _ if key() => Login::KeyInEnvironment,
         // Claude Code keeps its login in the keychain on macOS: the file says nothing there.
         _ if cfg!(target_os = "macos") && k.id == "claude" => Login::Unknown,
@@ -481,6 +500,9 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         let login = login_of(k, home);
         let mut argv = vec![path.to_string_lossy().into_owned()];
         argv.extend(k.args.iter().map(|a| a.to_string()));
+        if k.id == "antigravity" && path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("agy")) {
+            argv.push("acp".into());
+        }
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
             result.problem = Some(solidcraft_ui_text::format("ui.agent_chat_node_too_old", &[("version", version)]));
@@ -808,6 +830,37 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn antigravity_cli_is_found_and_starts_with_acp_subcommand() -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("sc-agent-agy-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("sc-agent-agy-home-{}", std::process::id()));
+        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(home.join(".gemini/antigravity-cli"))?;
+        let agy = root.join("agy");
+        std::fs::write(&agy, "#!/bin/sh\necho 1.5.16\n")?;
+        std::fs::set_permissions(&agy, std::fs::Permissions::from_mode(0o755))?;
+
+        let d = detect_in(std::slice::from_ref(&root), Some(&home), PROBE_LIMIT);
+        let Some(found) = d.found.iter().find(|f| f.id == "antigravity") else {
+            return Err("antigravity not found in first detection".into());
+        };
+        assert_eq!(found.argv, vec![agy.to_string_lossy().into_owned(), "acp".into()]);
+        assert_eq!(found.login, Login::NotLoggedIn);
+
+        std::fs::write(home.join(".gemini/antigravity-cli/antigravity-oauth-token"), "token")?;
+        let d2 = detect_in(std::slice::from_ref(&root), Some(&home), PROBE_LIMIT);
+        let Some(found2) = d2.found.iter().find(|f| f.id == "antigravity") else {
+            return Err("antigravity not found in second detection".into());
+        };
+        assert_eq!(found2.login, Login::LooksLoggedIn);
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(home);
+        Ok(())
+    }
+
+    #[test]
     fn every_known_agent_has_a_program_and_an_install_hint() {
         for k in KNOWN {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
@@ -819,7 +872,9 @@ mod tests {
     fn vibe_is_offered_for_install_and_discovered_as_an_acp_executable() {
         let root = std::env::temp_dir().join(format!("sc-agent-vibe-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let detect = || detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
+        // A generous limit, as the other probes here: a whole test run can keep the shell from
+        // starting within the app's three seconds, and a probe that runs out reports no version.
+        let detect = || detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
         let uninstalled = detect();
         let missing = uninstalled.missing.iter().find(|agent| agent.id == "vibe").unwrap();
         assert_eq!(missing.install, "uv tool install mistral-vibe");
@@ -946,6 +1001,29 @@ mod tests {
         assert_eq!(search_dirs_in(&|name| (name == "PATH").then(|| system.clone().into()), true), std::slice::from_ref(&system));
         assert!(!search_dirs_in(&env, false).iter().any(|d| d.ends_with("nodejs")));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// nvm's Node folders are searched newest first by version number, not as text: `v8.15.0`
+    /// sorts after `v22.14.0` as text, and an agent's `#!/usr/bin/env node` then ran on Node 8
+    /// (#18007). A folder whose name isn't a version goes last.
+    #[test]
+    fn nvm_node_versions_are_searched_newest_first_by_number() {
+        let home = std::env::temp_dir().join(format!("sc-agent-nvm-{}", std::process::id()));
+        let versions = home.join(".nvm/versions/node");
+        for name in ["v8.15.0", "v12.22.12", "v12.16.1", "v16.20.0", "v22.14.0", "current"] {
+            std::fs::create_dir_all(versions.join(name).join("bin")).unwrap();
+        }
+        let env = |name: &str| -> Option<OsString> { (name == "HOME").then(|| home.clone().into()) };
+        let dirs = search_dirs_in(&env, false);
+        let order: Vec<String> = dirs
+            .iter()
+            .filter_map(|d| d.strip_prefix(&versions).ok())
+            .filter_map(|d| d.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(order, ["v22.14.0", "v16.20.0", "v12.22.12", "v12.16.1", "v8.15.0", "current"]);
+        assert_eq!(node_version("v8.15.0"), Some((8, 15, 0)));
+        assert_eq!(node_version("v8.15"), None);
+        let _ = std::fs::remove_dir_all(home);
     }
 
     /// Finder's PATH lacks user-installed runtimes. Discovery, the version probe and a live

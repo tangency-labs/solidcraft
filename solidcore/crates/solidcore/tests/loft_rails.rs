@@ -13,6 +13,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::query::api_queries::surface_closest_point;
 use solidcore::sweep::loft_rails::{loft_rails, RailLoftOptions, RailSection, RailedLoft};
+use solidcore::sweep::stations::RailFit;
 use solidcore::Kernel;
 
 /// A B-spline curve of `degree` through the control points `points` with the full knots
@@ -180,6 +181,60 @@ fn a_straight_rail_tapering_similar_sections_gives_the_frustum() {
     assert!(off <= 1e-9, "{off}");
 }
 
+/// The rectangle and trapezoid lie on perpendicular planes. Their corresponding
+/// corners interpolate to nonplanar closed wires, which are valid skin sections.
+/// At x in [-2, 2], the YZ area is (20 * (22.5 + 1.25*x) - 10^2) / 2:
+/// the outer triangle less the inner triangle. Integrating over x gives 700 mm^3.
+#[test]
+fn perpendicular_sections_with_a_guide_can_have_nonplanar_interior_wires() {
+    let mut k = Kernel::default();
+    let first = [
+        Point3::new(-2.0, 0.0, 10.0),
+        Point3::new(2.0, 0.0, 10.0),
+        Point3::new(2.0, 0.0, 20.0),
+        Point3::new(-2.0, 0.0, 20.0),
+    ];
+    let last = [
+        Point3::new(-2.0, 10.0, 0.0),
+        Point3::new(2.0, 10.0, 0.0),
+        Point3::new(2.0, 25.0, 0.0),
+        Point3::new(-2.0, 20.0, 0.0),
+    ];
+    let wire = |points: &[Point3; 4]| {
+        points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| line(a, b))
+            .collect::<Vec<_>>()
+    };
+    let lower = wire(&first);
+    let upper = wire(&last);
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: -Vec3::Y,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rail = line(Point3::new(0.0, 0.0, 10.0), Point3::new(0.0, 10.0, 0.0));
+    let mut opts = RailLoftOptions::new(1e-6);
+    opts.fit = RailFit::Stretch;
+    opts.closed = true;
+    opts.cap = true;
+    let mut made = loft_rails(&mut k, &sections, &[&rail], &opts).unwrap();
+    assert!(made.bounds.iter().all(|&b| b <= 1e-6));
+    assert!(solidcore::topology::brep::is_outward_solid(&mut k, &mut made.skin.brep).unwrap());
+    let volume =
+        solidcore::mass::integrator::properties::brep_volume_default(&k, &mut made.skin.brep, 1e-9)
+            .unwrap();
+    assert!((volume - 700.0).abs() < 1e-6, "volume {volume} vs 700");
+}
+
 /// The hull side of #3140 (the case its first comment gives): keel and sheer sections, stem and transom rails, each a
 /// natural cubic through its points (mm). SolidCraft's even fill of 15 stations per span left
 /// the bow edge up to 2.65 mm off the stem in the forefoot's hook, against its own tolerance
@@ -334,11 +389,16 @@ fn malformed_rail_lofts_are_refused() {
         loft_rails(&mut k, &sections, &[&rail], &RailLoftOptions::new(0.0)),
         "a railed loft's tolerance is finite and positive",
     );
-    // no rail, three rails
+    // no rail, seventeen rails
     invalid(
         loft_rails(&mut k, &sections, &[], &RailLoftOptions::new(1e-6)),
-        "a loft takes one or two guide rails",
+        "a loft takes 1 to 16 guide rails",
     );
+    invalid(
+        loft_rails(&mut k, &sections, &[&rail; 17], &RailLoftOptions::new(1e-6)),
+        "a loft takes 1 to 16 guide rails",
+    );
+    // three rails, two of them at one point of the sections
     invalid(
         loft_rails(
             &mut k,
@@ -346,7 +406,7 @@ fn malformed_rail_lofts_are_refused() {
             &[&rail, &rail, &rail],
             &RailLoftOptions::new(1e-6),
         ),
-        "a loft takes one or two guide rails",
+        "the guide rails meet a section at the same point",
     );
     // one section
     invalid(
@@ -374,4 +434,480 @@ fn malformed_rail_lofts_are_refused() {
         ),
         "the two guide rails meet a section at the same point",
     );
+    // three rails, one crossing a section's plane away from its curves
+    let second = line(Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 0.0, 5.0));
+    invalid(
+        loft_rails(
+            &mut k,
+            &sections,
+            &[&rail, &second, &away],
+            &RailLoftOptions::new(1e-6),
+        ),
+        "a guide rail crosses a section's plane away from its curves",
+    );
+}
+
+/// Four rails bulge the sides of a square-to-square loft out between its corners: each guided
+/// edge is certified within the tolerance of its rail, and the skin passes through every rail's
+/// bulge (the straight sides of a plain loft between the corners would not).
+#[test]
+fn four_rails_bulge_the_sides_of_a_square_loft_through_their_bulges() {
+    let mut k = Kernel::default();
+    let square = |z: f64| {
+        [
+            Point3::new(1.0, -1.0, z),
+            Point3::new(1.0, 1.0, z),
+            Point3::new(-1.0, 1.0, z),
+            Point3::new(-1.0, -1.0, z),
+        ]
+    };
+    let [a0, a1, a2, a3] = square(0.0);
+    let [b0, b1, b2, b3] = square(10.0);
+    let lower = [line(a0, a1), line(a1, a2), line(a2, a3), line(a3, a0)];
+    let upper = [line(b0, b1), line(b1, b2), line(b2, b3), line(b3, b0)];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 10.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    // each corner's rail bulges out through (1.5 x, 1.5 y, 5)
+    let bulge = |a: Point3, b: Point3| natural(&[a, Point3::new(1.5 * a.x, 1.5 * a.y, 5.0), b]);
+    let rails = [bulge(a0, b0), bulge(a1, b1), bulge(a2, b2), bulge(a3, b3)];
+    let rail_refs: Vec<&Curve> = rails.iter().collect();
+    let opts = RailLoftOptions::new(1e-3);
+    let made = loft_rails(&mut k, &sections, &rail_refs, &opts).unwrap();
+    assert_eq!(made.bounds.len(), 4, "{:?}", made.bounds);
+    for (rail, bound) in rails.iter().zip(&made.bounds) {
+        assert!(*bound <= 1e-3, "{:?}", made.bounds);
+        let off = sampled_off(&k, &made, rail, 50);
+        assert!(off <= 1e-3, "{off}");
+    }
+}
+
+/// Six rails round a circle-to-circle frustum, each from a point of the lower circle to the
+/// point above it on the upper circle (twice the radius): straight rails along the frustum's
+/// wall, every guided edge certified and on the skin.
+#[test]
+fn six_rails_round_a_circle_to_circle_frustum_stay_on_the_skin() {
+    let mut k = Kernel::default();
+    let circle = |r: f64, z: f64| -> Vec<Point3> {
+        (0..=6_u32)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 6.0;
+                Point3::new(r * a.cos(), r * a.sin(), z)
+            })
+            .collect()
+    };
+    let lower_pts = circle(5.0, 0.0);
+    let upper_pts = circle(10.0, 10.0);
+    let lower = natural_section(&lower_pts);
+    let upper = natural_section(&upper_pts);
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 10.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rails: Vec<Curve> = lower_pts
+        .iter()
+        .zip(&upper_pts)
+        .take(6)
+        .map(|(a, b)| line(*a, *b))
+        .collect();
+    let rail_refs: Vec<&Curve> = rails.iter().collect();
+    let opts = RailLoftOptions::new(1e-6);
+    let made = loft_rails(&mut k, &sections, &rail_refs, &opts).unwrap();
+    assert_eq!(made.bounds.len(), 6, "{:?}", made.bounds);
+    for (rail, bound) in rails.iter().zip(&made.bounds) {
+        assert!(*bound <= 1e-6, "{:?}", made.bounds);
+        let off = sampled_off(&k, &made, rail, 50);
+        assert!(off <= 1e-6, "{off}");
+    }
+}
+
+/// Eleven rails guide a loft between two matching quarter-arc sections, each one cubic span (the
+/// lower at radius 5, the upper at radius 10, twice as high), the rails from the arcs' points at
+/// the same parameters: straight along the wall, except the middle one, which bulges out between
+/// the sections. Each section has as many points as rails, so the warp's solve must hold.
+#[test]
+fn eleven_rails_on_quarter_arcs_with_one_bulging_stay_on_the_skin() {
+    const KAPPA: f64 = 0.552_284_749_8;
+    let mut k = Kernel::default();
+    // the quarter arc of radius r at height z as one cubic Bezier, and its point at t
+    let arc = |r: f64, z: f64| -> [Point3; 4] {
+        [
+            Point3::new(r, 0.0, z),
+            Point3::new(r, KAPPA * r, z),
+            Point3::new(KAPPA * r, r, z),
+            Point3::new(0.0, r, z),
+        ]
+    };
+    let at = |p: &[Point3; 4], t: f64| {
+        let s = 1.0 - t;
+        let (a, b, c, d) = (s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t);
+        p[0] * a + p[1] * b + p[2] * c + p[3] * d
+    };
+    let lower_pts = arc(5.0, 0.0);
+    let upper_pts = arc(10.0, 10.0);
+    let lower = [spline(
+        3,
+        &lower_pts,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    )];
+    let upper = [spline(
+        3,
+        &upper_pts,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    )];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 10.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rails: Vec<Curve> = (0..=10_u32)
+        .map(|i| {
+            let t = f64::from(i) / 10.0;
+            let (a, b) = (at(&lower_pts, t), at(&upper_pts, t));
+            if i == 5 {
+                let mid = Point3::new(1.3 * (a.x + b.x) / 2.0, 1.3 * (a.y + b.y) / 2.0, 5.0);
+                natural(&[a, mid, b])
+            } else {
+                line(a, b)
+            }
+        })
+        .collect();
+    let rail_refs: Vec<&Curve> = rails.iter().collect();
+    let opts = RailLoftOptions::new(1e-3);
+    let made = loft_rails(&mut k, &sections, &rail_refs, &opts).unwrap();
+    assert_eq!(made.bounds.len(), 11, "{:?}", made.bounds);
+    for (rail, bound) in rails.iter().zip(&made.bounds) {
+        assert!(*bound <= 1e-3, "{:?}", made.bounds);
+        let off = sampled_off(&k, &made, rail, 50);
+        assert!(off <= 1e-3, "{off}");
+    }
+}
+
+/// Sixteen rails, the most a loft takes, guide a loft between two quarter-arc sections, each
+/// one cubic span (the lower at radius 5, the upper at radius 10, twice as high): one rail per
+/// point of each arc, straight along the wall, except the middle one, which bulges out between
+/// the sections. Each section is a single span, so the warp must move sixteen points through
+/// only the control points one span has.
+#[test]
+fn sixteen_rails_on_single_span_arcs_with_one_bulging_stay_on_the_skin() {
+    const KAPPA: f64 = 0.552_284_749_8;
+    let mut k = Kernel::default();
+    let arc = |r: f64, z: f64| -> [Point3; 4] {
+        [
+            Point3::new(r, 0.0, z),
+            Point3::new(r, KAPPA * r, z),
+            Point3::new(KAPPA * r, r, z),
+            Point3::new(0.0, r, z),
+        ]
+    };
+    let at = |p: &[Point3; 4], t: f64| {
+        let s = 1.0 - t;
+        let (a, b, c, d) = (s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t);
+        p[0] * a + p[1] * b + p[2] * c + p[3] * d
+    };
+    let lower_pts = arc(5.0, 0.0);
+    let upper_pts = arc(10.0, 10.0);
+    let lower = [spline(
+        3,
+        &lower_pts,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    )];
+    let upper = [spline(
+        3,
+        &upper_pts,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    )];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 10.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rails: Vec<Curve> = (0..=15_u32)
+        .map(|i| {
+            let t = f64::from(i) / 15.0;
+            let (a, b) = (at(&lower_pts, t), at(&upper_pts, t));
+            if i == 8 {
+                let mid = Point3::new(1.3 * (a.x + b.x) / 2.0, 1.3 * (a.y + b.y) / 2.0, 5.0);
+                natural(&[a, mid, b])
+            } else {
+                line(a, b)
+            }
+        })
+        .collect();
+    let rail_refs: Vec<&Curve> = rails.iter().collect();
+    let opts = RailLoftOptions::new(1e-3);
+    let made = loft_rails(&mut k, &sections, &rail_refs, &opts).unwrap();
+    assert_eq!(made.bounds.len(), 16, "{:?}", made.bounds);
+    for (rail, bound) in rails.iter().zip(&made.bounds) {
+        assert!(*bound <= 1e-3, "{:?}", made.bounds);
+        let off = sampled_off(&k, &made, rail, 6);
+        assert!(off <= 1e-3, "{off}");
+    }
+}
+
+/// A B-spline curve of `degree` through `points` with `weights` (rational) and the full knots.
+fn rational(degree: usize, points: &[Point3], weights: &[f64], knots: &[f64]) -> Curve {
+    let mut values: Vec<f64> = Vec::new();
+    let mut mults: Vec<usize> = Vec::new();
+    for &u in knots {
+        if values.last() == Some(&u) {
+            *mults.last_mut().unwrap() += 1;
+        } else {
+            values.push(u);
+            mults.push(1);
+        }
+    }
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree,
+            control_points: points,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &mults,
+            knots: &values,
+            knot_type: KnotType::Unspecified,
+            weights: Some(weights),
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// The quarter arc of radius 10 from (10, 0) to (0, 10) at height `z`: a rational quadratic.
+fn quarter_arc(z: f64) -> Curve {
+    rational(
+        2,
+        &[
+            Point3::new(10.0, 0.0, z),
+            Point3::new(10.0, 10.0, z),
+            Point3::new(0.0, 10.0, z),
+        ],
+        &[1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0],
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+}
+
+/// The chord of `quarter_arc` at height `z` as a non-rational quadratic: its control points
+/// are collinear, so it is the same straight line.
+fn straight_form(z: f64) -> Curve {
+    spline(
+        2,
+        &[
+            Point3::new(10.0, 0.0, z),
+            Point3::new(5.0, 5.0, z),
+            Point3::new(0.0, 10.0, z),
+        ],
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+}
+
+/// Three rails from the ends and the middle of the chord at z = 0 to the arc's ends and middle
+/// at z = 40.
+fn three_rails_chord_to_arc() -> [Curve; 3] {
+    let r = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    [
+        line(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 40.0)),
+        line(Point3::new(0.0, 10.0, 0.0), Point3::new(0.0, 10.0, 40.0)),
+        line(Point3::new(5.0, 5.0, 0.0), Point3::new(r, r, 40.0)),
+    ]
+}
+
+/// A line section (its straight form, collinear control points) against an arc section under
+/// three rails: the line takes the arc's weights and the loft is built, the rails certified.
+#[test]
+fn a_line_section_takes_an_arc_sections_weights_under_three_rails() {
+    let mut k = Kernel::default();
+    let lower = [straight_form(0.0)];
+    let upper = [quarter_arc(40.0)];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 40.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rails = three_rails_chord_to_arc();
+    let refs: Vec<&Curve> = rails.iter().collect();
+    let made = loft_rails(&mut k, &sections, &refs, &RailLoftOptions::new(1e-6)).unwrap();
+    assert!(made.bounds.iter().all(|b| *b <= 1e-6), "{:?}", made.bounds);
+}
+
+/// A quadratic whose control points are off a line, against the same arc under three rails: its
+/// points are not the arc's, so it is refused as curves that do not pair (it is not given the
+/// arc's weights).
+#[test]
+fn a_bent_curve_against_an_arc_does_not_pair_under_three_rails() {
+    let mut k = Kernel::default();
+    let lower = [spline(
+        2,
+        &[
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(10.0, 10.0, 0.0),
+            Point3::new(0.0, 10.0, 0.0),
+        ],
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )];
+    let upper = [quarter_arc(40.0)];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 40.0),
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rails = three_rails_chord_to_arc();
+    let refs: Vec<&Curve> = rails.iter().collect();
+    match loft_rails(&mut k, &sections, &refs, &RailLoftOptions::new(1e-6)) {
+        Err(SolidError::Unsupported { reason, .. }) => {
+            assert!(reason.contains("do not pair"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Three sections whose curves pair within solidcore's `1e-9` relative (an interior knot at 0.5
+/// in the middle one, 1e-10 above it in the others) under three rails: refining each curve alone
+/// gives the first and last one more control point than the middle one, and the loft then reads
+/// a control point the middle section lacks. The column must refine to the same knots, so the
+/// loft builds.
+#[test]
+fn a_column_whose_curves_pair_within_the_tolerance_builds_under_three_rails() {
+    let mut k = Kernel::default();
+    let bent = |z: f64| {
+        [
+            Point3::new(10.0, 0.0, z),
+            Point3::new(0.0, 10.0, z),
+            Point3::new(-10.0, 0.0, z),
+        ]
+    };
+    let first = [spline(1, &bent(0.0), &[0.0, 0.0, 0.5 + 1e-10, 1.0, 1.0])];
+    let middle = [spline(1, &bent(20.0), &[0.0, 0.0, 0.5, 1.0, 1.0])];
+    let last = [spline(1, &bent(40.0), &[0.0, 0.0, 0.5 + 1e-10, 1.0, 1.0])];
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: first.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 20.0),
+            normal: Vec3::Z,
+            curves: middle.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 40.0),
+            normal: Vec3::Z,
+            curves: last.iter().collect(),
+        },
+    ];
+    let rails = [
+        line(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 40.0)),
+        line(Point3::new(0.0, 10.0, 0.0), Point3::new(0.0, 10.0, 40.0)),
+        line(Point3::new(-10.0, 0.0, 0.0), Point3::new(-10.0, 0.0, 40.0)),
+    ];
+    let refs: Vec<&Curve> = rails.iter().collect();
+    let made = loft_rails(&mut k, &sections, &refs, &RailLoftOptions::new(1e-6)).unwrap();
+    assert!(made.bounds.iter().all(|b| *b <= 1e-6), "{:?}", made.bounds);
+}
+
+/// Three square sections, each edge a straight line in every section (the middle section's first
+/// edge with weights 1 + 1e-10, within the pairing's tolerance), under three rails up three
+/// corners: the columns refine together, so the loft builds.
+#[test]
+fn a_straight_column_with_a_line_within_the_tolerance_builds_under_three_rails() {
+    let mut k = Kernel::default();
+    let knots = [0.0, 0.0, 1.0, 1.0];
+    let corners = |z: f64| {
+        [
+            Point3::new(10.0, 10.0, z),
+            Point3::new(-10.0, 10.0, z),
+            Point3::new(-10.0, -10.0, z),
+            Point3::new(10.0, -10.0, z),
+        ]
+    };
+    let edges = |z: f64| {
+        let c = corners(z);
+        [
+            line(c[0], c[1]),
+            line(c[1], c[2]),
+            line(c[2], c[3]),
+            line(c[3], c[0]),
+        ]
+    };
+    let first = edges(0.0);
+    let c20 = corners(20.0);
+    let middle = [
+        rational(1, &[c20[0], c20[1]], &[1.0 + 1e-10, 1.0 + 1e-10], &knots),
+        line(c20[1], c20[2]),
+        line(c20[2], c20[3]),
+        line(c20[3], c20[0]),
+    ];
+    let last = edges(40.0);
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: first.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 20.0),
+            normal: Vec3::Z,
+            curves: middle.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::new(0.0, 0.0, 40.0),
+            normal: Vec3::Z,
+            curves: last.iter().collect(),
+        },
+    ];
+    let c40 = corners(40.0);
+    let rails = [
+        line(corners(0.0)[0], c40[0]),
+        line(corners(0.0)[1], c40[1]),
+        line(corners(0.0)[2], c40[2]),
+    ];
+    let refs: Vec<&Curve> = rails.iter().collect();
+    let made = loft_rails(&mut k, &sections, &refs, &RailLoftOptions::new(1e-6)).unwrap();
+    assert!(made.bounds.iter().all(|b| *b <= 1e-6), "{:?}", made.bounds);
 }

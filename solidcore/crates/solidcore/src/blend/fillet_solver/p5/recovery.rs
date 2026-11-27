@@ -8,7 +8,8 @@
 //! | `Recovery::split_rail` | calls [`super::super::p1::split_rail`] |
 //! | `Recovery::support_edge` | calls [`super::super::p1::compute_support_edge`] |
 //! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406: a rollover's piece traced again up to an End at a smooth vertex) |
-//! | `Recovery::keeps_round` (private) | none (#2406, with `fillet_round_as_definition`: the piece before a tangent rollover keeps its round by its definition) |
+//! | `Recovery::keeps_round` (private) | none (#2406: the piece before a tangent rollover keeps its round by its definition) |
+//! | `Recovery::seed_from_solved_end`, `Recovery::side_edge_across_rolled_edge` (private) | none (#15767: both rail ends of an Nx1 corner past a partway tangent rollover re-solved, seeded from the first, on the face beyond's side edge) |
 //!
 //! Deviations: missing callees have typed call boundaries in `RecoveryOps`;
 //! their callers, mutations, cleanup and continuation are fully represented.
@@ -37,6 +38,8 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::{BlendFailure, CrossingInput, FilletSetUp, SolverFailure as Solver};
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -134,6 +137,10 @@ pub(super) trait RecoveryOps {
             Some(EntityRef::Edge(e)) => Some(e),
             _ => None,
         };
+        let tolerance = c
+            .solver
+            .rollover_tolerance(c.k, c.target)?
+            .min(tangency_tolerance);
         let r = crate::blend::fillet_solver::p2::find_rollover_side_edge(
             c.k,
             c.fillets,
@@ -143,7 +150,7 @@ pub(super) trait RecoveryOps {
             original_uv_curve,
             original_surface,
             convex,
-            tangency_tolerance,
+            tolerance,
             &edge_of,
             &mut io,
         );
@@ -171,7 +178,10 @@ pub(super) trait RecoveryOps {
         c.split_rail(geom, rail, self)
     }
     fn topology_split(&mut self, c: &mut Recovery<'_>, geom: FilletGeomId) -> Result<FilletGeomId> {
-        let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        let solver_id = caller(
+            c.fillets.geom(geom)?.fillet_solver(),
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
+        )?;
         c.fillets.topology_split(
             c.k,
             geom,
@@ -196,12 +206,23 @@ pub(super) trait RecoveryOps {
             c.solver, c.k, c.target, c.fillets, vertex, geom, which, rail, side, guess,
         )
     }
-    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId) -> Result<bool> {
-        super::super::p1::test_manifold_tangent_rollover(
+    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
+        let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
+        let curve = edge::curve(c.target, side)?.ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+        })?;
+        let (parameter, _) = super::super::p3::drop_param(
             c.k,
-            c.target,
-            side,
-            c.solver.solver().tangency_tolerance,
+            curve,
+            &edge::interval(c.target, side)?,
+            point,
+            false,
+        )?
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::CrossingOnSideEdge)
+        })?;
+        super::super::p1::test_manifold_tangent_rollover_at(
+            c.k, c.target, side, parameter, tolerance,
         )
         .map(|r| r.0)
     }
@@ -227,7 +248,10 @@ pub(super) trait RecoveryOps {
         extension: f64,
     ) -> Result<Option<FilletGeomId>> {
         // `this` is the solver of the geometry being processed
-        let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        let solver_id = caller(
+            c.fillets.geom(geom)?.fillet_solver(),
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
+        )?;
         // upstream passes a NULL pAdjFace through; the side face is dereferenced there
         let side_face = adjacent_face.ok_or_else(|| {
             SolidError::invalid_input(OP, "CreateCliffRollOverSideFG: no adjacent face")
@@ -244,7 +268,10 @@ pub(super) trait RecoveryOps {
     ) -> Result<()> {
         // ProcessRollOver visits this solver's own geometries, so c.solver
         // is the solver identified by geom.fillet_solver().
-        let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        let solver_id = caller(
+            c.fillets.geom(geom)?.fillet_solver(),
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
+        )?;
         // CalcRailIntEdgeuse reads the vertex's corner in the executive's table
         c.fillets.calc_rail_int_edgeuse_with_solver_ops(
             c.k,
@@ -265,7 +292,10 @@ pub(super) trait RecoveryOps {
         vertex: VertexId,
         geom: FilletGeomId,
     ) -> Result<()> {
-        let id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        let id = caller(
+            c.fillets.geom(geom)?.fillet_solver(),
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
+        )?;
         let context = OwnSolver {
             id,
             solver: c.solver.solver(),
@@ -335,7 +365,10 @@ pub(super) trait RecoveryOps {
         c.support_edge(edge, geom, approx_tol, angle_tol, self)
     }
     fn trim_rails(&mut self, c: &mut Recovery<'_>, geom: FilletGeomId) -> Result<()> {
-        let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        let solver_id = caller(
+            c.fillets.geom(geom)?.fillet_solver(),
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
+        )?;
         c.fillets
             .trim_rail_curves_with_solver(c.k, geom, solver_id, c.solver.solver(), c.target)
     }
@@ -408,11 +441,119 @@ fn get_mut<T>(pair: &mut [T; 2], which: usize) -> Result<&mut T> {
     pair.get_mut(which)
         .ok_or_else(|| SolidError::invalid_input(OP, "rail index past 1"))
 }
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::blend_missing(OP, "a fillet entity the recovery needs"))
+/// `value`, or a defect (`SM_ERR_NULL_POINTER`) saying `why` the link it reads is never
+/// missing: links the roll-over checked on entry or built itself (split pieces and their
+/// vertices).
+#[track_caller]
+fn required<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    value.ok_or_else(|| SolidError::blend_null_defect(OP, why))
 }
 
+/// `value`, or the caller's set-up `cause`: the roll-over is public and reads the fillet
+/// geometry, solver and corners its caller passes, so a missing link there is the
+/// caller's input, not a kernel defect.
+fn caller<T>(value: Option<T>, cause: Solver) -> Result<T> {
+    value.ok_or_else(|| SolidError::blend_solver(OP, cause))
+}
+
+/// `value`, or [`Solver::OffsetSurfaceMissing`] at upstream's `SM_ERR_NULL_POINTER`: the
+/// caller's solver lacks an offset surface (now, or when the segment saved them).
+fn offset_required<T>(value: Option<T>) -> Result<T> {
+    value.ok_or_else(|| {
+        Failure::new(OP, BlendFailure::Solver(Solver::OffsetSurfaceMissing))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })
+}
+
+/// A rail of the roll-over lost its curve classification.
+const CLASSIFIED: &str = "a rail of the roll-over lost its curve classification: the \
+                          roll-over starts only on rails that have one, and the walk reads \
+                          each classification from the rail it was installed on";
+/// A split's vertex slot is empty.
+const SPLIT_VERTEX: &str = "a split of the roll-over left no vertex for a rail that hit a side \
+                            edge: each split fills the vertex of every rail that hit one";
+
 impl Recovery<'_> {
+    /// Not upstream (#15767): gives rail end `to` of geometry `geom` the intersection point of
+    /// `from`, the other rail's end at the same corner just solved after a roll-over: the
+    /// round's ball there, with its UVs on the geometry's current offsets, from which `to`'s
+    /// solve starts. Nothing is done where either end has no vertex use on `geom`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex use lookups.
+    fn seed_from_solved_end(
+        &mut self,
+        from: VertexId,
+        to: VertexId,
+        geom: FilletGeomId,
+    ) -> Result<()> {
+        let (Some(src), Some(dst)) = (
+            self.fillets.vu_at_rail_end(from, Some(geom), None, None)?,
+            self.fillets.vu_at_rail_end(to, Some(geom), None, None)?,
+        ) else {
+            return Ok(());
+        };
+        let tsect = self.fillets.fillet_vertexuse(src)?.tsect_pnt().clone();
+        self.fillets
+            .fillet_vertexuse_mut(dst)?
+            .set_tsect_pnt(&tsect);
+        Ok(())
+    }
+
+    /// Not upstream (#15767): re-points corner vertex `vertex`, found on side edge use E of
+    /// the face its rail rolled off, at the side edge use N on face `x` the rail rolled onto,
+    /// where E's far end has three edges: E, the tangent edge T rolled over (between the rail's
+    /// old face and `x`) and N (between `x` and E's other face, the end face)
+    /// ([`side_edgeuse_across_rolled_edge`]). A vertex on a side edge of `x` already, or with
+    /// no such continuation, is left as it is.
+    ///
+    /// [`side_edgeuse_across_rolled_edge`]: crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks and the tangency test.
+    fn side_edge_across_rolled_edge(&mut self, vertex: VertexId, x: FaceId) -> Result<()> {
+        let record = self.fillets.fillet_vertex(vertex)?;
+        if record.point_class() != PointClassType::Edgeuse {
+            return Ok(());
+        }
+        let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
+            return Ok(());
+        };
+        let Some(side_edge) = eu::edge(self.target, side_eu)? else {
+            return Ok(());
+        };
+        if edge::faces(self.target, side_edge, None)?.contains(&x) {
+            return Ok(());
+        }
+        let tol = self.solver.solver().tangency_tolerance;
+        let (start, end) = crate::topology::vertex::edge_vertex_pair(self.target, side_edge)?;
+        for at in [start, end].into_iter().flatten() {
+            let Some(beyond) = crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                self.k,
+                self.target,
+                side_eu,
+                at,
+                Some(x),
+                tol,
+            )?
+            else {
+                continue;
+            };
+            // N's edge use on the rail's face X
+            let Some(on_x) = eu::radial(self.target, beyond)? else {
+                continue;
+            };
+            self.fillets
+                .fillet_vertex_mut(vertex)?
+                .set_point_class(PointClassType::Edgeuse, Some(EntityRef::Edgeuse(on_x)));
+            return Ok(());
+        }
+        Ok(())
+    }
+
     fn split_rail(
         &mut self,
         geom: FilletGeomId,
@@ -448,12 +589,26 @@ impl Recovery<'_> {
         )
     }
     fn rail_copy(&self, geom: FilletGeomId, which: usize) -> Result<Rail> {
-        let rail = required(self.fillets.geom(geom)?.rail(which))?;
-        let count = required(self.fillets.fillet_edge(rail)?.curve_class())?.size();
-        let curve = required(edge::curve(self.fillets.brep(), rail)?)?.copy(self.k)?;
-        let primary = required(eu::primary_edgeuse(self.fillets.brep(), rail)?)?;
+        let rail = caller(
+            self.fillets.geom(geom)?.rail(which),
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: geom,
+                side: which,
+            },
+        )?;
+        let count = required(self.fillets.fillet_edge(rail)?.curve_class(), CLASSIFIED)?.size();
+        // a rail edge with no curve is [`FilletSetUp::RailCurve`]
+        let curve = edge::curve(self.fillets.brep(), rail)?
+            .ok_or_else(|| {
+                SolidError::blend(OP, BlendFailure::FilletSetUpInvalid(FilletSetUp::RailCurve))
+            })?
+            .copy(self.k)?;
+        let primary = caller(
+            eu::primary_edgeuse(self.fillets.brep(), rail)?,
+            Solver::RailEdgeUseMissing { rail },
+        )?;
         let (uv, _) = eu::uv_trim_curve(self.fillets.brep(), primary)?;
-        let uv_curve = required(uv)?.copy(self.k)?;
+        let uv_curve = caller(uv, Solver::RailWithoutUvCurve { rail })?.copy(self.k)?;
         Ok(Rail {
             edge: rail,
             class_edge: rail,
@@ -465,13 +620,19 @@ impl Recovery<'_> {
         })
     }
     fn start(&self, rail: EdgeId) -> Result<VertexId> {
-        required(edge::vertex(self.fillets.brep(), rail)?)
+        caller(
+            edge::vertex(self.fillets.brep(), rail)?,
+            Solver::EdgeWithoutVertex { edge: rail },
+        )
     }
     fn end(&self, rail: EdgeId) -> Result<VertexId> {
         let start = self.start(rail)?;
-        required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
+        caller(
+            edge::other_vertex(self.fillets.brep(), rail, Some(start))?,
+            Solver::EdgeWithoutVertex { edge: rail },
+        )
     }
-    /// Not upstream (#2406; with `fixes.fillet_round_as_definition`):
+    /// Not upstream (#2406):
     /// whether geometry `geom`, a piece of the rollover that ends where a rail rolls over
     /// a tangent edge (`hits`) and is not the last, keeps its round. Its ball rolls on the
     /// same two faces as before (its offsets unchanged, `geom_type` the default), and its
@@ -494,12 +655,7 @@ impl Recovery<'_> {
         hits: &[SideHit; 2],
         saved: &FilletSolverOffsetsData,
     ) -> Result<bool> {
-        let fixes = &self.k.fixes;
-        if !fixes.fillet_round_as_definition
-            || last
-            || geom_type != FilletGeomType::Default
-            || !hits.iter().any(|h| h.tangent)
-        {
+        if last || geom_type != FilletGeomType::Default || !hits.iter().any(|h| h.tangent) {
             return Ok(false);
         }
         for which in 0..2 {
@@ -557,7 +713,13 @@ impl Recovery<'_> {
         let mut ends = Vec::new();
         let mut corner = None;
         for which in 0..2 {
-            let rail = required(self.fillets.geom(geom)?.rail(which))?;
+            let rail = caller(
+                self.fillets.geom(geom)?.rail(which),
+                Solver::FilletGeomWithoutRail {
+                    fillet_geom: geom,
+                    side: which,
+                },
+            )?;
             let vertex = if last {
                 self.end(rail)?
             } else {
@@ -584,7 +746,10 @@ impl Recovery<'_> {
         }
         let mut out = Vec::new();
         for (vertex, rail) in ends {
-            let face = required(self.fillets.fillet_edge(rail)?.original_face())?;
+            let face = caller(
+                self.fillets.fillet_edge(rail)?.original_face(),
+                Solver::RailWithoutFace { rail },
+            )?;
             let record = self.fillets.fillet_vertex_mut(vertex)?;
             record.set_status(FilStatus::Unprocessed);
             record.set_point_class(PointClassType::Face, Some(EntityRef::Face(face)));
@@ -613,14 +778,26 @@ impl Recovery<'_> {
     /// the plane's normal is not a plane's; those of the section's solve.
     fn end_sections(&mut self, geom: FilletGeomId) -> Result<[Option<TsectPnt>; 2]> {
         let mut out = [None, None];
-        let rail0 = required(self.fillets.geom(geom)?.rail(0))?;
+        let rail0 = caller(
+            self.fillets.geom(geom)?.rail(0),
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: geom,
+                side: 0,
+            },
+        )?;
         let along = self.fillets.vertex_point(self.end(rail0)?)?
             - self.fillets.vertex_point(self.start(rail0)?)?;
         for (slot, at_end) in out.iter_mut().zip([false, true]) {
             let mut ends = Vec::new();
             let mut normal = None;
             for which in 0..2 {
-                let rail = required(self.fillets.geom(geom)?.rail(which))?;
+                let rail = caller(
+                    self.fillets.geom(geom)?.rail(which),
+                    Solver::FilletGeomWithoutRail {
+                        fillet_geom: geom,
+                        side: which,
+                    },
+                )?;
                 let vertex = if at_end {
                     self.end(rail)?
                 } else {
@@ -637,10 +814,7 @@ impl Recovery<'_> {
                     continue;
                 };
                 let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the corner's end cap is not a plane",
-                    ));
+                    return Err(SolidError::blend_solver(OP, Solver::EndCapNotPlane));
                 };
                 normal = Some((plane.is_planar().0, plane.evaluate_normal()));
                 ends.push(self.fillets.vertex_point(vertex)?);
@@ -658,7 +832,7 @@ impl Recovery<'_> {
             let middle = *a + (*b - *a) * 0.5;
             let on_plane = middle - normal * (middle - origin).dot(normal);
             let base = |which: usize| -> Result<Surface> {
-                Ok(required(self.solver.solver().surface(which)?)?
+                Ok(offset_required(self.solver.solver().surface(which)?)?
                     .surface
                     .base_surface()
                     .clone())
@@ -691,27 +865,49 @@ impl Recovery<'_> {
             return Ok(());
         }
         // Preserve rail-0 NER before touching rail 1.
-        let r0 = required(self.fillets.geom(id)?.rail(0))?;
-        let cc0 = required(self.fillets.fillet_edge(r0)?.curve_class())?;
+        let r0 = caller(
+            self.fillets.geom(id)?.rail(0),
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: id,
+                side: 0,
+            },
+        )?;
+        let cc0 =
+            self.fillets.fillet_edge(r0)?.curve_class().ok_or_else(|| {
+                SolidError::blend_solver(OP, Solver::RailNotClassified { which: 0 })
+            })?;
         let n0 = cc0.size();
-        let r1 = required(self.fillets.geom(id)?.rail(1))?;
-        let cc1 = required(self.fillets.fillet_edge(r1)?.curve_class())?;
+        let r1 = caller(
+            self.fillets.geom(id)?.rail(1),
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: id,
+                side: 1,
+            },
+        )?;
+        let cc1 =
+            self.fillets.fillet_edge(r1)?.curve_class().ok_or_else(|| {
+                SolidError::blend_solver(OP, Solver::RailNotClassified { which: 1 })
+            })?;
         if n0 == 1 && cc1.size() == 1 {
             let unknown0 = cc0.at(0)?.mid.point_class() == PointClassType::Unknown;
             let unknown1 = cc1.at(0)?.mid.point_class() == PointClassType::Unknown;
             if !unknown0 && !unknown1 {
                 return Ok(());
             }
-            let corner = required(self.fillets.fillet_vertex(self.start(r0)?)?.fillet_corner())?;
+            let corner = self
+                .fillets
+                .fillet_vertex(self.start(r0)?)?
+                .fillet_corner()
+                .ok_or_else(|| SolidError::blend_solver(OP, Solver::RolloverCornerMissing))?;
             // `SM_FCR_N_x_1_CLOSED`: one closed blend meeting itself, now the blend corner's
             // closed Join (the fork's `IsClosedJoin()`, 543d25a; WR-697) or closed Turn (#2349)
             let corner_type = self.corners.corner_type(corner)?;
             let meets_itself =
                 corner_type == FilletCornerType::NByTwo && self.corners.meets_itself(corner)?;
             if !meets_itself {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend_solver(
                     OP,
-                    "the closed blend does not meet itself at the corner",
+                    Solver::ClosedBlendDoesNotMeetItself { corner_type },
                 ));
             }
             if unknown0 {
@@ -719,7 +915,7 @@ impl Recovery<'_> {
             }
             // The second interval is read after the first call, as upstream's
             // reference can observe mutations performed by full recovery.
-            if required(self.fillets.fillet_edge(r1)?.curve_class())?
+            if required(self.fillets.fillet_edge(r1)?.curve_class(), CLASSIFIED)?
                 .at(0)?
                 .mid
                 .point_class()
@@ -738,17 +934,25 @@ impl Recovery<'_> {
         adjusted: &mut Vec<FilletCornerId>,
         ops: &mut impl RecoveryOps,
     ) -> Result<()> {
-        let solver_eu = required(self.solver.solver().edgeuse(0)?)?;
+        let solver_eu = self.solver.solver().edgeuse(0)?.ok_or_else(|| {
+            SolidError::blend_solver(OP, Solver::SolverEdgeUseMissing { index: 0 })
+        })?;
         let convex = ops.convex(self, solver_eu, 10, false, 0.0)?;
-        let surface = required(self.fillets.geom(id)?.fillet_surface(None)?)?;
+        let surface = caller(
+            self.fillets.geom(id)?.fillet_surface(None)?,
+            Solver::FilletGeomWithoutSurface { fillet_geom: id },
+        )?;
         let analytic = if surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
             SurfOfRevolution::is_nurb_surface_surf_of_revolution(self.k, surface, 1.0)?.is_some()
         } else {
             false
         };
         let mut rails = [self.rail_copy(id, 0)?, self.rail_copy(id, 1)?];
-        let original_surface =
-            required(self.fillets.geom(id)?.fillet_surface(None)?)?.copy(self.k)?;
+        let original_surface = caller(
+            self.fillets.geom(id)?.fillet_surface(None)?,
+            Solver::FilletGeomWithoutSurface { fillet_geom: id },
+        )?
+        .copy(self.k)?;
         let mut processing_rollover = false;
         let mut corner_eu = None;
         let mut corner_vertex = None;
@@ -781,8 +985,11 @@ impl Recovery<'_> {
                 if rail.count == 1 {
                     continue;
                 }
-                let cc =
-                    required(self.fillets.fillet_edge(rail.class_edge)?.curve_class())?.clone();
+                let cc = required(
+                    self.fillets.fillet_edge(rail.class_edge)?.curve_class(),
+                    CLASSIFIED,
+                )?
+                .clone();
                 let hit = ops.find_side(
                     self,
                     SideSearch {
@@ -807,26 +1014,37 @@ impl Recovery<'_> {
                     continue;
                 };
                 if cc.at(rail.index)?.mid.point_class() == PointClassType::Unknown {
-                    let original_face =
-                        required(self.fillets.fillet_edge(rail.edge)?.original_face())?;
-                    let face = required(
-                        edge::faces(self.target, side, None)?
-                            .into_iter()
-                            .find(|f| *f != original_face),
+                    let original_face = caller(
+                        self.fillets.fillet_edge(rail.edge)?.original_face(),
+                        Solver::RailWithoutFace { rail: rail.edge },
                     )?;
+                    let face = edge::faces(self.target, side, None)?
+                        .into_iter()
+                        .find(|f| *f != original_face)
+                        .ok_or_else(|| {
+                            SolidError::blend_solver(
+                                OP,
+                                Solver::RolloverHasNoFaceBeyond { edge: side },
+                            )
+                        })?;
                     *get_mut(&mut adjacent, which)? = Some(face);
                     if !hit.tangent || hit.trim {
                         geom_type = FilletGeomType::CliffRollover;
                     } else {
                         geom_type = FilletGeomType::TangentRollover;
-                        let mut distance = required(self.solver.solver().surface(which)?)?
+                        let mut distance = offset_required(self.solver.solver().surface(which)?)?
                             .surface
                             .offset_distance();
                         if hit.opposite_normals {
                             distance *= -1.0;
                             *get_mut(&mut self.solver.solver_mut().orientations, which)? *= -1.0;
                         }
-                        let base = required(self.target.face(face)?.surface.as_ref())?;
+                        let base = self.target.face(face)?.surface.as_ref().ok_or_else(|| {
+                            Failure::new(OP, BlendFailure::FaceHasNoSurface)
+                                .with_status(SM_ERR_NULL_POINTER)
+                                .at(EntityRef::Face(face))
+                                .into_error()
+                        })?;
                         let mut offset = OffsetSurface::new(
                             self.k,
                             distance,
@@ -854,9 +1072,12 @@ impl Recovery<'_> {
             }
             let mut params = [0.0; 2];
             for (param, rail) in params.iter_mut().zip(&rails) {
-                *param = required(self.fillets.fillet_edge(rail.class_edge)?.curve_class())?
-                    .at(rail.index)?
-                    .max();
+                *param = required(
+                    self.fillets.fillet_edge(rail.class_edge)?.curve_class(),
+                    CLASSIFIED,
+                )?
+                .at(rail.index)?
+                .max();
             }
             let mut guess = 0.0;
             if corner_eu.is_none() {
@@ -923,7 +1144,7 @@ impl Recovery<'_> {
                         *slot = Some(self.end(rail.edge)?);
                     }
                     for which in 0..2 {
-                        let vertex = required(*get(&new_vertices, which)?)?;
+                        let vertex = required(*get(&new_vertices, which)?, SPLIT_VERTEX)?;
                         let mate = *get(&new_vertices, 1 - which)?;
                         self.fillets.fillet_vertex_mut(vertex)?.set_mate(0, mate);
                     }
@@ -933,17 +1154,19 @@ impl Recovery<'_> {
                         self.fillets
                             .fillet_edge_mut(rail.edge)?
                             .set_original_face(*get(&adjacent, which)?);
-                        let orig = required(get(&saved.surfaces, which)?.as_ref())?;
+                        let orig = offset_required(get(&saved.surfaces, which)?.as_ref())?;
                         // Bare Copy: upstream ignores its status but uses its output.
                         let (copy, status) = ops.copy_offset(self.k, &orig.surface);
                         // fork 66b02de passes this on (SER)
-                        ignored(crate::error::passed_on(
-                            status,
-                            self.k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        status?;
                         if let Some(copy) = copy {
                             self.fillets
-                                .geom_mut(required(new_geom)?)?
+                                .geom_mut(required(
+                                    new_geom,
+                                    "the solver's offset changed in a segment that split no \
+                                     geometry: only a tangent roll-over replaces an offset, and \
+                                     a tangent roll-over that is not the last splits the geometry",
+                                )?)?
                                 .set_offset_surface(which, Some(copy))?;
                         }
                     }
@@ -951,7 +1174,7 @@ impl Recovery<'_> {
                     let Some(side) = hit.edge else {
                         continue;
                     };
-                    let vertex = required(*get(&new_vertices, which)?)?;
+                    let vertex = required(*get(&new_vertices, which)?, SPLIT_VERTEX)?;
                     if hit.tangent || corner_eu.is_none() {
                         self.fillets
                             .fillet_vertex_mut(vertex)?
@@ -992,10 +1215,14 @@ impl Recovery<'_> {
                         continue;
                     }
                     let Some(EntityRef::Edge(side)) = record.point_class_object() else {
-                        return Err(SolidError::blend_missing(OP, "the rail vertex's side edge"));
+                        return Err(SolidError::blend_null_defect(
+                            OP,
+                            "a rail-crosses-edge vertex is not on an edge: the walk marks a \
+                             vertex as one only with the side edge as its point's object",
+                        ));
                     };
                     let guess = self.fillets.vertex_point(vertex)?;
-                    if ops.tangent(self, side)? {
+                    if ops.tangent(self, side, guess)? {
                         ops.rail_x_edge(
                             self,
                             vertex,
@@ -1015,7 +1242,10 @@ impl Recovery<'_> {
                     };
                     if corner_eu.is_some() && !hit.trim {
                         // This is target-B-rep geometry, copied into a new pseudo vertex.
-                        let point = self.target.vertex(required(corner_vertex)?)?.point;
+                        let corner_vertex = corner_vertex.ok_or_else(|| {
+                            SolidError::blend_solver(OP, Solver::VertexUseWithoutVertex)
+                        })?;
+                        let point = self.target.vertex(corner_vertex)?.point;
                         // SmFilletVertex() + SetPoint: retain SmVertex's zero
                         // tolerance rather than Brep::add_vertex's zone default.
                         let end = self.fillets.brep_mut().add_vertex_record(Vertex {
@@ -1030,7 +1260,9 @@ impl Recovery<'_> {
                             self.k,
                             self.fillets,
                             end,
-                            required(*get(&new_vertices, which)?)?,
+                            (*get(&new_vertices, which)?).ok_or_else(|| {
+                                SolidError::blend_solver(OP, Solver::CliffCornerOnLastPiece)
+                            })?,
                         )?;
                         self.fillets
                             .fillet_edge_mut(support)?
@@ -1041,7 +1273,7 @@ impl Recovery<'_> {
                     self.fillets
                         .fillet_edge_mut(rail)?
                         .set_fillet_edge_type(FilletEdgeType::CliffRail);
-                    let extension = required(get(&saved.surfaces, which)?.as_ref())?
+                    let extension = offset_required(get(&saved.surfaces, which)?.as_ref())?
                         .surface
                         .offset_distance()
                         .abs();
@@ -1070,8 +1302,15 @@ impl Recovery<'_> {
                 }
             }
             if first || last {
+                let mut solved_corner: Option<(FilletCornerId, VertexId)> = None;
                 for which in 0..2 {
-                    let rail = required(self.fillets.geom(current_geom)?.rail(which))?;
+                    let rail = caller(
+                        self.fillets.geom(current_geom)?.rail(which),
+                        Solver::FilletGeomWithoutRail {
+                            fillet_geom: current_geom,
+                            side: which,
+                        },
+                    )?;
                     let vertex = if last {
                         self.end(rail)?
                     } else {
@@ -1084,10 +1323,26 @@ impl Recovery<'_> {
                     let Some(corner) = record.fillet_corner() else {
                         continue;
                     };
+                    // only the other rail's end at the corner just solved (below)
+                    if solved_corner.is_some_and(|(c, _)| c != corner) {
+                        break;
+                    }
                     if !adjusted.contains(&corner) {
                         adjusted.push(corner);
                     }
                     if geom_type == FilletGeomType::TangentRollover {
+                        // Not upstream (#15767): this rail rolled onto face X; its end on a
+                        // side edge of the face it rolled off lies past that edge's end, on
+                        // the edge between X and the end face beyond the rolled-over edge
+                        if let Some(x) = *get(&adjacent, which)? {
+                            self.side_edge_across_rolled_edge(vertex, x)?;
+                        }
+                        // Not upstream (#15767): the other rail's end at that corner is solved
+                        // from the rolled end's ball, whose points lie on the geometry's new
+                        // offsets; its own point's UVs are on the offset the roll-over replaced
+                        if let Some((_, solved)) = solved_corner {
+                            self.seed_from_solved_end(solved, vertex, current_geom)?;
+                        }
                         self.fillets
                             .fillet_vertex_mut(vertex)?
                             .set_status(FilStatus::Unprocessed);
@@ -1103,10 +1358,23 @@ impl Recovery<'_> {
                         if self.fillets.fillet_vertex(vertex)?.status()
                             == FilStatus::SolverNotConverge
                         {
-                            return Err(SolidError::blend_failed(
+                            return Err(SolidError::blend_solver(
                                 OP,
-                                "the corner vertex's solver did not converge",
+                                Solver::CornerVertexNotConverged,
                             ));
+                        }
+                        // Not upstream (#15767): a corner whose two rail ends are each on
+                        // their own side edge (no mates; an open end's Nx2 corner) has both
+                        // solved from the round's ball, which the roll-over changed: the
+                        // other rail's end is solved again too, not left at the ball before it.
+                        // Only an end solved here seeds it: one that found no side edge
+                        // (`NoIntRailEu`) keeps its point from before the roll-over
+                        if solved_corner.is_none()
+                            && self.fillets.fillet_vertex(vertex)?.is_processed()
+                            && self.fillets.fillet_vertex(vertex)?.mate(0).is_none()
+                        {
+                            solved_corner = Some((corner, vertex));
+                            continue;
                         }
                     }
                     break;
@@ -1119,7 +1387,13 @@ impl Recovery<'_> {
                 self.fillets
                     .geom_mut(current_geom)?
                     .set_fillet_surface(None);
-                let start = self.start(required(self.fillets.geom(current_geom)?.rail(0))?)?;
+                let start = self.start(caller(
+                    self.fillets.geom(current_geom)?.rail(0),
+                    Solver::FilletGeomWithoutRail {
+                        fillet_geom: current_geom,
+                        side: 0,
+                    },
+                )?)?;
                 let point = self.fillets.vertex_point(start)?;
                 let original_curve = &get(&rails, 0)?.curve;
                 let solutions = original_curve.global_point_solve(
@@ -1137,7 +1411,11 @@ impl Recovery<'_> {
                 let mut direction = None;
                 if let Some(solution) = solutions.get(0) {
                     let t = solution.start.parameters.first().copied().ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the curve parameter of the solution")
+                        SolidError::blend_null_defect(
+                            OP,
+                            "a point solve's solution has no curve parameter: \
+                             `global_point_solve` records the parameter of every solution",
+                        )
                     })?;
                     if let Some(values) =
                         ignored(original_curve.evaluate(self.k, t, 1, true, true))?
@@ -1178,7 +1456,13 @@ impl Recovery<'_> {
             if let Some(geom) = new_geom {
                 current_geom = geom;
                 for (which, rail) in rails.iter_mut().enumerate() {
-                    rail.edge = required(self.fillets.geom(geom)?.rail(which))?;
+                    rail.edge = caller(
+                        self.fillets.geom(geom)?.rail(which),
+                        Solver::FilletGeomWithoutRail {
+                            fillet_geom: geom,
+                            side: which,
+                        },
+                    )?;
                     rail.split_last_time = true;
                 }
             } else {

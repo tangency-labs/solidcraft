@@ -3,10 +3,13 @@
 //! Rust workspace tooling. External tools (`cargo`, and Python 3.11+ for the
 //! original icon collection) are invoked through `std::process::Command`.
 
+mod app_geometry;
 mod app_icons;
 mod assets;
 mod book;
+mod ci;
 mod external_corpus;
+mod fast;
 mod features;
 mod i18n;
 mod icons;
@@ -21,6 +24,7 @@ mod mesh_decisions;
 mod parallel;
 mod params;
 mod pending;
+mod plugin_examples;
 mod render_assets;
 mod rustfmt;
 mod shared;
@@ -51,6 +55,10 @@ commands:
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
+  plugin-examples [--run]
+                  check that the plugin guide's examples (docs/book/plugin-examples) match the guide
+                  and build them for wasm32-unknown-unknown; --run also wraps each as a component
+                  and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
@@ -122,13 +130,20 @@ commands:
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
-  skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
+  skills          check that AGENTS.md, skills/ and .agents/skills/ cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
                   geometry: fails on a function outside display, export, previews and mesh bodies
-                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
+  app-geometry [--print]
+                  check that apps compute no geometry: fails on a function in crates/doc, engine,
+                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
+                  new since the base (git merge-base HEAD origin/main, else HEAD~1) and
+                  xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
+                  on stale lines; prints the listed count per crate. --print writes the sites
+                  found, in the list's format
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
@@ -139,14 +154,30 @@ commands:
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
                   Trunk after release builds of apps/solidcraft-web, or on a built site in DIR
-  web-api-test [--site DIR]  Test the command API in a real browser build (default: dist/web)
+  web-api-test [--site DIR] [--smoke]  Test the real browser build (default: dist/web); --smoke checks startup, frames and opening a design
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
-                  with the wasm check alongside, then web-offline-test when Chrome is installed
-                  (stops at the first failing step)
+  fast [--base REF] [-p PACKAGE]... [--units ID,...] [--no-tests] [--list] [-- TEST ARGS]
+                  the check before a commit and a push: what the change touches, against REF
+                  (default origin/main; committed, uncommitted and untracked files). Formats,
+                  runs the quick checks of ci, workspace clippy, and the tests of the packages
+                  whose files changed (scripts/ci/affected.py --owners; heavy tests skipped).
+                  When solidcore/ code changed: clippy of the whole solidcore workspace, the
+                  tests of all its crates but goldens and solidcore-ops (those only when
+                  changed) and solidcore's wasm check; --units runs the goldens of those kernel
+                  units (a kernel change without it prints a hint). -p names the packages to
+                  test instead; --list only prints what would run. Every step runs; the failures
+                  are listed at the end. CI runs the full gate
+  ci [--all] [--base REF]
+                  the check before a push: runs what the change needs. Always fmt --check,
+                  assets, icons, licences --check, lists, skills, layers, shared, ui-containers,
+                  mesh-decisions, app-geometry, clippy -D warnings, then the tests with the wasm
+                  check alongside, then web-offline-test when Chrome is installed; and, when the
+                  branch (against the merge-base with REF, default origin/main) changes their
+                  paths, i18n --check, kernel-cases --coverage, plugin-examples and the
+                  design-format pending check (xtask/src/ci.rs, PATH_GATES). Prints what it runs
+                  and skips and why; --all runs everything (stops at the first failing step)
 ";
 
 fn main() -> ExitCode {
@@ -177,6 +208,7 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("app-geometry") => app_geometry::run(&root(), &rest),
         Some("fmt") => match rest[..] {
             [] => rustfmt::run(&root(), false),
             ["--check"] => rustfmt::run(&root(), true),
@@ -188,7 +220,9 @@ fn main() -> ExitCode {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
             test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
         }
-        Some("ci") => cmd_ci(),
+        Some("ci") => ci::run(&root(), &rest),
+        Some("fast") => fast::run(&root(), &rest),
+        Some("plugin-examples") => plugin_examples::run(&root(), rest.contains(&"--run")),
         Some("wasm") => cmd_wasm(),
         Some("web-offline") => web_offline::run(&root(), rest.first().copied()),
         Some("web-offline-test") => {
@@ -197,7 +231,7 @@ fn main() -> ExitCode {
         }
         Some("web-api-test") => {
             let site = rest.iter().position(|a| *a == "--site").and_then(|i| rest.get(i + 1)).copied().unwrap_or("dist/web");
-            web_offline_test::run_api(site)
+            web_offline_test::run_api(site, rest.contains(&"--smoke"))
         }
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
@@ -308,6 +342,8 @@ fn cmd_layers() -> Result<(), String> {
     let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    let adapter = std::fs::read_to_string(root().join(layers::ADAPTER_LIST)).map_err(|e| format!("{}: {e}", layers::ADAPTER_LIST))?;
+    violations.extend(layers::adapter_check(&crates, &adapter));
     violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
     let paths = solidcore_paths::counts(&solidcore_paths::scan(
         &root(),
@@ -464,7 +500,7 @@ fn cmd_oracle(cli: Option<&str>) -> Result<(), String> {
     }
     let counts: Vec<String> = sources.iter().map(|(k, v)| format!("{v} {k}")).collect();
     let mut md = format!(
-        "# Reference tests\n\nGenerated by `cargo xtask oracle`. Each case in [`tests/oracle/`](../tests/oracle/) is a part described by our own `recipe.json`. SolidCraft replays the recipe through its command engine and compares the result with `expected.json`: body count, volume and area (relative tolerance 1e-3 unless the case states another), centre of mass and bounding box (within 1e-3 of the part's size), face count where the geometry fixes it, and, where the case has a `reference.stl`, the sampled symmetric (Hausdorff) distance between the two surfaces and the principal second moments of both triangulations. Every rebuilt part is also exported as STEP, validated and read back.\n\nWhere the expected values come from (the **Source** column):\n\n- **analytic**: closed-form geometry worked out by hand (prisms, cylinders, cones, spheres, tori and Pappus' theorems, fillets on straight edges with a constant radius or one varying along the edge, sheet-metal bends as annular sectors). The scripts in [`tools/oracle-analytic/`](../tools/oracle-analytic/) compute them and give the formulas.\n- **freecad &lt;version&gt;**: the same recipe built with FreeCAD's public Python scripting API by [`tools/freecad-oracle/`](../tools/freecad-oracle/), an independent kernel run as an external program. FreeCAD is not a dependency of SolidCraft. Where the two kernels legitimately build a different shape (for example the corner patch where fillets meet), only volume and area are compared, within the tolerance the case states.\n\nNo expected value comes from a commercial CAD product.\n\n**{pass} / {} cases pass**; sources: {}. {known} known failure(s) tracked in issues; {missing} case(s) without expected values yet.\n\n| Case | Source | Result | Surface distance mm (max / mean) | Method | Notes |\n|---|---|---|---|---|---|\n",
+        "# Reference tests\n\nGenerated by `cargo xtask oracle`. Each case in [`tests/oracle/`](../tests/oracle/) is a part described by our own `recipe.json`. SolidCraft replays the recipe through its command engine and compares the result with `expected.json`: body count, volume and area (relative tolerance 1e-3 unless the case states another), centre of mass and bounding box (within 1e-3 of the part's size), face count where the geometry fixes it, and, where the case has a `reference.stl`, the sampled symmetric (Hausdorff) distance between the two surfaces and the principal second moments of both triangulations. Cases with a `sweep.json` also change dimensions, rebuild and compare against the analytic reference at the same values. Every rebuilt part is also exported as STEP, validated and read back.\n\nWhere the expected values come from (the **Source** column):\n\n- **analytic**: closed-form geometry worked out by hand (prisms, cylinders, cones, spheres, tori and Pappus' theorems, fillets on straight edges with a constant radius or one varying along the edge, sheet-metal bends as annular sectors). The scripts in [`tools/oracle-analytic/`](../tools/oracle-analytic/) compute them and give the formulas.\n- **freecad &lt;version&gt;**: the same recipe built with FreeCAD's public Python scripting API by [`tools/freecad-oracle/`](../tools/freecad-oracle/), an independent kernel run as an external program. FreeCAD is not a dependency of SolidCraft. Where the two kernels legitimately build a different shape (for example the corner patch where fillets meet), only volume and area are compared, within the tolerance the case states.\n\nNo expected value comes from a commercial CAD product.\n\n**{pass} / {} cases pass**; sources: {}. {known} known failure(s) tracked in issues; {missing} case(s) without expected values yet.\n\n| Case | Source | Result | Surface distance mm (max / mean) | Method | Notes |\n|---|---|---|---|---|---|\n",
         list.len(),
         counts.join(", ")
     );
@@ -503,35 +539,13 @@ fn wasm_check() -> Result<(Command, usize), String> {
         .map(|c| c.name.clone())
         .collect();
     set.push("solidcraft-web".into());
+    set.push("ui-kit-gallery".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
     for p in &set {
         c.args(["-p", p]);
     }
     Ok((c, set.len()))
-}
-
-/// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
-/// binaries do, which leaves cargo's build lock free.
-fn cmd_ci() -> Result<(), String> {
-    rustfmt::run(&root(), true)?;
-    assets::run(&root())?;
-    icons::run(&root())?;
-    licences::run(&root(), true)?;
-    lists::run(&root(), false)?;
-    skills::run(&root())?;
-    cmd_layers()?;
-    shared::run(&root())?;
-    ui_containers::run(&root())?;
-    mesh_decisions::run(&root())?;
-    let mut c = cargo();
-    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
-    run(c, "cargo clippy -D warnings")?;
-    let (wasm, n) = wasm_check()?;
-    test_nextest::run_selected(vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
-    web_offline_test::run(&root(), None, false)?;
-    eprintln!("ci: all gates passed");
-    Ok(())
 }
 
 #[cfg(test)]

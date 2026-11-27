@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
             "type: mate|flush|distance|concentric|insert|parallel|perpendicular|angle|tangent|point_on_axis; a, b: references, as joint.create's \
-         origins (a face or a datum plane for a plane, a circle or an axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
+         origins (a planar face or a datum plane for a plane, a round face, circle or axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
          angle?: deg or an expression (needed for angle); flip?: turn b over; name? (default: the rule and a number, Mate1); quiet?. \
          Kept as a joint of the kind the rule needs (mate and flush planar, distance planar or point on plane, concentric cylindrical, \
          insert revolute, tangent line on plane, point on axis point on line), made where the parts are, so b moves no further than the \
@@ -206,6 +206,8 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         m.remove("values");
         m.remove("value");
         m.remove("limits");
+        m.remove("offset_x");
+        m.remove("offset_y");
         m.insert("flip".into(), Value::Bool(flip));
         // No name, `null` or blank text: the rule's own name (`Mate1`), not a joint's.
         if !m.get("name").and_then(Value::as_str).is_some_and(|n| !n.trim().is_empty()) {

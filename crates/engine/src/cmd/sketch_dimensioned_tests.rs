@@ -88,6 +88,41 @@ fn signed_arc_sweep_retains_radius_and_logical_endpoint_identity() {
     }
 }
 
+/// #20719: a 3-Point Arc takes a typed Radius and Sweep as dimensions on the arc it draws; its three
+/// points stay as clicked, and it is never dimensioned unless a value is typed.
+#[test]
+fn a_three_point_arc_takes_a_typed_radius_and_sweep() {
+    let mut s = session();
+    let params = json!({"start":[0,50],"end":[50,0],"through":[50.0 - 50.0 * 0.5f64.sqrt(), 50.0 - 50.0 * 0.5f64.sqrt()]});
+    draw(&mut s, "sketch.arc.three_point", params.clone(), json!({"radius":50,"sweep":"90 deg"}));
+    close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 50.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::ArcSweep { .. })), std::f64::consts::FRAC_PI_2);
+    let mut plain = session();
+    run(&mut plain, "sketch.arc.three_point", params.clone());
+    assert!(sketch(&plain).constraints.is_empty());
+    // Asking for the sizes as drawn leaves a typed-only creator as it is drawn.
+    let mut asked = session();
+    run(&mut asked, "sketch.draw.dimensioned", json!({"command":"sketch.arc.three_point","params":params,"as_drawn":true,"locate":true}));
+    assert!(sketch(&asked).constraints.is_empty());
+}
+
+/// #20719: the quarter circle round the corner of an L, drawn through its outer point, is R 50 over
+/// 90 deg with its centre on the corner, and a Coincident constraint keeps the centre there.
+#[test]
+fn a_three_point_arc_round_the_corner_of_an_l_keeps_its_centre_on_the_corner() {
+    let mut s = session();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[0,50]]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[50,0]]}));
+    let k = 50.0 * 0.5f64.sqrt();
+    let out = run(&mut s, "sketch.arc.three_point", json!({"start":[0,50],"end":[50,0],"through":[k,k]}));
+    let arc = out["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{arc}.center"), "b": "origin", "if_redundant": "refuse"}));
+    let sk = sketch(&s);
+    let i = sk.curves.iter().position(|c| c.id == arc).unwrap();
+    assert!(sk.center(i).unwrap().len() < 1e-6);
+    close(sk.radius(i).unwrap(), 50.0);
+}
+
 /// #6645: a clicked end with `clockwise` sweeps from the start the other way round, keeps the
 /// start's radius and its `.start`/`.end` names, with and without a typed radius.
 #[test]
@@ -498,6 +533,7 @@ fn sample(creator: &str) -> Option<Value> {
         "sketch.rectangle.center" => json!({"center":[0,0],"corner":[15,10]}),
         "sketch.rectangle.three_point" => json!({"p0":[0,0],"p1":[30,10],"p2":[25,25]}),
         "sketch.rectangle.rounded" => json!({"p0":[0,0],"p1":[30,20],"radius":3}),
+        "sketch.rectangle.edge_center" => json!({"anchor":[0,0],"corner":[10,6],"direction":[1,0]}),
         "sketch.circle.center" => json!({"center":[0,0],"radius":5}),
         "sketch.circle.two_point" => json!({"p0":[0,0],"p1":[10,0]}),
         "sketch.circle.three_point" => json!({"p0":[0,0],"p1":[10,0],"p2":[5,5]}),

@@ -9,6 +9,9 @@
 //! | [`MAX_TREES`], [`MAX_PARAMS`]                 | `SM_SA_MAX_TREES`, `SM_SA_MAX_TREES*2`                     |
 //! | [`SolutionType`]                              | `SmSolutionType`                                           |
 //! | [`SortKey`]                                   | `SmSortKeyType`                                            |
+//! | [`Contact`], [`Contact::merged`], `Solution::contact` | (not upstream) how a solution meets the surface     |
+//! | [`ContactId`], `Solution::shared_contact`     | (not upstream) two solutions of one solve standing for one contact |
+//! | [`SideRecord`], [`SolutionArray::side_record`] | (not upstream) what a line solve left undecided          |
 //! | [`SolutionEnd`], [`SolutionEnd::new`]         | `SmSolutionEnd`, `SmSolutionEnd()`                         |
 //! | `Clone`/`Copy` for [`SolutionEnd`]            | `SmSolutionEnd::operator=`                                 |
 //! | `Drop` (implicit)                             | `~SmSolutionEnd`                                           |
@@ -96,10 +99,22 @@
 //!   `NULL` of a failed `smos_Calloc`). New slots made by growth
 //!   are [`Solution::zeroed`] (type [`SolutionType::NodesOnly`], as calloc'd
 //!   memory reads upstream).
+//! - **Contact.** A solution carries a [`Contact`] upstream has no counterpart
+//!   for: how a line or curve meets the surface there. [`Solution::new`],
+//!   [`Solution::reset`] and new slots make it [`Contact::Unclassified`]; a
+//!   duplicate merged into a held solution leaves it [`Contact::merged`] from both.
+//!   It takes no part in the sort, the duplicate tests or the classification. A
+//!   solution typed by a certified root also carries the `(u, v)` box that root is
+//!   the only root in (`Solution::unique`): two solutions in boxes apart are two contacts,
+//!   so where a tolerance still merges them (upstream's duplicate removal, kept) the one
+//!   kept is undecided and carries no box, never a crossing standing for both; and the two solutions a line
+//!   solve reports for one contact on a seam, once at each end of the range, share a
+//!   [`ContactId`] (`Solution::shared_contact`), so that a consumer counts them once.
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
 //!   not ported; the `SM_DEBUG_CODE`/`GWC` blocks and `ERR` on an unknown sort key
 //!   (impossible with the [`SortKey`] enum) have no counterpart.
 
+use crate::blend::fillet_section::interval::{round_down, round_up};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object;
@@ -155,6 +170,146 @@ impl SolutionType {
     #[must_use]
     pub fn from_code(code: i32) -> Option<Self> {
         Self::ALL.into_iter().find(|t| t.code() == code)
+    }
+}
+
+/// How a line or curve solution meets the surface (not upstream): the type a ray's
+/// parity and a shell's inside test read. A solver sets it only from a certificate;
+/// [`Contact::Unclassified`] is a solution no typing has looked at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Contact {
+    /// No typing has looked at the solution.
+    #[default]
+    Unclassified,
+    /// The line passes from one side of the surface to the other here.
+    Crossing,
+    /// The line stays on one side of the surface here.
+    Touching,
+    /// Typing looked at the solution and could not decide.
+    Undecided,
+}
+
+impl Contact {
+    /// The contact of one solution kept for two merged into it (a duplicate merged into
+    /// the solution it repeats): unclassified for two unclassified, touching for two
+    /// touching, and [`Contact::Undecided`] otherwise. Every merge is by a tolerance, never
+    /// by a certificate that the two are one contact, so an unclassified one merged with a
+    /// decided one is undecided (nothing has shown that the decided type is the other's),
+    /// and so are two crossings (they may be two, which one solution would count once); a
+    /// caller that has shown two crossings one contact keeps the crossing itself.
+    #[must_use]
+    pub const fn merged(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unclassified, Self::Unclassified) => Self::Unclassified,
+            (Self::Touching, Self::Touching) => Self::Touching,
+            _ => Self::Undecided,
+        }
+    }
+
+    /// The contact of a range that takes in another solution (a point it absorbs, a range
+    /// it is joined with, the point a range is made from): unclassified when both are
+    /// (callers then behave as upstream), and [`Contact::Undecided`] once a solution typing
+    /// looked at goes into it, since a stretch is not the contact of a point in it.
+    #[must_use]
+    pub const fn absorbed(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unclassified, Self::Unclassified) => Self::Unclassified,
+            _ => Self::Undecided,
+        }
+    }
+}
+
+/// One contact two solutions of one solve both stand for (not upstream): a line solve that
+/// reports one contact on a seam twice, once at each end of the knots' range
+/// (`surface::surface::certified_line`, "The seam pair"), gives the two the same id, shared
+/// by no other solution of that solve, each typed as that contact. The contract for a
+/// consumer: two solutions of one solve (the same objects) with the same id are one contact,
+/// counted once; ids of different solves are unrelated, so arrays pooled from several solves
+/// keep their solves apart. It is no index: the solutions are rescaled, truncated to the
+/// first hit, deduplicated and joined after the typing, and the id travels with each copy. A
+/// solution merged with or absorbed into another by a tolerance loses it (nothing shows the
+/// kept one is still that contact) and takes the [`Contact::merged`] or
+/// [`Contact::absorbed`] of the two, undecided for a crossing: the one direction that could
+/// count the contact twice, two crossings with the id lost, never occurs while both stay
+/// crossings. A new or reset solution has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ContactId(pub core::num::NonZeroU32);
+
+/// What a line solve has not decided along the line, beside its solutions (not upstream):
+/// the side record a line/surface solve of a certified kind fills
+/// (`surface::surface::certified_line`, "Components"), in the line's parameter. Three
+/// states, never a list that may be empty: an empty record is never read as complete.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum SideRecord {
+    /// No certified pass ran (no exact net, a kind it does not run on, or no leaf it
+    /// could search): the solutions mean what they always did.
+    #[default]
+    NotRun,
+    /// Every part of the line the solve looked at is decided.
+    Complete,
+    /// The line parameters of what is not decided: closed intervals, ascending and apart.
+    Undecided(Vec<[f64; 2]>),
+}
+
+impl SideRecord {
+    /// The record undecided over `spans` (in any order, overlapping or not), merged into
+    /// ascending intervals apart; undecided over the whole line when `spans` is empty, so
+    /// that no list built empty reads as decided.
+    #[must_use]
+    pub fn undecided(mut spans: Vec<[f64; 2]>) -> Self {
+        if spans.is_empty() {
+            return Self::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]]);
+        }
+        spans.sort_by(|[a, _], [b, _]| a.total_cmp(b));
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for [lo, hi] in spans {
+            match merged.last_mut() {
+                Some([_, end]) if lo <= *end => *end = end.max(hi),
+                _ => merged.push([lo, hi]),
+            }
+        }
+        Self::Undecided(merged)
+    }
+
+    /// The record with the line parameter divided by `scale` (a solve that ran on the line
+    /// scaled by it), each interval rounded outward; undecided over the whole line for a
+    /// scale that is not a positive number.
+    #[must_use]
+    pub fn unscaled(self, scale: f64) -> Self {
+        let Self::Undecided(spans) = self else {
+            return self;
+        };
+        let usable = scale > 0.0 && scale.is_finite();
+        if !usable {
+            return Self::undecided(Vec::new());
+        }
+        Self::undecided(
+            spans
+                .into_iter()
+                .map(|[lo, hi]| [round_down(lo / scale), round_up(hi / scale)])
+                .collect(),
+        )
+    }
+
+    /// The record of a ray that keeps only its solution at line parameter `first`: an
+    /// interval that starts after it goes with the solutions the ray drops; one that starts
+    /// at or before it stays. Complete when none stays: everything before the hit the ray
+    /// keeps is decided.
+    #[must_use]
+    pub fn before(self, first: f64) -> Self {
+        let Self::Undecided(spans) = self else {
+            return self;
+        };
+        // (a NaN keeps every interval)
+        let kept: Vec<[f64; 2]> = spans
+            .into_iter()
+            .filter(|&[lo, _]| lo.partial_cmp(&first) != Some(core::cmp::Ordering::Greater))
+            .collect();
+        if kept.is_empty() {
+            Self::Complete
+        } else {
+            Self::Undecided(kept)
+        }
     }
 }
 
@@ -520,6 +675,16 @@ pub struct Solution<O> {
     /// `m_apNodes`: tree nodes the solution was found in; `None` is a null
     /// pointer.
     pub nodes: [Option<NodeId>; MAX_TREES],
+    /// (not upstream) how the solution meets the surface; see [`Contact`].
+    pub contact: Contact,
+    /// (not upstream) the `(u, v)` box `[[u0, u1], [v0, v1]]` a certified root is the only
+    /// root in, for a solution typed a crossing by that root: two solutions whose boxes are
+    /// apart are two contacts.
+    pub unique: Option<[[f64; 2]; 2]>,
+    /// (not upstream) the one contact this solution and another of the same solve both
+    /// stand for ([`ContactId`]); `None`, or an id no other solution of the solve carries,
+    /// for a solution that is its own contact.
+    pub shared_contact: Option<ContactId>,
 }
 
 impl<O: Copy> Default for Solution<O> {
@@ -540,6 +705,9 @@ impl<O: Copy> Solution<O> {
             num_objects: 0,
             objects: [None; MAX_TREES],
             nodes: [None; MAX_TREES],
+            contact: Contact::Unclassified,
+            unique: None,
+            shared_contact: None,
         }
     }
 
@@ -555,14 +723,17 @@ impl<O: Copy> Solution<O> {
 }
 
 impl<O: SolutionObject> Solution<O> {
-    /// Clears the type, the counts, the objects and the nodes (`ReSet`). The
-    /// solution ends keep their values, as upstream.
+    /// Clears the type, the counts, the objects, the nodes and the contact
+    /// (`ReSet`). The solution ends keep their values, as upstream.
     pub fn reset(&mut self) {
         self.solution_type = SolutionType::Unknown;
         self.num_variables = 0;
         self.num_objects = 0;
         self.objects = [None; MAX_TREES];
         self.nodes = [None; MAX_TREES];
+        self.contact = Contact::Unclassified;
+        self.unique = None;
+        self.shared_contact = None;
     }
 
     /// Checks the counts upstream would use to index its fixed arrays.
@@ -1399,6 +1570,8 @@ fn poly_vertex_point<O: SolutionObject>(poly_vertex: &O) -> Result<Point3> {
 pub struct SolutionArray<O> {
     /// `m_pData[0 .. m_lSize]`.
     data: Vec<Solution<O>>,
+    /// (Not upstream) what a line solve left undecided beside its solutions.
+    side_record: SideRecord,
 }
 
 impl<O: SolutionObject> Default for SolutionArray<O> {
@@ -1414,7 +1587,10 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// An empty array (`SmSolutionArray()`).
     #[must_use]
     pub const fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            data: Vec::new(),
+            side_record: SideRecord::NotRun,
+        }
     }
 
     /// An empty array (`SmSolutionArray(nDataSize, NULL)`).
@@ -1504,15 +1680,38 @@ impl<O: SolutionObject> SolutionArray<O> {
         }
     }
 
-    /// Removes every solution (`ReSet`).
+    /// Removes every solution (`ReSet`), and the side record with them.
     pub fn reset(&mut self) {
         self.data.clear();
+        self.side_record = SideRecord::NotRun;
+    }
+
+    /// (Not upstream) What a line solve left undecided beside its solutions
+    /// ([`SideRecord`]); [`SideRecord::NotRun`] for every other array.
+    #[must_use]
+    pub fn side_record(&self) -> &SideRecord {
+        &self.side_record
+    }
+
+    /// Sets the side record.
+    pub fn set_side_record(&mut self, record: SideRecord) {
+        self.side_record = record;
+    }
+
+    /// Takes the side record, leaving [`SideRecord::NotRun`].
+    pub fn take_side_record(&mut self) -> SideRecord {
+        std::mem::take(&mut self.side_record)
     }
 
     /// The solutions (`GetDataArray`).
     #[must_use]
     pub fn as_slice(&self) -> &[Solution<O>] {
         &self.data
+    }
+
+    /// The solutions, to change in place (`GetDataArray`).
+    pub fn as_mut_slice(&mut self) -> &mut [Solution<O>] {
+        &mut self.data
     }
 
     /// Solution `index`, `None` past the size (`operator[]`).
@@ -1609,8 +1808,13 @@ impl<O: SolutionObject> SolutionArray<O> {
                 num_objects: s.num_objects,
                 objects: [None; MAX_TREES],
                 nodes: s.nodes,
+                contact: s.contact,
+                unique: s.unique,
+                shared_contact: s.shared_contact,
             });
         }
+        // (the same solve's: the record names no object)
+        out.side_record = self.side_record.clone();
         out
     }
 
@@ -1711,8 +1915,9 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// (`AddSortedSolution`). Returns the index it was added at, or `None` when
     /// it was rejected: its value is `SM_BIG_DOUBLE` (uninitialised), or it
     /// [`Solution::is_equal`] a solution already held, which `new` then
-    /// replaces when its value is smaller in magnitude. Solutions are never
-    /// merged.
+    /// replaces when its value is smaller in magnitude; the solution kept takes
+    /// the [`Contact::merged`] of both, and keeps no unique box unless that is a crossing.
+    /// Solutions are never otherwise merged.
     ///
     /// # Errors
     ///
@@ -1752,8 +1957,17 @@ impl<O: SolutionObject> SolutionArray<O> {
             // don't add duplicate solutions (SolValues within ZeroSqrt and ParamValues within ScaledZero)
             if old.is_equal_in(new, domains)? {
                 // save the better solution - improve tolerances
+                // (not upstream) the kept solution carries both contacts
+                let contact = old.contact.merged(new.contact);
                 if new.start.solution_value.abs() < old.start.solution_value.abs() {
                     *old = *new;
+                }
+                old.contact = contact;
+                old.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a merged solution
+                // that is not a crossing carries none, whichever of the two was kept)
+                if old.contact != Contact::Crossing {
+                    old.unique = None;
                 }
                 return Ok(None);
             }
@@ -1908,6 +2122,210 @@ mod tests {
             SolutionType::NodesOnly
         );
         assert_eq!(Solution::<Obj>::new().solution_type, SolutionType::Unknown);
+    }
+
+    fn with_contact(mut s: Solution<Obj>, contact: Contact) -> Solution<Obj> {
+        s.contact = contact;
+        s
+    }
+
+    /// A new, zeroed or reset solution is unclassified; the contact travels with its
+    /// solution through a copy, the sorted insertion and the handle change.
+    #[test]
+    fn contact_survives_copy_and_sort() {
+        assert_eq!(Solution::<Obj>::new().contact, Contact::Unclassified);
+        assert_eq!(Solution::<Obj>::zeroed().contact, Contact::Unclassified);
+        assert_eq!(Contact::default(), Contact::Unclassified);
+        let crossing = with_contact(single(3.0, &[3.0]), Contact::Crossing);
+        let copy = crossing;
+        assert_eq!(copy.contact, Contact::Crossing);
+        let mut cleared = crossing;
+        cleared.reset();
+        assert_eq!(cleared.contact, Contact::Unclassified);
+
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        for (v, contact) in [
+            (3.0, Contact::Crossing),
+            (1.0, Contact::Touching),
+            (2.0, Contact::Undecided),
+            (0.5, Contact::Unclassified),
+        ] {
+            a.add_sorted_solution(
+                &with_contact(single(v, &[v]), contact),
+                SortKey::BySolutionValue,
+            )
+            .unwrap();
+        }
+        let sorted: Vec<_> = a
+            .as_slice()
+            .iter()
+            .map(|s| (s.start.solution_value, s.contact))
+            .collect();
+        assert_eq!(
+            sorted,
+            [
+                (0.5, Contact::Unclassified),
+                (1.0, Contact::Touching),
+                (2.0, Contact::Undecided),
+                (3.0, Contact::Crossing),
+            ]
+        );
+        a.insert_at(0, &crossing, 1);
+        a.swap(0, 4).unwrap();
+        assert_eq!(a.get(4).map(|s| s.contact), Some(Contact::Crossing));
+        let bare: SolutionArray<Obj> = a.without_objects();
+        let contacts: Vec<_> = bare.as_slice().iter().map(|s| s.contact).collect();
+        let held: Vec<_> = a.as_slice().iter().map(|s| s.contact).collect();
+        assert_eq!(contacts, held);
+
+        // the shared contact id: none on a new solution, kept by a copy, a sort, a swap, a
+        // truncation and the objects' clearing, cleared by a reset
+        assert_eq!(Solution::<Obj>::new().shared_contact, None);
+        let id = core::num::NonZeroU32::new(7).map(ContactId);
+        let mut linked = crossing;
+        linked.shared_contact = id;
+        let copy = linked;
+        assert_eq!(copy.shared_contact, id);
+        let mut cleared = linked;
+        cleared.reset();
+        assert_eq!(cleared.shared_contact, None);
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        for v in [3.0, 1.0] {
+            let mut s = single(v, &[v]);
+            s.shared_contact = id;
+            a.add_sorted_solution(&s, SortKey::BySolutionValue).unwrap();
+        }
+        a.add_sorted_solution(&single(2.0, &[2.0]), SortKey::BySolutionValue)
+            .unwrap();
+        a.swap(0, 1).unwrap();
+        let ids: Vec<_> = a.as_slice().iter().map(|s| s.shared_contact).collect();
+        assert_eq!(ids, [None, id, id]);
+        let bare: SolutionArray<Obj> = a.without_objects();
+        let kept: Vec<_> = bare.as_slice().iter().map(|s| s.shared_contact).collect();
+        assert_eq!(kept, ids);
+        a.swap(0, 1).unwrap();
+        a.set_size(1);
+        assert_eq!(a.get(0).map(|s| s.shared_contact), Some(id));
+    }
+
+    /// The merge rule: two solutions merged by a tolerance keep the shared type when both
+    /// are unclassified or touching, and any other pair gives undecided: an unclassified one
+    /// with a decided one (nothing shows the decided type is the other's), and two crossings
+    /// (they may be two contacts). A range taking in a solution stays unclassified only when
+    /// both are.
+    #[test]
+    fn merged_contacts() {
+        use Contact::{Crossing, Touching, Unclassified, Undecided};
+        let all = [Unclassified, Crossing, Touching, Undecided];
+        for x in all {
+            // the same type on both, two crossings apart (they may be two contacts)
+            let same = if x == Crossing { Undecided } else { x };
+            assert_eq!(x.merged(x), same);
+            // undecided stays undecided
+            assert_eq!(Undecided.merged(x), Undecided);
+            assert_eq!(x.merged(Undecided), Undecided);
+            // a range: unclassified with unclassified alone
+            let range = if x == Unclassified {
+                Unclassified
+            } else {
+                Undecided
+            };
+            assert_eq!(Unclassified.absorbed(x), range);
+            assert_eq!(x.absorbed(Unclassified), range);
+            for y in [Crossing, Touching, Undecided] {
+                assert_eq!(x.absorbed(y), Undecided);
+            }
+        }
+        // an unclassified one with a decided one, in either order
+        for x in [Crossing, Touching] {
+            assert_eq!(Unclassified.merged(x), Undecided);
+            assert_eq!(x.merged(Unclassified), Undecided);
+        }
+        // two decided types that differ
+        assert_eq!(Crossing.merged(Touching), Undecided);
+        assert_eq!(Touching.merged(Crossing), Undecided);
+
+        // a duplicate the sorted insertion drops leaves the kept one both contacts,
+        // whichever of the two is kept
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        a.add_sorted_solution(
+            &with_contact(single(2.0, &[2.0]), Crossing),
+            SortKey::BySolutionValue,
+        )
+        .unwrap();
+        let dup = with_contact(single(2.0 + 1e-7, &[2.0]), Touching);
+        assert_eq!(
+            a.add_sorted_solution(&dup, SortKey::BySolutionValue)
+                .unwrap(),
+            None
+        );
+        assert_eq!(a.len(), 1);
+        assert_eq!(
+            a.get(0).map(|s| (s.start.solution_value, s.contact)),
+            Some((2.0, Undecided))
+        );
+        let mut b: SolutionArray<Obj> = SolutionArray::new();
+        b.add_sorted_solution(&single(2.0 + 1e-7, &[2.0]), SortKey::BySolutionValue)
+            .unwrap();
+        let better = with_contact(single(2.0, &[2.0]), Crossing);
+        assert_eq!(
+            b.add_sorted_solution(&better, SortKey::BySolutionValue)
+                .unwrap(),
+            None
+        );
+        // (an unclassified one with a decided one: undecided)
+        assert_eq!(
+            b.get(0).map(|s| (s.start.solution_value, s.contact)),
+            Some((2.0, Undecided))
+        );
+        // a duplicate merged loses a shared contact id, either one kept (nothing shows the
+        // kept one is still that contact)
+        let id = core::num::NonZeroU32::new(1).map(ContactId);
+        for first in [true, false] {
+            let mut c: SolutionArray<Obj> = SolutionArray::new();
+            let mut s = with_contact(single(2.0 + 1e-7, &[2.0]), Crossing);
+            let mut t = with_contact(single(2.0, &[2.0]), Crossing);
+            if first {
+                s.shared_contact = id;
+            } else {
+                t.shared_contact = id;
+            }
+            c.add_sorted_solution(&s, SortKey::BySolutionValue).unwrap();
+            c.add_sorted_solution(&t, SortKey::BySolutionValue).unwrap();
+            assert_eq!(
+                c.get(0).map(|s| (s.contact, s.shared_contact)),
+                Some((Undecided, None))
+            );
+        }
+        // two boxed crossings merged are undecided and keep no unique box, whether the one
+        // held or the one coming in is kept; a crossing not merged keeps its box
+        let boxed = |value: f64, unique: [[f64; 2]; 2]| {
+            let mut s = with_contact(single(value, &[2.0]), Crossing);
+            s.unique = Some(unique);
+            s
+        };
+        let (p, q) = ([[0.1, 0.2], [0.3, 0.4]], [[0.2, 0.3], [0.3, 0.4]]);
+        for (held, incoming) in [(2.0, 2.0 + 1e-7), (2.0 + 1e-7, 2.0), (2.0, 2.0)] {
+            let mut d: SolutionArray<Obj> = SolutionArray::new();
+            d.add_sorted_solution(&boxed(held, p), SortKey::BySolutionValue)
+                .unwrap();
+            d.add_sorted_solution(&boxed(incoming, q), SortKey::BySolutionValue)
+                .unwrap();
+            assert_eq!(d.len(), 1);
+            assert_eq!(
+                d.get(0).map(|s| (s.contact, s.unique)),
+                Some((Undecided, None)),
+                "{held} {incoming}"
+            );
+        }
+        let mut e: SolutionArray<Obj> = SolutionArray::new();
+        e.add_sorted_solution(&boxed(2.0, p), SortKey::BySolutionValue)
+            .unwrap();
+        e.add_sorted_solution(&boxed(5.0, q), SortKey::BySolutionValue)
+            .unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e.get(0).and_then(|s| s.unique), Some(p));
+        assert_eq!(e.get(1).and_then(|s| s.unique), Some(q));
     }
 
     #[test]
@@ -2286,5 +2704,54 @@ mod tests {
                 Err(SolidError::InvalidInput { .. })
             ));
         }
+    }
+
+    /// The side record of a line solve: not run by default and after a reset; an
+    /// undecided record built from intervals merges them, and is never empty (built from
+    /// none, it is the whole line); scaled back, each interval is rounded outward; a ray
+    /// that keeps its first hit keeps the intervals starting at or before it, and is
+    /// complete when none does.
+    #[test]
+    fn the_side_record_has_three_states_and_follows_the_line_parameter() {
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        assert_eq!(a.side_record(), &SideRecord::NotRun);
+        assert_eq!(SideRecord::default(), SideRecord::NotRun);
+        a.set_side_record(SideRecord::Complete);
+        a.reset();
+        assert_eq!(a.side_record(), &SideRecord::NotRun);
+
+        let r = SideRecord::undecided(vec![[4.0, 5.0], [0.0, 1.0], [0.5, 2.0]]);
+        assert_eq!(r, SideRecord::Undecided(vec![[0.0, 2.0], [4.0, 5.0]]));
+        assert_eq!(
+            SideRecord::undecided(Vec::new()),
+            SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
+
+        let SideRecord::Undecided(scaled) = r.clone().unscaled(10.0) else {
+            panic!();
+        };
+        assert_eq!(scaled.len(), 2);
+        for ([lo, hi], [a0, a1]) in scaled.iter().zip([[0.0, 2.0], [4.0, 5.0]]) {
+            assert!(*lo <= a0 / 10.0 && *hi >= a1 / 10.0);
+            assert!(a0 / 10.0 - lo < 1.0e-15 && hi - a1 / 10.0 < 1.0e-15);
+        }
+        assert_eq!(
+            r.clone().unscaled(f64::NAN),
+            SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
+        assert_eq!(SideRecord::Complete.unscaled(10.0), SideRecord::Complete);
+        assert_eq!(SideRecord::NotRun.unscaled(10.0), SideRecord::NotRun);
+
+        assert_eq!(
+            r.clone().before(3.0),
+            SideRecord::Undecided(vec![[0.0, 2.0]])
+        );
+        assert_eq!(r.clone().before(4.0), r);
+        assert_eq!(
+            SideRecord::Undecided(vec![[4.0, 5.0]]).before(3.0),
+            SideRecord::Complete
+        );
+        assert_eq!(r.clone().before(f64::NAN), r);
+        assert_eq!(SideRecord::NotRun.before(3.0), SideRecord::NotRun);
     }
 }

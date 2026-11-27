@@ -331,6 +331,10 @@ pub struct NotifyRecords {
     /// The B-rep value and key scheme the store was last made exact for, if no record
     /// has been removed other than by a reset since ([`Self::changed_since`]).
     mark: Option<ReseedMark>,
+    /// The arena slots and keys visited to check, seed and reset the store since
+    /// [`Self::take_visits`] last ran (a tally for `Kernel::work_counters`; no result
+    /// reads it).
+    visits: u64,
 }
 
 /// What a [`NotifyRecords`] was last made exact for (not upstream): a default record for
@@ -450,6 +454,7 @@ impl From<BTreeMap<ObjectKey, Topology>> for NotifyRecords {
             changed: Vec::new(),
             all_changed,
             mark: None,
+            visits: 0,
         }
     }
 }
@@ -465,6 +470,22 @@ impl NotifyRecords {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Adds `visits` to the tally of the store's work: one for each arena slot, key or record
+    /// a pass of a check, a seeding or a reset touches (a slot scanned for a live object,
+    /// emptied slots included; a key made, compared, matched, removed or added; a record
+    /// reset). Outside it: the ten kinds' own bookkeeping, the progress entries (one for
+    /// each B-rep value) and the steps of the map's tree.
+    pub(crate) fn note_visits(&mut self, visits: usize) {
+        self.visits = self
+            .visits
+            .saturating_add(u64::try_from(visits).unwrap_or(u64::MAX));
+    }
+
+    /// The visits noted since this last ran ([`Self::note_visits`]).
+    pub(crate) fn take_visits(&mut self) -> u64 {
+        std::mem::take(&mut self.visits)
     }
 
     /// Remembers that the record of `key` may change. Past one entry per record the list
@@ -540,6 +561,17 @@ impl NotifyRecords {
     /// one ascending walk of both.
     pub(crate) fn reset_to_keys(&mut self, keys: &[ObjectKey]) {
         self.forget_seeding();
+        // (the records reset, then the one walk of the records and of `keys`)
+        let reset = if self.all_changed {
+            self.map.len()
+        } else {
+            self.changed.len()
+        };
+        self.note_visits(
+            reset
+                .saturating_add(self.map.len())
+                .saturating_add(keys.len()),
+        );
         if self.all_changed {
             for record in self.map.values_mut() {
                 *record = Topology::default();
@@ -564,6 +596,8 @@ impl NotifyRecords {
             }
         }
         new.extend(wanted.copied());
+        // (the keys removed and the keys added, each once more)
+        self.note_visits(gone.len().saturating_add(new.len()));
         for key in gone {
             self.map.remove(&key);
         }

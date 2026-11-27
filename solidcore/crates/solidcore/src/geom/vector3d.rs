@@ -53,6 +53,8 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::signed_unit_angle`]                  | not upstream: oriented angle of unit directions   |
+//! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
 //!
@@ -84,6 +86,7 @@
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -178,6 +181,34 @@ impl Vec3 {
     /// constructor).
     pub const UNDEF: Self = Self::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
 
+    /// Orient an undirected axis toward the positive side of its largest component, keeping
+    /// its length. Components within a relative 1e-9 of the largest magnitude tie in X, Y, Z
+    /// order, at any scale, so a zero component never decides; the zero vector stays as it is.
+    #[must_use]
+    pub fn canonical_axis_direction(self) -> Self {
+        let coordinates = self.to_array();
+        let largest = coordinates
+            .iter()
+            .fold(0.0_f64, |size, coordinate| size.max(coordinate.abs()));
+        match coordinates
+            .iter()
+            .find(|coordinate| coordinate.abs() >= largest * (1.0 - 1e-9))
+        {
+            Some(coordinate) if *coordinate < 0.0 => -self,
+            _ => self,
+        }
+    }
+
+    /// The unit direction of an undirected axis, oriented as [`Vec3::canonical_axis_direction`]
+    /// orients it: the vector divided by its length. `None` for a vector no longer than
+    /// `min_length` or one whose length is not finite.
+    #[must_use]
+    pub fn unit_axis_direction(self, min_length: f64) -> Option<Self> {
+        let length = self.length();
+        (length > min_length && length.is_finite())
+            .then(|| (self / length).canonical_axis_direction())
+    }
+
     /// Creates a vector from its components (`SmVector3d(dX, dY, dZ)`, `Set`).
     #[must_use]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
@@ -271,6 +302,14 @@ impl Vec3 {
         (self.x * o.x) + (self.y * o.y) + (self.z * o.z)
     }
 
+    /// How far this point stands from `origin` along `direction`: `(self - origin) . direction`,
+    /// as many lengths as `direction` is long (a unit direction gives the distance itself).
+    /// Negative behind `origin`.
+    #[must_use]
+    pub fn distance_along(self, origin: Self, direction: Self) -> f64 {
+        (self - origin).dot(direction)
+    }
+
     /// Cross product `self × o` (upstream `operator*` on two vectors).
     #[must_use]
     pub fn cross(self, o: Self) -> Self {
@@ -307,6 +346,25 @@ impl Vec3 {
         } else {
             self.unitize_nonzero(len_sq)
         }
+    }
+
+    /// The length and the unit direction of a vector of any finite length (not upstream). The
+    /// vector is first divided by its largest absolute coordinate, so its squared length lies
+    /// in `[1, 3]` and neither overflows nor underflows, then made unit as [`Vec3::unitize`]
+    /// makes it. The direction is exact at every finite length; the length is infinite past
+    /// `f64::MAX` and rounds to 0 below the smallest positive `f64`.
+    ///
+    /// `None` for a coordinate that is not finite, or the zero vector.
+    #[must_use]
+    pub fn length_and_unit(self) -> Option<(f64, Self)> {
+        let finite = self.x.is_finite() && self.y.is_finite() && self.z.is_finite();
+        let scale = self.max_dimension();
+        if !(finite && scale > 0.0) {
+            return None;
+        }
+        let scaled = self / scale;
+        let len_sq = scaled.length_squared();
+        Some((scale * sqrt(len_sq), scaled.unitize_nonzero(len_sq)))
     }
 
     fn unitize_nonzero(self, len_sq: f64) -> Self {
@@ -395,6 +453,26 @@ impl Vec3 {
             }
         }
         (parallel, anti)
+    }
+
+    /// Not upstream: this direction, reversed when it points more than a right angle away from
+    /// `like` ([`Vec3::parallel_sense`]'s anti-parallel flag): a line's direction given the sense
+    /// of another, as a turn about an edge found again keeps the sense it was picked with.
+    /// `None` when either has zero length or a coordinate that is not finite. The two are
+    /// compared scaled by their largest coordinate, so a vector whose squared length overflows
+    /// still has its sense.
+    #[must_use]
+    pub fn with_sense_of(self, like: Self) -> Option<Self> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self) || !finite(like) {
+            return None;
+        }
+        if self.length_squared() <= EFF_ZERO_SQ || like.length_squared() <= EFF_ZERO_SQ {
+            return None;
+        }
+        let scaled = |v: Self| v * (1.0 / v.x.abs().max(v.y.abs()).max(v.z.abs()));
+        let anti = scaled(self).parallel_sense(scaled(like), 0.0).1?;
+        Some(if anti { -self } else { self })
     }
 
     /// True when `self` and `o` are perpendicular within `ang_tol_deg` degrees
@@ -545,9 +623,9 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::vector3d::Vec3::solve_two_linear_equations",
-            "the system is singular",
+            GeomFailure::Singular { measure: denom },
         ))
     }
 
@@ -573,9 +651,9 @@ impl Vec3 {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(SolidError::geom_failed(
+            _ => Err(SolidError::geom(
                 "geom::vector3d::Vec3::component_mut",
-                "the component index is out of range",
+                GeomFailure::IndexOutOfRange { index, len: 3 },
             )),
         }
     }
@@ -655,9 +733,11 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::geom_failed(
+                // reached when `self` overflows: unitizing a vector whose squared
+                // length is infinite gives a zero vector
+                return Err(SolidError::geom(
                     "geom::vector3d::Vec3::make_unit_ortho_vectors",
-                    "no perpendicular vector found",
+                    GeomFailure::NoPerpendicular,
                 ));
             }
         }
@@ -826,6 +906,34 @@ impl Vec3 {
         }
     }
 
+    /// Signed angle in radians about the unit normal `self`, from unit `start` to unit `end`.
+    /// The directions must be perpendicular to the normal, within `1e-9` for rounding.
+    /// They are not renormalised. A half turn with a triple product below `1e-12` in
+    /// magnitude always chooses positive `PI`, including a negative rounded zero.
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] for non-finite, non-unit or non-perpendicular directions.
+    pub fn signed_unit_angle(self, start: Self, end: Self) -> Result<f64> {
+        if ![self, start, end]
+            .iter()
+            .all(|v| (v.length_squared() - 1.0).abs() <= 1e-9)
+            || self.dot(start).abs() > 1e-9
+            || self.dot(end).abs() > 1e-9
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            });
+        }
+        let sin = self.dot(start.cross(end));
+        let cos = start.dot(end).clamp(-1.0, 1.0);
+        Ok(if cos < 0.0 && sin.abs() < 1e-12 {
+            PI
+        } else {
+            sin.atan2(cos)
+        })
+    }
+
     /// Counter-clockwise angle in radians, in `[-PI, PI]`, from `start` to `end`
     /// after projecting both into the plane normal to `self` (`CCWAngleBetween`).
     /// Returns `0` when either vector is parallel to `self`.
@@ -850,6 +958,52 @@ impl Vec3 {
             proj_ang = -proj_ang;
         }
         Ok(proj_ang)
+    }
+
+    /// The turn about unit axis `self` that brings `normal` square to `line`, folded into
+    /// (-PI/2, PI/2]: the nearer of the two answers PI apart. `normal` and `line` act through
+    /// their projections on the plane square to the axis.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a non-finite vector, or a `normal` or `line` along
+    /// the axis (it has no direction square to it).
+    pub fn square_turn(self, normal: Self, line: Self) -> Result<f64> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !(finite(self) && finite(normal) && finite(line)) {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "non-finite vector",
+            });
+        }
+        // Only their directions count: scaled to a largest component of 1, so squaring a huge
+        // (or tiny) finite vector can't overflow (or underflow) on the way.
+        let scaled = |v: Self| {
+            let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+            if m > 0.0 {
+                v / m
+            } else {
+                v
+            }
+        };
+        let (normal, line) = (scaled(normal), scaled(line));
+        let target = self.cross(line);
+        if self.cross(normal).length_squared() < 100.0 * EFF_ZERO_SQ
+            || target.length_squared() < 100.0 * EFF_ZERO_SQ
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "a vector along the axis",
+            });
+        }
+        let turn = self.ccw_angle_between(normal, target)?;
+        Ok(if turn > PI / 2.0 {
+            turn - PI
+        } else if turn <= -PI / 2.0 {
+            turn + PI
+        } else {
+            turn
+        })
     }
 
     /// True when `self` and `end_vec` both lie along the segment `start_pnt`..`end_pnt`
@@ -967,7 +1121,120 @@ impl DivAssign<f64> for Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signed_unit_angles_keep_orientation_and_choose_positive_half_turns() {
+        for (normal, start, quarter) in [
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            (Vec3::Y, Vec3::Z, Vec3::X),
+            (Vec3::new(0.0, 0.6, 0.8), Vec3::X, Vec3::new(0.0, 0.8, -0.6)),
+        ] {
+            assert_eq!(normal.signed_unit_angle(start, start).unwrap(), 0.0);
+            assert!((normal.signed_unit_angle(start, quarter).unwrap() - PI / 2.0).abs() < 1e-15);
+            assert!((normal.signed_unit_angle(quarter, start).unwrap() + PI / 2.0).abs() < 1e-15);
+            assert_eq!(normal.signed_unit_angle(start, -start).unwrap(), PI);
+        }
+        for tiny in [-5e-13, -0.0, 0.0, 5e-13] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                PI
+            );
+        }
+        for tiny in [-2e-12_f64, 2e-12] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                tiny.atan2(-1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn signed_unit_angles_refuse_invalid_frames_without_normalising_them() {
+        for invalid in [
+            Vec3::ZERO,
+            Vec3::X * 2.0,
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            Vec3::new(0.0, f64::INFINITY, 0.0),
+            Vec3::new(1e300, 1e300, 0.0),
+        ] {
+            assert!(invalid.signed_unit_angle(Vec3::X, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(invalid, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(Vec3::X, invalid).is_err());
+        }
+        assert!(Vec3::Z.signed_unit_angle(Vec3::Z, Vec3::X).is_err());
+        assert!(Vec3::Z.signed_unit_angle(Vec3::X, Vec3::Z).is_err());
+    }
+
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
+        assert!((Vec3::new(9.0, 6.0, -4.0).distance_along(o, d) - 4.0).abs() < 1e-12);
+        assert!((Vec3::new(1.0, -1.0, 3.0).distance_along(o, d) + 3.0).abs() < 1e-12);
+        assert_eq!(o.distance_along(o, d), 0.0);
+    }
+
     use super::*;
+
+    /// A side with normal X, turned about Z to square with a line.
+    #[test]
+    fn square_turn_folds_to_the_nearer() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let turn = |l: [f64; 3]| z.square_turn(x, Vec3::from(l)).unwrap();
+        assert!(turn([0.0, 1.0, 0.0]).abs() < 1e-12);
+        assert!((turn([1.0, 1.0, 5.0]) + PI / 4.0).abs() < 1e-12);
+        assert!((turn([1.0, 0.0, 0.0]) - PI / 2.0).abs() < 1e-12);
+        assert!(z.square_turn(x, z).is_err());
+        assert!(z.square_turn(x, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+        // Huge and tiny finite vectors: the same turn, never NaN.
+        assert!((turn([1e200, 1e200, 0.0]) + PI / 4.0).abs() < 1e-12);
+        assert!(
+            (z.square_turn(x * 1e300, Vec3::new(1e-300, 1e-300, 0.0))
+                .unwrap()
+                + PI / 4.0)
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn a_direction_takes_the_sense_of_another_and_none_without_length() {
+        let y = Vec3::new(0.1, 1.0, 0.0);
+        assert_eq!(
+            Vec3::new(0.0, -2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        // Not along one line at all: the sense of the nearer half.
+        assert_eq!(
+            Vec3::new(1.0, -1.0, 0.0).with_sense_of(Vec3::new(0.0, 1.0, 0.0)),
+            Some(Vec3::new(-1.0, 1.0, 0.0))
+        );
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0).with_sense_of(y), None);
+        assert_eq!(y.with_sense_of(Vec3::new(0.0, 0.0, 0.0)), None);
+        assert_eq!(Vec3::new(f64::NAN, 1.0, 0.0).with_sense_of(y), None);
+        // Squared lengths that overflow keep their sense (#21447 review).
+        assert_eq!(
+            Vec3::new(1e200, 0.0, 0.0).with_sense_of(Vec3::new(-1.0, 0.0, 0.0)),
+            Some(Vec3::new(-1e200, 0.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 1e200, 0.0).with_sense_of(Vec3::new(0.0, 1e300, 0.0)),
+            Some(Vec3::new(0.0, 1e200, 0.0))
+        );
+        // Tiny but above the zero-length tolerance: still compared.
+        assert_eq!(
+            Vec3::new(0.0, -1e-9, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 1e-9, 0.0))
+        );
+    }
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
     /// zero and upstream fails after writing the x and z out-params.
@@ -1135,6 +1402,72 @@ mod tests {
             Vec3::new(3.0, 0.0, 4.0).unitize().unwrap(),
             Vec3::new(0.6, 0.0, 0.8)
         );
+    }
+
+    #[test]
+    fn length_and_unit_holds_at_any_finite_length() {
+        // (3, 0, 4) scaled so its squared length underflows or overflows
+        let unit = Vec3::new(0.6, 0.0, 0.8);
+        for s in [1.0, 1e-200, 1e200, 1e-300, 1e300] {
+            let (length, u) = Vec3::new(3.0 * s, 0.0, 4.0 * s).length_and_unit().unwrap();
+            assert!((length / s - 5.0).abs() < 1e-12, "{s:e}: {length:e}");
+            assert!((u - unit).length() < 1e-15, "{s:e}: {u:?}");
+        }
+        let (length, u) = Vec3::new(f64::MAX, f64::MAX, 0.0)
+            .length_and_unit()
+            .unwrap();
+        assert_eq!(length, f64::INFINITY);
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        assert!((u - Vec3::new(half, half, 0.0)).length() < 1e-15, "{u:?}");
+        for v in [
+            Vec3::ZERO,
+            Vec3::new(-0.0, 0.0, -0.0),
+            Vec3::new(f64::NAN, 0.0, 1.0),
+            Vec3::new(0.0, f64::NEG_INFINITY, 1.0),
+        ] {
+            assert_eq!(v.length_and_unit(), None, "{v:?}");
+        }
+    }
+
+    #[test]
+    fn a_canonical_axis_direction_is_one_orientation_at_any_scale() {
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        // unit vectors: the largest component turns positive, the first of equal ones decides
+        for (v, expected) in [
+            (Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+            (Vec3::new(half, -half, 0.0), Vec3::new(half, -half, 0.0)),
+            (Vec3::new(-half, half, 0.0), Vec3::new(half, -half, 0.0)),
+        ] {
+            assert_eq!(v.canonical_axis_direction(), expected, "{v:?}");
+        }
+        // X within a relative 1e-12 of the larger Y still ties first, whichever way the axis points
+        let (x, y) = (half, half * (1.0 + 1e-12));
+        for v in [Vec3::new(-x, y, 0.0), Vec3::new(x, -y, 0.0)] {
+            assert_eq!(v.canonical_axis_direction(), Vec3::new(x, -y, 0.0), "{v:?}");
+        }
+        // below 1e-9 a zero component never decides; the length is kept
+        for (y, z) in [(1e-10, 0.0), (0.0, 1e-200), (0.0, 5e-324)] {
+            for sign in [1.0, -1.0] {
+                let v = Vec3::new(0.0, sign * y, sign * z);
+                assert_eq!(v.canonical_axis_direction(), Vec3::new(0.0, y, z), "{v:?}");
+            }
+        }
+        assert_eq!(Vec3::ZERO.canonical_axis_direction(), Vec3::ZERO);
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a vector too short or not finite has no direction.
+    #[test]
+    fn a_unit_axis_direction_is_unit_and_oriented() {
+        let unit = |x, y, z| Vec3::new(x, y, z).unit_axis_direction(1e-9);
+        assert_eq!(unit(0.0, -2.0, 0.0), Some(Vec3::Y));
+        assert_eq!(unit(0.0, 0.0, 4.0), Some(Vec3::Z));
+        assert_eq!(unit(-3.0, 4.0, 0.0), Some(Vec3::new(-0.6, 0.8, 0.0)));
+        assert_eq!(unit(0.0, 0.0, 0.0), None);
+        assert_eq!(unit(1e-10, 0.0, 0.0), None);
+        assert_eq!(unit(f64::NAN, 1.0, 0.0), None);
+        assert_eq!(unit(f64::INFINITY, 0.0, 0.0), None);
     }
 
     #[test]

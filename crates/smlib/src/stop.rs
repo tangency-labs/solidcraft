@@ -89,6 +89,26 @@ impl Stop {
     }
 }
 
+/// Run `f` with a limit on its kernel work: the kernel counts the times it checks for a stop
+/// ([`solidcore::kernel::CancelToken::after_polls`]), a count of work, not of time, so the limit
+/// is the same on every machine, and `f` is stopped at the `polls`-th check. Under another token
+/// already, that one stops `f` too. Returns `f`'s answer and whether the limit, rather than that
+/// token, stopped it.
+pub fn within_polls<R>(polls: u64, f: impl FnOnce() -> R) -> (R, bool) {
+    let mine = Stop(Arc::new(Token { cancel: CancelToken::after_polls(polls), ..Token::default() }));
+    let over = current();
+    if let Some(over) = &over {
+        over.0.link(&mine.0);
+        if over.is_stopped() {
+            mine.stop();
+        }
+    }
+    let answer = scoped(Some(mine.clone()), f);
+    let over_stopped = over.as_ref().is_some_and(Stop::is_stopped);
+    let spent = !over_stopped && mine.0.cancel.polls().is_some_and(|made| made >= polls);
+    (answer, spent)
+}
+
 /// The token over this thread's work, to hand to the worker threads it starts.
 pub fn current() -> Option<Stop> {
     CURRENT.with(|c| c.borrow().clone())
@@ -115,7 +135,8 @@ pub fn unstoppable<R>(f: impl FnOnce() -> R) -> R {
     scoped(None, f)
 }
 
-/// solidcore's token of the work on this thread.
-pub(crate) fn token() -> Option<CancelToken> {
+/// solidcore's token of the work on this thread: for work that runs solidcore through another
+/// door (solidcore-ops' calls, `solidcore_ops::cancel::within`), so it stops with this work too.
+pub fn token() -> Option<CancelToken> {
     CURRENT.with(|c| c.borrow().as_ref().map(|s| s.0.cancel.clone()))
 }

@@ -23,6 +23,13 @@ const fn icon_primary(rgb: [u8; 3]) -> Color32 {
 impl Tokens {
     pub const fn light() -> Tokens {
         Tokens {
+            library_highlights: [
+                Color32::from_rgb(190, 45, 45),
+                Color32::from_rgb(165, 85, 0),
+                Color32::from_rgb(30, 125, 65),
+                Color32::from_rgb(30, 100, 200),
+                Color32::from_rgb(115, 65, 170),
+            ],
             nav_hover: Color32::from_rgb(233, 237, 242),
             nav_press: Color32::from_rgb(220, 226, 234),
             nav_dim: Color32::from_rgb(136, 149, 167),
@@ -170,6 +177,7 @@ impl Tokens {
             sel_edge_rim: Color32::from_rgb(127, 191, 255),
             hover_edge: Color32::from_rgb(0, 0, 0),
             hover_edge_halo: Color32::from_rgb(203, 203, 203),
+            hover_edge_lit: Color32::from_rgb(255, 128, 0),
             hover_face_lift: 40,
             sel_profile: Color32::from_rgb(26, 84, 167),
             sel_profile_edge: Color32::from_rgb(47, 109, 198),
@@ -198,12 +206,13 @@ impl Tokens {
             preview_new: Color32::from_rgb(240, 225, 105),
             preview_sketch: Color32::from_rgb(32, 190, 96),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
-            cube_face: Color32::from_rgb(236, 239, 244),
-            cube_border: Color32::from_rgb(85, 94, 110),
-            cube_text: Color32::from_rgb(38, 42, 50),
-            cube_hover: Color32::from_rgb(190, 220, 252),
+            navigator_face: Color32::from_rgb(236, 239, 244),
+            navigator_border: Color32::from_rgb(85, 94, 110),
+            navigator_text: Color32::from_rgb(38, 42, 50),
+            navigator_hover: Color32::from_rgb(190, 220, 252),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
+            viewport_middle: None,
             grid: Color32::from_rgb(196, 202, 212),
             grid_major: Color32::from_rgb(170, 178, 190),
             body_selected: Color32::from_rgb(110, 170, 235),
@@ -287,6 +296,35 @@ impl Tokens {
             sketch_centerline: Color32::from_rgb(200, 110, 60),
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
+            // The sheet colours of #4894 (22 and 30 Oct) and the drawing UI design's paper presets
+            // (#13159, D25), the same in both themes.
+            paper_white: Color32::from_rgb(0xF2, 0xF2, 0xF2),
+            paper_ink: Color32::from_rgb(0x1E, 0x1E, 0x1E),
+            paper_blueprint: Color32::from_rgb(0x1F, 0x4E, 0x8F),
+            paper_blueprint_ink: Color32::from_rgb(0xF1, 0xF6, 0xFF),
+            paper_prussian_blue: Color32::from_rgb(0x0A, 0x35, 0x55),
+            paper_prussian_blue_ink: Color32::from_rgb(0xD6, 0xE3, 0xEC),
+            paper_dark: Color32::from_rgb(0x2B, 0x2F, 0x36),
+            paper_dark_ink: Color32::from_rgb(0xD9, 0xDD, 0xE3),
+            // Hidden, centre, dimension, dimension text and note (`PaperLine`) on a white and a
+            // dark sheet (#18989): teal, red, violet, a deeper or lighter violet, and rose. Every
+            // pair, the ink too, stays apart (CIEDE2000 10 or more) for normal vision and each
+            // colour vision simulation (`colour_vision_tests`), so no mode changes them. The white
+            // set is the print colours too; a blueprint sheet keeps its one white ink.
+            paper_lines: [
+                Color32::from_rgb(0x17, 0x9C, 0x97),
+                Color32::from_rgb(0xFC, 0x34, 0x1C),
+                Color32::from_rgb(0x9A, 0x65, 0xEE),
+                Color32::from_rgb(0x41, 0x10, 0xB2),
+                Color32::from_rgb(0x97, 0x40, 0x60),
+            ],
+            paper_dark_lines: [
+                Color32::from_rgb(0x1D, 0xAD, 0xA4),
+                Color32::from_rgb(0xF8, 0x18, 0x2C),
+                Color32::from_rgb(0x99, 0x70, 0xD9),
+                Color32::from_rgb(0xE6, 0xAE, 0xE9),
+                Color32::from_rgb(0xFF, 0x7B, 0xB0),
+            ],
             interference: Color32::from_rgb(235, 45, 40),
             comb_envelope: Color32::from_rgb(130, 40, 175),
             comb_teeth: Color32::from_rgb(215, 105, 0),
@@ -454,6 +492,13 @@ impl Tokens {
         t.timeline_item_error = Color32::from_rgb(110, 50, 54);
         t.timeline_marker = Color32::from_rgb(170, 178, 192);
         t.field = Color32::from_rgb(30, 34, 41);
+        t.library_highlights = [
+            Color32::from_rgb(245, 100, 100),
+            Color32::from_rgb(245, 170, 60),
+            Color32::from_rgb(90, 195, 115),
+            Color32::from_rgb(100, 165, 250),
+            Color32::from_rgb(185, 145, 240),
+        ];
         t.box_window = Color32::from_rgb(70, 150, 255);
         t.box_crossing = Color32::from_rgb(80, 200, 120);
         t.bend_up = Color32::from_rgb(110, 200, 120);

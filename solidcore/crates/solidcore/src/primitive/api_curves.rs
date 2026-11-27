@@ -36,9 +36,10 @@
 //!   B-spline and line constructors take no context in the port.
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`];
 //!   `SM_ERR_NOT_WITHIN_TOLERANCE` is [`PrimitiveFailure::HelixDeviates`] (comparison
-//!   status [`SM_ERR_NOT_WITHIN_TOLERANCE`]) and `SM_ERR` a
-//!   [`PrimitiveFailure::Failed`] (comparison status [`crate::error::SM_ERR`]). Errors
-//!   of the called constructors pass through unchanged.
+//!   status [`SM_ERR_NOT_WITHIN_TOLERANCE`]) and `SM_ERR` a named
+//!   [`PrimitiveFailure`] (comparison status [`crate::error::SM_ERR`]): a helix that
+//!   could not be evaluated or a polygon side that could not be made, with the caught
+//!   error as its cause. Other errors of the called constructors pass through unchanged.
 //! - `SmApiCreateHelix` returns the curve as an `SmBSplineCurve`; the fitter's
 //!   `TWOPI` literal `6.2831853071795864` is [`core::f64::consts::TAU`] (the same
 //!   double).
@@ -58,7 +59,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{ignore_status, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::zone_tol_3d_of_curve;
 use crate::geom::vector3d::{is_valid_double, Point3, Vec3};
@@ -363,7 +364,9 @@ pub fn create_helix(params: &HelixParams) -> Result<BSplineCurve> {
             if e.is_unported_or_cancelled() {
                 e
             } else {
-                SolidError::primitive_failed(OP_HELIX, "the fitted helix could not be evaluated")
+                Failure::new(OP_HELIX, PrimitiveFailure::HelixNotEvaluated)
+                    .caused_by(e)
+                    .into_error()
             }
         })?;
 
@@ -444,28 +447,29 @@ pub fn create_rectangle(center: Point3, length: f64, width: f64) -> Result<Vec<L
     segments(&corners, OP_RECTANGLE)
 }
 
+/// A polygon side the line constructor refused or failed to make
+/// ([`PrimitiveFailure::PolygonSideNotMade`]), keeping the constructor's error as its cause
+/// (it decides defect or refusal: corners that coincide in double precision are the
+/// caller's).
+#[track_caller]
+fn side_not_made(operation: &'static str, e: SolidError) -> SolidError {
+    Failure::new(operation, PrimitiveFailure::PolygonSideNotMade)
+        .caused_by(e)
+        .into_error()
+}
+
 /// The closed polygon through `points` (segment `i` from point `i` to point
 /// `i + 1`, wrapping), each through `SmLine::CreateLineSegment`; `SM_ERR` on the
 /// first failure.
 fn segments(points: &[Point3], operation: &'static str) -> Result<Vec<Line>> {
     let mut result = Vec::with_capacity(points.len());
-    for (ii, &p0) in points.iter().enumerate() {
-        let p1 = points
-            .get((ii + 1) % points.len())
-            .copied()
-            .ok_or_else(|| {
-                SolidError::primitive_failed(operation, "a polygon corner is out of range")
-            })?;
+    // segment `i` ends at point `i + 1`, the last at the first
+    for (&p0, &p1) in points.iter().zip(points.iter().cycle().skip(1)) {
         match Line::create_line_segment(3, p0, p1, None) {
             Ok(seg) => result.push(seg),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // Drop the segments this call already made.
-            Err(_) => {
-                return Err(SolidError::primitive_failed(
-                    operation,
-                    "a polygon side could not be made",
-                ))
-            }
+            Err(e) => return Err(side_not_made(operation, e)),
         }
     }
     Ok(result)
@@ -538,12 +542,7 @@ pub fn create_regular_polygon(center: Point3, num_sides: u64, radius: f64) -> Re
             Ok(seg) => result.push(seg),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // Drop the segments this call already made.
-            Err(_) => {
-                return Err(SolidError::primitive_failed(
-                    OP_POLYGON,
-                    "a polygon side could not be made",
-                ))
-            }
+            Err(e) => return Err(side_not_made(OP_POLYGON, e)),
         }
     }
 
@@ -791,9 +790,15 @@ mod tests {
             create_rectangle(c, 10.0, 6.0).map(|v| v.len()).ok(),
             Some(4)
         );
+        // corners that coincide in double precision: the side keeps the line's error
+        let side = |e: &SolidError| {
+            e.upstream_status() == Some(SM_ERR)
+                && e.primitive_failure() == Some(&PrimitiveFailure::PolygonSideNotMade)
+                && e.cause().is_some()
+        };
         assert!(matches!(
             create_rectangle(p(0.0, 1.0e10, 0.0), 10.0, 1.0e-9),
-            Err(ref e) if e.upstream_status() == Some(SM_ERR)
+            Err(ref e) if side(e)
         ));
         assert!(matches!(
             create_rectangle(c, f64::NAN, 6.0),
@@ -805,7 +810,7 @@ mod tests {
         );
         assert!(matches!(
             create_regular_polygon(p(1.0e10, 1.0e10, 0.0), 5, 1.5e-6),
-            Err(ref e) if e.upstream_status() == Some(SM_ERR)
+            Err(ref e) if side(e)
         ));
         assert!(create_regular_polygon(c, 6, f64::INFINITY).is_err());
     }
