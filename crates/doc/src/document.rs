@@ -516,7 +516,21 @@ pub struct Extent {
     /// was not known): no cap answers to `start`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one_sided_direction: Option<Direction>,
+    /// To Object as a construction plane or point (or an origin plane or the origin), found
+    /// again on each evaluation so the end follows it. `to` then holds a point on it, so the
+    /// extrude still reads as To Object. Designs saved before it carry none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_ref: Option<ObjectRef>,
+    /// From Object as a reference, as `to_ref`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_ref: Option<ObjectRef>,
 }
+
+/// A To / From Object that is a construction plane or point, not a body face: see
+/// [`Extent::to_ref`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ObjectRef(pub GeoRef);
 
 /// A component's placement relative to a feature's own component, as it was when the feature
 /// picked something in it ([`Extent::picked_placements`]).
