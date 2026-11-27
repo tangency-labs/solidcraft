@@ -58,18 +58,15 @@ fn decode(png: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     let size = reader.output_buffer_size().filter(|&n| n <= DECODE_LIMIT)?;
     let mut buffer = vec![0_u8; size];
     let info = reader.next_frame(&mut buffer).ok()?;
-    if (info.width, info.height) != (width, height) || info.bit_depth != png::BitDepth::Eight {
-        return None;
-    }
-    let pixels = usize::try_from(u64::from(width) * u64::from(height)).ok()?;
     let data = buffer.get(..info.buffer_size())?;
-    match info.color_type {
-        png::ColorType::Rgba if data.len() == pixels.checked_mul(4)? => Some(data.to_vec()),
-        png::ColorType::GrayscaleAlpha if data.len() == pixels.checked_mul(2)? => {
-            Some(data.as_chunks::<2>().0.iter().flat_map(|&[gray, alpha]| [gray, gray, gray, alpha]).collect())
-        }
-        _ => None,
-    }
+    // The transformations leave RGBA or grey with alpha, 8 bits a channel; anything else, or a
+    // frame of another size, fails the length check below.
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::GrayscaleAlpha => data.as_chunks::<2>().0.iter().flat_map(|&[gray, alpha]| [gray, gray, gray, alpha]).collect(),
+        _ => data.to_vec(),
+    };
+    let pixels = usize::try_from(u64::from(width) * u64::from(height)).ok()?;
+    (rgba.len() == pixels.checked_mul(4)?).then_some(rgba)
 }
 
 /// Straight RGBA rows `width` x `height` averaged down to `to_width` x `to_height`, no larger.
