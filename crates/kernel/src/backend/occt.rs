@@ -386,6 +386,22 @@ impl Modelling for Occt {
         }
         let (pieces, _) = crate::build::loft_plan(sections).map_err(refused)?;
         let curves = crate::smlib_sweeps::loft_curves_of(&pieces).map_err(refused)?;
+        // A ruled skin pairs its curves' points by parameter. Lines and like arcs (one sweep)
+        // pair alike on both kernels; a line against an arc, or arcs of different sweeps, pair
+        // by each kernel's own parametrisation, which differ.
+        let alike = |a: &Curve, b: &Curve| match (a, b) {
+            (Curve::Line { .. }, Curve::Line { .. }) => true,
+            (Curve::Arc { start: s0, end: e0, .. }, Curve::Arc { start: s1, end: e1, .. }) => ((e0 - s0) - (e1 - s1)).abs() <= 1e-12,
+            (Curve::Nurbs { degree: d0, knots: k0, .. }, Curve::Nurbs { degree: d1, knots: k1, .. }) => d0 == d1 && k0 == k1,
+            _ => false,
+        };
+        let paired = match curves.as_slice() {
+            [a, b] => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| alike(x, y)),
+            _ => false,
+        };
+        if !paired {
+            return unsupported("a loft between curves of different kinds or sweeps");
+        }
         let mut data = vec![curves.len() as f64];
         for c in &curves {
             data.extend(encode_profile(c)?);
@@ -690,6 +706,12 @@ mod tests {
         parity("a circle to a smaller circle", Some(PI * 4.0 / 3.0 * (9.0 + 1.0 + 3.0)), || {
             one(crate::route::loft(&[(up(0.0), Loop2::circle(Vec2::ZERO, 3.0)), (up(4.0), Loop2::circle(Vec2::ZERO, 1.0))]))
         });
-        parity("a square to a circle", None, || one(crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))])));
+        // A square to a circle pairs a line with an arc: that stays on solidcore.
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))]).unwrap();
+        set_kernel(Kernel::Solidcore);
+        assert!(fell_back() > before);
     }
 }
