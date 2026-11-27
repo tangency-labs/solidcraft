@@ -3289,6 +3289,7 @@ impl AnalyticSupport {
         use crate::math::EFF_ZERO;
         use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
         use crate::surface::surf_of_revolution::SurfOfRevolution;
+        type WeightedPatch = Vec<Vec<(Vec3, f64)>>;
         let Some(nurb) = form.gw_nurb() else {
             return Ok(None);
         };
@@ -3296,7 +3297,6 @@ impl AnalyticSupport {
             let w = if c.w == NOW { 1.0 } else { c.w };
             (Vec3::new(c.x, c.y, c.z) * (1.0 / w), w)
         };
-        type WeightedPatch = Vec<Vec<(Vec3, f64)>>;
         let patches: Vec<Vec<WeightedPatch>> = decompose_to_bez(nurb)?
             .iter()
             .map(|row| {

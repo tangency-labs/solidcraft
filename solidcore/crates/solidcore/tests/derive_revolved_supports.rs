@@ -1014,10 +1014,11 @@ fn revolved_arc_surface(
 #[test]
 fn trimmed_unequal_span_revolution_net_derives_with_its_own_parametrisation() {
     use solidcore::surface::surface::SurfaceKind;
+    type SpanSpec = (f64, f64, f64);
     let k = Kernel::default();
     let (_, _, z) = tilted();
     let origin = Vec3::new(15.0, -22.5, 40.0);
-    let cases: [(&str, &[(f64, f64, f64)], f64); 2] = [
+    let cases: [(&str, &[SpanSpec], f64); 2] = [
         (
             "unequal 54+36 deg spans",
             &[(0.1, 0.25, 54.0), (0.25, 0.35, 36.0)],
@@ -1129,7 +1130,7 @@ fn shallow_small_arc_revolution_net_at_large_radius_derives() {
     // Perturbing a control point off the surface of revolution must still be refused.
     let good = revolved_arc_surface(origin, 60.0, 1.5, 0.0, 90.0, &[(0.0, 1.0, 45.0)], false);
     let nurb = good.gw_nurb().unwrap();
-    let mut rows: Vec<Vec<CPoint>> = nurb.rows().map(|r| r.iter().copied().collect()).collect();
+    let mut rows: Vec<Vec<CPoint>> = nurb.rows().map(<[CPoint]>::to_vec).collect();
     rows[1][1].x += 1e-3 * rows[1][1].w;
     let bad = BSplineSurface::from_nurb(
         solidcore::nurbs::srf_basic::Surface::new(
