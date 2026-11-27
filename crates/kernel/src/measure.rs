@@ -210,6 +210,19 @@ pub fn line_meets_box(b: &Aabb3, o: Vec3, d: Vec3) -> bool {
     !b.is_empty() && solidcore_ops::measure::line_meets_box(k(b.min), k(b.max), k(o), k(d), 1e-6).unwrap_or(false)
 }
 
+/// How far `b` runs past `end` along `toward` (mm), its greatest level above the plane through
+/// `end` square to `toward`, as solidcore-ops measures it
+/// ([`solidcore_ops::section_corners::reach_past`]); 0 when none of it lies past. A mesh body has
+/// no solidcore form and is refused.
+pub fn reach_past(b: &Body, end: solidcore_record::Vec3, toward: solidcore_record::Vec3) -> Result<f64> {
+    let Some(form) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("how far the body runs past its end: the body has no solidcore form".into()));
+    };
+    let (ops, _) = &*form;
+    solidcore_ops::section_corners::reach_past(ops, end, toward)
+        .map_err(|e| crate::KernelError::Invalid(format!("how far the body runs past its end can't be measured: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

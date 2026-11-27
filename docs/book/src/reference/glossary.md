@@ -1043,6 +1043,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
+| | the clearance between two flanges at a sheet corner | *corner gap* | the Gap row in a Flange corner card or the Corner Join dialog |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
@@ -1070,6 +1071,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 
