@@ -72,17 +72,29 @@ fn a_clover_drawn_by_clicks_snaps_every_corner_without_redundant_constraints() {
     assert_eq!(solved.report.dof, 4);
 }
 
-/// Preferences › Sketch › Rectangles can be turned (#21467): the 2-Point Rectangle tool holds its
-/// sides parallel and perpendicular with only the bottom horizontal. Off (the default), each side
-/// is horizontal or vertical as before.
+/// The 2-Point Rectangle tool's Fixed/Can turn switch (#21467): Can turn holds the sides parallel
+/// and perpendicular with only the bottom horizontal. Fixed (the start) keeps each side horizontal
+/// or vertical as before. The tool starts at the choice last made.
 #[test]
-fn the_rectangle_tool_draws_a_rotatable_rectangle_with_the_preference_on() {
+fn the_rectangle_tool_draws_a_rotatable_rectangle_with_its_switch_on_can_turn() {
     use solidcraft_engine::sketch::ConstraintKind;
     for on in [false, true] {
         let mut h = Harness::new();
-        h.app.preferences.rectangle_rotatable = on;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-        rectangle(&mut h, [0., 0.], [20., 12.], false);
+        h.step(&json!({"start": "sketch.rectangle.two_point"})).unwrap();
+        assert!(!h.app.tool.as_ref().unwrap().rotatable, "a rectangle tool starts Fixed");
+        h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+        h.step(&json!({"move": {"world": [20, 12, 0]}})).unwrap();
+        h.settle();
+        let which = if on { "can_turn" } else { "fixed" };
+        let at = crate::scenario::handle_at(&format!("rectangle_switch:{which}")).expect("the Fixed/Can turn switch under the Width box");
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.settle();
+        assert_eq!(h.app.tool.as_ref().unwrap().rotatable, on, "the switch sets the tool");
+        h.step(&json!({"move": {"world": [20, 12, 0]}})).unwrap();
+        h.step(&json!({"click": {"world": [20, 12, 0]}})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.settle();
         let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         let count = |f: fn(&ConstraintKind) -> bool| sk.constraints.iter().filter(|c| f(&c.kind)).count();
         let horizontal = count(|k| matches!(k, ConstraintKind::Horizontal { .. }));
@@ -92,5 +104,6 @@ fn the_rectangle_tool_draws_a_rotatable_rectangle_with_the_preference_on() {
         assert_eq!(sk.curves.len(), 4, "on {on}: {:?}", sk.curves);
         let want = if on { (1, 0, 2, 1) } else { (2, 2, 0, 0) };
         assert_eq!((horizontal, vertical, parallel, perpendicular), want, "on {on}: {:?}", sk.constraints);
+        assert_eq!(crate::sketch_dims::last_rectangle_rotatable(), on, "the next rectangle tool starts at this choice");
     }
 }

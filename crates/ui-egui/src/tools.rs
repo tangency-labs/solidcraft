@@ -133,6 +133,10 @@ pub struct Tool {
     /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
     /// tool runs; off, the tool shows only the pointer's coordinates, as before.
     pub arc_modes: bool,
+    /// The 2-Point and Center Rectangle draw a rectangle that can be turned (#21467): its sides
+    /// held parallel and perpendicular with only the bottom one horizontal. Set with the tool's own
+    /// Fixed/Can turn switch; a rectangle tool starts at the choice last made.
+    pub rotatable: bool,
     /// True when the constraint/dimension tool was entered from a valid preselection: once that
     /// single operation commits, the tool unselects itself (`app.tool = None`).
     pub preselected: bool,
@@ -198,6 +202,7 @@ impl Tool {
             line_type: 3,
             classic: false,
             arc_modes: false,
+            rotatable: crate::sketch_dims::last_rectangle_rotatable(),
             preselected: false,
             finished: false,
         })
@@ -941,10 +946,10 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
         // A corner or centre clicked on a curve, a midpoint or a crossing stays there, as a
         // line's end does (#18756).
         "sketch.rectangle.two_point" => {
-            json!({"p0": held(app, &p[0]), "p1": held(app, &p[1]), "rotatable": app.preferences.rectangle_rotatable})
+            json!({"p0": held(app, &p[0]), "p1": held(app, &p[1]), "rotatable": t.rotatable})
         }
         "sketch.rectangle.center" => {
-            json!({"center": held(app, &p[0]), "corner": held(app, &p[1]), "rotatable": app.preferences.rectangle_rotatable})
+            json!({"center": held(app, &p[0]), "corner": held(app, &p[1]), "rotatable": t.rotatable})
         }
         "sketch.rectangle.rounded" => {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
