@@ -5968,6 +5968,37 @@ fn right_clicking_a_message_offers_copy_message() {
     assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
 }
 
+/// Right-clicking selected reply text keeps the selection, and the menu's Copy row copies just
+/// that text, not the whole reply and not the selected CAD body (#10882). Without a selection the
+/// menu offers only Copy message.
+#[test]
+fn right_clicking_selected_reply_text_keeps_it_and_copies_only_it() {
+    let mut h = transcript_clipboard_harness(crate::ui_kit::LayoutMode::Docked);
+    let at = transcript_text_position(&h);
+    // A double click selects the word "Transcript".
+    transcript_click(&mut h, at);
+    transcript_click(&mut h, at);
+    h.frames(1);
+    let selected = |h: &crate::scenario::Harness| h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().selected_text();
+    assert_eq!(selected(&h).as_deref(), Some("Transcript"), "the double click selects one word");
+
+    click_at(&mut h, at, egui::PointerButton::Secondary);
+    h.frames(1); // let the popup settle at its final place before clicking its row
+    assert_eq!(selected(&h).as_deref(), Some("Transcript"), "the right-click keeps the selection");
+    let item = solidcraft_ui_registry::handle_at("agent_chat:copy_selection_menu:0").expect("the menu's Copy row for the selection");
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:copy_menu:0").is_some(), "Copy message stays in the menu");
+    click_at(&mut h, item, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("Transcript"), "only the selected word");
+    assert!(h.app.copied_bodies.is_empty(), "copying text must not copy a CAD body");
+
+    // The click on the row ended the selection: the next menu has no Copy row.
+    let msg = solidcraft_ui_registry::rect_of("agent_chat:msg:0").expect("the reply's message area");
+    click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
+    h.frames(1);
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:copy_menu:0").is_some(), "the menu is open");
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:copy_selection_menu:0").is_none(), "no selection, no Copy row");
+}
+
 /// A reply that is still streaming copies the stable text received so far.
 #[test]
 fn a_streaming_reply_copies_the_text_received_so_far() {

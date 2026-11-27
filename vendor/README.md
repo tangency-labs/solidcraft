@@ -120,6 +120,12 @@ SolidCraft changes to egui and eframe:
   under the pointer by that handle, and a window's title bar is laid out by its viewport: with
   the handle each window, the main one and every pop-out, publishes its own bar for one window
   procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
+- `crates/egui/src/text_selection/label_text_selection.rs`: only the primary button starts,
+  drags or ends a selection of label text. Upstream treats a press of any button as the start of
+  a new one, so a right-click cleared selected label text before a menu could copy it (#10882).
+  Text fields keep upstream's behaviour, where a right press moves the caret.
+  `LabelSelectionState::selected_text` gives the settled selected label text, for a menu's Copy
+  item (the agent chat's reply menu).
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
