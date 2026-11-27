@@ -428,9 +428,9 @@ pub fn slot_outline(start: f64, width: f64, faces: (f64, f64), clearance: f64) -
     slot_outline_split(start, width, faces, clearance, clearance)
 }
 
-/// [`slot_outline`] with its own room across the tab plate's thickness: `u ∈ [u_k − c, u_k + W
-/// + c]` along the edge and `w ∈ [w_A − c_t, w_B + c_t]` across, `c_t` the thickness clearance.
-/// Counter-clockwise.
+/// [`slot_outline`] with its own room across the tab plate's thickness, `c_t` the thickness
+/// clearance: `u ∈ [u_k − c, u_k + W + c]` along the edge and `w ∈ [w_A − c_t, w_B + c_t]`
+/// across. Counter-clockwise.
 ///
 /// # Errors
 ///
