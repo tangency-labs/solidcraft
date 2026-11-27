@@ -1924,3 +1924,26 @@ fn edited_extrude_to_a_reference_shows_it_and_keeps_it() {
     let volume = solidcraft_engine::doc::kernel::measure(&state.body("Main").unwrap().body).unwrap().volume;
     assert!((volume - 4000.0).abs() < 1e-6, "{volume}");
 }
+
+/// The window's arrow runs from a From plane or point to a To plane or point the extrude
+/// follows (#8527): it starts at the From one's height, 5 mm, and reaches the To one's, 25 mm.
+#[test]
+fn the_arrow_runs_between_from_and_to_references() {
+    use solidcraft_engine::geom::PlaneGeom as _;
+    for (from, to) in [(json!({"plane":"Floor"}), json!({"plane":"Ceiling"})), (json!({"construct_point":"Low"}), json!({"construct_point":"High"}))]
+    {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Floor"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":25,"name":"Ceiling"})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point":{"point":[5,5,5]},"name":"Low"})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point":{"point":[5,5,25]},"name":"High"})).unwrap();
+        let mut h = make_in(h, json!({"from": from, "to": to}));
+        open(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        let (base, dir) = crate::canvas::anchor(&h.app, d).unwrap();
+        assert!((base.z - 5.0).abs() < 1e-6, "{from}: the arrow starts at z {}", base.z);
+        let plane = solidcore_record::Plane::from_normal(base, dir.unwrap()).unwrap();
+        let span = crate::canvas::reference_height(&h.app, d, "To Object", &plane, base).unwrap();
+        assert!((span - 20.0).abs() < 1e-6, "{to}: the arrow reaches {span} past its start");
+    }
+}

@@ -6305,6 +6305,24 @@ pub(crate) fn object_point(inputs: &[SelInput], label: &str) -> Option<Value> {
     })
 }
 
+/// Where a To or From Object pick lies, for the window's arrow (#8527).
+pub(crate) enum ObjectPlace {
+    /// A place on the model, a free point or a construction point.
+    Point(Vec3),
+    /// An origin or construction plane.
+    Plane(solidcore_record::Plane),
+}
+
+/// [`ObjectPlace`] of the pick in the input `label`, where it is shown.
+pub(crate) fn object_place(s: &Session, inputs: &[SelInput], label: &str) -> Option<ObjectPlace> {
+    match inputs.iter().find(|i| i.label == label)?.items.first()? {
+        Sel::Face { point, .. } | Sel::Vertex { point, .. } | Sel::Edge { point, .. } => Some(ObjectPlace::Point(*point)),
+        Sel::ConstructionPoint { name } => point_by_name(s, name).map(ObjectPlace::Point),
+        Sel::Plane { name } => plane_by_name(s, name).map(ObjectPlace::Plane),
+        _ => None,
+    }
+}
+
 /// The pick that stands for a stored To / From Object reference (#8527): an origin or
 /// construction plane, or a construction point. `None` for one the dialog does not offer.
 fn reference_pick(s: &Session, r: &solidcraft_engine::doc::ObjectRef) -> Option<Sel> {
