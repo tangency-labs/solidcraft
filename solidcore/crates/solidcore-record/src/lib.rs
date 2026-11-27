@@ -24,6 +24,7 @@ pub mod accuracy;
 #[allow(missing_docs)]
 pub mod brep;
 pub mod cell_grid;
+pub mod cell_grid_wall;
 pub mod curve_query;
 // A sheet metal part's surfaces are SolidCraft's saved-model wire format, carried over as it is:
 // each type says what it is, and its fields are the names it says.
