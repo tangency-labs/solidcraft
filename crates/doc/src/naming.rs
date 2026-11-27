@@ -256,6 +256,22 @@ impl NameCell {
     pub(crate) fn is_saved(&self) -> bool {
         self.saved
     }
+    /// Already-computed face names, without forcing lazy naming or meshing.
+    pub(crate) fn cached_names(&self) -> Option<Arc<Names>> {
+        self.names.get().cloned()
+    }
+    /// Already-computed edge names for `body`, without meshing.
+    pub(crate) fn cached_edge_names(&self, body: &solidcraft_kernel::Body) -> Option<Arc<EdgeNameIndex>> {
+        self.edge_names.get().filter(|(cached, _)| cached.same_shape(body)).map(|(_, index)| index.clone())
+    }
+    /// Whether this cell retains an earlier `ModelState` or source `ModelBody`.
+    pub(crate) fn retains_ancestors(&self) -> bool {
+        self.origin.is_some() || self.copy_of.is_some()
+    }
+    /// The body this cell copies its names from, if any.
+    pub(crate) fn copy_source(&self) -> Option<&Arc<ModelBody>> {
+        self.copy_of.as_ref()
+    }
     fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
         if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
             pending.push(NamingAncestor::State(origin.before));
@@ -805,6 +821,70 @@ fn warm_chain(b: &ModelBody, ready: fn(&ModelBody) -> bool, name: fn(&ModelBody)
     for p in chain.iter().rev().step_by(WARM_STEP) {
         name(p);
     }
+}
+
+/// Materializes `b`'s exact face names without meshing, caching them into `b.names.names`.
+fn resolve_names_no_mesh(b: &ModelBody, limit: usize) -> Option<Arc<Names>> {
+    if let Some(known) = b.names.names.get() {
+        return Some(known.clone());
+    }
+    if limit == 0 {
+        return None;
+    }
+    if let Some(source) = b.names.copy_of.as_ref() {
+        let known = resolve_names_no_mesh(source, limit - 1)?;
+        let _ = b.names.names.set(known.clone());
+        return Some(known);
+    }
+    let o = b.names.origin.as_ref()?;
+    if o.depth >= MAX_DEPTH {
+        if b.body.is_mesh() {
+            return None;
+        }
+        let fallback = Arc::new(Names::unverified((0..b.body.face_count()).map(|k| format!("{}:face:{k}", b.name)).collect(), &[], None));
+        let _ = b.names.names.set(fallback.clone());
+        return Some(fallback);
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let derived = Arc::new(crate::history_names::derive_exact_no_mesh(b, o, lineage)?);
+    let _ = b.names.names.set(derived.clone());
+    Some(derived)
+}
+
+/// Returns a detached `NameCell` for storing `b` inside `EvalCache` without pinning
+/// `NamingOrigin::before` or `copy_of` chains, when `b`'s exact names can be materialized
+/// without meshing and no downstream compatibility path needs its live `origin`.
+pub(crate) fn try_detach_for_cache(b: &ModelBody) -> Option<NameCell> {
+    if !b.names.retains_ancestors() || b.frame_member_line.is_some() {
+        return None;
+    }
+    if let Some(o) = b.names.origin.as_ref()
+        && matches!(o.feature.kind, FeatureKind::FrameMember { .. } | FeatureKind::Align { .. } | FeatureKind::Move { copy: false, .. })
+    {
+        return None;
+    }
+    resolve_names_no_mesh(b, 16)?;
+    let cached_construction = b.names.cached_construction.or_else(|| {
+        let o = b.names.origin.as_ref()?;
+        (o.feature.id == b.feature
+            && matches!(
+                &o.feature.kind,
+                FeatureKind::Box { operation: crate::Operation::NewBody, .. } | FeatureKind::Extrude { operation: crate::Operation::NewBody, .. }
+            )
+            && o.before.body(&b.name).is_none())
+        .then_some(o.feature.id)
+    });
+    Some(NameCell {
+        origin: None,
+        cached_construction,
+        lineage: None,
+        names: b.names.names.clone(),
+        edge_names: b.names.edge_names.clone(),
+        vertex_names: b.names.vertex_names.clone(),
+        copy_of: None,
+        saved_depth: b.names.depth(),
+        saved: true,
+    })
 }
 
 /// A body's names, with what finding them again needs: from the history of the feature that
