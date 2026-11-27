@@ -2743,17 +2743,20 @@ pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order). A body of a component picked
-/// whole counts as that component, also when a sub-component places it; where two whole picks
-/// hold it, as the inner one.
+/// whole counts as that component, also when a sub-component places it; where several whole picks
+/// hold it (a component and its sub-component), as each of them, in the order they were picked.
 fn occurrences(s: &Session, items: &[Sel], whole: &[WholeComponent]) -> Vec<u64> {
     let mut out = Vec::new();
     for x in items {
         let Sel::Body { name } = x else { continue };
-        let picked = whole.iter().filter(|w| w.bodies.contains(name)).max_by_key(|w| w.path.len()).and_then(|w| w.path.last().copied());
-        if let Some(o) = picked.or_else(|| occurrence_of_body(s, name))
-            && !out.contains(&o)
-        {
-            out.push(o);
+        let mut held: Vec<u64> = whole.iter().filter(|w| w.bodies.contains(name)).filter_map(|w| w.path.last().copied()).collect();
+        if held.is_empty() {
+            held.extend(occurrence_of_body(s, name));
+        }
+        for o in held {
+            if !out.contains(&o) {
+                out.push(o);
+            }
         }
     }
     out

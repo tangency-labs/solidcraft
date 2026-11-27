@@ -2525,20 +2525,28 @@ fn as_built_takes_a_two_body_component_as_one() {
 
 /// Component Outer holding sub-component Inner, and component Other beside them.
 fn outer_inner_other() -> (crate::scenario::Harness, u64, u64, u64) {
+    outer_inner_other_with(true)
+}
+
+/// As [`outer_inner_other`]; without `outer_body` Outer holds Inner and no body of its own.
+fn outer_inner_other_with(outer_body: bool) -> (crate::scenario::Harness, u64, u64, u64) {
     let mut h = crate::scenario::Harness::new();
-    let component = |h: &mut crate::scenario::Harness, name: &str, corner: [f64; 3]| {
+    let component = |h: &mut crate::scenario::Harness, name: &str, corner: Option<[f64; 3]>| {
         let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
-        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body"})).unwrap();
+        if let Some(corner) = corner {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body"})).unwrap();
+        }
         occ
     };
-    let outer = component(&mut h, "Outer", [0.0, 0.0, 0.0]);
-    let inner = component(&mut h, "Inner", [0.0, 0.0, 10.0]);
+    let outer = component(&mut h, "Outer", outer_body.then_some([0.0, 0.0, 0.0]));
+    let inner = component(&mut h, "Inner", Some([0.0, 0.0, 10.0]));
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
-    let other = component(&mut h, "Other", [40.0, 0.0, 0.0]);
+    let other = component(&mut h, "Other", Some([40.0, 0.0, 0.0]));
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
     h.app.preferences.browser_components_open = true;
     h.frames(3);
-    assert_eq!(h.app.session.occurrence_bodies(&[outer], true).unwrap().len(), 2, "Outer holds Inner's body too");
+    let held = if outer_body { 2 } else { 1 };
+    assert_eq!(h.app.session.occurrence_bodies(&[outer], true).unwrap().len(), held, "Outer holds Inner's body too");
     assert_eq!(h.app.session.occurrence_bodies(&[outer, inner], true).unwrap().len(), 1);
     (h, outer, inner, other)
 }
@@ -2617,6 +2625,32 @@ fn as_built_takes_a_component_with_a_sub_component_as_one() {
     assert_eq!(d.active, 1, "two components: Position is next");
     let c = apply_commands(&h.app, d).unwrap();
     assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)), "with a body picked in the canvas");
+
+    // Outer with no body of its own: its row and Inner's hold the same body, and are still two
+    // components, in the order clicked.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, other) = outer_inner_other_with(false);
+        h.app.start("joint.as_built");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 0, "one component so far (Outer first {outer_first})");
+        click_row_at(&mut h, &second);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!((d.inputs[0].items.len(), d.active), (1, 1), "Inner's one body, Position is next (Outer first {outer_first})");
+        let c = apply_commands(&h.app, d).unwrap();
+        let want = if outer_first { (json!(outer), json!(inner)) } else { (json!(inner), json!(outer)) };
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), want, "Outer with no body (Outer first {outer_first})");
+        if outer_first {
+            // Position is active, so Other's row is not a third component, and picks no position.
+            click_row(&mut h, other);
+            let d = h.app.dialog.as_ref().unwrap();
+            assert_eq!((d.inputs[0].items.len(), d.active, d.inputs[1].items.len()), (1, 1, 0), "Other's row changes nothing");
+            let c = apply_commands(&h.app, d).unwrap();
+            assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Other's row leaves the two components");
+        }
+    }
 }
 
 /// Both grounded: Outer, which holds a sub-component, picked by its row, and Other make a joint
