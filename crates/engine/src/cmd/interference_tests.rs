@@ -661,9 +661,9 @@ fn a_slot_through_the_bore_clears_an_eccentric_pin() {
     run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 9, "base": [0, 0, -2], "operation": "cut", "targets": ["Plate"]}));
     run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 9, "base": [0.1, 0, -2], "operation": "new", "body_name": "Pin"}));
     let r = run(&mut s, "inspect.interference", json!({"bodies": ["Plate", "Pin"]}));
-    let (radius, d): (f64, f64) = (3.0, 0.1);
-    let lens = 2.0 * radius * radius * (d / (2.0 * radius)).acos() - d / 2.0 * (4.0 * radius * radius - d * d).sqrt();
-    let want = 5.0 * (std::f64::consts::PI * radius * radius - lens);
+    // Independent reference: the crescent area is 2R² asin(d / (2R)) + (d/2) sqrt(4R² - d²).
+    // R = 3 mm, d = 0.1 mm, overlap height = 5 mm.
+    let want = 2.999_861_105_323_5;
     assert_eq!(r["count"], 1, "{r}");
     assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(0), "{r}");
     assert!((f(&r["interferences"][0]["volume_mm3"]) - want).abs() < 1e-4, "{r}: expected {want}");
