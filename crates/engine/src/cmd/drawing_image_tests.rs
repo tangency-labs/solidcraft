@@ -359,8 +359,12 @@ fn placed_images_can_be_selected_and_deleted_with_shared_commands() {
     s.execute("select.all", &json!({"sheet":first})).unwrap();
     let id_a = ids::decode(a.as_str().unwrap()).unwrap();
     let id_b = ids::decode(b.as_str().unwrap()).unwrap();
-    assert!(s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_a)));
+    // Keep the existing Select All behavior: placed images require explicit selection.
+    assert!(!s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_a)));
     assert!(!s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_b)));
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+    s.execute("select.set", &json!({"items":[item(&a)]})).unwrap();
+    assert!(s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_a)));
     let dry = s.execute("selection.delete", &json!({"items":[item(&a)],"dry_run":true})).unwrap();
     assert_eq!(dry["images"], json!([a]));
     assert!(std::sync::Arc::ptr_eq(&before, &s.doc));

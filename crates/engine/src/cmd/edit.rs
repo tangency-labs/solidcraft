@@ -2445,7 +2445,6 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                 .chain(&on.dimensions)
                 .chain(&on.balloons)
                 .chain(&on.notes)
-                .chain(&on.images)
                 .filter(|object| d.has_object(**object))
                 .take(MAX_SELECTION + 1)
                 .map(|object| Sel::Drawing { drawing: open, object: *object })
