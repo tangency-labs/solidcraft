@@ -1656,15 +1656,16 @@ mod tests {
     }
 
     /// The third outcome of the tangent end's span (#17744, the maintainer's answer on
-    /// #18674): on a true tangent end of a large round (radius 40), both faces enclosed
+    /// #18674): on a true tangent end of a larger round (radius 160), both faces enclosed
     /// (NURBS), the certificate's graded pieces stop at `t*` near the tangent end, where the
-    /// bound over `[0, t*]` is not within the tolerance. The span is accepted on `main`'s
+    /// bound over `[0, t*]` is not within the tolerance, neither by the ring about the tangent
+    /// end nor by the bands about the fillet UV curve. The span is accepted on `main`'s
     /// midpoint check, every other span certified, and the rib makes no claim.
     #[test]
     fn a_rib_whose_tangent_end_is_not_bounded_is_built_without_a_bound() {
         let k = Kernel::default();
         let tol = 1e-5;
-        let (fillet, end, other) = tangent_end_surfaces(40.0);
+        let (fillet, end, other) = tangent_end_surfaces(160.0);
         assert!(certificate::Face::of(&k, &fillet).unwrap().is_some());
         assert!(certificate::Face::of(&k, &end).unwrap().is_some());
         let p = Point3::new(0.0, 0.0, 0.0);
