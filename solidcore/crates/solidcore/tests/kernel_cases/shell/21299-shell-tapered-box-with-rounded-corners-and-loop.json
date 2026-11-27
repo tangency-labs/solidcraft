@@ -496,7 +496,10 @@
    "tangency-labs/solidcraft#21299"
   ],
   "volume_mm3": 8884.295533,
-  "what": "an 80 x 50 rectangle extruded 10 with a 1 degree inward draft, its four slanted edges rounded R4, its top edge loop rounded R2, shelled 1.5 mm inward with the bottom face removed. The top round's pieces over the R4 rounds are rolling-ball rounds between the top plane and an inclined cylinder, whose spine is a plane conic, so they are kept as exact rounds of the conic class: their offset has no surface of its own kind, and re-certifying a definition against the offset surface refused every wall (the net has no NURBS form to check)"
+  "what": "an 80 x 50 rectangle extruded 10 with a 1 degree inward draft, its four slanted edges rounded R4, its top edge loop rounded R2, shelled 1.5 mm inward with the bottom face removed. The top round's pieces over the R4 rounds are rolling-ball rounds between the top plane and an inclined cylinder, whose spine is a plane conic, so they are kept as exact rounds of the conic class: their offset has no surface of its own kind, and re-certifying a definition against the offset surface refused every wall (the net has no NURBS form to check)",
+  "tolerance": {
+   "rel": 1e-06
+  }
  },
  "expressible": true,
  "operation_expressible": true,
