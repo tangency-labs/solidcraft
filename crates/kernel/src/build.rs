@@ -96,6 +96,32 @@ fn free_form_degree(s: &Seg2) -> Option<u8> {
 }
 
 fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>) -> Result<Vec<Body>> {
+    extrusion_plans(plane, regions, start, end, one_curve, |x| {
+        crate::smlib_sweeps::extrude(plane, &x.pieces, Some(x.region), x.from, x.distance, 1.0, None)
+    })
+}
+
+/// One region of an extrusion as the kernel sweeps it: its pieces (lines continuing one another
+/// joined and runs of one curve marked where the caller asks), from `from` along the plane's
+/// normal for `distance`.
+pub(crate) struct ExtrusionPlan<'a> {
+    pub pieces: Vec<crate::smlib_sweeps::Piece>,
+    pub region: &'a Region2,
+    pub from: f64,
+    pub distance: f64,
+}
+
+/// The extrusion of `regions` from `start` to `end`, checked and planned region by region as
+/// [`extrude`] and [`extrude_whole_sides`] build it, each plan handed to `each` as soon as it is
+/// made: what another kernel builds the same solids from, and what names them after.
+pub(crate) fn extrusion_plans<'a, T>(
+    plane: &Plane,
+    regions: &'a [Region2],
+    start: f64,
+    end: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+    mut each: impl FnMut(ExtrusionPlan<'a>) -> Result<T>,
+) -> Result<Vec<T>> {
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
     }
@@ -112,8 +138,9 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_cu
         .map(|r| {
             region_ok(r)?;
             let pieces = oriented(r)?;
+            let plan = |pieces| ExtrusionPlan { pieces, region: r, from: lo, distance: hi - lo };
             let Some(one_curve) = one_curve else {
-                return crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&pieces, &pieces), Some(r), lo, hi - lo, 1.0, None);
+                return each(plan(crate::smlib_sweeps::region_pieces(&pieces, &pieces)));
             };
             // Pieces of one curve: free-form segments of one degree that the caller says are one
             // curve. Each loop starts where such a run starts, so no run wraps round its end.
@@ -131,7 +158,7 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_cu
                 }
                 k += l.lp.segs.len();
             }
-            crate::smlib_sweeps::extrude(plane, &swept, Some(r), lo, hi - lo, 1.0, None)
+            each(plan(swept))
         })
         .collect()
 }
@@ -211,6 +238,50 @@ enum RevolveProfile<'a> {
 
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
 fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64, profile: RevolveProfile<'_>) -> Result<Vec<Body>> {
+    let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
+    revolution_plans(plane, regions, axis_origin, axis_dir, angle, profile, |x| {
+        crate::smlib_sweeps::revolve(plane, &x.pieces, x.origin, x.axis, x.angle, join_arcs)
+    })
+}
+
+/// One region of a revolution as the kernel turns it: its pieces (on-axis points snapped, runs
+/// of one curve marked where the caller asks), turned by `angle` about the axis through `origin`
+/// along `axis` (world coordinates; the angle's sign turns it toward the sketch normal).
+pub(crate) struct RevolutionPlan {
+    pub pieces: Vec<crate::smlib_sweeps::Piece>,
+    pub origin: Vec3,
+    pub axis: Vec3,
+    pub angle: f64,
+}
+
+/// [`revolve`], [`revolve_whole`] and [`revolve_whole_sides`]'s revolution of `regions`, checked
+/// and planned region by region (for [`revolve_joining_arcs`], the pieces before the arcs join):
+/// what another kernel builds the same solids from, and what names them after.
+pub(crate) fn revolution_plans_of(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+) -> Result<Vec<RevolutionPlan>> {
+    let profile = match one_curve {
+        Some(f) => RevolveProfile::JoinFreeForm(f),
+        None => RevolveProfile::AsDrawn,
+    };
+    revolution_plans(plane, regions, axis_origin, axis_dir, angle, profile, Ok)
+}
+
+/// The plans of [`revolution_plans_of`], each handed to `each` as soon as it is made.
+fn revolution_plans<T>(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    profile: RevolveProfile<'_>,
+    mut each: impl FnMut(RevolutionPlan) -> Result<T>,
+) -> Result<Vec<T>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -277,8 +348,7 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
         let RevolveProfile::JoinFreeForm(one_curve) = profile else {
             let pieces = crate::smlib_sweeps::pieces(given.oriented().loops());
-            let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
-            out.push(crate::smlib_sweeps::revolve(plane, &pieces, o, axis, angle, join_arcs)?);
+            out.push(each(RevolutionPlan { pieces, origin: o, axis, angle })?);
             continue;
         };
         // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
@@ -297,7 +367,7 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
             }
             k += l.lp.segs.len();
         }
-        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle, false)?);
+        out.push(each(RevolutionPlan { pieces: swept, origin: o, axis, angle })?);
     }
     Ok(out)
 }
