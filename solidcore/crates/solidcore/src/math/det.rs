@@ -10,7 +10,8 @@
 //!
 //! `sqrt`, `mul_add`, `abs`, `floor`, `ceil`, `round`, `trunc`, `min`, `max`, `copysign` and
 //! `rem_euclid` stay `std`'s: IEEE 754 rounds them correctly, or they are exact, so every
-//! platform agrees on them already.
+//! platform agrees on them already. (`min` and `max` may return either zero for `-0.0` and
+//! `0.0`; a value that must not depend on the sign of a zero compares instead.)
 //!
 //! Not upstream (SMLib calls the platform's C library). Deviations: none. No recursion.
 
