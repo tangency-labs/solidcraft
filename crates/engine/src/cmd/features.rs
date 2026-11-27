@@ -312,7 +312,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
             "features: [names] | bodies: [names] (combine?: join with the original; placements?: [[occurrence ids]] one per body to pick exact placements); ",
-            "plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)",
+            "plane: XY|XZ|YZ|construction plane name or id|{face, body?, index?, path?, fixed?}|{origin, normal}|{origin, x_dir, y_dir} (follows a picked face, a construction plane or length expressions in an explicit origin)",
         )),
     CommandSpec::new("solid.hole", "Hole", hole).begins_edit()
         .at("SOLID", "CREATE")
@@ -4090,15 +4090,27 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`placements` requires `bodies`"));
     }
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
-    let plane = plane_param(s, p.get("plane"), cmd)?;
+    let picked_face = p.get("plane").filter(|value| value.get("face").is_some());
+    let plane = match picked_face {
+        Some(face) => super::sketch::face::capture(s, face, cmd)?,
+        None => plane_param(s, p.get("plane"), cmd)?,
+    };
     let combine = bool_(p, "combine").unwrap_or(false);
     let ResolvedBodies { bodies, placements, warning } = if explicit_placements.is_empty() {
         placed_bodies(s, bodies, cmd)?
     } else {
         resolve_explicit_placements(s, bodies, explicit_placements, cmd)?
     };
-    let mut reply =
-        add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
+    if picked_face.is_some() {
+        super::sketch::face::capture_positions(s, &plane)?;
+    }
+    // Face capture already authors the reference in the active component's frame.
+    let mut reply = add_feature_in(
+        s,
+        p,
+        FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements },
+        picked_face.is_none(),
+    )?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
         copies_keep_looks(s, &reply, &bodies)?;

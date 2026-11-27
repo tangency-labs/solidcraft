@@ -939,9 +939,9 @@ pub struct MirrorParams {
     /// Omit to resolve placements from `bodies` names.
     #[serde(default)]
     pub placements: Option<Vec<Vec<u64>>>,
-    /// The plane to mirror across. The mirror follows a construction plane, and an explicit
-    /// plane's origin given as length expressions.
-    pub plane: PlaneParam,
+    /// The plane to mirror across. A picked planar face, construction plane or an explicit
+    /// plane's origin given as length expressions is followed on rebuild.
+    pub plane: PlaneOrFace,
     /// Join each copy to its original. Default: false.
     #[serde(default)]
     pub combine: Option<bool>,

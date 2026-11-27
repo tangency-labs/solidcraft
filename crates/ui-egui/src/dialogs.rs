@@ -7661,7 +7661,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Mirror => {
             need(0, "objects")?;
             need(1, "the mirror plane")?;
-            let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
+            let plane = match sels(d, 1).first() {
+                Some(sel @ Sel::Face { .. }) => crate::sketch_attachment_ui::face_plane(app, sel),
+                sel => plane_value(s, sel),
+            }
+            .ok_or("the mirror plane must be a plane or a planar face")?;
             let mut p = json!({"plane": plane});
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
