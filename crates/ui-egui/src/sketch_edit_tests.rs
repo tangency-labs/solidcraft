@@ -817,7 +817,7 @@ mod remembered_sketch_views {
     fn three_modes_keep_the_old_default_and_distinguish_finish_from_cancel() {
         assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
         let mut h = Harness::new();
-        h.app = sample_app();
+        *h.app = sample_app();
         h.app.home.open = false;
         let id = first_sketch(&h.app);
         h.app.ui.sketch_open_view = SketchOpenView::LastFinished;
@@ -871,7 +871,7 @@ mod remembered_sketch_views {
     #[test]
     fn one_sketchs_last_view_is_private_to_its_design_tab() {
         let mut h = Harness::new();
-        h.app = sample_app();
+        *h.app = sample_app();
         h.app.home.open = false;
         h.app.ui.sketch_open_view = SketchOpenView::Last;
         let id = first_sketch(&h.app);
@@ -893,7 +893,7 @@ mod remembered_sketch_views {
     fn reopening_ignores_a_camera_with_an_incompatible_up_axis() {
         use solidcraft_viewport::UpAxis;
         let mut h = Harness::new();
-        h.app = sample_app();
+        *h.app = sample_app();
         h.app.home.open = false;
         let id = first_sketch(&h.app);
         h.app.ui.sketch_open_view = SketchOpenView::Last;
@@ -913,7 +913,7 @@ mod remembered_sketch_views {
     fn replacing_a_design_clears_its_remembered_sketch_cameras() {
         use serde_json::json;
         let mut h = Harness::new();
-        h.app = sample_app();
+        *h.app = sample_app();
         h.app.home.open = false;
         let id = first_sketch(&h.app);
         let cam = h.app.cam;
