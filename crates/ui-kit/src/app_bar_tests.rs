@@ -1684,6 +1684,15 @@ fn a_tab_groups_label_comes_before_its_tabs_with_its_menu() {
     assert!(label.right() <= grouped0.left() && grouped0.right() <= grouped1.left(), "label {label:?}, then its tabs {grouped0:?} {grouped1:?}");
     assert!(label.left() >= tab0.left() - 1.0, "the label starts where the first tab did");
     assert!(grouped1.left() > tab1.left(), "the tabs make room for it");
+    // The group holds its designs: its label is as tall as a tab, and its band, taller still, runs
+    // behind the label and both tabs.
+    assert!((label.height() - grouped0.height()).abs() < 0.5, "label {label:?} as tall as a tab {grouped0:?}");
+    let band = rect("t:group:0:band");
+    assert!(
+        band.contains_rect(label) && band.contains_rect(grouped0) && band.contains_rect(grouped1) && band.height() > grouped0.height(),
+        "band {band:?} around the label {label:?} and tabs {grouped0:?} {grouped1:?}"
+    );
+    assert!(band.right() < rect("t:tab:2").left(), "the design outside the group is outside the band");
     drop(plain);
     rig.press(rig.at("t:group:0"), egui::PointerButton::Secondary);
     rig.frame(Vec::new());
