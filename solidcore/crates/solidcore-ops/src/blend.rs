@@ -1718,21 +1718,30 @@ pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
 
 /// [`session_failure`] on the session's error info.
 fn noted_failure(info: &ErrorInfo<FilletObject>, e: &SolidError) -> Option<Error> {
-    Some(match (failure(e)?, noted(info)) {
-        (
-            Error::BlendFailed {
-                class,
-                status,
-                phrase,
-            },
-            Some(why),
-        ) => Error::BlendFailed {
-            class,
-            status,
-            phrase: format!("{phrase}: {why}"),
-        },
-        (failed, _) => failed,
-    })
+    use std::fmt::Write as _;
+
+    let mut failed = failure(e)?;
+    if let Error::BlendFailed { ref mut phrase, .. } = failed {
+        if let Some(why) = noted(info) {
+            *phrase = format!("{phrase}: {why}");
+        }
+        if !phrase.contains("at (")
+            && info.code != FilletErrorType::Ok as i32
+            && !(info.no_room_without_site && info.code == FilletErrorType::NoRoom as i32)
+        {
+            if let Some(p) = info
+                .location
+                .filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+            {
+                let _ = write!(
+                    phrase,
+                    ", at the edge at ({:.3}, {:.3}, {:.3})",
+                    p.x, p.y, p.z
+                );
+            }
+        }
+    }
+    Some(failed)
 }
 
 /// What the session noted of its last failure, in the kernel's words: its error info's

@@ -1234,7 +1234,7 @@ fn paint_two_tier_header(
 
     // Diamond icon + Title + Count Badge
     p.text(pos2(banner_rect.left() + 10.0, banner_rect.center().y), egui::Align2::LEFT_CENTER, "◆", FontId::proportional(t.font_small), accent.color);
-    p.text(
+    let heading_rect = p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
         solidcraft_ui_text::tr_label("MODELING FEATURES"),
@@ -1242,7 +1242,8 @@ fn paint_two_tier_header(
         t.text,
     );
     let count_text = solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", &total_features.to_string())]);
-    let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 175.0, banner_rect.center().y), vec2(58.0, 16.0));
+    let badge_left = (banner_rect.left() + 146.0).max(heading_rect.right() + 6.0);
+    let badge_rect = Rect::from_min_size(pos2(badge_left, banner_rect.center().y - 8.0), vec2(58.0, 16.0));
     p.rect_filled(badge_rect, 3.0, accent.color.gamma_multiply(0.18));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, accent.color.gamma_multiply(0.4)), StrokeKind::Inside);
     p.text(badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), accent.color);

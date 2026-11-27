@@ -728,6 +728,26 @@ pub fn turn_to_parallel(
     Ok(m.turn)
 }
 
+/// Whether two 3D directions agree within cosine threshold `min_cos` (`a·b >= min_cos`, or
+/// `|a·b| >= min_cos` when `unsigned` is true).
+#[must_use]
+pub fn directions_aligned(a: [f64; 3], b: [f64; 3], min_cos: f64, unsigned: bool) -> bool {
+    solidcore::query::edge_turn::directions_aligned(Vec3::from(a), Vec3::from(b), min_cos, unsigned)
+}
+
+/// How far a frame's origin and Z axis moved between two column-major 4×4 transforms:
+/// `(origin_shift_mm, z_angle_deg)`.
+#[must_use]
+pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64, f64) {
+    solidcore::query::edge_turn::frame_z_deviation(before, after)
+}
+
+/// How far two rigid column-major 4×4 transforms differ: `(translation_mm, rotation_deg)`.
+#[must_use]
+pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
+    solidcore::query::edge_turn::rigid_pose_delta(a, b)
+}
+
 /// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
 /// `max`, each side counting `share` of the box's size beyond it
 /// (`query::api_queries::line_meets_box`). Never for a zero `dir`.
