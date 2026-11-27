@@ -478,6 +478,14 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
+
 ### keyboard profile
 
 A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
