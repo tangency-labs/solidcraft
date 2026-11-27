@@ -13,7 +13,8 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 2. Run `inspect_design {"measure":false,"sketches":false}`, even when you think the session is empty.
    - The SolidCraft server's instructions end with `Backend: connected to the SolidCraft app` when it drives the user's open app, and with `Backend: headless` otherwise.
    - If the design has timeline features, ask before calling `new_design` or `open`, because both discard unsaved work. You can also build into the open design.
-3. Write a plan:
+3. The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it. It is a text block at the end of a reply (`[Selected in SolidCraft right now: ...]`), left out when nothing is selected; faces and edges come with the names and indices the tools take.
+4. Write a plan:
    - the parameters
    - the placement: centre the part on the origin so patterns and mirrors can work from the planes
    - every feature, with the world point you will use for each edge or face pick
@@ -37,6 +38,7 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 
   A plain number never follows a parameter.
 - **Repeats:** `solid.pattern.rectangular` takes expression spacing; `solid.mirror` takes `XY`/`XZ`/`YZ`, a construction plane or `{origin, normal}` (origin coordinates may be length expressions such as `["half", 0, 0]`). A mirror or pattern feature cannot be mirrored or patterned again.
+- **Cell grids:** `solid.cell_grid` cuts (or with `mode: raised` adds) a field of cells. `shape: sketch` repeats the one closed profile of another sketch (`cell_sketch`) on a lattice from `pitch_x`, `pitch_y`, `stagger` (0 to 1; 0.5 for brick and hexagonal layouts), `cell_angle`, `flip` and `cell_origin`; `clip` is `whole` by default for it and `snap` is refused. A pitch whose cells overlap or come nearer than `web` is refused.
 - **Edge and face picks** snap to the nearest edge or face. An edge pick farther than 5% of the body's size from every edge is refused (`the nearest edge is 15.000 mm away`). On a large body that limit is wide (about 48 mm on a 949 mm board), so compute the exact midpoint from your geometry (the vertical corner edge of a centred box is `[w/2, d/2, h/2]`).
   - Picks must be plain numbers.
   - A pick is resolved once and then follows its edge when parameters change.

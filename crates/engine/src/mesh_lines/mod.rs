@@ -7,7 +7,7 @@
 //! tolerance, no closer.
 //!
 //! When the lines can't be made, [`Refused`] says what happened, and each caller adds what to do
-//! about it in its own terms: a DXF's tolerance and camera, a drawing view's chord and scale.
+//! about it in its own terms: a DXF's tolerance and camera, or the parts shown by a drawing view.
 mod coincide;
 mod meshes;
 mod progress;
@@ -39,9 +39,14 @@ pub(crate) enum Refused {
     /// The occlusion work, or the lines and segments it makes, past their limits.
     #[error("the lines take more work than the limit allows")]
     Work,
-    /// The meshes or the sketch points past their memory limit.
-    #[error("the meshes take more memory than the limit allows")]
-    Memory,
+    #[error("the mesh buffers exceed the {0} MiB limit")]
+    MeshBuffers(usize),
+    #[error("the meshes contain more than {0} triangles before placement")]
+    MeshTriangles(usize),
+    #[error("the projected mesh index exceeds the {0} MiB limit")]
+    ViewNodes(usize),
+    #[error("the shown sketches contain more than {0} sampled points")]
+    SketchPoints(usize),
     /// Part of the model is behind a perspective camera's eye.
     #[error("the model crosses the camera's eye plane")]
     EyePlane,

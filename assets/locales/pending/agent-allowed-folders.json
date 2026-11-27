@@ -1,0 +1,74 @@
+{
+  "en": {
+    "ai.prefs.allowed_folders": "Allowed folders",
+    "ai.prefs.allowed_folders_add": "Add folder…",
+    "ai.prefs.allowed_folders_clear": "Clear all",
+    "ai.prefs.allowed_folders_none": "No extra folders added.",
+    "ai.prefs.allowed_folders_note": "Extra folders the Assistant may open, save, and read linked designs in (in addition to the open design's folder). Reconnect or start a new chat for CLI-side tools to pick up changes.",
+    "ai.prefs.allowed_folders_remove": "Remove folder"
+  },
+  "fr": {
+    "ai.prefs.allowed_folders": "Dossiers autorisés",
+    "ai.prefs.allowed_folders_add": "Ajouter un dossier…",
+    "ai.prefs.allowed_folders_clear": "Tout effacer",
+    "ai.prefs.allowed_folders_none": "Aucun dossier supplémentaire ajouté.",
+    "ai.prefs.allowed_folders_note": "Dossiers supplémentaires dans lesquels l'Assistant peut ouvrir, enregistrer et lire des conceptions liées (en plus du dossier du fichier ouvert). Reconnectez ou démarrez un nouveau chat pour que les outils CLI prennent en compte les changements.",
+    "ai.prefs.allowed_folders_remove": "Retirer le dossier"
+  },
+  "de": {
+    "ai.prefs.allowed_folders": "Erlaubte Ordner",
+    "ai.prefs.allowed_folders_add": "Ordner hinzufügen…",
+    "ai.prefs.allowed_folders_clear": "Alle entfernen",
+    "ai.prefs.allowed_folders_none": "Keine zusätzlichen Ordner hinzugefügt.",
+    "ai.prefs.allowed_folders_note": "Zusätzliche Ordner, in denen der Assistent verknüpfte Konstruktionen öffnen, speichern und lesen darf (zusätzlich zum Ordner der geöffneten Konstruktion). Für CLI-Werkzeuge neu verbinden oder einen neuen Chat starten.",
+    "ai.prefs.allowed_folders_remove": "Ordner entfernen"
+  },
+  "ar": {
+    "ai.prefs.allowed_folders": "المجلدات المسموح بها",
+    "ai.prefs.allowed_folders_add": "إضافة مجلد…",
+    "ai.prefs.allowed_folders_clear": "مسح الكل",
+    "ai.prefs.allowed_folders_none": "لم تتم إضافة مجلدات إضافية.",
+    "ai.prefs.allowed_folders_note": "مجلدات إضافية يُسمح للمساعد بفتح التصميمات المرتبطة وحفظها وقراءتها فيها (إضافةً إلى مجلد التصميم المفتوح). أعد الاتصال أو ابدأ محادثة جديدة لتطبيق التغييرات على أدوات سطر الأوامر.",
+    "ai.prefs.allowed_folders_remove": "إزالة المجلد"
+  },
+  "he": {
+    "ai.prefs.allowed_folders": "תיקיות מורשות",
+    "ai.prefs.allowed_folders_add": "הוסף תיקייה…",
+    "ai.prefs.allowed_folders_clear": "נקה הכול",
+    "ai.prefs.allowed_folders_none": "לא נוספו תיקיות נוספות.",
+    "ai.prefs.allowed_folders_note": "תיקיות נוספות שבהן העוזר רשאי לפתוח, לשמור ולקרוא תכנונים מקושרים (בנוסף לתיקיית התכנון הפתוח). התחבר מחדש או התחל שיחה חדשה כדי שגם כלי CLI יקלטו שינויים.",
+    "ai.prefs.allowed_folders_remove": "הסר תיקייה"
+  },
+  "ja": {
+    "ai.prefs.allowed_folders": "許可するフォルダー",
+    "ai.prefs.allowed_folders_add": "フォルダーを追加…",
+    "ai.prefs.allowed_folders_clear": "すべてクリア",
+    "ai.prefs.allowed_folders_none": "追加のフォルダーはありません。",
+    "ai.prefs.allowed_folders_note": "アシスタントがリンク設計を開いたり保存・読み取りできる追加フォルダーです（開いている設計のフォルダーに加えて適用されます）。CLI側ツールへ反映するには再接続または新しいチャットを開始してください。",
+    "ai.prefs.allowed_folders_remove": "フォルダーを削除"
+  },
+  "ko": {
+    "ai.prefs.allowed_folders": "허용된 폴더",
+    "ai.prefs.allowed_folders_add": "폴더 추가…",
+    "ai.prefs.allowed_folders_clear": "모두 지우기",
+    "ai.prefs.allowed_folders_none": "추가된 폴더가 없습니다.",
+    "ai.prefs.allowed_folders_note": "열린 설계의 폴더 외에 어시스턴트가 연결된 설계를 열고 저장하고 읽을 수 있는 추가 폴더입니다. CLI 도구에 변경 사항을 반영하려면 다시 연결하거나 새 대화를 시작하세요.",
+    "ai.prefs.allowed_folders_remove": "폴더 제거"
+  },
+  "vi": {
+    "ai.prefs.allowed_folders": "Thư mục được phép",
+    "ai.prefs.allowed_folders_add": "Thêm thư mục…",
+    "ai.prefs.allowed_folders_clear": "Xóa tất cả",
+    "ai.prefs.allowed_folders_none": "Chưa thêm thư mục bổ sung nào.",
+    "ai.prefs.allowed_folders_note": "Các thư mục bổ sung mà Trợ lý có thể mở, lưu và đọc thiết kế liên kết (ngoài thư mục của thiết kế đang mở). Kết nối lại hoặc bắt đầu cuộc trò chuyện mới để công cụ CLI áp dụng thay đổi.",
+    "ai.prefs.allowed_folders_remove": "Xóa thư mục"
+  },
+  "zh": {
+    "ai.prefs.allowed_folders": "允许的文件夹",
+    "ai.prefs.allowed_folders_add": "添加文件夹…",
+    "ai.prefs.allowed_folders_clear": "全部清除",
+    "ai.prefs.allowed_folders_none": "尚未添加额外文件夹。",
+    "ai.prefs.allowed_folders_note": "除当前打开的设计所在文件夹外，允许助手在其中打开、保存和读取关联设计的额外文件夹。重新连接或新建对话即可让 CLI 侧工具生效。",
+    "ai.prefs.allowed_folders_remove": "移除文件夹"
+  }
+}

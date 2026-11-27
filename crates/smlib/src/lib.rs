@@ -138,8 +138,16 @@ pub enum Error {
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
+    /// A classification that needs one nearest point on a face's surface found `found` of them
+    /// (the kernel's `compute_point_parameters`, its `IntersectFailure::NotOneFoot`): the
+    /// point's place on the face is undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
-    /// is missing, and the solidcore issue that ports it.
+    /// is missing, and the solidcore issue that ports it; or what solidcore cannot build yet, in
+    /// its words (solidcore-ops' `Unsupported`, a blend corner of a kind it has no patch for).
     Unported(&'static str),
     /// The work's token was stopped ([`stop::Stop::stop`]) before or during the call: no result,
     /// even one solidcore finished first. Never a failure of the operation on its input.
@@ -159,6 +167,7 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument for SMLib"),
             Error::Empty => write!(f, "SMLib returned an empty body"),
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
+            Error::NotOneFoot { found } => write!(f, "a classification found {found} nearest points on the face's surface, where one is needed"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
@@ -287,6 +296,22 @@ pub fn hold_a_kernel() -> core::HeldKernel {
 pub fn in_call() -> bool {
     core::in_call()
 }
+
+/// Every pooled kernel's profile (solidcore's `profile` feature), written as JSON Lines: the
+/// scopes and counted work of its calls so far (feature `solidcore-profile`).
+///
+/// # Errors
+///
+/// Those of writing to `w`.
+#[cfg(feature = "solidcore-profile")]
+pub fn write_kernel_profiles(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    core::write_kernel_profiles(w)
+}
+
+/// [`solidcore_ops::session::profiled`], re-exported so the applications can dump each
+/// solidcore-ops call's kernel profile (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcore_ops::session::profiled;
 
 /// A panic inside a solidcore call, which the call catches as it catches any
 /// ([`Error::Internal`], the kernel replaced by a fresh one): the crash-report check

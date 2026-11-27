@@ -1,0 +1,16 @@
+{
+  "id": "panorama",
+  "name": "Panorama",
+  "version": "1.0.0",
+  "description": "A 360-degree picture around the model that turns with the view.",
+  "capabilities": ["shaders@0.1"],
+  "shaders": [
+    {
+      "id": "panorama",
+      "name": "Panorama",
+      "kind": "background",
+      "source": "panorama.wgsl",
+      "textures": [{"name": "picture", "file": "panorama.jpg"}]
+    }
+  ]
+}

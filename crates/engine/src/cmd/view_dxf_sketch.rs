@@ -59,7 +59,7 @@ pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, Refused> {
         }
         total = total.saturating_add(points.len());
         if total > MAX_POINTS {
-            return Err(Refused::Memory);
+            return Err(Refused::SketchPoints(MAX_POINTS));
         }
         result.push(Part { points, on_top });
         Ok(())
