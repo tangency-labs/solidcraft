@@ -24,15 +24,18 @@ use super::types::{
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
 
-/// Add a box primitive.
+/// Add a box primitive. Its corner or centre and its sizes are in world coordinates, also while a
+/// moved component is active: the box goes into that component. In a component turned by other
+/// than quarter turns its sizes lie along the component's own axes; without `corner` or `center`
+/// it sits at the component's origin, along its axes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BoxParams {
-    /// Size along X.
+    /// Size along the world X axis.
     pub length: LengthExpr,
-    /// Size along Y.
+    /// Size along the world Y axis.
     pub width: LengthExpr,
-    /// Size along Z.
+    /// Size along the world Z axis.
     pub height: LengthExpr,
     /// The box's minimum corner. Default: the origin. When both `corner` and `center` are given,
     /// `corner` is used.
@@ -313,7 +316,8 @@ pub struct NoticeAction {
     pub params: Value,
 }
 
-/// Add a cylinder primitive.
+/// Add a cylinder primitive. `base` and an `[x, y, z]` axis are in world coordinates, also while
+/// a moved component is active: the cylinder goes into that component.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CylinderParams {
@@ -329,10 +333,11 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction from the bottom to the top: X, Y, Z or `[x, y, z]`, each a number or an
-    /// expression with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as
-    /// the parameters change. A parameter added as a plain number is a length: divide it by its
-    /// unit (`"n / 1 mm"`). Default: Z.
+    /// The direction from the bottom to the top: the active component's X, Y or Z axis, or a world
+    /// direction `[x, y, z]`, each a number or an expression with no unit
+    /// (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as the parameters change. A
+    /// parameter added as a plain number is a length: divide it by its unit (`"n / 1 mm"`).
+    /// Default: the active component's Z axis.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "AxisDirExpr")]
     pub axis: Option<AxisDirExpr>,

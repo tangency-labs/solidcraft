@@ -4,7 +4,11 @@ A design is a tree of **components**. **New Component** (`component.create`) add
 **Create Components from Bodies** (`component.from_bodies`) turns bodies into components. Each
 component has its own origin, bodies, sketches and timeline entries. The **active component**
 (the radio button in the browser) receives new sketches and features; the others are drawn
-faded.
+faded. Points and directions you give a command are in world coordinates even when the active
+component is moved or turned: a box's corner and its length, width and height along X, Y and Z,
+or a cylinder's base and an axis given as `[x, y, z]`, land where you asked in the world (a box in
+a component turned by other than quarter turns keeps its sides along the component's axes). Names
+such as the plane `XY` or a cylinder's axis `Z` are the active component's own.
 
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**
