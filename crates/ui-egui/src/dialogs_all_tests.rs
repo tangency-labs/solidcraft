@@ -1144,6 +1144,43 @@ fn cell_grid_wall_hides_mode_and_direction() {
     check_form_with("solid.cell_grid", &rest, &["Mode", "Direction"], wall);
 }
 
+/// A wall grid takes no profiles: with a wall picked the Profiles row is not drawn and does not
+/// wait for the next click (an edited wall grid opened on it, empty and reading Select); the
+/// wall's row does. Without the wall the Profiles row is back.
+#[test]
+fn cell_grid_wall_hides_the_profiles_row_and_waits_on_the_wall() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.cell_grid");
+    d.inputs[0].items.clear();
+    d.inputs[4].items = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 2.5) }];
+    // The first empty pick, as a dialog opens on it.
+    d.active = 0;
+    let draw = |h: &mut Harness, d: &mut Dialog| {
+        scenario::clear_handles();
+        let mut out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+            |ui| {
+                ui.set_width(264.0);
+                rows(&mut h.app, &h.ctx, d, ui);
+            },
+        );
+        out.textures_delta.clear();
+    };
+    draw(&mut h, &mut d);
+    let profiles = format!("dialog:field:{}", d.inputs[0].label);
+    let wall = format!("dialog:field:{}", d.inputs[4].label);
+    assert!(scenario::rect_of(&profiles).is_none(), "a wall grid draws no Profiles row");
+    assert!(scenario::rect_of(&wall).is_some(), "the Wall row is drawn");
+    assert_ne!(d.active, 0, "the focused pick is not Profiles");
+    assert_eq!(d.active, 4, "the focused pick is the Wall");
+    let Kind::CellGrid(c) = &d.kind else { panic!() };
+    assert!(!crate::dialogs_cell_grid::shown_picks(c).contains(&0), "{c:?}");
+    // The wall cleared: Profiles is drawn again.
+    d.inputs[4].items.clear();
+    draw(&mut h, &mut d);
+    assert!(scenario::rect_of(&profiles).is_some(), "without a wall the Profiles row is back");
+}
+
 /// A cell grid on a wall sends the face (a point on it) and the wall's body as the only target,
 /// and no sketch, profiles, direction or mode; a wall with profiles is refused with its own
 /// message; and without a wall the command is as before.
