@@ -34,6 +34,10 @@
 //!   `GetBaseWasApplied` is tested. The fork's taking the B-rep in afresh (its copy
 //!   constructor, `RemoveAllTopology`, `MergeBrep`) goes through the boolean merge's
 //!   arena-store wrappers, which carry the marks with the copy as `SM_AB_COPY` does.
+//!   Besides planes, a face round a group may lie on a whole sphere (#22811): the group's
+//!   edges then lie on that sphere's own surface, so the extension is never what the
+//!   result keeps. Blends of one group that come off onto the same sharp edge (the halves
+//!   of a round split where its rim was split) put back one blend on it.
 //! - **Cached topology.** After each removal and before [`OffsetFacesExecutive::offset_faces`]
 //!   returns, the port's cached topology fields are refreshed (upstream has none).
 //! - **"Moved no face".** The fork marks the new surfaces and, after the local operation,
@@ -100,6 +104,7 @@ use crate::offset::offset_executive::p2::local_operation_simple;
 use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation};
 use crate::surface::implicit::AnalyticSupport;
 use crate::surface::plane::Plane;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
@@ -1104,11 +1109,28 @@ impl OffsetFacesExecutive {
                 {
                     continue;
                 }
+                found += 1;
+                // (not in the fork) the pieces of one round, taken off together, met at
+                // one sharp edge: it is blended once, as they were all one size (each
+                // piece's size measured on its own face, so to the B-rep's tolerance)
+                if let Some(at) = edges.iter().position(|&x| x == e) {
+                    let tol: f64 = b.tolerance();
+                    let same_size = sizes
+                        .get(at)
+                        .is_some_and(|&size: &f64| (size - rb.size).abs() <= tol);
+                    if !same_size || solvers.get(at) != Some(&rb.solver) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "blends of different sizes on a moved face came off onto one edge",
+                            None,
+                        ));
+                    }
+                    continue;
+                }
                 edges.push(e);
                 sections.push(FilletSurfaceGeneratorType::Circular);
                 solvers.push(rb.solver);
                 sizes.push(rb.size);
-                found += 1;
             }
             if found == 0 {
                 return Err(self.refuse(
@@ -1166,13 +1188,30 @@ impl OffsetFacesExecutive {
 
 // ---- step 3 and OffsetFaces ------------------------------------------------------------
 
+/// Whether a face on `s` can grow to wherever a group of blends beside it comes off without
+/// its surface being continued inexactly: a plane (continued, the same plane), or a sphere
+/// whose definition is the whole sphere, all round and from pole to pole (#22811). Such a
+/// sphere's domain holds every point of the sphere, so the sharp edges the face gets, where
+/// the sphere meets the faces beside it, lie within it: the defeature's extension past its
+/// domain is never the part the result keeps. A partial sphere, a cylinder, a cone or a
+/// torus ends somewhere a sharp edge could lie past, so it is not taken.
+fn grows_exactly(s: &Surface) -> Result<bool> {
+    if s.is_kind_of(Plane::TYPE)? {
+        return Ok(true);
+    }
+    Ok(
+        matches!(s.kind(), SurfaceKind::Sphere(sphere) if sphere.is_closed_u() && sphere.is_closed_v()),
+    )
+}
+
 impl OffsetFacesExecutive {
     /// `OffsetFaces` step 3: each followed blend taken off, its faces met at the sharp
     /// edge it replaced (`SmRingFilletRemoval` for a ring, `SmFilletRemoval` exact only
     /// otherwise), in rounds while any comes off; the sharp edge marked [`MARK_SHARP`].
-    /// Blends that meet each other at their ends (mitred rounds) come off afterwards,
-    /// each connected group at once, through [`FeatureExecutive`] (the faces round the
-    /// group extended until they meet), where every face round the group is a plane; the
+    /// Blends that meet each other at their ends (mitred rounds, or the pieces of one
+    /// round) come off afterwards, each connected group at once, through
+    /// [`FeatureExecutive`] (the faces round the group extended until they meet), where
+    /// every face round the group is a plane or a whole sphere; the
     /// extended faces are joined again across the group's edges, and each blend's sharp
     /// edge is found where its two faces meet.
     ///
@@ -1256,10 +1295,11 @@ impl OffsetFacesExecutive {
         }
 
         // Blends that meet each other at their ends (mitred rounds along the edges of a
-        // face) cannot come off one by one exactly: each one's end lies on the next one's
-        // surface. Each connected group of them comes off at once (SmFeatureExecutive: the
-        // faces round the group extended until they meet), where every face round it is a
-        // plane, which continues exactly.
+        // face, or the pieces of one round split where its rim was) cannot come off one
+        // by one exactly: each one's end lies on the next one's surface. Each connected
+        // group of them comes off at once (SmFeatureExecutive: the faces round the group
+        // extended until they meet), where every face round it continues exactly: a
+        // plane, or a whole sphere (`grows_exactly`).
         let left: Vec<usize> = (0..blends.len())
             .filter(|&i| blends.get(i).is_some_and(|x| !x.taken_off))
             .collect();
@@ -1303,21 +1343,21 @@ impl OffsetFacesExecutive {
                 .iter()
                 .filter_map(|&i| blends.get(i).and_then(|x| x.blend))
                 .collect();
-            // every face round the group a plane
-            let mut planes = true;
+            // every face round the group one that grows exactly
+            let mut exact = true;
             'faces: for &f in &faces {
                 for e in face_edges(b, f)? {
                     match face_across(b, e, f)? {
                         None => {
-                            planes = false;
+                            exact = false;
                             break 'faces;
                         }
                         Some(across) if !faces.contains(&across) => {
                             let s = crate::topology::face::p2::surface(b, across)?.ok_or_else(
                                 || failed(OffsetFailure::FaceHasNoSurface { face: across }),
                             )?;
-                            if !s.is_kind_of(Plane::TYPE)? {
-                                planes = false;
+                            if !grows_exactly(s)? {
+                                exact = false;
                                 break 'faces;
                             }
                         }
@@ -1325,7 +1365,7 @@ impl OffsetFacesExecutive {
                     }
                 }
             }
-            if !planes {
+            if !exact {
                 not_exact = true;
                 continue;
             }

@@ -593,6 +593,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-reporting", "SKILL.md", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
+        ("solidcraft-reporting", "reference/report-template.md", include_str!("../../../skills/solidcraft-reporting/reference/report-template.md")),
         ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
         ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
@@ -609,9 +611,41 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 }
 
 #[test]
+fn skill_reference_falls_back_to_skill_md_when_reference_md_is_absent() {
+    let mut s = server();
+    for (skill, expected) in [
+        ("solidcraft-editing", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-checking", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
+        ("solidcraft-reporting", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
+    ] {
+        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
+        assert!(r.get("error").is_none(), "{skill}: {r}");
+        assert_ne!(r["result"]["isError"], json!(true), "{skill}: {r}");
+        assert_eq!(r["result"]["content"][0]["text"], expected);
+    }
+    // Skills with `reference.md` keep defaulting to it when `file` is omitted.
+    let modeling = raw_tool(&mut s, "skill_reference", json!({"skill": "solidcraft-modeling"}));
+    assert!(modeling.get("error").is_none(), "{modeling}");
+    assert_ne!(modeling["result"]["isError"], json!(true), "{modeling}");
+    assert_eq!(modeling["result"]["content"][0]["text"], include_str!("../../../skills/solidcraft-modeling/reference.md"));
+    // Explicit lookup for `solidcraft-reporting`'s template works as well.
+    let template = raw_tool(&mut s, "skill_reference", json!({"skill": "solidcraft-reporting", "file": "reference/report-template.md"}));
+    assert!(template.get("error").is_none(), "{template}");
+    assert_ne!(template["result"]["isError"], json!(true), "{template}");
+    assert_eq!(template["result"]["content"][0]["text"], include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"));
+}
+
+#[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
+    let skills = [
+        "solidcraft-checking",
+        "solidcraft-editing",
+        "solidcraft-mechanisms",
+        "solidcraft-modeling",
+        "solidcraft-reporting",
+        "solidcraft-sheetmetal",
+    ];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -626,8 +660,12 @@ fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Available files: SKILL.md, reference.md"), "{text}");
     }
-    for (skill, files) in [("solidcraft-checking", "SKILL.md, reference/porting.md"), ("solidcraft-editing", "SKILL.md")] {
-        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
+    for (skill, files) in [
+        ("solidcraft-checking", "SKILL.md, reference/porting.md"),
+        ("solidcraft-editing", "SKILL.md"),
+        ("solidcraft-reporting", "SKILL.md, reference/report-template.md"),
+    ] {
+        let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill, "file": "reference.md"}));
         assert_eq!(r["result"]["isError"], true, "{r}");
         assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains(files), "{r}");
     }
@@ -1042,7 +1080,7 @@ fn inspect_design_lists_joint_definitions() {
 
     // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
     // joints are counted, not listed.
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
         for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
@@ -1267,7 +1305,7 @@ fn check_parameters_reports_only_the_bodies_asked_for_in_summary() {
 /// without compact output and as a batch step; left out, the call and its reply are as before.
 #[test]
 fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         parametric_box_with_cylinder(&mut s);
         tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
@@ -1323,8 +1361,13 @@ fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
     // before them answers as it always did.
     let mut b = Answers { calls: Vec::new(), answer: Box::new(|_, _| Ok(json!({"timeline": [], "bodies": [], "sketches": []}))) };
     crate::tools::call_tool(&mut b, "inspect_design", &json!({"sketches": false, "joints": false}));
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true });
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false, "bodies": ["B"]}), crate::Options { compact: true });
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true, ..Default::default() });
+    crate::tools::call_tool_with(
+        &mut b,
+        "inspect_design",
+        &json!({"joints": false, "bodies": ["B"]}),
+        crate::Options { compact: true, ..Default::default() },
+    );
     let sent: Vec<&Value> = b.calls.iter().filter(|(m, _)| m == "document.inspect").map(|(_, p)| p).collect();
     assert_eq!(
         sent,
@@ -2383,6 +2426,82 @@ fn compare_picture_returns_the_overlay_as_an_image() {
     // A reference outside the server's folders is refused through the existing path rules.
     let outside = raw_tool(&mut s, "compare_picture", json!({"reference": "/etc/hostname"}));
     assert_eq!(outside["result"]["isError"], json!(true), "{outside}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn compare_picture_part_fills_crop_is_accepted_and_forwarded() {
+    use image::ImageEncoder as _;
+    use std::io::Cursor;
+
+    // The MCP tool schema exposes `part_fills_crop` as a boolean.
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "compare_picture").expect("compare_picture tool");
+    assert_eq!(def["inputSchema"]["properties"]["part_fills_crop"]["type"], "boolean");
+
+    // Direct call and batch step both forward `part_fills_crop` to `inspect.compare_picture`.
+    let mut rec = Recorder { calls: Vec::new(), batch: Ok(json!({"completed": 1, "results": [{"overlap": 1.0}], "undone": 0})) };
+    let _ = crate::call_tool(&mut rec, "compare_picture", &json!({"reference": "crop.png", "part_fills_crop": true}));
+    assert_eq!(rec.calls[0].0, "engine.execute");
+    assert_eq!(rec.calls[0].1["command"], "inspect.compare_picture");
+    assert_eq!(rec.calls[0].1["params"]["part_fills_crop"], true);
+
+    let (rec_batch, body, is_error) = recorded_batch(
+        Ok(json!({"completed": 1, "results": [{"overlap": 1.0}], "undone": 0})),
+        json!({"commands": [{"command": "compare_picture", "params": {"reference": "crop.png", "part_fills_crop": true}}]}),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(rec_batch.calls[0].0, "engine.batch");
+    assert_eq!(rec_batch.calls[0].1["commands"][0]["command"], "inspect.compare_picture");
+    assert_eq!(rec_batch.calls[0].1["commands"][0]["params"]["part_fills_crop"], true);
+
+    // End-to-end through the MCP server schema check and headless engine: a uniform crop that
+    // fills the frame fails background detection without `part_fills_crop: true`, and succeeds
+    // with it both directly and as a `batch` step.
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-compare-fills-crop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let recovery = base.join("recovery");
+    std::fs::create_dir_all(&recovery).unwrap();
+    let scope = crate::agent_scope_with(Some(recovery.clone()), []);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(scope));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 30}}));
+
+    let (w, h) = (100u32, 150u32);
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
+    let mut png = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8).unwrap();
+    let path = recovery.join("tight-crop.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+
+    // Non-boolean `part_fills_crop` is rejected by schema validation.
+    let bad_type = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "part_fills_crop": "yes"}));
+    assert!(bad_type.get("error").is_some() || bad_type["result"]["isError"] == json!(true), "{bad_type}");
+
+    // Without `part_fills_crop: true`, background flood consumes the uniform frame.
+    let without = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "view": "front"}));
+    assert_eq!(without["result"]["isError"], json!(true), "{without}");
+
+    // With `part_fills_crop: true`, the direct MCP call passes schema validation and matches the box.
+    let direct = raw_tool(
+        &mut s,
+        "compare_picture",
+        json!({"reference": path.to_string_lossy(), "view": "front", "crop_px": [0, 0, 100, 150], "part_fills_crop": true}),
+    );
+    assert!(direct.get("error").is_none(), "{direct}");
+    assert_ne!(direct["result"]["isError"], json!(true), "{direct}");
+    let content = direct["result"]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "image", "{content:?}");
+    let info: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert!(info["overlap"].as_f64().unwrap() > 0.9, "{info}");
+
+    // Inside `batch`, `compare_picture` also forwards `part_fills_crop: true` to `inspect.compare_picture`.
+    let batch = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "compare_picture", "params": {"reference": path.to_string_lossy(), "view": "front", "crop_px": [0, 0, 100, 150], "part_fills_crop": true}}]}),
+    );
+    assert_eq!(batch["completed"], 1, "{batch}");
+    assert!(batch["results"][0]["overlap"].as_f64().unwrap() > 0.9, "{batch}");
+
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -5026,7 +5145,7 @@ fn no_tool_schema_has_a_list_of_types() {
             _ => {}
         }
     }
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut found = Vec::new();
         for def in crate::tool_definitions_with(opts) {
             mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
@@ -5067,15 +5186,21 @@ fn inspect_design_is_unchanged_without_compact_output() {
 /// sketches asked for; `bodies` keeps only those bodies.
 #[test]
 fn compact_inspect_design_summarises_sketches_unless_asked() {
-    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let mut s = server_with_big_sketch(crate::Options { compact: true, ..Default::default() });
     let listed = call(&mut s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
     assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
-    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    assert_eq!(
+        def,
+        crate::tool_definitions_with(crate::Options { compact: true, ..Default::default() })
+            .into_iter()
+            .find(|d| d["name"] == "inspect_design")
+            .unwrap()
+    );
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
     let check = |options| solidcraft_mcp_server::check_arguments(&crate::tool_definitions_with(options), "inspect_design", &bodies);
-    assert!(check(crate::Options { compact: true }).is_ok());
+    assert!(check(crate::Options { compact: true, ..Default::default() }).is_ok());
     assert!(check(crate::Options::default()).is_err_and(|e| e.contains("bodies")));
 
     let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
@@ -5168,9 +5293,9 @@ fn compact_output_follows_the_apps_preference() {
     assert!(!inspect_design_is_compact(&mut s));
 
     // The command line turns it on whatever the app says.
-    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
-    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
 }
 
@@ -5743,7 +5868,7 @@ fn the_instructions_tell_the_agent_to_use_the_selection() {
 /// Counts, positions and volumes are specified independently of inspect.measure (#21797).
 #[test]
 fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command":command, "params":params}));
         let part = exec(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
@@ -5812,4 +5937,807 @@ fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names()
         let after = tool(&mut s, "inspect_design", json!({"bodies":false, "measure":false, "sketches":false, "joints":false}));
         assert_eq!(after, before, "no document/history mutation: {opts:?}");
     }
+}
+
+#[test]
+fn initialize_advertises_resources_prompts_and_completions_capabilities() {
+    let mut s = server();
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let caps = &init["result"]["capabilities"];
+    assert_eq!(caps["tools"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["resources"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["prompts"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["completions"], json!({}), "{caps}");
+}
+
+#[test]
+fn resource_templates_list_and_read_body_sketch_feature_command_and_skill() {
+    let mut s = server();
+
+    // Verify all resource templates are listed with their expected MIME types.
+    let listed = call(&mut s, 1, "resources/templates/list", json!({}));
+    let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
+    let pairs: Vec<(&str, &str)> = templates.iter().map(|t| (t["uriTemplate"].as_str().unwrap(), t["mimeType"].as_str().unwrap())).collect();
+    assert_eq!(
+        pairs,
+        [
+            ("solidcraft://body/{name}", "application/json"),
+            ("solidcraft://sketch/{name}", "application/json"),
+            ("solidcraft://feature/{id}", "application/json"),
+            ("solidcraft://command/{id}", "application/json"),
+            ("solidcraft://skill/{skill}/{file}", "text/markdown"),
+        ],
+        "{listed}"
+    );
+
+    // Build a small parametric design: a component with a box body (and placed copy) plus a sketch.
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+    let comp = exec(&mut s, "component.create", json!({"name": "Housing", "grounded": false}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 20, "height": 30, "body_name": "MainBox", "name": "BaseBox"}));
+    exec(&mut s, "component.activate", json!({"component": 0}));
+    exec(&mut s, "occurrence.copy", json!({"component": comp["component"], "translate": [40, 0, 0]}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let design = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
+    let box_feature_id = design["timeline"].as_array().unwrap().iter().find(|f| f["name"] == "BaseBox").unwrap()["id"].as_u64().unwrap();
+
+    let read_json = |s: &mut Server, id: u64, uri: &str| -> Value {
+        let r = call(s, id, "resources/read", json!({"uri": uri}));
+        assert!(r.get("error").is_none(), "{uri}: {r}");
+        let block = &r["result"]["contents"][0];
+        assert_eq!(block["uri"], uri);
+        assert_eq!(block["mimeType"], "application/json");
+        serde_json::from_str(block["text"].as_str().unwrap()).unwrap()
+    };
+
+    // solidcraft://body/{name} (plain name and percent-encoded occurrence name)
+    let body = read_json(&mut s, 2, "solidcraft://body/MainBox");
+    assert_eq!(body["name"], "MainBox", "{body}");
+    assert_eq!(body["faces"], 6, "{body}");
+    assert_eq!(body["edges"], 12, "{body}");
+    assert!((body["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{body}");
+    assert!(body["mass_g"].as_f64().unwrap() > 0.0, "{body}");
+    assert_eq!(body["bbox"]["min"], json!([0.0, 0.0, 0.0]), "{body}");
+    assert_eq!(body["bbox"]["max"], json!([10.0, 20.0, 30.0]), "{body}");
+    assert_eq!(body["component"], "Housing", "{body}");
+
+    let copy = read_json(&mut s, 3, "solidcraft://body/MainBox%20(Housing%3A2)");
+    assert_eq!(copy["name"], "MainBox (Housing:2)", "{copy}");
+    assert_eq!(copy["definition"], "MainBox", "{copy}");
+    assert_eq!(copy["component"], "Housing", "{copy}");
+    assert_eq!(copy["bbox"]["min"], json!([40.0, 0.0, 0.0]), "{copy}");
+
+    // solidcraft://sketch/{name}
+    let sketch = read_json(&mut s, 4, "solidcraft://sketch/BaseSketch");
+    assert_eq!(sketch["name"], "BaseSketch", "{sketch}");
+    assert_eq!(sketch["curves"].as_array().unwrap().len(), 4, "{sketch}");
+    assert_eq!(sketch["profiles"].as_array().unwrap().len(), 1, "{sketch}");
+
+    // solidcraft://feature/{id} by numeric id and by name
+    let feat_by_id = read_json(&mut s, 5, &format!("solidcraft://feature/{box_feature_id}"));
+    assert_eq!(feat_by_id["id"], box_feature_id, "{feat_by_id}");
+    assert_eq!(feat_by_id["name"], "BaseBox", "{feat_by_id}");
+    assert!(feat_by_id["definition"].is_object(), "{feat_by_id}");
+    assert!(feat_by_id["inputs"].is_array(), "{feat_by_id}");
+
+    let feat_by_name = read_json(&mut s, 6, "solidcraft://feature/BaseBox");
+    assert_eq!(feat_by_name["id"], box_feature_id, "{feat_by_name}");
+    assert_eq!(feat_by_name["name"], "BaseBox", "{feat_by_name}");
+
+    // solidcraft://command/{id}
+    let cmd = read_json(&mut s, 7, "solidcraft://command/solid.box");
+    assert_eq!(cmd["id"], "solid.box", "{cmd}");
+    assert!(cmd["label"].as_str().is_some_and(|l| !l.is_empty()), "{cmd}");
+    assert!(cmd["input"].is_object(), "{cmd}");
+
+    // solidcraft://skill/{skill}/{file} (top-level and nested file path)
+    let skill_reply = call(&mut s, 8, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-modeling/SKILL.md"}));
+    let skill_block = &skill_reply["result"]["contents"][0];
+    assert_eq!(skill_block["mimeType"], "text/markdown");
+    assert_eq!(skill_block["text"], include_str!("../../../skills/solidcraft-modeling/SKILL.md"));
+
+    let nested_reply = call(&mut s, 9, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-checking/reference/porting.md"}));
+    let nested_block = &nested_reply["result"]["contents"][0];
+    assert_eq!(nested_block["mimeType"], "text/markdown");
+    assert_eq!(nested_block["text"], include_str!("../../../skills/solidcraft-checking/reference/porting.md"));
+
+    // Existing static resources remain intact.
+    let static_design = read_json(&mut s, 10, "solidcraft://design");
+    assert!(static_design["timeline"].is_array(), "{static_design}");
+    let static_commands = read_json(&mut s, 11, "solidcraft://commands");
+    assert!(static_commands.as_array().is_some_and(|c| !c.is_empty()), "{static_commands}");
+
+    // Unknown targets across every template return RESOURCE_NOT_FOUND (-32002).
+    for uri in [
+        "solidcraft://body/DoesNotExist",
+        "solidcraft://body/",
+        "solidcraft://sketch/DoesNotExist",
+        "solidcraft://sketch/BaseBox",
+        "solidcraft://feature/999999",
+        "solidcraft://feature/DoesNotExist",
+        "solidcraft://command/no.such.command",
+        "solidcraft://skill/unknown-skill/SKILL.md",
+        "solidcraft://skill/solidcraft-modeling/missing.md",
+        "solidcraft://skill/solidcraft-modeling",
+    ] {
+        let err = call(&mut s, 12, "resources/read", json!({"uri": uri}));
+        assert_eq!(err["error"]["code"], -32002, "{uri}: {err}");
+    }
+}
+
+#[test]
+fn prompts_list_and_get_cover_cad_workflows_and_validate_arguments() {
+    let mut s = server();
+    let listed = call(&mut s, 1, "prompts/list", json!({}));
+    let prompts = listed["result"]["prompts"].as_array().unwrap();
+    let names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["model-part", "edit-design", "check-parameters", "diagnose-feature", "assembly-clearance"], "{listed}");
+
+    for prompt in prompts {
+        let name = prompt["name"].as_str().unwrap();
+        assert!(prompt["description"].as_str().is_some_and(|d| !d.is_empty()), "{prompt}");
+        // Every prompt can be requested with no arguments (all arguments are optional).
+        let filled = call(&mut s, 2, "prompts/get", json!({"name": name, "arguments": {}}));
+        assert!(filled.get("error").is_none(), "{name}: {filled}");
+        assert!(filled["result"]["description"].as_str().is_some_and(|d| !d.is_empty()), "{name}: {filled}");
+        let msg = &filled["result"]["messages"][0];
+        assert_eq!(msg["role"], "user", "{name}: {filled}");
+        assert_eq!(msg["content"]["type"], "text", "{name}: {filled}");
+        assert!(msg["content"]["text"].as_str().is_some_and(|t| t.len() > 80), "{name}: {filled}");
+    }
+
+    // Optional arguments are woven into the returned workflow instructions.
+    let model = call(&mut s, 3, "prompts/get", json!({"name": "model-part", "arguments": {"part": "L-bracket 60x40x5", "material": "sheet metal"}}));
+    let model_text = model["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(model_text.contains("L-bracket 60x40x5"), "{model_text}");
+    assert!(model_text.contains("solidcraft-sheetmetal"), "{model_text}");
+
+    let edit = call(&mut s, 4, "prompts/get", json!({"name": "edit-design", "arguments": {"goal": "widen slot by 2 mm", "target": "MainBox"}}));
+    let edit_text = edit["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(edit_text.contains("widen slot by 2 mm") && edit_text.contains("MainBox"), "{edit_text}");
+
+    let check =
+        call(&mut s, 5, "prompts/get", json!({"name": "check-parameters", "arguments": {"parameters": "width, wall", "ranges": "width 40..120 mm"}}));
+    let check_text = check["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(check_text.contains("width, wall") && check_text.contains("width 40..120 mm"), "{check_text}");
+
+    let diag = call(&mut s, 6, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"feature": "Fillet1"}}));
+    let diag_text = diag["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(diag_text.contains("Fillet1"), "{diag_text}");
+
+    let clearance =
+        call(&mut s, 7, "prompts/get", json!({"name": "assembly-clearance", "arguments": {"occurrences": "Arm:1, Frame:1", "joint": "Hinge"}}));
+    let clearance_text = clearance["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(clearance_text.contains("Arm:1, Frame:1") && clearance_text.contains("Hinge"), "{clearance_text}");
+
+    // Unknown prompt names and undeclared arguments are rejected with INVALID_PARAMS (-32602).
+    let unknown_prompt = call(&mut s, 8, "prompts/get", json!({"name": "no-such-prompt"}));
+    assert_eq!(unknown_prompt["error"]["code"], -32602, "{unknown_prompt}");
+    let bad_arg = call(&mut s, 9, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"bogus": "1"}}));
+    assert_eq!(bad_arg["error"]["code"], -32602, "{bad_arg}");
+}
+
+#[test]
+fn completion_suggests_bodies_sketches_features_commands_skills_and_prompt_args() {
+    let mut s = server();
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+
+    tool(&mut s, "set_parameter", json!({"name": "plate_w", "value": "50 mm"}));
+    tool(&mut s, "set_parameter", json!({"name": "plate_h", "value": "30 mm"}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket", "name": "MainBox"}));
+    exec(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Boss", "name": "TopBoss"}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let complete = |s: &mut Server, reference: Value, arg: &str, value: &str| -> Vec<String> {
+        let r = call(s, 1, "completion/complete", json!({"ref": reference, "argument": {"name": arg, "value": value}}));
+        assert!(r.get("error").is_none(), "{r}");
+        r["result"]["completion"]["values"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect()
+    };
+
+    // ref/resource completions for bodies, sketches, features, commands and skills
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", ""), ["Boss", "Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", "br"), ["Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://sketch/{name}"}), "name", "Base"), ["BaseSketch"]);
+
+    let feat_matches = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "Main");
+    assert_eq!(feat_matches, ["MainBox"]);
+    let all_feats = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "");
+    assert!(all_feats.iter().any(|f| f == "MainBox") && all_feats.iter().any(|f| f == "TopBoss"), "{all_feats:?}");
+    assert!(all_feats.iter().any(|f| f.chars().all(|c| c.is_ascii_digit())), "numeric feature ids included: {all_feats:?}");
+
+    let cmd_prefix = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "solid.b");
+    assert!(cmd_prefix.iter().any(|c| c == "solid.box"), "{cmd_prefix:?}");
+    assert!(cmd_prefix.iter().all(|c| c.starts_with("solid.b")), "{cmd_prefix:?}");
+    let cmd_sub = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "fillet");
+    assert!(cmd_sub.iter().any(|c| c == "solid.fillet"), "{cmd_sub:?}");
+
+    let skills = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "skill", "solidcraft-m");
+    assert_eq!(skills, ["solidcraft-mechanisms", "solidcraft-modeling"]);
+    let all_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "file", "");
+    assert_eq!(all_files, ["SKILL.md", "reference.md", "reference/porting.md", "reference/report-template.md"]);
+    let scoped_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/solidcraft-checking/{file}"}), "file", "ref");
+    assert_eq!(scoped_files, ["reference/porting.md"]);
+
+    // ref/prompt argument completions
+    let edit_targets = complete(&mut s, json!({"type": "ref/prompt", "name": "edit-design"}), "target", "Br");
+    assert_eq!(edit_targets, ["Bracket"]);
+    let params = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_");
+    assert_eq!(params, ["plate_h", "plate_w"]);
+    let params_csv = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_w, p");
+    assert_eq!(params_csv, ["plate_w, plate_h"]);
+    let diag_feats = complete(&mut s, json!({"type": "ref/prompt", "name": "diagnose-feature"}), "feature", "Top");
+    assert_eq!(diag_feats, ["TopBoss"]);
+    let materials = complete(&mut s, json!({"type": "ref/prompt", "name": "model-part"}), "material", "sheet");
+    assert_eq!(materials, ["sheet metal"]);
+    let occs = complete(&mut s, json!({"type": "ref/prompt", "name": "assembly-clearance"}), "occurrences", "Bo");
+    assert_eq!(occs, ["Boss"]);
+}
+
+#[test]
+fn batch_dry_run_simulates_edits_and_measure_then_rolls_back_completely() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "corner": [0, 0, 0]}}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0]}}));
+    tool(&mut s, "undo", json!({}));
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!((&before["undo"], &before["redo"]), (&json!(1), &json!(1)), "{before}");
+
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [
+                {"command": "parameters.add", "params": {"name": "cut_w", "expression": "10 mm"}},
+                {"command": "solid.box", "params": {"length": "cut_w", "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "cut"}},
+                {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "body_name": "Probe"}},
+                {"command": "measure", "params": {"summary": true}},
+                {"command": "inspect.measure", "params": {}},
+            ],
+        }),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["dry_run"], true, "{r}");
+    assert_eq!(r["rolled_back"], true, "{r}");
+    assert_eq!(r["completed"], 5, "{r}");
+    assert_eq!(r["results"][3]["body_count"], 2, "{r}");
+    assert!(rel(r["results"][3]["total"]["volume_mm3"].as_f64().unwrap(), 1125.0) < 1e-6, "{r}");
+    assert_eq!(r["results"][4]["body_count"], 2, "{r}");
+    assert!(rel(r["results"][4]["total"]["volume_mm3"].as_f64().unwrap(), 1125.0) < 1e-6, "{r}");
+
+    // Document, model, parameters, undo stack and redo stack are all untouched.
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+    assert_eq!(after["redo"], before["redo"], "{after}");
+    assert_eq!(after["timeline"].as_array().unwrap().len(), before["timeline"].as_array().unwrap().len(), "{after}");
+    assert_eq!(after["params"], before["params"], "{after}");
+
+    // `expect` is evaluated on the simulated design before rollback.
+    let probe = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0]}});
+    let met = tool(&mut s, "batch", json!({"dry_run": true, "commands": [probe.clone()], "expect": {"volume_mm3": 3000, "bodies": 2}}));
+    assert_eq!((&met["dry_run"], &met["rolled_back"], &met["expectation"]["ok"]), (&json!(true), &json!(true), &json!(true)), "{met}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 2000.0) < 1e-9);
+
+    let miss = raw_tool(&mut s, "batch", json!({"dry_run": true, "commands": [probe.clone()], "expect": {"bodies": 5}}));
+    assert_eq!(miss["result"]["isError"], true, "{miss}");
+    let note = miss["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(note.contains("expectation not met") && note.contains("dry run was rolled back"), "{note}");
+    let miss_body: Value = serde_json::from_str(miss["result"]["content"][1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (&miss_body["dry_run"], &miss_body["rolled_back"], &miss_body["expectation"]["ok"]),
+        (&json!(true), &json!(true), &json!(false)),
+        "{miss_body}"
+    );
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+
+    // A failing step inside a dry run still rolls back cleanly and tags the reply with `dry_run: true`.
+    let failed = raw_tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [probe, {"command": "solid.extrude", "params": {"distance": "bogus +"}}],
+        }),
+    );
+    assert_eq!(failed["result"]["isError"], true, "{failed}");
+    let failed_body: Value = serde_json::from_str(failed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (&failed_body["ok"], &failed_body["dry_run"], &failed_body["rolled_back"], &failed_body["failed"]["index"], &failed_body["applied"]),
+        (&json!(false), &json!(true), &json!(true), &json!(1), &json!([])),
+        "{failed_body}"
+    );
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    let end = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!((&end["undo"], &end["redo"]), (&before["undo"], &before["redo"]), "{end}");
+}
+
+#[test]
+fn batch_dry_run_refuses_disk_writing_and_external_steps_without_touching_disk_or_design() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    let dir = tempfile::tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let sc_path = dir.path().join("dry.sc");
+    let step_path = dir.path().join("dry.step");
+    let stl_path = dir.path().join("dry.stl");
+    let csv_path = dir.path().join("dry.csv");
+    let extra_box = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]}});
+
+    for (step, expected_cmd) in [
+        (json!({"command": "save", "params": {"path": sc_path.to_string_lossy()}}), "file.save"),
+        (json!({"command": "file.save", "params": {"path": sc_path.to_string_lossy()}}), "file.save"),
+        (json!({"command": "file.save_as", "params": {"path": sc_path.to_string_lossy()}}), "file.save_as"),
+        (json!({"command": "export", "params": {"path": step_path.to_string_lossy()}}), "file.export"),
+        (json!({"command": "file.export", "params": {"path": step_path.to_string_lossy()}}), "file.export"),
+        (json!({"command": "file.export_stl", "params": {"path": stl_path.to_string_lossy()}}), "file.export_stl"),
+        (json!({"command": "execute", "params": {"command": "FILE.SAVE", "params": {"path": sc_path.to_string_lossy()}}}), "file.save"),
+        (json!({"command": "parameters.export", "params": {"path": csv_path.to_string_lossy()}}), "parameters.export"),
+        (json!({"command": "assembly.bom", "params": {"path": csv_path.to_string_lossy()}}), "assembly.bom"),
+        (json!({"command": "panel.open", "params": {}}), "panel.open"),
+    ] {
+        let r = raw_tool(&mut s, "batch", json!({"dry_run": true, "commands": [extra_box.clone(), step.clone()]}));
+        assert_eq!(r["result"]["isError"], true, "{step}: {r}");
+        let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            (&body["ok"], &body["dry_run"], &body["completed"], &body["rolled_back"], &body["failed"]["index"], &body["applied"]),
+            (&json!(false), &json!(true), &json!(0), &json!(true), &json!(1), &json!([])),
+            "{step}: {body}"
+        );
+        assert_eq!(body["not_run"], json!([0, 1]), "{step}: {body}");
+        let err = body["failed"]["error"].as_str().unwrap();
+        assert!(err.contains(expected_cmd) && err.contains("dry_run"), "{step}: {err}");
+    }
+    for path in [&sc_path, &step_path, &stl_path, &csv_path] {
+        assert!(!path.exists(), "dry_run must never write {}", path.display());
+    }
+
+    // `dry_run: true` cannot be combined with `rollback: false`.
+    let conflict = raw_tool(&mut s, "batch", json!({"dry_run": true, "rollback": false, "commands": [extra_box]}));
+    assert_eq!(conflict["result"]["isError"], true, "{conflict}");
+    assert!(conflict["result"]["content"][0]["text"].as_str().unwrap().contains("rollback: false"), "{conflict}");
+
+    // In-memory `parameters.export` (no `path`) has no disk side effect and works inside a dry run.
+    let mem = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": true,
+            "commands": [
+                {"command": "parameters.add", "params": {"name": "w", "expression": "12 mm"}},
+                {"command": "parameters.export", "params": {"format": "csv"}},
+            ],
+        }),
+    );
+    assert_eq!((&mem["ok"], &mem["dry_run"], &mem["rolled_back"]), (&json!(true), &json!(true), &json!(true)), "{mem}");
+    assert!(mem["results"][1].to_string().contains("12 mm"), "{mem}");
+
+    // Original design and undo stack remain completely untouched.
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 1000.0) < 1e-9);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+    assert_eq!(after["params"], before["params"], "{after}");
+}
+
+#[test]
+fn batch_dry_run_default_and_false_preserve_normal_behavior() {
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "batch").unwrap();
+    assert_eq!(def["inputSchema"]["properties"]["dry_run"]["type"], "boolean", "{def}");
+
+    let mut s = server();
+    let bad = raw_tool(&mut s, "batch", json!({"dry_run": "yes", "commands": []}));
+    assert_eq!(bad["error"]["code"], -32602, "{bad}");
+
+    // Omitted `dry_run` defaults to false and keeps edits.
+    let r1 = tool(&mut s, "batch", json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}]}));
+    assert_eq!((&r1["ok"], &r1["completed"]), (&json!(true), &json!(1)), "{r1}");
+    assert!(r1.get("dry_run").is_none() && r1.get("rolled_back").is_none(), "{r1}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 1);
+
+    // Explicit `dry_run: false` keeps edits and allows `save`.
+    let dir = tempfile::tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let saved = dir.path().join("kept.sc");
+    let r2 = tool(
+        &mut s,
+        "batch",
+        json!({
+            "dry_run": false,
+            "commands": [
+                {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}},
+                {"command": "save", "params": {"path": saved.to_string_lossy()}},
+            ],
+        }),
+    );
+    assert_eq!((&r2["ok"], &r2["completed"]), (&json!(true), &json!(2)), "{r2}");
+    assert!(r2.get("dry_run").is_none() && r2.get("rolled_back").is_none(), "{r2}");
+    assert!(saved.exists(), "save should write when dry_run is false");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 2);
+}
+
+#[test]
+fn batch_dry_run_works_on_bridged_app_with_and_without_engine_batch_and_reports_restore_failure() {
+    // Bridged app WITH `engine.batch`: takes checkpoint, runs one `engine.batch`, then restores checkpoint.
+    let reply = json!({"completed": 2, "results": [{"feature": 1}, {"body_count": 1}], "undone": 0});
+    let steps = json!([{"command": "solid.box"}, {"command": "inspect.measure"}]);
+    let (b, body, is_error) = recorded_batch(Ok(reply), json!({"dry_run": true, "commands": steps}));
+    assert!(!is_error, "{body}");
+    assert_eq!(
+        (&body["ok"], &body["dry_run"], &body["rolled_back"], &body["completed"]),
+        (&json!(true), &json!(true), &json!(true), &json!(2)),
+        "{body}"
+    );
+    assert_eq!(methods(&b), ["engine.execute", "engine.batch", "engine.execute"]);
+    assert_eq!(b.calls[0].1["command"], "edit.checkpoint");
+    assert_eq!(b.calls[2].1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // Bridged app WITH `engine.batch` and `expect`: measures BEFORE restoring checkpoint.
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({"completed": 1, "results": [{"feature": 1}], "undone": 0})) };
+    let r = crate::tools::call_tool(&mut b, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}], "expect": {"bodies": 0}}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&b), ["engine.execute", "engine.batch", "engine.execute", "engine.execute"]);
+    assert_eq!(b.calls[0].1["command"], "edit.checkpoint");
+    assert_eq!(b.calls[2].1["command"], "inspect.measure");
+    assert_eq!(b.calls[3].1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // Bridged app WITHOUT `engine.batch`: falls back step-by-step reusing the same checkpoint.
+    let (b, body, is_error) = recorded_batch(
+        Err("unknown method `engine.batch`".into()),
+        json!({"dry_run": true, "commands": [{"command": "parameters.add"}, {"command": "parameters.list"}]}),
+    );
+    assert!(!is_error, "{body}");
+    assert_eq!(
+        (&body["ok"], &body["dry_run"], &body["rolled_back"], &body["completed"]),
+        (&json!(true), &json!(true), &json!(true), &json!(2)),
+        "{body}"
+    );
+    let exec_cmds: Vec<&str> = b.calls.iter().filter(|(m, _)| m == "engine.execute").map(|(_, p)| p["command"].as_str().unwrap_or("")).collect();
+    assert_eq!(exec_cmds, ["edit.checkpoint", "parameters.add", "parameters.list", "edit.restore_checkpoint"]);
+    assert_eq!(b.calls.last().unwrap().1, json!({"command": "edit.restore_checkpoint", "params": {"checkpoint": 3}}));
+
+    // App without `edit.checkpoint`: refuses before running anything.
+    let mut no_cp = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|_, p| if p["command"] == "edit.checkpoint" { Err("unknown command `edit.checkpoint`".into()) } else { Ok(json!({})) }),
+    };
+    let r = crate::tools::call_tool(&mut no_cp, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}]}));
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("edit.checkpoint"), "{r}");
+    assert_eq!(no_cp.calls.len(), 1, "nothing ran after missing checkpoint: {:?}", no_cp.calls);
+
+    // Restore failure: fails loudly with `rolled_back: false` and `restore_error`.
+    let mut bad_restore = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|method, p| match (method, p["command"].as_str()) {
+            ("engine.execute", Some("edit.checkpoint")) => Ok(json!({"checkpoint": 7})),
+            ("engine.batch", _) => Ok(json!({"completed": 1, "results": [{"feature": 1}], "undone": 0})),
+            ("engine.execute", Some("edit.restore_checkpoint")) => Err("busy: request still running".into()),
+            _ => Err("unexpected call".into()),
+        }),
+    };
+    let r = crate::tools::call_tool(&mut bad_restore, "batch", &json!({"dry_run": true, "commands": [{"command": "solid.box"}]}));
+    assert_eq!(r["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["dry_run"], &body["rolled_back"]), (&json!(true), &json!(false)), "{body}");
+    assert!(body["restore_error"].as_str().unwrap().contains("still running"), "{body}");
+    assert!(body["note"].as_str().unwrap().contains("STILL HOLD"), "{body}");
+}
+
+/// Standard MCP `notifications/progress` during `batch` steps for string and integer
+/// `_meta.progressToken`, and zero progress notifications when `_meta.progressToken` is absent.
+#[test]
+fn batch_emits_progress_notifications_for_string_and_integer_tokens_and_none_without_token() {
+    let steps = json!({"commands": [
+        {"command": "parameters.change", "params": {"name": "w", "expression": 10}},
+        {"command": "parameters.change", "params": {"name": "h", "expression": 20}},
+    ]});
+    let lines = [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "batch", "arguments": steps, "_meta": {"progressToken": "batch-str"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "batch", "arguments": steps, "_meta": {"progressToken": 7}}}),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "batch", "arguments": steps}}),
+    ];
+    let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let mut output = Vec::new();
+    server().serve(std::io::Cursor::new(input), &mut output).unwrap();
+    let messages: Vec<Value> = String::from_utf8(output).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+
+    // 2 progress + 1 reply for id 1, 2 progress + 1 reply for id 2, 0 progress + 1 reply for id 3.
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert_eq!(
+        messages[0],
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "batch-str", "progress": 1, "total": 2, "message": "step 1/2: parameters.change"}})
+    );
+    assert_eq!(
+        messages[1],
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "batch-str", "progress": 2, "total": 2, "message": "step 2/2: parameters.change"}})
+    );
+    assert_eq!(messages[2]["id"], 1);
+    assert_ne!(messages[2]["result"]["isError"], true, "{}", messages[2]);
+
+    assert_eq!(
+        messages[3],
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 7, "progress": 1, "total": 2, "message": "step 1/2: parameters.change"}})
+    );
+    assert_eq!(
+        messages[4],
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 7, "progress": 2, "total": 2, "message": "step 2/2: parameters.change"}})
+    );
+    assert_eq!(messages[5]["id"], 2);
+    assert_ne!(messages[5]["result"]["isError"], true, "{}", messages[5]);
+
+    assert_eq!(messages[6]["id"], 3);
+    assert!(messages[6].get("method").is_none(), "no progress notification without progressToken: {}", messages[6]);
+    assert_ne!(messages[6]["result"]["isError"], true, "{}", messages[6]);
+}
+
+/// Long bridged waits (`control.pending`) emit standard MCP `notifications/progress` when
+/// `_meta.progressToken` is supplied, and emit none when `_meta.progressToken` is omitted.
+#[test]
+fn bridged_pending_wait_emits_progress_notifications_when_progress_token_supplied() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    let polls = AtomicUsize::new(0);
+    let (addr, _) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.execute") => running(),
+        Some("control.pending") => {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            if n < 2 || (3..5).contains(&n) {
+                json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}})
+            } else {
+                json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": true, "reply": {"ok": true, "result": {"filleted": true}}}})
+            }
+        }
+        _ => json!({"ok": true, "result": {}}),
+    });
+
+    let mut remote = crate::Remote::connect(&addr).unwrap();
+    remote.set_waits(quick_waits(5000, 1000));
+    remote.set_progress_interval(Duration::from_millis(1));
+    let mut s = Server::new(Box::new(remote));
+
+    let lines = [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "execute", "arguments": {"command": "solid.fillet"}, "_meta": {"progressToken": "wait-1"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "execute", "arguments": {"command": "solid.fillet"}}}),
+    ];
+    let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let mut output = Vec::new();
+    s.serve(std::io::Cursor::new(input), &mut output).unwrap();
+    let messages: Vec<Value> = String::from_utf8(output).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+
+    let reply1_idx = messages.iter().position(|m| m.get("id") == Some(&json!(1))).expect("reply 1");
+    let reply2_idx = messages.iter().position(|m| m.get("id") == Some(&json!(2))).expect("reply 2");
+    let first_progress = &messages[..reply1_idx];
+    assert!(first_progress.len() >= 2, "expected progress notifications during control.pending wait: {messages:?}");
+    let mut last = 0u64;
+    for note in first_progress {
+        assert_eq!(note["jsonrpc"], "2.0");
+        assert_eq!(note["method"], "notifications/progress");
+        assert_eq!(note["params"]["progressToken"], "wait-1");
+        let p = note["params"]["progress"].as_u64().expect("monotonic integer progress");
+        assert!(p > last, "progress must increase: {first_progress:?}");
+        last = p;
+        assert!(note["params"]["message"].as_str().is_some_and(|m| !m.is_empty()), "{note}");
+    }
+    assert!(messages[reply1_idx]["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"filleted\": true"));
+
+    // Between reply 1 and reply 2 (no progressToken): zero progress notifications.
+    assert_eq!(reply2_idx, reply1_idx + 1, "no progress notifications without progressToken: {messages:?}");
+    assert!(messages[reply2_idx]["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"filleted\": true"));
+}
+
+/// Out-of-band MCP `notifications/cancelled` cancels a matching in-flight bridged call via
+/// `Remote::side_channel()` → `control.cancel` and ignores mismatched `requestId`s.
+#[test]
+fn notifications_cancelled_out_of_band_cancels_matching_bridged_call_and_ignores_mismatch() {
+    use std::io::{BufRead, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    let cancel_seen = Arc::new(AtomicBool::new(false));
+    let cancelled = cancel_seen.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let start = Instant::now();
+            while !cancelled.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if cancelled.load(Ordering::SeqCst) {
+                json!({"ok": false, "cancelled": true, "error": "cancelled: stopped by control.cancel"})
+            } else {
+                json!({"ok": true, "result": {"ok": true, "results": [{}]}})
+            }
+        }
+        Some("control.cancel") => {
+            cancelled.store(true, Ordering::SeqCst);
+            json!({"ok": true, "result": {"cancelled": 1, "method": "engine.batch", "outcome": "stopped"}})
+        }
+        _ => json!({"ok": true, "result": {}}),
+    });
+
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let server_thread = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+
+    let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}]});
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "batch", "arguments": steps}})).unwrap();
+    let start = Instant::now();
+    while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Mismatched requestId must be ignored (no control.cancel sent).
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 999, "reason": "wrong id"}}))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(!cancel_seen.load(Ordering::SeqCst), "mismatched requestId must not cancel in-flight call");
+
+    // Matching requestId triggers side-channel control.cancel immediately.
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 10, "reason": "user aborted"}}))
+        .unwrap();
+
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut line = String::new();
+    replies.read_line(&mut line).unwrap();
+    let reply: Value = serde_json::from_str(&line).unwrap();
+    drop(to_server);
+    server_thread.join().unwrap();
+
+    assert!(cancel_seen.load(Ordering::SeqCst), "matching requestId must trigger control.cancel");
+    assert!(seen.lock().unwrap().1.iter().any(|m| m == "control.cancel"), "{:?}", seen.lock().unwrap().1);
+    assert_eq!(reply["id"], 10);
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    assert!(reply["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("cancelled"), "{reply}");
+}
+
+/// Out-of-band `notifications/cancelled` sets the local cancellation flag for headless `batch`
+/// loops so they abort cleanly, roll back completed steps, and ignore mismatched `requestId`s.
+#[test]
+fn notifications_cancelled_aborts_local_headless_batch_and_rolls_back() {
+    use std::io::{BufRead, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    struct GatedBatchBackend {
+        headless: Headless,
+        step0_done: Arc<AtomicBool>,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    }
+
+    impl crate::Backend for GatedBatchBackend {
+        fn set_cancel_flag(&mut self, cancel: Option<Arc<AtomicBool>>) {
+            self.cancel_flag = cancel;
+        }
+        fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+            let out = crate::Backend::call(&mut self.headless, method, params.clone());
+            if method == "engine.execute" && params["command"] == "parameters.change" && params["params"]["name"] == "a" {
+                self.step0_done.store(true, Ordering::SeqCst);
+                let start = Instant::now();
+                while !self.cancel_flag.as_ref().is_some_and(|f| f.load(Ordering::SeqCst)) && start.elapsed() < Duration::from_secs(5) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+            out
+        }
+        fn has_ui(&self) -> bool {
+            false
+        }
+        fn in_process(&self) -> bool {
+            true
+        }
+        fn describe(&self) -> String {
+            "gated headless batch backend".into()
+        }
+    }
+
+    let step0_done = Arc::new(AtomicBool::new(false));
+    let backend = GatedBatchBackend { headless: Headless::default(), step0_done: step0_done.clone(), cancel_flag: None };
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let server_thread = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(backend));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+
+    let steps = json!({"commands": [
+        {"command": "parameters.change", "params": {"name": "a", "expression": 1}},
+        {"command": "parameters.change", "params": {"name": "b", "expression": 2}},
+        {"command": "parameters.change", "params": {"name": "c", "expression": 3}},
+    ]});
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "id": "batch-1", "method": "tools/call", "params": {"name": "batch", "arguments": steps}}))
+        .unwrap();
+    let start = Instant::now();
+    while !step0_done.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(step0_done.load(Ordering::SeqCst), "step 0 should have started");
+
+    // Mismatched string requestId must not cancel the running batch.
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "other-id"}})).unwrap();
+    std::thread::sleep(Duration::from_millis(40));
+
+    // Matching string requestId aborts the local batch before step 1 and rolls back step 0.
+    writeln!(to_server, "{}", json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "batch-1"}})).unwrap();
+
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut line = String::new();
+    replies.read_line(&mut line).unwrap();
+    let reply: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(reply["id"], "batch-1");
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    let body: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["ok"], false, "{body}");
+    assert_eq!(body["cancelled"], true, "{body}");
+    assert_eq!(body["completed"], 1, "{body}");
+    assert_eq!(body["rolled_back"], true, "{body}");
+    assert_eq!(body["not_run"], json!([1, 2]), "{body}");
+
+    // Follow-up request succeeds and confirms step 0 was rolled back.
+    writeln!(
+        to_server,
+        "{}",
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "inspect_design", "arguments": {"measure": false, "sketches": false}}})
+    )
+    .unwrap();
+    line.clear();
+    replies.read_line(&mut line).unwrap();
+    let inspect: Value = serde_json::from_str(&line).unwrap();
+    drop(to_server);
+    server_thread.join().unwrap();
+    let doc: Value = serde_json::from_str(inspect["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(doc["params"], json!([]), "rolled back parameter `a`: {doc}");
+}
+
+/// `--structured`: every result also carries its reply as data, built from the text every tool
+/// already returns, so a program (the Python client) reads the same tools an agent does, and a
+/// new tool needs no change. Off by default: chat clients get exactly what they got before.
+#[test]
+fn structured_results_carry_the_reply_as_data() {
+    let structured = crate::Options { structured: true, ..Default::default() };
+    let mut s = Server::new(Box::new(Headless::default())).with_options(structured);
+    let made = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    let r = &made["result"];
+    assert_ne!(r["isError"], json!(true), "{r}");
+    let text: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(r["structuredContent"]["result"], text, "the data is the text's JSON, number for number");
+
+    let measured = raw_tool(&mut s, "measure", json!({}));
+    let bodies = &measured["result"]["structuredContent"]["result"]["bodies"];
+    assert!((bodies[0]["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{bodies}");
+
+    // A message that is not JSON is the result as a string, and the error flag stays.
+    let refused = raw_tool(&mut s, "execute", json!({"command": "solid.no_such_command"}));
+    assert_eq!(refused["result"]["isError"], json!(true));
+    assert!(refused["result"]["structuredContent"]["result"].as_str().is_some_and(|m| m.contains("no_such_command")), "{refused}");
+
+    // Off: no structured copy on a success, as before.
+    let mut plain = Server::new(Box::new(Headless::default()));
+    let made = raw_tool(&mut plain, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    assert!(made["result"].get("structuredContent").is_none(), "{made}");
+}
+
+/// A notice or selection block added after the reply goes in `notes`; keys a result already
+/// carries stay.
+#[test]
+fn structured_results_keep_notes_and_existing_keys() {
+    let mut r = json!({"content": [{"type": "text", "text": "{\"a\": 1}"}, {"type": "text", "text": "selected: Body1"}], "structuredContent": {"panel_error": {"rule": "schema"}}});
+    crate::server::structure(&mut r);
+    assert_eq!(r["structuredContent"], json!({"panel_error": {"rule": "schema"}, "result": {"a": 1}, "notes": ["selected: Body1"]}));
+    let mut image = json!({"content": [{"type": "image", "data": "AA==", "mimeType": "image/png"}, {"type": "text", "text": "{\"width\": 4}"}]});
+    crate::server::structure(&mut image);
+    assert_eq!(image["structuredContent"], json!({"result": {"width": 4}}), "an image's text block is its reply");
 }

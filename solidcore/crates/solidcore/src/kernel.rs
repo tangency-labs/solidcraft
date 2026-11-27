@@ -145,6 +145,12 @@ pub struct Caches {
     /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
     /// changes no result, only speed.
     pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
+    /// Not upstream (#20158): content-keyed memo of [`crate::topology::edgeuse::p3::fit_tolerance`]'s
+    /// uncached edge/face gap measurements (`topology::edgeuse::p3::FitGapMemo`). Shared through
+    /// an [`Arc`] so boolean worker cache kernels reuse gaps already measured by their parent
+    /// (a hit returns the exact same gap, so sharing changes no result). Off when
+    /// [`Kernel::memoize_curve_caches`] is false; clearing it changes no result, only speed.
+    pub(crate) fit_gap_memo: Arc<Mutex<crate::topology::edgeuse::p3::FitGapMemo>>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -173,6 +179,7 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             trim_move_bounds: RefCell::default(),
+            fit_gap_memo: Arc::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
@@ -207,6 +214,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    keep_feature_creases: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
@@ -257,6 +265,7 @@ pub struct WorkCounters {
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
     move_trim_bisection_pieces: Cell<u64>,
+    fit_gap_calcs: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -282,6 +291,13 @@ impl WorkCounters {
     #[must_use]
     pub fn wall_body_copies(&self) -> u64 {
         self.wall_body_copies.get()
+    }
+
+    /// Creases keep features computes, each the section of a sheet face of rounds by a
+    /// feature's wall (a planar section, or a surface intersection). Not the fork's.
+    #[must_use]
+    pub fn keep_feature_creases(&self) -> u64 {
+        self.keep_feature_creases.get()
     }
 
     /// Curve intersections a boolean ran to split its proto edges where they cross
@@ -700,11 +716,19 @@ impl WorkCounters {
         self.move_trim_bisection_pieces.get()
     }
 
+    /// Uncached edge/face gap evaluations (`topology::edgeuse::p1::calc_max_edge_face_gap`)
+    /// performed by `topology::edgeuse::p3::fit_tolerance` (#20158). Not the fork's.
+    #[must_use]
+    pub fn fit_gap_calcs(&self) -> u64 {
+        self.fit_gap_calcs.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.keep_feature_creases.set(0);
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
@@ -755,12 +779,19 @@ impl WorkCounters {
         self.booleans.set(0);
         self.apart_unions.set(0);
         self.move_trim_bisection_pieces.set(0);
+        self.fit_gap_calcs.set(0);
     }
 
     /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
     pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
         self.move_trim_bisection_pieces
             .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
+    }
+
+    /// Counts one uncached edge/face gap calculation inside `fit_tolerance`.
+    pub(crate) fn add_fit_gap_calc(&self) {
+        self.fit_gap_calcs
+            .set(self.fit_gap_calcs.get().saturating_add(1));
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -853,6 +884,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one crease keep features computes between a sheet face and a wall.
+    pub(crate) fn add_keep_feature_crease(&self) {
+        self.keep_feature_creases
+            .set(self.keep_feature_creases.get().saturating_add(1));
     }
 
     /// Counts one curve intersection of two proto edges.
