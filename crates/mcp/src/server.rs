@@ -227,6 +227,28 @@ impl Agent {
     }
 }
 
+/// `--structured`: the result's reply as data, `structuredContent: {"result", "notes"?}`, for a
+/// program calling the tools. `result` is the first text block read as JSON (the text itself when
+/// it is not JSON: a message); `notes` are the text blocks after it (a notice, the selection). It
+/// is built from what every tool already returns, so a new tool is covered without a change here.
+/// Keys a result already carries (`panel_error`, `plugin_error`) stay.
+pub(crate) fn structure(result: &mut Value) {
+    let texts: Vec<&str> =
+        result["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect();
+    let Some((first, rest)) = texts.split_first() else { return };
+    let reply = serde_json::from_str::<Value>(first).unwrap_or_else(|_| Value::String((*first).to_string()));
+    let notes: Vec<Value> = rest.iter().map(|t| Value::String((*t).to_string())).collect();
+    let mut data = match result.get_mut("structuredContent").map(Value::take) {
+        Some(Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    data.insert("result".into(), reply);
+    if !notes.is_empty() {
+        data.insert("notes".into(), Value::Array(notes));
+    }
+    result["structuredContent"] = Value::Object(data);
+}
+
 impl Tools for Agent {
     fn instructions(&self) -> String {
         format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
@@ -288,6 +310,9 @@ impl Tools for Agent {
             && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
         {
             content.push(json!({"type": "text", "text": block}));
+        }
+        if self.options.structured {
+            structure(&mut result);
         }
         result
     }

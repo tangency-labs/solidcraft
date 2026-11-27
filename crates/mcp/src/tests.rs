@@ -1080,7 +1080,7 @@ fn inspect_design_lists_joint_definitions() {
 
     // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
     // joints are counted, not listed.
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
         for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
@@ -1305,7 +1305,7 @@ fn check_parameters_reports_only_the_bodies_asked_for_in_summary() {
 /// without compact output and as a batch step; left out, the call and its reply are as before.
 #[test]
 fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         parametric_box_with_cylinder(&mut s);
         tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
@@ -1361,8 +1361,13 @@ fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
     // before them answers as it always did.
     let mut b = Answers { calls: Vec::new(), answer: Box::new(|_, _| Ok(json!({"timeline": [], "bodies": [], "sketches": []}))) };
     crate::tools::call_tool(&mut b, "inspect_design", &json!({"sketches": false, "joints": false}));
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true });
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false, "bodies": ["B"]}), crate::Options { compact: true });
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true, ..Default::default() });
+    crate::tools::call_tool_with(
+        &mut b,
+        "inspect_design",
+        &json!({"joints": false, "bodies": ["B"]}),
+        crate::Options { compact: true, ..Default::default() },
+    );
     let sent: Vec<&Value> = b.calls.iter().filter(|(m, _)| m == "document.inspect").map(|(_, p)| p).collect();
     assert_eq!(
         sent,
@@ -5140,7 +5145,7 @@ fn no_tool_schema_has_a_list_of_types() {
             _ => {}
         }
     }
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut found = Vec::new();
         for def in crate::tool_definitions_with(opts) {
             mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
@@ -5181,15 +5186,21 @@ fn inspect_design_is_unchanged_without_compact_output() {
 /// sketches asked for; `bodies` keeps only those bodies.
 #[test]
 fn compact_inspect_design_summarises_sketches_unless_asked() {
-    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let mut s = server_with_big_sketch(crate::Options { compact: true, ..Default::default() });
     let listed = call(&mut s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
     assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
-    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    assert_eq!(
+        def,
+        crate::tool_definitions_with(crate::Options { compact: true, ..Default::default() })
+            .into_iter()
+            .find(|d| d["name"] == "inspect_design")
+            .unwrap()
+    );
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
     let check = |options| solidcraft_mcp_server::check_arguments(&crate::tool_definitions_with(options), "inspect_design", &bodies);
-    assert!(check(crate::Options { compact: true }).is_ok());
+    assert!(check(crate::Options { compact: true, ..Default::default() }).is_ok());
     assert!(check(crate::Options::default()).is_err_and(|e| e.contains("bodies")));
 
     let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
@@ -5282,9 +5293,9 @@ fn compact_output_follows_the_apps_preference() {
     assert!(!inspect_design_is_compact(&mut s));
 
     // The command line turns it on whatever the app says.
-    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
-    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
 }
 
@@ -5857,7 +5868,7 @@ fn the_instructions_tell_the_agent_to_use_the_selection() {
 /// Counts, positions and volumes are specified independently of inspect.measure (#21797).
 #[test]
 fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command":command, "params":params}));
         let part = exec(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
@@ -6689,4 +6700,44 @@ fn notifications_cancelled_aborts_local_headless_batch_and_rolls_back() {
     server_thread.join().unwrap();
     let doc: Value = serde_json::from_str(inspect["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(doc["params"], json!([]), "rolled back parameter `a`: {doc}");
+}
+
+/// `--structured`: every result also carries its reply as data, built from the text every tool
+/// already returns, so a program (the Python client) reads the same tools an agent does, and a
+/// new tool needs no change. Off by default: chat clients get exactly what they got before.
+#[test]
+fn structured_results_carry_the_reply_as_data() {
+    let structured = crate::Options { structured: true, ..Default::default() };
+    let mut s = Server::new(Box::new(Headless::default())).with_options(structured);
+    let made = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    let r = &made["result"];
+    assert_ne!(r["isError"], json!(true), "{r}");
+    let text: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(r["structuredContent"]["result"], text, "the data is the text's JSON, number for number");
+
+    let measured = raw_tool(&mut s, "measure", json!({}));
+    let bodies = &measured["result"]["structuredContent"]["result"]["bodies"];
+    assert!((bodies[0]["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{bodies}");
+
+    // A message that is not JSON is the result as a string, and the error flag stays.
+    let refused = raw_tool(&mut s, "execute", json!({"command": "solid.no_such_command"}));
+    assert_eq!(refused["result"]["isError"], json!(true));
+    assert!(refused["result"]["structuredContent"]["result"].as_str().is_some_and(|m| m.contains("no_such_command")), "{refused}");
+
+    // Off: no structured copy on a success, as before.
+    let mut plain = Server::new(Box::new(Headless::default()));
+    let made = raw_tool(&mut plain, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    assert!(made["result"].get("structuredContent").is_none(), "{made}");
+}
+
+/// A notice or selection block added after the reply goes in `notes`; keys a result already
+/// carries stay.
+#[test]
+fn structured_results_keep_notes_and_existing_keys() {
+    let mut r = json!({"content": [{"type": "text", "text": "{\"a\": 1}"}, {"type": "text", "text": "selected: Body1"}], "structuredContent": {"panel_error": {"rule": "schema"}}});
+    crate::server::structure(&mut r);
+    assert_eq!(r["structuredContent"], json!({"panel_error": {"rule": "schema"}, "result": {"a": 1}, "notes": ["selected: Body1"]}));
+    let mut image = json!({"content": [{"type": "image", "data": "AA==", "mimeType": "image/png"}, {"type": "text", "text": "{\"width\": 4}"}]});
+    crate::server::structure(&mut image);
+    assert_eq!(image["structuredContent"], json!({"result": {"width": 4}}), "an image's text block is its reply");
 }
