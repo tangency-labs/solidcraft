@@ -457,6 +457,9 @@ const GROUP_CHEVRON: f32 = 3.5;
 /// How strongly a label's pill is tinted with its colour, at rest and under the pointer.
 const GROUP_TINT: f32 = 0.30;
 const GROUP_TINT_HOT: f32 = 0.45;
+/// How strongly the band behind a group's label and tabs is tinted with its colour: fainter than the
+/// label, so the label and the tabs still stand out on it.
+const GROUP_BAND: f32 = 0.14;
 const GROUP_LABEL_MAX: f32 = 160.0;
 /// Where the Report a bug text starts, from the button's left edge.
 pub const REPORT_TEXT_X: f32 = crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE + crate::app_bar_layout::application::GAP;
@@ -3506,7 +3509,7 @@ fn group_label_width(ui: &egui::Ui, name: &str) -> f32 {
     if name.is_empty() {
         return GROUP_DOT + GROUP_CHEVRON_ROOM;
     }
-    (text_width(ui, name, crate::type_face::semibold(Tokens::get().font_small)) + GROUP_SWATCH_ROOM + 2.0 * GROUP_PAD + GROUP_CHEVRON_ROOM)
+    (text_width(ui, name, crate::type_face::semibold(Tokens::get().font_button)) + GROUP_SWATCH_ROOM + 2.0 * GROUP_PAD + GROUP_CHEVRON_ROOM)
         .min(GROUP_LABEL_MAX)
 }
 
@@ -3542,7 +3545,8 @@ fn group_label(ui: &mut egui::Ui, strip: &mut TabStrip, g: usize, rect: Rect, me
         painter.rect_stroke(rect, 6u8, Stroke::new(1.0, label.fill.gamma_multiply(0.8)), egui::StrokeKind::Inside);
         painter.circle_filled(pos2(rect.left() + GROUP_PAD + GROUP_SWATCH, rect.center().y), GROUP_SWATCH, label.fill);
         let ink = Tokens::get().app_bar_text;
-        let font = crate::type_face::semibold(Tokens::get().font_small);
+        // The name is as large as the tabs' names: the group holds them, it is no smaller.
+        let font = crate::type_face::semibold(Tokens::get().font_button);
         let galley = painter.layout_no_wrap(label.name.to_string(), font, ink);
         let at = pos2(rect.left() + GROUP_PAD + GROUP_SWATCH_ROOM, rect.center().y - galley.size().y / 2.0);
         // The name stops short of the chevron.
@@ -3760,8 +3764,11 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
     let (mut pick, mut shut, mut torn) = (None, None, None);
     let group_menu_id = strip.id.with("group_menu");
     let mut group_menu: Option<(usize, Pos2)> = ui.ctx().data(|d| d.get_temp(group_menu_id));
-    // Where each group's tabs (and label) reach, for the line under them.
+    // Where each group's tabs (and label) reach, for the band behind them and the line under them.
     let mut spans: Vec<Option<(f32, f32)>> = vec![None; strip.groups.len()];
+    // Each group's band goes under its label and tabs: its place among the shapes is kept now, and
+    // it is filled in once the group's reach is known.
+    let bands: Vec<egui::layers::ShapeIdx> = strip.groups.iter().map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for i in order {
         let Some(tab) = strip.tabs.get(i).copied() else {
             continue;
@@ -3782,7 +3789,9 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 *to = to.max(left + w);
             }
             if label_w > 0.0 {
-                let lr = Rect::from_min_size(pos2(slot_left, r.center().y - 11.0), vec2(label_w - GROUP_GAP, 22.0));
+                // As tall as a design tab: the group holds its tabs, it is no smaller than they are.
+                let lh = r.height() - 8.0;
+                let lr = Rect::from_min_size(pos2(slot_left, r.center().y - lh / 2.0), vec2(label_w - GROUP_GAP, lh));
                 group_label(ui, strip, g, lr, &mut group_menu, &mut actions);
             }
         }
@@ -3937,8 +3946,13 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         }
         ui.set_clip_rect(tab_clip);
     }
-    for (span, label) in spans.iter().zip(strip.groups) {
+    for (g, ((span, label), band)) in spans.iter().zip(strip.groups).zip(&bands).enumerate() {
         if let Some((from, to)) = span {
+            // The group holds its designs: a band in its colour, the bar's height, behind its label
+            // and tabs, with the line in its colour along the bottom.
+            let rect = Rect::from_min_max(pos2(from - 1.0, r.top() + 2.0), pos2(to - 1.0, r.bottom() - 1.0));
+            ui.painter().set(*band, egui::epaint::RectShape::filled(rect, 8u8, label.fill.gamma_multiply(GROUP_BAND)));
+            solidcraft_ui_registry::publish_rect(&format!("{}{g}:band", strip.handles.group), rect);
             let line = Rect::from_min_max(pos2(from + 1.0, r.bottom() - 3.0), pos2(to - 3.0, r.bottom() - 1.0));
             ui.painter().rect_filled(line, 1u8, label.fill);
         }
