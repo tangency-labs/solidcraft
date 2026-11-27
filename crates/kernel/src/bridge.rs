@@ -377,6 +377,15 @@ fn frames_on(r: &Brep, faces: &[usize], stations: &[(Vec3, usize)], line: &Chain
     Ok(out)
 }
 
+/// `count` stations evenly by arclength along `chain`, on its edges' own curves, as [`frames`]
+/// places them.
+pub(crate) fn chain_stations(body: &Body, chain: &Chain, count: usize) -> Result<Vec<Vec3>> {
+    if !(2..=4097).contains(&count) {
+        return Err(KernelError::Invalid("a bridge needs 2 to 4097 stations".into()));
+    }
+    Ok(ChainLine::of(body, chain)?.stations(count, 0.0, false)?.into_iter().map(|(p, _)| p).collect())
+}
+
 /// The frames of `body`'s face `face` at stations on its own boundary, each leaving the face
 /// straight across that boundary: `stations` are points on the boundary with the boundary's
 /// direction there *as the face's own boundary runs* (counter-clockwise about its outward normal),

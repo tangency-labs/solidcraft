@@ -1288,7 +1288,20 @@ fn loft_blend(
         match piece {
             Piece::Body(name, edges) => {
                 let b = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?.body.clone();
-                frames.push(kernel::loft_blend::section_frames(&b, edges, leave, stations)?);
+                // Only an end held past G0 leaves through the body's face; the others are held by
+                // position alone.
+                let end = if i == 0 {
+                    continuity.first()
+                } else if i == last {
+                    continuity.last()
+                } else {
+                    None
+                };
+                frames.push(if end.is_some_and(|g| *g != kernel::Continuity::G0) {
+                    kernel::loft_blend::section_frames(&b, edges, leave, stations)?
+                } else {
+                    kernel::loft_blend::section_positions(&b, edges, leave, stations)?
+                });
             }
             Piece::Points(pts) => frames.push(point_frames(pts, leave, stations)?),
         }
