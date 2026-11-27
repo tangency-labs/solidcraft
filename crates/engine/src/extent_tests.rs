@@ -831,6 +831,154 @@ fn the_faces_of_an_extrude_with_a_taper_of_zero_and_a_start_offset_take_a_sketch
     }
 }
 
+/// A revolved shell (cone, cylinder or torus) under a small block's sketch at z = 0, and a
+/// join extrude of that sketch To the shell's inner face with `extra` params. Returns the session
+/// and the body's name.
+fn shell_and_post(shell: &str, profile: [[f64; 2]; 2], to: [f64; 3], extra: Value) -> Session {
+    let mut p = json!({"operation": "join"});
+    if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
+    shell_and_post_with(shell, profile, to, p)
+}
+
+/// [`shell_and_post`] with the extrude's own params (its sketch, direction and To are set here).
+fn shell_and_post_with(shell: &str, profile: [[f64; 2]; 2], to: [f64; 3], extra: Value) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+    match shell {
+        "cone" => run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true})),
+        "cylinder" => run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [5, 10], [4, 10]], "closed": true})),
+        // A ring of radius 2 whose centre is 8 from the axis and 8 below the sketch plane.
+        _ => run(&mut s, "sketch.circle.center", json!({"center": [8, 8], "radius": 2})),
+    };
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+    let [[x0, y0], [x1, y1]] = profile;
+    run(&mut s, "sketch.line", json!({"points": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"sketch": "SketchR", "exact_regions": true, "direction": "negative", "to": to});
+    if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
+    run(&mut s, "solid.extrude", p);
+    s
+}
+
+fn z_max_and_volume(s: &mut Session) -> (f64, f64) {
+    let m = body(s, "Body1");
+    let z = m["bbox"]["max"][2].as_f64().or_else(|| m["bounds"]["max"][2].as_f64()).unwrap_or(f64::NAN);
+    (z, m["volume_mm3"].as_f64().unwrap_or(f64::NAN))
+}
+
+/// Side two of a two-sided extrude is built to its own distance whatever kind of face side
+/// one ends To: a cone, a cylinder and a torus, with side two alone and with both sides.
+#[test]
+fn two_sided_extrude_to_a_curved_face_builds_side_two() {
+    // (shell, profile, To point on the face's inside, profile's reach to the face)
+    let cases = [
+        ("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]),
+        ("cylinder", [[4.2, 0.0], [4.8, 1.0]], [4.5, 0.5, -5.0]),
+        ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0]),
+    ];
+    for (shell, profile, to) in cases {
+        let mut one = shell_and_post(shell, profile, to, json!({}));
+        let mut two = shell_and_post(shell, profile, to, json!({"distance2": "5 mm"}));
+        let (z1, v1) = z_max_and_volume(&mut one);
+        let (z2, v2) = z_max_and_volume(&mut two);
+        let area = (profile[1][0] - profile[0][0]) * (profile[1][1] - profile[0][1]);
+        assert!(z1.abs() < 1e-6, "{shell}: side one only reaches z {z1}");
+        assert!(v1.is_finite() && v1 > 0.0, "{shell}: side one only has volume {v1}");
+        assert!((z2 - 5.0).abs() < 1e-6, "{shell}: side two must reach z 5, got {z2}");
+        assert!((v2 - v1 - 5.0 * area).abs() < 1e-6 * v1.max(1.0), "{shell}: side two adds {} want {}", v2 - v1, 5.0 * area);
+    }
+}
+
+/// Undo and redo of a two-sided extrude To a cone face keep side two, and so does a
+/// save and reload.
+#[test]
+fn two_sided_extrude_to_a_cone_survives_undo_redo_and_reload() {
+    let mut s = shell_and_post("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196], json!({"distance2": "5 mm"}));
+    let (z, v) = z_max_and_volume(&mut s);
+    assert!((z - 5.0).abs() < 1e-6, "z {z}");
+    run(&mut s, "edit.undo", json!({}));
+    let (z_undone, v_undone) = z_max_and_volume(&mut s);
+    assert!(z_undone.abs() < 1e-6 && v_undone < v, "undone: z {z_undone}, volume {v_undone} against {v}");
+    run(&mut s, "edit.redo", json!({}));
+    let (z_redone, v_redone) = z_max_and_volume(&mut s);
+    assert!((z_redone - 5.0).abs() < 1e-6 && (v_redone - v).abs() < 1e-6, "redone: z {z_redone}, volume {v_redone} against {v}");
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(doc);
+    let (z_cold, v_cold) = z_max_and_volume(&mut cold);
+    assert!((z_cold - 5.0).abs() < 1e-6 && (v_cold - v).abs() < 1e-6, "reloaded: z {z_cold}, volume {v_cold} against {v}");
+}
+
+/// A profile that only partly lies over a cone To face is refused by name, with a second
+/// side or without one: x 3 to 4 of it lies over the cone's hole (its inner face starts at x 4).
+#[test]
+fn two_sided_extrude_to_a_cone_the_profile_partly_misses_is_refused() {
+    for extra in [json!({}), json!({"distance2": "20 mm"})] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+        run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+        run(&mut s, "sketch.line", json!({"points": [[3, 0], [8, 0], [8, 1], [3, 1]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "SketchR", "exact_regions": true, "operation": "join", "direction": "negative", "to": [7.5, 0.5, -5.196]});
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        let err = s.execute("solid.extrude", &p).expect_err("refused");
+        assert!(err.to_string().contains("reaches past the To face"), "{extra}: {err}");
+    }
+}
+
+/// A new-body two-sided extrude To a cone, cylinder or torus face is one body whose two
+/// sides share the sketch plane's face, with the volume of side one plus 5 times the section.
+#[test]
+fn two_sided_new_body_extrude_to_a_curved_face_is_one_body() {
+    let cases = [
+        ("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]),
+        ("cylinder", [[4.2, 0.0], [4.8, 1.0]], [4.5, 0.5, -5.0]),
+        ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0]),
+    ];
+    for (shell, profile, to) in cases {
+        let area = (profile[1][0] - profile[0][0]) * (profile[1][1] - profile[0][1]);
+        let post = |extra: Value| {
+            let mut p = json!({"operation": "new", "body_name": "Post"});
+            if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+                p.extend(e.clone());
+            }
+            shell_and_post_with(shell, profile, to, p)
+        };
+        let mut one = post(json!({}));
+        let mut two = post(json!({"distance2": "5 mm"}));
+        let v1 = body(&mut one, "Post")["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let bodies = |s: &Session| s.model.state().bodies.iter().filter(|b| b.name.starts_with("Post")).count();
+        assert_eq!(bodies(&two), 1, "{shell}: side two came out as a body of its own");
+        let b = body(&mut two, "Post");
+        let v2 = b["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        assert!((v2 - v1 - 5.0 * area).abs() < 1e-6 * v2, "{shell}: {v2} against {v1} + {}", 5.0 * area);
+        assert!((b["bbox"]["max"][2].as_f64().unwrap_or(f64::NAN) - 5.0).abs() < 1e-6, "{shell}: {b}");
+    }
+}
+
+/// A second distance too thin for the kernel to build (1e-6 mm) is refused by name on a cone
+/// or a torus To face, not with a bare kernel status.
+#[test]
+fn two_sided_extrude_to_a_curved_face_with_a_second_distance_too_thin_is_refused_by_name() {
+    for (shell, profile, to) in [("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]), ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0])] {
+        let built = std::panic::catch_unwind(|| shell_and_post_with(shell, profile, to, json!({"operation": "join", "distance2": "0.000001 mm"})));
+        let msg = built.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+        assert!(msg.contains("too thin"), "{shell}: {msg}");
+    }
+}
+
 /// A block with a text parameter `lbl` cut 1 mm into its top by a whole-sketch text, and a post
 /// extruded From the top at (35, 35), away from the text. `lbl` starts as `first`.
 fn labelled_block_with_post(first: &str) -> Session {

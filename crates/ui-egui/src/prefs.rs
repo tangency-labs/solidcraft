@@ -7581,6 +7581,7 @@ mod tests {
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
+            ("new_body_default", json!(true), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
@@ -8541,6 +8542,8 @@ mod tests {
         assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
         assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
         assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");
+        let sign = control(&mut h.app, &json!({"accent": "#+fffff"}));
+        assert!(sign.as_ref().is_err_and(|e| e.contains("must be a colour as #rrggbb")), "a sign is not a hex digit (#22089): {sign:?}");
         control(&mut h.app, &json!({"accent": ""})).unwrap();
         h.frames(2);
         assert_eq!(solidcraft_theme::Tokens::get().accent, own);
