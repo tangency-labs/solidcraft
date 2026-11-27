@@ -530,11 +530,14 @@ pub fn calculate_tight_bounding_box_into(
     // (not upstream: whether an edge gave a box; an edge without curve gives none, as
     // upstream's `CalculateTightBoundingBox` returns without setting it)
     let mut has_edge_boxes = false;
+    let mut all_edges_boxed = true;
     for e in face_edges(b, f)? {
         // Get this Edge's tight box
         if let Some(e_bbox) = qe::calculate_tight_bounding_box(k, b, e)? {
             has_edge_boxes = true;
             face_bbox = face_bbox.union(&e_bbox);
+        } else {
+            all_edges_boxed = false;
         }
     } // end loop on Edges
 
@@ -596,9 +599,30 @@ pub fn calculate_tight_bounding_box_into(
         return Ok(());
     }
 
-    // First check the approximate box.
+    // #22664: a cone or cylinder is a ruled surface whose rulings are straight line
+    // segments, so any linear coordinate attains its extrema on the face's boundary edges
+    // or at the cone's apex. When every edge already contributed its tight box and the
+    // apex is accounted for, no `face_directed_max` global surface solve is needed.
     let uv_domain = b.face(f)?.uv_domain;
-    let srf_bbox = surface_bounding_box(k, b, f, surface, &uv_domain)?;
+    if all_edges_boxed {
+        if let SurfaceKind::Cone(cone) = surface.kind() {
+            if cone_tight_box_complete(
+                k,
+                lb,
+                f,
+                cone,
+                &uv_domain,
+                face_zone_tol_3d,
+                &mut face_bbox,
+            )? {
+                *out = face_bbox;
+                return Ok(());
+            }
+        }
+    }
+
+    // First check the approximate box.
+    let srf_bbox = surface_bounding_box(k, lb.get(), f, surface, &uv_domain)?;
     if srf_bbox.is_contained_by(&face_bbox, 0.0) {
         return Ok(());
     }
@@ -678,6 +702,176 @@ pub fn calculate_tight_bounding_box_into(
 fn is_empty_box(e: &Extent3d) -> bool {
     let (lo, hi) = (e.min(), e.max());
     !(lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z)
+}
+
+/// For a [`Cone`] (or cylinder) face whose edges all have tight boxes, every ruling is a
+/// straight line segment `v -> O + R(v)(cos u X + sin u Y) + v Z` with `R(v)` affine in `v`,
+/// so any linear height `S(u, v) . dir` attains its extrema on the face's boundary edges, on
+/// the face's UV domain boundary (for faces whose complement reaches an untrimmed end circle
+/// or seam), or at the cone's apex (#22664).
+///
+/// Checks only the finite set of analytic candidate points on the UV domain ends (and the
+/// apex) that would enlarge `face_bbox`, classifying each against the face's trim. Returns
+/// `Ok(true)` when `face_bbox` is complete, or `Ok(false)` to fall back to
+/// [`face_directed_max`] when a required conversion or classification fails.
+fn cone_tight_box_complete(
+    k: &Kernel,
+    lb: &mut LazyBrep<'_>,
+    f: FaceId,
+    cone: &crate::surface::cone::Cone,
+    uv_domain: &Extent2d,
+    face_zone_tol_3d: f64,
+    face_bbox: &mut Extent3d,
+) -> Result<bool> {
+    let step_a = match ignored(cone.convert_uv_from_nurbs_to_step(k, uv_domain.min()))? {
+        Some(uv) if uv.x.is_finite() && uv.y.is_finite() => uv,
+        _ => return Ok(false),
+    };
+    let step_b = match ignored(cone.convert_uv_from_nurbs_to_step(k, uv_domain.max()))? {
+        Some(uv) if uv.x.is_finite() && uv.y.is_finite() => uv,
+        _ => return Ok(false),
+    };
+    let v_lo = step_a.y.min(step_b.y);
+    let v_hi = step_a.y.max(step_b.y);
+    let (u_lo, u_hi) = if (step_b.x - step_a.x).abs() <= 1e-6 {
+        let dom_u = cone.rev.anal_uv_domain.u_interval();
+        (dom_u.min(), dom_u.max())
+    } else {
+        (step_a.x.min(step_b.x), step_a.x.max(step_b.x))
+    };
+    if !(u_lo.is_finite() && u_hi.is_finite() && v_lo.is_finite() && v_hi.is_finite()) {
+        return Ok(false);
+    }
+
+    let classify_and_add = |lb: &mut LazyBrep<'_>,
+                            step_uv: Point2,
+                            pt: Point3,
+                            face_bbox: &mut Extent3d|
+     -> Result<bool> {
+        if !(pt.x.is_finite() && pt.y.is_finite() && pt.z.is_finite()) {
+            return Ok(false);
+        }
+        if face_bbox.contains_point(pt, EFF_ZERO_SQRT) {
+            return Ok(true);
+        }
+        let Some(nurb_uv) = ignored(cone.convert_uv_from_step_to_nurbs(k, step_uv))? else {
+            return Ok(false);
+        };
+        let mut pt_class = PointClassification::new(face_zone_tol_3d);
+        let options = PointClassifyOptions {
+            src_zone_tol_3d: face_zone_tol_3d,
+            do_boundary_intersections: false,
+            use_uv_classification: true,
+            ..PointClassifyOptions::default()
+        };
+        let classified = ignored(match lb {
+            LazyBrep::Prepared(b) => {
+                point_classify_prepared(k, b, f, nurb_uv, &mut pt_class, options).map_err(|e| {
+                    match e {
+                        SolidError::Unported { .. } => SolidError::PreparationRequired {
+                            operation: OP_TIGHT,
+                        },
+                        e => e,
+                    }
+                })
+            }
+            _ => point_classify(k, lb.get_mut()?, f, nurb_uv, &mut pt_class, options),
+        })?
+        .is_some();
+        if !classified {
+            return Ok(false);
+        }
+        // Inside the face only (`SM_PC_FACE`), matching `cell_directed_max`:
+        // boundary extrema already come from the vertices and edges, and a
+        // tolerance-only `Edge`/`Vertex` hit outside the trim must not enlarge the box.
+        if pt_class.point_class() == PointClassType::Face {
+            face_bbox.add_point(pt);
+        }
+        Ok(true)
+    };
+
+    // Candidate extrema on the two end circles (v = v_lo, v_hi): the U-domain endpoints plus
+    // the stationary angles atan2(Y . dir, X . dir) and +180 deg for each coordinate axis.
+    let rx = cone.rev.position.x_axis();
+    let ry = cone.rev.position.y_axis();
+    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+    let mut angles = Vec::new();
+    angles.push(u_lo);
+    angles.push(u_hi);
+    for dir in axes {
+        let a = rx.dot(dir);
+        let b = ry.dot(dir);
+        if a * a + b * b > 0.0 {
+            let base = b.atan2(a).to_degrees();
+            for shift in [0.0, 180.0] {
+                let mut deg = base + shift;
+                // Normalize into [u_lo, u_lo + 360).
+                deg = u_lo + (deg - u_lo).rem_euclid(360.0);
+                if deg >= u_lo - 1e-9 && deg <= u_hi + 1e-9 {
+                    angles.push(deg.max(u_lo).min(u_hi));
+                }
+            }
+        }
+    }
+
+    // Candidate v-levels: the UV domain ends plus the face's own axial extent from
+    // `face_bbox` (covers seam-straddling loops whose UV closing segment lies at the
+    // loop's v-bounds strictly inside [v_lo, v_hi]).
+    let origin = cone.rev.position.origin();
+    let z_axis = cone.rev.position.z_axis();
+    let (bmin, bmax) = (face_bbox.min(), face_bbox.max());
+    let mut v_box_lo = f64::INFINITY;
+    let mut v_box_hi = f64::NEG_INFINITY;
+    for &x in &[bmin.x, bmax.x] {
+        for &y in &[bmin.y, bmax.y] {
+            for &z in &[bmin.z, bmax.z] {
+                let v = (Point3::new(x, y, z) - origin).dot(z_axis);
+                v_box_lo = v_box_lo.min(v);
+                v_box_hi = v_box_hi.max(v);
+            }
+        }
+    }
+    let mut v_levels = vec![v_lo, v_hi];
+    if v_box_lo.is_finite() && v_box_hi.is_finite() {
+        let clo = v_box_lo.max(v_lo).min(v_hi);
+        let chi = v_box_hi.max(v_lo).min(v_hi);
+        v_levels.push(clo);
+        v_levels.push(chi);
+        v_levels.push(0.5 * (clo + chi));
+    }
+
+    for v in v_levels {
+        for &u in &angles {
+            let step_uv = Point2::new(u, v);
+            let Some(pt) = ignored(cone.evaluate_step_point(step_uv))? else {
+                return Ok(false);
+            };
+            if !classify_and_add(lb, step_uv, pt, face_bbox)? {
+                return Ok(false);
+            }
+        }
+    }
+
+    if !cone.is_cylinder() {
+        let Some(apex) = ignored(cone.apex(k))? else {
+            return Ok(false);
+        };
+        if !apex.is_cylinder {
+            let v_apex =
+                -cone.base_radius / (cone.semi_angle_deg * std::f64::consts::PI / 180.0).tan();
+            if !v_apex.is_finite() {
+                return Ok(false);
+            }
+            if v_apex >= v_lo - face_zone_tol_3d && v_apex <= v_hi + face_zone_tol_3d {
+                let u_mid = 0.5 * (u_lo + u_hi);
+                if !classify_and_add(lb, Point2::new(u_mid, v_apex), apex.point, face_bbox)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
+    Ok(true)
 }
 
 /// `SmSurfaceEval::Pos()`: the position, also when the evaluation failed (then what
@@ -5535,5 +5729,70 @@ mod tests {
         let e = angle_ser(Vec3::ZERO, Vec3::X, OP_SECTOR).unwrap_err();
         assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
         assert_eq!(e.cause(), Some(&angle));
+    }
+
+    /// #22664: a cone or cylinder face is a ruled surface whose rulings are straight
+    /// line segments, so its directed extrema lie on its boundary edges (or apex) and
+    /// its tight bounding box needs no `face_directed_max` global surface solves.
+    #[test]
+    fn tight_box_of_cone_and_cylinder_faces_uses_no_global_solves() {
+        use crate::primitive::api_primitives::{
+            create_cone, create_cylinder, create_partial_cone, create_partial_cylinder,
+        };
+        let mut k = Kernel::default();
+        let c30 = (30.0_f64.to_radians()).cos();
+        let s30 = (30.0_f64.to_radians()).sin();
+        let c120 = (120.0_f64.to_radians()).cos();
+        let cases: [(&str, Brep, [f64; 6]); 5] = [
+            (
+                "full cone with apex",
+                create_cone(&mut k, Point3::ZERO, 5.0, 0.0, 10.0).unwrap(),
+                [-5.0, -5.0, 0.0, 5.0, 5.0, 10.0],
+            ),
+            (
+                "truncated cone",
+                create_cone(&mut k, Point3::ZERO, 5.0, 2.0, 10.0).unwrap(),
+                [-5.0, -5.0, 0.0, 5.0, 5.0, 10.0],
+            ),
+            (
+                "partial cone 30..120 deg",
+                create_partial_cone(&mut k, Point3::ZERO, 5.0, 2.0, 10.0, 30.0, 120.0).unwrap(),
+                [5.0 * c120, 2.0 * s30, 0.0, 5.0 * c30, 5.0, 10.0],
+            ),
+            (
+                "full cylinder",
+                create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0).unwrap(),
+                [-5.0, -5.0, 0.0, 5.0, 5.0, 10.0],
+            ),
+            (
+                "partial cylinder 30..120 deg",
+                create_partial_cylinder(&mut k, Point3::ZERO, 5.0, 10.0, 30.0, 120.0).unwrap(),
+                [5.0 * c120, 5.0 * s30, 0.0, 5.0 * c30, 5.0, 10.0],
+            ),
+        ];
+        for (label, brep, want) in cases {
+            let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            let side = faces
+                .into_iter()
+                .find(|&f| {
+                    matches!(
+                        brep.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                        Some(SurfaceKind::Cone(_))
+                    )
+                })
+                .unwrap();
+            let before = k.work_counters.face_extreme_control_points();
+            let bx = calculate_tight_bounding_box(&k, &brep, side).unwrap();
+            let used = k.work_counters.face_extreme_control_points() - before;
+            let (lo, hi) = (bx.min(), bx.max());
+            let got = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z];
+            for (g, w) in got.iter().zip(want.iter()) {
+                assert!((g - w).abs() <= 1e-6, "{label}: {got:?} vs {want:?}");
+            }
+            assert_eq!(
+                used, 0,
+                "{label}: expected 0 face_extreme_control_points, got {used}"
+            );
+        }
     }
 }
