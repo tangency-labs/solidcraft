@@ -548,7 +548,7 @@ fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &W
     let Some((index, group)) = app.plugin_workspaces.menu.and_then(|index| Some((index, built.get(index)?))) else { return };
     let Some(drawn) = out.groups.iter().find(|drawn| drawn.group == index) else { return };
     let ctx = ui.ctx().clone();
-    let popup = ui.id().with(("plugin-workspace-group-menu", index));
+    let popup = ui.scope_id().with(("plugin-workspace-group-menu", index));
     let mut chosen = None;
     let shown = crate::ui_kit::Container::new(&ctx, crate::ui_kit::Surface::Popup)
         .area(popup)
