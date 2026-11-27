@@ -6,11 +6,18 @@
 //! (`law_along`). No recursion.
 
 use super::p1::{FilletLaw, FilletLawKind};
+use crate::geom::extent1d::Extent1d;
+use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_nurb::greville_abscissa;
+use crate::topology::edge as topo_edge;
+use crate::topology::vertex as topo_vertex;
+use crate::topology::{Brep, EdgeId, VertexId};
 use crate::{Result, SolidError, Vec3};
 
 const OP: &str = "blend::fillet_executive::FilletLaw::of_radii";
+const OP_CHAIN: &str = "blend::fillet_executive::FilletLaw::chain_of_radii";
 
 impl FilletLaw {
     /// The law of a clamped B-spline radius of `degree` over `knots` (from 0 to 1, `n +
@@ -74,6 +81,132 @@ impl FilletLaw {
             extended_law: None,
         }))
     }
+
+    /// One radius law along a tangent chain: the law of [`FilletLaw::of_radii`] running from
+    /// the chain's end nearest `start` (0) to its other end (1), each edge of `edges` (of
+    /// `b`, in any order) taking the part of it that its share of the chain's length gives, as
+    /// its edge map. An edge whose curve runs back along the chain takes the reversed law over
+    /// the mirrored part, so the radius is one function of the position along the chain and
+    /// agrees where two edges meet. Within an edge the position runs with its curve's
+    /// parameter, as it does for a law along one edge. The laws come in the order of `edges`.
+    ///
+    /// `None` when `edges` are not one open chain (each edge's two vertices distinct, the
+    /// edges joined end to end, no vertex on more than two of them, two ends) or an edge is
+    /// no longer than the zone tolerance.
+    ///
+    /// # Errors
+    /// Those of [`FilletLaw::of_radii`], of the edges' vertices and curves, and of the
+    /// curves' lengths.
+    pub fn chain_of_radii(
+        k: &Kernel,
+        b: &Brep,
+        edges: &[EdgeId],
+        start: Vec3,
+        degree: usize,
+        knots: &[f64],
+        radii: &[f64],
+    ) -> Result<Option<Vec<Self>>> {
+        let Some(path) = chain_path(b, edges, start)? else {
+            return Ok(None);
+        };
+        // each edge's length, in the chain's order
+        let mut lengths = Vec::with_capacity(path.len());
+        for &(i, _) in &path {
+            let Some(&e) = edges.get(i) else {
+                return Ok(None);
+            };
+            let curve =
+                b.edge(e)?.curve.as_ref().ok_or_else(|| {
+                    SolidError::invalid_input(OP_CHAIN, "an edge without a curve")
+                })?;
+            let length = curve.length(k, &topo_edge::interval(b, e)?, EFF_ZERO)?;
+            if !(length.is_finite() && length > k.tolerances.zone_tol_3d) {
+                return Ok(None);
+            }
+            lengths.push(length);
+        }
+        let total: f64 = lengths.iter().sum();
+        let mut laws: Vec<Option<Self>> = vec![None; edges.len()];
+        let mut run = 0.0;
+        for (n, (&(i, reversed), &length)) in path.iter().zip(&lengths).enumerate() {
+            let from = run / total;
+            run += length;
+            // the chain's far end is 1 exactly
+            let to = if n + 1 == path.len() {
+                1.0
+            } else {
+                run / total
+            };
+            let mut law = Self::of_radii(degree, knots, radii, reversed)?;
+            law.edge_map = if reversed {
+                Extent1d::from_min_max(1.0 - to, 1.0 - from)
+            } else {
+                Extent1d::from_min_max(from, to)
+            };
+            if let Some(slot) = laws.get_mut(i) {
+                *slot = Some(law);
+            }
+        }
+        Ok(laws.into_iter().collect())
+    }
+}
+
+/// The edges of `edges` (of `b`) as one open chain from its end nearest `start`: each edge's
+/// index in `edges` and whether its curve runs back along the chain (from its end vertex).
+/// `None` for edges that are not one open chain.
+fn chain_path(b: &Brep, edges: &[EdgeId], start: Vec3) -> Result<Option<Vec<(usize, bool)>>> {
+    let mut ends = Vec::with_capacity(edges.len());
+    for (n, &e) in edges.iter().enumerate() {
+        if edges.get(..n).is_some_and(|before| before.contains(&e)) {
+            return Ok(None);
+        }
+        let (Some(s), Some(t)) = topo_edge::start_end_vertices(b, e)? else {
+            return Ok(None);
+        };
+        if s == t {
+            return Ok(None);
+        }
+        ends.push([s, t]);
+    }
+    // each vertex with the number of the edges' ends on it
+    let mut counts: Vec<(VertexId, usize)> = Vec::new();
+    for &v in ends.iter().flatten() {
+        match counts.iter_mut().find(|(w, _)| *w == v) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((v, 1)),
+        }
+    }
+    if counts.iter().any(|&(_, c)| c > 2) {
+        return Ok(None);
+    }
+    let open: Vec<VertexId> = counts
+        .iter()
+        .filter(|&&(_, c)| c == 1)
+        .map(|&(v, _)| v)
+        .collect();
+    let [a, z] = open[..] else {
+        return Ok(None);
+    };
+    let near = |v: VertexId| -> Result<f64> { Ok(topo_vertex::point(b, v)?.distance(start)) };
+    let mut at = if near(z)? < near(a)? { z } else { a };
+    let mut used = vec![false; edges.len()];
+    let mut path = Vec::with_capacity(edges.len());
+    while path.len() < edges.len() {
+        let Some((i, &[s, t])) = ends
+            .iter()
+            .enumerate()
+            .find(|&(i, [s, t])| !used.get(i).copied().unwrap_or(true) && (*s == at || *t == at))
+        else {
+            return Ok(None);
+        };
+        let reversed = t == at;
+        at = if reversed { s } else { t };
+        if let Some(u) = used.get_mut(i) {
+            *u = true;
+        }
+        path.push((i, reversed));
+    }
+    Ok(Some(path))
 }
 
 #[cfg(test)]

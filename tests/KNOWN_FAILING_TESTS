@@ -21,7 +21,6 @@ solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_a
 solidcraft-engine::loft_sheet_tests::a_loft_between_sections_sharing_an_edge_on_their_planes_common_line_is_a_wedge the loft fails with a bare "SMLib failed (status 1001)" (T-156, solidcore#3312)
 solidcraft-engine::shell_regressions::shell_of_a_box_with_a_lofted_tunnel SMLib's check refuses the shell: SmFace #36 Face Near missing Seam (T-202, solidcore#3318)
 solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point fillet status 1001 on the taper fit (radius 16 closing to 0), as on C++
-solidcraft-engine::tests::spline_fillet_follows_a_rounded_corner_chain spline radius laws are applied to one edge at a time with tangent propagation disabled; the round cannot end where its edge continues into the earlier corner round (#6473)
 solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together fillet status 1001 on the round that ends in the earlier one, as on C++
 solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds the vertical edge after the separate bottom rounds is refused as smooth ("its faces meet tangentially, so there is nothing to round"): the rounds leave it tangent at solidcore 8ddce9016
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++

@@ -9,13 +9,31 @@ the vertical edge at (100, 0, 15) at R10, then ask for a spline fillet at
 edge, the R10 quarter arc, and another straight edge.
 
 The regression is `solidcraft-engine::tests::spline_fillet_follows_a_rounded_corner_chain`
-in `crates/engine/src/tests.rs`, tracked in `tests/KNOWN_FAILING_TESTS`.
+in `crates/engine/src/tests.rs` (it was tracked in `tests/KNOWN_FAILING_TESTS` until the
+chain law below made it pass).
 Its reference is the same selection rounded with an ordinary R2 fillet.
 This equivalence is exact: the B-spline basis sums to one, so five control
 radii of 2 give radius 2 everywhere, regardless of the interior knot.
 No golden or kernel-case expectation is changed.
 
-## Existing contract and missing construction
+## The fix: one law along the chain
+
+`FilletLaw::chain_of_radii` (`solidcore/.../fillet_executive/law_radii.rs`) is the missing
+construction. It orders the chain's edges from the end nearest `start`, measures each edge's
+length, and gives each edge its own copy of the law with an edge map: the part of the law
+`[s_i, s_i+1]` its share of the chain's length covers (an edge whose curve runs back along the
+chain takes the reversed law over `[1 - s_i+1, 1 - s_i]`). The executive already evaluates a
+law through its edge map (`SmBSplineFilletLaw::Evaluate`) and already joins a tangent sequence
+of solvers into one curve (`CreateSmoothEdgeSequence`), so one pass of all the chain's edges,
+each with its law (`FilletSession::prepare_variable_radius_edge_laws`), builds the round as a
+constant round's chain is built, and the radius agrees at every join. ops' entry point is
+`fillet_variable_chain_from`; SolidCraft's variable and spline fillets call it for each picked
+edge's open tangent chain when `tangent_chain` is on. A chain that closes on itself has no end
+for the law to start from and keeps the picked edge alone, with the warning saying why. Older
+designs are saved `tangent_chain: false` as they open (`format/pending/variable-fillet-tangent-chain.rs`),
+so they rebuild as they did.
+
+## Existing contract and missing construction (before the fix)
 
 - `crates/doc/src/document.rs`, `FilletStyle::Spline`, defines the law over
   each individual edge, from its end nearest `start` to its other end.
