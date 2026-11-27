@@ -21,6 +21,7 @@ impl Model {
         let reusable = !self.no_cache
             && self.primed.is_empty()
             && !doc.has_capture_position_timeline()
+            && !self.has_pending_import_checks()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
@@ -168,6 +169,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         print_faces,
         // Read only by robot exports: no feature's geometry depends on it.
         collision_shapes: _,
+        // Display only: no feature's geometry depends on it.
+        edgeless_bodies: _,
         user_materials,
         appearances,
         body_components,

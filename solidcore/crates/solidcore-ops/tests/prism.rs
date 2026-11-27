@@ -13,9 +13,9 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, fill_channel, fitted_loop, loop_holds, planar_regions_boolean,
-    prism_equivalent, prism_section, region_area, Contour, FillFailure, FillOptions, FillSide,
-    PrismSection,
+    extrude_planar_regions, fill_channel, fitted_loop, loop_crosses_itself, loop_holds,
+    planar_regions_boolean, prism_equivalent, prism_section, region_area, Contour, FillFailure,
+    FillOptions, FillSide, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -2163,4 +2163,46 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     assert!(old.check(CheckLevel::All).unwrap().is_valid());
     let (v, w) = (body.volume(1e-9).unwrap(), old.volume(1e-9).unwrap());
     assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
+}
+
+/// A square does not cross itself; a bow tie (the square with two corners swapped) crosses
+/// itself at its middle, and a loop moved past a neck (two sides lying along one line) touches
+/// itself there. A loop with a free-form side is not decided.
+#[test]
+fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
+    let sq = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&sq, 1e-7), Some(false));
+    let bow = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), v(10.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&bow, 1e-7), Some(true));
+    let neck = Loop2::polygon(&[
+        v(0.0, 0.0),
+        v(4.0, 0.0),
+        v(4.0, 6.0),
+        v(10.0, 6.0),
+        v(10.0, 10.0),
+        v(4.0, 10.0),
+        v(4.0, 4.0),
+        v(0.0, 4.0),
+    ]);
+    assert_eq!(loop_crosses_itself(&neck, 1e-7), Some(true));
+    assert_eq!(loop_crosses_itself(&sq, 0.0), None);
+    let curvy = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(10.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(10.0, 0.0),
+                p1: v(12.0, 5.0),
+                p2: v(5.0, 12.0),
+                p3: v(0.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 10.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
 }

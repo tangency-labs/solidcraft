@@ -1841,8 +1841,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // broken references re-picked via #16661): remember where they sit now (in the model before
     // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
-        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. } | FeatureKind::Dogbone { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. }
+        | FeatureKind::Chamfer { edges: b, body: was, .. }
+        | FeatureKind::Dogbone { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
         && (a != b || body != was || sets_path(set, "edges"))
     {
@@ -3174,6 +3176,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
@@ -3194,6 +3197,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.refold"
                 | "sheet.convert"
                 | "sheet.recognize"
+                | "sheet.corner_join"
                 | "plastic.boss"
                 | "plastic.lip"
                 | "plastic.snap_fit"
@@ -3376,6 +3380,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
     }
+    let flange_corners = if matches!(old.kind, FeatureKind::SheetFlange { .. }) && cid == "sheet.flange" {
+        let corners = super::sheet::flange_corners(s, &params, cmd)?;
+        if let Some(parameters) = params.as_object_mut() {
+            parameters.remove("corners");
+        }
+        Some(corners)
+    } else {
+        None
+    };
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
@@ -3498,6 +3511,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
+    }
+    if let (FeatureKind::SheetFlange { corners, .. }, Some(mut saved)) = (&mut new.kind, flange_corners) {
+        if s.doc.units.trim() != "mm" {
+            for corner in &mut saved {
+                if corner.kind == solidcraft_doc::CornerJoinKind::PartialOverlap
+                    && let Some(overlap) = &mut corner.overlap
+                {
+                    *overlap = s.doc.with_design_unit(overlap, solidcraft_doc::expr::Kind::Length).into();
+                }
+                if let Some(gap) = &mut corner.gap {
+                    *gap = s.doc.with_design_unit(gap, solidcraft_doc::expr::Kind::Length).into();
+                }
+            }
+        }
+        *corners = saved;
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its

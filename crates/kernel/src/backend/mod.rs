@@ -21,6 +21,8 @@ mod hatch;
 mod hole_stacks;
 mod mesh;
 mod modelling;
+#[cfg(feature = "backend-occt")]
+mod occt;
 mod planar;
 mod points;
 mod profiles;
@@ -34,6 +36,9 @@ mod tube_cope;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
+
+#[cfg(feature = "backend-occt")]
+pub(crate) use occt::Occt;
 
 /// solidcore, through `solidcore-ops`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

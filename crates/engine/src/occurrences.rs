@@ -412,8 +412,13 @@ impl Session {
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
+        let owners = previous.model_body_components(state);
+        let mut by_component: std::collections::HashMap<u64, Vec<&solidcraft_doc::ModelBody>> = std::collections::HashMap::new();
+        for (body, owner) in state.bodies.iter().zip(owners) {
+            by_component.entry(owner).or_default().push(body);
+        }
         for (component, path, _) in previous.placements() {
-            for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
+            for body in by_component.get(&component).into_iter().flatten().copied() {
                 let old = before.name(&body.name, component, &path);
                 let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
                 let new = after.name(source, component, &path);
@@ -856,6 +861,15 @@ impl Session {
         }
         let path = self.doc.first_path(self.active_component);
         self.occurrence_placement(&path).map(|p| p.world).unwrap_or(IDENTITY)
+    }
+
+    /// The active component's placement as occurrence ids from the top: the one it was activated
+    /// at while that still leads to it, else its first. Empty for the design.
+    pub fn active_path(&self) -> Vec<u64> {
+        match &self.active_occurrence_path {
+            Some(path) if self.doc.path_placement(path).is_some_and(|(component, _)| component == self.active_component) => path.clone(),
+            _ => self.doc.first_path(self.active_component),
+        }
     }
 
     pub fn occurrence_visible(&self, path: &[u64]) -> bool {

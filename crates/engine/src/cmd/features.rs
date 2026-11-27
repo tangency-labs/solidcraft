@@ -17,8 +17,9 @@ use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams,
-    ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
+    ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, FingerJointParams, MirrorParams, MoveParams, MoveResult, NoticeAction,
+    OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams,
+    TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::features::{ThreadFeatureResult, ThreadParams};
@@ -55,6 +56,7 @@ const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const FINGER_JOINT_CONTRACT: TypedContract<FingerJointParams> = TypedContract::new();
 const THREAD_CONTRACT: TypedContract<ThreadParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -236,6 +238,19 @@ pub static COMMANDS: &[CommandSpec] = &[
             "offset_faces?: [[x,y,z] points on tool faces] (with offset: only these faces move, the faces round them extended or trimmed to meet them; the other faces, and tools with none of them, cut as they are; default: every face of every tool); ",
             "offset_radius?: expr (with offset_edges: round: the radius of the rounds, default the offset's size; one too large for the faces round an edge is refused as a fillet's is, naming the largest that fits); ",
             "new_component?: bool (the result goes into a new component; component_name?)",
+        )),
+    CommandSpec::new("solid.finger_joint", "Finger Joint", crate::checked!("solid.finger_joint", finger_joint)).begins_edit()
+        .at("SOLID", "MODIFY")
+        .icon("finger_joint")
+        .contract(&FINGER_JOINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(concat!(
+            "bodies?: [2 to 32 body names] (default: selected plates, in selection order; the first plate is joined to each later plate in order; failed pairs are unchanged and reported); ",
+            "count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); ",
+            "clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); ",
+            "inverted?: bool (default false; starts with a tab instead of a slot without changing which plate supplies tabs); ",
+            "edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); ",
+            "name?",
         )),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
         .at("SOLID", "CREATE")
@@ -514,7 +529,10 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
         ProfileSel::All => ps.first()?.region.interior_point(),
         ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
         ProfileSel::Points { points } => *points.first()?,
-        selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
+        selection @ (ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
             ps.get(*indices.first()?)?.region.interior_point()
         }
@@ -811,7 +829,10 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 *sel = selection;
                 continue;
             }
-            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
+            ProfileSel::OffsetBoundaries { .. }
+            | ProfileSel::WholeBoundaries { .. }
+            | ProfileSel::TextRegions { .. }
+            | ProfileSel::SidedCurves { .. } => {
                 // Explicit identities retain the caller's semantics. Validate through the
                 // same resolver as recomputation, including reserved-role precedence.
                 solidcraft_doc::profile_selection_indices(ss, sel)?;
@@ -949,6 +970,9 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
         Value::Object(fields) => {
             if fields.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
                 return solidcraft_doc::whole_profile_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("text_regions") {
+                return solidcraft_doc::text_regions_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
             }
             if fields.get("type").and_then(Value::as_str) == Some("sided_curves") {
                 return solidcraft_doc::sided_curves_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
@@ -1128,7 +1152,9 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     stable_profiles(s, &mut kind, exact_regions(p))?;
     // Blends remember where their edges sat, to find them again after upstream edits.
     let (refs, names) = match &kind {
-        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
+        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } | FeatureKind::Dogbone { edges, body, .. }
+            if !edges.is_empty() =>
+        {
             let st = s.model.state();
             (
                 solidcraft_doc::edge_refs(&st, body, &solidcraft_doc::plain(edges)),
@@ -2288,9 +2314,9 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
 /// feature keeps (`None`: each edge is looked up on its own).
-struct EdgePicks {
-    points: Vec<Vec3>,
-    body: Option<String>,
+pub(super) struct EdgePicks {
+    pub(super) points: Vec<Vec3>,
+    pub(super) body: Option<String>,
 }
 
 /// A body as a pick is looked up on: the model body, the name it is shown by, and the frame it
@@ -2336,12 +2362,16 @@ pub(crate) fn edge_reach(size: f64) -> f64 {
 /// whose edge is in the same place only in its own frame is not in the way, and two bodies
 /// with an edge there make it ambiguous. The polylines short-list the edges; which body a pick
 /// means is decided on the exact curves.
-fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
+pub(super) fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 edges"));
     }
-    let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
+    let verb = match cmd {
+        "solid.chamfer" => "chamfer",
+        "solid.dogbone" => "relieve",
+        _ => "round",
+    };
     let st = s.model.state();
     // A picked point must lie on an edge (within the distance the kernel re-finds an edge from)
     // of the body the feature names, or of any body: a pick far from every edge would round
@@ -3076,6 +3106,64 @@ pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     Ok(Some(out))
 }
 
+fn finger_joint(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.finger_joint";
+    let bodies = match p.get("bodies") {
+        None | Some(Value::Null) => s
+            .selection
+            .iter()
+            .filter_map(|selection| match selection {
+                crate::Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect(),
+        Some(_) => string_list(cmd, p, "bodies")?,
+    };
+    if bodies.len() < 2 || bodies.len() > solidcraft_doc::MAX_FINGER_JOINT_BODIES {
+        return Err(bad(cmd, format!("`bodies` must name 2 to {} different bodies", solidcraft_doc::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if bodies.iter().any(|name| !seen.insert(name)) {
+        return Err(bad(cmd, "`bodies` must not repeat a body"));
+    }
+    let count = match p.get("count") {
+        None | Some(Value::Null) => 3,
+        Some(value) => value
+            .as_u64()
+            .filter(|count| (1..=64).contains(count))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or_else(|| bad(cmd, "`count` must be an integer from 1 to 64"))?,
+    };
+    let state = s.model.state();
+    for name in &bodies {
+        let body = state.body(name).ok_or_else(|| bad(cmd, format!("body `{name}` does not exist")))?;
+        if s.doc.model_body_component(body) != s.active_component {
+            return Err(bad(cmd, format!("body `{name}` does not belong to the active component")));
+        }
+    }
+    let clearance = match p.get("clearance") {
+        None | Some(Value::Null) => "0".into(),
+        Some(_) => req_expr(cmd, p, "clearance")?,
+    };
+    let edge_offset = match p.get("edge_offset") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(req_expr(cmd, p, "edge_offset")?),
+    };
+    for (key, length) in std::iter::once(("clearance", &clearance)).chain(edge_offset.as_ref().map(|length| ("edge_offset", length))) {
+        check_expr(s, length, Kind::Length, cmd, key)?;
+        let value = s.doc.eval(length, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(bad(cmd, format!("{key} must be a non-negative length")));
+        }
+    }
+    let inverted = match p.get("inverted") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`inverted` must be true or false")),
+    };
+    add_feature(s, p, FeatureKind::FingerJoint { bodies: bodies.into_iter().map(BodyName).collect(), count, clearance, inverted, edge_offset })
+}
+
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let normalized = move_matrix_params(p)?;
     let p = normalized.as_ref().unwrap_or(p);
@@ -3440,6 +3528,15 @@ pub(super) fn copy_keeps_appearance_for(
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
             } else if !same_source {
                 s.doc_mut().appearances.bodies.remove(&copy);
+            }
+        }
+        // A new copy, or one whose source changed, takes the source's edge lines; a copy rebuilt
+        // from the same body keeps what was set on it.
+        if !same_source {
+            if s.doc.edgeless_bodies.contains(&source) {
+                s.doc_mut().edgeless_bodies.insert(copy.clone());
+            } else {
+                s.doc_mut().edgeless_bodies.remove(&copy);
             }
         }
         if !same_source && s.doc.materials.contains_key(&copy) {
@@ -5415,7 +5512,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !p.construction && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
-fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
+pub(super) fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     let a = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must be a list of points or face names"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 faces"));
@@ -5424,7 +5521,7 @@ fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 }
 
 /// The body the `faces` picks of `p` apply to: see [`super::face::faces_body`].
-fn faces_body(s: &Session, p: &Value, faces: &[Vec3]) -> super::face::FacesBody {
+pub(super) fn faces_body(s: &Session, p: &Value, faces: &[Vec3]) -> super::face::FacesBody {
     let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     super::face::faces_body(s, p, refs, faces)
 }
@@ -6210,6 +6307,11 @@ mod thin_extrude_tests;
 #[cfg(test)]
 #[path = "extrude_convention_tests.rs"]
 mod extrude_convention_tests;
+
+#[cfg(test)]
+#[path = "finger_joint_tests.rs"]
+mod finger_joint_tests;
+
 /// `solid.fillet corner?: rolling|g2`: the default keeps the rolling ball's sphere corner, `g2`
 /// sets the corner back and fills it with the G2 patch (`solidcraft_kernel::fillet_g2_corners`),
 /// with `setbacks` naming its distance, and an unknown word is refused.

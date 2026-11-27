@@ -12,6 +12,8 @@ use crate::{DocError, Result};
 
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMS: usize = 10_000;
+/// Limit the quadratic number of pair checks in a finger-joint feature.
+pub const MAX_FINGER_JOINT_BODIES: usize = 32;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
@@ -204,6 +206,10 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Every letter of these sketch texts (their links), counters left open: found again from the
+    /// text on every evaluation, so the pick follows new words (#727). A letter that other curves
+    /// of the sketch cut into is an error, never a guess.
+    TextRegions { links: Vec<String> },
     /// Profiles that the curves around them can't tell apart (twins, such as the halves of a lens
     /// a line cuts), each saved as the curves of its outer loop with the side of each it lies on
     /// (#22548). Found again on every evaluation; after a change of the regions, the profile that
@@ -1106,6 +1112,39 @@ pub enum FeatureKind {
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
     },
+    /// Dogbone reliefs (CNC routing): a round bite of the bit's diameter cut into each picked
+    /// inside corner edge, or into the inside corners at picked planar faces (a pocket's floor, a
+    /// plate's face a slot runs through), so that a square part seats where a round bit would
+    /// leave a round. See `crate::dogbone`.
+    Dogbone {
+        /// Reference points on the inside corner edges (each re-finds the nearest edge).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        edges: Vec<Position>,
+        /// Points on planar faces whose inside corners, along the face's normal, are relieved.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        #[walk(length = "Bit Diameter")]
+        diameter: Expr,
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneStyle::is_normal")]
+        style: crate::dogbone::DogboneStyle,
+        /// Minimal style: how far short of the sharp corner the relief stops (default 5% of the
+        /// bit diameter).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// T-bone style: the wall the relief bites.
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneSide::is_longer")]
+        side: crate::dogbone::DogboneSide,
+        /// The largest corner angle relieved (default 90°).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Largest Angle")]
+        max_angle: Option<Expr>,
+        /// The bit's axis: picked edges not along it are skipped (default: any direction).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Dir>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     Box {
         /// The box's lowest corner, or its centre when `centred` is set.
         #[serde(with = "point_expr")]
@@ -1208,6 +1247,18 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Offset radius")]
         offset_radius: Option<Expr>,
+    },
+    /// Alternating rectangular cuts in the intersection of two crossing rectangular blocks.
+    FingerJoint {
+        bodies: Vec<BodyName>,
+        count: usize,
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inverted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge offset")]
+        edge_offset: Option<Expr>,
     },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by
@@ -2257,6 +2308,16 @@ pub enum FeatureKind {
         /// rule's `bend_relief_shape` (rectangular | obround | tear). None follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bend_relief_shape: Option<String>,
+        /// Corner choices for these flanges, identified by their named source rims.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::CornerJoinParams>,
+    },
+    /// A corner shared by two bends, saved by their source-edge identities.
+    SheetCornerJoin {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        #[serde(flatten)]
+        corner: crate::CornerJoinParams,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -4166,6 +4227,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. }
                 | FeatureKind::SheetContour { .. }
                 | FeatureKind::SheetFlange { .. }
+                | FeatureKind::SheetCornerJoin { .. }
                 | FeatureKind::SheetHem { .. }
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
@@ -4201,12 +4263,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
             FeatureKind::Chamfer { .. } => "ChamferFeature",
+            FeatureKind::Dogbone { .. } => "DogboneFeature",
             FeatureKind::Box { .. } => "BoxFeature",
             FeatureKind::Cylinder { .. } => "CylinderFeature",
             FeatureKind::Sphere { .. } => "SphereFeature",
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Cone { .. } => "ConeFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
+            FeatureKind::FingerJoint { .. } => "FingerJointFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
@@ -4248,6 +4312,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoinFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
@@ -4303,12 +4368,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "revolve",
             FeatureKind::Fillet { .. } => "fillet",
             FeatureKind::Chamfer { .. } => "chamfer",
+            FeatureKind::Dogbone { .. } => "dogbone",
             FeatureKind::Box { .. } => "box",
             FeatureKind::Cylinder { .. } => "cylinder",
             FeatureKind::Sphere { .. } => "sphere",
             FeatureKind::Torus { .. } => "torus",
             FeatureKind::Cone { .. } => "cone",
             FeatureKind::Combine { .. } => "combine",
+            FeatureKind::FingerJoint { .. } => "finger_joint",
             FeatureKind::Pattern { .. } => "pattern",
             FeatureKind::Mirror { .. } => "mirror",
             FeatureKind::Hole { .. } => "hole",
@@ -4345,6 +4412,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
+            FeatureKind::SheetCornerJoin { .. } => "sheet_corner_join",
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
@@ -4401,12 +4469,14 @@ impl FeatureKind {
             "RevolveFeature" => "revolve",
             "FilletFeature" => "fillet",
             "ChamferFeature" => "chamfer",
+            "DogboneFeature" => "dogbone",
             "BoxFeature" => "box",
             "CylinderFeature" => "cylinder",
             "SphereFeature" => "sphere",
             "TorusFeature" => "torus",
             "ConeFeature" => "cone",
             "CombineFeature" => "combine",
+            "FingerJointFeature" => "finger_joint",
             "RectangularPatternFeature" | "PathPatternFeature" | "CircularPatternFeature" => "pattern",
             "MirrorFeature" => "mirror",
             "ConstructionPlane" => "construction_plane",
@@ -4445,6 +4515,7 @@ impl FeatureKind {
             "BaseFlangeFeature" => "sheet_base",
             "ContourFlangeFeature" => "sheet_contour",
             "EdgeFlangeFeature" => "sheet_flange",
+            "CornerJoinFeature" => "sheet_corner_join",
             "HemFeature" => "sheet_hem",
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
@@ -4498,12 +4569,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "Revolve",
             FeatureKind::Fillet { .. } => "Fillet",
             FeatureKind::Chamfer { .. } => "Chamfer",
+            FeatureKind::Dogbone { .. } => "Dogbone",
             FeatureKind::Box { .. } => "Box",
             FeatureKind::Cylinder { .. } => "Cylinder",
             FeatureKind::Sphere { .. } => "Sphere",
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Cone { .. } => "Cone",
             FeatureKind::Combine { .. } => "Combine",
+            FeatureKind::FingerJoint { .. } => "FingerJoint",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
@@ -4545,6 +4618,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoin",
             FeatureKind::SheetHem { .. } => "Hem",
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
@@ -5028,6 +5102,10 @@ pub struct Document {
     /// What a body looks like to a simulator, by body name; a body not listed is `Auto`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub collision_shapes: std::collections::BTreeMap<String, CollisionShape>,
+    /// Bodies drawn without their edge lines (by body name), whatever the visual style: an
+    /// overlay such as a thin label on a plate. Every other body draws them as the style says.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub edgeless_bodies: std::collections::BTreeSet<String>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -5408,6 +5486,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             collision_shapes: Default::default(),
+            edgeless_bodies: Default::default(),
             print_faces: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
@@ -5448,6 +5527,9 @@ impl Document {
         }
         if let Some(shape) = self.collision_shapes.remove(old) {
             self.collision_shapes.insert(new.to_string(), shape);
+        }
+        if self.edgeless_bodies.remove(old) {
+            self.edgeless_bodies.insert(new.to_string());
         }
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();
@@ -5560,6 +5642,12 @@ impl Document {
     /// The parameter renamed from `previous` to this design, as `(old, new)`, when that rename
     /// ([`Document::rename_param`], with every reference it follows) is all that changed (#611).
     pub fn param_rename_from(&self, previous: &Document) -> Option<(String, String)> {
+        if self.features.len() != previous.features.len()
+            || self.params.len() != previous.params.len()
+            || self.text_params.len() != previous.text_params.len()
+        {
+            return None;
+        }
         // Borrowed names: every command that changes the design asks, and most rename nothing.
         fn names(d: &Document) -> std::collections::BTreeSet<&str> {
             let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
