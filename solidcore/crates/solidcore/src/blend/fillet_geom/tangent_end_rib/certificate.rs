@@ -63,6 +63,7 @@ use crate::error::Result;
 use crate::geom::krawczyk::{
     contraction, inverse_of_columns3, krawczyk, krawczyk_region, newton, plus_c_times, Linearised,
 };
+use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -886,8 +887,7 @@ impl Rib<'_, '_> {
         (t1, y1): (f64, [f64; 3]),
         tol: f64,
     ) -> Result<Bound> {
-        // the offsets from the tangent end grow as t^m: alpha ~ s^(k/2), s ~ t or t^2
-        let m = if self.odd { self.order } else { self.order / 2 }.max(1);
+        let m = self.growth();
         let mut worst = 0.0_f64;
         let (mut hi_t, mut hi_y) = (t1, y1);
         let mut stop = Bound::Open;
@@ -1082,6 +1082,12 @@ impl Rib<'_, '_> {
         Ok(true)
     }
 
+    /// The power `m` the offsets from the tangent end grow as, `t^m`: alpha ~ s^(k/2),
+    /// s ~ t or t^2.
+    fn growth(&self) -> u32 {
+        if self.odd { self.order } else { self.order / 2 }.max(1)
+    }
+
     /// The fillet UV curve's alpha `alpha_c` and its slope over `t`, or `None`.
     fn centre_over(&self, t: Ivl) -> Option<(Ivl, Ivl)> {
         let d = curve_derivs_over(self.curves.get(1)?, t, 1, None).ok()?;
@@ -1131,7 +1137,8 @@ impl Rib<'_, '_> {
             return Ok(None);
         };
         let offset = (b[0] - Ivl::from(a0)).mag();
-        Ok(match self.fixed_ring(&f, (a0, start), ts, 2.0 * offset, tol)? {
+        let ring = self.fixed_ring(&f, (a0, start), ts, (2.0 * offset, WIDENINGS), tol)?;
+        Ok(match ring {
             Ring::Within(d) => Some(d),
             // the ring about alpha0 costs more than tol: the bands about alpha_c
             Ring::Over => self.moving_bands(&f, (a0, start), ts, b[0], tol)?,
@@ -1140,13 +1147,14 @@ impl Rib<'_, '_> {
     }
 
     /// The ring `A <= |alpha − alpha0| <= 2A` over `[0, t_hi]` ([`Self::near_bound`]), from
-    /// `big_a`, the root at `t_hi` less than `big_a` from `alpha0`.
+    /// `big_a`, the root at `t_hi` less than `big_a` from `alpha0`, doubled at most
+    /// `widenings − 1` times.
     fn fixed_ring(
         &self,
         f: &Frame,
         (a0, start): (f64, [f64; 3]),
         t_hi: f64,
-        big_a: f64,
+        (big_a, widenings): (f64, usize),
         tol: f64,
     ) -> Result<Ring> {
         let t = Ivl::new(0.0, t_hi);
@@ -1154,7 +1162,7 @@ impl Rib<'_, '_> {
         let at = Ivl::from;
         let place = |s: Ivl, a: Ivl| Some((s, a, 0.0));
         let mut big_a = big_a;
-        for _ in 0..WIDENINGS {
+        for _ in 0..widenings {
             self.kernel.check_cancelled(OP)?;
             let alpha = at(a0) + Ivl::new(-big_a, big_a);
             let Some(s) = self.fillet_over(sigma, alpha, 1) else {
@@ -1198,17 +1206,20 @@ impl Rib<'_, '_> {
 
     /// The bands of [`Self::near_bound`] (#19140, after the maintainer's sketch on #18674),
     /// the root's alpha `root` at `t*`: the bound within `tol`, or `None`. Band `k` is
-    /// `T_k = [t_k / 2, t_k]`, `t_0 = t*`, with the inner radius `h_k`, two thirds of the
-    /// centre's distance from `alpha0` at `t_k / 2` (the root's mirror, the other root of
+    /// `T_k = [q t_k, t_k]`, `t_0 = t*`, `q` near enough to 1 that the root's offset `a`
+    /// falls by at most half across it, with the inner radius `h_k`, two thirds of the
+    /// centre's distance from `alpha0` at `q t_k` (the root's mirror, the other root of
     /// the section and E, lies about `2 |alpha_c − alpha0|` off), at least `h_(k−1) / 2`.
     /// Where the separation keeps one sign on `h_k <= |alpha − alpha_c(t)| <= 2 h_k` over
     /// `T_k` ([`Self::one_sign`], cut on `t` and on the offset, the centre enclosed over each
     /// piece), the root stays within `h_k` of the centre over `T_k`: at `t_k` it is within
     /// `h_(k−1) <= 2 h_k` (at `t*` within `|root − alpha_c(t*)|`, which must be at most `2 h_0`)
     /// and off the ring, and it is continuous (ARGUED as the ring's branch above). Below
-    /// `T_k` the ring about `alpha0` takes over, the root at `t_k / 2` within
-    /// `|alpha_c − alpha0| + h_k` of `alpha0` ([`Self::fixed_ring`]); where that ring too
-    /// costs more than `tol`, the next band.
+    /// `T_k` the ring about `alpha0` takes over, the root at `q t_k` within
+    /// `|alpha_c − alpha0| + h_k` of `alpha0` ([`Self::fixed_ring`], one ring, not widened);
+    /// where that ring too costs more than `tol`, the next band. A band is tried only while
+    /// its own bound, about `|S_alpha| h_k`, is within `tol` and the ring below it is not, so
+    /// few bands run.
     fn moving_bands(
         &self,
         f: &Frame,
@@ -1225,11 +1236,19 @@ impl Rib<'_, '_> {
             let (c, _) = self.centre_over(x)?;
             Some((self.sigma(x).0, c + b, c.hi - c.lo))
         };
+        // a band's lower end: `t q` with `q = 2^(−1/2^j)`, `2^j >= m`, so that the offset
+        // `a ~ t^m` falls by at most half across it (`h_k >= h_(k−1) / 2` then needs no
+        // floor); square roots only, rounded the same everywhere
+        let (m, mut q, mut p) = (self.growth(), 0.5_f64, 1_u32);
+        while p < m {
+            q = sqrt(q);
+            p = p.saturating_mul(2);
+        }
         let (mut worst, mut hi, mut half) = (0.0_f64, ts, 0.0_f64);
         let mut inside = (root - c_hi).mag();
         for _ in 0..GRADES {
             self.kernel.check_cancelled(OP)?;
-            let lo = 0.5 * hi;
+            let lo = q * hi;
             let t = Ivl::new(lo, hi);
             let (Some((c, slope)), Some((c_lo, _))) =
                 (self.centre_over(t), self.centre_over(at(lo)))
@@ -1240,9 +1259,13 @@ impl Rib<'_, '_> {
             // `½ Δκ h (2a − h)` and `2 Δκ h (a − h)` with `a = |alpha_c − alpha0|`: equal
             // for `h = 2a / 3`, both `4/9 Δκ a²` (the outer ring's least is twice that); `a`
             // at the band's lower end, nearest the tangent end
-            half = (2.0 / 3.0 * (c_lo - at(a0)).mig()).max(0.5 * half);
+            let h = 2.0 / 3.0 * (c_lo - at(a0)).mig();
             // (a NaN fails it)
-            if !(inside <= 2.0 * half && half.is_finite()) {
+            if !(h > 0.0 && (2.0 * h).is_finite()) {
+                return Ok(None);
+            }
+            half = h.max(0.5 * half);
+            if !(inside <= 2.0 * half) {
                 return Ok(None);
             }
             let band = Band {
@@ -1269,7 +1292,7 @@ impl Rib<'_, '_> {
             // the ring starts at the root's farthest alpha there (it lies strictly inside),
             // and widens
             let offset = (at((c_lo - at(a0)).mag()) + at(half)).hi;
-            match self.fixed_ring(f, (a0, start), lo, offset, tol)? {
+            match self.fixed_ring(f, (a0, start), lo, (offset, 1), tol)? {
                 Ring::Within(d) => return Ok(Some(worst.max(d))),
                 Ring::Over => {}
                 Ring::Open => return Ok(None),
