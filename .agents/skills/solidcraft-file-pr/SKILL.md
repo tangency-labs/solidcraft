@@ -29,7 +29,7 @@ From merged titles:
 ## The body
 Open with the problem as a user meets it, then the result. Don't list the functions you changed. Write in your own words: no chat transcripts, chat links or tool footers. Fill in `.github/pull_request_template.md`:
 - `Fixes #N` when there is an issue.
-- `Changes a default: no`, or `Changes a default: yes - <what>, old behaviour kept behind setting <name>` (the tool option or the format's legacy value). UX only: a kernel result, or new behaviour on an input that did nothing, is `no` (`.agents/skills/solidcraft-preferences/SKILL.md`).
+- `Changes a default: no`, or `Changes a default: yes - <what>, old behaviour kept behind setting <name>`. UX only: a jank fix, a kernel result, or new behaviour on an input that did nothing is `no` and keeps no setting. `yes` is a deliberate change to behaviour users rely on (`.agents/skills/solidcraft-preferences/SKILL.md`).
 - `Test change: <reason>` when the diff changes or deletes a line of an existing test or golden: why the old value was wrong, derived (`.agents/skills/solidcraft-kernel-rules/SKILL.md`). New tests need no line.
 - Validation: what you ran and what came out; expected and measured values for geometry.
 

@@ -155,6 +155,95 @@ pub(crate) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(Cell::get)
 }
 
+/// Run `f` while measuring its [`Counts`] without modifying this thread's outer counters.
+pub(crate) fn measure<R>(f: impl FnOnce() -> R) -> (R, Counts) {
+    let saved = COUNTS.with(|c| c.replace(Counts::default()));
+    struct Restore(Counts);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COUNTS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(saved);
+    let r = f();
+    let delta = COUNTS.with(Cell::get);
+    (r, delta)
+}
+
+/// Add `delta` to this thread's [`Counts`].
+pub(crate) fn add(delta: Counts) {
+    let Counts {
+        moved,
+        digested,
+        imports_read,
+        cam_meshes,
+        mesh_digested,
+        joint_faces,
+        faces_at,
+        measures,
+        body_searches,
+        feature_searches,
+        cut,
+        cylinder_search,
+        tapped_wall,
+        miss_intersects,
+        cut_tools,
+        apart_unions,
+        surfaces,
+        flats,
+        joined_apart,
+        kept_checks,
+        detached_checks,
+        reused_checks,
+        thread_cuts,
+        grouped_thread_fallbacks,
+        hole_tools,
+        run_on_probes,
+        tight_boxes,
+        blends,
+        fit_searches,
+        classifications,
+        hole_points,
+        contact_tests,
+        join_unions,
+    } = delta;
+    count(|c| {
+        c.moved += moved;
+        c.digested += digested;
+        c.imports_read += imports_read;
+        c.cam_meshes += cam_meshes;
+        c.mesh_digested += mesh_digested;
+        c.joint_faces += joint_faces;
+        c.faces_at += faces_at;
+        c.measures += measures;
+        c.body_searches += body_searches;
+        c.feature_searches += feature_searches;
+        c.cut += cut;
+        c.cylinder_search += cylinder_search;
+        c.tapped_wall += tapped_wall;
+        c.miss_intersects += miss_intersects;
+        c.cut_tools += cut_tools;
+        c.apart_unions += apart_unions;
+        c.surfaces += surfaces;
+        c.flats += flats;
+        c.joined_apart += joined_apart;
+        c.kept_checks += kept_checks;
+        c.detached_checks += detached_checks;
+        c.reused_checks += reused_checks;
+        c.thread_cuts += thread_cuts;
+        c.grouped_thread_fallbacks += grouped_thread_fallbacks;
+        c.hole_tools += hole_tools;
+        c.run_on_probes += run_on_probes;
+        c.tight_boxes += tight_boxes;
+        c.blends += blends;
+        c.fit_searches += fit_searches;
+        c.classifications += classifications;
+        c.hole_points += hole_points;
+        c.contact_tests += contact_tests;
+        c.join_unions += join_unions;
+    });
+}
+
 #[test]
 fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
@@ -671,7 +760,8 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
+        let comps = super::ComponentDigests::of(doc);
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &comps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -2439,6 +2529,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
@@ -2525,6 +2616,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2582,6 +2675,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -4269,6 +4364,78 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// Multi-target joins and `Touching::Separate` keep exact results when AABB prefiltering and mesh
+/// caching skip meshing disjoint pairs.
+#[test]
+fn multi_target_join_and_separate_touching_preserve_exact_results() {
+    let mut doc = Document::new("multi-target join");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(50.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // Boss on B joins B only; A and C stay untouched.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(52.0, 2.0, 10.0)),
+            length: "4".into(),
+            width: "4".into(),
+            height: "5".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    // Boss bridging B and C merges B and C into one body while A stays separate.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(58.0, 2.0, 2.0)),
+            length: "44".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 1000.0).abs() < 1e-6);
+    // B (1000) + boss (80) + C (1000) + bridge (44*4*4 = 704) - 2 overlaps (2*4*4 = 32 each)
+    let expected_bc = 1000.0 + 80.0 + 1000.0 + 704.0 - 64.0;
+    assert!((volume(&model, "B") - expected_bc).abs() < 1e-6, "{} vs {expected_bc}", volume(&model, "B"));
+}
+
+/// A single multi-tool join that warms a target's contact-mesh cache, bridges two targets while a
+/// third stays live, and then joins a later tool touching only the new bridge geometry must
+/// invalidate the remade target's cache so the later tool joins the remade target rather than
+/// missing it and falling back to the first live target.
+#[test]
+fn multi_target_join_invalidates_target_mesh_cache_after_bridge() {
+    let mut doc = Document::new("multi-tool bridge cache invalidation");
+    // Put C first in `live` so a stale cache on A would cause tool 3 to miss A and fall back to C.
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(20.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // One multi-tool extrude (3 profiles in order):
+    // 1. (1..5, 1..5): touches A only -> warms `target_meshes["A"]`
+    // 2. (8..22, 1..5): bridges A and B while C stays live -> remakes A, invalidating its cache
+    // 3. (13..17, 5..9): lies strictly in the gap x=13..17 between original A (x<=10) and B
+    //    (x>=20), touching only the bridge from tool 2 along y=5.
+    join_rects(&mut doc, &[(1.0, 1.0, 4.0, 4.0), (8.0, 1.0, 14.0, 4.0), (13.0, 5.0, 4.0, 4.0)], 10.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "C") - 1000.0).abs() < 1e-6, "tool 3 must not fall back to C: {}", volume(&model, "C"));
+    // A (1000) + B (1000) + gap span of bridge (10*4*10 = 400) + tool 3 (4*4*10 = 160);
+    // tool 1 lies inside A and the bridge ends overlap A and B.
+    let expected_a = 1000.0 + 1000.0 + 400.0 + 160.0;
+    assert!((volume(&model, "A") - expected_a).abs() < 1e-6, "{} vs {expected_a}", volume(&model, "A"));
+}
+
 /// When an import's background checks end having healed a part, the model takes the healed
 /// body in the import's place: settling marks the import and what follows it stale, the next
 /// evaluation reads the healed body under another fingerprint, and settling the same heal again
@@ -4589,6 +4756,15 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // Settle the heal and evaluate so the model carries the healed body.
     assert!(model.settle_import_checks_under(true));
     model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
     assert!(model.has_import_heals());
     assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
     let healed_fp = model.result(import).unwrap().fingerprint;
@@ -5599,6 +5775,8 @@ fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached()
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -5832,6 +6010,8 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -5953,6 +6133,8 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
             extent2: None,
             copy_at_end1: false,
             copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
         },
         bodies: Vec::new(),
         placements: Vec::new(),
@@ -6337,4 +6519,610 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+/// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,
+/// so distant untouched bodies never run fine contact tests or get meshed.
+#[test]
+fn join_with_distant_bodies_skips_contact_tests_and_meshing_for_distant_targets() {
+    let mut doc = Document::new("distant join");
+    for i in 0..5 {
+        block(&mut doc, &format!("B{i}"), Vec3::new(50.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert!(model.state().bodies.iter().all(|b| b.cached_mesh().is_none()));
+
+    // A single boss standing on B2 must only contact-test B2, leaving B0/B1/B3/B4 unmeshed.
+    let boss = FeatureKind::Box {
+        corner: point_expr(Vec3::new(102.0, 2.0, 10.0)),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let f1 = doc.add_feature(boss, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f1).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f1));
+    assert_eq!(work.contact_tests, 1, "only the touching target B2 should run Body::meets: {work:?}");
+    assert_eq!(work.join_unions, 1, "{work:?}");
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "distant target {name} must not be meshed");
+    }
+    assert!((volume(&model, "B2") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B2"));
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!((volume(&model, name) - 1000.0).abs() < 1e-6, "{name}: {}", volume(&model, name));
+    }
+
+    // Two bosses standing on B1 and B3: one contact test per tool, distant targets stay unmeshed.
+    let f2 = join_rects(&mut doc, &[(52.0, 2.0, 4.0, 4.0), (152.0, 2.0, 4.0, 4.0)], 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f2).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f2));
+    assert_eq!(work.contact_tests, 2, "each tool should contact-test only its own target: {work:?}");
+    assert_eq!(work.join_unions, 2, "{work:?}");
+    for name in ["B0", "B2", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "untouched target {name} must stay unmeshed");
+    }
+    assert!((volume(&model, "B1") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B1"));
+    assert!((volume(&model, "B3") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B3"));
+}
+
+/// `join_pattern_copies` uses batched union (`join_union_batch`) for overlapping copies and
+/// `union_all_apart` for disjoint copies, matching the exact union volume.
+#[test]
+fn join_pattern_copies_matches_exact_union_volume() {
+    // Five overlapping 10x10x10 cubes spaced 6 mm along X span 0..34 -> exact volume 3400 mm^3.
+    let mut doc = Document::new("pattern join overlap");
+    block(&mut doc, "Bar", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Bar"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "5", "spacing1": "6"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "overlapping pattern copies must batch into one union: {work:?}");
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, "Bar");
+    assert!((volume(&model, "Bar") - 3400.0).abs() < 1e-4, "{}", volume(&model, "Bar"));
+
+    // Four disjoint 10x10x10 cubes spaced 25 mm along X fast-path via `union_all_apart` and stay
+    // four separate bodies totaling 4000 mm^3.
+    let mut doc = Document::new("pattern join apart");
+    block(&mut doc, "Peg", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Peg"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "25"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.joined_apart, 1, "disjoint pattern copies should fast-path via union_all_apart: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 4);
+    assert_eq!(st.bodies[0].name, "Peg");
+    let total: f64 = st.bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((total - 4000.0).abs() < 1e-4, "{total}");
+}
+
+/// Parallel multi-body `Pattern`, `Mirror`, `Fillet`, `Scale`, `Move` (with composed `copy_frames`),
+/// and `Cut` produce deterministic body names, ordering, and exact geometry across repeated runs.
+#[test]
+fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
+    let eval_snapshot = |doc: &Document| -> Vec<(String, usize, f64, solidcraft_geom::Aabb3)> {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| (b.name.clone(), b.body.face_count(), kernel::measure(&b.body).unwrap().volume, b.body.exact_bounds().unwrap()))
+            .collect()
+    };
+
+    // 1. Multi-body Pattern (2 sources x 4 instances = 8 bodies).
+    let mut doc = Document::new("par pattern");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 20.0, 0.0), [10.0, 10.0, 10.0]);
+    let pat: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["A", "B"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "20"},
+    }))
+    .unwrap();
+    doc.add_feature(pat, None).unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 8);
+    assert_eq!(run1, run2, "parallel body pattern must be deterministic");
+    assert!(run1.iter().all(|(_, f, v, _)| *f == 6 && (*v - 1000.0).abs() < 1e-6));
+
+    // 2. Multi-body Mirror across YZ (3 bodies -> 6 bodies).
+    let mut doc = Document::new("par mirror");
+    for i in 0..3 {
+        block(&mut doc, &format!("M{i}"), Vec3::new(10.0 + 20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Mirror {
+            features: Vec::new(),
+            plane: PlaneRef::Origin { name: "YZ".into() },
+            bodies: vec![BodyName("M0".into()), BodyName("M1".into()), BodyName("M2".into())],
+            combine: false,
+            placements: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 6);
+    assert_eq!(run1, run2, "parallel mirror must be deterministic");
+    assert!((run1[3].3.min.x - (-20.0)).abs() < 1e-6 && (run1[3].3.max.x - (-10.0)).abs() < 1e-6);
+    assert!((run1[4].3.min.x - (-40.0)).abs() < 1e-6 && (run1[4].3.max.x - (-30.0)).abs() < 1e-6);
+    assert!((run1[5].3.min.x - (-60.0)).abs() < 1e-6 && (run1[5].3.max.x - (-50.0)).abs() < 1e-6);
+
+    // 3. Multi-body Fillet across 3 bodies in one feature.
+    let mut doc = Document::new("par fillet");
+    for i in 0..3 {
+        block(&mut doc, &format!("F{i}"), Vec3::new(30.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Fillet {
+            edges: vec![Position(Vec3::new(5.0, 0.0, 10.0)), Position(Vec3::new(35.0, 0.0, 10.0)), Position(Vec3::new(65.0, 0.0, 10.0))],
+            radius: "1".into(),
+            body: None,
+            style: Default::default(),
+            fit: Default::default(),
+            corner: Default::default(),
+            setbacks: Vec::new(),
+            turn: Default::default(),
+            tangent_chain: false,
+            edge_radii: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel fillet must be deterministic");
+    let names: Vec<&str> = run1.iter().map(|(n, ..)| n.as_str()).collect();
+    assert_eq!(names, vec!["F0", "F1", "F2"]);
+    let expected_fillet_v = 1000.0 - 10.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    for (_, faces, vol, _) in &run1 {
+        assert_eq!(*faces, 7);
+        assert!((*vol - expected_fillet_v).abs() < 1e-3, "{vol} vs {expected_fillet_v}");
+    }
+
+    // 4. Multi-body Cut (3 surviving targets cut in parallel, 1 distant target pruned).
+    let mut doc = Document::new("par cut");
+    for i in 0..3 {
+        block(&mut doc, &format!("C{i}"), Vec3::new(20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    block(&mut doc, "Far", Vec3::new(200.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(-5.0, 3.0, 3.0)),
+            length: "60".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Cut,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(work.cut, 3, "only the 3 intersecting bodies should be cut: {work:?}");
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel cut must be deterministic");
+    for (i, item) in run1.iter().enumerate().take(3) {
+        assert!((item.2 - 840.0).abs() < 1e-4, "C{i}: {}", item.2);
+    }
+    assert!((run1[3].2 - 1000.0).abs() < 1e-6, "Far: {}", run1[3].2);
+
+    // 5. Multi-body Scale and Move (copy + non-identity copy_frames composed into one transform).
+    let mut doc = Document::new("par scale move");
+    block(&mut doc, "S0", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "S1", Vec3::new(30.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Scale {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            origin: Position(Vec3::ZERO),
+            about: None,
+            factor: "2".into(),
+            factors: None,
+        },
+        None,
+    )
+    .unwrap();
+    let frame = rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.add_feature(
+        FeatureKind::Move {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            translate: ["0".into(), "50".into(), "0".into()],
+            rotate_axis: None,
+            rotate_about: None,
+            origin: None,
+            angle: None,
+            copy: true,
+            copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 4);
+    assert_eq!(run1, run2, "parallel scale + move copy must be deterministic");
+    for (_, _, vol, _) in &run1 {
+        assert!((*vol - 8000.0).abs() < 1e-4, "{vol}");
+    }
+    assert!(run1[2].3.min.dist(Vec3::new(0.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[2].3.max.dist(Vec3::new(20.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[3].3.min.dist(Vec3::new(60.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[3].3);
+    assert!(run1[3].3.max.dist(Vec3::new(80.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[3].3);
+}
+
+/// `world_state_moved_reusing` and `body_frames_with_source` with nested multi-occurrence
+/// subassemblies, sketches, constructions, and cosmetic threads produce exact placements and
+/// identical outputs across cache reuse and occurrence moves.
+#[test]
+fn world_state_moved_reusing_and_body_frames_match_nested_assembly() {
+    let mut doc = Document::new("nested world");
+    let sub = doc.add_component(Some("Sub"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), sub).unwrap();
+
+    // Place Sub at x = 10 and a second instance at x = 100.
+    let occ_sub1 = doc.occurrence_of(sub).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_sub1).unwrap().transform = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let occ_sub2 = doc.add_occurrence(sub, 0, rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Place Part inside Sub at y = 10 and a second instance at y = 40.
+    let occ_part1 = doc.occurrence_of(part).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_part1).unwrap().transform = rigid(Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let _occ_part2 = doc.add_occurrence(part, sub, rigid(Vec3::new(0.0, 40.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Root body, sketch, and construction plane.
+    block(&mut doc, "RootBox", Vec3::ZERO, [5.0, 5.0, 5.0]);
+    let root_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(5.0, 0.0)), Some("RootSk")).unwrap();
+    let offset_xy = |d: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: d.into() },
+    };
+    let root_cp = doc.add_feature(offset_xy("1"), Some("RootCP")).unwrap();
+
+    // Sub sketch and construction plane.
+    let sub_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(6.0, 0.0)), Some("SubSk")).unwrap();
+    doc.feature_mut(sub_sk).unwrap().component = sub;
+    let sub_cp = doc.add_feature(offset_xy("3"), Some("SubCP")).unwrap();
+    doc.feature_mut(sub_cp).unwrap().component = sub;
+
+    // Part sketch, construction plane, cylinder, and cosmetic thread.
+    let part_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(7.0, 0.0)), Some("PartSk")).unwrap();
+    doc.feature_mut(part_sk).unwrap().component = part;
+    let part_cp = doc.add_feature(offset_xy("5"), Some("PartCP")).unwrap();
+    doc.feature_mut(part_cp).unwrap().component = part;
+    let cyl = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("Pin"),
+        )
+        .unwrap();
+    doc.feature_mut(cyl).unwrap().component = part;
+    let tap = doc.add_feature(marking(Vec3::new(3.0, 0.0, 6.0)), Some("Tap")).unwrap();
+    doc.feature_mut(tap).unwrap().component = part;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 2);
+    assert_eq!(st.sketches.len(), 3);
+    assert_eq!(st.construct.len(), 3);
+    assert_eq!(st.threads.len(), 1);
+
+    let frames = doc.body_frames_with_source(&st);
+    let mut cache = PlacedBodies::default();
+    let empty_moves = BTreeMap::new();
+    let world = world_state_moved_reusing(&doc, &st, &empty_moves, &mut cache).unwrap();
+
+    // 1 root body + 2*2 nested Part placements = 5 world bodies.
+    assert_eq!(frames.len(), 5);
+    assert_eq!(world.bodies.len(), 5);
+    for ((wname, def, comp, _, mat), wb) in frames.iter().zip(&world.bodies) {
+        assert_eq!(wname, &wb.name);
+        assert_eq!(def, wb.definition_name());
+        assert_eq!(*comp, wb.component);
+        assert_eq!(*mat, wb.source_transform);
+    }
+
+    // Sketches and constructions belong only to each component's primary (first) placement.
+    assert_eq!(world.sketches.len(), 3);
+    assert_eq!(world.construct.len(), 3);
+    let find_sk = |feat: u64| world.sketches.iter().find(|s| s.feature == feat).unwrap();
+    assert!(find_sk(root_sk).plane.origin.dist(Vec3::ZERO) < 1e-9);
+    assert!(find_sk(sub_sk).plane.origin.dist(Vec3::new(10.0, 0.0, 0.0)) < 1e-9);
+    assert!(find_sk(part_sk).plane.origin.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-9);
+
+    let cp_origin = |feat: u64| match &world.construct.iter().find(|c| c.feature == feat).unwrap().geom {
+        crate::construct::ConstructGeom::Plane(p) => p.origin,
+        other => panic!("expected plane, got {other:?}"),
+    };
+    assert!(cp_origin(root_cp).dist(Vec3::new(0.0, 0.0, 1.0)) < 1e-9);
+    assert!(cp_origin(sub_cp).dist(Vec3::new(10.0, 0.0, 3.0)) < 1e-9);
+    assert!(cp_origin(part_cp).dist(Vec3::new(10.0, 10.0, 5.0)) < 1e-9);
+
+    // Cosmetic threads appear on all 4 placements of Part, with matching body names and world axes.
+    assert_eq!(world.threads.len(), 4);
+    let mut thread_xy: Vec<(f64, f64)> = world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    thread_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let expected_xy = [(10.0, 10.0), (10.0, 40.0), (100.0, 10.0), (100.0, 40.0)];
+    for ((ax, ay), (ex, ey)) in thread_xy.iter().zip(expected_xy) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
+    for t in &world.threads {
+        assert!(world.body(&t.body).is_some(), "thread body `{}` missing from world state", t.body);
+    }
+
+    // Reusing `PlacedBodies` with a moved second Sub occurrence shifts only its placements.
+    let mut moves = BTreeMap::new();
+    moves.insert(occ_sub2, rigid(Vec3::new(200.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let moved_world = world_state_moved_reusing(&doc, &st, &moves, &mut cache).unwrap();
+    assert_eq!(moved_world.bodies.len(), 5);
+    assert_eq!(moved_world.threads.len(), 4);
+    let mut moved_xy: Vec<(f64, f64)> = moved_world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    moved_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    for ((ax, ay), (ex, ey)) in moved_xy.iter().zip([(10.0, 10.0), (10.0, 40.0), (200.0, 10.0), (200.0, 40.0)]) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
+}
+
+/// Adding an unrelated component must not invalidate the evaluation cache (`EvalKey::whole`,
+/// `EvalKey::reads`, `EvalKey::relative`, or `primed`) for existing features — including features
+/// whose `Feature::reads` is `None` (#22662).
+#[test]
+fn adding_unrelated_component_keeps_eval_cache_warm() {
+    let mut doc = Document::new("unrelated component cache");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // Confirm the Hole feature exercises the `EvalKey::whole` path (`reads == None`).
+    assert!(doc.feature(hole_f).unwrap().reads(&doc, &model.state_before(hole_f)).is_none());
+
+    // Add a new unrelated component (as `component.create` / `parts.insert` does).
+    let _fastener = doc.add_component(Some("M5x10 BHCS"), 0).unwrap();
+
+    // Force cache lookup (no `self.results` prefix reuse) using the shared EvalCache.
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "adding an unrelated component must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Primed results evaluated before the unrelated component was added also remain valid.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    assert_eq!(primed.last_recomputed, 0, "adding an unrelated component must not invalidate primed results");
+    assert_eq!(primed.last_restored, doc.features.len());
+}
+
+/// Toggling UI-only component metadata (`history_hidden`, `identification_color`, properties,
+/// etc.) must not invalidate the evaluation cache or `evaluate_shared`'s placement proof (#22662).
+#[test]
+fn component_display_metadata_changes_keep_eval_cache_warm() {
+    let mut doc = Document::new("component display metadata");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+
+    // Mutate every display/metadata-only field on PartA.
+    let c = doc.components.iter_mut().find(|c| c.id == comp_a).unwrap();
+    c.history_hidden = true;
+    c.identification_color = Some([10, 20, 30]);
+    c.identification_color_index = Some(42);
+    c.properties.insert("finish".into(), "anodized".into());
+    c.name_split = Some(crate::ComponentNameSplit { separator: "-".into(), left_property: "part".into(), right_property: "rev".into() });
+
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "UI-only component changes must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Local-geometry shared evaluation proof also stays valid across UI-only component changes.
+    let mut local_doc = Document::new("local display metadata");
+    let comp_l = local_doc.add_component(Some("LocalPart"), 0).unwrap();
+    let box_l = local_doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Cube"),
+        )
+        .unwrap();
+    local_doc.feature_mut(box_l).unwrap().component = comp_l;
+    let mut shared_doc = Arc::new(local_doc);
+    let mut shared_model = Model::new();
+    assert!(shared_model.evaluate_shared(&shared_doc));
+    {
+        let d = Arc::make_mut(&mut shared_doc);
+        let c = d.components.iter_mut().find(|c| c.id == comp_l).unwrap();
+        c.history_hidden = true;
+        c.identification_color = Some([1, 2, 3]);
+    }
+    assert!(!shared_model.evaluate_shared(&shared_doc), "UI-only component change must keep evaluate_shared proof");
+    assert_eq!(shared_model.last_recomputed, 0);
+}
+
+/// Renaming a component that a feature can reach must still invalidate that feature's cache key
+/// (e.g. so target error messages reflect the renamed component).
+#[test]
+fn renaming_reached_component_invalidates_its_cache_key() {
+    let mut doc = Document::new("rename reached component");
+    let comp_a = doc.add_component(Some("OldName"), 0).unwrap();
+    let comp_b = doc.add_component(Some("Cutter"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    // Cut in comp_b with default targets: comp_b has no bodies, so `empty_boolean_targets` names
+    // the overlapping body's component (`OldName`).
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(2.0, 2.0, 0.0)),
+                length: "4".into(),
+                width: "4".into(),
+                height: "6".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("MissCut"),
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err_before = model.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_before.contains("OldName"), "expected error naming OldName, got: {err_before}");
+
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "NewName".into();
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    let err_after = cached.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_after.contains("NewName"), "expected refreshed error naming NewName, got: {err_after}");
+    assert!(cached.last_recomputed >= 1);
+
+    // Primed results must also reject reuse when a reached component was renamed.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    let err_primed = primed.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_primed.contains("NewName"), "expected primed miss naming NewName, got: {err_primed}");
+    assert!(primed.last_recomputed >= 1);
+
+    // Rolled-back results must also reject reuse when a reached component was renamed while rolled back.
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "OldName".into();
+    let mut rolled = Model::new();
+    rolled.evaluate(&doc);
+    assert!(rolled.result(cut).and_then(|r| r.error.as_deref()).is_some_and(|e| e.contains("OldName")));
+    doc.marker = Some(1);
+    rolled.evaluate(&doc);
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "RenamedWhileRolled".into();
+    doc.marker = None;
+    rolled.evaluate(&doc);
+    let err_rolled = rolled.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_rolled.contains("RenamedWhileRolled"), "expected rolled miss naming RenamedWhileRolled, got: {err_rolled}");
+    assert!(rolled.last_recomputed >= 1);
+}
+
+/// Adding a missing destination component for a `BodyTransfer` must invalidate its cached refusal
+/// so the transfer succeeds on the next evaluation (#22662).
+#[test]
+fn body_transfer_cache_invalidates_when_destination_component_is_added() {
+    let mut doc = Document::new("body transfer cache");
+    block(&mut doc, "Plate", Vec3::ZERO, [10.0, 10.0, 4.0]);
+    let dest = doc.add_component(Some("Dest"), 0).unwrap();
+    let transfer = doc
+        .add_feature(
+            FeatureKind::BodyTransfer { bodies: vec![crate::BodyName("Plate".into())], from: 0, to: dest, transform: crate::IDENTITY },
+            Some("MovePlate"),
+        )
+        .unwrap();
+    let saved_dest = doc.components.pop().unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(transfer).and_then(|r| r.error.as_deref()).is_some(), "transfer to missing component must fail");
+
+    doc.components.push(saved_dest);
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert_eq!(cached.result(transfer).and_then(|r| r.error.as_deref()), None, "transfer must succeed once destination component exists");
+    assert_eq!(cached.state().body("Plate").unwrap().component, dest);
+    assert!(cached.last_recomputed >= 1);
 }
