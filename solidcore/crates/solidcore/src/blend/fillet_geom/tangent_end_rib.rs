@@ -1777,6 +1777,27 @@ mod tests {
         assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
     }
 
+    /// A true tangent end of contact order 2 on a large round (radius 40, the surfaces of
+    /// [`tangent_end_surfaces`], both NURBS; #19140): the graded pieces stop at `t*` near
+    /// the tangent end, where a ring about the fixed centre `alpha0` costs more than the
+    /// tolerance. The rib is still bounded up to its tangent end, and the bound holds each
+    /// curve's distance from the closed-form rib at the same parameter.
+    #[test]
+    fn a_rib_at_a_true_tangent_end_of_a_large_round_is_certified_within_the_tolerance() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let r = 40.0;
+        let (fillet, end, other) = tangent_end_surfaces(r);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
+        let bound = rib.bound.unwrap();
+        assert!(bound <= tol, "{bound:e}");
+        let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| {
+            on_tangent_rib(&k, &fillet, r, t)
+        });
+        assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
+    }
+
     /// [`tangent_end_surfaces`] with its end surface lifted by `d` along z, its normal at the
     /// tangent end (the origin): `z = x² / (4 r) + y² / r + d`. It stands `d` off the tangent
     /// end, as the end face of a seam held as a touch does. The fillet surface
