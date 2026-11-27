@@ -33,14 +33,14 @@ use super::config::NameList;
 use super::joints::JointOriginArg;
 use super::motion::require;
 use super::types::{AngleExpr, FeatureCommon, PlaneParam, Point3, SketchRef, StringList, feature_common};
-use crate::cmd::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, sketch_frame_id, sketch_key};
+use crate::cmd::{MAX_SKETCH_ID, SNAP_KINDS, SidePoint, SketchFrameId, axes_mask, sketch_frame_id, sketch_key};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The handler's message for `bodies` left out, `null` or empty.
 const BODIES_MESSAGE: &str = "`bodies` must list the bodies to move";
 
 /// The kinds of snap point `from` and `to` take.
-const SNAPS: [&str; 4] = ["vertex", "edge_mid", "face_center", "circle_center"];
+const SNAPS: [&str; 4] = SNAP_KINDS;
 
 /// The `bodies` schema: one name, or a list of 1 to 10 000.
 fn bodies_schema(_: &mut SchemaGenerator) -> Schema {
@@ -155,11 +155,16 @@ fn align_schema(schema: &mut Schema) {
 /// the timeline (one undo step). Each side is one of: a point (`from`, `to`), a planar face
 /// picked by a point on it (`from_face`, `to_face`), a plane (`from_plane`, `to_plane`) or a frame
 /// (`from_frame`, `to_frame`); give one key for each side. A plane or a frame is worked out again
-/// whenever the design changes, so the bodies follow it. Faces, planes and frames also turn the
-/// bodies so that they meet (the first side's face against the second's, or with `flip` side by
-/// side); a point onto a plane moves along the plane's normal. `axes` keeps the move to some
-/// world axes and only goes with two points. Align makes no body, so `body_name` and `body_names`
-/// do nothing here (as for Remove), and `participants` changes nothing in the result.
+/// whenever the design changes, so the bodies follow it. What a side picks decides the way it
+/// faces: a face or a face centre snap its outward normal, a circle centre snap the circle's axis
+/// out of its body, a plane its normal and a frame its z; a vertex, an edge midpoint, the origin
+/// and a bare point face no way. Two sides that face a way turn the bodies so that they meet (the
+/// first against the second, or with `flip` the same way); with one, the bodies keep their turn
+/// and `flip` turns them half round about an axis square to that side's way; with neither, `flip`
+/// is refused. A point onto a plane moves along the plane's normal; against a plane or a frame it
+/// does not turn, unless `flip` turns it over. `axes` keeps the move to some world axes and only
+/// goes with two sides that face no way. Align makes no body, so `body_name` and `body_names` do
+/// nothing here (as for Remove), and `participants` changes nothing in the result.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = align_schema)]
 pub struct AlignParams {
@@ -209,12 +214,13 @@ pub struct AlignParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FrameSchema")]
     pub to_frame: Option<Value>,
-    /// With faces, planes or frames: true turns the bodies so that the two normals point the same
-    /// way, instead of facing each other. Default: false.
+    /// True turns the bodies over: two sides that face a way point the same way instead of
+    /// facing each other; with one, the bodies turn half round about an axis square to its way.
+    /// Refused when neither side faces a way (two points). Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
     /// Which world axes the offset moves along, with a point on each side: [x, y, z] booleans,
-    /// at least one true. Default: all three. Refused with a face, plane or frame.
+    /// at least one true. Default: all three. Refused with a side that faces a way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "AxesSchema")]
     pub axes: Option<[bool; 3]>,
