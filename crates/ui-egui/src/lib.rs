@@ -5300,18 +5300,7 @@ impl SolveApp {
         } else {
             viewport::show(self, ui);
         }
-        if let Some(view) = view_window_drag::hovered_view(self) {
-            let rect = if view == self.docs.views.active().id {
-                self.viewport.rect
-            } else {
-                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
-            };
-            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
-                let t = solidcraft_theme::Tokens::get();
-                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
-                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-            }
-        }
+        view_window_drag::paint_hover_outline(self, ui);
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {
