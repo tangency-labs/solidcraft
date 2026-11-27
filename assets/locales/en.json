@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "Plane Through Point, Square To Line",
   "cmd.construct.point": "Point",
   "cmd.construct_axis_edge": "Axis Through Edge",
-  "cmd.construct_axis_normal_to_face": "Axis Perpendicular To Face",
+  "cmd.construct_axis_normal_to_face": "Axis Perpendicular To Face or Plane",
   "cmd.construct_axis_through_cylinder": "Axis Through Cylinder/Cone/Torus",
   "cmd.construct_axis_two_planes": "Axis Through Two Planes",
   "cmd.construct_axis_two_points": "Axis Through Two Points",
