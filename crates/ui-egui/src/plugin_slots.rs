@@ -571,12 +571,21 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
+            swatches: Default::default(),
+            updates: None,
+            themes: Vec::new(),
             entries: serde_json::from_value(json!([
                 {"name":"sheets","kind":"exporter","extensions":["dxf"],"output":"files","label":"Cut sheets"},
                 {"name":"list","kind":"exporter","extensions":["csv"]}
             ]))
             .unwrap(),
+            shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
         };
         h.app.plugin_slots.inventory = Some(Inventory { root: None, plugins: vec![plugin], skipped: vec![] });
         let rows = export_slots(&h.app);
