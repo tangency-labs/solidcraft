@@ -187,10 +187,17 @@ impl<R: Send + 'static> Worker<R> {
     /// Run `work` on a thread named `name`; `wake` gets a frame when it is done. An error when the
     /// thread can't be started: the caller runs the work itself.
     pub fn spawn(name: &str, wake: egui::Context, work: impl FnOnce() -> R + Send + 'static) -> std::io::Result<Self> {
+        Self::spawn_with_wake(name, move || wake.request_repaint(), work)
+    }
+
+    fn spawn_with_wake(name: &str, wake: impl FnOnce() + Send + 'static, work: impl FnOnce() -> R + Send + 'static) -> std::io::Result<Self> {
         let (send, done) = std::sync::mpsc::channel();
         std::thread::Builder::new().name(name.to_owned()).spawn(move || {
             let _ = send.send(work());
-            wake.request_repaint();
+            // Work is complete, even if requesting repaint has to wait for the UI thread.
+            // Release the sender before entering that callback.
+            drop(send);
+            wake();
         })?;
         Ok(Self { done })
     }
@@ -461,10 +468,33 @@ mod tests {
             polled = worker.poll();
         }
         assert_eq!(polled, Poll::Done(7));
-        // The thread still holds its sender while it asks for a frame after sending, so a poll
-        // straight after the result can see Running; once the thread has ended it must be Failed.
+        // The sender is released before requesting a repaint. The result may arrive just before
+        // that release; wait for completion before checking that it cannot be taken again.
         assert!(worker.wait(std::time::Duration::from_secs(10)), "the thread ends after handing over");
         assert_eq!(worker.poll(), Poll::Failed, "the result is taken once");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_worker_is_complete_even_if_the_repaint_callback_is_blocked() {
+        let (entered, repainting) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let worker = Worker::spawn_with_wake(
+            "blocked repaint",
+            move || {
+                entered.send(()).unwrap();
+                let _ = blocked.recv();
+            },
+            || 7,
+        )
+        .unwrap();
+        repainting.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert_eq!(worker.poll(), Poll::Done(7));
+        let complete = worker.wait(std::time::Duration::ZERO);
+        let after = worker.poll();
+        release.send(()).unwrap();
+        assert!(complete, "repaint must not keep the completed work channel open");
+        assert_eq!(after, Poll::Failed);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
