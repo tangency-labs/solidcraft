@@ -20,6 +20,7 @@ pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 pub(crate) mod print;
+mod view_bodies;
 
 use panels::Tool;
 
@@ -47,6 +48,9 @@ pub struct State {
     sheet_menu: Option<SheetMenu>,
     delete_sheet: Option<(u64, u64, u64)>,
     first_sheet: Option<first_sheet::BlankSheet>,
+    /// The drawing that was open when New drawing… was chosen: its setup page's Back opens it
+    /// again, and so does entering Drawing again with no drawing made.
+    return_to: Option<u64>,
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
@@ -123,11 +127,50 @@ fn open_a_drawing(app: &mut SolveApp) {
     if app.session.open_drawing.is_some() {
         return;
     }
-    let Some(id) = app.session.doc.drawings.first().map(|d| d.id) else { return };
+    let left = app.drawing_workspace.return_to.filter(|id| app.session.doc.drawing(*id).is_some());
+    let Some(id) = left.or_else(|| app.session.doc.drawings.first().map(|d| d.id)) else { return };
+    open_drawing(app, id);
+}
+
+/// Opens the design's drawing `id` on its first sheet, fitted, in place of the one open: the
+/// drawing picker's choice. The panels and picks of the drawing left go with it.
+pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
+    if app.session.open_drawing == Some(id) {
+        app.drawing_workspace.return_to = None;
+        return;
+    }
+    close_panel(app);
     match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
-        Ok(_) => crate::drawing_sheet_page::fit(app),
+        Ok(_) => {
+            // Kept until the open succeeds: a failed Back leaves the setup page and its Back.
+            app.drawing_workspace.return_to = None;
+            app.session.selection.retain(|item| !matches!(item, solidcraft_engine::Sel::Drawing { drawing, .. } if *drawing != id));
+            crate::drawing_sheet_page::fit(app);
+        }
         Err(error) => app.set_status(error, true),
     }
+}
+
+/// New drawing…: closes the open drawing, which stays in the design, so the setup page shows to
+/// make another; its Back opens the drawing left again.
+pub(crate) fn new_drawing(app: &mut SolveApp) {
+    let Some(open) = app.session.open_drawing else { return };
+    close_panel(app);
+    match app.run("drawing.close", serde_json::json!({})) {
+        Ok(_) => {
+            app.drawing_workspace.return_to = Some(open);
+            app.session.selection.retain(|item| !matches!(item, solidcraft_engine::Sel::Drawing { .. }));
+        }
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+/// The drawing New drawing… left, while its setup page shows and the drawing is still there.
+pub(crate) fn left_for_new(app: &SolveApp) -> Option<&solidcraft_engine::doc::drawing::Drawing> {
+    if app.session.open_drawing.is_some() {
+        return None;
+    }
+    app.drawing_workspace.return_to.and_then(|id| app.session.doc.drawing(id)).map(|drawing| drawing.as_ref())
 }
 
 /// Puts the selection kept for the workspace being entered back, and keeps the one of the
@@ -436,6 +479,22 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
     true
 }
 
+/// Hide in This View (#22107): view `view` of the open drawing leaves `body` out, added to the
+/// bodies it leaves out now (its own list, or the one it takes from its parent, which becomes its
+/// own). One `drawing.view.edit`, one undo step. A body already left out changes nothing.
+pub(crate) fn hide_body_in_view(app: &mut SolveApp, view: u64, body: solidcraft_engine::doc::drawing_view::HiddenBody) -> Result<(), String> {
+    let drawing = app.session.drawing("drawing.inspect").map_err(|error| error.to_string())?;
+    let resolved = drawing.resolve_view(view).map_err(|error| error.to_string())?;
+    let mut hidden: Vec<_> = resolved.hide_bodies.value.as_deref().unwrap_or_default().to_vec();
+    if hidden.contains(&body) {
+        return Ok(());
+    }
+    hidden.push(body);
+    app.run("drawing.view.edit", serde_json::json!({"view": solidcraft_engine::doc::ids::encode(view), "set": {"hide_bodies": hidden}}))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 /// Edit object `object` of the open drawing, as a double-click on it at `at` does (the menu's Edit,
 /// with `at` where the menu was opened).
 pub(crate) fn edit(app: &mut SolveApp, object: u64, at: egui::Pos2) {
@@ -602,6 +661,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::drawing_sheet_page::show(app, ui) {
         return;
     }
+    show_setup(app, ui);
+}
+
+/// The page that makes a drawing, filling `ui`: shown while no drawing is open.
+pub(crate) fn show_setup(app: &mut SolveApp, ui: &mut egui::Ui) {
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
     let t = Tokens::get();
@@ -1590,6 +1654,47 @@ mod tests {
         reset_document(&mut h.app);
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
+    }
+
+    /// The Drawing browser's drop-down lists the design's drawings: New drawing… shows the setup
+    /// page, whose Back returns to the drawing left; a drawing made there gets a name of its own;
+    /// picking a drawing opens it.
+    #[test]
+    fn the_drawing_picker_opens_another_drawing_and_makes_a_new_one() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
+        h.frames(4);
+        let first = h.app.session.open_drawing.expect("the first drawing is open");
+
+        let pick = |h: &mut Harness, handle: &str| {
+            h.step(&serde_json::json!({"click":{"handle":"drawing:picker"}})).unwrap();
+            h.frames(2);
+            h.step(&serde_json::json!({"click":{"handle":handle}})).unwrap();
+            h.frames(3);
+        };
+        pick(&mut h, "drawing:picker:new");
+        assert!(h.app.session.open_drawing.is_none(), "New drawing… shows the setup page");
+        assert_eq!(h.app.session.doc.drawings.len(), 1, "the drawing left stays in the design");
+        h.step(&serde_json::json!({"click":{"handle":"drawing:first:back"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, Some(first), "Back opens the drawing left");
+
+        pick(&mut h, "drawing:picker:new");
+        h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
+        h.frames(4);
+        let names: Vec<String> = h.app.session.doc.drawings.iter().map(|d| d.name.clone()).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert_ne!(names[0], names[1], "the new drawing's name tells it apart");
+        let second = h.app.session.doc.drawings[1].id;
+        assert_eq!(h.app.session.open_drawing, Some(second), "the new drawing is open");
+
+        pick(&mut h, &format!("drawing:picker:{}", solidcraft_engine::doc::ids::encode(first)));
+        assert_eq!(h.app.session.open_drawing, Some(first), "picking a drawing opens it");
+        assert_eq!(h.app.session.doc.drawings.len(), 2);
     }
 
     /// A sheet sketch being edited never holds Design: the model's commands and sketch tools work on

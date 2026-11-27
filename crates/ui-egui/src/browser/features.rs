@@ -38,6 +38,8 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
+    app.tree.reveal_occurrence = None;
+    app.tree.reveal_construction = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.open_row(&scope);
@@ -69,6 +71,8 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     set_open(app, &scope, path.is_empty() || start_open, true);
     set_open(app, &format!("{scope}/history"), true, true);
+    app.tree.reveal_occurrence = None;
+    app.tree.reveal_construction = None;
     for folder in folder_chain(&app.session.doc.timeline_groups, id) {
         crate::timeline_folders::set_open(app, folder, true);
     }
@@ -748,7 +752,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     crate::ui_kit::history_marker(ui.painter(), line, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"))
 }
@@ -2281,6 +2285,20 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// The History marker in the browser moves only up and down, so the pointer over it shows
+    /// up-and-down arrows, not the grab cursor Windows draws as a four-way move cross.
+    #[test]
+    fn browser_history_marker_shows_up_and_down_arrows() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Cube"})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let marker = crate::scenario::handle_at("browser:rollback").unwrap();
+        h.call("ui.move", json!({"x": marker.x, "y": marker.y}));
+        h.frames(2);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::ResizeVertical, "up and down arrows over the marker");
     }
 
     /// #7221: the history in the browser shows the timeline folders as the vertical History

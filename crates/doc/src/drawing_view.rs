@@ -17,6 +17,21 @@ pub const MAX_REFERENCE_SHOWN_PERCENT: f64 = 100.0;
 /// on every redraw copies none of them.
 pub type OccurrencePaths = Arc<[Vec<u64>]>;
 
+/// One body of a part a view leaves out (#22107): the occurrences that place it, from the design's
+/// root (`[]` for the design's own bodies), and its definition's body name, the pair a view's shown
+/// body carries. Matched by name, so a body rebuilt by its feature stays left out; a body renamed
+/// since matches nothing and is drawn again.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HiddenBody {
+    #[serde(default)]
+    pub path: Vec<u64>,
+    pub body: String,
+}
+
+/// The bodies a view leaves out, each on its own ([`HiddenBody`]). Shared, as [`OccurrencePaths`].
+pub type HiddenBodies = Arc<[HiddenBody]>;
+
 /// Which way a view looks: by name, or along any direction with an up.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -76,6 +91,18 @@ pub enum TangentEdges {
     #[default]
     Hide,
     Show,
+}
+
+/// Which of the bodies its design places a view draws (#22107): every one (the default, whatever the
+/// browser shows), or only those the design shows, as the browser's eyes leave them: a body's own,
+/// its placements', its folders' and groups'. Its own `source`, `hide` and `hide_bodies` apply on top
+/// of either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Shows {
+    #[default]
+    All,
+    Design,
 }
 
 /// Which state of its assembly a view draws (#13048): as the design places its parts (the default),
@@ -191,6 +218,14 @@ pub struct ViewOverrides {
     /// The subtrees it leaves out: none when no view of its chain sets them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide: Option<OccurrencePaths>,
+    /// The bodies of its parts it leaves out, each on its own: none when no view of its chain sets
+    /// them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_bodies: Option<HiddenBodies>,
+    /// Which bodies it draws, every one or only those the design shows: every one when no view of
+    /// its chain sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shows: Option<Shows>,
     /// The ISO 128 line group its lines are drawn in: its sheet's, then its drawing's, when no view
     /// of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]

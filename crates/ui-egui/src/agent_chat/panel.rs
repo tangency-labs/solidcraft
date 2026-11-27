@@ -58,6 +58,8 @@ pub enum PanelAction {
     RemovePending(usize),
     /// Undo the changes of the message at this index.
     UndoChanges(usize),
+    /// Toggle the model highlight for this message's changes.
+    ShowModelChanges(usize),
     SetMode(String),
     SetModel(String),
     SetCustomModel(String),
@@ -124,6 +126,10 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::Cancel => cancel(app),
         PanelAction::RemovePending(n) => remove_pending(app, n),
         PanelAction::UndoChanges(n) => undo_changes(app, n),
+        PanelAction::ShowModelChanges(n) => {
+            super::toggle_model_changes(app, n);
+            ctx.request_repaint();
+        }
         PanelAction::SetMode(m) => set_mode(app, &m),
         PanelAction::SetModel(m) => set_model(app, &m),
         PanelAction::SetCustomModel(m) => {
@@ -202,6 +208,9 @@ pub struct PanelView {
     pub undo_history: Option<super::Revision>,
     /// Whether the Hole in the review card is shown for the currently entered parameters.
     hole_review: Option<Result<bool, String>>,
+    /// Whether the current view can show a feature highlight, and which card is showing one.
+    model_view_visible: bool,
+    model_changes: Option<usize>,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -248,6 +257,8 @@ impl PanelView {
             revision: super::Revision::of(&app.session.doc),
             undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
             hole_review: super::hole_review_state(app),
+            model_view_visible: super::model_changes_view_visible(app),
+            model_changes: super::model_changes_index(app),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -411,6 +422,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.drop_rect = None;
     app.agent_chat.hovered = None;
     app.agent_chat.hover.clear();
+    if !shown(app) || !app.agent_chat.open || !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !visible {
         app.agent_chat.panel_rect = None;
         app.agent_chat.window_placed = false;
@@ -455,9 +469,13 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Independent viewers and drop feedback keep their existing window policy.
 pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !shown(app) || !app.agent_chat.open {
         app.agent_chat.keyboard_owned = false;
         app.agent_chat.hover.clear();
+        app.agent_chat.model_changes_shown = None;
         return;
     }
     if app.agent_chat.panel_rect.is_none() {
@@ -2045,6 +2063,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     // Allow (true), Deny (false), Always allow (None).
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
+    let mut toggle_model_changes: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
     // The pill or chip under the pointer, for the host to light.
     let mut hovered: Option<Hovered> = None;
@@ -2300,20 +2319,52 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, features, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal_wrapped(|ui| {
+                        let text = if features.is_empty() {
+                            trf("ui.agent_chat_changes", &[("n", &steps.to_string())])
+                        } else {
+                            trf("ui.agent_chat_model_changes", &[("n", &features.len().to_string())])
+                        };
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            if !features.is_empty() && view.model_view_visible {
+                                let label = tr(if view.model_changes == Some(n) {
+                                    "ui.agent_chat_hide_model_changes"
+                                } else {
+                                    "ui.agent_chat_show_model_changes"
+                                });
+                                let b = ui_kit::button(ui, label, ui_kit::Button::Normal);
+                                solidcraft_ui_registry::publish_handle("agent_chat:model_changes", b.rect.center());
+                                if b.clicked() {
+                                    toggle_model_changes = Some(n);
+                                }
+                            }
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {
@@ -2480,6 +2531,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     }
     if let Some(n) = undo {
         chat.actions.push(PanelAction::UndoChanges(n));
+    }
+    if let Some(n) = toggle_model_changes {
+        chat.actions.push(PanelAction::ShowModelChanges(n));
     }
 }
 
@@ -3230,6 +3284,8 @@ mod tests {
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
             undo_history: None,
             hole_review: None,
+            model_view_visible: true,
+            model_changes: None,
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),

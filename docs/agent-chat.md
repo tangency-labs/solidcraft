@@ -479,6 +479,10 @@ load servers you configured for them:
   dismisses the proposal. Changes to the design or a switch to another tab invalidate the review.
   The Assistant requests this with a standalone `execute` call for `assistant.review_hole`, with
   `{target, position: [x,y,z], diameter, depth?}`. It returns the ordinary Hole result after Apply.
+- **Show in model:** when a message adds or edits features, its changes card counts them.
+  In a Model view, choose **Show in model** to highlight the features whose edits still match
+  the Assistant's changes. **Hide highlight** clears the highlight. Closing Assistant,
+  changing the design, switching tabs or undoing also clears it.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button

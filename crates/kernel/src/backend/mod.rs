@@ -14,15 +14,31 @@ mod affine;
 mod cell_grid;
 mod curves;
 mod develop;
+mod dxf;
 mod exchange;
 mod frames;
+mod hatch;
+mod hole_stacks;
+mod mesh;
 mod modelling;
+#[cfg(feature = "backend-occt")]
+mod occt;
+mod planar;
 mod points;
+mod profiles;
 mod projection;
 mod query;
+mod runtime;
+mod sections;
+mod shaft_spline;
+mod tessellate;
+mod tube_cope;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
+
+#[cfg(feature = "backend-occt")]
+pub(crate) use occt::Occt;
 
 /// solidcore, through `solidcore-ops`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,7 +76,10 @@ impl From<KernelError> for BackendError {
     fn from(e: KernelError) -> BackendError {
         match e {
             KernelError::Invalid(m) => BackendError::Invalid(m),
-            KernelError::TooLarge(why) => BackendError::TooLarge { why, largest: None },
+            KernelError::TooLarge(why) => {
+                let largest = crate::blend::named_fit(&why);
+                BackendError::TooLarge { why, largest }
+            }
             KernelError::Internal(m) => BackendError::Internal(m),
             KernelError::Failed(m) => BackendError::Failed(m),
             // The words after "the operation failed: ", so the way back reads the same.
@@ -77,7 +96,15 @@ impl From<BackendError> for KernelError {
     fn from(e: BackendError) -> KernelError {
         match e {
             BackendError::Invalid(m) => KernelError::Invalid(m),
-            BackendError::TooLarge { why, .. } => KernelError::TooLarge(why),
+            BackendError::TooLarge { why, largest } => {
+                let why = match largest {
+                    Some(size) if size.is_finite() && size > 0.0 && !crate::blend::names_largest_fit(&why) => {
+                        format!("{why}; {}", crate::blend::largest_fit_note("radius", size))
+                    }
+                    _ => why,
+                };
+                KernelError::TooLarge(why)
+            }
             BackendError::Internal(m) => KernelError::Internal(m),
             e @ BackendError::Cancelled(_) => KernelError::Failed(e.to_string()),
             e @ BackendError::Unsupported(_) => KernelError::Failed(e.to_string()),
@@ -105,6 +132,32 @@ mod tests {
         ] {
             assert_eq!(KernelError::from(BackendError::from(e.clone())), e);
         }
+    }
+
+    #[test]
+    fn too_large_carries_largest_fit_across_backend_boundary() {
+        let sized = KernelError::TooLarge("the fillet is larger than the faces beside its edges allow; the largest radius that fits is 3 mm".into());
+        assert_eq!(sized.largest_fit(), Some(3.0));
+        assert_eq!(sized.blend_fit(), Some(crate::BlendFit::Radius(3.0)));
+        let backend = BackendError::from(sized.clone());
+        assert_eq!(
+            backend,
+            BackendError::TooLarge {
+                why: "the fillet is larger than the faces beside its edges allow; the largest radius that fits is 3 mm".into(),
+                largest: Some(3.0),
+            }
+        );
+        assert_eq!(KernelError::from(backend), sized);
+
+        // A backend reporting `largest` separately without embedding the note still surfaces it.
+        let external = BackendError::TooLarge { why: "the fillet is larger than the faces beside its edges allow".into(), largest: Some(2.5) };
+        let converted = KernelError::from(external);
+        assert_eq!(converted.largest_fit(), Some(2.5));
+        assert!(converted.to_string().contains("the largest radius that fits is 2.5 mm"), "{converted}");
+
+        // A backend that reports no fit size stays clean without inventing one.
+        let without_size = BackendError::TooLarge { why: "the fillet is larger than the faces beside its edges allow".into(), largest: None };
+        assert_eq!(KernelError::from(without_size).largest_fit(), None);
     }
 
     #[test]
