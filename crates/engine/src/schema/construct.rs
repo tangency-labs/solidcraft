@@ -149,6 +149,19 @@ pub struct PointAlongPathParams {
     pub common: ConstructionCommon,
 }
 
+/// Add a construction point at the average (the centroid) of two or more points.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PointAverageParams {
+    /// The points, in any order: vertices, construction points, sketch points, fixed points, or
+    /// the centres of circular edges, sketch circles or arcs, or spherical or toroidal faces. The
+    /// new point stays at their average as they move.
+    #[schemars(length(min = 2, max = 1000))]
+    pub points: Vec<GeoRefParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: ConstructionCommon,
+}
+
 /// Add a construction plane halfway between two planes: midway between parallel ones, else
 /// through the line where they meet, halving the angle between them.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -207,7 +220,10 @@ pub struct PlaneThreePointsParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PlaneTangentParams {
-    /// The face: a plane, or a planar, cylindrical, conical, spherical or toroidal face.
+    /// The face: a plane or any face of a body. On a cylindrical, conical, spherical or toroidal
+    /// face the plane touches the whole surface the face lies on; on any other curved face (a
+    /// loft's, a sweep's, a patch's, an extruded spline's) it touches the face itself, with the
+    /// face's exact normal there.
     pub face: GeoRefParam,
     /// Where the plane touches the face, in mm: the point of the face nearest it. Not on the
     /// axis of a round face. Default, for a face picked by a point: that point; required
@@ -215,7 +231,8 @@ pub struct PlaneTangentParams {
     #[serde(default)]
     pub at: Option<Point3>,
     /// A plane or planar face to line the plane up with: it touches where the face turns
-    /// towards the reference, parallel to it, on the side of `at`.
+    /// towards the reference, parallel to it, on the side of `at`. On a planar, cylindrical,
+    /// conical, spherical or toroidal face only.
     #[serde(default)]
     pub reference: Option<GeoRefParam>,
     /// With `reference`, how far the plane is turned from it about the face's axis. Not on a

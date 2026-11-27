@@ -45,7 +45,8 @@
 
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -72,9 +73,20 @@ fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// `NER(p)`: a `NULL` pointer (`what`) is `SM_ERR_NULL_POINTER`.
-fn ner<T>(v: Option<T>, what: &'static str) -> Result<T> {
-    v.ok_or_else(|| SolidError::blend_missing(OP, what))
+/// `s`'s iso curves of constant `direction` at its natural domain's ends: the caller's
+/// direction that is neither u nor v is [`BlendFailure::IsoDirectionNotUOrV`], with the
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn iso_boundaries(
+    k: &Kernel,
+    s: &Surface,
+    direction: SurfParamType,
+    tol: f64,
+) -> Result<(Curve, Curve)> {
+    s.create_iso_boundaries(k, direction, tol)?.ok_or_else(|| {
+        Failure::new(OP, BlendFailure::IsoDirectionNotUOrV)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })
 }
 
 /// Element `i` of an evaluation array.
@@ -391,10 +403,7 @@ pub fn test_for_fillet_surface_u_or_v(
     // 1. Check that min/max naturalDomain isoParmeter curves have fillet crossSection shapes
 
     // Construct temporary naturalDomain Iso boundaries for this direction: rib curves.
-    let (rib_min, rib_max) = ner(
-        s.create_iso_boundaries(k, which_dir, EFF_ZERO)?,
-        "the surface's iso boundaries",
-    )?;
+    let (rib_min, rib_max) = iso_boundaries(k, s, which_dir, EFF_ZERO)?;
 
     // skip min isoParameter curves that don't have a known filletCrossSection shape
     let t = test_for_fillet_cross_section(k, &rib_min, tol3d)?;
@@ -637,10 +646,7 @@ pub fn find_fillet_min_max_radii(
     radii.init();
 
     let rib_dir = other_dir(rail_dir);
-    let (rail1, rail2) = ner(
-        s.create_iso_boundaries(k, rib_dir, tol)?,
-        "the surface's iso boundaries",
-    )?;
+    let (rail1, rail2) = iso_boundaries(k, s, rib_dir, tol)?;
 
     let domain = rail1.natural_interval();
 
@@ -820,10 +826,7 @@ pub fn identify_fillet_u_or_v(
 
     // This will return the presumed rail curves:
     let rail_iso_dir = other_dir(rail_dir);
-    let (min_rail, max_rail) = ner(
-        surface.create_iso_boundaries(k, rail_iso_dir, tol3d)?,
-        "the surface's iso boundaries",
-    )?;
+    let (min_rail, max_rail) = iso_boundaries(k, &surface, rail_iso_dir, tol3d)?;
 
     // We will be using these:
     let min_rail_domain = min_rail.natural_interval();
@@ -1004,9 +1007,13 @@ pub fn identify_fillet(
                 SurfParamType::V
             }
         } else {
-            // (status ignored; the size is then unset upstream)
-            let s = ner(face::p2::surface(b, f)?, "the face's surface")?;
-            let sizes = ignored(s.approximate_size(k, None))?.unwrap_or(Vec2::new(0.0, 0.0));
+            // (status ignored; the size is then unset upstream. The face has a surface: a
+            // face without one is a fillet in neither direction)
+            let sizes = match face::p2::surface(b, f)? {
+                Some(s) => ignored(s.approximate_size(k, None))?,
+                None => None,
+            }
+            .unwrap_or(Vec2::new(0.0, 0.0));
             if sizes.x > sizes.y {
                 SurfParamType::U
             } else {
@@ -1039,18 +1046,27 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::float_cmp)]
     use super::*;
 
-    /// #13790: a missing object the identification needs is a typed blend failure that
-    /// keeps the `SM_ERR_NULL_POINTER` status of the bare `Upstream` it replaced.
+    /// #13790: iso curves asked in a direction that is neither u nor v are the caller's
+    /// input, a typed cause that keeps the `SM_ERR_NULL_POINTER` status of the bare
+    /// `Upstream` it replaced.
     #[test]
-    fn a_missing_object_is_a_typed_failure() {
-        let error = ner::<()>(None, "the face's surface").unwrap_err();
+    fn iso_curves_in_neither_direction_are_an_input_check() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let f = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .first()
+            .copied()
+            .unwrap();
+        let s = face::p2::surface(&b, f).unwrap().unwrap();
+        let error = iso_boundaries(&k, s, SurfParamType::Both, 1e-6).unwrap_err();
         assert_eq!(
             error.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the face's surface"
-            ))
+            Some(&BlendFailure::IsoDirectionNotUOrV)
         );
-        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(error.sm_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(error.upstream_status(), error.sm_status());
         assert_eq!(error.operation(), OP);
     }

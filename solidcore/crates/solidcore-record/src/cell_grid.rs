@@ -123,3 +123,28 @@ pub struct CellGridPlan {
     /// Things worth telling the user.
     pub warnings: Vec<String>,
 }
+
+/// A sketched cell and its layout, in the sketch's units (mm and radians): one closed profile of
+/// lines and arcs repeated on the lattice `a = (pitch_x, 0)`, `b = (stagger * pitch_x, pitch_y)`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchCell {
+    /// The cell's outline in the cell's own coordinates.
+    pub profile: Loop2,
+    /// The cell's origin in those coordinates (`None`: the outline's centroid).
+    #[serde(default)]
+    pub origin: Option<Vec2>,
+    /// The distance along a row between cell origins.
+    pub pitch_x: f64,
+    /// The distance between rows.
+    pub pitch_y: f64,
+    /// How far each row is shifted along the row against the one before, as a fraction of
+    /// `pitch_x` (0 to 1; 0.5 gives hexagonal and brick layouts).
+    #[serde(default)]
+    pub stagger: f64,
+    /// The cell's turn about its own origin (radians).
+    #[serde(default)]
+    pub cell_angle: f64,
+    /// Mirror the cells with `i + j` odd.
+    #[serde(default)]
+    pub flip: bool,
+}

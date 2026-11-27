@@ -176,9 +176,6 @@ fn the_views_centre_lands_on_its_position() {
     assert!(frame.boundary(&box_of(5.0, 5.0, 5.0, 5.0)).is_ok_and(|b| b.min == b.max), "a point's box is a point");
     let line = Seg2::Line { a: Vec2::ZERO, b: Vec2::new(100.0, 20.0) };
     assert_eq!(frame.seg_to_paper(&line), Seg2::Line { a: Vec2::new(110.0, 128.5), b: Vec2::new(310.0, 168.5) });
-    let bounded = CurveAccuracy::Bounded { max_deviation_mm: 0.01 };
-    assert_eq!(frame.accuracy_on_paper(bounded), CurveAccuracy::Bounded { max_deviation_mm: 0.02 });
-    assert_eq!(frame.accuracy_on_paper(CurveAccuracy::Analytic), CurveAccuracy::Analytic);
 }
 
 /// A scale is read and written as paper:model, kept as written, within 1:100000 to 1000:1.
@@ -191,7 +188,7 @@ fn a_scale_reads_and_writes_as_paper_to_model() {
         assert_eq!(serde_json::from_value::<Scale>(serde_json::json!(text)).unwrap(), s);
     }
     let not_scales = [
-        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", " 1:2", "1:2 ", "1e3:1", "NaN:1", "inf:1", "1..5:1",
+        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", "1 0:1", "1e3:1", "NaN:1", "inf:1", "1..5:1",
         "1:2.", "١:٢",
     ];
     for text in not_scales {

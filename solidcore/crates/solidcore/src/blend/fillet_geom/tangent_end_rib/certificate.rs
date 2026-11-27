@@ -38,6 +38,12 @@
 //! ([`Rib::first_span_bound`], [`Rib::near_bound`]); where that bound is not within the
 //! tolerance, the part it covers, `[0, t*]`, carries no claim ([`Bound::Open`]). Every
 //! loop over pieces, grades, ring boxes and widenings polls the kernel's cancellation.
+//!
+//! A rib of a standoff ([`super::Standoff`], [`Rib::standoff`]) is certified the same way
+//! with `F(t, y) = S(sigma(t), alpha) + lambda(t) n − E(u, v)`: `lambda` is a known
+//! polynomial in `t`, so `F`, its derivatives in `t` and the rib's point (the end surface's
+//! less `lambda n`) gain its terms, enclosed over the piece, and the Jacobian is unchanged.
+//! Near the tangent end the separation is compared with `lambda` at its section, not 0.
 
 use core::cell::RefCell;
 
@@ -346,6 +352,10 @@ pub(super) struct Rib<'a, 'f> {
     pub order: u32,
     /// The 3D curve, the fillet surface's UV curve and the end surface's, in `t`.
     pub curves: [NurbsCurve; 3],
+    /// The end surface's standoff the rib is defined with ([`super::Standoff`]):
+    /// `F(t, y) = S(sigma(t), alpha) + lambda(t) n − E(u, v)`, the rib's point the fillet
+    /// surface's and its foot on the end surface `lambda(t) n` from it. `None`: `F = S − E`.
+    pub standoff: Option<super::Standoff>,
 }
 
 /// A piece end: its parameter, the Newton root there, the box Krawczyk's test proves to
@@ -391,7 +401,44 @@ impl Path {
     }
 }
 
+/// `x^n` over `x`, by products (an enclosure for any sign of `x`).
+fn power(x: Ivl, n: i32) -> Ivl {
+    (0..n.max(0)).fold(Ivl::from(1.0), |p, _| p * x)
+}
+
+/// `a` scaled to the vector `n`.
+fn along(n: [f64; 3], a: Ivl) -> V3<Ivl> {
+    let [x, y, z] = n.map(|c| Ivl::from(c) * a);
+    V3 { x, y, z }
+}
+
 impl Rib<'_, '_> {
+    /// The standoff's `lambda(t) n` and its first two derivatives in `t` over `t`
+    /// (`lambda = lambda0 (1 − t^m)`), or `None` without one.
+    fn shift(&self, t: Ivl) -> Option<[V3<Ivl>; 3]> {
+        let s = self.standoff?;
+        let (m, l0) = (s.power, Ivl::from(s.lambda0));
+        let n = [s.n.x, s.n.y, s.n.z];
+        let f = |k: i32| Ivl::from(f64::from(k));
+        let value = l0 * (Ivl::from(1.0) - power(t, m));
+        let first = ZERO - l0 * f(m) * power(t, m - 1);
+        let second = if m >= 2 {
+            ZERO - l0 * f(m) * f(m - 1) * power(t, m - 2)
+        } else {
+            ZERO
+        };
+        Some([along(n, value), along(n, first), along(n, second)])
+    }
+
+    /// The standoff's `lambda` over the sections `sigma` (`lambda0 (1 − s^q)`, `s` the
+    /// section parameter normalised, `q` the contact order), or `None` without one.
+    fn standoff_over(&self, sigma: Ivl) -> Option<Ivl> {
+        let s = self.standoff?;
+        let q = if self.odd { s.power / 2 } else { s.power };
+        let unit = (sigma - Ivl::from(self.sigma0)) / Ivl::from(self.d_sigma);
+        Some(Ivl::from(s.lambda0) * (Ivl::from(1.0) - power(unit, q)))
+    }
+
     fn sigma(&self, t: Ivl) -> (Ivl, Ivl, Ivl) {
         let d = Ivl::from(self.d_sigma);
         if self.odd {
@@ -442,7 +489,11 @@ impl Rib<'_, '_> {
         let o = [o.x.mid(), o.y.mid(), o.z.mid()];
         let s = self.fillet_about(self.sigma(t).0, a, 0, Some(o))?;
         let e = partials_about(self.end, u, v, 0, o)?;
-        Some(arr(v_sub(s(0, 0), e.at(0, 0))))
+        let f = v_sub(s(0, 0), e.at(0, 0));
+        Some(arr(match self.shift(t) {
+            Some([l, ..]) => v_add(f, l),
+            None => f,
+        }))
     }
 
     fn columns(&self, t: Ivl, y: [Ivl; 3]) -> Option<[[Ivl; 3]; 3]> {
@@ -519,6 +570,11 @@ impl Rib<'_, '_> {
                 v_add(v_scale(s(1, 0), ds), v_scale(s(0, 1), dc0)),
                 neg(v_add(v_scale(e.at(1, 0), dc1), v_scale(e.at(0, 1), dc2))),
             );
+            // (with a standoff F's derivative in t gains lambda' n)
+            let slope = match self.shift(t) {
+                Some([_, l1, _]) => v_add(slope, l1),
+                None => slope,
+            };
             Ok(Some(arr(v_add(V3 { x, y, z }, v_scale(slope, d)))))
         };
         let Some(j) = self.columns(Ivl::from(tm), mid.map(Ivl::from)) else {
@@ -546,6 +602,11 @@ impl Rib<'_, '_> {
         let at = Ivl::from(t);
         let [a, u, v] = y;
         let x = partials_over(self.end, u, v, 0)?.at(0, 0);
+        // the rib's point: the end surface's, or with a standoff that point less lambda n
+        let x = match self.shift(at) {
+            Some([l, ..]) => v_sub(x, l),
+            None => x,
+        };
         let [c3, cf, ce] = self.curves.each_ref().map(|c| {
             curve_derivs_over(c, at, 0, None)
                 .ok()
@@ -575,13 +636,24 @@ impl Rib<'_, '_> {
         let s = self.fillet_over(self.sigma(t).0, a, 2)?;
         let e = partials_over(self.end, u, v, 2)?;
         let cols = [s(0, 1), neg(e.at(1, 0)), neg(e.at(0, 1))];
-        // J y' = −S_sigma sigma'
-        let [a1, u1, v1] = solve_over(cols, neg(v_scale(s(1, 0), ds)))?;
+        let shift = self.shift(t);
+        // J y' = −S_sigma sigma' (with a standoff, less lambda' n)
+        let known = v_scale(s(1, 0), ds);
+        let known = match shift {
+            Some([_, l1, _]) => v_add(known, l1),
+            None => known,
+        };
+        let [a1, u1, v1] = solve_over(cols, neg(known))?;
         let two = Ivl::from(2.0);
         let s2 = v_add(
             v_add(v_scale(s(2, 0), ds * ds), v_scale(s(1, 1), two * ds * a1)),
             v_add(v_scale(s(0, 2), a1 * a1), v_scale(s(1, 0), dds)),
         );
+        // (with a standoff F's second derivative gains lambda'' n)
+        let s2 = match shift {
+            Some([_, _, l2]) => v_add(s2, l2),
+            None => s2,
+        };
         let e2 = v_add(
             v_add(
                 v_scale(e.at(2, 0), u1 * u1),
@@ -592,6 +664,11 @@ impl Rib<'_, '_> {
         // J y'' = −(the second derivative of F without its y'' terms)
         let [a2, u2, v2] = solve_over(cols, neg(v_sub(s2, e2)))?;
         let x2 = v_add(e2, v_add(v_scale(e.at(1, 0), u2), v_scale(e.at(0, 1), v2)));
+        // the rib's point is the end surface's less lambda n
+        let x2 = match shift {
+            Some([_, _, l2]) => v_sub(x2, l2),
+            None => x2,
+        };
         let [c3, cf, ce] = self.curves.each_ref().map(|c| {
             curve_derivs_over(c, t, 2, None)
                 .ok()
@@ -621,8 +698,18 @@ impl Rib<'_, '_> {
         let s = self.fillet_over(sigma, a, 1)?;
         let e = partials_over(self.end, u, v, 1)?;
         let cols = [s(0, 1), neg(e.at(1, 0)), neg(e.at(0, 1))];
-        let [a1, u1, v1] = solve_over(cols, neg(v_scale(s(1, 0), ds)))?;
+        let shift = self.shift(t);
+        let known = v_scale(s(1, 0), ds);
+        let known = match shift {
+            Some([_, l1, _]) => v_add(known, l1),
+            None => known,
+        };
+        let [a1, u1, v1] = solve_over(cols, neg(known))?;
         let x1 = v_add(v_scale(e.at(1, 0), u1), v_scale(e.at(0, 1), v1));
+        let x1 = match shift {
+            Some([_, l1, _]) => v_sub(x1, l1),
+            None => x1,
+        };
         let [c3, cf, ce] = self.curves.each_ref().map(|c| {
             curve_derivs_over(c, t, 1, None)
                 .ok()
@@ -849,6 +936,9 @@ impl Rib<'_, '_> {
         let n = [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
         let len = n.iter().map(|x| x * x).sum::<f64>().sqrt();
         let n = n.map(|x| x / len);
+        // (a standoff is along its own copy of this normal: the separation is taken along
+        // the same one, so that the rib's is lambda exactly)
+        let n = self.standoff.map_or(n, |s| [s.n.x, s.n.y, s.n.z]);
         n.iter().all(|x| x.is_finite()).then_some(Frame { p, n })
     }
 
@@ -952,6 +1042,11 @@ impl Rib<'_, '_> {
                 return Ok(false);
             }
             if let Some([lambda, ..]) = self.separation_over(f, s, a, start)? {
+                // the rib's separation is 0, or with a standoff lambda at its section
+                let lambda = match self.standoff_over(s) {
+                    Some(held) => lambda - held,
+                    None => lambda,
+                };
                 if lambda.lo > 0.0 || lambda.hi < 0.0 {
                     continue;
                 }
@@ -1072,7 +1167,12 @@ impl Rib<'_, '_> {
                     let e0 = partials_over(self.end, c0.x, c0.y, 0)?;
                     let e = partials_over(self.end, range.x, range.y, 1)?;
                     let d = v_add(v_scale(e.at(1, 0), d1.x), v_scale(e.at(0, 1), d1.y));
-                    (e0.at(0, 0), d)
+                    // with a standoff the image is the rib's foot on the end surface: less
+                    // lambda n it is the rib's point
+                    match (self.shift(at(0.0)), self.shift(t)) {
+                        (Some([l, ..]), Some([_, l1, _])) => (v_sub(e0.at(0, 0), l), v_sub(d, l1)),
+                        _ => (e0.at(0, 0), d),
+                    }
                 }
             });
         }

@@ -57,8 +57,16 @@ fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permi
     let written = {
         let mut f = options.open(path)?;
         // Unix: exactly the old mode (the umask may have narrowed it), through the open handle.
+        // A filesystem that refuses chmod (such as SMB/CIFS without unix extensions or a gvfs
+        // mount) returns EPERM (1) or ENOTSUP/EOPNOTSUPP: best-effort keeps the save working (#20552).
         #[cfg(unix)]
-        let kept = like.map_or(Ok(()), |p| f.set_permissions(p.clone()));
+        let kept = like.map_or(Ok(()), |p| match set_file_permissions(&f, p) {
+            Err(e) if refused_by_the_drive(&e) => {
+                log::debug!("ignoring permission copy refused by filesystem: {e}");
+                Ok(())
+            }
+            r => r,
+        });
         #[cfg(not(unix))]
         let kept = Ok(());
         let mut done = 0usize;
@@ -81,6 +89,15 @@ fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permi
         let _ = fs::remove_file(path);
     }
     written
+}
+
+#[cfg(unix)]
+fn set_file_permissions(f: &fs::File, p: &fs::Permissions) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::CHMOD_REFUSED.with(std::cell::Cell::get) {
+        return Err(std::io::Error::from_raw_os_error(1));
+    }
+    f.set_permissions(p.clone())
 }
 
 /// Flush a written file to the disk. On Apple systems `sync_all` asks the drive itself to flush
@@ -144,9 +161,23 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
 /// file is written. An error fails the save, which then replaces nothing.
 fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) -> std::io::Result<()> {
     match old {
-        Some(p) if cfg!(not(unix)) => fs::set_permissions(new, p.clone()),
+        Some(p) if cfg!(not(unix)) => match set_path_permissions(new, p) {
+            Err(e) if refused_by_the_drive(&e) => {
+                log::debug!("ignoring permission copy refused by filesystem: {e}");
+                Ok(())
+            }
+            r => r,
+        },
         _ => Ok(()),
     }
+}
+
+fn set_path_permissions(p: &Path, perms: &fs::Permissions) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::CHMOD_REFUSED.with(std::cell::Cell::get) {
+        return Err(std::io::Error::from_raw_os_error(1));
+    }
+    fs::set_permissions(p, perms.clone())
 }
 
 // Retrying only the already-synced atomic rename avoids rewriting a large image
@@ -312,6 +343,37 @@ fn remove_old_temps(path: &Path) {
     }
 }
 
+/// A save the file or its folder refuses: no permission to write there. It travels
+/// inside an `io::Error` of kind `PermissionDenied`, so a caller can tell it from any other
+/// failure and show its message as it is (it already names the file).
+#[derive(Debug)]
+pub struct WriteDenied {
+    path: PathBuf,
+}
+
+impl std::fmt::Display for WriteDenied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "can't write {}: it is read-only or you don't have permission", self.path.display())
+    }
+}
+
+impl std::error::Error for WriteDenied {}
+
+/// Whether `error` is a [`WriteDenied`].
+pub fn is_write_denied(error: &std::io::Error) -> bool {
+    error.get_ref().is_some_and(|inner| inner.is::<WriteDenied>())
+}
+
+/// The bare "Permission denied (os error 13)" of a refused save becomes a [`WriteDenied`] naming
+/// the file. A refusal already explained (the Windows one) and any other error stay as they are.
+fn explain_denied(error: std::io::Error, path: &Path) -> std::io::Error {
+    if error.kind() == std::io::ErrorKind::PermissionDenied && error.raw_os_error().is_some() {
+        log::debug!("save of {} refused: {error}", path.display());
+        return std::io::Error::new(std::io::ErrorKind::PermissionDenied, WriteDenied { path: path.to_path_buf() });
+    }
+    error
+}
+
 /// Write `bytes` to `path` atomically; with `backup`, the file being replaced is kept as
 /// `<path>.bak` first. A symbolic link at `path` is followed (the file it points to is replaced,
 /// the link stays), and the file keeps the permissions it had. The app's own folders (autosave,
@@ -323,7 +385,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<
         let _ = backup;
         return crate::vfs::write(&path.to_string_lossy(), bytes);
     }
-    write_steps(&resolve_links(path)?, bytes, backup, None)
+    resolve_links(path).and_then(|target| write_steps(&target, bytes, backup, None)).map_err(|e| explain_denied(e, path))
 }
 
 /// Write `bytes` to the file named `path` itself, atomically: a link at `path` is never followed,
@@ -464,6 +526,8 @@ mod tests {
         /// This thread's saves find hard links refused ([`link_backup`]), as on a FAT drive: the
         /// backup is copied, exactly as it is there.
         pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// This thread's permission sets fail with EPERM, as on an SMB or gvfs mount without unix extensions (#20552).
+        pub(super) static CHMOD_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
         /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
         /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
@@ -597,6 +661,33 @@ mod tests {
         assert!(!lock::changed_since(&design.to_string_lossy(), &known));
         std::fs::write(&design, b"written elsewhere").unwrap();
         assert!(lock::changed_since(&design.to_string_lossy(), &known));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A lock written on this computer by a process that has ended is ignored at once; one whose
+    /// process is still running, and one from another computer, still hold the design.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_from_a_process_that_has_ended_on_this_computer_is_ignored() {
+        use crate::design_lock as lock;
+        let d = dir("design-lock-dead-pid");
+        let design = d.join("Bracket.solidcraft");
+        std::fs::write(&design, b"one").unwrap();
+        let now = lock::now_secs();
+
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let held = lock::Lock { pid: child.id(), ..lock::Lock::mine(now) };
+        lock::write(&design, &held).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some(), "a running process holds it");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(lock::held_elsewhere(&design, now).is_none(), "an ended process no longer does");
+        // The same pid on another computer says nothing about that computer's process.
+        lock::write(&design, &lock::Lock { host: "WORKSHOP-PC".into(), ..held.clone() }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some());
+        // Nor does another user's: their processes may be hidden from this one.
+        lock::write(&design, &lock::Lock { user: "someone-else".into(), ..held }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some(), "another user's process may be hidden");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1159,6 +1250,63 @@ mod tests {
             write_atomic(&d.join("l"), b"two", true).unwrap();
             assert_eq!(mode(&target), 0o600);
             assert_eq!(mode(&backup_path(&target)), 0o600);
+            let _ = fs::remove_dir_all(&d);
+        }
+
+        /// When saving over an existing design on a filesystem that refuses chmod
+        /// (such as SMB/CIFS without unix extensions or a gvfs mount, returning EPERM or
+        /// ENOTSUP), the save succeeds and writes the file rather than failing (#20552).
+        #[test]
+        fn a_save_succeeds_where_the_filesystem_refuses_chmod() -> std::io::Result<()> {
+            CHMOD_REFUSED.with(|r| r.set(true));
+            let d = dir("chmod-refused");
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"one", false)?;
+            let result = write_atomic(&p, b"two", true);
+            CHMOD_REFUSED.with(|r| r.set(false));
+            assert!(result.is_ok(), "save failed: {result:?}");
+            assert_eq!(fs::read(&p)?, b"two");
+            let _ = fs::remove_dir_all(&d);
+            Ok(())
+        }
+
+        /// A folder that refuses new files gives a typed error naming the file, for a file already
+        /// there and for a new one, where the OS said only "Permission denied (os error 13)".
+        #[test]
+        fn a_save_into_a_folder_that_refuses_it_says_so() {
+            let d = dir("read-only-folder");
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"old", false).unwrap();
+            fs::set_permissions(&d, fs::Permissions::from_mode(0o555)).unwrap();
+            // Someone who may write anywhere (root) cannot be refused, so there is nothing to test.
+            if fs::File::create(d.join("probe")).is_ok() {
+                fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+                let _ = fs::remove_dir_all(&d);
+                return;
+            }
+            for target in [p.clone(), d.join("new.solidcraft")] {
+                let e = write_atomic(&target, b"new", false).unwrap_err();
+                assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+                assert!(is_write_denied(&e), "{e}");
+                assert!(e.to_string().contains(&*target.to_string_lossy()), "{e}");
+            }
+            assert_eq!(fs::read(&p).unwrap(), b"old");
+            fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+            let _ = fs::remove_dir_all(&d);
+        }
+
+        /// Other failures keep their own kind, and a read-only file is still replaced as before.
+        #[test]
+        fn other_failures_are_not_called_permission_errors() {
+            let d = dir("not-denied");
+            let e = write_atomic(&d.join("missing").join("a.solidcraft"), b"x", false).unwrap_err();
+            assert!(!is_write_denied(&e), "{e}");
+            assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"old", false).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o444)).unwrap();
+            write_atomic(&p, b"new", false).unwrap();
+            assert_eq!(fs::read(&p).unwrap(), b"new");
             let _ = fs::remove_dir_all(&d);
         }
     }

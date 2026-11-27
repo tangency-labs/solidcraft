@@ -109,8 +109,13 @@ impl JsonSchema for SelectionItem {
 /// What `selection.get` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SelectionGetResult {
-    /// How many items are selected.
+    /// How many things are selected. A whole-body selection (see [`all_bodies`]) counts every
+    /// shown body although [`items`] is empty.
     pub count: usize,
+    /// Every shown body is selected, by scope rather than by name: [`items`] names no bodies.
+    /// Left out when false, so an ordinary selection reads as it always did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all_bodies: bool,
     /// The selected items, in order.
     pub items: Vec<SelectionItem>,
     /// With `detail`, when more than this many items are selected: how many were resolved.

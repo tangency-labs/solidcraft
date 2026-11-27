@@ -1,3 +1,11 @@
+#[test]
+fn secondary_alignment_panel_is_available_for_joint_creation() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let dialog = app.dialog.as_ref().expect("joint creation dialog");
+    assert_eq!(dialog.inputs.len(), 4, "two primary origins and two optional secondary alignments");
+}
+
 use serde_json::json;
 use solidcraft_engine::Session;
 
@@ -5,11 +13,1128 @@ use super::*;
 use crate::Services;
 use crate::dialogs::{apply_commands, edge_sel, face_sel, preview_commands};
 
+#[test]
+fn coderabbit_review_alignment_accepts_circular_edges_without_a_cylindrical_wall() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("solid.cone", json!({"radius":5,"top_radius":2,"height":10,"base":[40,10,20],"operation":"new"})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let state = app.session.model.state();
+    let body = state.body("Body3").unwrap();
+    let record = body.body.record();
+    let index = record
+        .edges
+        .iter()
+        .position(|edge| {
+            matches!(edge.curve, solidcore_record::brep::Curve::Circle { .. })
+                && edge.uses.iter().all(|u| {
+                    !matches!(
+                        solidcraft_engine::kernel::face_surface(&body.body, u.face as usize),
+                        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                    )
+                })
+        })
+        .expect("the cone has an exact circular edge without a cylindrical wall");
+    let point = body.mesh().edges[index][0];
+    let edge = Sel::Edge { body: "Body3".into(), index, point };
+    let reference = alignment_pick(&app.session, &edge, true).expect("an exact circular edge remains selectable without a cylinder");
+    assert_eq!(reference["reference"]["type"], "edge");
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(50.0, 10.0, 5.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+    dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+    assert!(alignment_accepts(&app.session, &dialog, &edge));
+    dialog.pick(&app.session, edge);
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+}
+
+#[test]
+fn coderabbit_review_alignment_resolves_component_origin_datums_and_rejects_nested_paths() {
+    let mut app = two_boxes();
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+    for (selection, kind, field, item) in [
+        (Sel::Axis { name: format!("o:{occurrence}/origin/X") }, "origin_axis", "axis", "X"),
+        (Sel::Plane { name: format!("o:{occurrence}/origin/YZ") }, "origin_plane", "plane", "YZ"),
+    ] {
+        let reference =
+            alignment_pick(&app.session, &selection, false).expect("a top-level component origin datum is a persistent alignment reference");
+        assert_eq!(reference["occurrence"], occurrence);
+        assert_eq!(reference["reference"]["type"], kind);
+        assert_eq!(reference["reference"][field], item);
+        app.start("joint.create");
+        let mut dialog = app.dialog.take().unwrap();
+        for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+            dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+        }
+        let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+        dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+        assert!(alignment_accepts(&app.session, &dialog, &selection));
+        dialog.pick(&app.session, selection);
+        let commands = apply_commands(&app, &dialog).unwrap();
+        assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], kind);
+        assert_eq!(commands[0].1["b_alignment"]["occurrence"], occurrence);
+        app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    }
+    let parent = app.session.doc.occurrences.iter().find(|o| o.name == "A:1").unwrap().id;
+    for selection in
+        [Sel::Axis { name: format!("o:{parent}/{occurrence}/origin/X") }, Sel::Plane { name: format!("o:{parent}/{occurrence}/origin/YZ") }]
+    {
+        assert!(alignment_pick(&app.session, &selection, false).is_err(), "nested datums remain outside the supported scope");
+    }
+    assert_eq!(alignment_pick(&app.session, &Sel::Axis { name: "X".into() }, false).unwrap()["occurrence"], 0);
+    assert_eq!(alignment_pick(&app.session, &Sel::Plane { name: "YZ".into() }, false).unwrap()["occurrence"], 0);
+}
+
+#[test]
+fn coderabbit_review_no_cylinder_circle_marker_uses_edge_axis() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("solid.cone", json!({"radius":5,"top_radius":2,"height":10,"base":[40,15,20],"operation":"new"})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let state = app.session.model.state();
+    let body = state.body("Body3").unwrap();
+    let record = body.body.record();
+    let index = record
+        .edges
+        .iter()
+        .position(|edge| {
+            matches!(edge.curve, solidcore_record::brep::Curve::Circle { .. })
+                && edge.uses.iter().all(|u| {
+                    !matches!(
+                        solidcraft_engine::kernel::face_surface(&body.body, u.face as usize),
+                        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                    )
+                })
+        })
+        .expect("the cone has an exact circular edge without a cylindrical wall");
+    let point = body.mesh().edges[index][0];
+    let edge = Sel::Edge { body: "Body3".into(), index, point };
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(50.0, 10.0, 5.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+    dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+    assert!(alignment_accepts(&app.session, &dialog, &edge));
+    let mut confirmed = dialog.clone();
+    confirmed.pick(&app.session, edge);
+    let commands = apply_commands(&app, &confirmed).unwrap();
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    app.dialog = Some(dialog);
+    let marker = review_alignment_marker(&mut app, crate::viewport::Hit::Edge { body: "Body3".into(), index, mid: point, point })
+        .expect("the accepted circular edge has graphical feedback");
+    assert!(marker.z.x.abs() < 1e-6, "the cone's edge axis is along Z: {:?}", marker.z);
+    assert!(marker.z.y.abs() < 1e-6, "the marker must not point toward the displaced circle centre: {:?}", marker.z);
+    assert!((marker.z.z.abs() - 1.0).abs() < 1e-6, "the cone's edge axis is along Z: {:?}", marker.z);
+}
+
+#[test]
+fn coderabbit_review_alignment_hover_cache_tracks_rollback() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let pointer = egui::pos2(700.0, 400.0);
+    let first = Some((
+        crate::viewport::Hit::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO }),
+    ));
+    let authored = Some((
+        crate::viewport::Hit::Face { body: "Body1".into(), index: 4, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body1".into(), index: 4, point: Vec3::ZERO }),
+    ));
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), first.clone()), first);
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None),
+        first,
+        "the unchanged pose keeps the stable candidate"
+    );
+    h.app.preview.rolled_back = true;
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), authored.clone()),
+        authored,
+        "rollback must discard the candidate from the preview pose"
+    );
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None), authored);
+    h.app.preview.rolled_back = false;
+    assert!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None).is_none(),
+        "returning to the preview must discard an authored-pose candidate"
+    );
+}
+
+#[test]
+fn secondary_alignment_edit_primary_replacement_uses_the_new_occurrence() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    app.run("component.create", json!({"name":"C"})).unwrap();
+    app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[80,0,0]})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let mut edit = edit_joint(&app, id).unwrap();
+    assert_eq!(edit.inputs.len(), 4);
+    assert!(alignment_side(&edit.kind, 0).is_none(), "primary rows stay primary while editing");
+    let a = edit.inputs[0].items.clone();
+    edit.active = 1;
+    edit.pick(&app.session, face_sel(&app.session, Vec3::new(90.0, 10.0, 0.0)).unwrap());
+    assert_eq!(edit.inputs[0].items, a);
+    edit.active = 2;
+    let candidate = face_sel(&app.session, Vec3::new(90.0, 20.0, 5.0)).unwrap();
+    assert!(alignment_accepts(&app.session, &edit, &candidate));
+    edit.pick(&app.session, candidate);
+    let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
+    assert_eq!(params["b"]["occurrence"], params["b_alignment"]["occurrence"]);
+    app.run("joint.edit", params).unwrap();
+    let joint = &app.session.doc.assembly.joints[0];
+    assert_ne!(joint.a.occurrence, joint.b.occurrence);
+}
+
+#[test]
+fn secondary_alignment_edit_woken_face_point_maps_back_from_the_preview() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let Sel::Face { body, index, point } = face_sel(&app.session, Vec3::new(10.0, 10.0, 20.0)).unwrap() else { panic!() };
+    app.dialog = edit_joint(&app, id);
+    if let Kind::Assembly(Asm::Joint(f)) = &mut app.dialog.as_mut().unwrap().kind {
+        f.angle = "27 deg".into();
+        f.flip = true;
+    }
+    settle_alignment_update(&mut app, &egui::Context::default());
+    let interaction = app.preview.interaction.as_ref().unwrap();
+    let back = interaction.to_document[&body];
+    let shown = solidcraft_engine::doc::mat_inverse(&back).unwrap();
+    let face = Sel::Face { body: body.clone(), index, point: solidcraft_engine::doc::apply_point(&shown, point) };
+    let mut scratch = app.session.scratch();
+    scratch.doc = interaction.document.clone();
+    let (snap, source) = solidcraft_engine::snap::snap_points_from(&scratch, &face)
+        .into_iter()
+        .find(|(p, from)| p.kind == solidcraft_engine::snap::SnapKind::End && from.face.is_some())
+        .unwrap();
+    let expected = solidcraft_engine::doc::apply_point(&back, snap.at);
+    assert!(expected.dist(snap.at) > 1e-3, "the preview actually moves the selected point");
+    app.viewport.woken.item = Some(face);
+    app.dialog.as_mut().unwrap().active = 1;
+    let hit = crate::viewport::Hit::Vertex { body: body.clone(), point: snap.at };
+    crate::viewport::dialog_pick(&mut app, &hit, Sel::Vertex { body, point: snap.at });
+    let dialog = app.dialog.as_ref().unwrap();
+    let Sel::Vertex { point, .. } = dialog.inputs[1].items[0] else { panic!() };
+    assert!(point.dist(expected) < 1e-6, "primary picks are authored in the document pose while editing");
+    let (_, _, from) = dialog.inputs[1].from_face.first().expect("preserve the face, corner and edge association");
+    assert!(from.face.unwrap().dist(solidcraft_engine::doc::apply_point(&back, source.face.unwrap())) < 1e-6);
+    assert!(from.edge.unwrap().dist(solidcraft_engine::doc::apply_point(&back, source.edge.unwrap())) < 1e-6);
+}
+
 /// Components A (grounded) and B: a 20 x 20 x 10 box each, B 30 mm along X.
 fn two_boxes() -> SolveApp {
     let mut s = Session::default();
     crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| s.execute(id, &p).unwrap());
     SolveApp::new(s, Services::default())
+}
+
+fn round_plates() -> SolveApp {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 150)] {
+        s.execute("component.activate", &json!({"component":"root"})).unwrap();
+        s.execute("component.create", &json!({"name":name})).unwrap();
+        s.execute("solid.box", &json!({"length":100,"width":80,"height":10,"corner":[x,0,0]})).unwrap();
+        for (a, b) in [(20, 20), (80, 20), (20, 60), (80, 60)] {
+            s.execute("solid.hole", &json!({"position":[x+a,b,10],"diameter":6})).unwrap();
+        }
+    }
+    s.execute("component.activate", &json!({"component":"root"})).unwrap();
+    s.execute("occurrence.ground", &json!({"occurrence":"A:1","grounded":true})).unwrap();
+    SolveApp::new(s, Services::default())
+}
+
+fn rim(s: &Session, body: &str, center: Vec3) -> (crate::viewport::Hit, Sel) {
+    let st = s.world_state().unwrap();
+    let b = st.body(body).unwrap();
+    let mesh = b.mesh();
+    let index = mesh.edges.iter().position(|e| circle_of(e).is_some_and(|(c, _)| c.dist(center) < 1e-6)).unwrap();
+    let point = mesh.edges[index][0];
+    (crate::viewport::Hit::Edge { body: body.into(), index, mid: point, point }, Sel::Edge { body: body.into(), index, point })
+}
+
+#[test]
+fn secondary_alignment_hover_option_is_available_in_joint_and_resets_on_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let before = h.app.session.doc.to_json();
+    h.app.start("joint.create");
+    h.frames(3);
+    let enabled = |app: &SolveApp| {
+        let Kind::Assembly(Asm::Joint(form)) = &app.dialog.as_ref().unwrap().kind else { panic!("expected a Joint dialog") };
+        form.preview_alignment_on_hover
+    };
+    let click = json!({"click":{"handle":"dialog:dialog.preview_alignment_on_hover"}});
+    assert!(enabled(&h.app));
+    h.step(&click).unwrap();
+    assert!(!enabled(&h.app));
+    h.step(&click).unwrap();
+    assert!(enabled(&h.app));
+    h.step(&click).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    h.app.start("joint.create");
+    assert!(enabled(&h.app));
+    assert!(serde_json::to_value(&h.app.preferences).unwrap().get("joint_auto_alignment").is_none());
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.session.undo.is_empty());
+}
+
+#[test]
+fn secondary_alignment_hover_option_disables_automatic_rim_alignment_but_keeps_explicit_picks() {
+    let mut app = round_plates();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let (_, moving) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    d.pick(&app.session, moving);
+    let ctx = egui::Context::default();
+    app.dialog = Some(d.clone());
+    settle_alignment_update(&mut app, &ctx);
+    let confirmed_pose = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    // Current main's default round frame may already match a particular counterpart.
+    // Choose a different valid counterpart so this test measures an actual transient change.
+    let alternatives: Vec<_> = [Vec3::new(80.0, 20.0, 10.0), Vec3::new(20.0, 60.0, 10.0), Vec3::new(80.0, 60.0, 10.0)]
+        .into_iter()
+        .map(|p| rim(&app.session, "Body1", p))
+        .collect();
+    let (hit, fixed) = alternatives
+        .into_iter()
+        .find(|(hit, _)| {
+            app.viewport.hover = Some(hit.clone());
+            alignment_hover_commands(&app, app.dialog.as_ref().unwrap())
+                .and_then(|commands| world_preview(&app.session, &commands, Colors::from_tokens(&Tokens::get())))
+                .and_then(Result::ok)
+                .and_then(|b| b.interaction)
+                .is_some_and(|i| i.to_document["Body2"] != confirmed_pose)
+        })
+        .expect("a counterpart that turns the part");
+    app.viewport.hover = Some(hit);
+    settle_alignment_update(&mut app, &ctx);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], confirmed_pose);
+    let before = apply_commands(&app, &d).unwrap();
+    let doc = app.session.doc.clone();
+    assert!(alignment_hover_commands(&app, &d).is_some());
+    let Kind::Assembly(Asm::Joint(form)) = &mut d.kind else { panic!("expected a Joint dialog") };
+    form.preview_alignment_on_hover = false;
+    app.dialog = Some(d.clone());
+    assert!(alignment_hover_commands(&app, &d).is_none());
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], confirmed_pose);
+    assert_eq!(apply_commands(&app, &d).unwrap(), before);
+    assert!(d.inputs[3].items.is_empty());
+    d.pick(&app.session, fixed);
+    let confirmed = apply_commands(&app, &d).unwrap();
+    assert_eq!(confirmed[0].1["a_alignment"]["reference"]["type"], "circle_center");
+    app.session.scratch().execute(&confirmed[0].0, &confirmed[0].1).unwrap();
+    assert_eq!(app.session.doc, doc);
+}
+
+#[test]
+fn secondary_alignment_primary_pick_preference_defaults_off_and_persists_transactions() {
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(serde_json::to_value(old).unwrap()["joint_moving_first"], false);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"open":"Design"}));
+    h.app.prefs_window.shell.filter = "selection order".into();
+    h.frames(5);
+    crate::prefs::reveal_preference(&mut h, "prefs:joint_moving_first");
+    h.step(&json!({"click":{"handle":"prefs:joint_moving_first"}})).unwrap();
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], true);
+    let mut restored = SolveApp::new(Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert_eq!(serde_json::to_value(&restored.preferences).unwrap()["joint_moving_first"], false);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], false);
+    h.call("ui.prefs", json!({"open":"Design","joint_moving_first":true}));
+    h.call("ui.prefs", json!({"button":"apply"}));
+    restored.load_prefs(&h.app.prefs());
+    assert_eq!(serde_json::to_value(&restored.preferences).unwrap()["joint_moving_first"], true);
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], false);
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_moving_first"], true);
+}
+
+#[test]
+fn secondary_alignment_primary_pick_preference_normalizes_both_sequences_and_snapshots_the_dialog() {
+    for moving_first in [false, true] {
+        let mut app = round_plates();
+        let mut settings = serde_json::to_value(&app.preferences).unwrap();
+        settings["joint_moving_first"] = json!(moving_first);
+        app.preferences = serde_json::from_value(settings).unwrap();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        assert_eq!(d.inputs[0].label, "Component 1");
+        assert_eq!(d.inputs[1].label, "Component 2");
+        let (_, a) = rim(&app.session, "Body1", Vec3::new(20.0, 20.0, 10.0));
+        let (_, b) = rim(&app.session, "Body2", Vec3::new(170.0, 20.0, 0.0));
+        let picks = if moving_first { [b, a] } else { [a, b] };
+        d.pick(&app.session, picks[0].clone());
+        assert_eq!(d.active, 1);
+        let mut settings = serde_json::to_value(&app.preferences).unwrap();
+        settings["joint_moving_first"] = json!(!moving_first);
+        app.preferences = serde_json::from_value(settings).unwrap();
+        d.pick(&app.session, picks[1].clone());
+        assert_eq!(d.active, 2);
+        let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+        assert_eq!(p["a"]["occurrence"], occ(&app, "A"));
+        assert_eq!(p["b"]["occurrence"], occ(&app, "B"));
+        let (_, moving) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        d.pick(&app.session, moving);
+        let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+        assert!(p["b_alignment"]["reference"]["name"].is_string());
+        crate::dialogs::run_dialog(&mut app, &d).unwrap();
+        let before = app.session.doc.clone();
+        let edit = edit_joint(&app, before.assembly.joints[0].id).unwrap();
+        let commands = apply_commands(&app, &edit).unwrap();
+        let mut scratch = app.session.scratch();
+        scratch.execute(&commands[0].0, &commands[0].1).unwrap();
+        assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
+    }
+}
+
+#[test]
+fn secondary_alignment_primary_hole_rim_clicks_persist_round_origins_before_alignment() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let (_, a) = rim(&app.session, "Body1", Vec3::new(20.0, 20.0, 10.0));
+        let (_, b) = rim(&app.session, "Body2", Vec3::new(170.0, 20.0, 0.0));
+        let picks = if reverse { [b, a] } else { [a, b] };
+        for pick in picks {
+            d.pick(&app.session, pick);
+        }
+        let commands = apply_commands(&app, &d).unwrap();
+        let mut base = app.session.scratch();
+        base.execute(&commands[0].0, &commands[0].1).unwrap();
+        let before = format!("{:?}", base.doc.assembly.joints[0]);
+        let primary_picks = [d.inputs[0].items.clone(), d.inputs[1].items.clone()];
+        let (_, moving) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        d.pick(&app.session, moving);
+        assert_eq!([d.inputs[0].items.clone(), d.inputs[1].items.clone()], primary_picks, "a secondary click must not replace either primary pick");
+        let commands = apply_commands(&app, &d).unwrap();
+        let mut preview = app.session.scratch();
+        let result = preview.execute(&commands[0].0, &commands[0].1);
+        assert!(result.is_ok(), "primary rim origins: {before}; alignment: {result:?}");
+        let joint = &preview.doc.assembly.joints[0];
+        for origin in [&joint.a, &joint.b] {
+            assert!(matches!(&origin.snap, solidcraft_engine::doc::joints::Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{origin:?}");
+        }
+        let moving_side = usize::from(!reverse);
+        assert_eq!(alignment_side(&d.kind, 2), Some(moving_side));
+        assert!(commands[0].1[if reverse { "a" } else { "b" }].get("circle").is_some(), "the persisted round identity above is authoritative");
+    }
+}
+
+#[test]
+fn secondary_alignment_nonround_primary_edge_disables_alignment_before_secondary_picking() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    let st = app.session.world_state().unwrap();
+    let mesh = st.body("Body1").unwrap().mesh();
+    let index = mesh.edges.iter().position(|e| circle_of(e).is_none()).unwrap();
+    let point = mesh.edges[index][0];
+    d.pick(&app.session, Sel::Edge { body: "Body1".into(), index, point });
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let base = apply_commands(&app, &d).unwrap();
+    app.session.scratch().execute(&base[0].0, &base[0].1).unwrap();
+    assert!(!alignment_input_available(&d, 2));
+    assert!(!alignment_input_available(&d, 3));
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!() };
+    assert!(f.alignment_origin_problem.is_some(), "explain the limitation before the first secondary pick");
+    d.active = 2;
+    let secondary = face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap();
+    assert!(!alignment_accepts(&app.session, &d, &secondary));
+    d.pick(&app.session, secondary);
+    assert!(d.inputs[2].items.is_empty());
+}
+
+#[test]
+fn secondary_alignment_round_origins_start_with_the_actual_moving_occurrence_in_either_pick_order() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let mut picks = [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)];
+        if reverse {
+            picks.reverse();
+        }
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        assert_eq!(alignment_side(&d.kind, 2), Some(if reverse { 0 } else { 1 }));
+        let (moving, _) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+        let (fixed, _) = rim(&app.session, "Body1", Vec3::new(80.0, 20.0, 10.0));
+        assert!(d.candidate(&app.session, &moving).is_some());
+        assert!(d.candidate(&app.session, &fixed).is_none());
+        assert!(!alignment_input_available(&d, 3), "the fixed component is second");
+        app.dialog = Some(d.clone());
+        app.viewport.hover = Some(moving);
+        assert!(alignment_hover_commands(&app, &d).is_none(), "no confirmed alignment: highlight only");
+    }
+}
+
+#[test]
+fn secondary_alignment_order_uses_measured_preview_motion_without_an_explicit_ground() {
+    for reverse in [false, true] {
+        let mut app = round_plates();
+        app.run("occurrence.ground", json!({"occurrence":"A:1","grounded":false})).unwrap();
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        let mut picks = [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)];
+        if reverse {
+            picks.reverse();
+        }
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        app.dialog = Some(d);
+        settle_alignment_update(&mut app, &egui::Context::default());
+        let view = app.preview.interaction.as_ref().unwrap();
+        let a = !solidcraft_engine::doc::is_identity(&view.to_document["Body1"]);
+        let b = !solidcraft_engine::doc::is_identity(&view.to_document["Body2"]);
+        assert_ne!(a, b, "this fixture has exactly one actual moving body");
+        let expected = if a { usize::from(reverse) } else { usize::from(!reverse) };
+        let d = app.dialog.as_ref().unwrap();
+        assert_eq!(alignment_side(&d.kind, 2), Some(expected));
+        assert!(alignment_input_available(d, 2));
+        let d = app.dialog.take().unwrap();
+        crate::dialogs::run_dialog(&mut app, &d).unwrap();
+        app.dialog = edit_joint(&app, app.session.doc.assembly.joints[0].id);
+        settle_alignment_update(&mut app, &egui::Context::default());
+        let edit = app.dialog.as_ref().unwrap();
+        assert_eq!(alignment_side(&edit.kind, 2), Some(expected));
+        assert!(alignment_input_available(edit, 0), "an already solved floating joint reuses the solver's actual fixed root");
+    }
+}
+
+#[test]
+fn secondary_alignment_round_origins_zero_then_one_confirmed_hover_leave_and_click() {
+    let mut app = round_plates();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let (moving, sel) = rim(&app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let zero = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    app.viewport.hover = Some(moving.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], zero);
+    assert!(app.dialog.as_ref().unwrap().inputs[2].items.is_empty());
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, sel);
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert_eq!(params["b_alignment"]["reference"]["type"], "circle_center");
+    assert!(params.get("a_alignment").is_none());
+    app.dialog = Some(d);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    let authored = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    let doc = app.session.doc.clone();
+    let candidates: Vec<_> = [Vec3::new(80.0, 20.0, 10.0), Vec3::new(20.0, 60.0, 10.0)].into_iter().map(|p| rim(&app.session, "Body1", p)).collect();
+    let (hit, sel) = candidates
+        .into_iter()
+        .find(|(hit, _)| {
+            app.viewport.hover = Some(hit.clone());
+            alignment_hover_commands(&app, app.dialog.as_ref().unwrap())
+                .and_then(|c| world_preview(&app.session, &c, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get())))
+                .and_then(Result::ok)
+                .and_then(|b| b.interaction)
+                .is_some_and(|i| i.to_document["Body2"] != authored)
+        })
+        .unwrap();
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.dialog.as_ref().unwrap().inputs[3].items.is_empty());
+    assert_eq!(app.session.doc, doc);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    crate::viewport::dialog_pick(&mut app, &hit, sel);
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.dialog.as_ref().unwrap().inputs[3].items.len(), 1);
+    assert_eq!(app.session.doc, doc);
+    let d = app.dialog.take().unwrap();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let edit = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
+    assert_eq!(alignment_side(&edit.kind, 2), Some(1));
+    assert_eq!(stored_alignment(&edit.kind, 2).unwrap()["reference"]["type"], "circle_center");
+}
+
+#[test]
+fn secondary_alignment_circle_centers_are_automatic_without_technical_mode_widgets() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = round_plates();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let (hit, _) = rim(&h.app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    assert!(h.step(&json!({"click":{"handle":"dialog:circle-axis:1"}})).is_err(), "Axis mode must not be offered");
+    assert!(h.step(&json!({"click":{"handle":"dialog:circle-center:1"}})).is_err(), "Center is automatic, not a mode control");
+    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &hit).is_some());
+    let (same, _) = rim(&h.app.session, "Body2", Vec3::new(170.0, 20.0, 10.0));
+    assert!(h.app.dialog.as_ref().unwrap().candidate(&h.app.session, &same).is_none(), "coincident center cannot define clocking");
+}
+
+#[test]
+fn secondary_alignment_cylinder_face_keeps_directional_reference_compatibility() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"A"})).unwrap();
+    app.run("parameters.change", json!({"name":"holeDiameter","expression":"6 mm"})).unwrap();
+    app.run("solid.hole", json!({"position":[10,10,10],"diameter":"holeDiameter"})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(30.0, 10.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
+    d.active = 3;
+    let Sel::Face { body, index, point } = face_sel(&app.session, Vec3::new(13.0, 10.0, 9.0)).unwrap() else { panic!() };
+    let hit = crate::viewport::Hit::Face { body, index, point };
+    let sel = d.candidate(&app.session, &hit).unwrap();
+    let snap = snap_of(&app.session, &sel).unwrap();
+    assert_eq!(snap.kind, SnapKind::CircleCenter);
+    assert!(snap.at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6);
+    d.pick(&app.session, sel);
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["a_alignment"]["reference"]["type"], "cylinder");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    app.run("parameters.change", json!({"name":"holeDiameter","expression":"8 mm"})).unwrap();
+    let saved = serde_json::to_value(&*app.session.doc).unwrap();
+    let loaded: solidcraft_engine::doc::Document = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded.assembly.joints, app.session.doc.assembly.joints);
+    let edit = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
+    assert_eq!(stored_alignment(&edit.kind, 3).unwrap()["reference"]["type"], "cylinder");
+}
+
+#[test]
+fn secondary_alignment_wrong_occurrence_hover_and_click_are_ignored() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    d.active = 2;
+    let before = apply_commands(&app, &d).unwrap();
+    let wrong = face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap();
+    let Sel::Face { body, index, point } = &wrong else { panic!() };
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
+    assert!(d.candidate(&app.session, &hit).is_none());
+    d.pick(&app.session, wrong);
+    assert_eq!(apply_commands(&app, &d).unwrap(), before);
+    app.dialog = Some(d.clone());
+    app.viewport.hover = Some(hit);
+    assert!(alignment_hover_commands(&app, &d).is_none());
+    app.session.scratch().execute(&before[0].0, &before[0].1).unwrap();
+    // Same definition, different occurrence is still the wrong path.
+    app.run("occurrence.copy", json!({"component":app.session.doc.find_component("B").unwrap(),"translate":[70,0,0]})).unwrap();
+    let wrong = face_sel(&app.session, Vec3::new(120.0, 10.0, 5.0)).unwrap();
+    let saved = d.inputs[2].items.clone();
+    d.pick(&app.session, wrong);
+    assert_eq!(d.inputs[2].items, saved);
+}
+
+#[test]
+fn secondary_alignment_filter_covers_construction_sketch_and_nested_occurrences() {
+    let mut app = two_boxes();
+    let mut features = Vec::new();
+    let mut curves = Vec::new();
+    for component in ["A", "B"] {
+        app.run("component.activate", json!({"component":component})).unwrap();
+        app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,1,0]},"name":format!("{component}Axis")})).unwrap();
+        app.run(
+            "construct.plane.three_points",
+            json!({"a":{"point":[0,0,0]},"b":{"point":[0,1,0]},"c":{"point":[0,0,1]},"name":format!("{component}Plane")}),
+        )
+        .unwrap();
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        features.push(app.session.active_sketch.unwrap());
+        app.run("sketch.line", json!({"points":[[0,0],[0,10]]})).unwrap();
+        let sketch = *features.last().unwrap();
+        curves.push(app.session.model.state().sketch(sketch).unwrap().sketch.curves[0].id.clone());
+        app.run("sketch.finish", json!({})).unwrap();
+    }
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
+    for (side, good, bad) in [(2, "B", "A"), (3, "A", "B")] {
+        d.active = side;
+        for sel in [
+            Sel::Axis { name: format!("{good}Axis") },
+            Sel::Plane { name: format!("{good}Plane") },
+            Sel::ExternalSketchCurve { sketch: features[3 - side], id: curves[3 - side].clone() },
+        ] {
+            assert!(
+                alignment_accepts(&app.session, &d, &sel),
+                "side {side}, selection {sel:?}, form {:?}, owner {:?}, frame {:?}, projection {}",
+                d.kind,
+                alignment_occurrence(&app.session, &sel),
+                primary_alignment_frame(&app.session, &d, 3 - side),
+                alignment_projection_valid(&app.session, &d, &sel, 3 - side)
+            );
+        }
+        for sel in [
+            Sel::Axis { name: format!("{bad}Axis") },
+            Sel::Plane { name: format!("{bad}Plane") },
+            Sel::ExternalSketchCurve { sketch: features[side - 2], id: curves[side - 2].clone() },
+            Sel::Axis { name: "X".into() },
+        ] {
+            assert!(!alignment_accepts(&app.session, &d, &sel));
+        }
+    }
+    d.active = 2;
+    let a = occ(&app, "A");
+    let b = occ(&app, "B");
+    app.session.doc_mut().occurrences.iter_mut().find(|o| o.id == b).unwrap().parent = a;
+    assert!(!alignment_accepts(&app.session, &d, &Sel::Axis { name: "BAxis".into() }));
+}
+
+fn settle_alignment_preview(h: &mut crate::scenario::Harness) {
+    h.frames(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.app.preview.busy {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        h.frame();
+    }
+}
+
+#[test]
+fn secondary_alignment_feedback_picks_the_solved_geometry() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    settle_alignment_preview(&mut h);
+    assert!(h.app.preview.active);
+    h.call("ui.view", json!({"view":"top"}));
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = proj.to_screen(Vec3::new(10.0, 10.0, 20.0)).unwrap();
+    let hits = crate::viewport::pick_all(&h.app, &proj, at);
+    assert!(
+        hits.iter().any(|hit| matches!(hit, crate::viewport::Hit::Face {body, ..} if body == "Body2")),
+        "the moved part must be pickable at its solved pose: {hits:?}"
+    );
+    h.app.set_origin_shown(false);
+    h.app.viewport.hover = hits.into_iter().find(|hit| matches!(hit, crate::viewport::Hit::Face { body, .. } if body == "Body2"));
+    let lit = crate::viewport::build_highlight(&h.app).merged();
+    assert!(!lit.tris.is_empty(), "the picked face must also be highlighted");
+    for vertex in lit.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
+        let x = f32::from_le_bytes(vertex[..4].try_into().unwrap());
+        assert!((-0.01..=20.01).contains(&x), "feedback must follow the solved pose, not Body2's original x=30..50: {x}");
+    }
+    assert!(h.app.session.doc.assembly.joints.is_empty());
+}
+
+#[test]
+fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    settle_alignment_preview(&mut h);
+    let key = h.app.preview.key;
+    let invalid = face_sel(&h.app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap();
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, invalid);
+    settle_alignment_preview(&mut h);
+    assert!(h.app.preview.active, "an invalid/partial secondary pick must not return the part to its original pose");
+    assert_eq!(h.app.preview.key, key);
+    assert!(h.app.preview.error.is_none(), "a rejected candidate cannot create an authored error");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[2].items.is_empty());
+    assert!(h.app.session.doc.assembly.joints.is_empty());
+}
+
+#[test]
+fn secondary_alignment_preview_toggle_clears_and_restores_pickable_pose() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.active && app.preview.interaction.is_some());
+    let doc = app.session.doc.clone();
+    app.dialog.as_mut().unwrap().preview_enabled = false;
+    crate::preview::update(&mut app, &ctx);
+    assert!(!app.preview.active, "the upstream preview toggle must hide the retained joint pose");
+    assert!(app.preview.interaction.is_none(), "disabled preview must stop picking solved geometry");
+    app.dialog.as_mut().unwrap().preview_enabled = true;
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.active && app.preview.interaction.is_some());
+    assert_eq!(app.session.doc, doc);
+}
+
+fn settle_alignment_update(app: &mut SolveApp, ctx: &egui::Context) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        crate::preview::update(app, ctx);
+        if !app.preview.busy {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn secondary_alignment_feedback_hover_is_temporary_and_invalid_hover_restores_authored_pose() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let candidate = face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap();
+    let Sel::Face { body, index, .. } = &candidate else { panic!() };
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: Vec3::new(20.0, 10.0, 5.0) };
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let authored = app.preview.interaction.as_ref().unwrap().to_document["Body2"];
+    let doc = app.session.doc.clone();
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.dialog.as_ref().unwrap().inputs[3].items.is_empty());
+    assert_eq!(app.session.doc, doc);
+    let Sel::Face { index: parallel, .. } = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap() else { panic!() };
+    app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: parallel, point: Vec3::new(10.0, 10.0, 10.0) });
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert!(app.preview.error.is_none(), "invalid hover cannot become an authored error");
+    app.viewport.hover = Some(hit.clone());
+    settle_alignment_update(&mut app, &ctx);
+    crate::viewport::dialog_pick(&mut app, &hit, candidate);
+    app.viewport.hover = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.dialog.as_ref().unwrap().inputs[3].items.len(), 1);
+    assert_ne!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], authored);
+    assert_eq!(app.session.doc, doc);
+    app.dialog = None;
+    settle_alignment_update(&mut app, &ctx);
+    assert!(!app.preview.active);
+    assert!(app.preview.interaction.is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_primary_repick_maps_from_preview_to_author_frame() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let old = d.inputs[1].items[0].clone();
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    settle_alignment_update(&mut app, &ctx);
+    let key = app.preview.key;
+    app.dialog.as_mut().unwrap().active = 3;
+    settle_alignment_update(&mut app, &ctx);
+    assert_eq!(app.preview.key, key, "arming an alignment input does not reset the pose");
+    app.dialog.as_mut().unwrap().active = 1;
+    let Sel::Face { body, index, .. } = old else { panic!() };
+    let point = Vec3::new(10.0, 10.0, 10.0);
+    let hit = crate::viewport::Hit::Face { body: body.clone(), index, point };
+    crate::viewport::dialog_pick(&mut app, &hit, Sel::Face { body, index, point });
+    let Sel::Face { point, .. } = &app.dialog.as_ref().unwrap().inputs[1].items[0] else { panic!() };
+    assert!(point.dist(Vec3::new(40.0, 10.0, 0.0)) < 1e-6);
+    settle_alignment_update(&mut app, &ctx);
+    assert!(app.preview.error.is_none());
+}
+
+#[test]
+fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real_leave() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = round_plates();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    let (_, moving) = rim(&h.app.session, "Body2", Vec3::new(230.0, 20.0, 10.0));
+    d.pick(&h.app.session, moving);
+    let (hit, selected) = rim(&h.app.session, "Body1", Vec3::new(80.0, 20.0, 10.0));
+    let Sel::Edge { point, .. } = &selected else { panic!() };
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = proj.to_screen(*point).unwrap();
+    let candidate = Some((hit.clone(), Some(selected.clone())));
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), candidate.clone()), candidate);
+    h.app.viewport.hover = Some(hit);
+    settle_alignment_update(&mut h.app, &egui::Context::default());
+    for _ in 0..8 {
+        assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(0.5, 0.5)), None), candidate);
+    }
+    let kept = crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(0.5, 0.5)), None).unwrap().1.unwrap();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, kept);
+    let p = apply_commands(&h.app, &d).unwrap()[0].1.clone();
+    assert_eq!(p["a_alignment"]["reference"]["type"], "circle_center");
+    h.app.dialog = Some(d);
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(100.0, 100.0)), None).is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_stationary_hover_keeps_identity_until_pointer_moves() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let at = egui::pos2(700.0, 400.0);
+    let first = Some((
+        crate::viewport::Hit::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO }),
+    ));
+    let kept = crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), first.clone());
+    assert_eq!(kept, first);
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at), None),
+        first,
+        "moving geometry must not erase a stationary candidate"
+    );
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, Some(at + egui::vec2(2.0, 0.0)), None).is_none());
+    assert!(crate::viewport::stable_alignment_hover(&mut h.app, &proj, None, None).is_none());
+}
+
+#[test]
+fn secondary_alignment_feedback_accepts_named_edge_and_tracks_sketch_namespace() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    let point = Vec3::new(40.0, 0.0, 0.0);
+    let Sel::Edge { index, .. } = edge_sel(&app.session, point).unwrap() else { panic!() };
+    let hit = crate::viewport::Hit::Edge { body: "Body2".into(), index, mid: point, point };
+    let selection = d.candidate(&app.session, &hit).unwrap();
+    d.pick(&app.session, selection);
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    d.active = 2;
+    let hit = crate::viewport::Hit::SketchCurve { sketch: 99, id: "l1".into(), straight: true, point: Vec3::ZERO };
+    assert!(d.candidate(&app.session, &hit).is_none(), "a missing sketch has no matching occurrence");
+}
+
+#[test]
+fn secondary_alignment_feedback_construction_picking_uses_the_preview_placement() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("construct.axis.two_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"name":"MovingAxis"})).unwrap();
+    app.run("construct.plane.three_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"c":{"point":[40,10,5]},"name":"MovingPlane"}))
+        .unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    app.dialog = Some(d);
+    settle_alignment_update(&mut app, &egui::Context::default());
+    let (_, a, b) = crate::viewport::construction_axis_segments(&app).into_iter().find(|(name, ..)| name == "MovingAxis").unwrap();
+    for point in [a, b] {
+        assert!((point.x - 10.0).abs() < 1e-6 && (point.z - 10.0).abs() < 1e-6, "{point:?}");
+    }
+    // At this fixed orthographic view the displayed square reaches 14.4 mm from the
+    // solved plane origin (10,10,10). Compare its corners with independent fixture data.
+    app.cam.distance = 200.0;
+    app.cam.fov = 0.0;
+    let (_, _, quad) = crate::viewport::construction_quads(&app).into_iter().find(|(name, ..)| name == "MovingPlane").unwrap();
+    let expected = [Vec3::new(10.0, -4.4, -4.4), Vec3::new(10.0, 24.4, -4.4), Vec3::new(10.0, 24.4, 24.4), Vec3::new(10.0, -4.4, 24.4)];
+    let mut remaining = [true; 4];
+    for actual in quad {
+        let index = expected
+            .iter()
+            .enumerate()
+            .find_map(|(index, expected)| {
+                (remaining[index]
+                    && (actual.x - expected.x).abs() < 1e-6
+                    && (actual.y - expected.y).abs() < 1e-6
+                    && (actual.z - expected.z).abs() < 1e-6)
+                    .then_some(index)
+            })
+            .unwrap_or_else(|| panic!("unexpected or repeated plane corner: {actual:?}"));
+        remaining[index] = false;
+    }
+    assert!(remaining.into_iter().all(|unmatched| !unmatched), "all independent fixture corners must be present");
+}
+
+#[test]
+fn secondary_alignment_dialog_preview_edit_clear_and_cancel_keep_references() {
+    let mut app = two_boxes();
+    app.run("parameters.add", json!({"name": "jointTurn", "expression": "17 deg"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.len(), 4);
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.angle = "jointTurn".into();
+        f.reverse_alignment[0] = true;
+    }
+    let commands = apply_commands(&app, &d).unwrap();
+    assert!(commands[0].1["a_alignment"]["face"].is_string());
+    assert_eq!(commands[0].1["a_alignment"]["reverse"], true);
+    let before = serde_json::to_value(&*app.session.doc).unwrap();
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before, "preview/cancel cannot change the document");
+    for (id, p) in commands {
+        app.run(&id, p).unwrap();
+    }
+    let old = app.session.doc.assembly.joints[0].clone();
+    let mut edit = edit_joint(&app, old.id).unwrap();
+    assert_eq!(edit.inputs.len(), 4);
+    assert_eq!(stored_alignment(&edit.kind, 3).unwrap()["face"], apply_commands(&app, &d).unwrap()[0].1["a_alignment"]["face"]);
+    let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
+    assert!(params.get("angle").is_none(), "an unchanged expression stays in the saved joint, following the current Edit Joint contract");
+    assert_eq!(params["a_alignment"]["reverse"], true);
+    clear_alignment(&mut edit.kind, 3);
+    let params = apply_commands(&app, &edit).unwrap()[0].1.clone();
+    assert_eq!(params["a_alignment"], Value::Null);
+    assert!(params["b_alignment"]["face"].is_string());
+    app.run("joint.edit", params).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.angle.as_deref(), Some("jointTurn"));
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    // The moving B is first; picking fixed A here is ignored.
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    let p = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert!(d.inputs[2].items.is_empty());
+    assert!(p.get("b_alignment").is_none());
+    app.session.scratch().execute("joint.create", &p).unwrap();
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 20.0, 5.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "2 mm".into();
+    }
+    assert!(apply_commands(&app, &d).unwrap_err().contains("Offset X"));
+    // Upstream occurrence picking now preserves B:2 instead of aliasing it to B:1.
+    // Reject a reference on fixed A, then prove an alignment and the joint keep B:2.
+    app.dialog = None;
+    let component = app.session.doc.find_component("B").unwrap();
+    let copied = app.run("occurrence.copy", json!({"component": component, "translate": [70, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(110.0, 10.0, 0.0)).unwrap());
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    assert!(d.inputs[3].items.is_empty(), "only the first alignment is supplied");
+    assert!(d.inputs[2].items.is_empty());
+    assert!(alignment_input_available(&d, 2), "the correctly resolved copied occurrence supports alignment");
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert_eq!(params["b"]["occurrence"], copied, "do not silently joint the first instance");
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(110.0, 20.0, 5.0)).unwrap());
+    let params = apply_commands(&app, &d).unwrap()[0].1.clone();
+    assert!(params["b_alignment"]["face"].is_string());
+    let mut scratch = app.session.scratch();
+    scratch.execute("joint.create", &params).unwrap();
+    assert_eq!(scratch.doc.assembly.joints.last().unwrap().b.occurrence, copied);
+}
+
+#[test]
+fn secondary_alignment_single_inversion_keeps_component_flip_and_clear_saved_references() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    h.app.dialog = Some(d);
+    h.frames(3);
+    let before = h.app.session.doc.clone();
+    h.step(&json!({"click":{"handle":"dialog:invert-alignment"}})).unwrap();
+    h.frames(3);
+    let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+    assert_eq!(p["b_alignment"]["reverse"], true);
+    assert_eq!(p["a_alignment"]["reverse"], false);
+    assert_eq!(p["flip"], false);
+    assert!(h.step(&json!({"click":{"handle":"dialog:invert-alignment:2"}})).is_err());
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc, before);
+    for (id, p) in commands {
+        h.app.run(&id, p).unwrap();
+    }
+    let id = h.app.session.doc.assembly.joints[0].id;
+    h.app.dialog = edit_joint(&h.app, id);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:clear:dialog.alignment_1_optional"}})).unwrap();
+    h.frames(3);
+    let p = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+    assert_eq!(p["b_alignment"], Value::Null);
+    assert!(p["a_alignment"]["face"].is_string());
 }
 
 fn occ(app: &SolveApp, name: &str) -> u64 {
@@ -53,7 +1178,7 @@ fn joint_from_two_snaps() {
     let o = &p["a"]["frame"]["origin"];
     let at = Vec3::new(o[0].as_f64().unwrap(), o[1].as_f64().unwrap(), o[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9, "{p}");
-    assert_eq!(p["offset_x"], 5.0);
+    assert_eq!(p["offset_x"], json!("5 mm"));
     // OK makes it.
     for (id, p) in apply_commands(&app, &d).unwrap() {
         app.run(&id, p).unwrap();
@@ -85,12 +1210,10 @@ fn editing_a_joint_keeps_all_three_offsets() {
 
     let before = app.session.doc.clone();
     let mut harness = crate::scenario::Harness::new();
-    harness.app = app;
+    *harness.app = app;
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
     for name in ["Offset X", "Offset Y", "Offset Z"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} is editable");
     }
@@ -101,8 +1224,19 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.settle();
     assert_eq!(harness.app.session.doc, before, "Cancel preserves the joint");
 
+    // Even if a prior joint had its Position section folded, Edit Joint opens the saved
+    // offsets again. The user can still fold it while editing.
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset X").is_none(), "Position still folds on click");
+    crate::dialogs::cancel(&mut harness.app);
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    for name in ["Offset X", "Offset Y", "Offset Z"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} reopens automatically");
+    }
     for (name, value) in [("Offset X", "20 mm"), ("Offset Y", "40 mm")] {
         harness.step(&json!({"click":{"handle":format!("dialog:{name}")}})).unwrap();
         harness.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -189,6 +1323,176 @@ fn joint_origin_can_be_the_origin_or_a_sketch_point() {
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
 }
+/// A part placed more than once shows its sketches on every copy, not only on the one they are
+/// edited at, and a sketch point picked on a copy holds that copy: before, the pick named no copy
+/// and the joint took the first copy, also when the one picked lay right on top of it.
+#[test]
+fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.session.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+    let part = app.session.doc.find_component("B").unwrap();
+    let first = app.session.doc.occurrence_of(part).unwrap().id;
+    // One copy right on top of the first, one 40 mm along Y.
+    let on_top = app.run("occurrence.copy", json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+    let moved = app.run("occurrence.copy", json!({"occurrence": first, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+
+    // The sketch is drawn at the first copy and at both others.
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).expect("the sketch's other placements").iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![on_top], vec![moved]]);
+    let (at, z) = world.placed_sketch_point(sketch, &[moved], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 45.0, 10.0)) < 1e-9 && z.dist(Vec3::Z) < 1e-9, "{at:?} {z:?}");
+
+    // A pick of the sketch where it is edited holds the first copy; one on the copy on top of it,
+    // at the same place, holds that copy.
+    let own = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:q") }).unwrap();
+    assert_eq!(own.param["occurrence"], first);
+    let top = snap_of(&app.session, &Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![on_top] }).unwrap();
+    assert!(top.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-9, "{top:?}");
+    assert_eq!((top.param["occurrence"].clone(), top.param["path"].clone()), (json!(on_top), json!([on_top])));
+
+    // In a joint's origin input the view picks the point on the moved copy, where it is drawn.
+    app.start("joint.create");
+    let proj = crate::viewport::projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
+    let screen = proj.to_screen(Vec3::new(35.0, 45.0, 10.0)).unwrap();
+    let hits = crate::viewport::pick(&app, &proj, screen);
+    let Some(crate::viewport::Hit::PlacedSketchPoint { path, .. }) = hits.first() else { panic!("the copy's point is picked: {hits:?}") };
+    assert_eq!(*path, [moved]);
+    let pick = app.dialog.as_ref().unwrap().candidate(&app.session, &hits[0]).expect("the joint's origin takes it");
+    assert_eq!(pick, Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![moved] });
+
+    // And the joint it makes moves that copy, the point onto the world origin, and no other copy.
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::Vertex { body: String::new(), point: Vec3::ZERO });
+    d.pick(&app.session, pick);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    let transform = |o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().transform;
+    let q = solidcraft_engine::doc::apply_point(&transform(moved), Vec3::new(35.0, 5.0, 10.0));
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "the moved copy's point is on the origin: {q:?}");
+    for o in [first, on_top] {
+        assert!(solidcraft_engine::doc::is_identity(&transform(o)), "copy {o} stays");
+    }
+
+    // Edited at the moved copy, the sketch is drawn there, and at the two others as copies.
+    app.session.execute("component.activate", &json!({"component": part, "occurrence": moved, "path": [moved]})).unwrap();
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).unwrap().iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![first], vec![on_top]]);
+    let drawn = world.sketch(sketch).unwrap();
+    let q = drawn.plane.to_world(drawn.sketch.point(drawn.sketch.resolve_point("q").unwrap()).unwrap());
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "{q:?}");
+    let (at, _) = world.placed_sketch_point(sketch, &[first], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// Snapping a joint origin to a sketch circle's centre in the UI stores a persistent
+/// `Snap::SketchPoint` reference rather than baking a static world point, so the joined
+/// component follows parameter changes (#21815).
+#[test]
+fn joint_snapped_to_sketch_circle_center_follows_parameter_change() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"})).unwrap();
+    app.run("component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    )
+    .unwrap();
+    app.run("sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [10, 90], "radius": 3})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    )
+    .unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let sketch = app.session.doc.find_feature("HoleSketch").unwrap().id;
+    let snap = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:c1.center") }).unwrap();
+    assert_eq!(snap.param["sketch"], json!(sketch));
+    assert_eq!(snap.param["point"], json!("c1.center"));
+
+    let beam_face = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.centroid.dist(Vec3::new(20.0, 10.0, 90.0)) < 1e-6).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "{:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+
+    // Changing h from 100 mm to 60 mm moves c1.center to [20, 10, 50] and pulls Beam:1 down by 40 mm.
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let beam_occ = app.session.doc.occurrences.iter().find(|o| o.name == "Beam:1").unwrap().id;
+    let t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let com = solidcraft_engine::doc::apply_point(&t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(com.dist(Vec3::new(45.0, 10.0, 50.0)) < 1e-6, "Beam:1 COM should follow h -> 60 mm: {com:?}");
+
+    // Nonzero lateral offsets (Offset X / Offset Y) must also keep the persistent sketch reference.
+    app.run("joint.delete", json!({"joint": app.session.doc.assembly.joints[0].id})).unwrap();
+    app.run("parameters.change", json!({"name": "h", "expression": "100"})).unwrap();
+    let beam_face2 = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.plane_normal.is_some_and(|n| n.x < -0.9)).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face2);
+    if let crate::dialogs::Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "5".into();
+        f.offset[1] = "2".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "nonzero lateral offset must keep Snap::SketchPoint: {:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+    let before_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let before_com = solidcraft_engine::doc::apply_point(&before_t, Vec3::new(45.0, 10.0, 90.0));
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let after_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let after_com = solidcraft_engine::doc::apply_point(&after_t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(
+        (after_com - before_com).dist(Vec3::new(0.0, 0.0, -40.0)) < 1e-6,
+        "offset sketch joint should follow h -> 60 mm by -40 mm in Z: before={before_com:?}, after={after_com:?}"
+    );
+}
+
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();
@@ -300,6 +1604,7 @@ fn joint_and_drive_preview_on_the_placed_model() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        replaced_ghost: true,
         glass_new: false,
     };
     let cmds = preview_commands(&app, &d).unwrap();
@@ -349,7 +1654,7 @@ fn edit_joint_runs_edit_and_limits() {
         .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
-    assert_eq!(d.inputs.len(), 2, "the two sides show as in the Joint dialog");
+    assert_eq!(d.inputs.len(), 4, "primary sides remain first, followed by optional alignments");
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         assert_eq!(TYPES[f.kind], "slider");
         f.limits[0] = (true, "0 mm".into(), "15 mm".into());
@@ -427,10 +1732,13 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
     app.run("parameters.add", json!({"name": "gap", "expression": "3 mm"})).unwrap();
     let (fa, fb) = (json!({"occurrence": a, "face": [10, 10, 10]}), json!({"occurrence": b, "face": [40, 10, 0]}));
-    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset": "gap", "angle": "0 deg"})).unwrap();
+    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset_x": "gap * 2", "offset_y": "-gap", "offset": "gap", "angle": "0 deg"}))
+        .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.offset[0], "gap * 2");
+        assert_eq!(f.offset[1], "-gap");
         assert_eq!(f.offset[2], "gap");
         f.flip = true;
     }
@@ -439,7 +1747,34 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     }
     let j = &app.session.doc.assembly.joints[0];
     assert!(j.flip);
-    assert_eq!((j.exprs.offset.as_deref(), j.exprs.angle.as_deref()), (Some("gap"), None));
+    assert_eq!(
+        (j.exprs.offset_x.as_deref(), j.exprs.offset_y.as_deref(), j.exprs.offset.as_deref(), j.exprs.angle.as_deref()),
+        (Some("gap * 2"), Some("-gap"), Some("gap"), None)
+    );
+}
+
+/// Creating a joint on a face with a parameter-backed lateral offset that evaluates to zero keeps
+/// the face reference (rather than freezing to a fixed frame) and still follows later changes.
+#[test]
+fn zero_valued_lateral_offset_expression_keeps_face_reference() {
+    let mut app = two_boxes();
+    app.run("parameters.add", json!({"name": "dx", "expression": "0 mm"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "dx".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1["a"].get("face").is_some(), "zero-valued expression keeps face reference: {}", cmds[0].1);
+    assert_eq!(cmds[0].1["offset_x"], json!("dx"));
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("dx"));
+    app.run("parameters.change", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].offset_xy, [15.0, 0.0]);
 }
 
 /// Edit Joint shows both sides pre-filled, each on its own component. OK sends no side while
@@ -453,7 +1788,7 @@ fn edit_joint_shows_both_sides_and_a_repick_sends_only_that_side() {
         .unwrap();
     let before = app.session.doc.assembly.joints[0].clone();
     let mut d = edit_joint(&app, before.id).unwrap();
-    assert_eq!(d.inputs.len(), 2);
+    assert_eq!(d.inputs.len(), 4);
     for (input, occurrence) in d.inputs.iter().zip([a, b]) {
         let Some(Sel::Face { body, .. }) = input.items.first() else { panic!("no side pick: {:?}", input.items) };
         assert_eq!(occurrence_of_body(&app.session, body), Some(occurrence), "{body}");
@@ -598,7 +1933,7 @@ fn a_picked_snap_is_measured_once_not_every_frame() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
     s.execute("component.activate", &json!({"component": "root"})).unwrap();
     let mut h = crate::scenario::Harness::new();
-    h.app = SolveApp::new(s, Services::default());
+    *h.app = SolveApp::new(s, Services::default());
     let (plate, peg) = (occ(&h.app, "Plate"), occ(&h.app, "Peg"));
     h.app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
     h.app.start("joint.create");
@@ -686,8 +2021,116 @@ fn as_built_animation_drives_the_new_shared_id_and_handles_exhaustion() {
     assert!(result.is_err() && !matches!(result, Err(solidcraft_engine::EngineError::Internal(..))), "{result:?}");
 }
 
-/// As-built joints and rigid groups take components from body picks; New Component makes one
-/// from bodies when bodies are picked.
+/// Two boxes as separate bodies of the design (Body1, Body2), no component, and the New Component
+/// window opened on `picked` with the Name `name` and Activate `activate`.
+fn new_component_window(picked: &[&str], name: &str, activate: bool) -> (SolveApp, crate::dialogs::Dialog) {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for x in [0, 40] {
+        app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "operation": "new"})).unwrap();
+    }
+    app.session.selection = picked.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::NewComponent { name: typed, activate: active }) = &mut d.kind else { panic!("expected New Component") };
+    *typed = name.into();
+    *active = activate;
+    (app, d)
+}
+
+/// New Component with bodies picked makes ONE component with the typed name, moves the bodies
+/// into it and activates it (#21840), as one undo step whose History is one folder named after
+/// the component.
+#[test]
+fn new_component_with_bodies_picked_puts_them_in_one_named_component() {
+    let (mut app, d) = new_component_window(&["Body1", "Body2"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Holder"]);
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "{body} is in Holder");
+    }
+    assert_eq!(app.session.active_component, doc.find_component("Holder").unwrap(), "Activate made it active");
+    assert_eq!(app.session.undo.len(), undo + 1, "one undo step");
+    let folders: Vec<_> = doc.timeline_groups.iter().map(|g| (g.name.as_str(), g.features.len())).collect();
+    assert_eq!(folders, [("Holder", 2)], "the two moves are one History folder");
+
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "one Undo takes it all back");
+    assert_eq!(app.session.active_component, 0);
+    app.run("edit.redo", json!({})).unwrap();
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "Redo puts {body} back in Holder");
+    }
+}
+
+/// With the default name and Activate off, one picked body goes into a new component that is not
+/// made active, and its move is one History item.
+#[test]
+fn new_component_with_a_body_picked_and_activate_off_keeps_the_active_component() {
+    let (mut app, d) = new_component_window(&["Body2"], "", false);
+    let undo = app.session.undo.len();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.len(), 1, "{:?}", doc.components);
+    let made = &doc.components[0].name;
+    assert_eq!(made, "Component1", "the default name the window shows");
+    assert_eq!(occurrence_of_body(&app.session, "Body2"), Some(occ(&app, made)));
+    assert_eq!(occurrence_of_body(&app.session, "Body1"), Some(0), "the body not picked stays in the design");
+    assert_eq!(app.session.active_component, 0, "Activate off");
+    assert_eq!(app.session.undo.len(), undo + 1);
+    assert!(doc.timeline_groups.is_empty(), "one move needs no folder");
+}
+
+/// A move the engine refuses leaves no empty component and no undo step behind, and the window
+/// gets the reason.
+#[test]
+fn new_component_whose_move_is_refused_leaves_nothing_behind() {
+    let (mut app, d) = new_component_window(&["Body1", "Nope"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    let redo = app.session.redo.len();
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    assert_eq!(app.session.doc.to_json(), before);
+    assert_eq!((app.session.undo.len(), app.session.redo.len()), (undo, redo));
+    assert_eq!(app.session.active_component, 0);
+}
+
+/// A refused move inside an active component, with a body selected and a step to redo, leaves
+/// the design, the undo and redo steps, the active component and the selection as they were.
+#[test]
+fn new_component_refused_inside_a_component_keeps_redo_the_active_component_and_the_selection() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "Inner", "activate": true})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [40, 0, 0], "operation": "new"})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    d.inputs[0].items.push(Sel::Body { name: "Nope".into() });
+    let labels = |steps: &[solidcraft_engine::Snapshot]| steps.iter().map(|step| step.label.clone()).collect::<Vec<_>>();
+    let state = |app: &SolveApp| {
+        let s = &app.session;
+        (s.doc.to_json(), labels(&s.undo), labels(&s.redo), s.active_component, s.active_occurrence_path.clone(), s.selection.clone())
+    };
+    let before = state(&app);
+    assert!(!before.2.is_empty(), "a step to redo");
+    assert_ne!(before.3, 0, "inside Inner");
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    let after = state(&app);
+    assert!(after.0 == before.0, "the design is as it was");
+    assert_eq!(after.1, before.1, "the undo steps");
+    assert_eq!(after.2, before.2, "the redo steps");
+    assert_eq!((after.3, &after.4), (before.3, &before.4), "the active component");
+    assert_eq!(after.5, before.5, "the selection");
+    app.run("edit.redo", json!({})).unwrap();
+    assert!(app.session.model.state().body("Body2").is_some(), "Redo still brings the second box back");
+}
+
+/// As-built joints and rigid groups take components from body picks; New Component with no
+/// bodies picked makes an empty component (with bodies it moves them into the one it makes).
 #[test]
 fn component_picks_become_occurrences() {
     let mut app = two_boxes();
@@ -705,6 +2148,58 @@ fn component_picks_become_occurrences() {
     app.start("component.create");
     let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(c[0].0, "component.create");
+}
+
+/// Once the first instance of a component has a joint, a face picked on a further instance still
+/// joints that instance at the face picked, and the preview moves it (#5406, #5653).
+#[test]
+fn joint_on_a_further_instance_after_the_first_is_jointed() {
+    let mut app = two_boxes();
+    let run_dialog = |app: &mut SolveApp, picks: [Vec3; 2]| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        d
+    };
+    // B:1's bottom on A's top: B:1 sits on A, 10 to 20 high.
+    let d = run_dialog(&mut app, [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)]);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let first = occ(&app, "B");
+    let component = app.session.doc.find_component("B").unwrap();
+    let copy = app.run("occurrence.copy", json!({"component": component, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    assert_ne!(copy, first);
+    // Component 1 is the copy's bottom, component 2 A's +X side, as in the report.
+    let bottom = Vec3::new(10.0, 50.0, 10.0);
+    let pick = face_sel(&app.session, bottom).unwrap();
+    assert!(matches!(&pick, Sel::Face { body, .. } if body.contains("B:2")), "{pick:?}");
+    let d = run_dialog(&mut app, [bottom, Vec3::new(20.0, 10.0, 5.0)]);
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
+    let preview = preview_commands(&app, &d).unwrap();
+    let params = &preview[0].1;
+    let side_on_copy = |p: &Value| ["a", "b"].into_iter().find(|s| p[*s]["occurrence"] == copy);
+    assert!(side_on_copy(params).is_some(), "the copy is a side: {params}");
+    assert!(["a", "b"].iter().all(|s| params[*s]["occurrence"] != first), "B:1 is not a side: {params}");
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let joint = app.session.doc.assembly.joints.last().unwrap();
+    let side = if joint.a.occurrence == copy { &joint.a } else { &joint.b };
+    assert_eq!(side.occurrence, copy, "{joint:?}");
+    let solve = app.run("joint.solve", json!({})).unwrap();
+    assert_eq!(solve["conflicts"], json!([]), "{solve}");
+    assert_eq!(solve["errors"], json!([]), "{solve}");
+    // The copy moved: its bottom now lies on A's +X side, at x = 20.
+    let frames = app.session.doc.body_frames(&app.session.model.state());
+    let body = frames.iter().find(|f| f.2.last() == Some(&copy)).map(|f| f.0.clone()).unwrap();
+    let bb = app.run("inspect.measure", json!({})).unwrap();
+    let measured = bb["bodies"].as_array().unwrap().iter().find(|b| b["name"] == body.as_str()).unwrap();
+    let min_x = measured["bbox"]["min"][0].as_f64().unwrap();
+    assert!((min_x - 20.0).abs() < 1e-6, "{bb}");
 }
 
 /// A body of a further instance of a component belongs to that instance, not the first (#3857).
@@ -875,6 +2370,252 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// #12867: a joint between two grounded parts moves neither. The Joint dialog says so under the
+/// picks and offers to unground the second part; after that the note is gone. A joint made
+/// between them anyway says the same in Messages, as an error.
+#[test]
+fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground_one() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
+    app.messages.clear();
+    let r = app
+        .run(
+            "joint.create",
+            json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+        )
+        .unwrap();
+    assert!(r["conflicts"].as_array().is_some_and(|c| c.len() == 1), "{r}");
+    assert!(app.messages.iter().any(|m| m.text == why && m.error), "{:?}", app.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    app.run("edit.undo", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(5.0, 5.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+    // The dialog names the joint it would make (its default name).
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
+    assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    // The auto-sized dialog takes a few frames to settle its width.
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let at = text_at(&out, &label).expect("and offers to unground the second part");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    let b = occ(&app, "B");
+    assert!(app.session.doc.occurrences.iter().any(|o| o.id == b && !o.grounded), "B is ungrounded");
+    assert!(app.dialog.is_some(), "the dialog stays open");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// #12867: the Joint dialog's note covers every pick a joint takes, not only faces: a grounded
+/// component's plane or axis is a side on that part. The root's own bodies never move, so a
+/// grounded part picked against them gets the note too, and the button ungrounds the part,
+/// whichever was picked first. Editing a joint that doesn't hold says why in Messages too.
+#[test]
+fn grounded_note_covers_datum_picks_the_root_and_edits() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    // A body of the root's own, away from both parts.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let note = |app: &mut SolveApp, a: Sel, b: Sel| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        d.pick(&app.session, a);
+        d.pick(&app.session, b);
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        let held = grounded_sides(app, f, &d.inputs);
+        app.dialog = None;
+        held
+    };
+    let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
+    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // A component plane or axis of a grounded part is a side on that part, as a face is.
+    for (a, b) in [
+        (Sel::Plane { name: "A/XY".into() }, face(&app, 25.0, 5.0)),
+        (face(&app, 5.0, 5.0), Sel::Axis { name: "B/Z".into() }),
+        (Sel::Plane { name: "A/XZ".into() }, Sel::Axis { name: "B/X".into() }),
+    ] {
+        let held = note(&mut app, a.clone(), b.clone()).unwrap_or_else(|| panic!("{a:?} and {b:?} are both on grounded parts"));
+        assert_eq!((held.why.as_str(), held.occurrence), (both.as_str(), occ(&app, "B")), "{a:?}, {b:?}");
+    }
+
+    // The root against a grounded part, in either order: the button frees the part.
+    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
+        let held = note(&mut app, a, b).expect("the root never moves");
+        assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
+    }
+    // A part that can move gets no note.
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": false})).unwrap();
+    let (root_face, a_face, b_face) = (face(&app, 5.0, 45.0), face(&app, 5.0, 5.0), face(&app, 25.0, 5.0));
+    assert_eq!(note(&mut app, root_face, a_face), None);
+    assert_eq!(note(&mut app, Sel::Plane { name: "A/XY".into() }, b_face), None);
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": true})).unwrap();
+
+    // An edit that leaves the joint not holding says why in Messages, as a new joint does.
+    let texts = |app: &SolveApp| app.messages.iter().filter(|m| m.error).map(|m| m.text.clone()).collect::<Vec<_>>();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    )
+    .unwrap();
+    app.messages.clear();
+    let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
+    assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    assert!(texts(&app).contains(&why), "{:?}", texts(&app));
+}
+
+/// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
+fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corners: &[[f64; 3]]| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        for c in corners {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": c})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        occ
+    };
+    let stand = component(&mut h, "Stand", &[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]);
+    let umbrella = component(&mut h, "Umbrella", &[[0.0, 40.0, 0.0]]);
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    (h, stand, umbrella)
+}
+
+fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
+    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    assert_eq!(at["ok"], true, "{at}");
+    let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
+    assert_eq!(clicked["ok"], true, "{clicked}");
+    h.frames(2);
+}
+
+/// The one-component hint As-Built would show now, if any.
+fn as_built_hint(h: &crate::scenario::Harness) -> Option<Vec<String>> {
+    let d = h.app.dialog.as_ref().expect("As-Built is open");
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    joint_problem(&h.app, k, &d.inputs).map(|p| p.1)
+}
+
+/// #21842: a component with two bodies picked by its Browser row, or selected when As-Built
+/// starts, is one component: Components stays active with no hint to split it, and the second
+/// component's row then moves on to Position with the two components as a and b.
+#[test]
+fn as_built_takes_a_two_body_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, stand, umbrella) = stand_and_umbrella();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![stand] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, stand);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "both of Stand's bodies");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        click_row(&mut h, umbrella);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!(c[0].0, "joint.as_built");
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
+    }
+}
+
+/// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
+/// whole-component pick stops hiding it once Components no longer holds that pick or the window
+/// opens again.
+#[test]
+fn as_built_hint_stays_for_bodies_picked_one_by_one() {
+    let (mut h, stand, _) = stand_and_umbrella();
+    let bodies = h.app.session.occurrence_bodies(&[stand], true).unwrap();
+    let pick_bodies = |h: &mut crate::scenario::Harness, names: &[String]| {
+        let mut d = h.app.dialog.take().unwrap();
+        for name in names {
+            d.pick(&h.app.session, Sel::Body { name: name.clone() });
+        }
+        h.app.dialog = Some(d);
+        h.frames(2);
+    };
+    h.app.start("joint.as_built");
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "picked one by one: the hint");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "still one component");
+    // Components cleared, then the same bodies one by one.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    assert_eq!(as_built_hint(&h), None);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "after a clear");
+    // One body taken out and picked again.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the pick took it out");
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(as_built_hint(&h), Some(vec![bodies[1].clone(), bodies[0].clone()]), "after a body went out (in pick order)");
+    // A new window: the bodies selected before it opens.
+    h.app.dialog = None;
+    h.app.session.selection = bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "a new window");
+}
+
 #[test]
 fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
     for component in [None, Some("Part")] {
@@ -976,7 +2717,7 @@ fn drive_value_takes_the_keyboard() {
 #[test]
 fn drive_slider_previews_intermediate_positions_before_release() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let (a, b) = (occ(&h.app, "A"), occ(&h.app, "B"));
     h.app
         .run(
@@ -1040,7 +2781,7 @@ fn drive_slider_previews_intermediate_positions_before_release() {
 #[test]
 fn slider_drag_does_not_open_suggestions_over_the_slider() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     for name in ["depth", "drop"] {
         h.app.run("parameters.add", json!({"name": name, "expression": "5 mm"})).unwrap();
     }
@@ -1249,6 +2990,7 @@ fn drive_says_where_a_loop_stopped_it() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        replaced_ghost: true,
         glass_new: false,
     };
     let rocker = app.session.doc.assembly.joints.iter().position(|j| j.name == "Rocker").unwrap();
@@ -1315,6 +3057,7 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        replaced_ghost: true,
         glass_new: false,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
@@ -1361,7 +3104,7 @@ fn drive_opens_on_the_picked_joint() {
 #[test]
 fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
     let glue = h.app.session.doc.assembly.joints[0].id;
@@ -1378,6 +3121,68 @@ fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
         Kind::Assembly(Asm::Joint(f)) => assert_eq!(f.editing, Some(glue)),
         k => panic!("{k:?}"),
     }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs.len(), 4, "the entry point opens a complete edit form");
+}
+
+#[test]
+fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
+        d.pick(&h.app.session, face_sel(&h.app.session, p).unwrap());
+    }
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    let before = h.app.session.doc.clone();
+    h.app.start("joint.drive");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    let edit = h.app.dialog.as_ref().unwrap();
+    assert_eq!(edit.inputs.len(), 4, "Drive's Edit Joint must transfer the selection inputs as well as the form kind");
+    assert!(edit.inputs.iter().take(2).all(|input| !input.items.is_empty()));
+    // Reopened alignment fields display their persisted identity rather than a transient Sel.
+    assert!(stored_alignment(&edit.kind, 2).is_some());
+    assert!(stored_alignment(&edit.kind, 3).is_some());
+    assert!(crate::scenario::handle_at("dialog:clear:dialog.alignment_1_optional").is_some());
+    assert!(crate::scenario::handle_at("dialog:clear:dialog.alignment_2_optional").is_some());
+    let commands = apply_commands(&h.app, edit).unwrap();
+    assert_eq!(commands[0].0, "joint.edit");
+    let mut scratch = h.app.session.scratch();
+    scratch.execute(&commands[0].0, &commands[0].1).unwrap();
+    assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
+}
+
+/// Edit Joint from the Drive Joints dialog opens with the joint's two sides, so its offsets can
+/// be edited and the edit confirmed (#17196).
+#[test]
+fn edit_joint_from_drive_joints_keeps_its_two_sides() {
+    let mut h = crate::scenario::Harness::new();
+    *h.app = two_boxes();
+    let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
+    let glue = h.app.session.doc.assembly.joints[0].id;
+    h.app.start("joint.drive");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    let mut d = h.app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "20 mm".into();
+    // The edit can be confirmed: the dialog has the joint's two sides, so nothing is asked for
+    // again (without them OK was off and asked for component 1's joint origin).
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].0, "joint.edit");
+    assert_eq!(commands[0].1["joint"], json!(glue));
+    assert_eq!(commands[0].1["offset_x"], json!("20 mm"));
+    // The two sides are the first two inputs; the Joint dialog holds the alignment references
+    // after them, so the sides are read by their place and not by the count of the inputs.
+    assert!(d.inputs.len() >= 2, "the Edit Joint dialog keeps its two sides");
+    assert_eq!(d.inputs[0].label, "Component 1");
+    assert_eq!(d.inputs[1].label, "Component 2");
+    assert_eq!(d.inputs[0].items.len(), 1, "the first side keeps its pick");
+    assert_eq!(d.inputs[1].items.len(), 1, "the second side keeps its pick");
 }
 
 /// A rigid joint has nothing to drive: Drive Joints won't start on it.
@@ -1479,7 +3284,7 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let origin = &p["a"]["frame"]["origin"];
     let at = Vec3::new(origin[0].as_f64().unwrap(), origin[1].as_f64().unwrap(), origin[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9);
-    assert_eq!(p["offset_x"], json!(6.35));
+    assert_eq!(p["offset_x"], json!("0.25 in"));
     app.run("joint.create", p).unwrap();
     let joint = app.session.doc.assembly.joints[0].id;
     app.start("joint.drive");
@@ -1626,7 +3431,7 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("no edit") };
     let untouched = f.limits[0].clone();
     // With the sides as the dialog opened on them (Edit Joint's side picks).
-    assert_eq!(d.inputs.len(), 2);
+    assert_eq!(d.inputs.len(), 4);
     find_limits(&app, f, id, &d.inputs);
     // B slides into A one way (they touch face to face already: it can't go further) and away
     // from it the other, where nothing is in its way.
@@ -1716,7 +3521,7 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
 /// The Joint dialog over two boxes, Component 1 taking a pick, in the harness (a real viewport).
 fn joint_picking_component_1() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.cam.distance = 160.0;
     h.settle();
     h.app.start("joint.create");
@@ -2330,7 +4135,7 @@ fn measure_still_takes_sketch_curve_picks() {
 #[test]
 fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let mut harness = crate::scenario::Harness::new();
-    harness.app = two_boxes();
+    *harness.app = two_boxes();
     harness.app.home.open = false;
     harness
         .app
@@ -2343,9 +4148,7 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let joint = harness.app.session.doc.assembly.joints[0].id;
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
-    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some());
+    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some(), "Position opens on an existing constraint");
     for name in ["Offset X", "Offset Y"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_none());
     }
@@ -2393,4 +4196,190 @@ fn a_joint_origin_a_few_points_inside_a_face_is_the_face() {
     assert!(matches!(near.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "right on the edge: {near:?}");
     let inside = pick_at(4.5);
     assert!(matches!(inside.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "inside the face: {inside:?}");
+}
+
+#[test]
+fn secondary_alignment_review_primary_hover_uses_the_displayed_pose_once() {
+    let mut app = round_plates();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(50.0, 40.0, 10.0), Vec3::new(200.0, 40.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.angle = "27 deg".into();
+        f.flip = true;
+    }
+    app.dialog = Some(d);
+    settle_alignment_update(&mut app, &egui::Context::default());
+    let shown = solidcraft_engine::doc::mat_inverse(&app.preview.interaction.as_ref().unwrap().to_document["Body2"]).unwrap();
+    let point = solidcraft_engine::doc::apply_point(&shown, Vec3::new(150.0, 0.0, 0.0));
+    let vertex = Sel::Vertex { body: "Body2".into(), point };
+    let snap = snap_hovered(&app, &vertex).unwrap();
+    assert!(snap.at.dist(point) < 1e-6, "a raw hovered vertex is already in the shown pose: {:?} != {:?}", snap.at, point);
+    let expected_z = solidcraft_engine::doc::apply_vector(&shown, Vec3::Z);
+    assert!(snap.z.dist(expected_z) < 1e-6);
+    // Both curved and flat faces must resolve in the same pose as the pointer.
+    for original in [Vec3::new(173.0, 20.0, 5.0), Vec3::new(200.0, 40.0, 10.0)] {
+        let authored = face_sel(&app.session, original).unwrap();
+        let expected = snap_of(&app.session, &authored).unwrap();
+        let Sel::Face { body, index, point } = authored else { panic!() };
+        let hovered = Sel::Face { body, index, point: solidcraft_engine::doc::apply_point(&shown, point) };
+        let actual = snap_hovered(&app, &hovered).expect("the hovered face retains its marker");
+        assert!(actual.at.dist(solidcraft_engine::doc::apply_point(&shown, expected.at)) < 1e-6);
+        assert!(actual.z.dist(solidcraft_engine::doc::apply_vector(&shown, expected.z)) < 1e-6);
+    }
+}
+
+fn review_alignment_marker(app: &mut SolveApp, hit: crate::viewport::Hit) -> Option<SnapPt> {
+    app.viewport.hover = Some(hit);
+    let mut d = app.dialog.take().unwrap();
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(Default::default(), |ui| {
+        let painter = ui.ctx().layer_painter(egui::LayerId::background());
+        let proj = crate::viewport::Proj {
+            cam: app.cam,
+            vp: app.cam.view_proj(1.0, 100.0),
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(720.0, 720.0)),
+            bounds: None,
+        };
+        overlay(app, &painter, &proj, &mut d);
+    });
+    let result = match &d.kind {
+        Kind::Assembly(Asm::Joint(f)) => f.hover.as_ref().and_then(|(_, s)| s.clone()),
+        _ => None,
+    };
+    app.dialog = Some(d);
+    result
+}
+
+#[test]
+fn secondary_alignment_review_helper_markers_follow_their_occurrence_without_a_body_map() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("construct.axis.two_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"name":"MovingAxis"})).unwrap();
+    app.run("construct.plane.three_points", json!({"a":{"point":[40,10,0]},"b":{"point":[40,20,0]},"c":{"point":[40,10,5]},"name":"MovingPlane"}))
+        .unwrap();
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let sketch = app.session.active_sketch.unwrap();
+    app.run("sketch.line", json!({"points":[[40,10],[40,20]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, p).unwrap());
+    }
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.angle = "27 deg".into();
+        f.flip = true;
+    }
+    d.active = 2;
+    app.dialog = Some(d);
+    settle_alignment_update(&mut app, &egui::Context::default());
+    let shown = solidcraft_engine::doc::mat_inverse(&app.preview.interaction.as_ref().unwrap().to_document["Body2"]).unwrap();
+    app.preview.interaction.as_mut().unwrap().to_document.clear();
+    let before = app.session.doc.clone();
+    for (hit, at, z) in [
+        (crate::viewport::Hit::Axis { name: "MovingAxis".into() }, Vec3::new(40.0, 10.0, 0.0), Vec3::Y),
+        (crate::viewport::Hit::Plane { name: "MovingPlane".into(), point: Vec3::ZERO }, Vec3::new(40.0, 10.0, 0.0), Vec3::X),
+        (crate::viewport::Hit::SketchCurve { sketch, id: "l1".into(), straight: true, point: Vec3::ZERO }, Vec3::new(40.0, 15.0, 0.0), Vec3::Y),
+    ] {
+        let marker = review_alignment_marker(&mut app, hit).expect("a valid helper has an alignment marker");
+        let expected = solidcraft_engine::doc::apply_point(&shown, at);
+        assert!(marker.at.dist(expected) < 1e-6, "helper feedback must follow its occurrence: {:?} != {:?}", marker.at, expected);
+        assert!(marker.z.dist(solidcraft_engine::doc::apply_vector(&shown, z)) < 1e-6);
+    }
+    assert_eq!(app.session.doc, before);
+}
+
+/// Edit Joint shows a limit typed as an expression as that expression, and OK keeps it (#20242).
+#[test]
+fn edit_joint_keeps_a_limit_typed_as_an_expression() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("parameters.add", json!({"name": "stop", "expression": "8 mm"})).unwrap();
+    let (fa, fb) = (json!({"occurrence": a, "face": [10, 10, 10]}), json!({"occurrence": b, "face": [40, 10, 0]}));
+    app.run("joint.create", json!({"type": "slider", "a": fa, "b": fb, "limits": [[0, "stop"]]})).unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        let (on, _, hi) = &f.limits[0];
+        assert!(*on);
+        assert_eq!(hi, "stop");
+        f.flip = true;
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.limit(0), [None, Some("stop")]);
+    app.run("parameters.change", json!({"name": "stop", "expression": "12 mm"})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].limits[0], Some((0.0, 12.0)));
+}
+
+#[test]
+fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "12.5".into();
+        f.dynamics[0][2] = "0.1".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].dynamics[0].unwrap();
+    assert_eq!((saved.effort, saved.damping), (Some(12.5), Some(0.1)));
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.dynamics[0][0], "12.5");
+        f.dynamics[0] = Default::default();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(app.session.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn find_limits_leaves_the_dynamics_out() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
+    f.dynamics[0][0] = "lots".into();
+    let commands = edit_commands(&app, f, &d.inputs).unwrap();
+    assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
+}
+
+#[test]
+fn a_mistyped_dynamics_value_is_refused_with_a_message() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    for typed in ["lots", "nan", "inf", "-inf"] {
+        if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+            f.dynamics[0][0] = typed.into();
+        }
+        assert!(apply_commands(&app, &d).is_err(), "{typed}");
+    }
 }

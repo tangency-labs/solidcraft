@@ -61,12 +61,20 @@
 //!   the edge: two of them closer than 0.001° there are coincident only where their faces
 //!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
 //!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
+//! - **The parting step** (not upstream). Once the steps grow with how fast the faces part,
+//!   they aim by the parabola through the edge and the last two steps where the faces are
+//!   twice the tolerance apart, or, where the parabola tops out lower (faces that cross again),
+//!   midway between the tolerance and its top: past the exit at the tolerance, before the
+//!   faces turn back. Upstream aimed at the tolerance along a line through 0, and faces
+//!   parting at a small angle settled short of it until their steady distance read as a
+//!   coincidence.
 //! - **Loops.** The step-off loops of both classifications keep upstream's bound (20
 //!   rounds of growing step-offs). No recursion.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
 use crate::curve::curve::Curve;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -229,15 +237,15 @@ pub fn calculate_bounding_box(
 
     // when asked for a tight Axis Aligned Box
     if tight {
-        let mut ok1 = true;
-        let mut ok2 = true;
+        // the first box's error, which the failure passes on
+        let mut failed: Option<SolidError> = None;
 
         if req.normal {
             match calculate_tight_bounding_box(k, brep, edge) {
                 Ok(Some(b)) => out.normal = Some(b),
                 Ok(None) => {}
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => ok1 = false,
+                Err(err) => failed = Some(err),
             }
         }
 
@@ -253,18 +261,21 @@ pub fn calculate_bounding_box(
                     out.polar = b.polar;
                 }
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => ok2 = false,
+                Err(err) => {
+                    failed.get_or_insert(err);
+                }
             }
         }
 
         // all done
-        if ok1 && ok2 {
+        let Some(err) = failed else {
             return Ok(out);
-        }
-        return Err(SolidError::query_failed(
-            OP_BBOX,
-            "the curve's bounding box could not be found",
-        ));
+        };
+        return Err(
+            crate::error::Failure::new(OP_BBOX, QueryFailure::BoundingBoxNotFound)
+                .caused_by(err)
+                .into_error(),
+        );
     }
 
     // get all the bounding boxes from the curve
@@ -310,7 +321,7 @@ pub fn calculate_tight_bounding_box(
         .calculate_bounding_box(k, &e.interval, req, true)?
         .normal
         .ok_or_else(|| {
-            SolidError::query_failed(OP_TIGHT, "the curve's bounding box has no normal box")
+            SolidError::query(OP_TIGHT, QueryFailure::Defect { why: "the curve's bounding box was asked for with its normal box, which the box of every curve kind computes when asked" })
         })?;
 
     let tol = EFF_ZERO * (1.0 + curve_bbox.max_dimension());
@@ -529,11 +540,14 @@ fn evaluate_binormal_step_off(
 
 /// The status of a vector operation upstream checks with `SER` (`Unitize`,
 /// `AngleBetween` of a zero-length vector): both return `SM_ERR_INVALID_INPUT` as a
-/// status (not a null dereference), which `SER` passes on unchanged.
+/// status (not a null dereference), which `SER` passes on unchanged. The operation's
+/// error stays the cause, so a port invariant below still reads as one.
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
+            crate::error::Failure::new(operation, QueryFailure::ZeroLengthVector)
+                .caused_by(e)
+                .into_error()
         }
         e => e,
     })
@@ -656,7 +670,7 @@ fn holds_coincidence(surfaces: Surfaces, gap: f64) -> bool {
 ///
 /// `SM_ERR` when the point cannot be dropped onto the other edge or the first step-off
 /// leaves a face; `SM_ERR_INVALID_INPUT` (as
-/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) when the first
+/// [`QueryFailure::ZeroLengthVector`]) when the first
 /// step-off's tangent or a binormal to measure is zero-length (a failed first step-off
 /// leaves the tangent uninitialised, which `Unitize` rejects before the step-off
 /// failure is looked at); [`SolidError::InvalidInput`] where upstream dereferences a null
@@ -696,9 +710,115 @@ pub fn radial_sector_classify_between(
     edge: EdgeId,
     normalized_param: f64,
     sector_eu: EdgeuseId,
-    mut other_brep: Option<&mut Brep>,
+    other_brep: Option<&mut Brep>,
     classify_eu: EdgeuseId,
 ) -> Result<RadialSectorClass> {
+    sector_classify(
+        k,
+        brep,
+        edge,
+        normalized_param,
+        sector_eu,
+        other_brep,
+        classify_eu,
+        true,
+    )?
+    .ok_or(SolidError::port_invariant(
+        OP_RADIAL,
+        "the sector classification steps off the edge and so always classifies",
+    ))
+}
+
+/// [`radial_sector_classify_between`] where the binormals at the edge decide (not
+/// upstream): the class when the three faces leave the edge at least 10 degrees apart from
+/// each other, `None` where they leave it closer and the faces would be stepped off the
+/// edge. A point of an edge where the faces meet at a clear angle decides there; one where
+/// they are near tangent is read from where they part off the edge, which a stretch of face
+/// within the tolerance of the other can mislead ([`crate::topology::edge::find_radial_sector_between`]).
+///
+/// # Errors
+///
+/// As [`radial_sector_classify_between`].
+pub fn radial_sector_classify_at_edge(
+    k: &Kernel,
+    brep: &mut Brep,
+    edge: EdgeId,
+    normalized_param: f64,
+    sector_eu: EdgeuseId,
+    other_brep: Option<&mut Brep>,
+    classify_eu: EdgeuseId,
+) -> Result<Option<RadialSectorClass>> {
+    sector_classify(
+        k,
+        brep,
+        edge,
+        normalized_param,
+        sector_eu,
+        other_brep,
+        classify_eu,
+        false,
+    )
+}
+
+/// The next step off the edge of [`sector_classify`] (not upstream): where two faces that
+/// leave the edge at a small angle are farther apart than the `tolerance` and still parting,
+/// from their distances `d1` and `d2` at the last two steps `s1` and `s2` (`(s1, d1)`,
+/// `(s2, d2)`). `None` where the model never rises.
+///
+/// The distance of two faces stepped `s` off a common edge is `θ s + κ s² / 2` to second
+/// order, `θ` their angle at the edge and `κ` the difference of their normal curvatures across
+/// it, and it is 0 at the edge. That parabola through the edge and the two steps is
+/// `d(s) = a s + b s²`, `a + b sᵢ = dᵢ / sᵢ`: quadratic interpolation through three points
+/// (Muller's method, Burden and Faires, *Numerical Analysis*, §2.6), one of them the edge, a
+/// known root. The step solves `d(s) = target` for its first root,
+/// `s = 2 target / (a + √(a² + 4 b target))`.
+///
+/// The exit needs the faces farther apart than the tolerance, so the target is above it:
+/// twice it. Faces that cross again part only so far: a cylinder of radius r sunk d into a
+/// plane meets it in two lines 2√(2rd) apart, and between them their distance rises from 0
+/// to d at the middle and falls back (`b = −1/(2r)`). Past the middle the cylinder turns back
+/// towards the plane, its binormal crosses the plane's, and the sector reads the other side;
+/// past the far line the step leaves the face. So where the parabola's top, `a² / (−4 b)`,
+/// is under three times the tolerance, the target is midway between the tolerance and the
+/// top, which the faces reach before it. A top under the tolerance is aimed at itself: the
+/// faces never part, their distance stops changing there and reads as a coincidence.
+fn parting_step(last: (f64, f64), this: (f64, f64), tolerance: f64) -> Option<f64> {
+    let ((s1, d1), (s2, d2)) = (last, this);
+    if !(s1 > 0.0 && s2 > 0.0) || s1 == s2 {
+        return None;
+    }
+    let b = (d2 / s2 - d1 / s1) / (s2 - s1);
+    let a = d1 / s1 - b * s1;
+    // the parabola tops out at s = −a / (2b), where the faces are a² / (−4b) apart
+    let tops_out = b < 0.0 && a > 0.0;
+    let target = if tops_out {
+        (2.0 * tolerance).min(0.5 * (tolerance - a * a / (4.0 * b)))
+    } else {
+        2.0 * tolerance
+    };
+    let disc = a * a + 4.0 * b * target;
+    if disc >= 0.0 && a + disc.sqrt() > 0.0 {
+        Some(2.0 * target / (a + disc.sqrt()))
+    } else if tops_out {
+        Some(-a / (2.0 * b))
+    } else {
+        None
+    }
+}
+
+/// The body of [`radial_sector_classify_between`] (`step` set) and
+/// [`radial_sector_classify_at_edge`] (`step` clear: `None` instead of the first step).
+#[allow(clippy::too_many_arguments)] // upstream's arguments and the step choice
+fn sector_classify(
+    k: &Kernel,
+    brep: &mut Brep,
+    edge: EdgeId,
+    normalized_param: f64,
+    sector_eu: EdgeuseId,
+    mut other_brep: Option<&mut Brep>,
+    classify_eu: EdgeuseId,
+    step: bool,
+) -> Result<Option<RadialSectorClass>> {
     // locals
     let eu_radial =
         eu1::radial(brep, sector_eu)?.ok_or_else(|| null(OP_RADIAL, "edge use without radial"))?;
@@ -712,15 +832,16 @@ pub fn radial_sector_classify_between(
     // classify edge locals
     let same_brep = other_brep.is_none();
     let other_ref: &Brep = other_brep.as_deref().unwrap_or(&*brep);
-    let other_edge = other_ref
-        .edgeuse(classify_eu)?
-        .edge
-        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge use's edge"))?;
+    let other_edge = other_ref.edgeuse(classify_eu)?.edge.ok_or_else(|| {
+        crate::error::Failure::new(OP_RADIAL, QueryFailure::EdgeuseWithoutEdge)
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     let other = other_ref.edge(other_edge)?;
     let other_curve = other
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge's curve"))?;
+        .ok_or_else(|| SolidError::query(OP_RADIAL, QueryFailure::EdgeWithoutCurve))?;
     let tolerance = other.tolerance + this.tolerance;
 
     // get the corresponding classify edge parameter value
@@ -749,10 +870,7 @@ pub fn radial_sector_classify_between(
         }
         if !success {
             // Unable to drop point to other curve.
-            return Err(SolidError::query_failed(
-                OP_RADIAL,
-                "the point could not be dropped onto the other curve",
-            ));
+            return Err(SolidError::query(OP_RADIAL, QueryFailure::NoFoot));
         }
         param
     };
@@ -768,7 +886,7 @@ pub fn radial_sector_classify_between(
     let mut ang1 = 0.0;
     let mut ang2 = 0.0;
     let mut ang3 = 0.0;
-    let mut last_step_off_distance = 0.0;
+    let mut last_step_off_distance: f64;
 
     // detect special case: all planar surfaces
     let all_planes = on_plane(brep, sector_eu)?
@@ -797,7 +915,10 @@ pub fn radial_sector_classify_between(
     let mut sector_left = false;
     let mut radial_left = false;
 
+    // The step of the previous round, whose distance is `last_min`.
+    let mut last_round_step = 0.0;
     while !done {
+        let round_step = step_off_distance;
         let (last1, last2) = (s1, s2);
         // 1. get Edgeuse->Face stepoff binormal
         let off1 = !sector_left
@@ -909,15 +1030,15 @@ pub fn radial_sector_classify_between(
         if stepped_off_surface {
             // its an error to step off on first pass
             if count == 0 {
-                return Err(SolidError::query_failed(
+                return Err(SolidError::query(
                     OP_RADIAL,
-                    "the first step stepped off the surface",
+                    QueryFailure::SteppedOffOnFirstStep,
                 ));
             }
 
             // the sector's faces stayed together as far as the faces reach
             if let Some(class) = zero_sector {
-                return Ok(class);
+                return Ok(Some(class));
             }
 
             // (the angle values are from the previous iteration)
@@ -927,32 +1048,32 @@ pub fn radial_sector_classify_between(
             // against the radial partner's normal, which for ang2 is another face at the
             // sector angle: past 90 degrees the coincident pair is taken for opposite sides.
             if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
-                return Ok(if norm1.dot(norm3) >= 0.0 {
+                return Ok(Some(if norm1.dot(norm3) >= 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
-                });
+                }));
             } else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
+                return Ok(Some(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
                     RadialSectorClass::CoincidentRadial
                 } else {
                     RadialSectorClass::CoincidentRadialMate
-                });
+                }));
             } else if ang1 < 0.5 * PI / 180.0 {
                 // Zero sector.
-                return Ok(if bin3.dot(norm1) > 0.0 {
+                return Ok(Some(if bin3.dot(norm1) > 0.0 {
                     RadialSectorClass::ZeroSector
                 } else {
                     RadialSectorClass::ZeroSectorMate
-                });
+                }));
             }
 
             // Just take the best answer that we could find.
-            return Ok(if inside {
+            return Ok(Some(if inside {
                 RadialSectorClass::Inside
             } else {
                 RadialSectorClass::Outside
-            });
+            }));
         }
 
         // classify the binormal vector set
@@ -973,14 +1094,14 @@ pub fn radial_sector_classify_between(
         if count > 2 && min_dist > tolerance {
             // and working with a lamina edge
             if lamina_edge {
-                return Ok(if ang2 > EFF_ZERO_SQRT {
+                return Ok(Some(if ang2 > EFF_ZERO_SQRT {
                     // face is inside
                     RadialSectorClass::Inside
                 } else if norm1.dot(norm3) > 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
-                });
+                }));
             }
 
             // If sector angle is zero (faces of EU and its radial partner are
@@ -1027,7 +1148,11 @@ pub fn radial_sector_classify_between(
         // surfaces at an increased step off distance from the edge
         if ang1 < 10.0 * PI / 180.0 || ang2 < 10.0 * PI / 180.0 || ang3 < 10.0 * PI / 180.0 {
             if lamina_edge && ang2 > 10.0 * PI / 180.0 {
-                return Ok(RadialSectorClass::Inside);
+                return Ok(Some(RadialSectorClass::Inside));
+            }
+            // the binormals at the edge do not decide: the faces would be stepped off it
+            if !step {
+                return Ok(None);
             }
             count += 1;
 
@@ -1053,9 +1178,22 @@ pub fn radial_sector_classify_between(
                     last_step_off_distance = step_off_distance;
                     step_off_distance = 2.0 * last_step_off_distance;
                 } else {
-                    let ratio = (step_off_distance - last_step_off_distance) / denom;
-                    last_step_off_distance = step_off_distance;
-                    step_off_distance = tolerance * ratio;
+                    let step = step_off_distance;
+                    last_step_off_distance = step;
+                    // (not upstream) The step aims where the faces' distance, modelled through
+                    // the edge and the last two steps ([`parting_step`]), is past the exit above
+                    // and still rising. Upstream's `(Δs / Δd) · tolerance` aims at the tolerance
+                    // along a line through 0: faces parting at a small angle and faster than
+                    // linearly (a sphere dipped 2e-5 into a face leaves it at 0.094 degrees)
+                    // settle short of it, their distance stops changing, and once the rounds run
+                    // out that reads as a coincidence. A falling distance doubles the step, as
+                    // upstream's negative step did, and so does a model that never rises.
+                    step_off_distance = if denom < 0.0 {
+                        -1.0
+                    } else {
+                        parting_step((last_round_step, last_min), (step, min_dist), tolerance)
+                            .unwrap_or(-1.0)
+                    };
                     // Don't let step distance grow or shrink by more than a factor of 3
                     if step_off_distance < 0.0 {
                         step_off_distance = 2.0 * last_step_off_distance;
@@ -1129,11 +1267,11 @@ pub fn radial_sector_classify_between(
                         diff2,
                     ))
             {
-                return Ok(if norm1.dot(norm3) < 0.0 {
+                return Ok(Some(if norm1.dot(norm3) < 0.0 {
                     RadialSectorClass::CoincidentSectorMate
                 } else {
                     RadialSectorClass::CoincidentSector
-                });
+                }));
             } else if on_radial
                 && (done
                     || !holds_coincidence(
@@ -1150,11 +1288,11 @@ pub fn radial_sector_classify_between(
             {
                 let norm4 = s2.tangent.cross(s2.binormal);
                 let norm5 = s3.tangent.cross(bin3);
-                return Ok(if norm4.dot(norm5) < 0.0 {
+                return Ok(Some(if norm4.dot(norm5) < 0.0 {
                     RadialSectorClass::CoincidentRadialMate
                 } else {
                     RadialSectorClass::CoincidentRadial
-                });
+                }));
             }
             if on_sector || on_radial {
                 held = true;
@@ -1165,22 +1303,23 @@ pub fn radial_sector_classify_between(
             break;
         }
 
+        last_round_step = round_step;
         last2_min = last_min;
         last_min = min_dist;
     }
 
     // the sector's faces stayed together through every step
     if let Some(class) = zero_sector {
-        return Ok(class);
+        return Ok(Some(class));
     }
     if lamina_edge {
-        return Ok(RadialSectorClass::Inside);
+        return Ok(Some(RadialSectorClass::Inside));
     }
-    Ok(if inside {
+    Ok(Some(if inside {
         RadialSectorClass::Inside
     } else {
         RadialSectorClass::Outside
-    })
+    }))
 }
 
 /// `SmEdge::RadialSectorOfCurveClassify`: where `curve` (over `interval`, starting at
@@ -1194,7 +1333,7 @@ pub fn radial_sector_classify_between(
 /// # Errors
 ///
 /// `SM_ERR` when the curve's projected direction vanishes; `SM_ERR_INVALID_INPUT` (as
-/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero-length vector to unitize or measure;
+/// [`QueryFailure::ZeroLengthVector`]) for a zero-length vector to unitize or measure;
 /// [`SolidError::InvalidInput`]
 /// for a sector edge use without radial partner; those of the step-offs and
 /// evaluations; [`SolidError::Unported`] for the step-offs
@@ -1265,13 +1404,13 @@ pub fn radial_sector_of_curve_classify(
         .unwrap_or(start_param);
         let pv = curve.evaluate(k, step_param, 1, true, true)?;
         let mut tan = *pv.get(1).ok_or_else(|| {
-            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no tangent")
+            SolidError::query(OP_RADIAL_CURVE, QueryFailure::Defect { why: "the curve evaluation, asked for the first derivative, returned fewer, though an evaluation that succeeds returns every order it is asked for" })
         })?;
         if orientation == OrientType::Opposite {
             tan = -tan;
         }
         let pnt3 = *pv.first().ok_or_else(|| {
-            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no point")
+            SolidError::query(OP_RADIAL_CURVE, QueryFailure::Defect { why: "the curve evaluation, asked for the point and the first derivative, returned no point, though an evaluation that succeeds returns every order it is asked for" })
         })?;
 
         // Project binormals into plane which is perpendicular to edge
@@ -1280,9 +1419,9 @@ pub fn radial_sector_of_curve_classify(
         let bin2 = tan1.cross(s2.binormal).cross(tan1);
         let bin3 = tan1.cross(tan).cross(tan1);
         if bin3.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::query_failed(
+            return Err(SolidError::query(
                 OP_RADIAL_CURVE,
-                "the curve's tangent is parallel to the edge's tangent",
+                QueryFailure::TangentAlongEdge,
             ));
         }
 
@@ -1657,5 +1796,27 @@ mod tests {
         );
         assert_eq!(RadialSectorClass::ZeroSectorMate.code(), 7);
         assert_eq!(CurveSectorClass::CoincidentRadial.code(), 3);
+    }
+
+    #[test]
+    fn a_vector_operations_error_stays_the_cause() {
+        // a zero-length vector: the status `SER` passes on, over the operation's error
+        let unit = Vec3::ZERO.unitize().unwrap_err();
+        let e = vec_status(Vec3::ZERO.unitize(), OP_RADIAL).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
+        assert_eq!(e.cause(), Some(&unit));
+        assert!(e.is_status_answer(), "{e:?}");
+        let angle = Vec3::X.angle_between(Vec3::ZERO).unwrap_err();
+        let e = vec_status(Vec3::X.angle_between(Vec3::ZERO), OP_RADIAL_CURVE).unwrap_err();
+        assert_eq!(e.cause(), Some(&angle));
+        // a port invariant below keeps its class: the status is no answer
+        let port = SolidError::port_invariant("inner", "an adapter failed");
+        let e = vec_status::<f64>(Err(port.clone()), OP_RADIAL).unwrap_err();
+        assert_eq!(e.cause(), Some(&port));
+        assert!(e.is_port_failure() && !e.is_status_answer(), "{e:?}");
+        // any other error passes through unchanged
+        let other = SolidError::cancelled("inner");
+        assert_eq!(vec_status::<f64>(Err(other.clone()), OP_RADIAL), Err(other));
     }
 }

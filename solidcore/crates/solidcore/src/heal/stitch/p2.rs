@@ -34,6 +34,12 @@
 //! - `DoStitching`'s edge gluing skips a lamina pair that crosses another lamina edge on
 //!   the same curve round it, where each face there meets that curve once (`RadialGlue`;
 //!   #2506, not upstream).
+//! - `DoStitching`'s region nesting sets the void flags by nesting
+//!   (`SM_VS_NESTEDSOLID`) where the faces came in loose (no region but the infinite
+//!   one), no lamina edge is left, every shell is closed and there are more than two
+//!   regions, so a cavity sewn from loose faces is a void; upstream only swaps the
+//!   infinite region's flag (`SM_VS_INFINITEREGION_SWAP`) and leaves it solid (not
+//!   upstream, WR-21540, as WR-569 for `StitchIntoSolid`).
 //! - `DoStitching` collects the modified faces (`sModifiedFaces`) as upstream, though
 //!   only commented-out code reads them; its `dMinEdgeLength` is dropped for the same
 //!   reason (the lengths are still computed).
@@ -48,7 +54,8 @@
 
 use super::p1::{sort_by_param, AdvancedStitch, DefaultStitchCallback, SplitReason, Stitch};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef};
+use crate::error::heal::HealFailure;
+use crate::error::{ignore_status, ignored, EntityRef, Failure};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::NotifyOperation;
@@ -60,7 +67,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
-use crate::topology::brep::p6::InfiniteHalf;
+use crate::topology::brep::p6::{every_shell_closed, InfiniteHalf};
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -94,9 +101,11 @@ fn deref(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// The stitch could not continue, as the phrase says (upstream `SE(SM_ERR)`).
-fn stitch_failed(what: &'static str) -> SolidError {
-    SolidError::heal_failed(OP, what)
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
 }
 
 /// The edge's curve; upstream dereferences a null curve pointer.
@@ -106,9 +115,12 @@ fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1)
-        .copied()
-        .ok_or_else(|| stitch_failed("the curve has no tangent"))
+    pv.get(1).copied().ok_or_else(|| {
+        defect(
+            "the curve's evaluation returned no first derivative, though an evaluation \
+             that succeeds returns the point and each derivative asked for",
+        )
+    })
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {
@@ -293,7 +305,12 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
             true,
         )?
         .normal
-        .ok_or_else(|| stitch_failed("the edge has no bounding box"))
+        .ok_or_else(|| {
+            defect(
+                "the edge curve's bounding box came back without the axis-aligned box, \
+                 though that box is computed whenever it is asked for",
+            )
+        })
 }
 
 /// `SmCurve::ApproximateLength(edge interval, samples)` of the edge's curve.
@@ -480,6 +497,9 @@ impl Stitch<'_> {
     ) -> Result<()> {
         let tol_3d = self.stitch_tol_3d();
         k.check_cancelled("heal::stitch::p2::Stitch::do_stitching")?;
+        // (not upstream, WR-21540) loose faces: no region but the infinite one, so every
+        // region after the gluing is one the gluing made
+        let loose = bp1::regions(b, None)?.len() <= 1;
         // (status not checked)
         ignore_status(self.edit_brep_pre_edit(k, b))?;
 
@@ -953,7 +973,25 @@ impl Stitch<'_> {
 
         // when asked - find and set the infinite region by classifying a ray from a
         // point outside the Brep
-        if self.do_region_nesting && bp1::regions(b, None)?.len() > 1 {
+        let regions = bp1::regions(b, None)?.len();
+        if self.do_region_nesting && regions > 1 {
+            // Not upstream (WR-21540, as WR-569 for `stitch_into_solid`): each closed shell
+            // the glue closed split off a new region, solid, and upstream only finds the
+            // infinite region, so the region inside a shell nested in another (a cavity)
+            // stays solid. When the faces came in loose and no lamina edge is left and
+            // every shell is closed, the regions are a nested solid model: material inside
+            // the outer shell, a void inside a shell within it, and so on. The flags are
+            // set once the gluing is done, from the nesting alone: a split cannot tell
+            // them, as a cavity's shell may close before the shell around it. A B-rep that
+            // came in with regions keeps their flags (a solid enclosed in material stays a
+            // solid, which a defeature then refuses). With two regions both settings give
+            // the same flags.
+            let nested = loose && regions > 2 && out.lamina_edges == 0 && every_shell_closed(b)?;
+            let void_setting = if nested {
+                SetRegionVoidType::NestedSolid
+            } else {
+                SetRegionVoidType::InfiniteRegionSwap
+            };
             let old = b.editing_enabled();
             b.set_editing_enabled(false);
             let r = find_and_set_infinite_region_with_identity(
@@ -961,7 +999,7 @@ impl Stitch<'_> {
                 b,
                 self.query_identity,
                 None,
-                SetRegionVoidType::InfiniteRegionSwap,
+                void_setting,
                 None,
             );
             b.set_editing_enabled(old);
@@ -1266,8 +1304,10 @@ impl Stitch<'_> {
                             }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                        Err(_) if !self.ignore_problems => {
-                            return Err(stitch_failed("the edges could not be glued"))
+                        Err(err) if !self.ignore_problems => {
+                            return Err(Failure::new(OP, HealFailure::EdgesNotGlued)
+                                .caused_by(err)
+                                .into_error())
                         }
                         Err(_) => {
                             // forget the deleted edge when the failed glue removed it
@@ -1337,7 +1377,7 @@ impl Stitch<'_> {
             has_brep = vertex::brep(b, v)?.is_some();
         }
         if !has_brep {
-            return Err(stitch_failed("the topology belongs to no B-rep")); // we'll flag this as an error.
+            return Err(SolidError::heal(OP, HealFailure::NotInBrep)); // we'll flag this as an error.
         }
 
         // Sort on (1,2,3), unitized so that parameter differences are 3d distances.
@@ -2103,6 +2143,64 @@ mod tests {
         };
         // the infinite region and the cavity are voids, between them the material
         assert_eq!(void_count(&build()), 2);
+    }
+
+    /// (#21540) The same twelve loose faces sewn by `SmBrep::StitchFaces`, the cavity's
+    /// faces turned either way and given before or after the cube's: both shells close
+    /// (twelve edges glued on each cube), and the region inside the inner shell is a void,
+    /// so every face lies between material and a void. The infinite region holds the outer
+    /// shell, the material region the outer shell's other side first, then the inner
+    /// shell, the cavity the inner shell's other side.
+    #[test]
+    fn stitch_faces_leaves_a_closed_cavity_void() {
+        for (inward, cavity_first) in [(true, false), (false, false), (true, true), (false, true)] {
+            let case = format!("inward {inward}, cavity first {cavity_first}");
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            if cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
+            add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
+            if !cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
+            let r =
+                crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false).unwrap();
+            assert_eq!((r.stitched_edges, r.lamina_edges), (24, 0), "{case}");
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "{case}");
+            let infinite = b.infinite_region().unwrap();
+            let mut regions: Vec<(bool, i32, usize)> = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .map(|r| {
+                    let region = b.region(r).unwrap();
+                    (r == infinite, region.is_void, region.shells.len())
+                })
+                .collect();
+            regions.sort_unstable();
+            // (infinite, void flag, shells): the material, the cavity, the infinite region
+            assert_eq!(
+                regions,
+                vec![(false, 0, 2), (false, 1, 1), (true, 1, 1)],
+                "{case}"
+            );
+            // the material region's first shell is its outer one, across from the infinite
+            // region's shell
+            let material = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&r| b.region(r).unwrap().is_void == 0)
+                .unwrap();
+            let outer = b.region(material).unwrap().shells[0];
+            let outside = b.region(infinite).unwrap().shells[0];
+            let mated = b.shell(outer).unwrap().mated_shells(&mut k, &b).unwrap();
+            assert_eq!(mated, vec![outside], "{case}");
+        }
     }
 
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half

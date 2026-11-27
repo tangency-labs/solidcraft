@@ -3,10 +3,11 @@
 use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
+use crate::viewport::Hit;
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::{FeatureKind, SweepOrientation};
+use solidcraft_engine::doc::{FeatureKind, PathEntry, SweepOrientation};
 
 /// A square `Q` on XY and a path `P` 40 up the Z axis; the square's sketch id.
 fn setup(h: &mut Harness) -> u64 {
@@ -196,5 +197,296 @@ fn a_sweep_path_edge_is_restored_on_the_body_it_was_picked_on() {
     match path.as_slice() {
         [Sel::Edge { body, .. }] => assert_eq!(body, "A", "the path was restored on another body"),
         other => panic!("the path was not restored as an edge: {other:?}"),
+    }
+}
+
+/// #17550: a sweep whose path curve was deleted from its sketch fails with "unknown path curve
+/// `l1`", and the guide curve cannot be picked again: the stale pick stays in the Path input and
+/// the sweep keeps failing. The path must be picked again, and the sweep must build.
+#[test]
+fn a_sweep_path_curve_deleted_from_its_sketch_can_be_picked_again() {
+    let mut h = Harness::new();
+    // A square `Q` on XY (the profile), a path `P` on XZ (the line `l1`) and `R` on YZ (a line
+    // `l1` as well: curve ids repeat from one sketch to the next, #3726).
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Q"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[5,5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"P"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,-40]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,0],[20,-20]],"ids":["keep"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"YZ","name":"R"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,-30]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let other = h.app.session.doc.find_feature("R").unwrap().id;
+    // The sweep follows P's line.
+    h.app.run("solid.sweep", json!({"sketch":"Q","path_sketch":"P","path":["l1"],"operation":"new","name":"Swept"})).unwrap();
+    let swept = h.app.session.doc.find_feature("Swept").unwrap().id;
+    assert!(h.app.session.model.result(swept).unwrap().error.is_none(), "{:?}", h.app.session.log);
+    // The line is deleted from P: the sweep cannot find its path curve any more.
+    h.app.run("sketch.edit", json!({"sketch":"P"})).unwrap();
+    h.app.run("sketch.delete", json!({"sketch":"P","entities":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(h.app.session.model.result(swept).unwrap().error.as_deref(), Some("unknown path curve `l1`"));
+    // The user opens the sweep and picks the guide curve again, in R.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Swept"}})).unwrap();
+    h.frames(8);
+    let hit = Hit::SketchCurve { sketch: other, id: "l1".into(), straight: true, point: Vec3::ZERO };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 1;
+    let pick = d.candidate_on(&h.app.session, &hit, None).expect("the line of R is a valid path pick");
+    d.pick(&h.app.session, pick);
+    // The preview of the sweep is computed again, so the dialog's OK is drawn with what the
+    // picks make now.
+    h.frames(8);
+    h.settle();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.settle();
+    // The sweep follows R's line now, and builds.
+    let f = h.app.session.doc.find_feature("Swept").unwrap();
+    let FeatureKind::Sweep { path_sketch, path, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(path_sketch.0, other, "the sweep still follows the stale path");
+    assert_eq!(path, &vec![PathEntry::OfPathSketch("l1".into())]);
+    assert!(
+        h.app.session.model.result(f.id).unwrap().error.is_none(),
+        "the sweep does not build: {:?}",
+        h.app.session.model.result(f.id).unwrap().error
+    );
+    assert!(h.app.dialog.is_none(), "the sweep was not applied: {:?}", h.app.preview.error);
+}
+
+/// A 40 x 20 x 10 block `B` whose four upright edges are rounded 4: its top outline is eight
+/// edges, each running on smoothly into the next. The display index of its top front edge.
+fn rounded_block(h: &mut Harness) -> (usize, Vec3) {
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "B"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false})).unwrap();
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let b = world.body("B").unwrap();
+    let at = Vec3::new(20.0, 0.0, 10.0);
+    // The straight top front edge: every point of it at y = 0, z = 10.
+    let index = b.mesh().edges.iter().position(|e| e.len() > 1 && e.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6)).unwrap();
+    (index, at)
+}
+
+/// The Sweep dialog's Path has a Tangent Chain switch: ticked, one pick of a body edge brings
+/// every edge that continues it smoothly (the block's whole rounded top outline); a listed
+/// row's remove button takes the whole chain out; unticked, the path is the picked edge again.
+#[test]
+fn sweep_path_tangent_chain_brings_the_smooth_outline() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].chain, Some(false), "off by default");
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let pick = Sel::Edge { body: "B".into(), index, point: at };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h), vec![pick.clone()], "off: only the picked edge");
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    assert!(chain.iter().all(|x| matches!(x, Sel::Edge { point, .. } if (point.z - 10.0).abs() < 1e-6)), "{chain:?}");
+    // Picking the same edge again takes the chain out, and again brings it back.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    // A listed row of the chain (not the picked edge) takes the whole chain with it.
+    let other = top(&h)[3].clone();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.remove_listed(&h.app.session, 1, 3, &other);
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    // Unticked: back to the picked edges.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![pick]);
+}
+
+/// Tangent Chain keeps every edge picked by hand: two edges of one chain picked before it is
+/// ticked both come back when it is unticked, and a marquee that replaces an expanded chain with
+/// one of its edges brings that edge's chain (not nothing) and that edge alone when unticked.
+#[test]
+fn tangent_chain_keeps_each_hand_picked_edge() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    // The straight top back edge: every point of it at y = 20, z = 10.
+    let back = world
+        .body("B")
+        .unwrap()
+        .mesh()
+        .edges
+        .iter()
+        .position(|e| e.len() > 1 && e.iter().all(|p| (p.y - 20.0).abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6))
+        .unwrap();
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let front = Sel::Edge { body: "B".into(), index, point: at };
+    let back = Sel::Edge { body: "B".into(), index: back, point: Vec3::new(20.0, 20.0, 10.0) };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, front.clone());
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, back.clone());
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), back.clone()]);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8, "{:?}", top(&h));
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), back.clone()], "both hand-picked edges come back");
+    // Ticked again (8 edges), a marquee taking only the back edge replaces the chain with its own.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, vec![back.clone()], false);
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    assert_eq!(chain[0], back, "{chain:?}");
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![back]);
+}
+
+/// A marquee that adds an edge already listed through another pick's chain still makes it a pick:
+/// unticking Tangent Chain brings back both picks, not only the first. A marquee over a whole
+/// smooth loop walks the chain once (the other picks lie in it), and removing one row of it still
+/// takes every pick whose chain held that row.
+#[test]
+fn tangent_chain_marquee_over_a_listed_edge_keeps_it_as_a_pick() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let front = Sel::Edge { body: "B".into(), index, point: at };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, front.clone());
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    // An additive marquee over an edge the chain already lists changes no row but is a pick.
+    let other = chain[3].clone();
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, vec![other.clone()], true);
+    h.frames(2);
+    assert_eq!(top(&h), chain);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), other.clone()], "both picks come back");
+    // Ticked, a replacing marquee over the whole loop: the same eight rows, one walk.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, chain.clone(), false);
+    h.frames(2);
+    assert_eq!(top(&h), chain);
+    let seeds = &h.app.dialog.as_ref().unwrap().inputs[1].chain_seeds;
+    assert_eq!(seeds.len(), 8);
+    assert_eq!(seeds.iter().filter(|(_, c)| c.is_some()).count(), 1, "one walk for the loop");
+    // Removing a row takes out every pick, each of whose chain is the whole loop.
+    let row = top(&h).iter().position(|x| *x == other).expect("the row is listed");
+    h.app.dialog.as_mut().unwrap().remove_listed(&h.app.session, 1, row, &other);
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+}
+
+/// #16084: Pipe and Pattern on Path take a body's edges as their path, as Sweep does: with
+/// Tangent Chain ticked, one pick of the rounded block's top front edge sends its whole top
+/// outline (eight edges) as `path_body` and `path_edges`, with no sketch anywhere in the design
+/// (none is drawn, projected or made), and editing the feature brings the eight edges back into
+/// the Path input.
+#[test]
+fn pipe_and_path_pattern_take_a_tangent_chain_of_body_edges() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 10], "body_name": "Pin"})).unwrap();
+    let pick = Sel::Edge { body: "B".into(), index, point: at };
+    for (command, path_input) in [("solid.pipe", 0), ("solid.pattern.path", 1)] {
+        h.step(&json!({"call":"ui.start","params":{"command":command}})).unwrap();
+        h.frames(3);
+        if path_input == 1 {
+            h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Pin".into() }];
+        }
+        h.app.dialog.as_mut().unwrap().active = path_input;
+        h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+        h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[path_input].items.len(), 8, "{command}");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        let refused = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+        assert!(refused.is_none(), "{command} was refused: {refused:?}");
+        assert!(h.app.dialog.is_none(), "{command}: {:?}", h.app.session.log);
+        let doc = &h.app.session.doc;
+        let f = doc
+            .features
+            .iter()
+            .rev()
+            .find(|f| matches!((command, &f.kind), ("solid.pipe", FeatureKind::Pipe { .. }) | ("solid.pattern.path", FeatureKind::Pattern { .. })))
+            .unwrap_or_else(|| panic!("{command}: {:?} {:?}", doc.features.iter().map(|f| &f.name).collect::<Vec<_>>(), h.app.session.log));
+        let (body, edges, curves) = match &f.kind {
+            FeatureKind::Pipe { path_body, path_edges, path, .. } => (path_body.clone(), path_edges.len(), path.len()),
+            FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Path { path_body, path_edges, path, .. }, .. } => {
+                (path_body.clone(), path_edges.len(), path.len())
+            }
+            other => panic!("{command}: {other:?}"),
+        };
+        // The edges are the path themselves: no sketch curve stands between them and the feature.
+        assert_eq!((body.map(|b| b.0), edges, curves), (Some("B".to_string()), 8, 0), "{command}");
+        assert!(!doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. })), "{command}: the design has a sketch");
+        assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{command}: {:?}", h.app.session.model.results.last());
+        let feature = f.name.clone();
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":feature}})).unwrap();
+        h.frames(8);
+        let d = h.app.dialog.as_ref().unwrap();
+        let path = d
+            .inputs
+            .get(path_input)
+            .map(|i| i.items.clone())
+            .unwrap_or_else(|| panic!("{command} {feature}: {:?} {:?}", d.kind, d.inputs.iter().map(|i| &i.label).collect::<Vec<_>>()));
+        assert_eq!(path.len(), 8, "{command}: {path:?}");
+        assert!(path.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "B")), "{command}: {path:?}");
+        h.app.dialog = None;
+    }
+}
+
+/// Every input that takes a chain of edges offers Tangent Chain, off: both Sweeps' Path, the
+/// Surface Loft's sections, Blend's two edge sets, Boundary's curves, Patch's boundary and
+/// Ruled's edges.
+#[test]
+fn edge_chain_inputs_offer_tangent_chain() {
+    let mut h = Harness::new();
+    rounded_block(&mut h);
+    for (command, labels) in [
+        ("solid.sweep", &["Path"][..]),
+        ("surface.sweep", &["Path"][..]),
+        ("surface.loft", &["Sections"][..]),
+        ("surface.blend", &["From edges", "To edges"][..]),
+        ("surface.boundary", &["Curves", "Cross curves"][..]),
+        ("surface.patch", &["Boundary"][..]),
+        ("surface.ruled", &["Edges"][..]),
+        ("solid.pipe", &["Path"][..]),
+        ("solid.pattern.path", &["Path"][..]),
+    ] {
+        h.step(&json!({"call":"ui.start","params":{"command":command}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap_or_else(|| panic!("{command}: no dialog"));
+        for inp in &d.inputs {
+            let want = if labels.contains(&inp.label) { Some(false) } else { None };
+            assert_eq!(inp.chain, want, "{command}: {}", inp.label);
+        }
+        h.app.dialog = None;
     }
 }

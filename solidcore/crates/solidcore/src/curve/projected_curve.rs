@@ -75,7 +75,7 @@
 //!   `ReadFromDB` does not call `MakeOrthoNormal`.
 
 use crate::curve::curve::p2::{self as curve_base, Curve, PROJECTED_CURVE_TYPE};
-use crate::error::curve::CurveFailure;
+use crate::error::curve::{CurveEdit, CurveFailure};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -393,10 +393,7 @@ impl ProjectedCurve {
         if proj_init && !proj_zero {
             self.proj_vec = self.proj_vec.unitize_or_z();
         } else {
-            return Err(SolidError::curve_failed(
-                OP,
-                "the projection vector is unset or zero",
-            ));
+            return Err(SolidError::curve(OP, CurveFailure::ProjectionVectorZero));
         }
 
         // for rotations - make the sAuxData vector orthonormal to the ProjVec
@@ -412,14 +409,11 @@ impl ProjectedCurve {
                 if zero {
                     return Err(SolidError::curve(
                         OP,
-                        CurveFailure::ZeroDirection("the auxiliary direction"),
+                        CurveFailure::AuxiliaryAlongProjection,
                     ));
                 }
             } else {
-                return Err(SolidError::curve_failed(
-                    OP,
-                    "the auxiliary data is unset or zero",
-                ));
+                return Err(SolidError::curve(OP, CurveFailure::AuxiliaryVectorZero));
             }
         }
         Ok(())
@@ -454,7 +448,11 @@ impl ProjectedCurve {
     pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
         let (_, mults) = match self.knots(k, None) {
             Ok(km) => km,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => (Vec::new(), Vec::new()),
         };
 
@@ -487,9 +485,11 @@ impl ProjectedCurve {
     pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be reparametrised",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Reparametrise,
+                },
             ));
         }
 
@@ -510,9 +510,11 @@ impl ProjectedCurve {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be reparametrised",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Reparametrise,
+                },
             ));
         }
 
@@ -544,9 +546,11 @@ impl ProjectedCurve {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be trimmed",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Trim,
+                },
             ));
         }
 
@@ -588,9 +592,11 @@ impl ProjectedCurve {
 
         // Don't own surface, can not transform the curve
         if self.owns_curve == OwnsCurve::No {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be transformed",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Transform,
+                },
             ));
         }
 
@@ -949,7 +955,30 @@ mod tests {
         .unwrap();
         assert_eq!(c.proj_vec(), Vec3::ZERO);
         assert_eq!(c.aux_data(), Vec3::ZERO);
-        assert!(c.make_ortho_normal().is_err());
+        let err = c.make_ortho_normal().unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::ProjectionVectorZero)
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        // a rotation's auxiliary vector: zero, then along the projection vector
+        c.proj_vec = Vec3::Z;
+        let err = c.make_ortho_normal().unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::AuxiliaryVectorZero)
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        c.aux_data = Vec3::new(0.0, 0.0, 2.0);
+        let err = c.make_ortho_normal().unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::AuxiliaryAlongProjection)
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(SM_ERR_INVALID_INPUT)
+        );
     }
 
     #[test]
@@ -989,11 +1018,41 @@ mod tests {
             OwnsCurve::No,
         )
         .unwrap();
-        assert!(c
+        let err = c
             .edit_parameterization(&k, &Extent1d::from_min_max(0.0, 2.0))
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Reparametrise
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
         let mut a = Axis2Placement::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y);
-        assert!(c.transform(&k, &a, None).is_err());
+        assert_eq!(
+            c.transform(&k, &a, None).unwrap_err().curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Transform
+            })
+        );
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        assert_eq!(
+            c.reverse_parameterization(&k, &ivl)
+                .unwrap_err()
+                .curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Reparametrise
+            })
+        );
+        let mut trim = Extent1d::from_min_max(0.2, 0.8);
+        assert_eq!(
+            c.trim(&k, &mut trim, TrimMode::Notify)
+                .unwrap_err()
+                .curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Trim
+            })
+        );
         a = Axis2Placement::new(Vec3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y);
         assert!(c.transform(&k, &a, None).is_ok());
         let (_, mults) = c.knots(&k, None).expect("knots");

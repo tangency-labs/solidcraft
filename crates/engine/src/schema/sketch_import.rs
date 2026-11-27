@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_import.rs`: `sketch.insert_dxf`,
-//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds` and `sketch.export_dxf`.
+//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds`, `sketch.export_dxf` and
+//! `sketch.export_svg`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a file can be read or written, a sketch
@@ -39,7 +40,7 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = source_required)]
 pub struct InsertDrawingKeys {
-    /// The drawing itself, as text. Wins over `path`. At most 16 MiB (`MAX_DRAWING_BYTES`).
+    /// The drawing itself, as text. Wins over `path`. At most 64 MiB (`MAX_DRAWING_BYTES`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<DrawingText>,
     /// The drawing file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is
@@ -79,10 +80,24 @@ pub struct InsertDrawingKeys {
     /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
     #[serde(default)]
     pub size_from: Option<DrawingSizeFrom>,
+    /// The dots per inch an SVG's pixels (its user units, and lengths without a unit) are read at,
+    /// 1 to 10000: a file drawn at 72 dpi comes in at the size it was drawn at with 72. Lengths
+    /// with their own unit (`mm`, `in`, `pt`) keep it. Default: 96, as CSS has it. For SVG
+    /// drawings; a DXF has no pixels.
+    #[serde(default)]
+    pub dpi: Option<f64>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
     pub tolerance: Option<f64>,
+    /// How far in mm a removed vertex may lie from the outline kept, measured on the drawing as
+    /// it is drawn (the same at any `scale`), 0 to 100 (a value outside is brought inside, and
+    /// never more than a hundredth of the drawing). Runs of consecutive lines that meet end to
+    /// end are replaced by fewer lines that follow them within it, so a dense drawing comes in
+    /// with fewer curves; arcs, circles, ellipses, splines, conics and text stay as drawn.
+    /// Default: 0, every edge as drawn.
+    #[serde(default)]
+    pub simplify: Option<f64>,
     /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
     /// does), so it stays where it is put; a circle's or ellipse's radius stays free, and text and
     /// the points the sketch already had are not touched. Default: false.
@@ -714,6 +729,78 @@ pub enum DxfExported {
     },
 }
 
+/// Save a sketch as an SVG drawing at its real size: to the file `path`, or, without it, as text in
+/// the reply. The file's `width` and `height` carry the unit and its `viewBox` is the same size
+/// without one, so it opens 1:1. Each closed profile is one closed path with its holes as further
+/// sub-paths; circles, arcs and lines stay what they are and other curves are written as line
+/// segments. Construction curves are left out.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportSvgParams {
+    /// The sketch: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The file to write. Default (also when blank): none, and the SVG text is returned.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// The drawing's unit (any case): `mm`, `cm`, or `in` or `inch`. Default: mm.
+    #[serde(default, deserialize_with = "svg_units")]
+    #[schemars(schema_with = "svg_units_schema")]
+    pub units: Option<String>,
+}
+
+/// The units `sketch.export_svg` takes, in lower case (the handler reads them in any case).
+const SVG_UNITS: [&str; 4] = ["mm", "cm", "in", "inch"];
+
+fn svg_units<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(units)) => {
+            let lower = units.to_ascii_lowercase();
+            if SVG_UNITS.contains(&lower.as_str()) {
+                Ok(Some(lower))
+            } else {
+                Err(D::Error::custom(whole(format!("unsupported unit `{lower}` (use \"mm\", \"cm\" or \"in\")"))))
+            }
+        }
+        Some(_) => Err(D::Error::custom(whole("`units` must be a string"))),
+    }
+}
+
+fn svg_units_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "mm, cm, in or inch, in any case. Default: mm."})
+}
+
+/// What `sketch.export_svg` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExportSvgResult {
+    #[serde(flatten)]
+    pub exported: SvgExported,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Where the SVG went.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SvgExported {
+    /// With a `path`: the file was written.
+    Written {
+        /// The file written, as given.
+        path: String,
+        /// How many drawn elements it holds (a closed profile with its holes is one).
+        elements: usize,
+    },
+    /// Without one: the SVG as text.
+    Text {
+        /// The SVG file's text.
+        svg: String,
+        /// How many drawn elements it holds (a closed profile with its holes is one).
+        elements: usize,
+    },
+}
+
 /// How big a drawing is in its own file, to size it before inserting it: the drawing is read as
 /// `sketch.insert_dxf` and `sketch.insert_svg` read it, and its bounds are the answer. Nothing is
 /// added to a sketch, so it needs no sketch and changes nothing.
@@ -734,6 +821,10 @@ pub struct DrawingBoundsParams {
     #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drawing_format_schema")]
     pub format: Option<String>,
+    /// The dots per inch an SVG's pixels are read at, 1 to 10000, as `sketch.insert_svg`'s
+    /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<f64>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -742,7 +833,7 @@ fn source_any_of() -> Value {
     serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
 }
 
-/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+/// `sketch.drawing_bounds` has no rule across its keys but the source one.
 fn bounds_source_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), source_any_of());
 }
@@ -789,6 +880,10 @@ pub struct DrawingBoundsResult {
     /// SVG that names no sheet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<DrawingBox>,
+    /// How many drawn entities the file has (lines, arcs, circles, ellipses, splines, conics and
+    /// texts): about what the insert adds curves for, so a window can tell whether the sketch
+    /// takes the drawing as drawn.
+    pub edges: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

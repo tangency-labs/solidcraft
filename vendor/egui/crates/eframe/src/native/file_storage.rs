@@ -194,7 +194,11 @@ impl crate::Storage for FileStorage {
     }
 }
 
-fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
+// SolidCraft: written to a temporary file beside `file_path`, synced and renamed over it, so the
+// file always holds one whole save, the last one written (#4164). Two windows saving at once each
+// truncated and wrote the same file, and a shorter save left a longer one's tail behind it.
+#[doc(hidden)]
+pub fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
     profiling::function_scope!();
 
     if let Some(parent_dir) = file_path.parent()
@@ -204,25 +208,76 @@ fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
         log::warn!("Failed to create directory {}: {err}", parent_dir.display());
     }
 
-    match std::fs::File::create(file_path) {
+    // SolidCraft: one temporary name per process and thread, so concurrent saves never share one.
+    let name = file_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let thread = format!("{:?}", std::thread::current().id()).replace(|c: char| !c.is_ascii_alphanumeric(), "");
+    let tmp_path = file_path.with_file_name(format!(".{name}.{}-{thread}.tmp", std::process::id()));
+
+    match std::fs::File::create(&tmp_path) {
         Ok(file) => {
             let mut writer = std::io::BufWriter::new(file);
             let config = Default::default();
 
             profiling::scope!("ron::serialize");
-            if let Err(err) = ron::Options::default()
+            let written = ron::Options::default()
                 .to_io_writer_pretty(&mut writer, &kv, config)
                 .and_then(|()| writer.flush().map_err(|err| err.into()))
-            {
+                .and_then(|()| writer.get_ref().sync_all().map_err(|err| err.into()));
+            drop(writer);
+            if let Err(err) = written {
                 log::warn!("Failed to serialize app state: {err}");
+                std::fs::remove_file(&tmp_path).ok();
+            } else if let Err(err) = rename_with_retries(&tmp_path, file_path) {
+                log::warn!("Failed to replace {}: {err}", file_path.display());
+                std::fs::remove_file(&tmp_path).ok();
             } else {
                 log::trace!("Persisted to {}", file_path.display());
             }
         }
         Err(err) => {
-            log::warn!("Failed to create file {}: {err}", file_path.display());
+            log::warn!("Failed to create file {}: {err}", tmp_path.display());
         }
     }
+}
+
+// SolidCraft: Windows refuses to replace a file another process has open, as a second window does
+// while it reads or saves the settings. That passes in moments, so try again before giving up. This
+// runs on the save thread, and the longest wait is 150 ms.
+fn rename_with_retries(from: &Path, to: &Path) -> std::io::Result<()> {
+    with_retries(|| std::fs::rename(from, to), |_| true)
+}
+
+/// SolidCraft: reads the settings file the way a starting window does. On Windows, opening it
+/// while another window renames a fresh save over it can fail for a moment (the file being replaced
+/// is shared out or pending delete). Read as "no settings", that started the window on defaults,
+/// and its first save then wrote those defaults over the real settings. A missing file and any
+/// other error are answered at once.
+#[doc(hidden)]
+pub fn read_settings(path: &Path) -> std::io::Result<String> {
+    with_retries(|| std::fs::read_to_string(path), passes_in_moments)
+}
+
+/// Errors Windows gives while another process replaces the file: access denied (the old file is
+/// pending delete) and sharing or lock violations.
+fn passes_in_moments(err: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(err.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// Runs `op`, and again after 10, 20, 40 and 80 ms while it fails with an error `retry` accepts.
+fn with_retries<T>(
+    mut op: impl FnMut() -> std::io::Result<T>,
+    retry: impl Fn(&std::io::Error) -> bool,
+) -> std::io::Result<T> {
+    let mut result = op();
+    for wait_ms in [10, 20, 40, 80] {
+        match &result {
+            Err(err) if retry(err) => {}
+            _ => break,
+        }
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        result = op();
+    }
+    result
 }
 
 // ----------------------------------------------------------------------------
@@ -232,17 +287,14 @@ where
     T: serde::de::DeserializeOwned,
 {
     profiling::function_scope!();
-    match std::fs::File::open(ron_path) {
-        Ok(file) => {
-            let reader = std::io::BufReader::new(file);
-            match ron::de::from_reader(reader) {
-                Ok(value) => Some(value),
-                Err(err) => {
-                    log::warn!("Failed to parse RON: {err}");
-                    None
-                }
+    match read_settings(ron_path.as_ref()) {
+        Ok(text) => match ron::from_str(&text) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                log::warn!("Failed to parse RON: {err}");
+                None
             }
-        }
+        },
         Err(_err) => {
             // File probably doesn't exist. That's fine.
             None
@@ -267,5 +319,49 @@ mod tests {
         ] {
             assert_eq!(directories_storage_dir(app_id), storage_dir(app_id));
         }
+    }
+
+    // SolidCraft: a read or rename that fails for a moment is tried again; other errors are not.
+    #[test]
+    fn only_errors_that_pass_are_tried_again() {
+        let busy = || std::io::Error::other("busy");
+        let gone = || std::io::Error::from(std::io::ErrorKind::NotFound);
+        let mut calls = 0;
+        let passes = with_retries(
+            || {
+                calls += 1;
+                if calls < 3 { Err(busy()) } else { Ok(calls) }
+            },
+            |e| e.kind() == std::io::ErrorKind::Other,
+        );
+        assert_eq!(passes.unwrap(), 3, "tried until it read");
+        let mut calls = 0;
+        let missing = with_retries::<()>(
+            || {
+                calls += 1;
+                Err(gone())
+            },
+            |e| e.kind() == std::io::ErrorKind::Other,
+        );
+        assert_eq!(
+            (missing.unwrap_err().kind(), calls),
+            (std::io::ErrorKind::NotFound, 1),
+            "a missing file is answered at once"
+        );
+        let mut calls = 0;
+        let gave_up = with_retries::<()>(
+            || {
+                calls += 1;
+                Err(busy())
+            },
+            |_| true,
+        );
+        assert!(gave_up.is_err());
+        assert_eq!(calls, 5, "gives up after four more tries");
+        // Off Windows nothing is tried again; on Windows only the errors of a file being replaced.
+        let os = std::io::Error::from_raw_os_error;
+        assert_eq!(passes_in_moments(&os(32)), cfg!(windows));
+        assert_eq!(passes_in_moments(&os(5)), cfg!(windows));
+        assert!(!passes_in_moments(&gone()) && !passes_in_moments(&os(2)));
     }
 }

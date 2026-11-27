@@ -432,7 +432,7 @@
 {"case":"read_surf_sphere150.smb_index0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
 {"case":"read_surf_sphere150.smb_index1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
 {"case":"read_surf_sphere150.smb_index2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
-{"case":"read_surf_sphere150.smb_modified0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.0,1.0,1.0,1.0,1.0]}}
+{"case":"read_surf_sphere150.smb_modified0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.0,1.0,1.0,2.0,2.0]}}
 {"case":"read_surf_sphere150.smb_modified1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.0,1.0,1.0,2.0,2.0]}}
 {"case":"read_surf_sphere150.smb_modified2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.0,1.0,1.0,2.0,2.0]}}
 {"case":"read_torus.smb_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,2.0,1.0]}}

@@ -485,7 +485,15 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
             let t = Tokens::get();
             for (kind, outline) in [(StatusKind::Mode, t.accent), (StatusKind::Result, t.border), (StatusKind::Attention, t.warning)] {
                 let ctx = crate::fonts::test_context();
-                let item = StatusItem { id: "test".into(), kind, name: "Draft".into(), setting: "Z · 1°".into(), has_key: true, editable: false };
+                let item = StatusItem {
+                    id: "test".into(),
+                    kind,
+                    name: "Draft".into(),
+                    setting: "Z · 1°".into(),
+                    has_key: true,
+                    editable: false,
+                    clear_key: None,
+                };
                 let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     viewport_status_item(ui, &item, &mut StatusPresentation::default());
                 });
@@ -531,7 +539,8 @@ fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
                     ("Draft", "Z · 1°", true, true),
                 ] {
                     let ctx = crate::fonts::test_context();
-                    let item = StatusItem { id: "centred".into(), kind, name: name.into(), setting: setting.into(), has_key, editable };
+                    let item =
+                        StatusItem { id: "centred".into(), kind, name: name.into(), setting: setting.into(), has_key, editable, clear_key: None };
                     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                         viewport_status_item(ui, &item, &mut StatusPresentation::default());
                     });
@@ -618,6 +627,7 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
                 setting: "12 stripes".into(),
                 has_key: false,
                 editable: false,
+                clear_key: None,
             };
             let mut state = StatusPresentation::default();
             let (rest, action) = paint(&ctx, &item, &mut state, vec![]);
@@ -2646,6 +2656,7 @@ fn summary_component_uses_supplied_newest_and_aggregate_attention_at_three_and_f
                         setting: format!("{i} mm"),
                         has_key: false,
                         editable: false,
+                        clear_key: None,
                     })
                     .collect();
                 for width in [320.0, 1600.0] {
@@ -2979,6 +2990,7 @@ fn status_item_actions_are_round_and_their_card_is_opaque() {
             setting: "Z · 1°".into(),
             has_key: true,
             editable: false,
+            clear_key: None,
         };
         let mut state = StatusPresentation::default();
         let mut draw = |input: egui::RawInput| {
@@ -3042,4 +3054,113 @@ fn note_callouts_are_screen_facing_and_follow_the_anchor() {
     h.app.run("note.update", json!({"note": id, "hidden": true})).unwrap();
     h.settle();
     assert!(shot(&h).is_empty());
+}
+
+/// Notes: a long note wraps inside its box. The box was sized from a layout wrapped at
+/// `NOTE_WRAP_WIDTH` while the text was drawn on one line, so a sentence ran out of its box.
+#[test]
+fn a_long_note_wraps_inside_its_box() {
+    let mut h = Harness::new();
+    let text = "This is a test comment to check that a long note is drawn correctly in the viewport";
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": text})).unwrap();
+    h.settle();
+    let proj = display_proj(&h.app);
+    let mut out = Vec::new();
+    draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+    assert_eq!(out.len(), 1);
+    let note = &out[0];
+    assert!(note.galley.rows.len() > 1, "a sentence wider than the callout wraps");
+    assert!(note.galley.size().x <= NOTE_WRAP_WIDTH + 0.5);
+    // What draw_notes actually paints: the wrapped text, inside the callout box.
+    let output = draw(&h.ctx, |ui| draw_notes(&h.app, ui.painter(), &proj));
+    let texts: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+    assert_eq!(texts.len(), 1, "one note, one text shape");
+    let painted = texts[0];
+    assert!(painted.galley.rows.len() > 1, "the painted text wraps");
+    let drawn = Rect::from_min_size(painted.pos, painted.galley.size());
+    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "painted text {drawn:?} inside box {:?}", note.text_rect);
+}
+
+/// #8120: while isolating, with no Isolate slot on the navigation bar, a status pill names the
+/// Isolation and how much it hid; its close exits the isolation, and Escape never does.
+#[test]
+fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
+    let kept = h.app.session.model.state().bodies[0].name.clone();
+    h.app.run("browser.visibility", json!({"items": [kept], "visible": true, "isolate": true})).unwrap();
+    h.settle();
+    let isolate = |h: &Harness| h.app.session.status_items().into_iter().find(|e| e.id == solidcraft_engine::status_items::StatusId::Isolate);
+    let effect = isolate(&h).expect("an Isolate status");
+    let item = crate::viewport_status::presentation(&h.app, &effect).expect("a pill, the bar having no Isolate slot");
+    assert_eq!((item.name.as_str(), item.setting.as_str()), ("Isolation", "1 hidden"));
+    assert_eq!(item.clear_key.as_deref(), Some("Ctrl+Shift+I"), "its close names its own key, not Escape");
+    let close = format!("viewport_status:{}:close", item.id);
+    assert!(solidcraft_ui_registry::handle_at(&close).is_some(), "drawn with its close");
+    h.app.preferences.escape_closes_analyses = true;
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.session.visibility.before_isolate.is_some(), "Escape never exits isolation");
+    h.app.preferences.navigation_bar.slots.push("isolate".into());
+    assert!(crate::viewport_status::presentation(&h.app, &effect).is_none(), "the bar's Isolate slot shows it instead");
+    h.app.ui.show_navigation_bar = false;
+    assert!(crate::viewport_status::presentation(&h.app, &effect).is_some(), "the bar hidden: the pill shows it");
+    h.app.ui.show_navigation_bar = true;
+    h.app.preferences.navigation_bar.slots.pop();
+    h.settle();
+    h.step(&json!({"click": {"handle": close}})).unwrap();
+    assert!(h.app.session.visibility.before_isolate.is_none() && h.app.session.visibility.hidden_bodies.is_empty(), "isolation exited");
+    assert!(isolate(&h).is_none());
+}
+
+/// #8120: with the view showing what an Isolate hid see-through or as edges, the bodies Isolate
+/// hid are drawn and can be picked (never ones the user hid before it, which stay hidden); the
+/// pill's details choose how.
+#[test]
+fn what_an_isolate_hid_shows_see_through_or_as_edges_and_can_be_picked() {
+    use solidcraft_engine::schema::view_navigation::IsolateShow;
+    let mut h = Harness::new();
+    for (corner, name) in [([0, 0, 0], "A"), ([20, 0, 0], "B"), ([40, 0, 0], "C")] {
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner, "body_name": name})).unwrap();
+    }
+    h.app.run("browser.visibility", json!({"items": ["C"], "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true})).unwrap();
+    h.settle();
+    assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden, "hidden by default");
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none());
+    // The pill's details offer the choice, at Hidden.
+    let effect = h.app.session.status_items().into_iter().find(|e| e.id == solidcraft_engine::status_items::StatusId::Isolate).unwrap();
+    let details = crate::viewport_details::description(&h.app, &effect);
+    let choice = details.settings.iter().find(|s| s.id == "show").expect("a choice of how the rest shows");
+    assert!(!details.settings.iter().any(|s| s.id == "pick"), "no click choice while the parts are hidden");
+    assert!(matches!(&choice.value, crate::ui_kit::DetailValue::Choice { selected: 0, options } if options.len() == 3));
+    let owner = crate::viewport_status::identity(&effect);
+    for (selected, show) in [(1, IsolateShow::Transparent), (2, IsolateShow::Wireframe)] {
+        let value = crate::ui_kit::DetailValue::Choice { selected, options: Vec::new() };
+        crate::viewport_details::dispatch(&mut h.app, &h.ctx, &owner, crate::ui_kit::DetailEvent::Change("show".into(), value));
+        h.settle();
+        assert_eq!(h.app.preferences.isolate_others, show);
+        assert_eq!(crate::viewport::isolate_ghost(&h.app, "B"), Some(show), "what the Isolate hid");
+        assert!(crate::viewport::isolate_ghost(&h.app, "C").is_none(), "hidden before the Isolate: stays hidden");
+        assert!(crate::viewport::isolate_ghost(&h.app, "A").is_none(), "shown: drawn as it is");
+        assert!(!h.app.session.body_visible("B"), "still hidden in the design");
+        assert!(crate::viewport::body_shown(&h.app, "B"), "drawn, so it can be picked");
+        assert_eq!(
+            crate::viewport::wire_ghost(&h.app, h.app.session.model.state().body("B").unwrap()),
+            show == IsolateShow::Wireframe,
+            "only edges: its faces don't pick"
+        );
+        let card = crate::viewport_details::description(&h.app, &effect);
+        assert!(card.settings.iter().any(|s| s.id == "pick"), "the click choice shows while the parts are drawn");
+        h.app.run("view.isolate_others", json!({"pick": false})).unwrap();
+        assert!(!crate::viewport::body_shown(&h.app, "B"), "clicks go through");
+        h.app.run("view.isolate_others", json!({"pick": true})).unwrap();
+        assert!(!crate::viewport::body_shown(&h.app, "C"), "hidden before the Isolate: never picked");
+    }
+    h.app.run("view.isolate_others", json!({"show": "hidden"})).unwrap();
+    assert_eq!(h.app.preferences.isolate_others, IsolateShow::Hidden);
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none());
+    h.app.run("browser.unisolate", json!({})).unwrap();
+    h.app.run("view.isolate_others", json!({"show": "transparent"})).unwrap();
+    assert!(crate::viewport::isolate_ghost(&h.app, "B").is_none(), "nothing isolated: nothing ghosted");
 }

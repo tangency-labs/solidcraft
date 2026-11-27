@@ -283,6 +283,32 @@ mod setup {
         assert!(run(&h, &["--client", "claude-desktop"]).status.success());
         assert!(json_of(&pkg.join("claude_desktop_config.json"))["mcpServers"]["solidcraft"].is_object());
     }
+
+    /// #20877: a current Microsoft Store Claude Desktop reads its config from
+    /// `%LOCALAPPDATA%\Claude-Data\claude_<package-id>`, not the package's redirected folder. Both
+    /// get the entries, the other servers in the one it reads stay, and a folder that isn't one of
+    /// Claude's is left alone.
+    #[test]
+    fn claude_desktop_msix_data_folder_is_found_beside_the_package_folder() {
+        let h = home("msix-data");
+        let pkg = h.join("AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude");
+        let data = h.join("AppData/Local/Claude-Data/claude_pzs8sxrjxfjjc");
+        let other = h.join("AppData/Local/Claude-Data/extensions");
+        for dir in [&pkg, &data, &other] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(data.join("claude_desktop_config.json"), r#"{"mcpServers": {"mine": {"command": "mine"}}}"#).unwrap();
+        let out = run(&h, &["--client", "claude-desktop", "--live"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let read = json_of(&data.join("claude_desktop_config.json"));
+        assert!(read["mcpServers"]["solidcraft"].is_object() && read["mcpServers"]["solidcraft-live"].is_object(), "{read}");
+        assert_eq!(read["mcpServers"]["mine"], serde_json::json!({"command": "mine"}));
+        assert!(json_of(&pkg.join("claude_desktop_config.json"))["mcpServers"]["solidcraft"].is_object());
+        assert!(!other.join("claude_desktop_config.json").exists());
+        // The output names each file written, the one Claude reads among them.
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("Claude-Data"), "{said}");
+    }
 }
 
 /// Scratch files belong to the CLI process; exercise real startup, requests and shutdown.

@@ -11,6 +11,19 @@ frame_member_turn
   inputs:
     Angle = turn.angle (Angle)
   expressions: turn.angle
+frame_gusset
+  inputs:
+    Angle = gusset1.angle (Angle)
+    Offset = gusset1.offset (Length)
+    Angle = gusset2.angle (Angle)
+    Offset = gusset2.offset (Length)
+    First Leg = gusset.leg1 (Length)
+    Second Leg = gusset.leg2 (Length)
+    Thickness = gusset.thickness (Length)
+    Corner Relief = gusset.relief (Length)
+    Outer Tip Clip = gusset.clip (Length)
+    Joint Offset = gusset.offset (Length)
+  expressions: gusset1.angle, gusset1.offset, gusset2.angle, gusset2.offset, gusset.leg1, gusset.leg2, gusset.thickness, gusset.relief, gusset.clip, gusset.offset, 0, 0, 0, 0, 0, 0
 body_transfer
 sketch
   inputs:
@@ -85,14 +98,14 @@ cylinder
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
-  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z, 0, 0, 1
 cylinder_references
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
     Reference distance = cyl.reference1 (Length)
     Reference distance = cyl.reference2 (Length)
-  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0, 0, 0, 1
 sphere
   inputs:
     Radius = sph.radius (Length)
@@ -107,7 +120,7 @@ cone
     Radius = cone.radius (Length)
     Top radius = cone.top_radius (Length)
     Height = cone.height (Length)
-  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
+  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z, 0, 0, 1
 combine
 pattern_rectangular
   inputs:
@@ -135,38 +148,79 @@ hole_simple
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
-  expressions: hole.diameter, hole.depth
+  expressions: hole.diameter, hole.depth, 0, 0, 1
 hole_drilled
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Tip angle = hole.tip_angle (Angle)
-  expressions: hole.diameter, hole.depth, hole.tip_angle
+  expressions: hole.diameter, hole.depth, hole.tip_angle, 0, 0, 1
 hole_counterbore
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Counterbore diameter = hole.cb_diameter (Length)
     Counterbore depth = hole.cb_depth (Length)
-  expressions: hole.diameter, hole.depth, hole.cb_diameter, hole.cb_depth
+  expressions: hole.diameter, hole.depth, hole.cb_diameter, hole.cb_depth, 0, 0, 1
 hole_countersink
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Countersink diameter = hole.cs_diameter (Length)
     Countersink angle = hole.cs_angle (Angle)
-  expressions: hole.diameter, hole.depth, hole.cs_diameter, hole.cs_angle
+  expressions: hole.diameter, hole.depth, hole.cs_diameter, hole.cs_angle, 0, 0, 1
 hole_references
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Reference distance = hole.reference1 (Length)
     Reference distance = hole.reference2 (Length)
-  expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2
+  expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2, 0, 0, 1
+hole_hardware
+  inputs:
+    Diameter = hole.diameter (Length)
+    Depth = hole.depth (Length)
+    Hardware length = hole.hardware_length (Length)
+  expressions: hole.diameter, hole.depth, hole.hardware_length, 0, 0, 1
 thread
   inputs:
     Length = thread.length (Length)
   expressions: thread.length
+shaft_spline
+  inputs:
+    Teeth = shaft_spline.teeth (Unitless)
+    Length = shaft_spline.length (Length)
+    Module = shaft_spline.module (Length)
+    Pressure angle = shaft_spline.pressure_angle (Angle)
+    Addendum = shaft_spline.addendum (Unitless)
+    Dedendum = shaft_spline.dedendum (Unitless)
+    Root fillet = shaft_spline.root_fillet (Unitless)
+    Profile shift = shaft_spline.profile_shift (Unitless)
+    Thinning = shaft_spline.thinning (Length)
+    Hub addendum = shaft_spline.hub_addendum (Unitless)
+    Tip clearance = shaft_spline.tip_clearance (Length)
+    Form clearance = shaft_spline.form_clearance (Length)
+    Major diameter = shaft_spline.major_diameter (Length)
+    Minor diameter = shaft_spline.minor_diameter (Length)
+    Tooth width = shaft_spline.tooth_width (Length)
+    Flank angle = shaft_spline.flank_angle (Angle)
+    Root round = shaft_spline.root_round (Length)
+    Tip size = shaft_spline.tip_size (Length)
+    Major clearance = shaft_spline.major_clearance (Length)
+    Minor clearance = shaft_spline.minor_clearance (Length)
+    Hub tip round = shaft_spline.hub_tip_round (Length)
+    Side clearance = shaft_spline.side_clearance (Length)
+    Hub root round = shaft_spline.hub_root_round (Length)
+    Hub diameter = shaft_spline.hub_diameter (Length)
+    Master angle = shaft_spline.master_angle (Angle)
+    Cutter diameter = shaft_spline.cutter_diameter (Length)
+    End chamfer = shaft_spline.end_chamfer (Length)
+    Entry chamfer = shaft_spline.entry_chamfer (Length)
+    End chamfer distance 2 = shaft_spline.end_chamfer_distance2 (Length)
+    End chamfer angle = shaft_spline.end_chamfer_angle (Angle)
+    Entry chamfer distance 2 = shaft_spline.entry_chamfer_distance2 (Length)
+    Entry chamfer angle = shaft_spline.entry_chamfer_angle (Angle)
+  expressions: shaft_spline.teeth, shaft_spline.length, shaft_spline.module, shaft_spline.pressure_angle, shaft_spline.addendum, shaft_spline.dedendum, shaft_spline.root_fillet, shaft_spline.profile_shift, shaft_spline.thinning, shaft_spline.hub_addendum, shaft_spline.tip_clearance, shaft_spline.form_clearance, shaft_spline.major_diameter, shaft_spline.minor_diameter, shaft_spline.tooth_width, shaft_spline.flank_angle, shaft_spline.root_round, shaft_spline.tip_size, shaft_spline.major_clearance, shaft_spline.minor_clearance, shaft_spline.hub_tip_round, shaft_spline.side_clearance, shaft_spline.hub_root_round, shaft_spline.hub_diameter, shaft_spline.master_angle, shaft_spline.cutter_diameter, shaft_spline.end_chamfer, shaft_spline.entry_chamfer, shaft_spline.end_chamfer_distance2, shaft_spline.end_chamfer_angle, shaft_spline.entry_chamfer_distance2, shaft_spline.entry_chamfer_angle
 loft
 sweep
 sweep_options
@@ -178,6 +232,10 @@ shell
   inputs:
     Thickness = shell.thickness (Length)
   expressions: shell.thickness
+dome
+  inputs:
+    Height = dome.height (Length)
+  expressions: dome.height
 draft
   inputs:
     Angle = draft.angle (Angle)
@@ -254,6 +312,28 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_cope
+frame_trim
+  inputs:
+    Angle = frame_trim.angle (Angle)
+    Offset = frame_trim.offset (Length)
+    Gap = frame_trim.gap (Length)
+  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap, 0, 0, 0
+frame_plate
+  inputs:
+    Angle = plate.angle (Angle)
+    Offset = plate.offset (Length)
+    Width = plate.width (Length)
+    Height = plate.height (Length)
+    Hole Diameter = plate.hole (Length)
+    Bolt Circle Diameter = plate.pitch (Length)
+    Bolt Pattern Angle = plate.hole_angle (Angle)
+    Thickness = plate.thickness (Length)
+    Offset = plate.offset (Length)
+    X Offset = plate.x (Length)
+    Y Offset = plate.y (Length)
+    Rotation = plate.angle (Angle)
+  expressions: plate.angle, plate.offset, plate.width, plate.height, plate.hole, plate.pitch, plate.hole_angle, plate.thickness, plate.offset, plate.x, plate.y, plate.angle, 0, 0, 0
 emboss
   inputs:
     Depth = emboss.depth (Length)
@@ -276,12 +356,12 @@ coil
     Revolutions = coil.turns (Unitless)
     Section size = coil.section_size (Length)
     Start angle = coil.start_angle (Angle)
-  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z
+  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z, 0, 0, 1
 coil_profile
   inputs:
     Pitch = coil_profile.pitch (Length)
     Revolutions = coil_profile.turns (Unitless)
-  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
+  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z, 0, 0, 1
 cell_grid
   inputs:
     Sides = cell_grid.sides (Unitless)
@@ -326,6 +406,18 @@ sheet_path
   inputs:
     Bend radius = path.radius (Length)
   expressions: path.radius
+sheet_tab
+sheet_bead
+  inputs:
+    Depth = bead.depth (Length)
+    Width = bead.width (Length)
+    Angle = bead.angle (Angle)
+    Crown width = bead.crown (Length)
+    Base radius = bead.rb (Length)
+    Crown radius = bead.rc (Length)
+    End length = bead.end (Length)
+    Margin = bead.margin (Length)
+  expressions: bead.depth, bead.width, bead.angle, bead.crown, bead.rb, bead.rc, bead.end, bead.margin
 sheet_unfold
 sheet_convert
 sheet_surface_convert
@@ -402,6 +494,12 @@ surface_offset
     Distance = soff.distance (Length)
     Tolerance = soff.tolerance (Length)
   expressions: soff.distance, soff.tolerance
+surface_midsurface
+  inputs:
+    Max thickness = smid.max_thickness (Length)
+    Min thickness = smid.min_thickness (Length)
+    Fill holes below = smid.suppress_holes_below (Length)
+  expressions: smid.max_thickness, smid.min_thickness, smid.suppress_holes_below
 surface_blend
 surface_boundary
 surface_network
@@ -454,11 +552,19 @@ move
     Z distance = move.z (Length)
     Angle = move.angle (Angle)
   expressions: move.x, move.y, move.z, move.angle
+capture_position
+  inputs:
+    X distance = capture.x (Length)
+    Y distance = capture.y (Length)
+    Z distance = capture.z (Length)
+    Angle = capture.angle (Angle)
+  expressions: capture.x, capture.y, capture.z, capture.angle, capture.ox, capture.oy, capture.oz
 import
 mesh_convert
   inputs:
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
+mesh_reduce
 mesh_import
 repair
   inputs:

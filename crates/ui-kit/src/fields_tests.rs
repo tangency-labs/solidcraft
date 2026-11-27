@@ -5,6 +5,94 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn table_cell_borders_are_single_inside_rings_for_hover_focus_and_errors() {
+    for dark in [false, true] {
+        let t = solidcraft_theme::Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        for (focused, invalid) in [(false, false), (true, false), (true, true)] {
+            let ctx = context();
+            let id = egui::Id::unique("single_cell_ring");
+            let mut value = "10 mm".to_owned();
+            let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+            let mut draw = |ui: &mut Ui| {
+                ui.set_width(280.0);
+                scope(ui, |ui| {
+                    rect.set(cell_editor(ui, id, &mut value, "", invalid).rect);
+                });
+            };
+            raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            if focused {
+                ctx.memory_mut(|m| m.request_focus(id));
+            }
+            let output =
+                raw_frame(&ctx, egui::RawInput { events: vec![egui::Event::PointerMoved(rect.get().center())], ..Default::default() }, &mut draw);
+            let mut rings = Vec::new();
+            for s in &output.shapes {
+                each_shape(&s.shape, &mut |shape| {
+                    if let egui::Shape::Rect(r) = shape
+                        && r.stroke.width > 0.0
+                    {
+                        rings.push(r.clone());
+                    }
+                });
+            }
+            assert_eq!(rings.len(), 1, "dark {dark}, focus {focused}, invalid {invalid}: {rings:?}");
+            assert_eq!(rings[0].rect, rect.get());
+            assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+            assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+            assert_eq!(rings[0].stroke.width, if focused && !invalid { 1.5 } else { 1.0 });
+            assert_eq!(
+                rings[0].stroke.color,
+                if invalid {
+                    t.form_error
+                } else if focused {
+                    crate::selection_ink(&t)
+                } else {
+                    t.control_border.lerp_to_gamma(t.form_dim, 0.35)
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_cell_editor_has_one_inside_ring_around_the_editor_and_note() {
+    let t = solidcraft_theme::Tokens::get();
+    for invalid in [false, true] {
+        let ctx = context();
+        let id = egui::Id::unique("wide_ring");
+        let mut value = "a long expression that wraps over the neighbouring cells".to_owned();
+        ctx.memory_mut(|m| m.request_focus(id));
+        let mut last = egui::FullOutput::default();
+        for _ in 0..4 {
+            last = raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    ui.set_width(100.0);
+                    wide_cell_editor(ui, id, &mut value, "", invalid, 460.0, ("Live value", false));
+                });
+            });
+        }
+        let mut rings = Vec::new();
+        for s in &last.shapes {
+            each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && r.stroke.width > 0.0
+                {
+                    assert!(s.clip_rect.contains_rect(r.rect));
+                    rings.push(r.clone());
+                }
+            });
+        }
+        assert_eq!(rings.len(), 1, "invalid {invalid}: {rings:?}");
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+        assert_eq!(rings[0].stroke.width, if invalid { 1.0 } else { 1.5 });
+        assert!(rings[0].rect.width() > 300.0);
+        assert!(text_shapes(&last).any(|text| text.galley.job.text == "Live value" && rings[0].rect.contains(text.pos)));
+    }
+}
+
+#[test]
 fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
     let fixture = |stock: bool| {
         let ctx = crate::test_support::context();
@@ -322,6 +410,261 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
         frame(&ctx, pointer(pick, false), &mut draw);
         assert_eq!(chosen.as_deref(), Some(if custom { "/fonts/face.ttf" } else { "two" }));
     }
+}
+
+#[test]
+fn searchable_dropdown_default_keys_keep_enter_and_close_on_escape_without_focus() {
+    for kind in ["text", "custom", "icon", "fitting"] {
+        for focused in [true, false] {
+            let ctx = crate::test_support::context();
+            let mut filter = "tw".to_owned();
+            let picked = std::cell::RefCell::new(None);
+            let widget = std::cell::Cell::new(egui::Id::NULL);
+            let enter_reaches_host = std::cell::Cell::new(false);
+            let options = [SearchOption { value: "two", label: "Two", handle: None }];
+            let mut draw = |ui: &mut Ui| {
+                row(ui, "Font", |ui| {
+                    let id = if kind == "icon" { "icon_search_menu" } else { "default_keys" };
+                    widget.set(ui.make_persistent_id(egui::IdSalt::new(id)));
+                    let value = match kind {
+                        "icon" => searchable_icon_dropdown(ui, "settings", "Two", &mut filter, &options),
+                        "fitting" => searchable_dropdown_fitting(ui, id, "Two", &mut filter, &options, None, false),
+                        _ => searchable_dropdown(ui, id, "Two", &mut filter, &options, (kind == "custom").then_some("Use typed value"), None),
+                    };
+                    if value.is_some() {
+                        *picked.borrow_mut() = value;
+                    }
+                });
+                enter_reaches_host.set(ui.input(|input| input.key_pressed(egui::Key::Enter)));
+            };
+            frame(&ctx, vec![], &mut draw);
+            let at = registry::handle_at("dialog:Font").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert!(picked.borrow().is_none(), "{kind}: Enter must not choose a value without opting in");
+            assert!(enter_reaches_host.get(), "{kind}: Enter remains available to the enclosing dialog");
+            assert!(egui::ComboBox::is_open(&ctx, widget.get()), "{kind}: Enter leaves the popup open");
+            let focus = if focused { widget.get().with("search_keyboard").with("editor") } else { egui::Id::unique("elsewhere") };
+            ctx.memory_mut(|memory| memory.request_focus(focus));
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert!(!egui::ComboBox::is_open(&ctx, widget.get()), "{kind}: Escape closes the popup with editor focus={focused}");
+        }
+    }
+}
+
+#[test]
+fn searchable_dropdown_fits_rows_and_keeps_loading_status_inside_popup() {
+    let ctx = crate::test_support::context();
+    let count = std::cell::Cell::new(3);
+    let pending = std::cell::Cell::new(true);
+    let widget = std::cell::Cell::new(egui::Id::NULL);
+    let names: Vec<_> = (0..40).map(|i| format!("Family {i}")).collect();
+    let mut filter = String::new();
+    let mut draw = |ui: &mut Ui| {
+        ui.set_width(300.0);
+        row(ui, "Font", |ui| {
+            widget.set(ui.make_persistent_id(egui::IdSalt::new("fitting_fonts")));
+            let options: Vec<_> = names.iter().take(count.get()).map(|name| SearchOption { value: name, label: name, handle: None }).collect();
+            searchable_dropdown_fitting(
+                ui,
+                "fitting_fonts",
+                "Family 0",
+                &mut filter,
+                &options,
+                pending.get().then_some("Looking for installed fonts…"),
+                false,
+            );
+        });
+    };
+    let mut render = |events| {
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| scope(ui, &mut draw),
+        )
+    };
+    render(vec![]);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    render(pointer(at, true));
+    render(pointer(at, false));
+    let mut measure = |rows, loading| {
+        count.set(rows);
+        pending.set(loading);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = render(vec![]);
+        }
+        let popup = ctx.read_response(widget.get().with("popup")).unwrap().rect;
+        let mut status = None;
+        let mut painted_text = Vec::new();
+        for clipped in &output.shapes {
+            each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    painted_text.push(text.galley.job.text.clone());
+                    if text.galley.job.text == "Looking for installed fonts…" {
+                        let rect = text.galley.rect.translate(text.pos.to_vec2());
+                        assert!(popup.expand(1.0).contains_rect(rect), "status {rect:?} outside popup {popup:?}");
+                        assert!(clipped.clip_rect.contains_rect(rect), "status must not be clipped");
+                        status = Some(rect);
+                    }
+                }
+            });
+        }
+        assert_eq!(status.is_some(), loading, "{rows} rows in {popup:?}: {painted_text:?}");
+        popup.height()
+    };
+    let three = measure(3, true);
+    let one = measure(1, true);
+    assert!(one < three - 20.0, "one row ({one}) must shrink from three ({three})");
+    assert!(one < 140.0, "one match and status must not reserve an empty list: {one}");
+    let loaded = measure(1, false);
+    assert!(loaded < one - 5.0, "loaded list drops the status row");
+    let many = measure(40, true);
+    assert!(many > three + 20.0, "more rows grow the popup again");
+    assert!(many < solidcraft_theme::Tokens::get().space_24 * 15.0, "long lists stay bounded and scroll: {many}");
+}
+
+#[test]
+fn searchable_dropdown_keyboard_picks_the_filtered_full_value() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let mut picked = None;
+    let options = [
+        SearchOption { value: "Celtic Gaelige", label: "Celtic Gaelige", handle: Some("font:gaelige") },
+        SearchOption { value: "CelticHand", label: "CelticHand", handle: Some("font:hand") },
+        SearchOption { value: "Liberation Sans", label: "Liberation Sans", handle: Some("font:liberation") },
+    ];
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown_fitting(ui, "keyboard_fonts", "", &mut filter, &options, None, true) {
+                picked = Some(value);
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, vec![egui::Event::Text("cElTiC".into())], &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("font:liberation").is_none());
+    for key in [egui::Key::ArrowDown, egui::Key::ArrowDown, egui::Key::ArrowUp, egui::Key::ArrowDown, egui::Key::Enter] {
+        frame(&ctx, vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }], &mut draw);
+        frame(&ctx, vec![], &mut draw);
+    }
+    assert_eq!(picked.as_deref(), Some("CelticHand"));
+}
+
+#[test]
+fn searchable_dropdown_keyboard_starts_at_the_current_family() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let options = [SearchOption { value: "one", label: "One", handle: None }, SearchOption { value: "two", label: "Two", handle: None }];
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown_fitting(ui, "current_font", "Two", &mut filter, &options, None, true) {
+                picked.borrow_mut().push(value);
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    for keys in [vec![egui::Key::Enter], vec![egui::Key::ArrowUp, egui::Key::Enter]] {
+        let at = registry::handle_at("dialog:Font").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        for pressed in keys {
+            frame(&ctx, key(pressed), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+        }
+    }
+    assert_eq!(*picked.borrow(), ["two", "one"], "Enter picks the highlighted current family; Up moves from that family");
+}
+
+#[test]
+fn searchable_dropdown_discovery_refreshes_current_family_until_arrow_navigation() {
+    for navigated in [false, true] {
+        let ctx = crate::test_support::context();
+        let mut filter = String::new();
+        let picked = std::cell::RefCell::new(None);
+        let loaded = std::cell::Cell::new(false);
+        let mut draw = |ui: &mut Ui| {
+            row(ui, "Font", |ui| {
+                let names = if !loaded.get() {
+                    vec!["Liberation Sans"]
+                } else if navigated {
+                    vec!["Arial", "Liberation Sans"]
+                } else {
+                    vec!["Liberation Sans", "Arial"]
+                };
+                let options: Vec<_> = names.iter().map(|name| SearchOption { value: name, label: name, handle: None }).collect();
+                if let Some(value) = searchable_dropdown_fitting(ui, "discovered_fonts", "Arial", &mut filter, &options, None, true) {
+                    *picked.borrow_mut() = Some(value);
+                }
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = registry::handle_at("dialog:Font").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        if navigated {
+            frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+        }
+        loaded.set(true);
+        for _ in 0..4 {
+            frame(&ctx, vec![], &mut draw);
+        }
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        assert_eq!(
+            picked.borrow().as_deref(),
+            Some(if navigated { "Liberation Sans" } else { "Arial" }),
+            "discovery updates the automatic highlight and preserves an arrow choice even when rows move"
+        );
+    }
+}
+
+#[test]
+fn searchable_dropdown_empty_match_keeps_enter_and_escape_in_the_popup() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let mut picked = None;
+    let options = [SearchOption { value: "Liberation Sans", label: "Liberation Sans", handle: None }];
+    let escaped = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown_fitting(ui, "empty_fonts", "", &mut filter, &options, None, true) {
+                picked = Some(value);
+            }
+        });
+        escaped.set(ui.input(|input| input.key_pressed(egui::Key::Escape)));
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, vec![egui::Event::Text("no such family".into())], &mut draw);
+    frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("dialog:Font search").is_some());
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    assert!(!escaped.get(), "Esc must not also cancel the containing dialog");
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("dialog:Font search").is_none());
+    assert!(picked.is_none());
 }
 
 #[test]
@@ -1133,8 +1476,25 @@ fn paste_inserts_at_the_cursor_and_replaces_the_selection() {
     right_click(&ctx, rect.get().center(), &mut draw);
     assert_eq!(selection(&ctx, id), Some((0, 6)), "a right press inside the selection keeps it");
     pick(&ctx, "text_paste", &mut draw);
-    assert_eq!(*value.borrow(), "4 mm  ", "Paste replaces the selection; a single line takes line breaks as spaces");
+    assert_eq!(*value.borrow(), "4 mm ", "Paste replaces the selection; each line ending becomes one space");
     set_clipboard(None);
+}
+
+#[test]
+fn single_line_paste_normalizes_each_line_ending_to_one_space() {
+    for ending in ["\r\n", "\n", "\r"] {
+        let clip = format!("尺寸{ending}🙂");
+        let mut text = String::new();
+        let inserted = egui::TextBuffer::insert_text(&mut super::SingleLineBuffer(&mut text), &clip, egui::text::CharIndex(0));
+        assert_eq!(text, "尺寸 🙂", "keyboard paste with {ending:?}");
+        assert_eq!(inserted, 4);
+
+        let mut text = String::new();
+        let done = text_menu::apply(&mut text, None, Edit::Paste, Some(&clip), Field::LINE);
+        assert_eq!(text, "尺寸 🙂", "menu paste with {ending:?}");
+        assert_eq!(done.range.primary.index.0, 4);
+        assert!(done.changed);
+    }
 }
 
 #[test]

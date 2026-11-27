@@ -13,19 +13,29 @@
 use serde::{Deserialize, Serialize};
 
 /// A failed kernel call's code as data to keep and send: the call (`"blend"`), the kernel's
-/// stable number for the kind of failure (`kind`, 0 for a failure solidcore-ops decided itself)
-/// and the kernel routine that failed (`operation`, a module path; for kind 0, the name of
-/// solidcore-ops' error).
+/// stable number for the kind of failure (`kind`, 0 for a failure solidcore-ops decided itself),
+/// the kernel routine that failed (`operation`, a module path; for kind 0, the name of
+/// solidcore-ops' error) and the kernel's class of the error (`class`: `refusal`, `defect`,
+/// `port_failure` or `unclassed`), copied from the kernel's code, never derived here.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ErrorCode {
     pub call: String,
     pub kind: u16,
     pub operation: String,
+    /// A code saved before the class was kept (#22148) has none: it reads as `unclassed`, the
+    /// class that claims nothing, so a report or result saved then still opens.
+    #[serde(default = "unclassed")]
+    pub class: String,
+}
+
+/// The class of a code saved without one: `unclassed`.
+pub(crate) fn unclassed() -> String {
+    "unclassed".to_owned()
 }
 
 impl From<solidcraft_smlib::failure::FailureCode> for ErrorCode {
     fn from(c: solidcraft_smlib::failure::FailureCode) -> Self {
-        ErrorCode { call: c.call.to_owned(), kind: c.kind, operation: c.operation.to_owned() }
+        ErrorCode { call: c.call.to_owned(), kind: c.kind, operation: c.operation.to_owned(), class: c.class.name().to_owned() }
     }
 }
 
@@ -54,4 +64,34 @@ pub fn last() -> Option<ErrorCode> {
 #[must_use]
 pub fn code_in(error: &str) -> Option<ErrorCode> {
     solidcraft_smlib::failure::code_in(error).map(ErrorCode::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_ops::{ErrorClass, FailureCode};
+
+    /// #22148: the code keeps the kernel's class by its name, for every class, without deriving
+    /// it from the kind (a refusal of kind 6 stays a refusal).
+    #[test]
+    fn the_code_keeps_the_kernels_class_by_name() {
+        for (class, name) in [
+            (ErrorClass::Refusal, "refusal"),
+            (ErrorClass::Defect, "defect"),
+            (ErrorClass::PortFailure, "port_failure"),
+            (ErrorClass::Unclassed, "unclassed"),
+        ] {
+            let code = ErrorCode::from(FailureCode { call: "blend", kind: 6, operation: "blend::op", class });
+            assert_eq!(code, ErrorCode { call: "blend".into(), kind: 6, operation: "blend::op".into(), class: name.into() });
+            assert_eq!(serde_json::to_value(&code).unwrap()["class"], name);
+        }
+    }
+
+    /// A code saved before #22148 has no `class`: it still reads, as `unclassed`.
+    #[test]
+    fn a_code_saved_before_the_class_still_reads_as_unclassed() {
+        let saved = r#"{"call":"blend","kind":7,"operation":"smlib::blend::rolling"}"#;
+        let code: ErrorCode = serde_json::from_str(saved).expect("an old code reads");
+        assert_eq!(code, ErrorCode { call: "blend".into(), kind: 7, operation: "smlib::blend::rolling".into(), class: "unclassed".into() });
+    }
 }
