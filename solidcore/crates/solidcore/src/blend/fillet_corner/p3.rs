@@ -333,9 +333,6 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
-    /// The chamfer event's configuration at a vertex of three but for chamfers of both
-    /// convexities (`ChamferClass::MixedConvexity`): as a bevel the corner is refused.
-    pub chamfer_mixed_convexity: bool,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -723,7 +720,6 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
-            chamfer_mixed_convexity: false,
             setback: None,
             mixed: None,
             end_cap: None,
