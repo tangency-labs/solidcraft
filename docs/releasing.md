@@ -309,6 +309,22 @@ To enable it once (owner):
 3. Keep the fork `bherbruck/winget-pkgs` (Komac pushes its branches there). Its default branch
    doesn't need syncing.
 
+**Install scope.** The MSI installs for all users by default and just for the user with
+`ALLUSERS=2 MSIINSTALLPERUSER=1`. WinGet doesn't pass either by itself: a manifest that only
+says `Scope: machine` (as the winget-pkgs one does) keeps installing for all users, unchanged.
+To offer `winget install --scope user`, the manifest needs a second installer entry per
+architecture, with the same URL, hash and product code, plus:
+
+```yaml
+  Scope: user
+  InstallerSwitches:
+    Custom: ALLUSERS=2 MSIINSTALLPERUSER=1
+```
+
+and the existing entries `Scope: machine`. That first edit is made by hand in the winget-pkgs
+pull request of the first release with the scope choice. Komac copies the other fields from the
+previous manifest, so later updates should keep both entries; check the next one does.
+
 When the token expires, create a new one the same way and run step 2 again. If a release was
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
