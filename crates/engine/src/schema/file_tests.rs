@@ -41,6 +41,7 @@ fn schemas_and_the_key_check_agree() {
             "name",
             "objects",
             "options",
+            "overwrite",
             "path",
             "physics",
             "place_meshes",

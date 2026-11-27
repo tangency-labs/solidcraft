@@ -478,13 +478,37 @@ pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrit
     Ok(())
 }
 
-/// What was seen of one entry of a folder: where, how big and when it was last changed.
+/// What was seen of one entry: its path, size, modification time and staged content digest.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Seen {
     path: PathBuf,
     len: u64,
     modified: Option<std::time::SystemTime>,
+    digest: Option<[u8; 32]>,
+}
+
+/// Hash file bytes with fixed memory, including cancellation checks for large files.
+#[cfg(not(target_arch = "wasm32"))]
+fn content_digest(path: &Path) -> std::io::Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if cancelled() {
+            return Err(cancelled_error());
+        }
+        let count = match file.read(&mut buffer) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if count == 0 {
+            return Ok(hash.finalize().into());
+        }
+        hash.update(&buffer[..count]);
+    }
 }
 
 /// Visit every entry below `source` without following links, with bounded traversal and stack
@@ -537,6 +561,8 @@ fn stage_existing(source: &Path, destination: &Path) -> std::io::Result<Vec<Seen
             path: relative.join(entry.file_name()),
             len: if directory { 0 } else { meta.len() },
             modified: meta.modified().ok().filter(|_| !directory),
+            // Hash the bytes actually staged, including the copy fallback.
+            digest: if directory { None } else { Some(content_digest(&target)?) },
         });
         Ok(())
     })?;
@@ -554,6 +580,7 @@ fn seen_in(root: &Path) -> std::io::Result<Vec<Seen>> {
             path: relative.join(entry.file_name()),
             len: if directory { 0 } else { meta.len() },
             modified: meta.modified().ok().filter(|_| !directory),
+            digest: if directory { None } else { Some(content_digest(&entry.path())?) },
         });
         Ok(())
     })?;
@@ -716,6 +743,8 @@ mod tests {
         pub(super) static CHMOD_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// A file this thread's folder export saves into the folder just after copying it, as another program would.
         pub(super) static LATE_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+        /// Replace an existing file with equal-length bytes and preserve its modification time.
+        static REPLACED_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
         /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
         /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
         /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
@@ -741,6 +770,11 @@ mod tests {
 
     /// The hook [`write_files_atomic`] calls after copying the folder.
     pub(super) fn after_staging() {
+        if let Some(path) = REPLACED_FILE.with(|p| p.borrow_mut().take()) {
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            write_atomic_no_follow(&path, b"late").unwrap();
+            fs::File::options().write(true).open(path).unwrap().set_modified(modified).unwrap();
+        }
         if let Some(late) = LATE_FILE.with(|l| l.borrow_mut().take()) {
             fs::write(late, b"late").unwrap();
         }
@@ -817,6 +851,33 @@ mod tests {
         assert_eq!(fs::read(target.join("late.txt")).unwrap(), b"late");
         assert_eq!(fs::read(target.join("cutlist.csv")).unwrap(), b"list");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_folder_export_detects_same_size_same_mtime_replacements() {
+        // Check both an unrelated file and a file the export intends to overwrite.
+        for name in ["keep.txt", "cutlist.csv"] {
+            let dir = fresh_dir("folder-same-metadata");
+            let target = dir.join("sheets");
+            fs::create_dir(&target).unwrap();
+            fs::write(target.join("keep.txt"), b"keep").unwrap();
+            fs::write(target.join("cutlist.csv"), b"list").unwrap();
+            let replaced = target.join(name);
+            let before = fs::metadata(&replaced).unwrap();
+            REPLACED_FILE.with(|p| *p.borrow_mut() = Some(replaced.clone()));
+            let files = vec![crate::safe_zip::File { path: "cutlist.csv".into(), bytes: b"exported".to_vec() }];
+            let error = write_files_atomic(&target, &files, true).unwrap_err();
+            assert!(error.to_string().contains("changed while the export was being prepared"), "{error}");
+            let after = fs::metadata(&replaced).unwrap();
+            assert_eq!(after.len(), before.len());
+            assert_eq!(after.modified().unwrap(), before.modified().unwrap());
+            assert_eq!(fs::read(&replaced).unwrap(), b"late");
+            let other = if name == "keep.txt" { "cutlist.csv" } else { "keep.txt" };
+            assert_eq!(fs::read(target.join(other)).unwrap(), if other == "keep.txt" { b"keep" } else { b"list" });
+            assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "only the restored folder remains");
+            fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[cfg(all(unix, not(target_arch = "wasm32")))]
