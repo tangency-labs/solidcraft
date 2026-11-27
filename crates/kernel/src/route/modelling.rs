@@ -2,7 +2,7 @@
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::{
-    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides, Taper, TrimKeep,
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Helix, Modelling, OpKind, Primitive, RailFit, RevolveSides, Taper, TrimKeep,
 };
 
 use crate::{PathSeg, PointPath, SplitTool, SweepControl};
