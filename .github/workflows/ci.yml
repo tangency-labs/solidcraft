@@ -858,10 +858,17 @@ jobs:
         env:
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          CI_RUNNER_LABEL: ${{ vars.CI_RUNNER }}
         run: |
           # Pull requests archive only the affected packages (scripts/ci/affected.py).
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
+          # Reduce the archive build's disk footprint on the standard hosted runner. The manual
+          # matrix jobs consume only these three integration-test binaries.
+          if [ "$FULL" = true ] && [ "$CI_RUNNER_LABEL" = ubuntu-24.04 ]; then
+            scope=(-p solidcraft-cli -p solidcraft-kernel -p solidcraft-engine
+              --test action_matrix --test boolean_props --test atomic_commands)
+          fi
           cargo nextest archive "${scope[@]}" --cargo-profile ci --locked --archive-file tests.tar.zst
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
