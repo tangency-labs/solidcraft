@@ -515,6 +515,82 @@ fn rolled_sides(
     Ok(out)
 }
 
+/// Not the fork's (tangency-labs/solidcraft#21940): on each side whose one edge between the
+/// blends is a seam of the face the blends roll on there (both its edge uses on that face) that
+/// runs from the corner's `vertex` into the face and ends there, at a vertex no other edge
+/// reaches (the surface's pole, as on a sphere turned so that its pole lies near the rim), and
+/// where the ball touching that face at the seam's far end and touching the blends' other face
+/// is smaller than the round (`ball_touching_with`: `within`), the seam ends inside the band
+/// the round takes off the face: the round's contact line passes beyond its end and never
+/// crosses it. Nothing stands between the blends there, so the seam is taken out of `between`
+/// and the section's end on that side lies on the face, through the vertex, as where no edge
+/// runs from it. (Where the ball at the far end is the round's or larger, the contact line
+/// crosses the seam and the section ends there, as before.) The ball's radius grows along such
+/// a seam from nothing at the vertex, where the seam meets the other face, to the far end: on a
+/// sphere against a plane it is `h r / (r - h)`, h the point's distance from the plane.
+///
+/// # Errors
+/// Those of the topology queries, the seam test, the solver lookup and `ball_touching_with`.
+fn seams_short_of_rails(
+    k: &Kernel,
+    target: &mut Brep,
+    solvers: &[Option<SolverObject>],
+    ids: &[Option<FilletSolverId>],
+    blended: EdgeuseId,
+    vertex: Option<crate::topology::VertexId>,
+    side: &[[Option<FaceId>; 2]; 2],
+    between: &mut [Vec<EdgeuseId>; 2],
+) -> Result<()> {
+    let Some(&Some(id)) = ids.first() else {
+        return Ok(());
+    };
+    for s in 0..2 {
+        let Some(&[only]) = between.get(s).map(Vec::as_slice) else {
+            continue;
+        };
+        let (Some(&Some(face)), Some(&Some(other_face))) = (
+            side.get(s).and_then(|f| f.first()),
+            side.get(1 - s).and_then(|f| f.first()),
+        ) else {
+            continue;
+        };
+        if faces_of(target, only)? != [Some(face); 2] {
+            continue;
+        }
+        let Some(edge) = eu1::edge(target, only)? else {
+            continue;
+        };
+        if !crate::topology::edge::is_seam(k, target, edge)? {
+            continue;
+        }
+        let Some(far) = crate::topology::edge::other_vertex(target, edge, vertex)? else {
+            continue;
+        };
+        if Some(far) == vertex || crate::topology::vertex::edges(target, far, None)? != [edge] {
+            continue;
+        }
+        let Some(side_eu) = find_side_edgeuse(target, blended, only)? else {
+            continue;
+        };
+        let at = crate::topology::vertex::point(target, far)?;
+        let (on_g, within, _) = crate::blend::blend_corner::end::ball_touching_with(
+            k,
+            target,
+            live(solvers, Some(id))?,
+            side_eu,
+            other_face,
+            at,
+            None,
+        )?;
+        if within && !on_g {
+            if let Some(b) = between.get_mut(s) {
+                b.clear();
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
 /// (`SM_FV_RAIL_X_EDGEUSE`), whether the constant round `fs` has a ball of its radius
 /// touching its face F there (F the round's face the side edge bounds, G `other_face` its
@@ -633,7 +709,8 @@ impl FilletCorner {
     /// stands between the blends the section is the one through the vertex: its end on
     /// the first side `SM_FV_JOIN_SECTION`, on the other its mate (`SM_FV_MATE`). Where
     /// one edge stands between them on a side (their faces change there and are tangent
-    /// along it, which the classification checks, or a face's seam runs from the vertex)
+    /// along it, which the classification checks, or a face's seam runs from the vertex and
+    /// the rails cross it: not one that ends inside the band, `seams_short_of_rails`)
     /// its end there is where the rails cross that edge (`SM_FV_RAIL_X_EDGEUSE`), where
     /// the first blend's ball is the second's. Its mate is on the other side, or
     /// with such an edge on both sides where the rails cross the other one too. More
@@ -673,6 +750,16 @@ impl FilletCorner {
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
         let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        seams_short_of_rails(
+            k,
+            target,
+            solvers,
+            &solver_eu_solvers,
+            *solver_eus.first().ok_or_else(|| defect(OP, PER_BLEND))?,
+            self.vertex,
+            &side,
+            &mut between,
+        )?;
         let cliff_join = self
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
