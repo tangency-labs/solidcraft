@@ -615,9 +615,17 @@ pub fn without_unanswered(description: &str) -> String {
 /// What the dialog shows instead of the form once Send was pressed.
 enum Phase {
     Form,
-    Sending { done: usize, total: usize },
+    Sending {
+        done: usize,
+        total: usize,
+    },
     Opened(String),
-    Error { why: String, kept: bool },
+    /// The same report was sent a few minutes ago: its page, offered instead of a second one.
+    AlreadySent(String),
+    Error {
+        why: String,
+        kept: bool,
+    },
 }
 
 fn phase(app: &SolveApp, id: u64) -> Phase {
@@ -629,6 +637,7 @@ fn phase(app: &SolveApp, id: u64) -> Phase {
     }
     match &app.tickets.outcome {
         Some(Outcome::Opened(url)) => Phase::Opened(url.clone()),
+        Some(Outcome::AlreadySent(url)) => Phase::AlreadySent(url.clone()),
         Some(Outcome::Queued(why)) => Phase::Error { why: why.clone(), kept: true },
         Some(Outcome::Failed(why)) => Phase::Error { why: why.clone(), kept: false },
         _ => Phase::Form,
@@ -670,6 +679,16 @@ fn after_send(app: &mut SolveApp, ui: &mut Ui, id: u64, phase: Phase) {
         Phase::Opened(url) => {
             ui_kit::text(ui, tr("report.thanks"), ui_kit::Text::Heading("report.thanks"));
             note(ui, "report.opened", tr("report.opened"));
+            link_with_copy(ui, &url);
+            let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
+            crate::scenario::publish_target("report:open_again", r.rect);
+            if r.clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+        }
+        Phase::AlreadySent(url) => {
+            ui_kit::text(ui, tr("report.already_sent_title"), ui_kit::Text::Heading("report.already_sent_title"));
+            note(ui, "report.already_sent", tr("report.already_sent"));
             link_with_copy(ui, &url);
             let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:open_again", r.rect);

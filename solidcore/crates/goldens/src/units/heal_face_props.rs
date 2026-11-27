@@ -2066,6 +2066,29 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// #21326 (WR-647 part B): a sphere of radius 1 with two circle loops of radius
+    /// 0.866 at z = +-0.5 and face tolerance 1 (fixture `stage3_sph_two_tol1`) passes
+    /// `SetProps_Stage3`. A classification input on a loop edge ends inside an interval
+    /// whose rest stays within the edge's tolerance (its midpoint 0.58 from the edge,
+    /// tolerance 1.00001); splitting it there left that rest unlabelled and the face was
+    /// refused (`SM_ERR_NOTYET_HEAL_FACE`, 1040, no loop tree root).
+    #[test]
+    fn sphere_two_loops_at_tolerance_one_passes_stage3() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let case = ctx
+            .fixture_cases(Runner.id())
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "stage3_sph_two_tol1")
+            .unwrap();
+        let v = rust(&case.parse().unwrap()).unwrap().values.get("v").cloned().unwrap();
+        // the Stage 3 classification status (1040 = NoLoopTreeRoot before the fix)
+        assert_eq!(v.first(), Some(&1000.0));
+    }
+
     /// The values of the Stage 3 script of generated case `s3gen{i}`.
     fn stage3_values(i: usize) -> Vec<f64> {
         let seed = CaseContext::seed_for("heal.face_props/stage3", i);
@@ -2102,5 +2125,30 @@ mod tests {
         assert_eq!(v.get(1 + 34), Some(&1.0), "outer loops");
         assert_eq!(v.get(1 + 37), Some(&1.0), "wrongly oriented loops");
         assert_eq!(v.get(1 + 39), Some(&2.0), "nested loops");
+    }
+
+    /// #18647: a plane face 8 x 8 (zone tolerance 1, intersection tolerance 2) with one
+    /// counter-clockwise quadrilateral loop (`s3gen0009`: signed area 11.2, every vertex at
+    /// least 1.54 inside the domain) is its own outer loop, so `SetProps_Stage3` passes
+    /// with one outer loop and no problem loop. The bisector's two crossings of the loop
+    /// lie 2.39 and 2.32 from its nearer end in 3D, more than the tolerance from both
+    /// ends, but its parameter interval [0, 1] is within the UV tolerance of both ends:
+    /// they were typed `Both` and dropped, and the face was refused as crossed nowhere
+    /// (`SM_ERR_NOTYET_HEAL_FACE`, 1040, `NoClassifyZeroCrosscnt`).
+    #[test]
+    fn plane_with_one_quadrilateral_passes_stage3_through_both_typed_crossings() {
+        let v = stage3_values(9);
+        // op 6 (Stage 3) first: its status, then its snapshot
+        assert_eq!(v.first(), Some(&1000.0), "status");
+        // snapshot fields 1, 33, 34, 37, 38, 39 and 44: not_yet_face_type,
+        // closed_loop_cnt, outer_loop_cnt, bad_orient_loop_cnt, bad_no_area_loop_cnt,
+        // bad_nested_loop_cnt and the number of loop props
+        assert_eq!(v.get(1 + 1), Some(&0.0), "no classify failure");
+        assert_eq!(v.get(1 + 33), Some(&1.0), "closed loops");
+        assert_eq!(v.get(1 + 34), Some(&1.0), "outer loops");
+        assert_eq!(v.get(1 + 37), Some(&0.0), "wrongly oriented loops");
+        assert_eq!(v.get(1 + 38), Some(&0.0), "no-area loops");
+        assert_eq!(v.get(1 + 39), Some(&0.0), "nested loops");
+        assert_eq!(v.get(1 + 44), Some(&1.0), "loop props");
     }
 }

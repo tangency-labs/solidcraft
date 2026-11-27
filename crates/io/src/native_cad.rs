@@ -1,6 +1,7 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]); and STEP and IGES when the
-//! cadmpeg reader is chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]). cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` files are read, and Rhino `.3dm` and OpenUSD files read and written
+//! ([`usd`], [`cadmpeg_export`]); STEP and IGES files are read when the cadmpeg reader is
+//! chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]) and written through it. cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
@@ -11,7 +12,8 @@
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
-//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! records or the exported bytes plus warnings; an export writes the design into cadmpeg's model
+//! directly (`cadir_out`) and cadmpeg's writer writes the file (`export`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -121,6 +123,310 @@ fn next_end_section(text: &str, from: usize) -> Option<usize> {
     None
 }
 
+/// Normalize non-standard `{...}` suffixes inside `FILE_SCHEMA((...))` entries of a STEP file's
+/// `HEADER;` section so cadmpeg's strict ASN.1 OID validator admits them (for example
+/// `'AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'` -> `'AUTOMOTIVE_DESIGN'`).
+///
+/// Bare schema names and valid ASN.1 OID suffixes (such as `{ 1 0 10303 214 1 1 1 1 }` or
+/// `{ 1 0 10303 442 1 1 4 }`) are left untouched with no allocation. Only the `HEADER;` section
+/// before `ENDSEC;` is inspected, so the `DATA;` section is never altered.
+fn normalize_step_file_schema(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let header_slice = &bytes[..bytes.len().min(STEP_HEADER_BYTES)];
+    let mut scan = StepHeaderScanner::new(header_slice);
+    // Optional UTF-8 BOM at the start of the file.
+    if scan.bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        scan.at = 3;
+    }
+    if scan.read_keyword().as_deref() != Some("ISO-10303-21") || !scan.eat_byte(b';') {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+    if scan.read_keyword().as_deref() != Some("HEADER") || !scan.eat_byte(b';') {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    while let Some(kw) = scan.read_keyword() {
+        match kw.as_str() {
+            "ENDSEC" | "DATA" => break,
+            "FILE_SCHEMA" => {
+                if !scan.collect_file_schema_edits(&mut edits) {
+                    break;
+                }
+            }
+            _ => {
+                if !scan.skip_statement() {
+                    break;
+                }
+            }
+        }
+    }
+
+    if edits.is_empty() {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    for (range, replacement) in edits {
+        out.extend_from_slice(&bytes[cursor..range.start]);
+        out.extend_from_slice(replacement.as_bytes());
+        cursor = range.end;
+    }
+    out.extend_from_slice(&bytes[cursor..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Byte-oriented scanner over a STEP Part 21 `HEADER;` section.
+struct StepHeaderScanner<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl<'a> StepHeaderScanner<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, at: 0 }
+    }
+
+    fn skip_comment(&mut self) -> bool {
+        if !self.bytes[self.at..].starts_with(b"/*") {
+            return false;
+        }
+        self.at += 2;
+        if let Some(rel) = self.bytes[self.at..].windows(2).position(|w| w == b"*/") {
+            self.at += rel + 2;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_trivia(&mut self) -> bool {
+        loop {
+            while self.bytes.get(self.at).is_some_and(|b| b.is_ascii_control() || *b == b' ') {
+                self.at += 1;
+            }
+            if self.bytes[self.at..].starts_with(b"\\N\\") || self.bytes[self.at..].starts_with(b"\\F\\") {
+                self.at += 3;
+                continue;
+            }
+            if self.bytes[self.at..].starts_with(b"/*") {
+                if !self.skip_comment() {
+                    return false;
+                }
+                continue;
+            }
+            return true;
+        }
+    }
+
+    fn read_keyword(&mut self) -> Option<String> {
+        if !self.skip_trivia() {
+            return None;
+        }
+        let first = *self.bytes.get(self.at)?;
+        if !(first.is_ascii_alphabetic() || first == b'_' || first == b'!') {
+            return None;
+        }
+        let mut out = String::new();
+        out.push(first.to_ascii_uppercase() as char);
+        self.at += 1;
+        while let Some(&b) = self.bytes.get(self.at) {
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
+                if out.len() < 64 {
+                    out.push(b.to_ascii_uppercase() as char);
+                }
+                self.at += 1;
+            } else if b.is_ascii_control() {
+                self.at += 1;
+            } else {
+                break;
+            }
+        }
+        Some(out)
+    }
+
+    fn eat_byte(&mut self, expected: u8) -> bool {
+        if !self.skip_trivia() {
+            return false;
+        }
+        if self.bytes.get(self.at) == Some(&expected) {
+            self.at += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_string(&mut self) -> Option<(usize, usize)> {
+        if !self.skip_trivia() || self.bytes.get(self.at) != Some(&b'\'') {
+            return None;
+        }
+        self.at += 1;
+        let start = self.at;
+        while self.at < self.bytes.len() {
+            if self.bytes[self.at] == b'\'' {
+                if self.bytes.get(self.at + 1) == Some(&b'\'') {
+                    self.at += 2;
+                    continue;
+                }
+                let end = self.at;
+                self.at += 1;
+                return Some((start, end));
+            }
+            self.at += 1;
+        }
+        None
+    }
+
+    fn skip_statement(&mut self) -> bool {
+        while self.at < self.bytes.len() {
+            match self.bytes[self.at] {
+                b';' => {
+                    self.at += 1;
+                    return true;
+                }
+                b'\'' => {
+                    if self.read_string().is_none() {
+                        return false;
+                    }
+                }
+                b'/' if self.bytes.get(self.at + 1) == Some(&b'*') => {
+                    if !self.skip_comment() {
+                        return false;
+                    }
+                }
+                _ => self.at += 1,
+            }
+        }
+        false
+    }
+
+    /// Parse `(( 'schema1', 'schema2', ... ));` after `FILE_SCHEMA` and append any string-content
+    /// replacements needed for non-OID `{...}` suffixes.
+    fn collect_file_schema_edits(&mut self, edits: &mut Vec<(std::ops::Range<usize>, String)>) -> bool {
+        let start = self.at;
+        if !self.eat_byte(b'(') || !self.eat_byte(b'(') {
+            self.at = start;
+            return self.skip_statement();
+        }
+        let mut pending = Vec::new();
+        if !self.skip_trivia() {
+            return false;
+        }
+        if self.bytes.get(self.at) == Some(&b')') {
+            self.at += 1;
+        } else {
+            loop {
+                let Some((s, e)) = self.read_string() else {
+                    self.at = start;
+                    return self.skip_statement();
+                };
+                if let Some(stripped) = strip_invalid_schema_oid(&self.bytes[s..e]) {
+                    pending.push((s..e, stripped));
+                }
+                if !self.skip_trivia() {
+                    return false;
+                }
+                match self.bytes.get(self.at) {
+                    Some(&b',') => self.at += 1,
+                    Some(&b')') => {
+                        self.at += 1;
+                        break;
+                    }
+                    _ => {
+                        self.at = start;
+                        return self.skip_statement();
+                    }
+                }
+            }
+        }
+        if !self.eat_byte(b')') || !self.eat_byte(b';') {
+            self.at = start;
+            return self.skip_statement();
+        }
+        edits.extend(pending);
+        true
+    }
+}
+
+/// If `raw` (the bytes inside quotes of a `FILE_SCHEMA` entry) has a valid schema name followed
+/// by a `{...}` suffix that cadmpeg's strict ASN.1 OID validator would reject (such as
+/// `{UNKNOWN IMPLEMENTATION LEVEL}`), return the bare schema name. Otherwise return `None` so the
+/// original bytes remain untouched.
+fn strip_invalid_schema_oid(raw: &[u8]) -> Option<String> {
+    // Bail out on STEP Part 21 escape sequences (`\X\`, `\S\`, `\\`, etc.) so we never rewrite
+    // escaped string contents.
+    if !raw.contains(&b'{') || raw.contains(&b'\\') {
+        return None;
+    }
+    // Part 21 ignores ASCII control bytes (such as line breaks) inside string literals.
+    let cleaned: Vec<u8> = raw.iter().copied().filter(|b| !b.is_ascii_control()).collect();
+    let text = std::str::from_utf8(&cleaned).ok()?.trim();
+    let (name, rest) = text.split_once('{')?;
+    let oid = rest.strip_suffix('}')?;
+    let name = name.trim_end();
+    if !is_valid_schema_name(name) || is_valid_schema_oid(oid) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_valid_schema_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= 1024 && bytes.next().is_some_and(|b| b.is_ascii_alphabetic()) && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Whether `oid` (the text between `{` and `}` in a `FILE_SCHEMA` identifier) parses as an ASN.1
+/// object identifier as cadmpeg's STEP parser checks it: at least two whitespace-separated
+/// components, each a decimal integer (optional leading `-`), a lowercase ASN.1 identifier, or
+/// `name(number)` / `name(name)`.
+fn is_valid_schema_oid(oid: &str) -> bool {
+    let mut components = oid.split_whitespace();
+    let (Some(first), Some(second)) = (components.next(), components.next()) else {
+        return false;
+    };
+    [first, second].into_iter().chain(components).all(is_valid_schema_oid_component)
+}
+
+fn is_valid_schema_oid_component(component: &str) -> bool {
+    if is_valid_schema_oid_name(component) {
+        return true;
+    }
+    if let Some((name, inner)) = component.split_once('(') {
+        let Some(inner) = inner.strip_suffix(')') else {
+            return false;
+        };
+        return is_valid_schema_oid_name(name) && (is_valid_schema_oid_name(inner) || is_valid_schema_oid_signed_number(inner));
+    }
+    is_valid_schema_oid_signed_number(component)
+}
+
+fn is_valid_schema_oid_signed_number(value: &str) -> bool {
+    let unsigned = value.strip_prefix('-').unwrap_or(value);
+    !unsigned.is_empty() && unsigned.bytes().all(|b| b.is_ascii_digit()) && (unsigned == "0" || !unsigned.starts_with('0'))
+}
+
+fn is_valid_schema_oid_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let mut previous_hyphen = false;
+    for b in bytes {
+        if b.is_ascii_alphanumeric() {
+            previous_hyphen = false;
+        } else if b == b'-' && !previous_hyphen {
+            previous_hyphen = true;
+        } else {
+            return false;
+        }
+    }
+    !value.ends_with('-')
+}
+
 /// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
 /// with what cadmpeg could not bring over, and whether its contents are a FreeCAD design. Panics
 /// inside cadmpeg or the reader become errors.
@@ -185,6 +491,19 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// A FreeCAD file's sketches alone, as [`native_cad_design`] makes them, for a file whose history
+/// is not rebuilt: its solids come in as an Import feature and these sketches beside them. A
+/// sketch that cannot be read is left out with a warning; an error when none can be.
+pub fn native_cad_sketches(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg sketches", || convert::sketches(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(|e| {
+        match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        }
+    })
+}
+
 /// [`traced_records`]'s records alone.
 #[cfg(test)]
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
@@ -192,7 +511,7 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 }
 
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
-/// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
+/// into a record by [`solidcraft_kernel::read_cadir`], its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
 /// come with their own names, visibility and rigid placements, which the records keep. Where the
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
@@ -211,7 +530,7 @@ fn traced_records(
 ) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
-    let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
+    let read = solidcraft_kernel::read_cadir(ir);
     let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();
@@ -233,8 +552,8 @@ fn traced_records(
             continue;
         }
         let body = by_id.get(r.body.as_str());
-        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
-        warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.face_origin));
+        warnings.extend(r.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
         let record = RecordBody {
             name: body.and_then(|b| b.name.as_deref()).map(str::trim).unwrap_or_default().to_string(),
             path: vec![product.to_string()],
@@ -245,9 +564,9 @@ fn traced_records(
             paint,
             hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(r.body.as_str()),
             placement: r.placement,
-            brep: Some(r.solid.brep),
-            face_origin: r.solid.face_origin,
-            sheet: r.solid.sheet,
+            brep: Some(r.brep),
+            face_origin: r.face_origin,
+            sheet: r.sheet,
             copy_of: None,
             mesh: None,
         };
@@ -492,16 +811,163 @@ pub use design::NativeDesign;
 mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
-/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
-/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
-/// it could not carry. Panics inside cadmpeg become errors.
-pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
-    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
-        |e| match e {
-            solidcraft_kernel::KernelError::Invalid(m) => m,
-            e => e.to_string(),
-        },
-    )
+mod cadir_out;
+mod cadir_physics;
+mod cadir_textures;
+mod export;
+
+/// What the design's view hides, for an export that writes it: bodies by their world name
+/// (hidden themselves, by a folder or by a placement above them) and placements by their path
+/// (hidden themselves).
+#[derive(Clone, Debug, Default)]
+pub struct Hidden {
+    pub bodies: std::collections::BTreeSet<String>,
+    pub placements: Vec<Vec<u64>>,
+}
+
+/// The choices of an export through cadmpeg beyond its bodies, file and quality.
+#[derive(Clone, Debug, Default)]
+pub struct CadmpegOptions {
+    /// What the design's view hides, written hidden.
+    pub hidden: Hidden,
+    /// OpenUSD: the joints, grounding and each component's mass written as physics.
+    pub physics: bool,
+    /// OpenUSD: the image textures a render setup gives bodies, written into a `.usdz` package.
+    pub surfaces: Vec<SurfacePlan>,
+    /// OpenUSD: the pictures shown on the model (decals), written into a `.usdz` package.
+    pub decals: Vec<DecalPlan>,
+    /// OpenUSD: the optics a render setup gives bodies (glass).
+    pub optics: Vec<OpticsPlan>,
+    /// OpenUSD: each body as its mesh alone, without its exact shape (B-rep), for a file a
+    /// viewer or a game engine shows rather than a CAD program edits.
+    pub meshes_only: bool,
+}
+
+/// The optics a render setup gives one placement of a body: a dielectric (glass) of index `ior`
+/// absorbing `absorption_per_mm` (red, green, blue, per mm) inside, its surface a thin sheet or
+/// the boundary of a closed volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpticsPlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and the component holding it (0:
+    /// the design itself). An export with the design's components matches these and `path`.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound: its occurrence path from the design (empty for a body of the design
+    /// itself).
+    pub path: Vec<u64>,
+    /// The body's world name, which an export of bodies where the design shows them (no
+    /// components) matches.
+    pub world: String,
+    /// The index of refraction.
+    pub ior: f64,
+    /// How much of red, green and blue the inside absorbs, per mm.
+    pub absorption_per_mm: [f64; 3],
+    /// The surface is a thin sheet, not the boundary of a closed volume.
+    pub thin_sheet: bool,
+}
+
+/// A picture shown on the model: its image on a quad.
+#[derive(Clone, Debug)]
+pub struct DecalPlan {
+    pub name: String,
+    /// The component it belongs to (0: the design itself).
+    pub component: u64,
+    /// Its corners (bottom-left, bottom-right, top-right, top-left) in its component's frame and
+    /// in the world, mm.
+    pub local: [[f64; 3]; 4],
+    pub world: [[f64; 3]; 4],
+    /// Its PNG or JPEG image, and the image's SHA-256 (hex), naming the file it is written as.
+    pub image: SurfaceMap,
+}
+
+/// One image map of a [`SurfacePlan`]: its SHA-256 (hex), naming the file it is written as, and its
+/// PNG or JPEG bytes.
+#[derive(Clone, Debug)]
+pub struct SurfaceMap {
+    pub sha256: String,
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+/// The image maps a render setup gives one placement of a body: the textures of the body's look
+/// for an OpenUSD export.
+#[derive(Clone, Debug)]
+pub struct SurfacePlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and component.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound (empty for a body of the design itself) and the body's world name.
+    pub path: Vec<u64>,
+    pub world: String,
+    /// The projection, in the body's definition frame (mm): a point `p` is at
+    /// `((p − origin)·u / |u|², (p − origin)·v / |v|²)` in the images, repeating.
+    pub origin: [f64; 3],
+    pub u: [f64; 3],
+    pub v: [f64; 3],
+    /// The image's v runs the other way (the built-in surfaces' images are stored so).
+    pub flip_v: bool,
+    /// How strongly the normal map tilts the surface, 0 to 1.
+    pub normal_strength: f64,
+    pub base_color: Option<SurfaceMap>,
+    pub normal: Option<SurfaceMap>,
+    pub roughness: Option<SurfaceMap>,
+    pub metallic: Option<SurfaceMap>,
+}
+
+impl CadmpegOptions {
+    /// Whether an export of `bodies` (all when empty) of `doc` writes the physics
+    /// [`Self::physics`] asks for: only the whole design, with its components, each placed
+    /// rigidly. Otherwise each body is written where the world shows it, without physics.
+    pub fn physics_fits(doc: &solidcraft_doc::Document, bodies: &[String]) -> bool {
+        bodies.is_empty() && !doc.occurrences.is_empty() && doc.occurrences.iter().all(|o| solidcraft_doc::is_placement(&o.transform))
+    }
+}
+pub(crate) use export::FREECAD_REFUSED;
+
+/// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
+/// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
+/// the extension picking the encoding), Rhino ([`crate::Format::Rhino`]), or STEP and IGES
+/// ([`crate::Format::Step`], [`crate::Format::Iges`]: SolidCraft's own writers are the default; this is
+/// the choice of writing them with cadmpeg); FreeCAD is refused,
+/// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
+/// keeps them where the format holds them: `model`, the model before placing, holds each
+/// component's bodies. `options` says what else is written. Meshes are made at `quality`. Returns
+/// the file's bytes and what it could not carry (`export` says what each format leaves out).
+/// Panics inside cadmpeg become errors.
+#[allow(clippy::too_many_arguments)]
+pub fn cadmpeg_export(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+    format: crate::Format,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg export", || {
+        export::from_design(doc, model, world, bodies, options, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
+}
+
+/// [`cadmpeg_export`] as OpenUSD: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package.
+pub fn usd_from_design(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    cadmpeg_export(doc, model, world, bodies, options, file, quality, crate::Format::Usd)
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records
@@ -632,6 +1098,21 @@ mod convert {
 
     /// The design history of a FreeCAD file (`name`), rebuilt.
     pub(super) fn design(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (ir, arenas) = read_design(name, bytes)?;
+        let index = std::cell::OnceCell::new();
+        let work = WorkBudget::new(EDGE_WORK);
+        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
+        super::design::rebuild(&arenas, &edge_point)
+    }
+
+    /// The sketches of a FreeCAD file (`name`) alone.
+    pub(super) fn sketches(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (_, arenas) = read_design(name, bytes)?;
+        super::design::sketches(&arenas)
+    }
+
+    /// A FreeCAD file (`name`) decoded at full depth, with its design arenas and placements.
+    fn read_design(name: &str, bytes: &[u8]) -> Result<(CadIr, super::design::Arenas), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         if format != "fcstd" {
@@ -673,10 +1154,7 @@ mod convert {
                 arenas.pattern_axes.insert(owner, (at, along));
             }
         }
-        let index = std::cell::OnceCell::new();
-        let work = WorkBudget::new(EDGE_WORK);
-        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
-        super::design::rebuild(&arenas, &edge_point)
+        Ok((ir, arenas))
     }
 
     /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a
@@ -747,7 +1225,9 @@ mod convert {
         if !matches!(ext.as_str(), "step" | "stp") {
             return Err(format!("{name}: not a STEP file (.step or .stp)"));
         }
-        records_of(name, &ext, bytes, &["step"])
+        crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64).map_err(|e| format!("{name}: {e}"))?;
+        let prepared = super::normalize_step_file_schema(bytes);
+        records_of(name, &ext, &prepared, &["step"])
     }
 
     /// An IGES file (`name`) read by cadmpeg's IGES decoder into an import kept as records.

@@ -54,19 +54,75 @@ fn grow_direction_follows_each_edges_convexity() {
     assert!(close(grow(&h, &edge(&h, STEP_TOP)), -open), "step top: {:?}", grow(&h, &edge(&h, STEP_TOP)));
 }
 
-/// A plain box's outside edge keeps its arrow into the body.
+/// A plain box's outside edge keeps its fillet's arrow into the body.
 #[test]
-fn box_edge_arrow_still_points_into_the_body() {
+fn box_fillet_arrow_still_points_into_the_body() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
-    let e = edge(&h, Vec3::new(20.0, 0.0, 20.0));
-    for id in ["solid.fillet", "solid.chamfer"] {
-        h.app.session.selection = vec![e.clone()];
-        h.app.start(id);
-        let dir = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().1.unwrap();
-        assert!(dir.y > 0.5 && dir.z < -0.5, "{id}: {dir:?}");
-        h.app.dialog = None;
-    }
+    h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
+    h.app.start("solid.fillet");
+    let dir = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().1.unwrap();
+    assert!(dir.y > 0.5 && dir.z < -0.5, "{dir:?}");
+}
+
+/// A 40 x 30 x 20 plate with a 10 mm hole through it at (10, 10): the hole's rim at the top is
+/// the circle of radius 5 around (10, 10) at z 20.
+fn plate_with_hole() -> Harness {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.hole", json!({"position": [10, 10, 20], "diameter": 10, "name": "Bore"})).unwrap();
+    h.frames(2);
+    h
+}
+
+/// The hole's top rim: the edge of the mesh on the circle of radius 5 around (10, 10) at z 20.
+fn hole_rim(h: &Harness) -> Sel {
+    let st = h.app.session.world_state().unwrap();
+    let m = st.body("Body1").unwrap().mesh();
+    let on_rim = |p: &Vec3| (p.z - 20.0).abs() < 1e-6 && (((p.x - 10.0).powi(2) + (p.y - 10.0).powi(2)).sqrt() - 5.0).abs() < 0.05;
+    let (index, rim) = m.edges.iter().enumerate().find(|(_, e)| e.iter().all(on_rim)).expect("the hole's top rim");
+    Sel::Edge { body: "Body1".into(), index, point: rim[0] }
+}
+
+/// #13527: the arrow of a chamfer on a hole's rim runs along the top face, so its tip is the
+/// upper edge the distance sets. It used to run at 45 degrees along the chamfer's face, into
+/// the material, past that edge.
+#[test]
+fn chamfer_arrow_on_a_hole_rim_points_at_the_upper_edge() {
+    let mut h = plate_with_hole();
+    h.app.session.selection = vec![hole_rim(&h)];
+    h.app.start("solid.chamfer");
+    let Some(Kind::Fillet { radius, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("a chamfer window") };
+    *radius = "8 mm".into();
+    h.frames(2);
+    let (at, dir) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let dir = dir.expect("the chamfer's arrow");
+    // The arrow lies in the top face's plane: it does not go down into the material.
+    assert!(dir.z.abs() < 1e-9, "the arrow runs along the top face: {dir:?}");
+    // It points away from the hole, into the top face's material, where the upper edge is.
+    let out = Vec3::new(at.x - 10.0, at.y - 10.0, 0.0).normalized().unwrap();
+    assert!(dir.dot(out) > 0.99, "the arrow points away from the hole: {dir:?} vs {out:?}");
+    // Its tip is the edge the distance sets: on the top face, one distance out from the rim.
+    let d = value(&h);
+    let tip = at + dir * d;
+    assert!((tip.z - 20.0).abs() < 1e-9, "the tip is on the top face: {tip:?}");
+    let rim = ((at.x - 10.0).powi(2) + (at.y - 10.0).powi(2)).sqrt();
+    let radius = ((tip.x - 10.0).powi(2) + (tip.y - 10.0).powi(2)).sqrt();
+    assert!((radius - (rim + d)).abs() < 0.05, "the tip is one distance out from the rim: {radius} vs {}", rim + d);
+}
+
+/// A chamfer's arrow runs along one of the edge's two faces, where its distance is measured: the
+/// face that faces up most, or the other one with Flip (#13527). A fillet's arrow stays on the
+/// bisector, where the centre of the round is.
+#[test]
+fn chamfer_arrow_runs_along_the_up_face_of_its_edge() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
+    h.app.start("solid.chamfer");
+    let (_, dir) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let dir = dir.expect("the chamfer's arrow");
+    assert!(close(dir, Vec3::new(0.0, 1.0, 0.0)), "the arrow runs along the top face: {dir:?}");
 }
 
 /// The value of the open fillet or chamfer window.
@@ -76,7 +132,9 @@ fn value(h: &Harness) -> f64 {
 }
 
 /// On an inside edge (and on an outside one, a mixed chain's first edge either way), the arrow
-/// points along the edge's own grow direction and dragging outward along it increases the value.
+/// points where the value grows and dragging outward along it increases the value. A fillet's
+/// arrow runs along the bisector of the two faces, where the centre of the round is; a chamfer's
+/// runs along one of the faces, where its distance is measured (#13527).
 #[test]
 fn dragging_out_along_the_arrow_grows_fillet_and_chamfer_on_both_kinds_of_edge() {
     for first in [INSIDE, OUTSIDE] {
@@ -93,9 +151,12 @@ fn dragging_out_along_the_arrow_grows_fillet_and_chamfer_on_both_kinds_of_edge()
             let want = grow(&h, &shown);
             assert!(close(want, grow(&h, &edge(&h, first))) || matches!(&shown, Sel::Edge { point, .. } if *point != first));
             let (at, dir) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-            assert!(close(dir.unwrap(), want), "{id} at {first:?}: {dir:?} vs {want:?}");
+            let dir = dir.unwrap();
+            if id == "solid.fillet" {
+                assert!(close(dir, want), "{id} at {first:?}: {dir:?} vs {want:?}");
+            }
             let before = value(&h);
-            let to = at + want * 6.0;
+            let to = at + dir * 6.0;
             h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [to.x, to.y, to.z]}], "ctrl": true})).unwrap();
             let after = value(&h);
             assert!(after > before && (after - 6.0).abs() < 0.3, "{id} at {first:?}: {before} -> {after}");
@@ -116,9 +177,11 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
     for (flip, expected) in [(false, (along_top, along_front)), (true, (along_front, along_top))] {
         h.app.session.selection = vec![edge(&h, top_front)];
         h.app.start("solid.chamfer");
-        // Equal distances keep the arrow along the bisector, and have no second one.
+        // Equal distances: the arrow runs along the face that faces up most (#13527), and there
+        // is no second one.
         let d = h.app.dialog.as_ref().unwrap();
-        assert!(crate::canvas::chamfer_face_dirs(&h.app, d, top_front).is_none());
+        let (t1, _) = crate::canvas::chamfer_face_dirs(&h.app, d, top_front).expect("the first face");
+        assert!(close(t1, along_top), "equal distances: {t1:?}");
         let Some(Kind::Fillet { ctype, flip: f, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("a chamfer window") };
         (*ctype, *f) = (1, flip);
         let d = h.app.dialog.as_ref().unwrap();

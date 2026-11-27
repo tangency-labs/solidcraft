@@ -95,6 +95,15 @@ fn case(name: &str) -> Case {
             Some(9000.0),
             None,
         ),
+        // Fifteen 10 mm cubes in a row, each overlapping its neighbour by 5 mm along x
+        // (SolidCraft issue #16552's join of fifteen tools): the level-by-level union or the
+        // one-by-one retry builds them all into one 80 x 10 x 10 cuboid, 8000 mm3 (each of the
+        // 14 adjacent overlaps is 5 x 10 x 10 = 500).
+        "union_all_fifteen_chain" => plain(
+            Op::UnionAll((0..15).map(|i| Shape::Box([f64::from(i) * 5.0, 0.0, 0.0], [10.0; 3])).collect()),
+            Some(15.0 * 1000.0 - 14.0 * 500.0),
+            None,
+        ),
         "intersect_disjoint" => plain(Op::Boolean(A, Shape::Box([20.0; 3], [10.0; 3]), BooleanOp::Intersect), None, None),
         // A 10 mm sphere less a cap of height h = 5: 4/3 πr³ - πh²(3r - h)/3.
         // (solidcore#1431, brep_volume of a whole sphere failing at 1e-8, does not touch the cut
@@ -207,6 +216,7 @@ cases!(
     subtract_inside_void,
     subtract_cylinder_hole,
     union_all_grid,
+    union_all_fifteen_chain,
     intersect_disjoint,
     sphere_minus_box,
     imprint_top_face,
@@ -234,6 +244,20 @@ fn boolean2d_combines_overlapping_squares() {
     }
     let (a, far) = (rectangle(0.0, 0.0, 10.0, 10.0), rectangle(20.0, 0.0, 10.0, 10.0));
     assert!(boolean2d(&a, &far, BooleanOp::Intersect).unwrap().is_none(), "disjoint squares intersected");
+}
+
+/// The classification refusal keeps its type through smlib's error mapping, so the `union_all`
+/// retry fires on it and on nothing else. No input is known that reaches it through a boolean
+/// (see the review of #16552: 300 random pairs, symmetric and tiny-feature joins all build
+/// level by level), so the plumbing is checked by its mappings, not by a join that fails
+/// without the retry; the kernel-to-ops mapping has its own test in solidcore-ops.
+#[test]
+fn not_one_foot_travels_by_its_type() {
+    let typed = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::NotOneFoot { found: 3 }, None);
+    assert_eq!(typed, Error::NotOneFoot { found: 3 });
+    // a deliberate refusal of its own kind is not the classification's, and is not retried
+    let other = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::Exception, None);
+    assert_ne!(other, Error::NotOneFoot { found: 3 }, "a deliberate refusal is not the classification's");
 }
 
 /// Two 10 mm cubes touching along one edge, joined: a closed body whose two solids meet along
@@ -290,29 +314,31 @@ fn operands_stay_as_they_were() {
 #[test]
 fn a_failed_closest_point_counts_as_off_the_piece() {
     use solidcore::query::api_queries::edge_closest_point;
-    use solidcore::topology::edge;
     let body = A.core();
+    let order = body.own_order();
+    let adjacency = body.adjacency(&order).unwrap();
+    let [s, f] = adjacency.edge_vertices[0].expect("an edge with no ends");
+    let (s, f) = (adjacency.vertex_points[s], adjacency.vertex_points[f]);
+    let at = [s, f, [0.5 * (s[0] + f[0]), 0.5 * (s[1] + f[1]), 0.5 * (s[2] + f[2])]];
+    let tol = body.tolerance().unwrap();
+    assert!(!super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "still where it lay");
     super::with_body("moved", &body, |k, b| {
         let e = b.edge_list()[0];
-        let (Some(s), Some(f)) = edge::start_end_vertices(b, e)? else { panic!("an edge with no ends") };
-        let (s, f) = (b.vertex(s)?.point, b.vertex(f)?.point);
-        let at = [s, f, s + (f - s) * 0.5];
-        let tol = b.tolerance();
-        assert!(!super::history::moved(k, b, &[(e, &at)], tol)?, "still where it lay");
         b.edge_mut(e)?.curve = None;
-        assert!(edge_closest_point(k, b, e, at[2]).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
-        assert!(super::history::moved(k, b, &[(e, &at)], tol)?, "off the piece");
+        let q = solidcore::geom::vector3d::Point3::new(at[2][0], at[2][1], at[2][2]);
+        assert!(edge_closest_point(k, b, e, q).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
         Ok(())
     })
     .unwrap();
+    assert!(super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "off the piece");
 }
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
 /// equal circles a little apart cross; they do not coincide over a tiny edge. The stack's volume
 /// is 113 pi whatever e is.
-/// This path passes with `simple_coincidence_crossing_is_point` off too, so the test holds the
-/// result here and does not single out that flag (solidcore's own test does).
+/// The crossing is decided on the merged range (WR-647); solidcore's own test is
+/// `issue_1979_ring_lip_crossing_not_coincidence`.
 #[test]
 fn a_ring_and_a_lip_with_walls_nearly_together() {
     use super::sweep::extrude;
@@ -342,6 +368,54 @@ fn a_ring_and_a_lip_with_walls_nearly_together() {
         assert!(super::is_manifold_solid(&u).unwrap(), "e {e}");
         assert!((v - 113.0 * PI).abs() < 1e-3, "e {e}: {v}");
     }
+}
+
+/// A 10 mm box with one edge on the face x = 0 whose line misses its start vertex by `gap`.
+/// That edge and its vertices keep tolerance `tol`. The tools used with it sit on the opposite face.
+fn box_with_an_edge_off_its_vertex(gap: f64, tol: f64) -> crate::Brep {
+    use solidcore_record::brep::Curve;
+    let src = crate::Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let mut rec = src.to_native().unwrap();
+    let edge = rec.edges.iter_mut().find(|e| matches!(&e.curve, Curve::Line { start, end } if start[0].abs() < 1e-9 && end[0].abs() < 1e-9)).unwrap();
+    if let Curve::Line { start, end } = &mut edge.curve {
+        // Off the vertex, along the face: the coordinate the edge does not run in.
+        if (start[1] - end[1]).abs() < 1e-9 {
+            start[1] += gap;
+        } else {
+            start[2] += gap;
+        }
+    }
+    edge.tolerance = tol;
+    let vs = edge.vertices;
+    rec.vertices[vs[0] as usize].tolerance = tol;
+    rec.vertices[vs[1] as usize].tolerance = tol;
+    crate::Brep::from_record(&rec, true).unwrap()
+}
+
+/// Issue 790: a multi-body union must pass the check a chain of single unions passes.
+///
+/// The target's own check fails (an edge 4e-4 mm off its vertex, tolerance 2.6e-4 mm). One
+/// union with a 3 x 2 x 2 box from (9, 2, 2) overlaps that box in a 1 x 2 x 2 block and heals
+/// the edge: volume 1000 + 12 - 4 = 1008. A second box from (9, 6, 2) does not meet the first,
+/// so the chain measures 1008 + 8 = 1016 and passes the check. `union_all` of the three is the
+/// same pairing and must do both.
+#[test]
+fn union_all_of_a_body_with_an_edge_off_its_vertex_passes_the_check_a_chain_of_unions_passes() {
+    let target = box_with_an_edge_off_its_vertex(4e-4, 2.6e-4);
+    assert!(!target.check(crate::check::CheckLevel::All).unwrap().is_valid(), "the target is the body whose own check fails");
+    let a = crate::Brep::make_box([9.0, 2.0, 2.0], [3.0, 2.0, 2.0]).unwrap();
+    let b = crate::Brep::make_box([9.0, 6.0, 2.0], [3.0, 2.0, 2.0]).unwrap();
+    let once = target.boolean(&a, BooleanOp::Union).unwrap().unwrap();
+    assert!(once.check(crate::check::CheckLevel::All).unwrap().is_valid(), "one union");
+    assert!((once.volume(1e-8).unwrap() - 1008.0).abs() < 1e-6, "{}", once.volume(1e-8).unwrap());
+    let chain = target.boolean(&a, BooleanOp::Union).unwrap().unwrap().boolean(&b, BooleanOp::Union).unwrap().unwrap();
+    let chain_report = chain.check(crate::check::CheckLevel::All).unwrap();
+    assert!(chain_report.is_valid(), "the chain: {chain_report}");
+    assert!((chain.volume(1e-8).unwrap() - 1016.0).abs() < 1e-6, "{}", chain.volume(1e-8).unwrap());
+    let all = crate::Brep::union_all(&[&target, &a, &b]).unwrap();
+    let report = all.check(crate::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert!((all.volume(1e-8).unwrap() - 1016.0).abs() < 1e-6, "{}", all.volume(1e-8).unwrap());
 }
 
 /// Face and edge tags (`Brep::tagged`) through booleans: each operand tagged, the result's history
@@ -467,6 +541,47 @@ mod history {
         let (a, b, c) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1), tagged_box([10.0; 3], [10.0; 3], 2));
         let h = Brep::union_all(&[&a, &b, &c]).unwrap().history().unwrap();
         assert_eq!(h.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{h:?}");
+    }
+
+    /// A plate, three pegs standing in it apart from each other and a box far from all, in one
+    /// `union_all`: the pegs and the far box are put beside each other with no boolean, then
+    /// joined to the plate by one, and every face still names its operand. The plate keeps its
+    /// six faces (its top holed), each peg its wall and top (its foot lies inside the plate), and
+    /// the far box its six. The far box's faces and each peg's top are whole and where they
+    /// were: Kept; each peg's wall lost the 2 mm inside the plate: Modified.
+    #[test]
+    fn a_union_of_bodies_apart_names_each() {
+        let plate = tagged_box([0.0; 3], [30.0, 10.0, 10.0], 0);
+        let pegs: Vec<Brep> =
+            [(5.0, 1), (15.0, 2), (25.0, 3)].into_iter().map(|(x, operand)| tagged_cylinder([x, 5.0, 8.0], 2.0, 12.0, operand)).collect();
+        let far = tagged_box([100.0, 0.0, 0.0], [5.0; 3], 4);
+        let mut all = vec![&plate];
+        all.extend(pegs.iter());
+        all.push(&far);
+        let h = Brep::union_all(&all).unwrap().history().unwrap();
+        let of = |operand: usize| h.faces.iter().filter(|f| f.origins.len() == 1 && f.origins[0].0 == operand).count();
+        assert_eq!(h.faces.len(), 6 + 3 * 2 + 6, "{h:?}");
+        assert_eq!((of(0), of(1), of(2), of(3), of(4)), (6, 2, 2, 2, 6), "{h:?}");
+        let kept = |operand: usize| h.faces.iter().filter(|f| f.origins.len() == 1 && f.origins[0].0 == operand && f.change == Change::Kept).count();
+        assert_eq!((kept(1), kept(2), kept(3), kept(4)), (1, 1, 1, 6), "{h:?}");
+    }
+
+    /// `boolean_tagged` and `union_all_tagged` preserve operand provenance tags for unions.
+    #[test]
+    fn tagged_boolean_and_union_all_keep_operand_origins() {
+        use std::collections::BTreeSet;
+        let a = super::Shape::Box([0.0; 3], [10.0; 3]).core();
+        let b = super::Shape::Box([5.0; 3], [10.0; 3]).core();
+        let c = super::Shape::Box([10.0; 3], [10.0; 3]).core();
+        let u = super::super::boolean::boolean_tagged(&a, &b, BooleanOp::Union).unwrap().unwrap();
+        let uh = super::super::history::read(&u).unwrap();
+        assert_eq!(uh.faces.len(), 12, "{uh:?}");
+        let u_origins: BTreeSet<usize> = uh.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
+        assert_eq!(u_origins, BTreeSet::from([0, 1]), "{uh:?}");
+        let all = super::super::boolean::union_all_tagged(&[&a, &b, &c]).unwrap();
+        let ah = super::super::history::read(&all).unwrap();
+        let a_origins: BTreeSet<usize> = ah.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
+        assert_eq!(a_origins, BTreeSet::from([0, 1, 2]), "{ah:?}");
     }
 
     /// A row of four boxes sharing their top and bottom planes, united in pairs and the pairs

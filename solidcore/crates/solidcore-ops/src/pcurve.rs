@@ -57,16 +57,35 @@ impl std::error::Error for PeriodicSeamError {
 
 /// Complete an import's periodic topology after its lifted pcurves are known, before the
 /// record is published. Returns the completed record and each output face's input index;
-/// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
-/// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
-/// and translates the pieces. A completed record that is no longer valid or no longer agrees
-/// with its own geometry is not returned: `None` keeps the record as it was.
+/// `None` leaves a record with in-domain trims and complete sectors unchanged, and so does a
+/// completion that cannot be made a record passing the import's checks. The kernel removes crossed internal
+/// cuts, splits genuine boundaries at the base cut, inserts seams and translates the pieces.
 ///
 /// # Errors
 /// Typed evaluation, conversion and topology failures, including a lost face origin.
 pub fn complete_periodic_seams(
     record: &solidcore_record::brep::Brep,
 ) -> std::result::Result<Option<(solidcore_record::brep::Brep, Vec<usize>)>, PeriodicSeamError> {
+    complete_periodic_seams_noted(record).map(|(completed, _)| completed)
+}
+
+/// [`complete_periodic_seams`], and where a completion was made but left unused, why: the
+/// second value says in a sentence which step refused the completed body (it could not be made
+/// a record, or the record failed a check the import makes of every record). It is `None` where
+/// the record needed no completion or the completion was used.
+///
+/// # Errors
+/// As [`complete_periodic_seams`].
+#[allow(clippy::type_complexity)]
+pub fn complete_periodic_seams_noted(
+    record: &solidcore_record::brep::Brep,
+) -> std::result::Result<
+    (
+        Option<(solidcore_record::brep::Brep, Vec<usize>)>,
+        Option<String>,
+    ),
+    PeriodicSeamError,
+> {
     use solidcore_convert::brep::{to_kernel, to_record};
     use solidcore_record::brep::Loop;
     use std::collections::{BTreeMap, BTreeSet};
@@ -100,7 +119,7 @@ pub fn complete_periodic_seams(
         }
     }
     if targets.is_empty() {
-        return Ok(None);
+        return Ok((None, None));
     }
     let mut kernel = solidcore::Kernel::default();
     let (mut body, order) =
@@ -129,19 +148,33 @@ pub fn complete_periodic_seams(
         }
     }
     if !changed {
-        return Ok(None);
+        return Ok((None, None));
     }
-    let (completed, order) =
-        to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;
-    // The kernel moves every trim piece into the base period on its own. Where a loop's
-    // consecutive uses lie either side of the cut with no seam edge between them (a vertex
-    // sits on the cut), the pieces end a whole period apart and the record's geometry no
-    // longer agrees with itself. Such a completion is not published: the record as imported,
-    // whose lifted trims continue one another, stays.
-    if crate::record_check::validate(&completed).is_err()
-        || crate::record_check::agreement(&completed).is_err()
-    {
-        return Ok(None);
+    // The edit deletes the trims of the uses at the seams' vertices and builds them again by
+    // sampling their edges. Where an edge lies off its surface by more than its tolerance, which
+    // a fitted edge curve can, the sampling comes back over part of the edge's interval and off
+    // the edge's end: the body then cannot be made a valid record, or the record fails the
+    // checks the import makes of every record. The record as imported passed them, so it
+    // stands: a body keeps its lifted trims rather than being refused for the completion's sake.
+    // The kernel also moves every trim piece into the base period on its own. Where a loop's
+    // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
+    // on the cut), the pieces end a whole period apart and the record no longer agrees with
+    // itself: the same checks refuse that completion too.
+    let (mut completed, order) = match to_record(&mut kernel, &mut body) {
+        Ok(made) => made,
+        Err(e) => {
+            return Ok((
+                None,
+                Some(format!(
+                    "the completed body could not be made a record: {}",
+                    PeriodicSeamError::Conversion(e)
+                )),
+            ));
+        }
+    };
+    snap_trim_ends(&mut completed);
+    if let Some(why) = import_check_failure(&completed) {
+        return Ok((None, Some(why)));
     }
     let faces = order
         .faces
@@ -153,7 +186,45 @@ pub fn complete_periodic_seams(
                 .ok_or(PeriodicSeamError::OutputFaceLost(f))
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(Some((completed, faces)))
+    Ok((Some((completed, faces)), None))
+}
+
+/// Moves the end knots of each trim that lies within rounding of its edge's interval onto the
+/// interval's ends. A trim built over an edge whose parameter range starts a rounding error
+/// off the record's (a seam's cut leaves `5.6e-17` where the record says `0`) passes the
+/// record's checks, which allow a millionth, yet a reader that asks for the trim over exactly
+/// the edge's interval finds it starts after it.
+pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
+    use solidcore_record::brep::{Curve2, Loop};
+    const ROUNDING: f64 = 1e-9;
+    let intervals: Vec<[f64; 2]> = record.edges.iter().map(|e| e.interval).collect();
+    for face in &mut record.faces {
+        for l in &mut face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let Some(&[lo, hi]) = intervals.get(u.edge as usize) else {
+                    continue;
+                };
+                let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+                    &mut u.pcurve;
+                solidcore::eval::pcurve::snap_end_knots(knots, [lo, hi], ROUNDING);
+            }
+        }
+    }
+}
+
+/// The first of the import's record checks `record` fails, in a sentence, or `None` where it
+/// passes them all.
+pub(crate) fn import_check_failure(record: &solidcore_record::brep::Brep) -> Option<String> {
+    if let Err(e) = crate::record_check::validate(record) {
+        return Some(format!("the completed record is invalid: {e}"));
+    }
+    if let Err(e) = crate::record_check::agreement(record) {
+        return Some(format!(
+            "the completed record disagrees with its own geometry: {e:?}"
+        ));
+    }
+    None
 }
 
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
@@ -300,6 +371,32 @@ pub fn exact_pcurves(
                 .collect()
         })
         .collect())
+}
+
+/// The proved gaps (mm) of a face's edge uses where the face is the whole polynomial spline patch
+/// `surface` and each use is a whole copy of one of its four boundary curves, one of each, every
+/// one taken by [`exact_pcurves`] as the straight line along it: `None` otherwise
+/// ([`solidcore::eval::pcurve::boundary_covers`]). `uses` are the face's one loop, each with the
+/// tolerance the importer asks at (the largest of the face's and its edge's), covered `margin`
+/// times within `max_tolerance`; `domain` is the face's parameter box where it has one. The
+/// surface is checked and converted once for the face, each curve once.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed record, an interval, a tolerance, a margin or a maximum that
+/// is not valid.
+pub fn boundary_covers(
+    surface: &Surface,
+    uses: &[EdgeUse<'_>],
+    domain: Option<[[f64; 2]; 2]>,
+    margin: f64,
+    max_tolerance: f64,
+) -> Result<Option<Vec<f64>>> {
+    let face = Converted::new(surface, &[uses.to_vec()])?;
+    let loops = face.loops();
+    let Some(converted) = loops.first() else {
+        return Ok(None);
+    };
+    k::boundary_covers(&face.surface, converted, domain, margin, max_tolerance)
 }
 
 /// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has

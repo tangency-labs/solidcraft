@@ -514,8 +514,8 @@ pub trait FilletSolverOps {
 
     /// `OffsetRadiiCanChange()`: whether the solver's offsets change along the trace
     /// (a virtual: `TRUE` for the `SmFilletSolver` base and the variable radius solver,
-    /// `FALSE` for the constant radius solvers). Read only with
-    /// `fixes.fillet_variable_span_follows_fillet`.
+    /// `FALSE` for the constant radius solvers). Read by the span check of a variable
+    /// round (WR-646).
     ///
     /// # Errors
     ///
@@ -1953,19 +1953,15 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             }
         }
 
-        // (not upstream, `fixes.fillet_variable_span_follows_fillet`, WR-646; the fork's
-        // tangency-labs/smlib@4438859) where the fillet's offsets change along the trace
-        // (a variable radius), the rails between two points must follow the fillet, not
-        // only lie on the faces: on a plane every uv curve does, so the test above holds
-        // for any span, the step grows to the angle tolerance, and the Hermite rails cut
-        // across the radius law between the points. The fillet is solved at the test
-        // points (a step of that share of the span from the start), and the span is
-        // rejected where a solution's contacts lie farther than the tolerance from the
-        // rails.
-        if k.fixes.fillet_variable_span_follows_fillet
-            && solver.offset_radii_can_change()?
-            && step_size > EFF_ZERO * 100.0
-        {
+        // (not upstream, WR-646; the fork's tangency-labs/smlib@4438859) where the
+        // fillet's offsets change along the trace (a variable radius), the rails between
+        // two points must follow the fillet, not only lie on the faces: on a plane every uv
+        // curve does, so the test above holds for any span, the step grows to the angle
+        // tolerance, and the Hermite rails cut across the radius law between the points.
+        // The fillet is solved at the test points (a step of that share of the span from
+        // the start), and the span is rejected where a solution's contacts lie farther than
+        // the tolerance from the rails.
+        if solver.offset_radii_can_change()? && step_size > EFF_ZERO * 100.0 {
             let rails = [&crv_3d0, &crv_3d1];
             for &param in &PARAMS_TO_TEST {
                 let mut part_step = step_size * param;
@@ -2418,7 +2414,13 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             // defect, never "no section"; a cancellation or a port failure is passed on)
             let mid = match self.try_solve_mid_point(solver, k, pj, pj1, frac) {
                 Ok(Some(found)) => found,
-                Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
+                Err(e)
+                    if e.is_port_failure()
+                        || matches!(
+                            e,
+                            SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
+                        ) =>
+                {
                     return Err(e);
                 }
                 found => {
@@ -3263,6 +3265,25 @@ where
     ) -> Result<SpanAccuracy> {
         self.intersector
             .test_span_accuracy(self.solver, k, point, next, mid)
+    }
+
+    /// Not upstream (#21179): a step that ends at a corner of the radius law
+    /// ([`FilletIntersector::land_on_radius_corner`]) ends on the through point made at that
+    /// corner: both points lie at a corner of the law, within the trace's tolerance of each
+    /// other (which corner) and within half the domains' sizes in UV (which turn of a closed
+    /// surface).
+    fn landed_on_through_point(&mut self, next: TsectId, through: TsectId) -> Result<bool> {
+        let si = &self.intersector.base.base;
+        let (next, through) = (si.point(next)?, si.point(through)?);
+        if !(self.solver.is_at_radius_corner(next) && self.solver.is_at_radius_corner(through)) {
+            return Ok(false);
+        }
+        Ok(next
+            .crv_pos()
+            .closer_than(si.this_approx_tol_3d, through.crv_pos())
+            && SRFS.iter().zip(&si.uv_domains).all(|(&s, domain)| {
+                next.uv_pos(s).distance(through.uv_pos(s)) < domain.size().length() / 2.0
+            }))
     }
 }
 

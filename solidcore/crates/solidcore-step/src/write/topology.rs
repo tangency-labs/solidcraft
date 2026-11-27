@@ -11,11 +11,14 @@
 //! ("not supported yet: …").
 //!
 //! Parameters: every record curve keeps its parameter in STEP (a line's runs from its start to
-//! its end as the record's does). A record surface's (u, v) is a linear image of its STEP
-//! surface's ([`Map`]): a plane is written on the orthonormal frame of its axes, a cone that
-//! narrows along its axis (negative half angle) with its axis turned over, a revolution with the
-//! angle first; pcurves go through the same map. Where the map reverses orientation, the
-//! record's natural normal is STEP's reversed, and the faces' same_sense says so.
+//! its end as the record's does), except an ellipse with `radii[0] < radii[1]`, which is turned a
+//! quarter turn about its normal so `semi_axis_1 >= semi_axis_2` while keeping its 3D curve and
+//! direction. A record surface's (u, v) is an affine image of its STEP surface's ([`Map`]): a
+//! plane is written on the orthonormal frame of its axes, a cone that narrows along its axis
+//! (negative half angle) with its axis turned over, a revolution with the angle first (and any
+//! quarter-turn shift of an elliptic profile carried in `Map::t`); pcurves go through the same
+//! map. Where the map reverses orientation, the record's natural normal is STEP's reversed, and
+//! the faces' same_sense says so.
 //!
 //! Sides: every face's normal points out of the material, as the record's shells have them (a
 //! void's faces into the void, its ORIENTED_CLOSED_SHELL orientation .T.). A face is written with
@@ -49,18 +52,23 @@ fn unsupported(what: impl std::fmt::Display) -> String {
     format!("not supported yet: STEP export of {what}")
 }
 
-/// The record's surface parameters as the STEP surface's: `(u', v') = m · (u, v)`.
+/// The record's surface parameters as the STEP surface's: `(u', v') = m · (u, v) + t`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Map {
     pub m: [[f64; 2]; 2],
+    pub t: [f64; 2],
 }
 
 impl Map {
-    pub const IDENTITY: Map = Map { m: [[1.0, 0.0], [0.0, 1.0]] };
+    pub const IDENTITY: Map = Map { m: [[1.0, 0.0], [0.0, 1.0]], t: [0.0, 0.0] };
+
+    fn linear(m: [[f64; 2]; 2]) -> Self {
+        Self { m, t: [0.0, 0.0] }
+    }
 
     pub fn apply(&self, [u, v]: [f64; 2]) -> [f64; 2] {
         let [a, b] = self.m;
-        [a[0] * u + a[1] * v, b[0] * u + b[1] * v]
+        [a[0] * u + a[1] * v + self.t[0], b[0] * u + b[1] * v + self.t[1]]
     }
 
     /// The record's natural normal is the STEP surface's (both are ∂S/∂u × ∂S/∂v, so they differ
@@ -141,23 +149,41 @@ fn rational(h: &[f64; 4]) -> R<(P3, f64)> {
     if w > 0.0 { Ok(([h[0] / w, h[1] / w, h[2] / w], w)) } else { Err("a non-positive rational weight".into()) }
 }
 
-/// A record curve as the STEP curve with the same parameter.
-pub fn curve(c: &BCurve) -> R<Curve> {
+/// A record curve as the STEP curve, and the parameter shift `t_step - t_record` (non-zero only
+/// for an ellipse with `radii[0] < radii[1]`, which is turned a quarter turn about its normal so
+/// `semi_axis_1 >= semi_axis_2` while keeping its 3D points and direction).
+fn curve_with_shift(c: &BCurve) -> R<(Curve, f64)> {
     Ok(match c {
         BCurve::Line { start, end } => {
             let d = sub(*end, *start);
-            Curve::Line { origin: *start, direction: unit(d, "line")?, magnitude: norm(d) }
+            (Curve::Line { origin: *start, direction: unit(d, "line")?, magnitude: norm(d) }, 0.0)
         }
-        BCurve::Circle { frame, radius } => Curve::Circle { position: placement(frame), radius: *radius },
-        BCurve::Ellipse { frame, radii } => Curve::Ellipse { position: placement(frame), semi_axis_1: radii[0], semi_axis_2: radii[1] },
-        BCurve::Polyline { points } => Curve::Polyline(points.clone()),
-        BCurve::Spline { knots, points } => bspline_curve(knots, points.clone(), None)?,
+        BCurve::Circle { frame, radius } => (Curve::Circle { position: placement(frame), radius: *radius }, 0.0),
+        BCurve::Ellipse { frame, radii } => {
+            let [a, b] = *radii;
+            if a < b {
+                // `o + a cos t x + b sin t y` is `o + b cos s y + a sin s (-x)` at `s = t - pi/2`:
+                // the major axis along y, the frame turned a quarter turn about `x × y`, keeping
+                // the curve and its direction so `EDGE_CURVE.same_sense` stays unchanged.
+                let position = Placement { origin: frame.origin, axis: cross(frame.x_axis, frame.y_axis), ref_direction: frame.y_axis };
+                (Curve::Ellipse { position, semi_axis_1: b, semi_axis_2: a }, -std::f64::consts::FRAC_PI_2)
+            } else {
+                (Curve::Ellipse { position: placement(frame), semi_axis_1: a, semi_axis_2: b }, 0.0)
+            }
+        }
+        BCurve::Polyline { points } => (Curve::Polyline(points.clone()), 0.0),
+        BCurve::Spline { knots, points } => (bspline_curve(knots, points.clone(), None)?, 0.0),
         BCurve::RationalSpline { knots, homogeneous } => {
             let (points, weights): (Vec<P3>, Vec<f64>) = homogeneous.iter().map(rational).collect::<R<Vec<_>>>()?.into_iter().unzip();
-            bspline_curve(knots, points, Some(weights))?
+            (bspline_curve(knots, points, Some(weights))?, 0.0)
         }
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("a traced intersection curve")),
     })
+}
+
+/// A record curve as the STEP curve, with ellipses oriented so `semi_axis_1 >= semi_axis_2`.
+pub fn curve(c: &BCurve) -> R<Curve> {
+    Ok(curve_with_shift(c)?.0)
 }
 
 fn bspline_surface(u_knots: &[f64], v_knots: &[f64], points: Vec<Vec<P3>>, weights: Option<Vec<Vec<f64>>>) -> R<Surface> {
@@ -187,7 +213,7 @@ fn plane(origin: P3, a: P3, b: P3) -> R<(Surface, Map)> {
     let z = unit(cross(a, b), "plane")?;
     let y = cross(z, x);
     let m = [[dot(a, x), dot(b, x)], [dot(a, y), dot(b, y)]];
-    Ok((Surface::Plane { position: Placement { origin, axis: z, ref_direction: x } }, Map { m }))
+    Ok((Surface::Plane { position: Placement { origin, axis: z, ref_direction: x } }, Map::linear(m)))
 }
 
 /// A column-major affine matrix as its linear part (columns) and translation.
@@ -272,11 +298,11 @@ fn revolution(profile: &BCurve, origin: P3, axis: P3, matrix: &[[f64; 4]; 4], fo
     }
     let turn = if dot(cross(l[0], l[1]), l[2]) > 0.0 { 1.0 } else { -1.0 };
     let similarity = near(across, along).then_some(across);
-    let profile = curve(&placed_curve(profile, &a, similarity)?)?;
+    let (profile, shift) = curve_with_shift(&placed_curve(profile, &a, similarity)?)?;
     let axis = Axis1 { origin: moved(&a, origin), direction: scale(lk, 1.0 / along) };
     // Record (u, v) is (profile, angle) when `forward`, else (angle, profile).
     let m = if forward { [[0.0, turn], [1.0, 0.0]] } else { [[turn, 0.0], [0.0, 1.0]] };
-    Ok((Surface::Revolution { profile: Arc::new(profile), axis }, Map { m }))
+    Ok((Surface::Revolution { profile: Arc::new(profile), axis }, Map { m, t: [0.0, shift] }))
 }
 
 /// A record surface as a STEP surface, and how the record's (u, v) map onto STEP's.
@@ -285,13 +311,21 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         BSurface::Plane { origin, u_axis, v_axis } => plane(*origin, *u_axis, *v_axis)?,
         BSurface::PlaneThrough { origin, u_point, v_point } => plane(*origin, sub(*u_point, *origin), sub(*v_point, *origin))?,
         BSurface::Cylinder { frame, radius } => (Surface::Cylinder { position: placement(frame), radius: *radius }, Map::IDENTITY),
+        BSurface::Cone { frame, radius_at_origin, half_angle } if *half_angle == 0.0 => {
+            // A cone of no angle (a round's straight edge) is the cylinder over its section, in the
+            // same (u, v), as the CADIR reader reads it; STEP's semi-angle must be above 0.
+            if !(*radius_at_origin > 0.0) {
+                return Err(unsupported("a cone of no angle and no radius"));
+            }
+            (Surface::Cylinder { position: placement(frame), radius: *radius_at_origin }, Map::IDENTITY)
+        }
         BSurface::Cone { frame, radius_at_origin, half_angle } => {
             // STEP's semi-angle is positive: a cone narrowing along z is the one widening along −z,
             // its frame turned over about x, (u, v) → (−u, −v).
             let k = half_angle.signum();
             let mut position = placement(frame);
             position.axis = scale(position.axis, k);
-            (Surface::Cone { position, radius: *radius_at_origin, semi_angle: half_angle.abs() }, Map { m: [[k, 0.0], [0.0, k]] })
+            (Surface::Cone { position, radius: *radius_at_origin, semi_angle: half_angle.abs() }, Map::linear([[k, 0.0], [0.0, k]]))
         }
         BSurface::Sphere { frame, radius } => (Surface::Sphere { position: placement(frame), radius: *radius }, Map::IDENTITY),
         BSurface::Torus { frame, major_radius, minor_radius, .. } => {
@@ -332,8 +366,8 @@ pub fn as_form(face: &Face, tolerance: f64) -> bool {
     face.nurbs.is_some() && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. }) || singular_torus(&face.surface, tolerance))
 }
 
-/// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear
-/// map, exact on a B-spline and on a NURBS's homogeneous coefficients).
+/// A record pcurve in the STEP surface's parameters: its control points through `map` (an affine
+/// map, exact on a B-spline and on a NURBS's de-homogenised control points).
 pub fn pcurve(c: &Curve2, map: Map) -> R<Curve> {
     let lift = |p: [f64; 2]| {
         let [u, v] = map.apply(p);
@@ -729,5 +763,5 @@ pub fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: M
         return None;
     }
     let keeps = (along > 0.0) == map.keeps_normal();
-    Some(Map { m: [[1.0, 0.0], [0.0, if keeps { 1.0 } else { -1.0 }]] })
+    Some(Map::linear([[1.0, 0.0], [0.0, if keeps { 1.0 } else { -1.0 }]]))
 }
