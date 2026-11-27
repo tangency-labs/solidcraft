@@ -11882,20 +11882,24 @@ fn centered_extrude(
     // other. Without that record no cap answers to `start`. It spans the plane when its caps
     // lie on both sides of it, as their roles already say.
     let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !matches!(cap_roles, CapRoles::TwoSided);
-    let start_name = || Some("start".to_string());
-    // An extrude whose start is offset off its sketch plane, with both caps on one side of it,
-    // gives both caps one role by their height (`top`, numbered `top#1` and `top#2` by where
-    // they lie). A piece of either cap that a later feature split off is named after that shared
-    // role, which stands for both caps, so it could not keep a sketch's attachment (T-1986). Each
-    // cap also answers to the end it closes, `cap:low` or `cap:high`, which no other face of the
-    // feature claims: a sketch on it attaches by that name. Its own name stays as it was.
-    let same_side = matches!(cap_roles, CapRoles::ByHeight) && caps[0] == caps[1];
-    let cap_synonyms = match one_sided_direction.filter(|_| spans) {
-        Some(crate::Direction::Positive) => [start_name(), None],
-        Some(crate::Direction::Negative) => [None, start_name()],
-        Some(crate::Direction::Symmetric) | None if same_side => [Some("cap:low".to_string()), Some("cap:high".to_string())],
-        Some(crate::Direction::Symmetric) | None => [None, None],
+    let mut cap_synonyms: [Vec<String>; 2] = match one_sided_direction.filter(|_| spans) {
+        Some(crate::Direction::Positive) => [vec!["start".to_string()], Vec::new()],
+        Some(crate::Direction::Negative) => [Vec::new(), vec!["start".to_string()]],
+        Some(crate::Direction::Symmetric) | None => Default::default(),
     };
+    // A cap named by its height also answers to the end it closes, `cap:low` or `cap:high`, which
+    // no other face of the feature claims. An extrude whose start is offset off its sketch plane
+    // has both caps on one side of it, so their height gives both one role (`top`, numbered
+    // `top#1` and `top#2` by where they lie), and a piece of either cap a later feature split off
+    // is named after that shared role, which stands for both caps: a sketch on it attaches by the
+    // end it closes instead (T-1986). Every such cap answers to it, wherever its start lies, so
+    // the attachment still finds the cap when an edit moves the offset across the sketch plane.
+    // The caps' own names stay as they were.
+    if matches!(cap_roles, CapRoles::ByHeight) {
+        for (names, end) in cap_synonyms.iter_mut().zip(["cap:low", "cap:high"]) {
+            names.push(end.to_string());
+        }
+    }
     let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
@@ -12308,7 +12312,7 @@ fn feature_tools_with_constructor(
                             sketch: Some(&ss),
                             region: Some(r),
                             caps: caps.clone(),
-                            cap_synonyms: [None, None],
+                            cap_synonyms: Default::default(),
                             thin: thin_roles.as_ref(),
                         };
                         let corner = match extent.corner {
@@ -17426,7 +17430,7 @@ fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -
     // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
     let cap = Some(cap.to_string());
     let caps = if positive { [cap, None] } else { [None, cap] };
-    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: Default::default(), thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
@@ -21622,7 +21626,7 @@ fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<T
     // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
     let section = Some("section".to_string());
     let caps = if positive { [section, None] } else { [None, section] };
-    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: Default::default(), thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
 }
 

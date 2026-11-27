@@ -914,9 +914,14 @@ fn cut_members(
             let (part, tool) = kernel::half_space(&t.body, &plane, true)?;
             let part = part.ok_or_else(|| DocError::Invalid(format!("the member on line `{id}` was cut away completely")))?;
             // The cut face is the cap of the half-space box in the plane: its start cap.
-            let tool =
-                crate::lineage::ProfileRoles { sketch: None, region: None, caps: [Some(role.into()), None], cap_synonyms: [None, None], thin: None }
-                    .tool(tool, None);
+            let tool = crate::lineage::ProfileRoles {
+                sketch: None,
+                region: None,
+                caps: [Some(role.into()), None],
+                cap_synonyms: Default::default(),
+                thin: None,
+            }
+            .tool(tool, None);
             t = Traced::step(part, &[&t, &tool]);
         }
         Ok(t)
