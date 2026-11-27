@@ -83,13 +83,18 @@ impl IInitializeWithStream_Impl for Provider_Impl {
 impl IThumbnailProvider_Impl for Provider_Impl {
     fn GetThumbnail(&self, cx: u32, phbmp: *mut HBITMAP, pdwalpha: *mut WTS_ALPHATYPE) -> Result<()> {
         guarded(|| {
+            // SAFETY: each pointer is written only when non-null; COM passes them as this call's
+            // out-parameters.
+            unsafe {
+                if !phbmp.is_null() {
+                    phbmp.write(HBITMAP::default());
+                }
+                if !pdwalpha.is_null() {
+                    pdwalpha.write(WTS_ALPHATYPE(0));
+                }
+            }
             if phbmp.is_null() || pdwalpha.is_null() {
                 return Err(E_POINTER.into());
-            }
-            // SAFETY: both pointers are non-null, and COM passes them as this call's out-parameters.
-            unsafe {
-                phbmp.write(HBITMAP::default());
-                pdwalpha.write(WTS_ALPHATYPE(0));
             }
             if cx == 0 {
                 return Err(E_INVALIDARG.into());
@@ -180,11 +185,14 @@ struct Factory {
 impl IClassFactory_Impl for Factory_Impl {
     fn CreateInstance(&self, punkouter: Ref<IUnknown>, riid: *const GUID, ppvobject: *mut *mut c_void) -> Result<()> {
         guarded(|| {
-            if ppvobject.is_null() || riid.is_null() {
+            if ppvobject.is_null() {
                 return Err(E_POINTER.into());
             }
             // SAFETY: a non-null out-parameter.
             unsafe { ppvobject.write(std::ptr::null_mut()) };
+            if riid.is_null() {
+                return Err(E_POINTER.into());
+            }
             if !punkouter.is_null() {
                 return Err(CLASS_E_NOAGGREGATION.into());
             }
@@ -211,12 +219,16 @@ impl IClassFactory_Impl for Factory_Impl {
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
     catch_unwind(|| {
-        if ppv.is_null() || rclsid.is_null() || riid.is_null() {
+        if ppv.is_null() {
+            return E_POINTER;
+        }
+        // SAFETY: `ppv` is a non-null out-parameter.
+        unsafe { ppv.write(std::ptr::null_mut()) };
+        if rclsid.is_null() || riid.is_null() {
             return E_POINTER;
         }
         // SAFETY: checked non-null; COM passes a class id, an interface id and an out-parameter.
         unsafe {
-            ppv.write(std::ptr::null_mut());
             if *rclsid != CLSID {
                 return CLASS_E_CLASSNOTAVAILABLE;
             }
