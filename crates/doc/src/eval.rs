@@ -2736,6 +2736,12 @@ fn chain_fingerprint(
         turns.hash(&mut h);
         fp = h.finish();
     }
+    if let Some(suppressed) = blend_suppressed_makers_digest(doc, f) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        fp.hash(&mut h);
+        suppressed.hash(&mut h);
+        fp = h.finish();
+    }
     // A pattern or mirror of features replays its sources' definitions wherever they are in the
     // timeline. One made with the timeline rolled back comes before them, where the chain doesn't
     // cover them: its copies kept the size the sources had when they were made.
@@ -3493,6 +3499,7 @@ impl EvalKey {
             ^ placement_digest(doc, f, Some(st))
             ^ construct_digest(doc, vals, f, Some(st), constructions)
             ^ turns_digest(doc, vals, f).unwrap_or(0)
+            ^ blend_suppressed_makers_digest(doc, f).unwrap_or(0)
             ^ depth_digest(st);
         let reached = components.reachable_digest(doc, f, st);
         let whole = cache_key(f, fp, local, ctx ^ reached, st);
@@ -4020,10 +4027,7 @@ impl Feature {
             FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
                 // A blend whose stored names reference a suppressed upstream feature depends on
                 // whether that feature is suppressed versus deleted, not only on the live bodies.
-                if doc.features.iter().take_while(|g| g.id != self.id).any(|g| g.suppressed)
-                    && (self.edge_names.iter().any(|n| !n.is_empty() && !suppressed_edge_makers(doc, self, n).is_empty())
-                        || body.as_ref().is_some_and(|n| suppressed_body_maker(doc, self, &n.0).is_some()))
-                {
+                if blend_suppressed_makers_digest(doc, self).is_some() {
                     return None;
                 }
                 match body {
@@ -10096,6 +10100,42 @@ fn suppressed_body_maker<'a>(doc: &'a Document, f: &Feature, body_name: &str) ->
         .take_while(|g| g.id != f.id)
         .find(|g| g.suppressed && g.body_names.iter().any(|n| n.trim() == target))
         .map(|g| g.name.as_str())
+}
+
+/// Digest of suppressed upstream features directly referenced by a Fillet or Chamfer's stored
+/// edge/body names. Returns `None` when none are suppressed so normal timelines keep identical
+/// cache keys; when a referenced maker transitions between suppressed and deleted (or is renamed
+/// while suppressed), the key changes so cached suppressed warnings are invalidated.
+fn blend_suppressed_makers_digest(doc: &Document, f: &Feature) -> Option<u64> {
+    let (FeatureKind::Fillet { body, .. } | FeatureKind::Chamfer { body, .. }) = &f.kind else {
+        return None;
+    };
+    if !doc.features.iter().take_while(|g| g.id != f.id).any(|g| g.suppressed) {
+        return None;
+    }
+    let mut any = false;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "blend-suppressed-makers".hash(&mut h);
+    if let Some(n) = body
+        && let Some(maker) = suppressed_body_maker(doc, f, &n.0)
+    {
+        any = true;
+        0u8.hash(&mut h);
+        maker.hash(&mut h);
+    }
+    for (i, n) in f.edge_names.iter().enumerate() {
+        if n.is_empty() {
+            continue;
+        }
+        let makers = suppressed_edge_makers(doc, f, n);
+        if !makers.is_empty() {
+            any = true;
+            1u8.hash(&mut h);
+            i.hash(&mut h);
+            makers.hash(&mut h);
+        }
+    }
+    any.then(|| h.finish())
 }
 
 /// The body (index) an edge name finds an edge on, when one does: the unique body holding that
