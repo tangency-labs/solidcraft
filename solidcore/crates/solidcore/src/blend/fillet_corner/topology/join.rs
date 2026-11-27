@@ -529,6 +529,8 @@ fn rolled_sides(
 /// a seam from nothing at the vertex, where the seam meets the other face, to the far end: on a
 /// sphere against a plane it is `h r / (r - h)`, h the point's distance from the plane.
 ///
+/// Returns whether a seam was taken out (the corner's `seam_short_of_rails`).
+///
 /// # Errors
 /// Those of the topology queries, the seam test, the solver lookup and `ball_touching_with`.
 fn seams_short_of_rails(
@@ -540,9 +542,10 @@ fn seams_short_of_rails(
     vertex: Option<crate::topology::VertexId>,
     side: &[[Option<FaceId>; 2]; 2],
     between: &mut [Vec<EdgeuseId>; 2],
-) -> Result<()> {
+) -> Result<bool> {
+    let mut removed = false;
     let Some(&Some(id)) = ids.first() else {
-        return Ok(());
+        return Ok(removed);
     };
     for s in 0..2 {
         let Some(&[only]) = between.get(s).map(Vec::as_slice) else {
@@ -585,10 +588,11 @@ fn seams_short_of_rails(
         if within && !on_g {
             if let Some(b) = between.get_mut(s) {
                 b.clear();
+                removed = true;
             }
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
 /// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
@@ -750,7 +754,7 @@ impl FilletCorner {
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
         let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
-        seams_short_of_rails(
+        self.seam_short_of_rails = seams_short_of_rails(
             k,
             target,
             solvers,

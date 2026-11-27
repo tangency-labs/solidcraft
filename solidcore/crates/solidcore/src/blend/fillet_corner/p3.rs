@@ -358,6 +358,10 @@ pub struct FilletCorner {
     /// is looked for across the cliff's tangent seam as well. Set only on the second pass's corner
     /// at V, where the concave chain meets the cliff.
     pub roll_over: bool,
+    /// Not the fork's (tangency-labs/solidcraft#21940): a Join whose side seam ends inside the
+    /// band the round takes off (`join::seams_short_of_rails`): the rails never cross the seam,
+    /// so the section's feet are named in the surfaces' natural domains.
+    pub seam_short_of_rails: bool,
     /// Not upstream (#10876): the Roll-over's End across the cliff's tangent seam
     /// ([`crate::blend::blend_corner::rollover::seam_end`]), set by its topology: the end rib is
     /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
@@ -729,6 +733,7 @@ impl FilletCorner {
             end_cap: None,
             turned_back_arcs: [None, None],
             roll_over: false,
+            seam_short_of_rails: false,
             seam_cap: None,
             end_face: None,
         }

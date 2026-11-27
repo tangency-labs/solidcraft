@@ -4081,6 +4081,7 @@ impl FilletBrep {
         let cp_vertex = owner
             .filleted_vertex()
             .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
+        let seam_short = owner.seam_short_of_rails;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
@@ -4220,6 +4221,22 @@ impl FilletBrep {
                     dropped.result_uv,
                     b.uv,
                 )?;
+                // Not the fork's (tangency-labs/solidcraft#21940): at a Join whose side seam ends
+                // inside the band (`FilletCorner::seam_short_of_rails`: a sphere turned so that
+                // its seam runs from a closed rim's vertex into the face, ending at a pole short
+                // of the rails), the rails never cross the seam, and the name nearest the edge
+                // use's parameters, on the seam's other side, lies past the domain's end: the
+                // foot's name in the domain is taken (the same point of the surface, moved by
+                // whole periods only). Where the rails do cross the seam at the vertex, the
+                // name on the edge use's side stays, as above.
+                let foot = if seam_short
+                    && !domain.contains_point(foot, 0.0)
+                    && domain.contains_point(dropped.result_uv, 0.0)
+                {
+                    dropped.result_uv
+                } else {
+                    foot
+                };
                 *slot = foot;
             }
 
