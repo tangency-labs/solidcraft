@@ -378,6 +378,39 @@ impl Names {
 /// One body's mass properties in its component's frame: (mass kg, centre mm, inertia kg mm²).
 pub(crate) type BodyMass = (f64, Vec3, [[f64; 3]; 3]);
 
+/// Match the assembly mass measurement: exact volume and centroid, with gyration
+/// from the standard inertia mesh. Export tessellation only affects visual/collision geometry.
+pub(crate) fn measured_body_mass(doc: &Document, state: &ModelState, b: &solidcraft_doc::ModelBody) -> Result<Option<BodyMass>> {
+    if !b.is_closed() {
+        return Ok(None);
+    }
+    let Some(mut moments) = crate::mass_properties(&b.body)? else {
+        return Err(IoError::Invalid("inertia mesh does not close".into()));
+    };
+    let (volume, centroid) =
+        if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty()) {
+            let mut measured = b.measure()?;
+            sheet.correct_perforation_properties(&mut measured, &IDENTITY)?;
+            sheet.correct_perforation_mass_properties(&mut moments, &IDENTITY)?;
+            (measured.volume, measured.centroid)
+        } else {
+            let measured = solidcraft_kernel::measure_mass(&b.body)?;
+            (measured.volume, measured.centroid)
+        };
+    let gyration = moments.gyration().ok_or_else(|| IoError::Invalid("invalid body gyration".into()))?;
+    let at = doc.model_body_offset(b).unwrap_or(&IDENTITY);
+    let l = [0, 1, 2].map(|i| [0, 1, 2].map(|j| at[j][i]));
+    let det = l[0][0] * (l[1][1] * l[2][2] - l[1][2] * l[2][1]) - l[0][1] * (l[1][0] * l[2][2] - l[1][2] * l[2][0])
+        + l[0][2] * (l[1][0] * l[2][1] - l[1][1] * l[2][0]);
+    let mass = volume * det.abs() * doc.density(&b.name) * 1e-6;
+    let center = apply_point(at, centroid);
+    let tensor = solidcraft_geom::inertia::from_gyration(&solidcraft_geom::inertia::transformed(&gyration, &l), mass);
+    if !(mass > 0.0 && mass.is_finite() && center.is_finite() && tensor.iter().flatten().all(|x| x.is_finite())) {
+        return Err(IoError::Invalid("non-finite or non-positive body mass properties".into()));
+    }
+    Ok(Some((mass, center, tensor)))
+}
+
 /// A component's meshes and masses.
 struct Part {
     visual: Option<String>,
@@ -455,26 +488,35 @@ fn parts(
             let opacity = b.body.paint().map(|p| p.opacity).filter(|o| o.is_finite()).map_or(1.0, |o| o.clamp(0.0, 1.0));
             color = color.or(b.body.color().map(|[r, g, b]| [r, g, b, opacity]));
             append(&mut visual, &welded);
-            let closed = welded.mass_properties();
-            if let Some(mp) = closed {
-                // g/cm³ to kg/mm³.
-                let rho = doc.density(&b.name) * 1e-6;
-                masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
-            }
+            let closed = b.is_closed() && welded.mass_properties().is_some();
+            let massive = match measured_body_mass(doc, st, b) {
+                Ok(Some(mp)) => {
+                    masses.push(mp);
+                    true
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    out.warnings.push(format!("body `{}`: its mass could not be measured: {e}", b.name));
+                    false
+                }
+            };
             let shape = match doc.collision_shape(&b.name) {
                 CollisionShape::Auto => CollisionShape::Mesh,
                 shape => shape,
             };
-            shared &= shape == CollisionShape::Mesh && closed.is_some();
-            if closed.is_none() {
+            shared &= shape == CollisionShape::Mesh && closed;
+            if !b.is_closed() {
                 let adds = if shape == CollisionShape::Mesh { "adds no mass or collision" } else { "adds no mass" };
                 out.warnings.push(format!("body `{}` is not a closed solid: it is drawn but {adds}", b.name));
+            } else if !closed && shape == CollisionShape::Mesh {
+                let adds = if massive { "adds no mesh collision" } else { "adds no mass or collision" };
+                out.warnings.push(format!("body `{}` has no closed solid mesh: it is drawn but {adds}", b.name));
             }
             let fit_failed = |out: &mut UrdfPackage, what: &str| {
                 out.warnings.push(format!("body `{}` has no {what} to collide with: it has no collision", b.name))
             };
             match shape {
-                CollisionShape::Mesh if closed.is_some() => append(&mut collision, &welded),
+                CollisionShape::Mesh if closed => append(&mut collision, &welded),
                 CollisionShape::Auto | CollisionShape::Mesh | CollisionShape::None => {}
                 CollisionShape::Box | CollisionShape::Cylinder | CollisionShape::Sphere => {
                     // The shape is set in the body's exact bounding box (the kernel's), in the

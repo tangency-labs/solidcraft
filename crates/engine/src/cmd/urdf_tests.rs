@@ -1141,6 +1141,28 @@ fn inertial_of(p: &UrdfPackage, link: &str) -> solidcraft_io::urdf::Inertial {
 }
 
 #[test]
+fn curved_body_mass_is_independent_of_export_quality() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 90, "body_name": "Shaft"}));
+    let state = s.doc.painted(&s.model.state());
+    let want = std::f64::consts::PI * 16.0 * 90.0 * s.doc.density("Shaft") * 1e-6;
+    let mut first = None;
+    for quality in [solidcraft_io::MeshQuality::Chord(1.0), solidcraft_io::MeshQuality::Fine] {
+        let p = solidcraft_io::urdf(&s.doc, &state, "shaft", &UrdfOptions { quality, ..Default::default() }).unwrap();
+        let actual = inertial_of(&p, "base_link");
+        assert!((actual.mass - want).abs() < want * 1e-6, "{actual:?}, {want}");
+        assert!((actual.com.z - 45.0).abs() < 1e-6, "{actual:?}");
+        if let Some(previous) = first {
+            let previous: solidcraft_io::urdf::Inertial = previous;
+            assert_eq!(actual.mass, previous.mass);
+            assert_eq!(actual.com, previous.com);
+            assert_eq!(actual.inertia, previous.inertia);
+        }
+        first = Some(actual);
+    }
+}
+
+#[test]
 fn a_mass_override_scales_inertia_and_keeps_the_centre() {
     let mut s = two_cubes();
     let before = inertial_of(&package(&s), "B");

@@ -85,10 +85,10 @@ set. In a chain, each step uses the values of the joint value it follows.
   already taken gets `_2`, `_3` and so on. Joint names are taken first, so a joint keeps the
   name you gave it. Mesh file names are compared without case, since Windows and macOS ignore
   it.
-- **Mass and inertia** come from each body's mesh and material density: the mass in kg, the
-  centre of mass and the inertia tensor about it in the link frame, in kg m². Bodies of the
-  same link combine with the parallel-axis theorem. Changing `quality` or `chord` can change the
-  computed mass, centre of mass and inertia.
+- **Mass and inertia** use the measured volume, centroid and material density of each solid.
+  The inertia uses the standard inertia mesh, scaled to the measured mass. Bodies of the same
+  link combine with the parallel-axis theorem (kg, mm and kg m²). Changing `quality` or `chord`
+  only changes the exported meshes, not these physical properties.
 - **Mass override:** `component.physical_override {component, mass?, com?, inertia?}` replaces the
   values of a component's own bodies, for a bought motor modelled as a solid block. With only `mass`,
   the centre of mass stays and the inertia is scaled. Nested components are links of their own and keep
