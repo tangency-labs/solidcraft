@@ -18,8 +18,7 @@ with sc.session() as d:
 
 `sc.session()` uses a running session daemon (`solidcraft-session serve`) when there is one, so
 several scripts work on one design, and otherwise starts its own headless SolidCraft. It talks to
-`solidcraft-cli mcp --structured`, the same MCP server agents use (`SOLIDCRAFT_CLI` names the
-binary when it is not on `PATH`). Design notes: `docs/python-api.md`.
+`solidcraft-cli mcp --structured`, the same MCP server agents use. Design notes: `docs/python-api.md`.
 
 ```sh
 pip install solidcraft
@@ -28,5 +27,13 @@ uvx solidcraft mcp     # the MCP server over stdio: command "uvx", args ["solidc
 
 The `solidcraft` command runs `solidcraft-cli` with the same arguments and exit code
 (`uvx solidcraft --version`).
+
+The package is pure Python and carries no binary. The first run downloads this version's
+`solidcraft-cli` for your platform (100 to 250 MB, once) from the GitHub release, checks
+it against the release's `SHA256SUMS.txt`, and keeps it in your user cache. A `solidcraft-cli` on
+`PATH` of the same minor version or newer (an installed SolidCraft) is used instead, and
+`SOLIDCRAFT_CLI` overrides both. Offline: `solidcraft install-cli --from <archive>` puts a
+downloaded archive in the cache; `SOLIDCRAFT_NO_DOWNLOAD=1` turns the download off.
+`solidcraft install-cli` also copies the CLI to `~/.local/bin` (it never edits `PATH`).
 
 The generated bindings come from `cargo xtask python` and are not committed.
