@@ -8,6 +8,7 @@ use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_geom::p6::{
     TrimOriginalBody, TrimOriginalSurfacesEnv, TrimOriginalSurfacesMarks,
 };
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::kernel::Kernel;
@@ -228,9 +229,9 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
                     "Fillet Error: the faces a fillet's rails enclose on the body reach past its rails (the trim leaks)",
                 ),
             );
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP_TRIM_LEAK,
-                "the faces the rails enclose reach past the rails",
+                BlendFailure::TrimLoopDoesNotSeparate,
             ));
         }
         Ok(())
@@ -322,6 +323,31 @@ impl FilletSession<'_> {
             .map(|face| FilletObject::Topology(FilletBody::Target, EntityRef::Face(face)))
             .collect();
         selected?;
+        // An End whose sides do not lie on the same extended face builds a free cap
+        // bounded by its end rib and side edges. Its own trimmed face is part of the
+        // blend even when the strip and the cap still have separate uses of the rib.
+        // In that case walking from the strip's rails cannot reach the cap before
+        // the final stitch. Faces on extended supports still need the usual trim.
+        let fillet = self
+            .objects
+            .intermediate
+            .as_ref()
+            .ok_or_else(|| invalid("intermediate body is not allocated"))?;
+        for corner in &self.objects.corners {
+            if corner.extended_surface_patch
+                || !corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_end)
+            {
+                continue;
+            }
+            for &face in &corner.surface_faces {
+                let patch = FilletObject::IntermediateTopology(EntityRef::Face(face));
+                if fillet.face(face).is_ok() && !output.kept.contains(&patch) {
+                    output.kept.push(patch);
+                }
+            }
+        }
         self.executive.delete_original_surface_faces(
             k,
             &mut DeleteAccess(&mut self.objects),

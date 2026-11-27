@@ -100,7 +100,9 @@
     ],
     "turn": "mitre"
    },
-   "error": "not supported yet: a convex and a concave round meeting at a vertex of four edges are not supported unless one continues the other across a tangent seam: they lie on opposite sides of their faces there and have no crossing to mitre on, at any size (#10876)"
+   "outputs": [
+    "b259"
+   ]
   }
  ],
  "bodies": {
@@ -110,20 +112,28 @@
   }
  },
  "params": {},
- "result": [],
+ "result": [
+  {
+   "made": "b259"
+  }
+ ],
  "expected": {
-  "outcome": "refused",
-  "refusal": "a convex and a concave round meeting at a vertex of four edges",
+  "outcome": "solid",
+  "body_count": 1,
+  "volume_mm3": 43913.83195727927,
+  "tolerance": {
+   "rel": 1e-11
+  },
   "source": "analytic",
   "sources": [
    "tangency-labs/solidcraft#15641",
    "tangency-labs/solidcraft#10876"
   ],
   "what": "the right ledge's two edges at its corner (12, 30, 33) rounded r 0.5 together: the convex edge where the ledge top meets the bore's round bottom (it runs on tangentially into the smooth edge between the bore's round bottom and its flat wall) and the concave edge where the ledge top meets the arch's front face, a mixed-convexity corner beside a curved face",
-  "method": "test11.sc from tangency-labs/solidcraft#15641 (a practice part: a 36 x 48 plate with a round end, an upright with a front notch, an arch, and a stadium bore of radius 12 through the arch and down into the upright, leaving two ledges at z = 33) up to Extrude9. V0 = 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18 - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12) = 43913.957931372, with I(a, b; R) the integral of sqrt(R^2 - x^2) from a to b: the plate and its round end, the bottom slot (15 wide, 6 high, through), the counterbore (r 12, 3 deep) and hole (r 6), the upright, its front notch, the arch block and its r 18 top, less the bore (its whole stadium through the arch, its lower half disc through the ledges behind the notch, and the parts of that half disc beside the notch). The corner at (12, 30, 33) has four edges: the two rounded ones, the sharp upright edge between the arch's front face and the bore's flat wall, and the smooth seam between the flat wall and the round bottom. The convex round does not run on into the concave one across that seam (they meet at 90 degrees on the ledge top), so the corner is not the blend corner's Mixed. On the ledge top, their common face, the convex round (ledge top and round bottom) lies in the material, below z = 33, and the concave round (ledge top and arch front) outside it, above z = 33: for any radii the two rounds meet only in the plane z = 33, at the point where their rails on the ledge top cross, so there is no crossing curve to mitre them on, and no size fits. The kernel refuses the corner, naming that cause (#10876)."
+  "method": "test11.sc from tangency-labs/solidcraft#15641 (a practice part: a 36 x 48 plate with a round end, an upright with a front notch, an arch, and a stadium bore of radius 12 through the arch and down into the upright, leaving two ledges at z = 33) up to Extrude9. V0 = 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18 - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12) = 43913.957931372, with I(a, b; R) the integral of sqrt(R^2 - x^2) from a to b: the plate and its round end, the bottom slot (15 wide, 6 high, through), the counterbore (r 12, 3 deep) and hole (r 6), the upright, its front notch, the arch block and its r 18 top, less the bore (its whole stadium through the arch, its lower half disc through the ledges behind the notch, and the parts of that half disc beside the notch). The corner at (12, 30, 33) has four edges: the two rounded ones, the sharp upright edge between the arch's front face and the bore's flat wall, and the smooth seam between the flat wall and the round bottom. The convex round does not run on into the concave one across that seam (they meet at 90 degrees on the ledge top), so the corner is not the blend corner's Mixed. It builds as the blend corner's Roll-over (#16286): the convex round goes first, and the concave round rolls over its end on a torus about the convex round's axis A1 (x = sqrt(156), z = 32.5; major radius 2r, minor r). At the bore, the concave round's End spans the bore's round bottom and its flat wall across their tangent seam: its rib runs in two pieces through the seam's line (#10876). In the frame u = x - 12, v = y - 30, w = z - 33, with r = 0.5, RB = 12 and ua = sqrt((RB + r)^2 - r^2) - RB = 0.489996: V = V0 - 9 A1 + (6 - ua) (1 - pi/4) r^2 + I. A1 is the convex round's section, the region between the ledge top, the bore's bottom and the round. By Green's theorem, A1 = 1/2 (RB^2 (phi_t - sin phi_t) + [ua r sin psi + r^2 psi + r^2 cos psi] from psi_t to pi/2), with phi_t = asin(-r / (RB + r)) and psi_t = atan2(r, -(ua + RB)). It is taken over the round's length 9. (1 - pi/4) r^2 is the concave round's section, taken over its remainder from u = ua to 6. I = int_r^(2r) rho (r - sqrt(r^2 - (2r - rho)^2)) theta_max(rho) d rho is the torus's material past that strip. theta_max(rho) = asin(ua / rho) beyond rho_w = sqrt(ua^2 + r^2) (the flat wall), and asin(((RB + r)^2 - RB^2 + rho^2) / (2 rho (RB + r))) - atan2(r, RB + ua) within it (the bore's bottom). With rho = 2r - r cos phi it is analytic on either side of rho_w, where it is evaluated by quadrature (two Gauss-Legendre rules agreeing to 1e-14; Simpson's rule agrees to 5e-16). The terms: -9 A1 = -0.453440152, the strip 0.295614245, I = 0.031851815. V = 43913.957931372 - 0.125974093 = 43913.831957279. solidcore-ops' test the_ledge_corner_rolls_over_across_the_bores_tangent_seam checks this volume to 1e-11 relative (measured 7.5e-13; a cap not split at the seam's line would be 7.2e-6 off, 1.6e-10 relative) and that the kernel's certified volume enclosure holds it."
  },
  "operation_expressible": true,
  "expressible": true,
  "records": "10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5.bodies.json.gz",
- "gallery_note": "Each edge builds alone. Together they meet at a corner of four edges where the convex round lies below the ledge top and the concave one above it: they touch only at a point and have no crossing to mitre on, at any size, so the kernel refuses the corner, naming that cause."
+ "gallery_note": "The two rounds meet at a corner of four edges where the convex round lies below the ledge top and the concave one above it, touching only at a point. The convex round goes first and the concave one rolls over its end on a torus; at the bore its end is capped across the seam between the bore's round bottom and its flat wall, in two faces split along the seam's line."
 }

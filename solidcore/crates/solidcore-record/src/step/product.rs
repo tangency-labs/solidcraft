@@ -254,12 +254,16 @@ pub struct Link {
 pub enum Transformation {
     /// `ITEM_DEFINED_TRANSFORMATION`: `item_1` (in `rep_1`'s units) is placed onto `item_2` (in
     /// `rep_2`'s units).
+    ///
+    /// `item_1` is always the item of `rep_1` and `item_2` that of `rep_2`. A file that lists
+    /// `transform_item_1` in `rep_2`'s items and `transform_item_2` in `rep_1`'s (a
+    /// non-conformant writing some exporters use) has its two items swapped on reading.
     Items {
         /// The entity id.
         entity: u64,
-        /// `transform_item_1`, in `rep_1`'s units.
+        /// The item that lives in `rep_1`, in `rep_1`'s units.
         item_1: Frame,
-        /// `transform_item_2`, in `rep_2`'s units.
+        /// The item that lives in `rep_2`, in `rep_2`'s units.
         item_2: Frame,
     },
     /// A placement or an operator, in `rep_2`'s units.
@@ -488,6 +492,30 @@ fn optional_scale(p: Option<&Param>, what: &str) -> R<Option<f64>> {
     }
 }
 
+/// The attributes of a `CARTESIAN_TRANSFORMATION_OPERATOR_3D` (or `_NON_UNIFORM`) from `axis1`
+/// on: `axis1, axis2, local_origin, scale, axis3` (then `scale2, scale3`).
+///
+/// Writers put one or two labels before them. The operator inherits a name from
+/// `representation_item` and a name and an optional description from
+/// `functionally_defined_transformation` (ISO 10303-43). Most files write a name and the
+/// description (`'','',#1,...`); some write the name only (`'',#1,...`). The second parameter
+/// says which: a reference is `axis1`, anything else the description. When it is unset (`$` or
+/// `*`), the count says: the form without the description has one parameter fewer.
+pub fn operator_attributes(e: &Entity) -> &[Param] {
+    let p = e.params();
+    let with_description = if e.name().ends_with("NON_UNIFORM") {
+        9
+    } else {
+        7
+    };
+    let labels = match p.get(1) {
+        Some(Param::Ref(_)) => 1,
+        Some(Param::Null | Param::Derived) if p.len() + 1 == with_description => 1,
+        _ => 2,
+    };
+    p.get(labels..).unwrap_or_default()
+}
+
 /// A placement or a transformation operator, in `units`.
 fn frame(ex: &Exchange, id: u64, units: Units) -> R<Frame> {
     let e = entity(ex, id)?;
@@ -495,21 +523,21 @@ fn frame(ex: &Exchange, id: u64, units: Units) -> R<Frame> {
     match e.name() {
         "CARTESIAN_TRANSFORMATION_OPERATOR_3D"
         | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM" => {
-            let p = e.params();
+            let p = operator_attributes(e);
             let non_uniform = e.name().ends_with("NON_UNIFORM");
             Ok(Frame::Operator(Operator {
-                axis1: optional_direction(&reader, p.get(2), "operator axis1")?,
-                axis2: optional_direction(&reader, p.get(3), "operator axis2")?,
-                origin: reader.point(reference(p.get(4), "operator origin")?)?,
-                scale: optional_scale(p.get(5), "operator scale")?,
-                axis3: optional_direction(&reader, p.get(6), "operator axis3")?,
+                axis1: optional_direction(&reader, p.first(), "operator axis1")?,
+                axis2: optional_direction(&reader, p.get(1), "operator axis2")?,
+                origin: reader.point(reference(p.get(2), "operator origin")?)?,
+                scale: optional_scale(p.get(3), "operator scale")?,
+                axis3: optional_direction(&reader, p.get(4), "operator axis3")?,
                 scale2: if non_uniform {
-                    optional_scale(p.get(7), "operator scale2")?
+                    optional_scale(p.get(5), "operator scale2")?
                 } else {
                     None
                 },
                 scale3: if non_uniform {
-                    optional_scale(p.get(8), "operator scale3")?
+                    optional_scale(p.get(6), "operator scale3")?
                 } else {
                     None
                 },
@@ -935,18 +963,26 @@ pub fn read(ex: &Exchange) -> R<ProductStructure> {
                 )?)));
             }
             let p = oe.params();
+            let written_1 = reference(p.get(2), "transform item 1")?;
+            let written_2 = reference(p.get(3), "transform item 2")?;
+            // Some exporters write the items the other way round from the representations
+            // (`transform_item_1` listed in `rep_2`); where the items live decides.
+            let holds = |r: usize, item: u64| {
+                out.representations
+                    .get(r)
+                    .is_some_and(|r| r.items.iter().any(|i| i.entity == item))
+            };
+            let swapped = (holds(rep_2, written_1) && !holds(rep_1, written_1))
+                || (holds(rep_1, written_2) && !holds(rep_2, written_2));
+            let (item_1, item_2) = if swapped {
+                (written_2, written_1)
+            } else {
+                (written_1, written_2)
+            };
             Ok(Some(Transformation::Items {
                 entity: op,
-                item_1: frame(
-                    ex,
-                    reference(p.get(2), "transform item 1")?,
-                    units_of(&out, rep_1),
-                )?,
-                item_2: frame(
-                    ex,
-                    reference(p.get(3), "transform item 2")?,
-                    units_of(&out, rep_2),
-                )?,
+                item_1: frame(ex, item_1, units_of(&out, rep_1))?,
+                item_2: frame(ex, item_2, units_of(&out, rep_2))?,
             }))
         })()
         .map_err(|e| format!("relationship #{id}: {e}"))?;

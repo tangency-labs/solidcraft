@@ -71,7 +71,7 @@ fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(u
 }
 
 /// Edge `i`'s middle (along its polyline) and the direction it runs there.
-fn middle(e: &[Vec3]) -> Option<(Vec3, Vec3)> {
+pub(crate) fn middle(e: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let total: f64 = e.windows(2).map(|w| w[0].dist(w[1])).sum();
     let mut acc = 0.0;
     for w in e.windows(2) {
@@ -191,7 +191,8 @@ pub fn edge_snap(doc: &Document, st: &ModelState, comp: u64, pick: Vec3, on: Opt
         .ok_or_else(|| DocError::Invalid("joint origin: no edge there".into()))?;
     // The picks in the body's own coordinates; the snap keeps the pick as given.
     let (local, on, corner) = (apply_point(&inv, pick), on.map(|p| apply_point(&inv, p)), corner.map(|c| apply_point(&inv, c)));
-    let names = crate::naming::edge_names(b);
+    let edges = crate::naming::edge_name_index(b);
+    let names = &edges.names;
     let face_names = crate::naming::face_names(b);
     let m = b.mesh();
     let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();

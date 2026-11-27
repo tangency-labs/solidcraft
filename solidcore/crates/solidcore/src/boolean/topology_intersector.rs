@@ -10,6 +10,8 @@
 //! ([`p1::Relations`], co-ported by `boolean.merge_p1`).
 
 mod coincident_strip;
+mod curved_strip;
+mod duplicate_edge_run;
 pub mod p1;
 pub mod p2;
 pub mod p3;

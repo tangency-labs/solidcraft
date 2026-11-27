@@ -242,7 +242,7 @@ fn creation_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ArcSlotCenterParams>(), &["center", "end", "sketch", "start", "sweep", "width"]);
     assert_keys(input_schema_for::<EllipseParams>(), &["axes", "center", "construction", "major", "minor", "minor_radius", "sketch"]);
     assert_keys(input_schema_for::<FitPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
-    assert_keys(input_schema_for::<ControlPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
+    assert_keys(input_schema_for::<ControlPointSplineParams>(), &["construction", "control_polygon", "periodic", "points", "sketch"]);
     assert_keys(input_schema_for::<ConicParams>(), &["apex", "construction", "end", "rho", "sketch", "start"]);
     assert_keys(input_schema_for::<BlendCurveParams>(), &["a", "b", "continuity", "sketch"]);
     assert_keys(input_schema_for::<CenterlineParams>(), &["curves", "sketch", "value"]);
@@ -429,7 +429,8 @@ fn strict_keeps_todays_errors_before_the_sketch() {
         ("sketch.text", json!({"at": at, "text": "x", "align": 5})),
         ("sketch.text", json!({"at": at, "text": "x", "letter_spacing": "wide"})),
         ("sketch.text", json!({"at": at, "text": "x", "line_spacing": 0})),
-        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "2"})),
+        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "1 - 1"})),
+        ("sketch.text", json!({"at": at, "text": "x", "line_spacing": "no_such_parameter"})),
         ("sketch.text", json!({"at": at, "text": "x", "path": 5})),
     ]);
 }

@@ -28,6 +28,14 @@ pub enum Geom2 {
         control: bool,
         degree: u8,
     },
+    /// Spline over the control points with its own clamped knots (`pts.len() + degree + 1`)
+    /// and weights (empty: all 1), as a DXF SPLINE gives it (#9355).
+    Nurbs {
+        pts: Vec<Vec2>,
+        degree: u8,
+        knots: Vec<f64>,
+        weights: Vec<f64>,
+    },
     /// Quadratic Bézier / conic.
     Conic {
         a: Vec2,
@@ -43,8 +51,12 @@ pub enum Geom2 {
     },
 }
 
-/// Most entities one file may produce.
-pub const MAX_ENTITIES: usize = 200_000;
+/// The most drawn entities a file may have: lines, arcs, circles, splines and texts. A dense
+/// exported drawing (an auto-traced logo) can hold hundreds of thousands of short lines, which
+/// the insert's `simplify` follows with a few thousand curves, so this is well above the largest
+/// sketch: reading one such file peaks at about 80 MB of geometry, on top of the file's own
+/// [`MAX_DRAWING_BYTES`].
+pub const MAX_ENTITIES: usize = 1_000_000;
 /// Largest drawing file we read.
 pub const MAX_DRAWING_BYTES: usize = 64 << 20;
 

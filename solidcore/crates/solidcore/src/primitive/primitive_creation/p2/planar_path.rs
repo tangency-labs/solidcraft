@@ -22,11 +22,15 @@
 //! (WR-400, tangency-labs/solidcore#837): `SweepProfilesAlongPath` asks for caps only for a profile that closes.
 //! Not upstream (WR-780, #13687): the reference points of a mitre trim stay within the
 //! reach of the cutting line. No recursion.
+//! Not upstream (WR-793, #17314): a corner where the path turns back within 2 degrees is refused,
+//! where upstream takes it for a smooth joint and never mitres it, and so is a sweep of a
+//! closed profile meant as a solid that does not close (upstream returns it).
 
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::primitive::PrimitiveFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -90,11 +94,35 @@ fn extend_into(
     Ok(())
 }
 
-/// `CreateLineSegment(3, start, end, out)`; its status is returned (not upstream, #483).
-fn line_into(start: Vec3, end: Vec3, out: &mut Option<BSplineCurve>) -> Result<()> {
-    *out = Some(BSplineCurve::create_line_segment(3, start, end)?);
-    Ok(())
+/// `CreateLineSegment(3, start, end, out)`; its status is returned (not upstream, #483),
+/// and the line is returned (it is always made when the status is good).
+fn line(start: Vec3, end: Vec3) -> Result<BSplineCurve> {
+    BSplineCurve::create_line_segment(3, start, end)
 }
+
+/// A defect ([`PrimitiveFailure::Defect`]) of a curve the kernel built that is not
+/// there, with the status `SM_ERR_NULL_POINTER` of the null pointer it replaces.
+#[track_caller]
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, PrimitiveFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+// Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
+
+/// Why the temporary cutting curve is not there.
+const NO_TEMP_CUTTING: &str = "the temporary cutting curve is not there, though the distance \
+     extension of the corner's cutting line just made it, and that extension returns a curve \
+     whenever it succeeds";
+/// Why the extended cutting curve of a closed path's last corner is not there.
+const NO_EXTENDED_CUTTING: &str = "the cutting curve of the closed path's last corner is not \
+     there, though the distance extension of its cutting line just made it, and that \
+     extension returns a curve whenever it succeeds";
+/// Why the union of the pieces does not leave one B-rep.
+const NOT_ONE_RESULT: &str = "the union of the pieces does not leave exactly one B-rep, though \
+     its tree names each piece once with one union per piece after the first, and the Boolean \
+     tree leaves one result per tree and no unused B-rep";
 
 /// Not upstream (WR-400, tangency-labs/solidcore#837): whether the profile curves
 /// close, every curve end meeting another curve end (a closed curve's own other end)
@@ -227,8 +255,10 @@ impl PrimitiveCreation {
     ///
     /// `InvalidInput` for no path curves or a path curve that is not a B-spline;
     /// `SM_ERR` when the pieces do not unite into one B-rep, or for a manifold
-    /// result without material; those of the union, the final stitch and the
-    /// region classification. Mandatory evaluations, geometry construction, cap
+    /// result without material; `SM_ERR` for a corner where the path turns back within
+    /// 2 degrees, and for a closed profile meant as a solid (`cap_start` and `cap_end`, or
+    /// a closed path) whose result does not close (not upstream, WR-793); those of the
+    /// union, the final stitch and the region classification. Mandatory evaluations, geometry construction, cap
     /// removals, trims and cleanup also propagate (not upstream, #483); every owned
     /// temporary is deleted on any error. No transaction is imposed on the caller's
     /// B-rep.
@@ -345,7 +375,6 @@ impl PrimitiveCreation {
         let mut new_breps: Vec<BrepId> = Vec::new();
         let mut before_brep: Option<BrepId> = None;
         let mut first_brep: Option<BrepId> = None;
-        let mut cut_line: Option<BSplineCurve> = None;
         let mut cutting: Option<BSplineCurve> = None;
         let mut temp_cutting: Option<BSplineCurve> = None;
         let mut before = [Vec3::UNDEF; 2];
@@ -387,11 +416,20 @@ impl PrimitiveCreation {
             new_breps.push(after_brep);
 
             // The first segment only records its derivatives; later ones cut both
-            // breps at the mitre.
+            // breps at the mitre. Past the first, the path before and its piece are there
+            // (the piece is recorded at the end of each pass).
+            let previous_piece = ii
+                .checked_sub(1)
+                .and_then(|i| paths.get(i))
+                .zip(before_brep);
             if ii == 0 {
                 first_brep = Some(after_brep);
                 first_pv = after;
-            } else if !before[1].is_parallel_to(after[1], 2.0) {
+            } else if before[1].parallel_sense(after[1], 2.0) == (true, Some(true)) {
+                return Err(SolidError::primitive(OP, PrimitiveFailure::PathTurnsBack));
+            } else if let Some((previous, before_id)) =
+                previous_piece.filter(|_| !before[1].is_parallel_to(after[1], 2.0))
+            {
                 let path_normal =
                     path_plane_normal(a.kernel(context_of)?, paths, &mut path_normal)?;
                 // Average the derivatives to determine cutting plane normal.
@@ -408,19 +446,10 @@ impl PrimitiveCreation {
                 // Create temp cutting curve: the line from the corner along the
                 // average derivative, then extended backwards.
                 let cutting_point = after[0] + (average * extend);
-                line_into(after[0], cutting_point, &mut cut_line)?;
-                let line = cut_line
-                    .as_ref()
-                    .ok_or_else(|| SolidError::primitive_missing(OP, "the cutting line"))?;
-                extend_into(line, extend, CurveEnd::Start, &mut temp_cutting)?;
+                let cut_line = line(after[0], cutting_point)?;
+                extend_into(&cut_line, extend, CurveEnd::Start, &mut temp_cutting)?;
 
                 cutting = None;
-                let previous = ii
-                    .checked_sub(1)
-                    .and_then(|i| paths.get(i))
-                    .ok_or_else(|| {
-                        SolidError::primitive_failed(OP, "the corner's previous path")
-                    })?;
                 if path.is_linear(a.kernel(context_of)?, tol, false)?.linear
                     && previous
                         .is_linear(a.kernel(context_of)?, tol, false)?
@@ -430,9 +459,6 @@ impl PrimitiveCreation {
                 } else {
                     // Intersect the temp cutting curve with every intersection curve
                     // and build the real cutting curve through the two best points.
-                    let before_id = before_brep.ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
-                    })?;
                     // `pBrepBefore->BrepIntersect(crContext, pBrepAfter, ..)`: the faces'
                     // caches, UV trim curves and classifications are made on their own
                     // B-reps (`after_brep` is of `context_of`'s context)
@@ -445,9 +471,9 @@ impl PrimitiveCreation {
                     // fork c8f6a31: SER(pBrepBefore->BrepIntersect(..)).
                     let (intersections, _) = intersection_search?;
                     if intersections.len() > 1 {
-                        let temp = temp_cutting.as_ref().ok_or_else(|| {
-                            SolidError::primitive_missing(OP, "the temporary cutting curve")
-                        })?;
+                        let temp = temp_cutting
+                            .as_ref()
+                            .ok_or_else(|| broken_link(NO_TEMP_CUTTING))?;
                         let temp = Curve::from(temp.clone());
                         let mut best = Vec3::UNDEF;
                         let mut best2 = Vec3::UNDEF;
@@ -502,11 +528,7 @@ impl PrimitiveCreation {
                             && best2.is_initialized()
                             && best.distance(best2) > tol * 10.0
                         {
-                            let mut line = None;
-                            line_into(best, best2, &mut line)?;
-                            let mut line = line.ok_or_else(|| {
-                                SolidError::primitive_missing(OP, "the cutting line")
-                            })?;
+                            let mut line = line(best, best2)?;
                             let mut extended_line = None;
                             extend_into(&line, extend, CurveEnd::End, &mut extended_line)?;
                             if let Some(next) = extended_line {
@@ -542,8 +564,8 @@ impl PrimitiveCreation {
                     // when `step * sin(beta / 2) > tol` (the larger of `tol` and the
                     // face's tolerance, as `project_and_trim` takes it). A corner reaches this
                     // point only when its legs are more than 2 degrees from parallel
-                    // (the `is_parallel_to(.., 2.0)` test above, which also skips a
-                    // hairpin within 2 degrees), so `sin(beta / 2) > sin(1 deg) = 0.0175`.
+                    // (the `is_parallel_to(.., 2.0)` test above; a hairpin within 2
+                    // degrees is refused before it), so `sin(beta / 2) > sin(1 deg) = 0.0175`.
                     // Where `100 tol` sets the step, the point therefore lies at least
                     // `1.75 tol` from the line and the trim never fails. Where the reach
                     // cap wins (a profile with `max_dimension < 100 tol / sqrt(2)`, about
@@ -555,9 +577,6 @@ impl PrimitiveCreation {
                     let step = 0.1_f64.max(100.0 * tol).min(extend * 0.5);
                     let reference1 = before[0] + (-before[1] * step);
                     let reference2 = after[0] + (after[1] * step);
-                    let before_id = before_brep.ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
-                    })?;
                     trim_both(
                         a,
                         [before_id, after_brep],
@@ -577,11 +596,13 @@ impl PrimitiveCreation {
             before[1] = before[1].unitize_or_z();
 
             // a closed path trims the end of the last and the beginning of the first
-            if closed && ii == paths.len() - 1 {
-                let after_id = first_brep
-                    .ok_or_else(|| SolidError::primitive_missing(OP, "the first piece's B-rep"))?;
+            // (the first pass recorded the first piece)
+            if let Some(after_id) = first_brep.filter(|_| closed && ii == paths.len() - 1) {
                 after = first_pv;
 
+                if before[1].parallel_sense(after[1], 2.0) == (true, Some(true)) {
+                    return Err(SolidError::primitive(OP, PrimitiveFailure::PathTurnsBack));
+                }
                 // tangent continuous paths need no trim
                 if !before[1].is_parallel_to(after[1], 2.0) {
                     let path_normal =
@@ -597,18 +618,14 @@ impl PrimitiveCreation {
 
                     // the cutting line runs 50 along the average and back
                     let cutting_point = after[0] + (average * 50.0);
-                    line_into(after[0], cutting_point, &mut cut_line)?;
-                    let line = cut_line
+                    let cut_line = line(after[0], cutting_point)?;
+                    extend_into(&cut_line, 50.0, CurveEnd::Start, &mut cutting)?;
+                    let curve = cutting
                         .as_ref()
-                        .ok_or_else(|| SolidError::primitive_missing(OP, "the cutting line"))?;
-                    extend_into(line, 50.0, CurveEnd::Start, &mut cutting)?;
-                    let curve = cutting.as_ref().ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the extended cutting curve")
-                    })?;
+                        .ok_or_else(|| broken_link(NO_EXTENDED_CUTTING))?;
 
-                    let before_id = before_brep.ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
-                    })?;
+                    // the piece before is this pass's own
+                    let before_id = after_brep;
                     let (reference1, reference2) = if before_id == after_id {
                         (
                             before[0] + (before[1] * 10.0),
@@ -658,25 +675,22 @@ impl PrimitiveCreation {
         let mut ordered = Vec::with_capacity(count);
         let mut tree: Vec<i64> = vec![0];
         ordered.extend(new_breps.pop());
-        for ii in 1..count {
+        for index in (1_i64..).take(count.saturating_sub(1)) {
             ordered.extend(new_breps.pop());
-            tree.push(i64::try_from(ii).map_err(|_| {
-                SolidError::primitive_failed(OP, "a piece index does not fit the Boolean tree")
-            })?);
+            tree.push(index);
             // Convert to different form of Boolean numbering (0 - 1)
             tree.push(-1);
         }
         a.boolean_trees(&mut ordered, &tree)?;
-        if ordered.len() != 1 {
+        let [sweep] = *ordered.as_slice() else {
             // Something went wrong
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "the pieces did not combine into one B-rep",
+                PrimitiveFailure::Defect {
+                    why: NOT_ONE_RESULT,
+                },
             ));
-        }
-        let sweep = *ordered
-            .first()
-            .ok_or_else(|| SolidError::primitive_failed(OP, "the combined pieces left no B-rep"))?;
+        };
 
         a.stitch_faces(sweep, tol)?;
         a.remove_topological_edges_and_vertices(sweep)?;
@@ -686,6 +700,20 @@ impl PrimitiveCreation {
         // Solid intent with a manifold boundary gets the nested-solid parity
         // classification.
         let solid_intent = closed || (cap_start && cap_end);
+        // Not upstream (WR-793): a closed profile meant as a solid must close, whatever
+        // left it open. One cause is a corner too sharp for its mitre: at an inner corner
+        // the pieces run `extend` past the corner and the cutting line reaches as far,
+        // while the mitre of a profile `w` wide on either side of the path reaches
+        // `w / sin(beta / 2)`, beta the angle between the legs.
+        if solid_intent
+            && profile_closes(a.kernel(sweep)?, profiles, tol)?
+            && !crate::topology::brep::p2::is_closed_manifold(a.brep(sweep)?)?
+        {
+            return Err(SolidError::primitive(
+                OP,
+                PrimitiveFailure::SweepDoesNotClose,
+            ));
+        }
         let manifold = a.is_manifold_solid(sweep)?;
         if solid_intent && manifold {
             a.with_primitive_brep(sweep, |k, b| {
@@ -703,9 +731,9 @@ impl PrimitiveCreation {
             }
         }
         if manifold && !has_material {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "the sweep encloses no material",
+                PrimitiveFailure::SweepEnclosesNoMaterial,
             ));
         }
         Ok(sweep)
@@ -864,9 +892,9 @@ mod tests {
         let e = sweep(0.6 * tol).unwrap_err();
         assert_eq!(
             e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the point is on the curve"
-            )),
+            Some(&crate::error::topology::TopologyFailure::SideUndecided {
+                why: crate::error::topology::SideOpen::OnCurve
+            }),
             "{e}"
         );
 
@@ -874,6 +902,44 @@ mod tests {
         elbow.refresh_cached_topology();
         assert_eq!(elbow.face_list().len(), 4);
         assert!(crate::topology::brep::p2::is_manifold_solid(&elbow).unwrap());
+    }
+
+    /// A path that turns straight back at its corner is refused by name (WR-793), as a
+    /// configuration the mitre does not take, keeping `SM_ERR`.
+    #[test]
+    fn a_path_that_turns_back_is_refused_by_name() {
+        use crate::primitive::primitive_creation::model::PrimitiveModel;
+
+        let mut k = Kernel::default();
+        let profile = Curve::from(
+            api_curves::create_arc(Point3::new(0.0, 0.0, 0.0), 0.1, 0.0, 360.0).unwrap(),
+        );
+        let paths = [
+            segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            segment([1.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+        ];
+        let e = PrimitiveModel::build_new(&mut k, |_, model| {
+            let id = PrimitiveCreation::create_sweep_along_planar_path(
+                model,
+                PrimitiveModel::MAIN,
+                std::slice::from_ref(&profile),
+                &paths,
+                1e-5,
+                true,
+                true,
+                true,
+            )?;
+            model.take_brep(id)
+        })
+        .map(|(_, b)| b)
+        .unwrap_err();
+        assert_eq!(
+            e.primitive_failure(),
+            Some(&PrimitiveFailure::PathTurnsBack),
+            "{e}"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 }
 

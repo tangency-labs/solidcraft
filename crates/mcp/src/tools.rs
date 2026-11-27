@@ -1,7 +1,8 @@
 //! MCP tool definitions and dispatch. Every tool is a thin wrapper over engine commands
 //! (`engine.execute`) and the inspection / rendering control methods.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::io::vfs;
@@ -67,6 +68,15 @@ pub fn tool_definitions() -> Vec<Value> {
 pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
     vec![
         tool(
+            "version",
+            "SolidCraft version",
+            "The SolidCraft build answering this session: {version, commit, mode}. Connected to an app, reports that app's \
+             version and source commit with mode app; otherwise reports this headless build with mode headless. \
+             The commit is unknown when unavailable. Reads metadata without opening Help or returning diagnostics.",
+            object(json!({}), &[]),
+            Effect::ReadOnly,
+        ),
+        tool(
             "list_commands",
             "List commands",
             "The command catalog: id, label, toolbar tab/panel, shortcut, one-line parameter docs and whether the command is \
@@ -116,15 +126,15 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
-             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
-             (read-only; docs/control-protocol.md). \
+             view.pick {rays: [{origin, dir}…]} answers, for each world ray, the body, face, exact world point, outward normal and depth where it first meets \
+             the design (null where it meets nothing), headless too. Connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the same \
+             under pixels of a screenshot; pixels are unavailable in headless MCP, including with frame: \"model\" (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst, and `warning_count` then gives how many lines there were (it is absent when no two warnings were of one kind: use the length of `warnings`). `timeline.export_script` with a `path` leaves the script out when the reply has `bytes` (the file's size); a reply without `bytes`, from an older app, keeps the script (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -141,13 +151,19 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
-             rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
+             rollback: false). Connected to the desktop, rollback batches refuse known commands that open or switch design tabs. \
+             If the steps must run one at a time, this server must recognize every command in a rollback batch. \
+             The reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
              finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
              file and passed as `path` instead of `commands`. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers \
              you computed beforehand: after the last step the design is measured and compared, so no separate measure call is \
-             needed; a mismatch is flagged as an error naming it, and the design is kept as built.",
+             needed; a mismatch is flagged as an error naming it, and the design is kept as built (unless `dry_run: true`). \
+             With `dry_run: true`, every step runs normally (so measure and inspect steps see the edits, and `expect` checks \
+             the simulated result) and then all document, model and undo/redo history changes are unconditionally rolled back \
+             (`dry_run: true`, `rolled_back: true`); commands with disk or external side effects (such as `save` and `export`), \
+             application layout steps and `rollback: false` are refused before anything runs.",
             object(
                 json!({
                     "commands": {
@@ -159,10 +175,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                      `solidcraft-cli run` takes and `solidcraft-cli script` writes), read by this server within the folders the \
                      agent may use; the steps run as if they had been sent here"),
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
+                    "dry_run": {"type": "boolean", "description": "Run all steps normally (including measure/inspect and `expect`), then unconditionally roll back all document, model and undo/redo history changes so the session is unchanged (`dry_run: true`, `rolled_back: true`). Refuses disk-writing/external steps such as save and export, layout steps and `rollback: false` before anything runs (default false)"},
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst, and `warning_count` then gives how many lines there were (it is absent when no two warnings were of one kind: use the length of `warnings`). `timeline.export_script` with a `path` leaves the script out when the reply has `bytes` (the file's size); a reply without `bytes`, from an older app, keeps the script (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -186,6 +203,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
+                    "within": {"type": "object", "properties": {
+                        "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+                    }, "required": ["min", "max"], "additionalProperties": false, "description": "Filter bodies by their world-coordinate bounding box (mm)"},
+                    "mode": {"type": "string", "enum": ["intersects", "inside"], "description": "With within: include boxes that touch or overlap (intersects, default), or only boxes fully inside"},
                 }),
                 &[],
             ),
@@ -308,6 +330,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
                     "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
                     "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "part_fills_crop": {"type": "boolean", "description": "true: the crop box is the part itself and no background search runs, for a crop that tightly frames it (default false)"},
                     "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
                     "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
                 }),
@@ -319,19 +342,43 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "export",
             "Export",
             "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
-             in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; \
-             transparent bodies are refused). The format \
-             comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
+             in metres with Y up, with each body's colours, metallic, roughness and opacity, render-setup Glass as glTF transmission, and each \
+             occurrence a named node holding its part's bodies) or OpenUSD (.usda text, .usdc or .usd binary, .usdz package: in metres with Z up, \
+             each body, named, as its exact B-rep and its mesh, with its looks' colour, opacity, metallic and roughness, \
+             and the assembly as prims named after the occurrences, a part placed twice written once) or Rhino (.3dm, Rhino 8: \
+             each body where the design shows it, as its exact shape, named and in its colour, when every face is planar and every \
+             edge straight, else as its mesh, without its name or colour; warnings say what the file left out; FreeCAD .FCStd cannot be written yet). \
+             The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
+             format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
+             next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
+             on a textured quad, the image also its visual's albedo map (docs/sdf.md). MJCF (format mjcf, any path such as robot.xml) exports the whole \
+             assembly as a MuJoCo model at its current joint values: a body per component placement with mass and inertia, a \
+             joint per joint value (ball joints as one), loops and motion links as equality constraints, and STL meshes written next to it \
+             (docs/mjcf.md).",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "urdf"]},
-                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "mjcf", "sdf"]},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf or mjcf)"},
+                    "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
+                    "quality": {"type": "string", "enum": ["standard", "fine", "finest"], "description": "stl, stla, obj, 3mf, glb, usd, 3dm, urdf and sdf: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size (default standard)"},
+                    "chord": {"type": "number", "minimum": 0.001, "maximum": 1000, "description": "Instead of quality, for the same formats: one chord tolerance for every body, in mm; coarser gives fewer triangles (a simulator's limit on triangles per mesh file). Refused with quality"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
-                    "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
-                    "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
+                    "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
+                    "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
+                    "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
+                    "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
+                    "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
+                    "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
+                    "purpose": {"type": "string", "enum": ["interchange", "distribution"], "description": "usd: what the file is for: interchange (exact shapes beside meshes, for CAD) or distribution (meshes only with the pictures shown on the model, for viewers and game engines); exact_brep and images override it (default interchange)"},
+                    "exact_brep": {"type": "boolean", "description": "usd: write each body's exact shape beside its mesh (default: true for interchange, false for distribution)"},
+                    "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default false)"},
+                    "name": string("sdf: the model's name (default: the folder's name)"),
+                    "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
+                    "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
                 }),
                 &["path"],
             ),
@@ -353,6 +400,64 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 &[],
             ),
             Effect::ReadOnly,
+        ),
+        tool(
+            "documents",
+            "Design tabs",
+            "The desktop app's open design tabs: their names, which is active, which have unsaved changes, and any prompt waiting on a person. \
+             With no action, lists them. `action` `switch` and `index` turn to that tab; `close` closes the tab at `index` (the active one when \
+             omitted); `new` opens a new empty design. Closing a tab that has unsaved changes is refused, naming the design, unless `force: true` \
+             says to discard them. Programmatic calls never open a \"save changes?\" dialog. External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "action": {"type": "string", "enum": ["new", "switch", "close"], "description": "new, switch or close (default: just list the tabs)"},
+                    "index": {"type": "integer", "description": "Which tab (switch and close; close: the active one when omitted)"},
+                    "force": {"type": "boolean", "description": "close: discard unsaved changes in the closed tab (refused otherwise, naming the design)"},
+                }),
+                &[],
+            ),
+            Effect::Replaces,
+        ),
+        tool(
+            "quit_app",
+            "Quit the app",
+            "Quit the desktop app cleanly (so the next start does not offer crash recovery). `force: true` quits even with unsaved designs; \
+             otherwise a design with unsaved changes is refused and named. Programmatic calls never open a \"save changes?\" dialog. Needs the \
+             desktop app: headless returns an error. External MCP clients only; not available in the in-app Assistant.",
+            object(json!({"force": {"type": "boolean", "description": "Quit even with unsaved designs (refused otherwise, naming them)"}}), &[]),
+            Effect::Replaces,
+        ),
+        tool(
+            "preferences",
+            "Read or set preferences",
+            "The desktop app's display and unit preferences: default_units, theme, language, up_axis, ui_scale, zoom_to_cursor, \
+             smooth_wheel_zoom and show_frame_rate. With no arguments, reads them back. With arguments, sets the named ones and returns \
+             them. Kept between runs. Any other key is refused, so this tool cannot change plugin access, graphics, file limits, signing or \
+             file paths, open dialogs or change the current design. Needs the desktop app: headless returns an error. External MCP clients \
+             only; not available in the in-app Assistant.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+            }),
+            Effect::Edits,
+        ),
+        tool(
+            "agent_cursor",
+            "Show the agent's cursor",
+            "The desktop app's agent cursor, where commands the agent runs visibly glide and land. `show` turns it on or off; `speed` is a \
+             multiplier from 1 to 5 (5 is fastest) or \"instant\" (no animation: each command runs at once and the pointer jumps to where it \
+             acted); `follow_camera` keeps the cursor with the camera as it moves. All are optional; with none, reads the current settings. \
+             External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "show": {"type": "boolean", "description": "Show (true) or hide (false) the cursor"},
+                    "speed": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "1-5 (times the normal speed) or \"instant\" (no animation)"},
+                    "follow_camera": {"type": "boolean", "description": "Keep the cursor with the camera as it moves"},
+                }),
+                &[],
+            ),
+            Effect::Edits,
         ),
         tool(
             "running",
@@ -392,8 +497,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "new_design",
             "New design",
-            "Start a new, empty design (unsaved changes to the current one are discarded).",
-            object(json!({"name": string("Design name (default Untitled)")}), &[]),
+            "Start a new, empty design (unsaved changes to the current one are discarded). With `new_tab: true` in the desktop app it opens in a \
+             tab of its own and the current design stays open; every later call acts on the new design, and `document_id` in the reply \
+             names it (`document.list` and `document.activate` list and switch between the open designs, through `execute`).",
+            object(
+                json!({
+                    "name": string("Design name (default Untitled)"),
+                    "new_tab": {"type": "boolean", "description": "Open the new design in a tab of its own, after the active one, and show it, instead of replacing the active design. Desktop app only. Default: false"},
+                }),
+                &[],
+            ),
             Effect::Replaces,
         ),
         tool(
@@ -402,16 +515,27 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
-             materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
+             materials appearances) or a KiCad board (.kicad_pcb, or the project's .kicad_pro: a new design with the board as a solid, its copper, \
+             silkscreen and component models in a component named after it); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
-             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
+             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
+             An OpenUSD file (.usd/.usda/.usdc/.usdz) opens as meshes, turned to Z up when the stage says Y is up; `geometry: \"exact\"` brings its exact B-rep \
+             where it has one (as SolidCraft's own OpenUSD exports carry) as B-rep bodies of an Import feature instead. \
+             A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
+             titled \"Open .ext files with …\" list them). \
+             A KiCad board takes the options `thickness`, `components`, `copper`, `silkscreen`, `color` and `representation`, the same as \
+             `execute` with `doc.open` takes; a component model that could not be read is named in the reply's warnings, with why. A model is \
+             read from the board's folder or from KiCad's own 3D model library on this machine; a model in another folder outside the agent's \
+             folders is refused with the folder named, and the user allows it with `--allow-path`.",
             object(
-                json!({
-                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
-                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
+                open_properties(json!({
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf, OpenUSD (.usd, .usda, .usdc, .usdz) or KiCad board (.kicad_pcb, or the project's .kicad_pro) file"),
+                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
+                    "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
+                    "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
-                }),
+                })),
                 &["path"],
             ),
             Effect::Files,
@@ -424,7 +548,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
              to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
             object(
-                json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
+                json!({
+                    "path": string("Path to save to, e.g. part.sc (default: the current file)"),
+                    "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"},
+                    "overwrite": {"type": "boolean", "description": "Replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused (default false)"}
+                }),
                 &[],
             ),
             Effect::Files,
@@ -433,12 +561,13 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking) from the copy built into SolidCraft. `file` defaults to reference.md; \
-             each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
+             solidcraft-editing, solidcraft-checking, solidcraft-reporting, solidcraft-sheetmetal) from the copy built into SolidCraft. \
+             `file` defaults to reference.md, or SKILL.md for skills without reference.md; each skill also has SKILL.md. \
+             Unknown skills or files are refused with the available ones.",
             object(
                 json!({
                     "skill": string("Skill name, such as solidcraft-modeling"),
-                    "file": {"type": "string", "description": "Document of that skill", "default": "reference.md"},
+                    "file": {"type": "string", "description": "Document of that skill (defaults to reference.md, or SKILL.md when the skill has none)", "default": "reference.md"},
                 }),
                 &["skill"],
             ),
@@ -458,14 +587,16 @@ fn inspect_design_tool(opts: Options) -> Value {
          rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
          counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
          status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
-         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
+         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one; with \
+         `joints: \"summary\"` the rigid joints holding an imported assembly's contents are only counted, per component, in \
+         `joint_summary`), \
          the active sketch, selection and undo depth. On a large design keep the reply small with `timeline: \"summary\"` \
          (each feature as id, name, type, and error or warning only when it has one) or false, and `bodies: \"names\"` or false.",
             object(
                 json!({
                     "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
-                    "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                    "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                     "timeline": timeline_arg(),
                     "bodies": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": BODIES_ARG},
                 }),
@@ -483,7 +614,8 @@ fn inspect_design_tool(opts: Options) -> Value {
          plane, counts of points, curves, constraints and profiles, degrees of freedom, solve status); their full contents \
          (curves with ids and coordinates, points, constraints, profiles) only for the sketches named in `sketches`, or \
          all with `sketches: true` (large: a 720-point sketch is some 200 KB). Assembly joints: what each origin is \
-         attached to (`execute` `joint.inspect {joint}` gives one). On a large design keep the reply small with \
+         attached to (`execute` `joint.inspect {joint}` gives one; the rigid joints holding an imported assembly's \
+         contents are only counted, per component, in `joint_summary`). On a large design keep the reply small with \
          `timeline: \"summary\"` (each feature as id, name, type, and error or warning only when it has one) or false, and \
          `bodies: \"names\"` or false. Arguments: measure, sketches, bodies, timeline, joints.",
         object(
@@ -501,7 +633,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "boolean"}, {"type": "string"}],
                     "description": "Only these bodies, by name (default: all); or \"names\" (only the body names, nothing measured) or false (no bodies)",
                 },
-                "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                 "timeline": timeline_arg(),
             }),
             &[],
@@ -550,24 +682,66 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
             .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
     {
         r["structuredContent"] = json!({"panel_error":reason});
+    } else if is_error && let Some(refusal) = v.as_str().and_then(crate::plugin_tools::structured_error) {
+        // A plugin tool's missing grant or a read entry's refusal, as data.
+        r["structuredContent"] = json!({"plugin_error": refusal});
     }
     r
 }
 
 /// Run a tool, as the server does by default. Failures are tool results with `isError: true`
 /// (the model sees the message); nothing here panics on hostile arguments.
+/// The preferences an external AI client may read and set through the `preferences` tool (#3704): display and unit
+/// settings only. Everything else `ui.prefs` knows (plugin grants, graphics, file limits, the signing key, file paths)
+/// stays with the person.
+const AGENT_PREFERENCES: &[&str] =
+    &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
+
+/// Per-call MCP execution context: an optional progress reporter (`_meta.progressToken`) and an
+/// out-of-band cancellation flag (`notifications/cancelled`).
+#[derive(Clone, Default)]
+pub struct CallContext {
+    pub progress: Option<solidcraft_mcp_server::ProgressReporter>,
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl CallContext {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+
+    pub fn report_progress(&self, progress: f64, total: Option<f64>, message: Option<&str>) {
+        if let Some(reporter) = &self.progress {
+            reporter.report(progress, total, message);
+        }
+    }
+}
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
 
 /// [`call_tool`] with these [`Options`].
 pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Options) -> Value {
+    call_tool_with_context(b, name, args, opts, &CallContext::default())
+}
+
+/// [`call_tool_with`] carrying an MCP [`CallContext`] (progress reporting and out-of-band
+/// cancellation).
+pub fn call_tool_with_context(b: &mut dyn Backend, name: &str, args: &Value, opts: Options, ctx: &CallContext) -> Value {
+    if ctx.is_cancelled() {
+        return text_result(&Value::String(format!("cancelled: `{name}` was cancelled by client")), true, opts);
+    }
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
+        _ if crate::plugin_tools::is_plugin_tool(name) => match args.as_object() {
+            Some(args) => crate::plugin_tools::call(b, name, args),
+            None => Err(format!("`{name}`: arguments must be an object")),
+        },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
-        "batch" => return batch(b, a, opts),
+        "batch" => return batch(b, a, opts, ctx),
         "check_parameters" => return check_parameters(b, a, opts),
         "execute" => return execute(b, a, opts),
         "inspect_design" if opts.compact => inspect_design_compact(b, a),
@@ -759,20 +933,22 @@ fn xyz_text(c: [f64; 3]) -> String {
     format!("[{}, {}, {}]", num(c[0]), num(c[1]), num(c[2]))
 }
 
-/// A reply that went through, with its `expectation` when `expect` was given. A mismatch is a
-/// tool error that names it first; the design stays as built (the agent decides what to do).
-fn with_expectation(b: &mut dyn Backend, mut reply: Value, expect: Option<Expect>, opts: Options) -> Value {
-    let Some(expect) = expect else { return text_result(&reply, false, opts) };
-    let expectation = match expect.check(b) {
+fn evaluate_expect(b: &mut dyn Backend, expect: &Expect) -> Value {
+    match expect.check(b) {
         Ok(e) => e,
         Err(e) => json!({"ok": false, "expected": expect.expected(), "mismatch": [format!("the design could not be measured: {e}")]}),
-    };
+    }
+}
+
+fn attach_expectation(mut reply: Value, expectation: Value, dry_run_rolled_back: bool, opts: Options) -> Value {
     let mismatch: Vec<&str> = expectation["mismatch"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let note = (expectation["ok"] != true).then(|| {
-        format!(
-            "expectation not met: {}. The design is kept as built: inspect it, then fix it (timeline.edit, undo) or carry on.",
-            mismatch.join("; ")
-        )
+        let tail = if dry_run_rolled_back {
+            "The dry run was rolled back, so the design is unchanged."
+        } else {
+            "The design is kept as built: inspect it, then fix it (timeline.edit, undo) or carry on."
+        };
+        format!("expectation not met: {}. {tail}", mismatch.join("; "))
     });
     if !reply.is_object() {
         reply = json!({"result": reply});
@@ -784,6 +960,14 @@ fn with_expectation(b: &mut dyn Backend, mut reply: Value, expect: Option<Expect
         content.insert(0, json!({"type": "text", "text": note}));
     }
     r
+}
+
+/// A reply that went through, with its `expectation` when `expect` was given. A mismatch is a
+/// tool error that names it first; the design stays as built (the agent decides what to do).
+fn with_expectation(b: &mut dyn Backend, reply: Value, expect: Option<Expect>, opts: Options) -> Value {
+    let Some(expect) = expect else { return text_result(&reply, false, opts) };
+    let expectation = evaluate_expect(b, &expect);
+    attach_expectation(reply, expectation, false, opts)
 }
 
 fn exec(b: &mut dyn Backend, command: &str, params: Value) -> Result<Value, String> {
@@ -818,8 +1002,10 @@ fn command_error(command: &str, error: String) -> String {
             let candidate = normalize(spec.id);
             let distance = command_distance(&normalized, &candidate);
             let shared = spec.id.split('.').filter(|word| words.iter().any(|w| w.eq_ignore_ascii_case(word))).count();
-            (distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
+            let alternative = solidcraft_engine::cmd::command_verb_alternative(id, spec.id);
+            (alternative || distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
                 normalized != candidate,
+                !alternative,
                 distance,
                 std::cmp::Reverse(shared),
                 spec.id,
@@ -827,7 +1013,7 @@ fn command_error(command: &str, error: String) -> String {
         })
         .collect();
     closest.sort_unstable();
-    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, id)| format!("`{id}`")).collect();
+    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, _, id)| format!("`{id}`")).collect();
     let mut message = format!("unknown command `{command}`");
     if !hints.is_empty() {
         message.push_str(&format!("; closest: {}", hints.join(", ")));
@@ -876,6 +1062,24 @@ fn command_distance(a: &str, b: &str) -> usize {
     row.last().copied().unwrap_or(a.len())
 }
 
+/// The properties of the `open` tool: `own`, and the KiCad board options, which are `doc.open`'s
+/// own (the engine's `kicad_open_properties`, not a copy).
+fn open_properties(mut own: Value) -> Value {
+    if let Some(map) = own.as_object_mut() {
+        map.extend(solidcraft_engine::schema::file::kicad_open_properties());
+    }
+    own
+}
+
+/// The arguments of `open` that `doc.open` takes.
+fn open_params(a: &Map<String, Value>) -> Value {
+    let keys: Vec<&str> = ["path", "new_tab", "up", "names", "geometry"]
+        .into_iter()
+        .chain(solidcraft_engine::schema::file::KICAD_OPEN_OPTIONS.iter().copied())
+        .collect();
+    pick(a, &keys)
+}
+
 fn pick(a: &Map<String, Value>, keys: &[&str]) -> Value {
     Value::Object(keys.iter().filter_map(|k| a.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect())
 }
@@ -884,9 +1088,17 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// Preserve present region keys, even null, for validation by the engine.
+fn measure_region_params(a: &Map<String, Value>) -> Value {
+    Value::Object(["within", "mode"].iter().filter_map(|k| a.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+}
+
 /// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
 fn measure_params(a: &Map<String, Value>) -> Value {
-    let mut p = pick(a, &["names_only"]);
+    let mut p = measure_region_params(a);
+    if let Some(v) = a.get("names_only").filter(|v| !v.is_null()) {
+        p["names_only"] = v.clone();
+    }
     if let Some(body) = str_arg(a, "body") {
         p["bodies"] = json!([body]);
     }
@@ -909,6 +1121,17 @@ fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
 
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
+        "version" => {
+            let info = b.call("ui.help", json!({}))?;
+            let version = info.get("version").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or("SolidCraft did not report a version")?;
+            let commit = match info.get("commit") {
+                None | Some(Value::Null) => "unknown",
+                Some(Value::String(s)) if !s.is_empty() => s,
+                _ => return Err("SolidCraft reported an invalid source commit".into()),
+            };
+            // Auto may have discovered the app while making this call.
+            Ok(json!({"version": version, "commit": commit, "mode": if b.has_ui() { "app" } else { "headless" }}))
+        }
         "list_commands" => {
             let query = CommandQuery::parse(a)?;
             let all = b.call("engine.commands", json!({}))?;
@@ -937,19 +1160,15 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     .collect();
                 d["sketches"] = Value::Array(full);
             }
-            // Joints: what each is attached to (left out when there are none, or the app is older).
-            if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-                && let Ok(j) = exec(b, "joint.inspect", json!({}))
-                && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-            {
-                d["joints"] = j["joints"].clone();
-            }
+            design_joints(b, a, &mut d);
             Ok(d)
         }
         "pending" => pending(b),
         "measure" => {
             if let Some(items) = a.get("items") {
-                return exec(b, "inspect.measure", json!({ "items": items }));
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                return exec(b, "inspect.measure", p);
             }
             let m = exec(b, "inspect.measure", measure_params(a))?;
             Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
@@ -968,7 +1187,35 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             p["expression"] = parameter_value(a)?;
             exec(b, "parameters.change", p)
         }
-        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
+        "export" => exec(
+            b,
+            "file.export",
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "quality",
+                    "chord",
+                    "mesh_prefix",
+                    "place_meshes",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "mimic",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
+        ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
             None => exec(b, "diagnostics.crash_reports", pick(a, &["limit"])),
@@ -976,11 +1223,70 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "skill_reference" => crate::skill_reference::read(a),
         "running" => b.call("control.running", json!({})),
         "cancel" => b.call("control.cancel", json!({})),
+        "documents" => {
+            if !b.has_ui() {
+                return Err("documents: needs the desktop app (headless has no design tabs)".into());
+            }
+            let mut params = json!({});
+            if let Some(action) = str_arg(a, "action") {
+                params["action"] = json!(action);
+            }
+            if let Some(index) = a.get("index") {
+                params["index"] = index.clone();
+            }
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            if str_arg(a, "action") == Some("close") {
+                params["ask"] = json!(false);
+            }
+            b.call("ui.documents", params)
+        }
+        "quit_app" => {
+            if !b.has_ui() {
+                return Err("quit_app: needs the desktop app (headless has no app window to quit)".into());
+            }
+            let mut params = json!({});
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            params["ask"] = json!(false);
+            b.call("app.quit", params)
+        }
+        "preferences" => {
+            if !b.has_ui() {
+                return Err("preferences: needs the desktop app (headless has no preferences window)".into());
+            }
+            if let Some(key) = a.keys().find(|key| !AGENT_PREFERENCES.contains(&key.as_str())) {
+                return Err(format!(
+                    "preferences: `{key}` cannot be read or set from an AI client; the preferences this tool can set are {}",
+                    AGENT_PREFERENCES.join(", ")
+                ));
+            }
+            let mut reply = b.call("ui.prefs", Value::Object(a.clone()))?;
+            // Read back only the same settings: the full reply also names plugin grants, file paths and the signing key.
+            if let Some(all) = reply.as_object_mut() {
+                all.retain(|key, _| AGENT_PREFERENCES.contains(&key.as_str()));
+            }
+            Ok(reply)
+        }
+        "agent_cursor" => {
+            if !b.has_ui() {
+                return Err("agent_cursor: needs the desktop app (headless has no window to show a cursor in)".into());
+            }
+            let mut params = json!({});
+            for key in ["show", "speed", "follow_camera"] {
+                if let Some(value) = a.get(key) {
+                    params[key] = value.clone();
+                }
+            }
+            b.call("ui.agent_cursor", params)
+        }
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
-        "new_design" => exec(b, "file.new", pick(a, &["name"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
-        "save" => exec(b, "file.save", pick(a, &["path", "format"])),
+        "new_design" => exec(b, "file.new", pick(a, &["name", "new_tab"])),
+        "open" => exec(b, "doc.open", open_params(a)),
+        "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
 }
@@ -1092,6 +1398,9 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
         return Ok(json!({"pending": null, "note": "nothing is running"}));
     }
     let name = what.as_str().unwrap_or("the request").to_string();
+    if p.get("cancelled").and_then(Value::as_bool) == Some(true) {
+        return Err(format!("cancelled: {name} was cancelled by client"));
+    }
     if p.get("lost").and_then(Value::as_bool) == Some(true) {
         return Err(format!(
             "the connection to the app was lost while {name} was running, and its result with it: inspect the design (inspect_design) \
@@ -1163,27 +1472,55 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
         }
         "measure" => match a.get("items") {
-            Some(items) => mapped("inspect.measure", json!({"items": items})),
+            Some(items) => {
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                mapped("inspect.measure", p)
+            }
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
-        "compare_picture" => {
-            // A batch step gets the numbers; the overlay PNG would be a base64 blob in text.
-            let mut p = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
-            if let Some(obj) = p.as_object_mut() {
-                obj.entry("overlay".to_string()).or_insert(json!(false));
-            }
-            mapped("inspect.compare_picture", p)
-        }
+        // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
+        "compare_picture" => mapped(
+            "inspect.compare_picture",
+            pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]),
+        ),
         "inspect_design" => {
             let keys: &[&str] = if a.get("bodies").is_some_and(Value::is_array) { &["timeline"] } else { &["timeline", "bodies"] };
             mapped("document.inspect", inspect_params(a, a.get("measure").and_then(Value::as_bool).unwrap_or(true), keys))
         }
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
-        "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
-        "save" => mapped("file.save", pick(a, &["path", "format"])),
-        "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
-        "new_design" => mapped("file.new", pick(a, &["name"])),
+        "export" => mapped(
+            "file.export",
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "quality",
+                    "chord",
+                    "mesh_prefix",
+                    "place_meshes",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "mimic",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
+        ),
+        "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
+        "open" => mapped("doc.open", open_params(a)),
+        "new_design" => mapped("file.new", pick(a, &["name", "new_tab"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
             None => mapped("diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1196,6 +1533,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
         "cancel" => Err("`cancel` is a tool, not a command: call it on its own".into()),
+        "documents" => Err("`documents` is a tool, not a command: call it on its own".into()),
+        "quit_app" => Err("`quit_app` is a tool, not a command: call it on its own".into()),
+        "preferences" => Err("`preferences` is a tool, not a command: call it on its own".into()),
+        "agent_cursor" => Err("`agent_cursor` is a tool, not a command: call it on its own".into()),
+        "version" => Err("`version` is a tool, not a command: call it on its own".into()),
         // An engine command: the step goes as it is.
         _ => Ok((String::new(), Value::Null, None)),
     }
@@ -1203,6 +1545,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
 
 /// The tool names a `batch` step may not be (or is mapped from): `execute` must not wrap them.
 const TOOL_STEPS: &[&str] = &[
+    "agent_cursor",
     "batch",
     "body_topology",
     "cancel",
@@ -1210,6 +1553,7 @@ const TOOL_STEPS: &[&str] = &[
     "compare_picture",
     "crash_reports",
     "describe_command",
+    "documents",
     "execute",
     "export",
     "inspect_design",
@@ -1218,6 +1562,8 @@ const TOOL_STEPS: &[&str] = &[
     "new_design",
     "open",
     "pending",
+    "preferences",
+    "quit_app",
     "redo",
     "running",
     "save",
@@ -1225,6 +1571,7 @@ const TOOL_STEPS: &[&str] = &[
     "set_parameter",
     "skill_reference",
     "undo",
+    "version",
 ];
 
 /// Names for an error message: at most 40 of them.
@@ -1337,14 +1684,48 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
             .collect();
         d["sketches"] = Value::Array(out);
     }
-    // Joints: what each is attached to (left out when there are none, or the app is older).
-    if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-        && let Ok(j) = exec(b, "joint.inspect", json!({}))
-        && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-    {
+    design_joints(b, a, &mut d);
+    Ok(d)
+}
+
+/// `inspect_design`'s `joints` argument.
+const JOINTS_ARG: &str = "Joint definitions as joint.inspect gives them, when the design has joints: true (every joint, the default), \
+     \"summary\" (every joint but the rigid joints holding an imported assembly's contents, which `joint_summary` counts per \
+     component) or false (none)";
+
+/// `inspect_design`'s joints: what each is attached to. With `joints: "summary"`, not the rigid
+/// joints holding a component's contents together (an imported assembly has one per placement,
+/// hundreds of them), which `joint_summary` counts per component instead, with every joint by
+/// type; an app from before the filters gives every joint. Left out when there are none or
+/// `joints: false`.
+fn design_joints(b: &mut dyn Backend, a: &Map<String, Value>, d: &mut Value) {
+    let summary = match a.get("joints") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(false)) => return,
+        Some(Value::Bool(true)) => false,
+        Some(Value::String(v)) if v.trim().eq_ignore_ascii_case("summary") => true,
+        // Anything else: as the default, every joint.
+        Some(_) => false,
+    };
+    let filtered = if summary { exec(b, "joint.inspect", json!({"exclude_rigid_groups": true})).ok() } else { None };
+    let j = match filtered.map_or_else(|| exec(b, "joint.inspect", json!({})), Ok) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if j["joints"].as_array().is_some_and(|v| !v.is_empty()) {
         d["joints"] = j["joints"].clone();
     }
-    Ok(d)
+    // Something left out: the summary says what and where. `kinds: []` keeps no rows. Without
+    // one, what was left out and why there is no summary, so the reply never hides joints.
+    if let Some(omitted) = j.get("omitted") {
+        d["joint_summary"] = match exec(b, "joint.list", json!({"summary": true, "quiet": true, "kinds": []})) {
+            Ok(list) => match list.get("summary") {
+                Some(summary) => summary.clone(),
+                None => json!({"omitted": omitted, "error": "joint.list gave no summary"}),
+            },
+            Err(e) => json!({"omitted": omitted, "error": e}),
+        };
+    }
 }
 
 /// The steps of the script file `batch` was given as `path` (`None`: it was given `commands`).
@@ -1443,18 +1824,175 @@ impl Undo {
     }
 }
 
+struct BatchOutcome {
+    reply: Value,
+    is_error: bool,
+    /// Present when `dry_run: true` already evaluated `expect` on the simulated design before
+    /// rolling back.
+    expectation: Option<Value>,
+}
+
+impl BatchOutcome {
+    fn ok(reply: Value) -> Self {
+        Self { reply, is_error: false, expectation: None }
+    }
+
+    fn err(reply: Value) -> Self {
+        Self { reply, is_error: true, expectation: None }
+    }
+}
+
+/// Commands that write to disk, trigger external actions, or mutate state outside a document
+/// checkpoint, and therefore cannot run inside a `batch` with `dry_run: true`.
+fn dry_run_refusal(id: &str, params: Option<&Value>) -> Option<String> {
+    let canonical = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+    if canonical.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout")) {
+        return Some(format!("`{canonical}` changes application layout outside document checkpoints and cannot run in a `dry_run` batch"));
+    }
+    if canonical == "edit.restore_checkpoint" {
+        return Some("`edit.restore_checkpoint` cannot run inside a `dry_run` batch".into());
+    }
+    let has_param = |k: &str| params.and_then(|p| p.get(k)).is_some_and(|v| !v.is_null());
+    let always_side_effect = matches!(
+        canonical,
+        "file.save"
+            | "file.save_as"
+            | "file.save_mesh"
+            | "file.stl_to_step"
+            | "file.export"
+            | "file.export_step"
+            | "file.export_stl"
+            | "file.export_3mf"
+            | "file.export_obj"
+            | "file.export_urdf"
+            | "file.export_urdf_options"
+            | "file.export_sdf"
+            | "file.export_mjcf"
+            | "file.export_view_dxf"
+            | "file.copy"
+            | "file.move"
+            | "file.trash"
+            | "file.import_cache_clear"
+            | "file.send_to_slicer"
+            | "file.open_in_easyprint"
+            | "component.extract"
+            | "doc.recovery_discard"
+            | "drawing.export"
+            | "drawing.print"
+            | "drawing.template.save"
+            | "frame.export_cope_dxf"
+            | "library.export"
+            | "motion.export"
+            | "motion.export_animation"
+            | "render.export"
+            | "render.start"
+            | "render.batch"
+            | "plugin.run"
+            | "plugin.install"
+            | "plugin.remove"
+            | "plugin.revoke"
+            | "settings.profile.save"
+            | "settings.profile.apply"
+            | "settings.profile.rename"
+            | "settings.profile.delete"
+            | "settings.profile.export"
+            | "settings.profile.import"
+            | "tab.layout.save"
+            | "tab.layout.remove"
+            | "tab.layout.rename"
+            | "diagnostics.crash_reports.clear"
+            | "diagnostics.report_issue"
+            | "diagnostics.crash_test"
+    );
+    let writes_file = always_side_effect
+        || solidcraft_engine::control_pending::command_effect(canonical, params.unwrap_or(&Value::Null)) == solidcraft_control::Effect::WritesFile
+        || (canonical == "assembly.bom" && has_param("path"))
+        || (canonical == "inspect.compare_picture" && has_param("overlay"))
+        || (canonical == "doc.recover" && params.and_then(|p| p.get("discard")).and_then(Value::as_bool) == Some(true));
+    if writes_file {
+        return Some(format!("`{canonical}` has disk or external side effects and cannot run in a `dry_run` batch"));
+    }
+    None
+}
+
+fn forget_checkpoint(b: &mut dyn Backend, checkpoint_id: Option<u64>) {
+    if let Some(id) = checkpoint_id {
+        let _ = exec(b, "edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
+    }
+}
+
+/// Unconditionally restore `checkpoint_id` at the end of a `dry_run: true` batch.
+/// When all steps succeeded and `expect` was given, `expect` is evaluated on the simulated
+/// design before restoring the checkpoint.
+fn finish_dry_run(b: &mut dyn Backend, checkpoint_id: u64, mut reply: Value, step_failed: bool, expect: Option<&Expect>) -> BatchOutcome {
+    let expectation = expect.filter(|_| !step_failed).map(|e| evaluate_expect(b, e));
+    match exec(b, "edit.restore_checkpoint", json!({"checkpoint": checkpoint_id})) {
+        Ok(_) => {
+            if let Some(o) = reply.as_object_mut() {
+                o.insert("dry_run".into(), json!(true));
+                o.insert("rolled_back".into(), json!(true));
+                if step_failed {
+                    o.insert("applied".into(), json!([]));
+                    if let Some(failed) = o.get_mut("failed").and_then(Value::as_object_mut) {
+                        failed.remove("still_running");
+                    }
+                    if o.get("undone").and_then(Value::as_u64).unwrap_or(0) == 0
+                        && let Some(completed) = o.get("completed").and_then(Value::as_u64)
+                    {
+                        o.insert("undone".into(), json!(completed));
+                    }
+                }
+            }
+            BatchOutcome { reply, is_error: step_failed, expectation }
+        }
+        Err(restore_error) => {
+            if !reply.is_object() {
+                reply = json!({"result": reply});
+            }
+            if let Some(exp) = expectation {
+                reply["expectation"] = exp;
+            }
+            reply["dry_run"] = json!(true);
+            reply["rolled_back"] = json!(false);
+            reply["restore_error"] = json!(restore_error);
+            reply["note"] = json!(
+                "THE DESIGN MAY STILL HOLD THE SIMULATED CHANGES: the dry-run checkpoint could not be restored. Inspect the design and undo before saving."
+            );
+            BatchOutcome { reply, is_error: true, expectation: None }
+        }
+    }
+}
+
 /// `batch`: run steps in order, stop at the first failure and (by default) go back to the
-/// design as it was before the batch. A batch that went through is then checked against its
-/// `expect`.
-fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
+/// design as it was before the batch. With `dry_run: true`, all steps run and then the design
+/// and undo/redo history are unconditionally rolled back. A batch that went through is checked
+/// against its `expect` (before rollback in `dry_run: true` mode).
+fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options, ctx: &CallContext) -> Value {
     let expect = match Expect::parse(a) {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
     };
-    match batch_run(b, a) {
-        (reply, true) => text_result(&reply, true, opts),
-        (reply, false) => with_expectation(b, reply, expect, opts),
+    let dry_run = match a.get("dry_run").filter(|v| !v.is_null()) {
+        None => false,
+        Some(v) => match v.as_bool() {
+            Some(flag) => flag,
+            None => return text_result(&Value::String("batch: `dry_run` must be true or false".into()), true, opts),
+        },
+    };
+    // Discovery can change the backend while the headless session is still empty. Use one
+    // session for preflight, every step, and the final expectation or checkpoint restore.
+    let b = if let Some(active) = b.batch_backend() { active } else { b };
+    let outcome = batch_run(b, a, dry_run, expect.as_ref(), ctx);
+    if outcome.is_error {
+        return text_result(&outcome.reply, true, opts);
     }
+    if dry_run {
+        return match outcome.expectation {
+            Some(expectation) => attach_expectation(outcome.reply, expectation, true, opts),
+            None => text_result(&outcome.reply, false, opts),
+        };
+    }
+    with_expectation(b, outcome.reply, expect, opts)
 }
 
 fn layout_step(step: &Value) -> bool {
@@ -1467,7 +2005,7 @@ fn layout_step(step: &Value) -> bool {
     command.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout"))
 }
 
-fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> (Value, bool) {
+fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> BatchOutcome {
     use solidcraft_engine::panels::{commands, error};
     let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
     reply["ok"] = json!(false);
@@ -1478,25 +2016,41 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
     reply["not_run_count"] = json!(count);
     reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
-    (reply, true)
+    BatchOutcome::err(reply)
+}
+
+fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool, dry_run: bool) -> BatchOutcome {
+    let mut reply = refusal.reply(count, rollback);
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    if dry_run {
+        reply["dry_run"] = json!(true);
+    }
+    if let Some(command) = refusal.command.as_deref() {
+        reply["failed"]["error"] = Value::String(command_error(command, refusal.error));
+    }
+    BatchOutcome::err(reply)
 }
 
 /// The batch itself: its reply and whether it failed.
-fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
+fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect: Option<&Expect>, ctx: &CallContext) -> BatchOutcome {
     let from_file = match script_file(a) {
         Ok(f) => f,
-        Err(e) => return (json!(e), true),
+        Err(e) => return BatchOutcome::err(json!(e)),
     };
     let Some(steps) = from_file.as_ref().map_or_else(|| a.get("commands").and_then(Value::as_array), Some) else {
-        return (json!("`commands` must be an array of {command, params}"), true);
+        return BatchOutcome::err(json!("`commands` must be an array of {command, params}"));
     };
+    if dry_run && a.get("rollback").and_then(Value::as_bool) == Some(false) {
+        return BatchOutcome::err(json!("batch: `dry_run: true` always rolls back the design and cannot be combined with `rollback: false`"));
+    }
+    let rollback = dry_run || a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     if steps.len() > MAX_BATCH {
-        if a.get("rollback").and_then(Value::as_bool).unwrap_or(true) && steps.iter().any(layout_step) {
+        if rollback && steps.iter().any(layout_step) {
             return atomic_layout_refusal(steps.len(), solidcraft_engine::panels::Rule::CollectionLimit, "atomic layout batch step count cap");
         }
-        return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
+        return BatchOutcome::err(json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())));
     }
-    let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(true);
     let profile = a.get("profile").and_then(Value::as_bool).unwrap_or(false);
     let timed = profile || a.get("timings").and_then(Value::as_bool).unwrap_or(false);
@@ -1505,13 +2059,28 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
     let mut narrows: Vec<(usize, Narrow)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        // The window goes to another design's tab for these, however the step names them: the
-        // batch's later steps and its rollback would land in the wrong design.
+        // Inspect the canonical command after mapping tool names and execute wrappers. A
+        // desktop checkpoint is local to its tab, so it cannot roll back across a tab change.
         let step_result = batch_step(step).and_then(|(command, params, narrow)| {
-            let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
+            let (id, command_params) = if command.is_empty() {
+                (step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or(""), step.get("params"))
+            } else {
+                (command.as_str(), Some(&params))
+            };
+            if dry_run && let Some(reason) = dry_run_refusal(id, command_params) {
+                return Err(reason);
+            }
             match solidcraft_engine::find_command(id).map(|spec| spec.id) {
                 Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
                     Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                Some(c)
+                    if rollback
+                        && b.has_ui()
+                        && (matches!(c, "view.next_tab" | "view.previous_tab" | "document.activate" | "doc.open" | "file.import")
+                            || (c == "file.new" && command_params.and_then(|p| p.get("new_tab")).and_then(Value::as_bool) == Some(true))) =>
+                {
+                    Err(format!("`{c}` can change the active design tab: run it separately or use `rollback: false`"))
                 }
                 _ => Ok((command, params, narrow)),
             }
@@ -1529,7 +2098,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) => {
                 let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
                 // Nothing ran: the design is where the batch started, as a rollback leaves it (#10749).
-                let reply = json!({
+                let mut reply = json!({
                     "ok": false,
                     "completed": 0,
                     "failed": {"index": i, "command": command, "error": e},
@@ -1540,7 +2109,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                     "results": [],
                     "note": "nothing was run",
                 });
-                return (reply, true);
+                if dry_run {
+                    reply["dry_run"] = json!(true);
+                }
+                return BatchOutcome::err(reply);
             }
         }
     }
@@ -1552,15 +2124,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len(), rollback);
-        if let Some(o) = reply.as_object_mut() {
-            o.insert("ok".into(), Value::Bool(false));
-            o.insert("applied".into(), json!([]));
-        }
-        if let (Some(command), Some(failed)) = (refusal.command.as_deref(), reply.get_mut("failed").and_then(Value::as_object_mut)) {
-            failed.insert("error".into(), Value::String(command_error(command, refusal.error.clone())));
-        }
-        return (reply, true);
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
     }
     // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
     // a `measure {summary: true}` step's reply summarised.
@@ -1581,6 +2145,40 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         o.insert("profile".into(), Value::Bool(profile));
     }
     let fits_transport = params.to_string().len().saturating_add(64 * 1024) <= solidcraft_engine::MAX_LINE;
+    // Oversized bridged dry runs go step by step: refuse unrecognized commands before taking a checkpoint.
+    if dry_run
+        && !fits_transport
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
+    }
+    let dry_checkpoint = if dry_run {
+        match exec(b, "edit.checkpoint", json!({})) {
+            Ok(v) => match v["checkpoint"].as_u64() {
+                Some(id) => Some(id),
+                None => {
+                    return BatchOutcome::err(json!(
+                        "batch: `dry_run: true` requires edit.checkpoint to roll back the design, but the backend returned no checkpoint id"
+                    ));
+                }
+            },
+            Err(e)
+                if e.starts_with(crate::backend::NOT_RUNNING)
+                    || e.starts_with(STILL_RUNNING)
+                    || e.contains(crate::backend::REFUSED_UNRUN)
+                    || e.starts_with(solidcraft_control::NOT_RUN) =>
+            {
+                return BatchOutcome::err(Value::String(e));
+            }
+            Err(e) => return BatchOutcome::err(json!(format!("batch: `dry_run: true` requires edit.checkpoint to roll back the design ({e})"))),
+        }
+    } else {
+        None
+    };
     if fits_transport {
         match b.call("engine.batch", params) {
             Ok(mut r) => {
@@ -1592,20 +2190,52 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         failed.insert("error".into(), Value::String(error));
                     }
                 }
-                return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                let (reply, is_err) = batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                if let Some(reporter) = &ctx.progress
+                    && reporter.count() == 0
+                {
+                    let done = reply["completed"].as_u64().unwrap_or(steps.len() as u64) as usize;
+                    let total = steps.len();
+                    let message = if is_err { format!("batch stopped at step {done}/{total}") } else { format!("completed {done}/{total} steps") };
+                    reporter.report(done as f64, Some(total as f64), Some(&message));
+                }
+                return match dry_checkpoint {
+                    Some(id) => finish_dry_run(b, id, reply, is_err, expect),
+                    None => BatchOutcome { reply, is_error: is_err, expectation: None },
+                };
+            }
+            // A newer app may know about tab-switching commands this server cannot preflight.
+            Err(e) if rollback && e.starts_with("engine.batch unavailable:") && e.ends_with("switches to another design") => {
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
-            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
-            // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
-            // the `pending` tool gets its result.
-            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
-                return (Value::String(e), true);
+            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => {
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
+            }
+            // Never sent: no app to send it to. Refused unrun: every connection the app serves is
+            // taken (#10967). Or sent and still running (it was not cancelled): the `pending` tool
+            // gets its result.
+            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
+                return BatchOutcome::err(Value::String(e));
+            }
+            // The app said it ran nothing (the user declined the call), or the call was cancelled.
+            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) || e.starts_with("cancelled:") || e.starts_with("stopped:") => {
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
             }
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
-                let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");
-                return (Value::String(msg), true);
+                let msg = if dry_run {
+                    format!(
+                        "the app did not answer engine.batch ({e}); the dry run may have run without rolling back: inspect the design before sending it again"
+                    )
+                } else {
+                    format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again")
+                };
+                return BatchOutcome::err(Value::String(msg));
             }
         }
     }
@@ -1613,6 +2243,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     // batch endpoint nor an oversized transport request authorizes a sequential
     // emulation of an atomic layout/mixed transaction.
     if atomic_layout {
+        forget_checkpoint(b, dry_checkpoint);
         return atomic_layout_refusal(
             steps.len(),
             if fits_transport { solidcraft_engine::panels::Rule::Capability } else { solidcraft_engine::panels::Rule::CollectionLimit },
@@ -1623,18 +2254,35 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             },
         );
     }
-    let start = if rollback { Undo::begin(b) } else { Undo::None };
+    // Without the desktop's batch preflight, an unrecognized command could switch tabs.
+    // Check IDs here and leave parameter checking to the app that executes the steps.
+    if rollback
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        forget_checkpoint(b, dry_checkpoint);
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
+    }
+    let start = if dry_checkpoint.is_none() && rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
     let mut rows = Vec::new();
     let clock = timing::Clock::start();
     // The kernel's share can only be measured where the commands run: in this process.
     let profile = profile && b.in_process();
+    let total = steps.len() as f64;
     // With `coalesce_parameters`, each run of plain parameter edits as one edit (#5822); a run
     // whose combined edit is refused goes step by step.
     for run in solidcraft_engine::batch_params::plan(steps, coalesce) {
         let singles = match run {
             solidcraft_engine::batch_params::BatchRun::Step(i) => vec![i],
             solidcraft_engine::batch_params::BatchRun::Params { steps: indices, changes } => {
+                if ctx.is_cancelled() {
+                    let at = indices.first().copied().unwrap_or(results.len());
+                    return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, at);
+                }
                 let (r, took) = timing::time(profile, || exec(b, "parameters.change", solidcraft_engine::batch_params::combined_params(&changes)));
                 match r {
                     Ok(v) => {
@@ -1643,6 +2291,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         }
                         let rows = solidcraft_engine::batch_params::step_results(steps, &indices, &v);
                         results.extend(rows.into_iter().map(|v| if verbose { v } else { compact(v) }));
+                        let done = results.len();
+                        ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: parameters.change", steps.len())));
                         continue;
                     }
                     Err(_) => indices,
@@ -1650,6 +2300,9 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             }
         };
         for i in singles {
+            if ctx.is_cancelled() {
+                return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, i);
+            }
             let Some(step) = steps.get(i) else { continue };
             let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
             let (r, took) = timing::time(profile, || match command {
@@ -1662,12 +2315,34 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             match r {
                 Ok(v) => {
                     let v = narrow(i, v);
-                    results.push(if verbose { v } else { compact(v) })
+                    results.push(if verbose { v } else { compact(v) });
+                    let done = i + 1;
+                    let label = command.unwrap_or("step");
+                    ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: {label}", steps.len())));
                 }
                 Err(e) => {
                     // A step still running in the app was not cancelled: the rollback first waits for
                     // it (the backend does), so a restored checkpoint takes it back too.
                     let running = e.starts_with(STILL_RUNNING);
+                    if let Some(id) = dry_checkpoint {
+                        let mut failed = json!({"index": i, "command": command, "error": e});
+                        let mut applied: Vec<usize> = (0..i).collect();
+                        if running {
+                            failed["still_running"] = json!(true);
+                            applied.push(i);
+                        }
+                        let reply = json!({
+                            "ok": false,
+                            "completed": i,
+                            "failed": failed,
+                            "rolled_back": false,
+                            "undone": 0,
+                            "applied": applied,
+                            "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
+                            "results": results,
+                        });
+                        return finish_dry_run(b, id, with_timings(reply, timed, rows, clock.ms()), true, None);
+                    }
                     let (went_back, undone) = start.rollback(b, i);
                     // Only a rollback asked for is reported as one.
                     let rolled_back = rollback && went_back;
@@ -1689,14 +2364,65 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
                         "results": results,
                     });
-                    return (with_timings(reply, timed, rows, clock.ms()), true);
+                    return BatchOutcome::err(with_timings(reply, timed, rows, clock.ms()));
                 }
             }
         }
     }
+    let reply = with_timings(json!({"ok": true, "completed": results.len(), "results": results}), timed, rows, clock.ms());
+    if let Some(id) = dry_checkpoint {
+        return finish_dry_run(b, id, reply, false, expect);
+    }
     start.finish(b);
-    let reply = json!({"ok": true, "completed": results.len(), "results": results});
-    (with_timings(reply, timed, rows, clock.ms()), false)
+    BatchOutcome::ok(reply)
+}
+
+/// Abort a per-step `batch` cleanly when MCP `notifications/cancelled` arrives mid-batch,
+/// rolling back completed steps when `rollback` is enabled.
+#[allow(clippy::too_many_arguments)]
+fn cancel_batch(
+    b: &mut dyn Backend,
+    start: Undo,
+    dry_checkpoint: Option<u64>,
+    rollback: bool,
+    timed: bool,
+    rows: Vec<Value>,
+    total_ms: f64,
+    steps: &[Value],
+    results: Vec<Value>,
+    at: usize,
+) -> BatchOutcome {
+    let completed = results.len();
+    let command = steps.get(at).and_then(|s| s.get("command").or_else(|| s.get("id"))).and_then(Value::as_str);
+    if let Some(id) = dry_checkpoint {
+        let reply = json!({
+            "ok": false,
+            "cancelled": true,
+            "completed": completed,
+            "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+            "rolled_back": false,
+            "undone": 0,
+            "applied": (0..completed).collect::<Vec<_>>(),
+            "not_run": (at..steps.len()).collect::<Vec<_>>(),
+            "results": results,
+        });
+        return finish_dry_run(b, id, with_timings(reply, timed, rows, total_ms), true, None);
+    }
+    let (went_back, undone) = start.rollback(b, completed);
+    let rolled_back = rollback && went_back;
+    let applied: Vec<usize> = if rolled_back { Vec::new() } else { (0..completed).collect() };
+    let reply = json!({
+        "ok": false,
+        "cancelled": true,
+        "completed": completed,
+        "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+        "rolled_back": rolled_back,
+        "undone": undone,
+        "applied": applied,
+        "not_run": (at..steps.len()).collect::<Vec<_>>(),
+        "results": results,
+    });
+    BatchOutcome::err(with_timings(reply, timed, rows, total_ms))
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.
@@ -1907,8 +2633,10 @@ const COMPACT_LIST: usize = 20;
 
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
 /// feature's full body list (its created, changed and removed bodies stay), and the sketch ids
-/// a sketch command repeats outside `created`. Long `created` lists are counted instead of listed.
-fn compact(mut v: Value) -> Value {
+/// a sketch command repeats outside `created`. Long `created` lists are counted instead of listed,
+/// and so are an export's repeated mesh warnings; a null `warning`, a `display_value` equal to
+/// `value` and a script already written to `path` are left out.
+pub(crate) fn compact(mut v: Value) -> Value {
     let Some(o) = v.as_object_mut() else { return v };
     if o.contains_key("created_bodies") {
         o.remove("bodies");
@@ -1940,6 +2668,21 @@ fn compact(mut v: Value) -> Value {
         }
     }
     compact_moved_points(o);
+    crate::mesh_warnings::compact(o);
+    // A step that built without a warning says so by leaving it out. A null `error` stays: clients
+    // read `error` to tell a feature that failed from one that built.
+    if o.get("warning").is_some_and(Value::is_null) {
+        o.remove("warning");
+    }
+    // A number in its own unit that is the same as `value` (a new parameter in mm) says nothing more.
+    if o.get("display_value").is_some_and(|d| d.as_f64().is_some() && o.get("value").and_then(Value::as_f64) == d.as_f64()) {
+        o.remove("display_value");
+    }
+    // A script written to a file is in the file: the reply names the file and its size (#18831).
+    // An older app gives no size; its reply keeps the script, as the agent can't tell it was written.
+    if o.get("path").is_some_and(Value::is_string) && o.get("bytes").is_some_and(Value::is_u64) && o.get("script").is_some_and(Value::is_object) {
+        o.remove("script");
+    }
     v
 }
 
@@ -2258,23 +3001,30 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     }
 }
 
-/// `compare_picture`: run the engine comparison and hand the overlay PNG back as an MCP
-/// image block, the numbers as text — an agent sees the picture, not a base64 blob.
+/// `compare_picture`: run the engine comparison, which writes the overlay PNG to a scratch file
+/// (as a screenshot is), and hand the picture back as an MCP image block, the numbers as text: an
+/// agent sees the picture, and no command reply carries it as text.
 fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
-    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
-    params["overlay"] = json!(true);
-    match exec(b, "inspect.compare_picture", params) {
-        Ok(v) => {
-            let overlay = v.get("overlay_png").and_then(Value::as_str).unwrap_or_default().to_string();
-            let mut info = v;
+    let n = SHOT.fetch_add(1, Ordering::Relaxed);
+    let dir = crate::scratch_dir().unwrap_or_else(vfs::temp_dir);
+    let path = dir.join(format!("compare-{n}.png")).to_string_lossy().to_string();
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]);
+    params["overlay"] = json!(path);
+    let ran = exec(b, "inspect.compare_picture", params);
+    let png = vfs::read(&path, MAX_IMAGE_BYTES);
+    let _ = vfs::remove(&path);
+    match ran {
+        Ok(mut info) => {
             if let Some(obj) = info.as_object_mut() {
-                obj.remove("overlay_png");
+                obj.remove("overlay");
             }
-            let mut content = vec![json!({"type": "text", "text": info.to_string()})];
-            if !overlay.is_empty() {
-                content.insert(0, json!({"type": "image", "data": overlay, "mimeType": "image/png"}));
+            match png {
+                Ok(png) => solidcraft_mcp_server::image_result(&png, "image/png", info.to_string()),
+                Err(e) => {
+                    info["overlay_error"] = json!(format!("{path}: {e} (is the app on another machine?)"));
+                    json!({"content": [{"type": "text", "text": info.to_string()}]})
+                }
             }
-            json!({"content": content})
         }
         Err(e) => text_result(&Value::String(e), true, opts),
     }

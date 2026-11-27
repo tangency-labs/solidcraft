@@ -31,6 +31,13 @@
 //!   field, or stays solid. Triangles, circles and polygons have no chords, so only the
 //!   tilings (hexagon, square, triangle) snap; circles and polygons act as `Whole`.
 //!
+//! # A sketched cell
+//! [`plan_sketch`] repeats one cell of the user's own, a closed profile of lines and arcs, on a
+//! lattice of two vectors (given as `pitch_x`, `pitch_y` and a stagger) with the cell turned and
+//! mirrored as asked, and refuses a layout whose cells overlap or come nearer than the web, checked
+//! exactly. It clips with [`Clip::Whole`] or [`Clip::Free`]; [`Clip::Snap`] is refused. See
+//! [`SketchCell`].
+//!
 //! Not upstream: SolidCraft's cell grid planner, a kernel primitive because it computes
 //! geometry any client could use (docs/layers.md §1). The field is the kernel's own planar profile
 //! ([`crate::prism::profile::Loop2`]); a curve that is neither a line nor an arc is flattened, as
@@ -43,8 +50,10 @@
 
 mod exact;
 mod free;
+mod gap;
 pub(crate) mod lattice;
 pub(crate) mod region;
+mod sketch;
 pub(crate) mod snap;
 mod vec;
 
@@ -62,9 +71,12 @@ use region::{
 use vec::{ring_next, Vec2Ext};
 
 pub use lattice::MAX_CELLS;
+pub use sketch::{plan_sketch, sketch_cell_center, SketchCell, MAX_CELL_REACH, MAX_CELL_SEGMENTS};
 
 /// Most sides of a polygon cell.
 pub const MAX_SIDES: u32 = 64;
+/// Most lattice lines a snapped field edge may be moved in.
+pub const MAX_SNAP_INSET: u32 = 1000;
 /// Largest coordinate (mm) of the field or the anchor.
 pub const MAX_COORD: f64 = 1e9;
 /// Smallest cell size and web (mm).
@@ -135,6 +147,9 @@ pub struct CellGridSpec {
     pub clip: Clip,
     /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
     pub keepout_clip: Option<Clip>,
+    /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
+    /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
+    pub snap_inset: u32,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -152,6 +167,7 @@ impl Default for CellGridSpec {
             anchor: Vec2::ZERO,
             clip: Clip::Snap,
             keepout_clip: None,
+            snap_inset: 0,
             margin: 0.0,
         }
     }
@@ -179,6 +195,24 @@ impl CellGridSpec {
                 "the web must be from {MIN_SIZE} to {MAX_COORD} mm, not {}",
                 self.web
             )));
+        }
+        self.validate_placement()
+    }
+
+    /// The checks that do not depend on the cell: the snap inset, the margin, the angle and the
+    /// anchor.
+    fn validate_placement(&self) -> Result<(), CellGridError> {
+        if self.snap_inset > MAX_SNAP_INSET {
+            return Err(CellGridError::Parameter(format!(
+                "the snap inset must be from 0 to {MAX_SNAP_INSET} lattice lines, not {}",
+                self.snap_inset
+            )));
+        }
+        if self.snap_inset > 0 && self.clip != Clip::Snap {
+            return Err(CellGridError::Parameter(
+                "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
+                    .into(),
+            ));
         }
         if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
             return Err(CellGridError::Parameter(format!(
@@ -226,6 +260,12 @@ pub enum CellGridError {
     #[error("cell grid: the field: {0}")]
     /// The field is refused.
     Field(String),
+    #[error("cell grid: the cell sketch: {0}")]
+    /// The sketched cell's profile or layout numbers are refused.
+    Profile(String),
+    #[error("cell grid: the layout: {0}")]
+    /// The pitch and web put neighbouring sketched cells on top of each other or too close.
+    Layout(String),
     #[error("cell grid: the field reaches {cells} lattice cells, more than the {max} allowed: use larger cells or a smaller field")]
     /// The field reaches more lattice cells than allowed.
     TooManyCells {
@@ -371,6 +411,7 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
             &region,
             &lat,
             (field_clip == Clip::Snap, keepout_clip == Clip::Snap),
+            spec.snap_inset,
         );
         region = snapped;
         warnings.extend(notes);

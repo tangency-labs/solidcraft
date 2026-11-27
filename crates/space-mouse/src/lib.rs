@@ -10,12 +10,35 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod button_set;
 pub mod buttons;
 mod calibration;
 mod descriptor;
 
-pub use calibration::{
-    AxisCalibration, Calibration, FEATHER_SHARE, HOLD_SECONDS, Kind, MAX_DEAD_ZONE_SHARE, MIN_SHARE, NO_SOURCE, Problem, REST_SECONDS,
-    RESTARTS_FOR_TRACKBALL, Recording, SETTLE_AFTER_SECONDS, SETTLE_SHARE, SETTLE_WANDER, STEPS, Settle, Stage, Step, Wizard,
-};
-pub use descriptor::{Descriptor, FULL_SCALE, Field, Layout, MAX_BUTTONS, Report};
+pub use button_set::ButtonSet;
+pub use calibration::AxisCalibration;
+pub use calibration::Calibration;
+pub use calibration::FEATHER_SHARE;
+pub use calibration::HOLD_SECONDS;
+pub use calibration::Kind;
+pub use calibration::MAX_DEAD_ZONE_SHARE;
+pub use calibration::MIN_SHARE;
+pub use calibration::NO_SOURCE;
+pub use calibration::Problem;
+pub use calibration::REST_SECONDS;
+pub use calibration::RESTARTS_FOR_TRACKBALL;
+pub use calibration::Recording;
+pub use calibration::SETTLE_AFTER_SECONDS;
+pub use calibration::SETTLE_SHARE;
+pub use calibration::SETTLE_WANDER;
+pub use calibration::STEPS;
+pub use calibration::Settle;
+pub use calibration::Stage;
+pub use calibration::Step;
+pub use calibration::Wizard;
+pub use descriptor::Descriptor;
+pub use descriptor::FULL_SCALE;
+pub use descriptor::Field;
+pub use descriptor::Layout;
+pub use descriptor::MAX_BUTTONS;
+pub use descriptor::Report;

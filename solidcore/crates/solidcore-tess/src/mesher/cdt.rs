@@ -98,7 +98,7 @@ fn triangulate_impl(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fil
         _ => [1.0, 1.0],
     };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
+    let Bounded { mut cdt, index, slits, .. } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
     for s in fill.seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -155,6 +155,10 @@ pub(crate) struct Meshed {
     /// Its refinement stopped at its bound of points, or its rounds, with a triangle still off
     /// the surface or longer than asked.
     pub capped: bool,
+    /// For each boundary node, the node the triangles name in its place: itself, or the first
+    /// boundary node at the same point of the triangulation (where a loop passes one point twice,
+    /// as a slit's two runs and the vertex where it meets the rest of its loop do).
+    pub merged: Vec<u32>,
 }
 
 /// The mesh path's start ([`super::Purpose::Mesh`]) on the region bounded by `loops` (as
@@ -177,7 +181,9 @@ pub(crate) fn mesh(
     }
     let scale = if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) { sag.scale } else { [1.0, 1.0] };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false, false)?;
+    let Bounded { mut cdt, index, slits, handles } = bounded(boundary, loops, scale, false, false)?;
+    // Each boundary node's vertex is named by the first node inserted there ([`bounded`]).
+    let merged = handles.iter().map(|h| index.get(h.index()).copied().flatten()).collect::<Option<Vec<u32>>>()?;
     for s in seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -190,7 +196,7 @@ pub(crate) fn mesh(
         return None;
     }
     let (extra, triangles) = collect(&cdt, index, boundary, loops, &slits, &from, false)?;
-    Some(Meshed { extra, triangles, capped: !settled })
+    Some(Meshed { extra, triangles, capped: !settled, merged })
 }
 
 /// A point of (u, v) in the triangulation's metric `scale`.
@@ -207,6 +213,8 @@ struct Bounded {
     index: Vec<Option<u32>>,
     /// The sides the loops run along both ways ([`slits`]).
     slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
+    /// Each boundary node's vertex, by the node's index: one vertex for nodes at one point.
+    handles: Vec<FixedVertexHandle>,
 }
 
 /// The constrained Delaunay triangulation of `boundary`'s points in the metric `scale` with the
@@ -261,7 +269,7 @@ fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64;
             cdt.add_constraint(a, b);
         }
     }
-    Some(Bounded { cdt, index, slits })
+    Some(Bounded { cdt, index, slits, handles })
 }
 
 /// The triangles of `cdt` inside the region its constraints bound (see [`region`]), with the
@@ -596,7 +604,13 @@ fn refine_sag(
     slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
 ) -> (usize, bool) {
     let mut added = 0;
-    let mut cache: HashMap<FixedVertexHandle, Option<(Vec3, Option<Vec3>)>> = HashMap::new();
+    let mut cache: crate::hash::BitsMap<usize, Option<(Vec3, Option<Vec3>)>> = crate::hash::BitsMap::default();
+    // Triangles that already passed all sag/turn/length checks in an earlier round need not be
+    // re-evaluated while unchanged (spade keeps vertex handles and constraint edges fixed).
+    let mut passed: crate::hash::BitsSet<[usize; 3]> = crate::hash::BitsSet::default();
+    // Non-constraint edge midpoint split decisions cached by sorted vertex handle pair, so each
+    // shared interior edge is evaluated once across both adjacent triangles and across rounds.
+    let mut edge_split: crate::hash::BitsMap<(usize, usize), bool> = crate::hash::BitsMap::default();
     // The widest turn between two corner normals.
     let spread = |n: [Option<Vec3>; 3]| match n {
         [Some(a), Some(b), Some(c)] => [(a, b), (b, c), (c, a)].iter().map(|(x, y)| x.dot(*y).clamp(-1.0, 1.0).acos()).fold(0.0, f64::max),
@@ -605,7 +619,7 @@ fn refine_sag(
     for _ in 0..SAG_ROUNDS {
         let mut todo: Vec<Point2<f64>> = Vec::new();
         let mut at = |h: FixedVertexHandle, p: Point2<f64>| {
-            *cache.entry(h).or_insert_with(|| {
+            *cache.entry(h.index()).or_insert_with(|| {
                 let q = from(p);
                 (sag.eval)(q[0], q[1])
             })
@@ -616,9 +630,15 @@ fn refine_sag(
                 continue;
             }
             let vs = face.vertices();
+            let mut key = [vs[0].fix().index(), vs[1].fix().index(), vs[2].fix().index()];
+            key.sort_unstable();
+            if passed.contains(&key) {
+                continue;
+            }
             let ps = vs.map(|v| v.position());
             let c = Point2::new((ps[0].x + ps[1].x + ps[2].x) / 3.0, (ps[0].y + ps[1].y + ps[2].y) / 3.0);
             let (Some((a, na)), Some((b, nb)), Some((d, nd))) = (at(vs[0].fix(), ps[0]), at(vs[1].fix(), ps[1]), at(vs[2].fix(), ps[2])) else {
+                passed.insert(key);
                 continue;
             };
             // How far the surface lies from the triangle at `q`.
@@ -647,15 +667,25 @@ fn refine_sag(
                 }
                 continue;
             }
+            let mut any_edge_split = false;
             for (e, (pa, pb)) in face.adjacent_edges().into_iter().zip([(a, b), (b, d), (d, a)]) {
                 if e.is_constraint_edge() {
                     continue;
                 }
+                let [u, v] = e.vertices().map(|x| x.fix().index());
+                let ekey = (u.min(v), u.max(v));
                 let [p, q] = e.positions();
                 let m = Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
-                if pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5) {
+                let needs = *edge_split
+                    .entry(ekey)
+                    .or_insert_with(|| pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5));
+                if needs {
                     todo.push(m);
+                    any_edge_split = true;
                 }
+            }
+            if !any_edge_split {
+                passed.insert(key);
             }
         }
         if todo.is_empty() {

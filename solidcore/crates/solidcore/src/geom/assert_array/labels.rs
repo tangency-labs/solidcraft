@@ -8,7 +8,8 @@
 //!
 //! Generated mechanically from upstream (entry order, categories and strings verbatim;
 //! upstream lists no fourth initializer, so every `message_for_file` is `None`), except
-//! [`WARNINGS`], the checks `AssertValid` reports without failing, kept by hand.
+//! [`WARNINGS`], the checks `AssertValid` reports without failing, and the last entry of
+//! [`VALIDATE_POINTERS`] (test 147, not upstream: #21105), kept by hand.
 
 use super::{AssertReportLabel, AssertType};
 
@@ -634,9 +635,8 @@ pub const CURVE_BOUNDED_SURFACE: &[AssertReportLabel] = &[
 ];
 
 /// Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): [`TORUS`] with the
-/// fork's test 5, "Self Intersection". Only the torus check with
-/// `Kernel::fixes.torus_check_spindle_apex` reports from it; `SM_GetAssertLabelList`
-/// ([`label_list`]) keeps upstream's [`TORUS`].
+/// fork's test 5, "Self Intersection". Only the spindle torus check reports from it;
+/// `SM_GetAssertLabelList` ([`label_list`]) keeps upstream's [`TORUS`].
 pub const TORUS_WITH_SPINDLE_APEX: &[AssertReportLabel] = &[
     l(
         AssertType::Radius,
@@ -1767,6 +1767,15 @@ pub const VALIDATE_POINTERS: &[AssertReportLabel] = &[
         AssertType::Pointer,
         "Pointer",
         Some("Loopuse edgeuse CCW walk closed"),
+    ),
+    // Not upstream (#21105), kept by hand: test 147, the edge curve or a UV trim of an
+    // edge has an end whose control polygon turns back on itself (`N_CrvIsNotReversed`).
+    // Upstream repairs it inside the check and logs `SM_ERR_WARNING`; the check reports it
+    // as a warning ([`WARNINGS`]) and leaves the curve as it is.
+    l(
+        AssertType::Geometric,
+        "Warn Reversed End",
+        Some("Edge curve or UV trim curve end turns back on itself (control polygon reversed at an end)"),
     ),
 ];
 
@@ -3188,7 +3197,7 @@ pub const LABELLED: &[(i64, u64)] = &[
 ///
 /// Not upstream (it has no severity field): kept by hand, not generated with the
 /// tables above.
-pub const WARNINGS: &[(i64, u64, u64)] = &[(BREP_TYPE, 0, 21)];
+pub const WARNINGS: &[(i64, u64, u64)] = &[(BREP_TYPE, 0, 21), (BREP_TYPE, 1, 147)];
 
 /// Whether check `test_index` of label table `list_index` of `type_code` is a warning
 /// ([`WARNINGS`]).

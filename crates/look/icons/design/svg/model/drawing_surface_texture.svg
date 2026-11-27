@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Surface texture</title>
+  <path d="M9 50L55 50" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15 31L27 48L43 17L54 17M34 33L54 33" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

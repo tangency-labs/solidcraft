@@ -1010,7 +1010,7 @@ fn own_brep(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
@@ -1180,6 +1180,8 @@ fn merge_ssi_rust(
         let t = solidcore::topology::vertex::tolerance(b, v).map_err(h)?;
         out.extend([p.x, p.y, p.z, t]);
     }
+    #[cfg(test)]
+    crate::certify::written(b);
     Ok(Output::new().values("out", out))
 }
 

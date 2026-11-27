@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.insert_simplify_auto_tip": "أصغر مسافة يجعل بها الرسم يناسب الرسم التخطيطي، محسوبة لهذا الرسم."
+  },
+  "de": {
+    "ui.insert_simplify_auto_tip": "Der kleinste Abstand, bei dem die Zeichnung in die Skizze passt, für diese Zeichnung berechnet."
+  },
+  "en": {
+    "ui.insert_simplify_auto_tip": "The smallest distance at which the drawing fits the sketch, worked out for this drawing."
+  },
+  "he": {
+    "ui.insert_simplify_auto_tip": "המרחק הקטן ביותר שבו השרטוט מתאים לסקיצה, מחושב עבור השרטוט הזה."
+  },
+  "ja": {
+    "ui.insert_simplify_auto_tip": "図形がスケッチに収まる最小の距離を、この図形について計算します。"
+  },
+  "ko": {
+    "ui.insert_simplify_auto_tip": "도면이 스케치에 들어가는 가장 작은 거리를 이 도면에 맞춰 계산합니다."
+  },
+  "vi": {
+    "ui.insert_simplify_auto_tip": "Khoảng cách nhỏ nhất để hình vẽ vừa bản phác, tính cho chính hình vẽ này."
+  },
+  "zh": {
+    "ui.insert_simplify_auto_tip": "让图形恰好放入草图的距离，按此图形计算。"
+  }
+}

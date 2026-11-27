@@ -271,7 +271,7 @@ fn classify_point(m: &Model, i: &ClassifyIn) -> Result<Option<[f64; 3]>, Harness
             f.surface
                 .as_ref()
                 .ok_or_else(|| harness("face without surface"))?
-                .evaluate_point(&Kernel::default(), uv)
+                .evaluate_point(&crate::runner_kernel(), uv)
                 .map_err(|e| harness(format!("surface point: {e}")))?
         }
         At::Point { p } => Vec3::new(p[0], p[1], p[2]),
@@ -285,7 +285,7 @@ fn classify_point(m: &Model, i: &ClassifyIn) -> Result<Option<[f64; 3]>, Harness
 fn rust_evaluate(i: &EvalIn) -> Result<Output, Fail> {
     let surface: Option<Surface> = i.surf.as_ref().map(surface_in).transpose()?;
     let uv = Point2::new(i.uv[0], i.uv[1]);
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut out = i.sentinel.to_vec();
     let mut put = |at: usize, v: Vec3| {
         if let Some(slot) = out.get_mut(at..at + 3) {
@@ -460,9 +460,16 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
                         expand_by_zone_tol_3d: expand,
                     }
                 };
+                if opts.tight {
+                    crate::dump::body(k, "tight", b);
+                }
                 push_box(&mut o, qb::calculate_bounding_box(k, &mut *b, opts))?;
             }
-            StepIn::Tight => push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?,
+            StepIn::Tight => {
+                // the body boxed, kept when a test captures it (`dump::capture`)
+                crate::dump::body(k, "tight", b);
+                push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?;
+            }
             StepIn::Lock { tight, defaults } => {
                 // the default argument is `FALSE`
                 let r = qb::lock_bounding_box(k, b, tight && !defaults);
@@ -477,6 +484,9 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
             }
         }
     }
+    // the boxed body, for the tolerance certificate (`certify::trim_tolerance`)
+    #[cfg(test)]
+    crate::certify::written(b);
     Ok(o)
 }
 
@@ -488,7 +498,7 @@ fn rust_box(i: &BoxIn) -> Result<Output, Fail> {
         Ok(m) => m,
         Err(o) => return Ok(o),
     };
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let flat = run_steps(&k, &mut m.brep, &i.steps)?;
     Ok(Output::new().values("steps", flat))
 }
@@ -511,7 +521,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -532,7 +542,7 @@ fn rust_classify(i: &ClassifyIn) -> Result<Output, Fail> {
     let Some(p) = classify_point(&m, i)? else {
         return Ok(Output::new().values("classify", vec![NO_ENTITY]));
     };
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut b = m.brep;
     let query = qb::BrepQuery::new(qb::BrepIdentity::arena(BrepId::from_index(0)));
     let tol = zone_tol3d(&k, i.tol);

@@ -90,16 +90,14 @@ class Synthetic(unittest.TestCase):
 
 
 def trigger_globs():
-    """The pull_request trigger paths of the workflow (the push trigger lists the same)."""
+    """The push trigger paths of the workflow (pull requests and merge groups reach it through
+    ci.yml, which runs the plan on every one)."""
     with open(WORKFLOW, encoding="utf-8") as f:
         text = f.read()
-    events = {}
-    for event in ("pull_request", "push"):
-        block = re.search(rf"^  {event}:\n((?:    .*\n|\s*\n)+)", text, re.M)
-        assert block, event
-        paths = block.group(1).split("paths:", 1)[1]
-        events[event] = re.findall(r'^\s+- "([^"]+)"', paths, re.M)
-    return events
+    block = re.search(r"^  push:\n((?:    .*\n|\s*\n)+)", text, re.M)
+    assert block, "push"
+    paths = block.group(1).split("paths:", 1)[1]
+    return re.findall(r'^\s+- "([^"]+)"', paths, re.M)
 
 
 def sample(glob):
@@ -138,15 +136,22 @@ class Real(unittest.TestCase):
                     self.assertFalse(overlap, f"{area}/PATHS: {g} names shared-core files (PATHS-ALL): {overlap[:3]}")
 
     def test_the_workflow_triggers_on_every_glob(self):
-        events = trigger_globs()
-        self.assertEqual(events["pull_request"], events["push"])
-        triggers = [plan.glob_regex(g) for g in events["pull_request"]]
+        triggers = [plan.glob_regex(g) for g in trigger_globs()]
         globs = [*plan.read_globs(os.path.join(ROOT, plan.CASES, "PATHS-ALL")), *plan.COVERAGE]
         for area, own in plan.areas(ROOT).items():
             globs += [*own, f"{plan.CASES}/{area}/**"]
         for g in globs:
             with self.subTest(glob=g):
                 self.assertTrue(any(t.match(sample(g)) for t in triggers), f"{g}: not under the workflow's trigger paths")
+
+    def test_mesh_conversion_in_solidcore_runs_every_area(self):
+        expected = ([*plan.areas(ROOT), plan.LADDER], True)
+        for path in (
+            "solidcore/crates/solidcore/src/mesh_reconstruction/mod.rs",
+            "solidcore/crates/solidcore-ops/src/mesh.rs",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(plan.select(ROOT, [path]), expected)
 
     def test_a_ui_change_runs_nothing(self):
         self.assertEqual(plan.select(ROOT, ["crates/ui-egui/src/app.rs", "docs/kernel-cases.md", "README.md"]), ([], False))

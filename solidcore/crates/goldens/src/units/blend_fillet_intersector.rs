@@ -13,9 +13,7 @@
 //! produces the record of the reference wrapper's layout (statuses `0` = `SM_SUCCESS`, else the
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream cannot produce;
 //! op values only on success), reported as the values `rec`. A case whose Rust side reaches an
-//! unported unit is deferred as a whole. Every case runs on a fresh [`Kernel`], where
-//! `ComputePointValues`' function-static `sdStaticStep` (ND-3) starts unlatched as on a
-//! first call; the step the case leaves latched is compared as `fillet_point_step`.
+//! unported unit is deferred as a whole. Every case runs on a fresh [`Kernel`].
 //!
 //! The constant-radius `SetupOffsetValues` dispatch runs the ported standard solver,
 //! so `ComputePointValuesDelta` can compare both mutated surface records.
@@ -224,12 +222,6 @@ fn point_values(p: &PointIn) -> Vec<f64> {
     v.extend(p.user);
     v
 }
-
-// ---- C++ side -----------------------------------------------------------------------------
-
-/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
-/// function static, fixed by the first call in a process) after the case.
-const POINT_STEP: &str = "fillet_point_step";
 
 // ---- Rust side ----------------------------------------------------------------------------
 
@@ -599,6 +591,16 @@ fn rail_offset(k: &Kernel, d: f64, base: Surface, id: SurfaceId) -> Result<Offse
 }
 
 fn rust_record(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
+    rust_record_seen(k, i, &mut |_| {})
+}
+
+/// [`rust_record`], handing `seen` the solver as the op leaves it (its offsets, with the
+/// extensions the op made).
+fn rust_record_seen(
+    k: &Kernel,
+    i: &Inputs,
+    seen: &mut dyn FnMut(&ConstantRadiusAssistedFs),
+) -> Result<Vec<f64>, Fail> {
     let a = rust_surface(&i.a)?;
     let b = match &i.b {
         Some(b) => Some(rust_surface(b)?),
@@ -685,18 +687,15 @@ fn rust_record(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     for p in si.points() {
         put_point(&mut o, p);
     }
+    seen(&solver);
     Ok(o)
 }
 
-/// Every case runs on a fresh kernel, whose `sdStaticStep` latch sets itself.
+/// Every case runs on a fresh kernel.
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     match rust_record(&k, i) {
-        // read as the C++ probe reads `sdStaticStep` (its crossing point latches 1e-5)
-        Ok(rec) => Ok(Output::new().values("rec", rec).values(
-            POINT_STEP,
-            vec![k.fillet_point_step.get().unwrap_or(1.0e-5)],
-        )),
+        Ok(rec) => Ok(Output::new().values("rec", rec)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -1375,11 +1374,80 @@ impl UnitDiff for Runner {
         Ok(v)
     }
 
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
-
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
 }
 
+
+/// The row the offset-extension retirement (WR-458, WR-633, WR-650; #18921) moves: an
+/// `EvaluateLawPoint` whose solution lies on the rails' extensions, so only its two uv
+/// pairs change (the rest of the record is main's bit for bit). Certified on the solver
+/// the op leaves: every extension its two offsets hold is rebuilt bit for bit from the
+/// base ([`ExtensionWatch`](crate::g1r_cert::ExtensionWatch)), and the recorded uvs solve
+/// the law point on them: the two offset points agree and lie on the section plane, each
+/// to the solver's tolerance.
+#[cfg(test)]
+mod wr458_moved_rows {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 1] = ["gen1001"];
+
+    #[test]
+    fn each_moved_row_solves_its_law_point_on_certified_extensions() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let name = c.name.as_str();
+            let i = c.parse::<Inputs>().unwrap();
+            let OpIn::Law { origin, normal, .. } = i.op else {
+                panic!("{name}: not a law point")
+            };
+            let k = Kernel::default();
+            let mut offsets = Vec::new();
+            let rec = rust_record_seen(&k, &i, &mut |s| {
+                for slot in s.solver.surfaces.iter().flatten() {
+                    offsets.push(slot.surface.surface.clone());
+                }
+            });
+            let Ok(rec) = rec else { panic!("{name}: no record") };
+            assert_eq!(rec.get(..3), Some(&[8.0, 0.0, 0.0][..]), "{name}: a solved law point");
+            assert_eq!(offsets.len(), 2, "{name}");
+            let mut watches = vec![ExtensionWatch::default(); offsets.len()];
+            for (w, o) in watches.iter_mut().zip(&offsets) {
+                w.observe(&k, o).unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
+            let growths: usize = watches.iter().map(|w| w.growths).sum();
+            assert!(growths > 0, "{name}: no extension held");
+            let at = |j: usize| {
+                let uv = Vec2::new(rec[3 + 2 * j], rec[4 + 2 * j]);
+                offsets[j].evaluate_point(&k, uv).unwrap()
+            };
+            let (p0, p1) = (at(0), at(1));
+            // the points are on the extensions certified above: evaluating the recorded uvs
+            // grew neither offset's extension (a growth would be a change the watch sees)
+            for (w, o) in watches.iter_mut().zip(&offsets) {
+                let before = w.growths;
+                w.observe(&k, o).unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert_eq!(w.growths, before, "{name}: a recorded uv grew its extension");
+            }
+            let n = v3(normal);
+            let n = n * (1.0 / n.length());
+            let gap = (p0 - p1).length();
+            // both points within the tolerance of the plane, not one and the gap
+            let off_plane =
+                f64::max((p0 - v3(origin)).dot(n).abs(), (p1 - v3(origin)).dot(n).abs());
+            let tol = i.solver.tol;
+            eprintln!("{name}: {growths} extensions, gap {gap:e}, off the plane {off_plane:e}, tol {tol:e}");
+            assert!(gap <= tol, "{name}: the offsets' points are {gap:e} apart");
+            assert!(off_plane <= tol, "{name}: a point is {off_plane:e} off the plane");
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}

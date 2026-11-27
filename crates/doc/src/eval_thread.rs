@@ -30,6 +30,40 @@ pub struct ThreadInfo {
     pub starts: u32,
 }
 
+impl ThreadInfo {
+    /// Whether two cosmetic thread markings agree on every field, bit for bit (distinguishing
+    /// `0.0` from `-0.0`). Every field is destructured so a new one cannot be left out.
+    pub(crate) fn same_bits(&self, other: &Self) -> bool {
+        let numbers = |t: &Self| {
+            let ThreadInfo {
+                feature: _,
+                body: _,
+                designation: _,
+                major_diameter,
+                radius,
+                pitch,
+                internal: _,
+                axis_point,
+                axis,
+                start,
+                end,
+                form: _,
+                hand: _,
+                starts: _,
+            } = t;
+            [*major_diameter, *radius, *pitch, axis_point.x, axis_point.y, axis_point.z, axis.x, axis.y, axis.z, *start, *end]
+        };
+        self.feature == other.feature
+            && self.body == other.body
+            && self.designation == other.designation
+            && self.internal == other.internal
+            && self.form == other.form
+            && self.hand == other.hand
+            && self.starts == other.starts
+            && numbers(self).iter().zip(numbers(other).iter()).all(|(x, y)| x.to_bits() == y.to_bits())
+    }
+}
+
 /// Nominal diameters and coarse pitches (mm) used for automatic ISO metric thread sizing.
 /// Other diameter/pitch pairs can be supplied as explicit designations.
 pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
@@ -37,7 +71,11 @@ pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).
+/// A designation with a tolerance class (`M8-6H`) is none: a tapped hole saves its class apart.
 pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
+    if crate::thread_forms::metric_class(s).1.is_some() {
+        return None;
+    }
     ThreadForm::Metric.parse(s, 1).ok().filter(|z| (z.lead - z.pitch).abs() < 1e-12).map(|z| (z.major, z.pitch))
 }
 
@@ -71,7 +109,8 @@ pub(super) enum Extent {
 /// What a thread feature asks for: its size, how far it runs and from which end.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ThreadAsk<'a> {
-    /// The form; `None`: the one `designation`'s prefix names, else metric.
+    /// The form; `None`: infer a historically supported form, else metric. Unified needs an
+    /// explicit form on a Thread feature; tapped holes use their own catalogue.
     pub form: Option<ThreadForm>,
     pub designation: Option<&'a str>,
     pub hand: ThreadHand,
@@ -86,6 +125,9 @@ pub(super) struct ThreadAsk<'a> {
     /// The runout at the end away from where the thread starts, as (mm, pitches): its length
     /// is mm + pitches x the pitch. The start never fades: it runs off its free end.
     pub ease_out: (f64, f64),
+    /// A modelled internal thread runs down to a blind hole's bottom, trimmed at its plane, as an
+    /// external thread runs down to a shoulder ([`End::Shoulder`]), rather than stopping clear.
+    pub to_bottom: bool,
     /// A tapped hole's thread: `designation` is a catalogue size (ISO metric, or a catalogued
     /// UNC/UNF, G, Rp, Rc or NPT size), and a size that is not metric fits the hole drilled for it.
     pub tapped: bool,
@@ -196,22 +238,27 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
 /// coordinates, so two parts built alike (two screws of one size) each have a face at the same
 /// point, and without this the second part's thread went on the first part's body.
 pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
-    let found: Vec<(usize, kernel::CylinderFace)> = st
-        .bodies
-        .iter()
-        .enumerate()
-        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
-        .filter_map(|(i, b)| {
-            #[cfg(test)]
-            super::cost_tests::count(|c| c.cylinder_search += 1);
-            kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
-        })
-        .collect();
-    let own = |i: &usize| component.is_some_and(|c| st.bodies.get(*i).is_some_and(|b| b.component == c));
-    let any_own = found.iter().any(|(i, _)| own(i));
+    // The component's own bodies are searched first; the others only when none of its own has
+    // a face there (each body searched is tessellated).
+    let own = |b: &ModelBody| component.is_some_and(|c| b.component == c);
+    let search = |want_own: bool| -> Vec<(usize, kernel::CylinderFace)> {
+        st.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| own(b) == want_own && !super::more::beyond_cylinder_reach(b, p))
+            .filter_map(|(i, b)| {
+                #[cfg(test)]
+                super::cost_tests::count(|c| c.cylinder_search += 1);
+                kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
+            })
+            .collect()
+    };
+    let mut found = search(true);
+    if found.is_empty() {
+        found = search(false);
+    }
     let (bi, cyl) = found
         .into_iter()
-        .filter(|(i, _)| !any_own || own(i))
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))
@@ -220,6 +267,9 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let dia = cyl.radius * 2.0;
     let form = match (ask.form, ask.designation.and_then(ThreadForm::of_designation)) {
+        // Saved Threads without a form predate Unified support and must keep their metric
+        // interpretation. Commands store Unified explicitly; tapped holes have their own catalogue.
+        (None, Some(ThreadForm::Unified)) if !ask.tapped => ThreadForm::Metric,
         (Some(f), _) | (None, Some(f)) => f,
         (None, None) => ThreadForm::Metric,
     };
@@ -283,6 +333,25 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
             }
         }
     }
+    if form == ThreadForm::Unified
+        && let Some(given) = ask.designation
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        // Preserve the authored series and tolerance class, including UNEF/UN and decimal or
+        // fractional sizes absent from the catalogue. The parser has validated this callout.
+        designation = given.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
+    }
+    // An ISO metric tolerance class (ISO 965-1) is kept in the callout as written, after the
+    // size's own designation; the size, and so the groove and the fit, are the size's alone.
+    let size_designation = designation.clone();
+    if form == ThreadForm::Metric
+        && tapped.is_none()
+        && let Some(given) = ask.designation
+        && let (_, Some(class)) = crate::thread_forms::metric_class(given)
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        designation = format!("{designation}-{class}");
+    }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
         // The hole drilled for it, without borrowing an ISO minor-diameter rule.
@@ -297,7 +366,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         let try_instead = form
             .fit(dia, cyl.internal)
             .map(|(n, q)| form.format(n, q, q))
-            .filter(|a| *a != designation)
+            .filter(|a| *a != size_designation)
             .map(|a| format!("; this {kind} takes {a}"))
             .unwrap_or_default();
         return Err(DocError::Invalid(format!("an {designation} thread does not fit a {dia:.2} mm {kind}{try_instead}")));
@@ -380,7 +449,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         } else if !ends.free(side)? {
             let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
             let square = ease.get(side).copied().unwrap_or(0.0) == 0.0;
-            let clear = at_end && square && !cyl.internal && !form.is_taper() && {
+            let clear = at_end && square && (!cyl.internal || ask.to_bottom) && !form.is_taper() && {
                 let check = ends.clear_of_end_plane(side);
                 unchecked |= matches!(check, Err(DocError::Kernel(_)));
                 match check {
@@ -786,6 +855,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         hand,
         starts,
         ease_out,
+        to_bottom,
         tip,
         chamfer_angle,
         chamfer_depth,
@@ -805,13 +875,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     if *tip != ThreadTip::None && !*modeled {
         return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
     }
+    if *to_bottom && (!*modeled || ease_out.is_some()) {
+        return Err(DocError::Invalid("a thread runs to the bottom only when it is modelled and its end does not fade out".into()));
+    }
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),
         (None, Some(crate::ThreadLimit::Face(q))) => Extent::UpToPoint(q.0),
         (None, Some(crate::ThreadLimit::Plane(pl))) => Extent::UpTo(doc.resolve_plane_in(vals, pl, 0, f.component, Some(st))?),
         (None, None) => Extent::Full,
     };
-    // A form left at its default is the one the designation names (`Tr20x4`).
+    // A default form keeps historical inference (`Tr20x4`), but never opts into Unified.
+    // New Unified Thread features store their form explicitly at command creation.
     let form = (*form != ThreadForm::Metric).then_some(*form);
     let ask = ThreadAsk {
         form,
@@ -823,6 +897,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         from: from.map(|q| q.0),
         modeled: *modeled,
         ease_out: (0.0, 0.0),
+        to_bottom: *to_bottom,
         tapped: false,
         old_auto_size: *old_auto_size,
     };
@@ -845,6 +920,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         // Resolve against the starting model, before a modelled thread removes a picked surface.
         if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl) {
             selected.push(on);
+        }
+    }
+    if *modeled && *tip == ThreadTip::None && selected.len() > 1 && super::EVAL_VALIDATION.get() == kernel::Validation::EachFeature {
+        match cut_grouped(st, &selected, *continuous_flanks) {
+            Ok(Some(next)) => {
+                *st = next;
+                return Ok(());
+            }
+            Ok(None) => {}
+            Err(DocError::Kernel(_)) => {
+                #[cfg(test)]
+                super::cost_tests::count(|c| c.grouped_thread_fallbacks += 1);
+            }
+            Err(error) => return Err(error),
         }
     }
     for on in selected {
@@ -882,6 +971,80 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
         Some(crate::ThreadRunout::Short) => (0.0, 1.25),
         Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
     })
+}
+
+/// Prepare the existing exact groove tool, including its shoulder trims, without cutting a target.
+fn groove_tool(
+    t: &ThreadInfo,
+    cyl: kernel::CylinderFace,
+    ends: [End; 2],
+    steep: SteepFlank,
+    ease: [f64; 2],
+    radius: f64,
+    taper: Option<(f64, usize)>,
+    continuous_flanks: bool,
+) -> Result<Body> {
+    let mut grooves = Vec::new();
+    for g in thread_grooves(t, radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
+        let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
+        grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law, continuous_flanks)?);
+    }
+    if let Some(taper) = taper
+        && let Some(envelope) = taper_envelope(t, cyl.radius, ends, taper)?
+    {
+        grooves.push(envelope);
+    }
+    let tool = match grooves.as_slice() {
+        [one] => one.clone(),
+        many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+    };
+    let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+    Ok(tool)
+}
+
+/// Separate external grooves on one body can share its cut and its final validity check.
+/// Unsupported or overlapping tool sets retain the ordinary per-face cutter.
+fn cut_grouped(st: &ModelState, selected: &[ThreadOn], continuous_flanks: bool) -> Result<Option<ModelState>> {
+    if selected.iter().any(|on| on.info.internal || on.info.form.is_taper() || on.narrow.is_some() || on.shoulder_unchecked) {
+        return Ok(None);
+    }
+    let mut groups: BTreeMap<&str, Vec<&ThreadOn>> = BTreeMap::new();
+    for on in selected {
+        groups.entry(on.info.body.as_str()).or_default().push(on);
+    }
+    let mut next = st.clone();
+    let mut checked = Vec::new();
+    for (name, group) in groups {
+        let index = st.bodies.iter().position(|body| body.name == name).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+        let original = st.bodies.get(index).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+        let tools = group
+            .iter()
+            .map(|on| groove_tool(&on.info, on.cyl, on.ends, on.steep, on.ease, on.cyl.radius, None, continuous_flanks))
+            .collect::<Result<Vec<_>>>()?;
+        let tool = match tools.as_slice() {
+            [one] => one.clone(),
+            many => match kernel::union_apart(many)? {
+                Some(one) => one,
+                None => return Ok(None),
+            },
+        };
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.thread_cuts += 1);
+        let body = kernel::boolean(&original.body, &tool, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the threads removed everything".into()))?;
+        // The check also keeps a bad shoulder trim on the established per-face fallback path.
+        super::check_feature_body(&body)?;
+        let faces = crate::lineage::Lineage::unnamed(&tool);
+        let lineage = original.traced().lineage.and_then(|lineage| crate::lineage::Lineage::step(&body, &[&lineage, &faces]));
+        checked.push((original.name.clone(), body.clone()));
+        if let Some(slot) = next.bodies.get_mut(index) {
+            *slot = original.remade(Traced { body, lineage, recipe: None });
+        }
+    }
+    // Nothing enters the live state or its validation scope until every target succeeded.
+    for (name, body) in checked {
+        super::remember_checked_thread_output(&name, &body);
+    }
+    Ok(Some(next))
 }
 
 /// Cut a modelled thread with its historical half-turn faces and groove-before-chamfer
@@ -931,10 +1094,9 @@ fn cut_with_flanks(
             )));
         }
         let sleeve = ring(r_min, r_out, 0.0, hi - lo)?;
-        let faces = sleeve.face_count();
         let filled =
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
-        let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+        let unnamed = crate::lineage::Lineage::unnamed(&sleeve);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
         input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
@@ -953,10 +1115,9 @@ fn cut_with_flanks(
     let chamfer = |mut input: Traced| -> Result<Traced> {
         if tip != ThreadTip::None {
             for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
-                let faces = cone.face_count();
                 let cut =
                     kernel::boolean(&input.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
-                let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+                let unnamed = crate::lineage::Lineage::unnamed(&cone);
                 let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
                 input = Traced { body: cut, lineage, recipe: None };
             }
@@ -966,30 +1127,23 @@ fn cut_with_flanks(
     if continuous_flanks {
         input = chamfer(input)?;
     }
-    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize)> {
-        let mut grooves = Vec::new();
-        for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
-            let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
-            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law, continuous_flanks)?);
-        }
-        if let Some(taper) = taper
-            && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
-        {
-            grooves.push(envelope);
-        }
-        let tool = match grooves.as_slice() {
-            [one] => one.clone(),
-            many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
-        };
-        let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, Body, Option<Body>)> {
+        let tool = groove_tool(&t, cyl, ends, steep, ease, groove_radius, taper, continuous_flanks)?;
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.thread_cuts += 1);
         let cut = kernel::boolean(&input.body, &tool, BoolOp::Cut)?;
         // Now rather than at the feature's end, where it could only fail the feature.
-        if ends.contains(&End::Shoulder)
-            && let Some(body) = &cut
-        {
-            kernel::check_kept(body)?;
-        }
-        Ok((cut, tool.face_count()))
+        let checked = if ends.contains(&End::Shoulder) {
+            if let Some(body) = &cut {
+                super::check_feature_body(body)?;
+                Some(body.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok((cut, tool, checked))
     };
     // A design that built with the square stop keeps building: where the kernel can't make the
     // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
@@ -1001,18 +1155,23 @@ fn cut_with_flanks(
     }
     let note = (square_stop && made.is_ok()).then(|| {
         format!(
-            "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
-            t.designation
+            "the {} thread's groove could not be run down to the {} here, so it stops clear of it and its last turn is left uncut",
+            t.designation,
+            if t.internal { "hole's bottom" } else { "shoulder" }
         )
     });
-    let (nb, groove_faces) = made?;
+    let (nb, groove_tool, checked) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
-    let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
+    let groove = crate::lineage::Lineage::unnamed(&groove_tool);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
+        // A later tip boolean needs its own check; the unmodified shoulder cut already passed.
+        if checked.as_ref().is_some_and(|body| body.same_shape(&nb.body)) {
+            super::remember_checked_thread_output(&mb.name, &nb.body);
+        }
         *slot = mb.remade(nb);
     }
     Ok(note)
@@ -1099,6 +1258,12 @@ fn tip_cones(
     Ok(out)
 }
 
+/// Replace the existing shoulder-trim failure hook for document orchestration tests.
+#[cfg(test)]
+pub(super) fn replace_empty_trim_for_test(value: bool) -> bool {
+    tests::EMPTY_TRIM.replace(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1122,6 +1287,7 @@ mod tests {
             from: None,
             modeled: true,
             ease_out: (0.0, 0.0),
+            to_bottom: false,
             tapped: false,
             old_auto_size: false,
         }
@@ -1192,6 +1358,35 @@ mod tests {
         assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
         // The square stop leaves about half a pitch's worth of groove uncut: well over a mm³.
         assert!(square > trimmed + 1.0, "{square} vs {trimmed}");
+    }
+
+    /// #22616: asked to, a modelled internal thread runs down to a blind hole's bottom, trimmed at
+    /// the bottom's plane as a thread at a shoulder is: more of the wall is cut than when it stops
+    /// clear of the bottom, and nothing past the bottom. Not asked, it stops clear, as before.
+    #[test]
+    fn an_internal_thread_asked_to_runs_down_to_a_blind_holes_bottom() {
+        // A 40 x 40 x 20 mm block with an 8.5 mm hole (M10's tap drill) 12 mm deep from the top.
+        let block = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let drill = kernel::cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::new(0.0, 0.0, 1.0), 4.25, 13.0).unwrap();
+        let body = kernel::boolean(&block, &drill, BoolOp::Cut).unwrap().unwrap();
+        let build = |to_bottom: bool| {
+            let mut st = ModelState::default();
+            st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
+            let on = thread_on(&st, 1, Vec3::new(4.25, 0.0, 14.0), &ThreadAsk { to_bottom, ..ask() }).unwrap();
+            let ends = on.ends;
+            let note = cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+            (ends, note, kernel::measure(&st.bodies[0].body).unwrap().volume)
+        };
+        let (clear, _, stops_clear) = build(false);
+        assert!(clear.contains(&End::Closed) && !clear.contains(&End::Shoulder), "{clear:?}");
+        let (ends, note, to_bottom) = build(true);
+        assert!(ends.contains(&End::Shoulder), "{ends:?}");
+        assert_eq!(note, None, "the groove reaches the bottom");
+        // The last turn or two of the groove more: at most the groove's ring (out to M10's major
+        // radius) over two pitches, so nothing is cut under the bottom.
+        let ring = std::f64::consts::PI * (5.0_f64.powi(2) - 4.25_f64.powi(2)) * 2.0 * 1.5;
+        let more = stops_clear - to_bottom;
+        assert!(more > 1e-3 && more < ring, "{more} mm³ more cut (at most {ring})");
     }
 
     /// A modelled thread on one hole leaves the other hole's wall a cylinder to thread: the

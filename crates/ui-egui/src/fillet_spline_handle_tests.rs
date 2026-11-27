@@ -29,11 +29,17 @@ fn open(h: &mut Harness) {
     h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Round"}})).unwrap();
+    // The preview's fillet runs on a worker thread; the loop ends as soon as it is in. The
+    // ceiling is only for a preview that never comes: with every test binary running at once,
+    // that thread can wait more than a minute for a core. A preview that ends in an error ends
+    // the wait at once.
     let began = std::time::Instant::now();
-    while (h.app.preview.busy || h.app.preview.tapered.is_empty()) && began.elapsed() < std::time::Duration::from_secs(60) {
+    let failed = |h: &Harness| !h.app.preview.busy && h.app.preview.error.is_some();
+    while (h.app.preview.busy || h.app.preview.tapered.is_empty()) && !failed(h) && began.elapsed() < std::time::Duration::from_secs(300) {
         h.frame();
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
+    assert!(!failed(h), "the fillet's preview failed: {:?}", h.app.preview.error);
     h.frames(4);
 }
 
@@ -191,4 +197,32 @@ fn a_taper_over_several_edges_keeps_the_radius_arrow() {
     // One spline would replace every edge's taper, so none is offered to drag.
     assert!(crate::scenario::handles("fillet_").is_empty(), "{:?}", crate::scenario::handles("fillet_"));
     assert!(h.at(&json!({"handle": "arrow"})).is_ok());
+}
+
+// Ctrl+Z after a radius handle drag puts the fillet's own radii back too: they are kept beside
+// the window's other values (#22838 review).
+#[test]
+fn undo_takes_back_a_radius_handle_drag() {
+    let mut h = fixture();
+    open(&mut h);
+    let (_, taper) = h.app.preview.tapered.first().cloned().expect("the preview's taper");
+    let law = if taper.start.dist(solidcore_record::Vec3::new(0.0, 0.0, 15.0)) < 1e-9 { taper.spline.clone() } else { taper.spline.reversed() };
+    let into = solidcore_record::Vec3::new(0.0, 1.0, -1.0) * std::f64::consts::FRAC_1_SQRT_2;
+    let g = law.greville();
+    let mid = g.len() / 2;
+    let k = if taper.spline == law { mid } else { g.len() - 1 - mid };
+    let p = solidcore_record::Vec3::new(40.0 * g[mid], 0.0, 15.0) + into * 4.0;
+    let before = h.app.dialog.as_ref().map(|d| d.extra.clone()).unwrap();
+    h.step(&json!({"drag": [{"handle": format!("fillet_r{k}")}, {"world": [p.x, p.y, p.z]}], "ctrl": true})).unwrap();
+    h.frames(2);
+    let dragged = h.app.dialog.as_ref().map(|d| d.extra.clone()).unwrap();
+    assert_eq!(dragged.get("type").and_then(Value::as_str), Some("spline"));
+    h.ctx.memory_mut(|m| m.stop_text_input());
+    h.frames(1);
+    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.extra.clone()), Some(before), "the radii are put back");
+    h.step(&json!({"key": "Y", "cmd": true})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.extra.clone()), Some(dragged), "Redo drags them again");
 }

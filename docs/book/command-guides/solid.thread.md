@@ -12,16 +12,16 @@ Put a thread on a round face: an external thread on a shaft or stud, or an inter
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Cylindrical face | The round face the thread goes on. | Click the outside of the shaft near the end to thread. |
-| Form | The thread standard: ISO metric, Trapezoidal (ISO 2904), Acme (ASME B1.5), Buttress (DIN 513 or ASME B1.9), and the pipe threads Pipe G (ISO 228-1), Pipe Rp (ISO 7-1), Pipe taper R, Rc (ISO 7-1) and Pipe taper NPT (ASME B1.20.1). UNC and UNF are not in this list. | ISO metric for fasteners. Acme or Trapezoidal for lead screws. Buttress for a screw that takes load one way, like a vise screw. Pipe taper NPT for US tapered pipe threads. |
+| Form | The thread standard: ISO metric, Unified (ASME B1.1: UNC, UNF, UNEF, UN), Trapezoidal (ISO 2904), Acme (ASME B1.5), Buttress (DIN 513 or ASME B1.9), and the pipe threads Pipe G (ISO 228-1), Pipe Rp (ISO 7-1), Pipe taper R, Rc (ISO 7-1) and Pipe taper NPT (ASME B1.20.1). | ISO metric for metric fasteners; Unified for inch fasteners. Acme or Trapezoidal for lead screws. Buttress for a screw that takes load one way, like a vise screw. Pipe taper NPT for US tapered pipe threads. |
 | Modeled | On: the thread groove is cut into the part. Off: the thread is carried as a callout only. | Leave it off unless you need to see the thread or 3D print it. A modeled thread makes the part slower to rebuild. |
-| Automatic size | On by default: picks the standard size that fits the face you selected. | Leave it on when the shaft is a standard diameter. |
+| Automatic size | On by default: picks the standard size that fits the face you selected; ISO metric by default, or the nearest catalogued UNC size when Form is Unified. | Leave it on when the shaft is a standard diameter. |
 | Size and Pitch | The thread size from the standard's table, and for metric threads the pitch. | M12 with the standard 1.75 mm pitch, or 1.25 mm for M12 fine. |
-| Designation | The thread callout. You can type it directly. | M12, M12x1.25. |
+| Designation | The thread callout. You can type it directly. | M12, M12x1.25, M12-6g, 1/4-20 UNC-2A, #10-32 UNF. An ISO metric class with a lowercase letter (6g) needs a shaft, an uppercase one (6H) a hole. Unified classes ending in A need a shaft; classes ending in B need a hole. The class is kept in the callout and does not change the thread's shape. |
 | Hand | Right, Left, or Both. Pipe threads offer Right or Left only. | Right unless the print calls for LH. |
 | Starts | Number of thread starts, 1 to 8. | 1 for fasteners. 2 or more for a fast-moving lead screw: each turn advances the pitch times the number of starts. |
 | Steep Flank (Buttress only) | Which end the steep, load-carrying flank faces. | Point it toward the load. |
 | Extent | Full runs the whole face. Length runs a set distance. Up to stops at a face or plane you pick. | Length for a threaded end on a longer shaft. Up to for a thread that stops at a shoulder. |
-| Start end (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to. | Pick it when the thread starts at the wrong end. |
+| Start side (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to. | Pick it when the thread starts at the wrong end. |
 | Start (Ends) | None leaves the thread's free end plain. Chamfer adds a lead-in chamfer and shows Chamfer Angle and Chamfer Depth; left blank, they use the ISO 4753 standard chamfer. | Chamfer the start of any thread that has to take a nut or go into a tapped hole by hand. |
 | End (Ends) | Square stops the thread sharp. Fade runs it out over a length (ISO 3508 runout, 2.5 pitches standard). | Fade for a thread cut with a die or single-point tool that stops short of a shoulder. |
 
@@ -38,11 +38,11 @@ Put a thread on a round face: an external thread on a shaft or stud, or an inter
 #### Tips and common mistakes
 
 - **Do** size the cylinder before threading it: major diameter for an external thread, tap drill size for an internal one.
-- **Do** click the face near the end you want threaded, or pick Start end. Otherwise a Length thread can start at the wrong end.
+- **Do** click the face near the end you want threaded, or pick Start side. Otherwise a Length thread can start at the wrong end.
 - **Do** chamfer the start of an external thread. The shop will put one there anyway, and a nut starts on it in the model the same way it does on the part.
 - **Do** leave room for runout before a shoulder. A thread can't run full depth right up to a shoulder without a relief groove.
 - **Don't** turn on Modeled just to show the part is threaded. The callout already says it.
-- **Don't** look for UNC or UNF here. Inch fastener threads are only on {{#command solid.hole}} tapped holes for now; the inch forms in this list are Acme, ASME buttress and the pipe threads.
+- **Do** choose Unified for inch fastener threads. A 1/4-20 UNC external thread needs a 6.35 mm shaft; a #10-32 UNF thread needs a 4.826 mm shaft. Fractional or decimal inch sizes and #0 through #12 are accepted; pitch is 25.4/TPI mm.
 - **Don't** mix up NPT and the ISO taper (R, Rc, often called BSPT). Both are tapered pipe threads, but the thread angle and pitch differ, and they don't seal together.
 
 #### See also
