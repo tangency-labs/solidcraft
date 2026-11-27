@@ -357,7 +357,7 @@ pub(super) fn coincident_opposites(
 mod tests {
     use super::*;
 
-    fn plane(id: usize, x: f64, normal_x: f64) -> PlanarFace {
+    fn plane(id: u32, x: f64, normal_x: f64) -> PlanarFace {
         PlanarFace {
             id: FaceId::from_index(id),
             origin: Point3::new(x, 0.0, 0.0),
