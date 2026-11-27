@@ -6,14 +6,16 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::Write;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod drawing;
 mod import_cache;
+mod kind;
 mod native_cache;
 mod provenance;
 mod text;
 mod thumbnail;
-pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
+pub use drawing::{FileKind, design_drawings, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
 pub use native_cache::{read_design_geometry, take_last_cache_refusal};
 pub use provenance::{
@@ -26,6 +28,8 @@ pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail
 use serde_json::{Map, Value, json};
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 use solidcraft_format::container::{Limits, Reader, Writer, digest};
+
+pub use kind::{DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file};
 
 use crate::{IoError, Result, design_metadata::replace};
 
@@ -134,15 +138,83 @@ const LIMITS: Limits = Limits {
 /// is still written in full, never refused (data loss), and the caller says it is over the limit.
 const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
+/// A Compact save's budgets: the same, with the model cache deflated at [`CACHE_LEVELS`]`.compact`.
+const COMPACT_SAVE_LIMITS: Limits = Limits { level: compact_part_level, ..SAVE_LIMITS };
+
+/// A Fast save's budgets while the experimental smaller saves are on
+/// ([`set_smaller_default_saves`]): the model cache at [`CACHE_LEVELS`]`.smaller_default`.
+const SMALLER_SAVE_LIMITS: Limits = Limits { level: smaller_part_level, ..SAVE_LIMITS };
 /// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since the
 /// bytes don't come from outside and a save may be over that limit (#18686).
 const WRITTEN_LIMITS: Limits = Limits { check_size: |_| Ok(()), ..SAVE_LIMITS };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
-/// compression is what makes it fit. Everything else is level 1.
+/// compression is what makes it fit. The model cache takes [`CACHE_LEVELS`]`.fast`. Everything
+/// else is level 1.
 fn part_level(name: &str, length: usize) -> i64 {
-    if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
+    cache_or_part_level(name, length, CACHE_LEVELS.fast)
+}
+
+/// The Deflate level of the model cache (`cache/bodies.bin`, `cache/model.json`) for each kind of
+/// save, in one place (#19988). Level 1 uses fixed Huffman codes: an 11.8 MB `cache/bodies.bin`
+/// took 14 ms to 1.77 MB, level 4 30 ms to 1.11 MB, level 6 46 ms to 0.93 MB, level 9 79 ms to
+/// 0.85 MB; reading it back took 13, 10.7, 9.6 and 9.2 ms. Every release reads every level, so
+/// changing a number here changes no format.
+struct CacheLevels {
+    /// A Fast save, the default.
+    fast: i64,
+    /// A Compact save (`file.save {compression: "compact"}`).
+    compact: i64,
+    /// A Fast save while the experimental smaller saves are on.
+    smaller_default: i64,
+}
+
+const CACHE_LEVELS: CacheLevels = CacheLevels { fast: 1, compact: 6, smaller_default: 6 };
+
+/// A part's level with the model cache at `cache_level` and the rest as [`part_level`] says.
+fn cache_or_part_level(name: &str, length: usize, cache_level: i64) -> i64 {
+    if native_cache::ENTRIES.contains(&name) {
+        cache_level
+    } else if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) {
+        STEP_LEVEL
+    } else {
+        1
+    }
+}
+
+/// A Compact save's level of a part: the model cache takes [`CACHE_LEVELS`]`.compact`.
+fn compact_part_level(name: &str, length: usize) -> i64 {
+    cache_or_part_level(name, length, CACHE_LEVELS.compact)
+}
+
+/// A smaller Fast save's level of a part: the model cache takes [`CACHE_LEVELS`]`.smaller_default`.
+fn smaller_part_level(name: &str, length: usize) -> i64 {
+    cache_or_part_level(name, length, CACHE_LEVELS.smaller_default)
+}
+
+/// Whether Fast saves deflate the model cache harder (experimental, off by default; #19988).
+static SMALLER_DEFAULT_SAVES: AtomicBool = AtomicBool::new(false);
+
+/// Every Fast save from now on deflates the model cache at [`CACHE_LEVELS`]`.smaller_default`
+/// (on) or `.fast` (off, the default). The app sets it from Preferences › General › Saving.
+pub fn set_smaller_default_saves(on: bool) {
+    SMALLER_DEFAULT_SAVES.store(on, Ordering::Relaxed);
+}
+
+/// Whether Fast saves deflate the model cache harder: [`set_smaller_default_saves`] turned it on,
+/// or `SOLIDCRAFT_SMALLER_SAVES` is set (for command-line runs, which read no preferences).
+pub fn smaller_default_saves() -> bool {
+    SMALLER_DEFAULT_SAVES.load(Ordering::Relaxed) || solidcraft_geom::env::flag("SMALLER_SAVES")
+}
+
+/// The budgets of a save under `compression`, the Fast ones as the experimental switch says.
+fn save_limits(compression: DesignCompression, smaller: bool) -> Limits {
+    match compression {
+        DesignCompression::Fast if smaller => SMALLER_SAVE_LIMITS,
+        DesignCompression::Fast => SAVE_LIMITS,
+        DesignCompression::Compact => COMPACT_SAVE_LIMITS,
+    }
 }
 
 /// A design container being written, within [`LIMITS`].
@@ -174,8 +246,8 @@ fn part_limit(name: &str) -> usize {
 }
 
 impl PackageWriter {
-    fn new() -> PackageWriter {
-        PackageWriter(Writer::for_save(SAVE_LIMITS, max_expanded))
+    fn new(compression: DesignCompression) -> PackageWriter {
+        PackageWriter(Writer::for_save(save_limits(compression, smaller_default_saves()), max_expanded))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -230,7 +302,7 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None)
+    write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), None, None)
 }
 
 /// [`write_design_container_with_thumbnail`] reusing what `reuse` already holds: `reuse` is the
@@ -252,8 +324,10 @@ pub fn write_design_container_reusing(
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
     // Reusing is only ever a shortcut: a source that cannot be copied from (damaged or cut short
     // on disk) never fails a save the document alone would make.
-    match write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
-        Err(_) if !crate::safe_write::cancelled() => write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None),
+    match write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
+        Err(_) if !crate::safe_write::cancelled() => {
+            write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), None, None)
+        }
         result => result,
     }
 }
@@ -270,7 +344,32 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save), None)
+    write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), Some(save), None)
+}
+
+/// Write a design of `kind` (experimental, #6892): its header names the kind ([`DesignKind`]); a
+/// single design's is the header every design had. `provenance` appends a signed record as
+/// [`write_design_container_with_provenance`] does. `reuse` is the container the design was
+/// opened from, as [`write_design_container_reusing`] takes it; it is only ever a shortcut, so a
+/// source that cannot be copied from never fails the save.
+#[allow(clippy::too_many_arguments)]
+pub fn write_design_container_as(
+    doc: &Document,
+    kind: DesignKind,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    provenance: Option<&ProvenanceSave<'_>>,
+    reuse: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_as");
+    match write_container(doc, kind, compression, preview, geometry, thumbnail, max_design(), provenance, reuse) {
+        Err(_) if reuse.is_some() && !crate::safe_write::cancelled() => {
+            write_container(doc, kind, compression, preview, geometry, thumbnail, max_design(), provenance, None)
+        }
+        result => result,
+    }
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
@@ -279,6 +378,7 @@ pub fn write_design_container_with_provenance(
 #[allow(clippy::too_many_arguments)]
 fn write_container(
     doc: &Document,
+    kind: DesignKind,
     compression: DesignCompression,
     preview: Option<&DesignPreview>,
     geometry: Option<&solidcraft_doc::SavedModel>,
@@ -290,7 +390,7 @@ fn write_container(
     doc.render.validate().map_err(invalid)?;
     // A source that is not a container it can read is not reused; it never fails the save.
     let mut reuse = reuse.and_then(|bytes| PackageReader::new(Cursor::new(bytes)).ok());
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(compression);
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
     }
@@ -419,7 +519,7 @@ fn write_container(
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
-    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| kind.header());
     let container_bytes = serde_json::to_vec(&container).map_err(invalid)?;
     writer.part("container.json", &container_bytes, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
@@ -433,6 +533,11 @@ fn write_container(
     drawing::write(&mut writer, doc)?;
     for (key, data) in &doc.plugin_data {
         writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), data, true)?;
+    }
+    // The internal components (experimental, #6892): each is a design file of its own,
+    // compressed already, so it goes in as it is.
+    for (name, data) in &doc.internal {
+        writer.part(&format!("{}{name}", solidcraft_doc::internal::PREFIX), data, false)?;
     }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
@@ -450,7 +555,7 @@ fn write_container(
         native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
-        // than the extra bytes would be written and read.
+        // than the extra bytes would be written and read. Compact deflates them harder.
         writer.part(manifest_entry, &manifest, true)?;
         writer.part(payload_entry, &data, true)?;
     }
@@ -1283,7 +1388,8 @@ fn hydrate_newer<R: Read + Seek>(
         let ours = matches!(name.as_str(), "document.json" | "container.json")
             || name.starts_with("cache/")
             || name.starts_with("drawings/")
-            || plugin_part(name).is_some();
+            || plugin_part(name).is_some()
+            || internal_part(name).is_some();
         if !ours && !unused_blobs.contains(name.as_str()) {
             file.parts.push((name.clone(), reader.limited_part(name, part_limit(name))?.into()));
         }
@@ -1312,11 +1418,162 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
     }
 }
 
+/// `container`, a design file's bytes, with its internal component `name` holding `bytes`
+/// (experimental, #6892): every other part goes across as it is stored, so writing one component
+/// back costs that component, not the design. One the file has not held yet is added. A signed
+/// design is refused, since its signature covers its parts: an ordinary save stores the component.
+pub fn with_internal_component(container: &[u8], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    if !solidcraft_doc::internal::valid_name(name) {
+        return Err(invalid("not an internal component's name"));
+    }
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let names = reader.part_names();
+    if names.iter().any(|part| part.starts_with("provenance/")) {
+        return Err(invalid("the design is signed, so only a save can store the component"));
+    }
+    let target = format!("{}{name}", solidcraft_doc::internal::PREFIX);
+    let mut writer = Writer::new(SAVE_LIMITS);
+    for part in &names {
+        if *part == target {
+            writer.part(&target, bytes, false)?;
+        } else {
+            writer.copy_part_as_stored(&mut reader.0, part)?;
+        }
+    }
+    // Not in the file yet: added (a name already written is written once).
+    writer.part(&target, bytes, false)?;
+    Ok(writer.finish()?)
+}
+
+/// The tag of a file that belongs to a design (experimental, #6892): an internal component, or a
+/// drawing's file in the design's work folder. It sits in the file's header (`container.json`,
+/// `"internal_of"`), so the file says what it is wherever it ends up: a recovery file left by a
+/// crash, or a copy taken out of the work folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InternalOf {
+    /// The name the owning design's file had when the tag was made: a hint, for a message and
+    /// for finding the file. It can be out of date.
+    pub design: String,
+    /// Made once with the tag. The owner is the design that holds a file with the same key.
+    pub key: String,
+}
+
+impl InternalOf {
+    /// The longest `design` and `key` a header may carry, in bytes.
+    const MAX: (usize, usize) = (255, 64);
+
+    /// The tag a header carries, when it carries one that reads: two plain strings within bounds.
+    fn from_header(container: &Value) -> Option<InternalOf> {
+        let tag = container.get("internal_of")?.as_object()?;
+        let text = |key: &str, max: usize| {
+            let value = tag.get(key)?.as_str()?;
+            (tag.len() == 2 && !value.is_empty() && value.len() <= max && !value.chars().any(char::is_control)).then(|| value.to_string())
+        };
+        Some(InternalOf { design: text("design", Self::MAX.0)?, key: text("key", Self::MAX.1)? })
+    }
+
+    fn header(&self) -> Value {
+        json!({"design": self.design, "key": self.key})
+    }
+}
+
+/// The tag of the file `bytes`, when it is a container that carries one ([`InternalOf`]).
+pub fn internal_of(bytes: &[u8]) -> Option<InternalOf> {
+    if !is_design_container(bytes) {
+        return None;
+    }
+    let mut reader = PackageReader::new(Cursor::new(bytes)).ok()?;
+    InternalOf::from_header(&serde_json::from_slice(&reader.limited_part("container.json", 4096).ok()?).ok()?)
+}
+
+/// The tag of the file at `path` ([`internal_of`]), read from its header alone.
+pub fn read_internal_of_file(path: &str) -> Option<InternalOf> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    InternalOf::from_header(&serde_json::from_slice(&PackageReader::new(source).ok()?.limited_part("container.json", 4096).ok()?).ok()?)
+}
+
+/// `container`, a design or drawing file's bytes, with its header carrying `tag`, or none: only
+/// `container.json` is written again, every other part is copied as it is stored. A signed
+/// design is refused, since its signature covers the file as it is.
+pub fn with_internal_of(container: &[u8], tag: Option<&InternalOf>) -> Result<Vec<u8>> {
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let names = reader.part_names();
+    if names.iter().any(|part| part.starts_with("provenance/")) {
+        return Err(invalid("the file is signed, so its header stays as it is"));
+    }
+    let mut header: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
+    let fields = header.as_object_mut().ok_or_else(|| invalid("the file's header is not an object"))?;
+    match tag {
+        Some(tag) if tag.design.len() <= InternalOf::MAX.0 && tag.key.len() <= InternalOf::MAX.1 => fields.insert("internal_of".into(), tag.header()),
+        Some(_) => return Err(invalid("the tag is too long")),
+        None => fields.remove("internal_of"),
+    };
+    let mut writer = Writer::new(SAVE_LIMITS);
+    for part in &names {
+        if part == "container.json" {
+            writer.part(part, &serde_json::to_vec(&header).map_err(invalid)?, false)?;
+        } else {
+            writer.copy_part_as_stored(&mut reader.0, part)?;
+        }
+    }
+    Ok(writer.finish()?)
+}
+
+/// The internal components `container`, a design file's bytes, holds, by name (experimental,
+/// #6892): only those parts are read, never the design.
+pub fn internal_components(container: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let mut held = std::collections::BTreeMap::new();
+    for name in reader.part_names() {
+        let Some(member) = internal_part(&name) else { continue };
+        if held.len() >= solidcraft_doc::internal::MAX_FILES {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            held.insert(member.to_string(), bytes);
+        }
+    }
+    Ok(held)
+}
+
+/// The name of a part stored inside the file, for a container part under `internal/` that is one.
+fn internal_part(name: &str) -> Option<&str> {
+    name.strip_prefix(solidcraft_doc::internal::PREFIX).filter(|member| solidcraft_doc::internal::valid_name(member))
+}
+
+/// The internal components (experimental, #6892): each `internal/<name>` part, as its
+/// bytes. One that does not read is left out; the design opens all the same, and the component
+/// that shows it keeps the bodies its link holds.
+fn hydrate_internal<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    for name in reader.part_names() {
+        let Some(member) = internal_part(&name) else { continue };
+        if doc.internal.len() >= solidcraft_doc::internal::MAX_FILES {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            doc.internal.insert(member.to_string(), bytes.into());
+        }
+    }
+}
+
 /// A `container.json` that says only a format this build writes or wrote.
 fn is_known_container(container: &Value) -> bool {
+    // A file tagged as a design's own ([`InternalOf`]) is otherwise what its header says.
+    if InternalOf::from_header(container).is_some() {
+        let mut plain = container.clone();
+        if let Some(fields) = plain.as_object_mut() {
+            fields.remove("internal_of");
+        }
+        return is_known_container(&plain);
+    }
     *container == json!({"format": VERSION})
         || *container == json!({"format": LEGACY_VERSION})
         || container.get("content").is_some_and(|c| c == "drawing")
+        || DesignKind::ALL.into_iter().any(|kind| *container == kind.header())
+        || *container == json!({"format": VERSION, "content": kind::LEGACY_SHEET_METAL.0})
 }
 
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
@@ -1411,6 +1668,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
         hydrate_newer(&mut doc, &metadata, container, reader, &mut records_parts)?;
     }
     hydrate_plugin_data(&mut doc, reader);
+    hydrate_internal(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -2371,6 +2629,116 @@ mod tests {
         assert!(count.get() >= step.len() / 4);
     }
 
+    /// A Compact save deflates the model cache harder than a Fast one; both read back the same
+    /// model, and every other part keeps its level.
+    #[test]
+    fn compact_saves_deflate_the_model_cache_harder_and_read_it_back() {
+        for name in native_cache::ENTRIES {
+            assert_eq!(part_level(name, 1), CACHE_LEVELS.fast, "{name}");
+            assert_eq!(compact_part_level(name, 1), CACHE_LEVELS.compact, "{name}");
+        }
+        for name in ["document.json", "blobs/a.step", "blobs/a.mesh", "cache/preview.bin"] {
+            assert_eq!(compact_part_level(name, 1), part_level(name, 1), "{name}");
+        }
+        use solidcore_record::Vec3;
+        let bodies = (0..4).map(|i| solidcraft_kernel::box_solid(Vec3::new(f64::from(i) * 20., 0., 0.), Vec3::new(10., 20., 30.)).unwrap());
+        let model = saved_model(bodies.collect());
+        let doc = document();
+        let stored = |bytes: &[u8], name: &str| zip::ZipArchive::new(Cursor::new(bytes)).unwrap().by_name(name).unwrap().compressed_size();
+        let fast = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+        let compact = write_design_container_with_cache(&doc, DesignCompression::Compact, None, Some(&model)).unwrap();
+        assert!(stored(&compact, "cache/model.json") <= stored(&fast, "cache/model.json"));
+        let (tight, loose) = (stored(&compact, "cache/bodies.bin"), stored(&fast, "cache/bodies.bin"));
+        assert!(tight < loose, "bodies: {tight} vs {loose}");
+        assert_eq!(parts(&compact)["cache/bodies.bin"], parts(&fast)["cache/bodies.bin"], "the same bodies, only packed tighter");
+        let read = DesignContainerReader::new(Cursor::new(&compact)).unwrap().geometry().unwrap();
+        assert_eq!(read.records, model.records);
+        assert_eq!(read.bodies.len(), model.bodies.len());
+        assert_eq!(crate::read_design(&compact).unwrap().to_json(), doc.to_json());
+    }
+
+    /// The experimental smaller saves (#19988) make a Fast save deflate the model cache at
+    /// `smaller_default` and leave every other part, and Compact, as they are. Off (the default),
+    /// a Fast save is as before. The switch itself is not flipped here: other tests save at once.
+    #[test]
+    fn smaller_default_saves_deflate_only_the_fast_model_cache_harder() {
+        assert!(solidcraft_geom::env::flag("SMALLER_SAVES") || !smaller_default_saves(), "off unless turned on");
+        let level = |compression, smaller, name: &str| (save_limits(compression, smaller).level)(name, 1);
+        for name in native_cache::ENTRIES {
+            assert_eq!(level(DesignCompression::Fast, false, name), CACHE_LEVELS.fast, "{name}");
+            assert_eq!(level(DesignCompression::Fast, true, name), CACHE_LEVELS.smaller_default, "{name}");
+            assert_eq!(level(DesignCompression::Compact, true, name), CACHE_LEVELS.compact, "{name}");
+        }
+        for name in ["document.json", "container.json", "blobs/a.step", "blobs/a.mesh", "drawings/a.json"] {
+            assert_eq!(level(DesignCompression::Fast, true, name), part_level(name, 1), "{name}");
+        }
+        use solidcore_record::Vec3;
+        let bodies = (0..4).map(|i| solidcraft_kernel::box_solid(Vec3::new(f64::from(i) * 20., 0., 0.), Vec3::new(10., 20., 30.)).unwrap());
+        let fast = write_design_container_with_cache(&document(), DesignCompression::Fast, None, Some(&saved_model(bodies.collect()))).unwrap();
+        let raw = parts(&fast)["cache/bodies.bin"].clone();
+        let packed = |smaller| {
+            let mut writer = Writer::new(save_limits(DesignCompression::Fast, smaller));
+            writer.part("cache/bodies.bin", &raw, true).unwrap();
+            let bytes = writer.finish().unwrap();
+            let size = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap().by_name("cache/bodies.bin").unwrap().compressed_size();
+            (size, parts(&bytes)["cache/bodies.bin"].clone())
+        };
+        let ((loose, plain), (tight, unpacked)) = (packed(false), packed(true));
+        assert!(tight < loose, "bodies: {tight} vs {loose}");
+        assert_eq!(unpacked, plain, "the same bodies, only packed tighter");
+    }
+
+    /// A design's kind (#6892) is its header's `content`: written, read back from bytes and from a
+    /// file, known to this build (no newer-file notice), and named by each extension in any case.
+    /// A single design's file is byte for byte what every save wrote before.
+    #[test]
+    fn design_kinds_live_in_the_header_and_a_single_design_is_unchanged() {
+        let doc = document();
+        let single = write_design_container_as(&doc, DesignKind::Single, DesignCompression::Fast, None, None, None, None, None).unwrap();
+        assert_eq!(single, write_design_container(&doc).unwrap(), "a single design's file is as before");
+        assert_eq!(parts(&single)["container.json"], serde_json::to_vec(&json!({"format": VERSION})).unwrap());
+        for kind in DesignKind::ALL {
+            let bytes = write_design_container_as(&doc, kind, DesignCompression::Fast, None, None, None, None, None).unwrap();
+            assert_eq!(design_kind(&bytes), kind);
+            let header: Value = serde_json::from_slice(&parts(&bytes)["container.json"]).unwrap();
+            assert_eq!(header.get("content").and_then(Value::as_str), kind.content(), "{header}");
+            let read = crate::read_design(&bytes).unwrap();
+            assert!(read.newer_file.is_none(), "{kind:?}: this build knows its own kinds");
+            assert_eq!(read.to_json(), doc.to_json());
+            assert_eq!(file_kind(&bytes).unwrap(), FileKind::Design);
+            let path = std::env::temp_dir().join(format!("solidcraft-kind-{}-{}.{}", std::process::id(), kind.extension(), kind.extension()));
+            std::fs::write(&path, &bytes).unwrap();
+            assert_eq!(read_design_kind_file(&path.to_string_lossy()), kind);
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(DesignKind::for_path(&format!("a/b.{}", kind.extension().to_uppercase())), Some(kind));
+        }
+        for path in ["a.solidcraft", "a.json", "a.step", "a", "a.scd", "a.scp", "a.scdwg"] {
+            assert_eq!(DesignKind::for_path(path), None, "{path}");
+        }
+        // The sheet metal part of the experiment's earlier builds is a part now: its header and its
+        // extension read as a part's, this build knows the header, and saving writes "part".
+        assert_eq!(DesignKind::for_path("panel.SCSHT"), Some(DesignKind::Part));
+        let mut legacy = parts(&single);
+        legacy.insert("container.json".into(), serde_json::to_vec(&json!({"format": VERSION, "content": "sheet_metal"})).unwrap());
+        let legacy = package(&legacy);
+        assert_eq!(design_kind(&legacy), DesignKind::Part);
+        let read = crate::read_design(&legacy).unwrap();
+        assert!(read.newer_file.is_none(), "this build knows the earlier header");
+        let path = std::env::temp_dir().join(format!("solidcraft-kind-legacy-{}.scsht", std::process::id()));
+        std::fs::write(&path, &legacy).unwrap();
+        assert!(is_legacy_sheet_metal_file(&path.to_string_lossy()));
+        std::fs::remove_file(&path).unwrap();
+        let resaved = write_design_container_as(&read, DesignKind::Part, DesignCompression::Fast, None, None, None, None, None).unwrap();
+        assert_eq!(parts(&resaved)["container.json"], serde_json::to_vec(&json!({"format": VERSION, "content": "part"})).unwrap());
+        assert_eq!(design_kind(b"{}"), DesignKind::Single, "plain JSON has no header");
+        assert_eq!(read_design_kind_file("no/such/file.scprt"), DesignKind::Single);
+        // A header naming something this build doesn't know is a single design here, and the
+        // newer-file path keeps it as it came.
+        let mut entries = parts(&single);
+        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/1","content":"weldment"}"#.to_vec());
+        assert_eq!(design_kind(&package(&entries)), DesignKind::Single);
+    }
+
     #[test]
     fn model_cache_stores_repeated_parts_once_and_keeps_placed_copies() {
         use solidcore_record::Vec3;
@@ -2571,14 +2939,25 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None, None).unwrap();
+        let bytes =
+            write_container(&doc, DesignKind::Single, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes =
-            write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None, None).unwrap();
+        let bytes = write_container(
+            &doc,
+            DesignKind::Single,
+            DesignCompression::Fast,
+            None,
+            Some(&native_geometry()),
+            None,
+            crate::MAX_DESIGN_BYTES,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }
@@ -2668,13 +3047,13 @@ mod tests {
         let doc = document();
         // At the default limit: left out, as before.
         assert!(native_cache::encode_model(&model, b"{}", usize::MAX).is_err());
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
+        let bytes = write_container(&doc, DesignKind::Single, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
         // With a limit that allows it: kept, and read back from the cache.
         crate::limits::test_cap::set(Some(1 << 30));
         let (manifest, _) = native_cache::encode_model(&model, b"{}", usize::MAX).unwrap();
         assert!(manifest.len() > 32 << 20, "{} bytes is not past the default cap", manifest.len());
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
+        let bytes = write_container(&doc, DesignKind::Single, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
         // Read back under the larger cap. The 40 MiB body name is only padding for the manifest, so
         // the check is that the cache reads, not a model built from that name.
@@ -3536,6 +3915,60 @@ mod tests {
         }
     }
 
+    /// The parts stored inside a design file (`internal/<name>`) open as their bytes and save back
+    /// byte for byte; a design without any has no `internal/` part, a part whose name is not a
+    /// member's is not taken as one, and a plain JSON design refuses to save them.
+    #[test]
+    fn parts_stored_inside_a_design_round_trip_untouched() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("internal/")));
+        assert!(crate::read_design(&package(&without)).unwrap().internal.is_empty());
+
+        // A member is a design file of its own: its bytes are a container's.
+        let part = write_design_container(&doc).unwrap();
+        let mut entries = without.clone();
+        entries.insert("internal/Top.scprt".into(), part.clone());
+        entries.insert("internal/Shelf Bracket.scprt".into(), b"not a design, kept all the same".to_vec());
+        entries.insert("internal/notes.txt".into(), b"no".to_vec());
+        entries.insert("internal/.hidden.scprt".into(), b"no".to_vec());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features, doc.features);
+        assert_eq!(opened.internal.keys().map(String::as_str).collect::<Vec<_>>(), ["Shelf Bracket.scprt", "Top.scprt"]);
+        assert_eq!(opened.internal["Top.scprt"].as_bytes(), part);
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved["internal/Top.scprt"], part);
+        assert_eq!(resaved["internal/Shelf Bracket.scprt"], b"not a design, kept all the same");
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("internal/")).count(), 2);
+        assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
+
+        let refused = crate::write_design(&opened).unwrap_err().to_string();
+        assert!(refused.contains("internal components") && refused.contains(".sc"), "{refused}");
+        assert!(!opened.to_json().contains("Top.scprt"), "never written as text");
+
+        // One component written back: it changes, every other part is the same bytes, and the
+        // design reads as before. One the file has not held is added.
+        let file = write_design_container(&opened).unwrap();
+        let rewritten = with_internal_component(&file, "Top.scprt", b"top, edited").unwrap();
+        let (before, after) = (parts(&file), parts(&rewritten));
+        assert_eq!(after["internal/Top.scprt"], b"top, edited");
+        assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+        for (name, bytes) in &before {
+            assert!(name == "internal/Top.scprt" || after[name] == *bytes, "{name} changed");
+        }
+        let reread = crate::read_design(&rewritten).unwrap();
+        assert_eq!(reread.features, opened.features);
+        assert_eq!(reread.internal["Shelf Bracket.scprt"], opened.internal["Shelf Bracket.scprt"]);
+        let added = parts(&with_internal_component(&file, "Leg.scprt", b"leg").unwrap());
+        assert_eq!(added["internal/Leg.scprt"], b"leg");
+        assert_eq!(added.len(), before.len() + 1);
+        assert!(with_internal_component(&file, "../Top.scprt", b"no").is_err());
+        let listed = internal_components(&file).unwrap();
+        assert_eq!(listed.keys().map(String::as_str).collect::<Vec<_>>(), ["Shelf Bracket.scprt", "Top.scprt"]);
+        assert_eq!(listed["Top.scprt"], part);
+    }
+
     /// Import records hold no more bodies than an import makes. A records part of millions of
     /// tiny bodies is small once compressed but took tens of gigabytes to read, before the
     /// import's own check of its bodies ran. One body past the bound is refused as the records
@@ -3772,6 +4205,45 @@ mod tests {
         let from_json = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
+    }
+
+    /// A file that belongs to a design says so in its header (#6892, [`InternalOf`]): the tag is
+    /// written and taken away without touching any other part, a tagged design opens as the
+    /// design it is with nothing reported as newer, and a tag that does not read is no tag.
+    #[test]
+    fn a_files_tag_names_the_design_it_belongs_to_and_touches_nothing_else() {
+        let plain = write_design_container(&document()).unwrap();
+        assert_eq!(internal_of(&plain), None);
+        assert_eq!(internal_of(b"{}"), None, "plain JSON carries no tag");
+        let tag = InternalOf { design: "Counter.sc".into(), key: "0123456789abcdef".into() };
+        let tagged = with_internal_of(&plain, Some(&tag)).unwrap();
+        assert_eq!(internal_of(&tagged), Some(tag.clone()));
+        let (before, after) = (parts(&plain), parts(&tagged));
+        assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+        assert!(before.iter().all(|(name, bytes)| name == "container.json" || after.get(name) == Some(bytes)), "only the header changes");
+        let header: Value = serde_json::from_slice(&after["container.json"]).unwrap();
+        assert_eq!(header, json!({"format": VERSION, "internal_of": {"design": "Counter.sc", "key": "0123456789abcdef"}}));
+        let opened = crate::read_design(&tagged).unwrap();
+        assert!(opened.newer_file.is_none(), "a tag is nothing from a newer SolidCraft");
+        assert_eq!(opened.features, document().features);
+        // Taken away again: the file as it was.
+        assert_eq!(parts(&with_internal_of(&tagged, None).unwrap()), before);
+        // A drawing's file carries one the same way, and still reads as that drawing.
+        // A tag that does not read (wrong shape, empty, a control character, too long) is none.
+        for bad in [
+            json!("Counter.sc"),
+            json!({"design": "", "key": "k"}),
+            json!({"design": "Counter.sc"}),
+            json!({"design": "Counter.sc", "key": 7}),
+            json!({"design": "Counter.sc", "key": "k", "more": 1}),
+            json!({"design": "Counter\n.sc", "key": "k"}),
+            json!({"design": "x".repeat(256), "key": "k"}),
+        ] {
+            let mut entries = before.clone();
+            entries.insert("container.json".into(), serde_json::to_vec(&json!({"format": VERSION, "internal_of": bad})).unwrap());
+            assert_eq!(internal_of(&package(&entries)), None, "{bad}");
+        }
+        assert!(with_internal_of(&plain, Some(&InternalOf { design: "x".repeat(256), key: "k".into() })).is_err());
     }
 
     /// A canvas's image is its bytes: a container keeps them as a part of their own (its record

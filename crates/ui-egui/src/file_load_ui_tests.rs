@@ -1674,6 +1674,317 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A renamed file opens as the kind its header says, and with the experimental file kinds on the
+/// status line says so (#6892).
+#[test]
+fn a_renamed_kind_file_opens_with_a_note_on_its_kind() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("renamed_kind");
+    let mut part = Session::default();
+    part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let saved = dir.join("bracket.scprt");
+    part.execute("file.save", &json!({"path": saved.to_string_lossy()})).unwrap();
+    let renamed = dir.join("bracket.scasm");
+    std::fs::copy(&saved, &renamed).unwrap();
+    let mut app = SolveApp::new(Session::default(), Default::default());
+
+    app.open_path(&renamed.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert!(text.contains("holds a part: it opened as a part"), "{text}");
+    assert!(!error);
+    assert_eq!(app.session.design_kind, solidcraft_engine::io::DesignKind::Part);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Parts not found on open (#6892, slice 4b): under Parts and assemblies, opening an assembly
+/// whose part files moved lists them in the window. Locating one relinks it and finds the other
+/// in that file's folder, which "Relink 1 more" then relinks, and the window closes.
+#[test]
+fn an_assembly_with_moved_parts_lists_them_and_locating_one_finds_the_rest() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("missing_links");
+    let (parts, moved) = (dir.join("parts"), dir.join("moved"));
+    std::fs::create_dir_all(&parts).unwrap();
+    std::fs::create_dir_all(&moved).unwrap();
+    for (name, height) in [("bracket.scprt", 2), ("plate.scprt", 4)] {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": parts.join(name).to_string_lossy()})).unwrap();
+    }
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": dir.join("frame.scasm").to_string_lossy()})).unwrap();
+    for name in ["bracket.scprt", "plate.scprt"] {
+        frame.execute("component.insert_design", &json!({"path": parts.join(name).to_string_lossy()})).unwrap();
+    }
+    frame.execute("file.save", &json!({})).unwrap();
+    for name in ["bracket.scprt", "plate.scprt"] {
+        std::fs::rename(parts.join(name), moved.join(name)).unwrap();
+    }
+    let mut app = SolveApp::new(Session::default(), Default::default());
+
+    app.open_path(&dir.join("frame.scasm").to_string_lossy());
+
+    let rows = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let bracket = rows.iter().find(|r| r.name == "bracket").unwrap().component;
+    crate::missing_links::located(&mut app, bracket, &moved.join("bracket.scprt").to_string_lossy());
+    let left = app.missing_links.as_ref().unwrap();
+    assert_eq!(left.rows.len(), 1);
+    assert_eq!(left.found_nearby.len(), 1, "the plate is in the same folder");
+    crate::missing_links::relink_nearby(&mut app);
+    assert!(app.missing_links.is_none(), "every part found: the window closes");
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    assert!(links["links"].as_array().unwrap().iter().all(|l| l["found"] == true), "{links}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A missing internal component (#6892): the window marks its row internal, and the file chosen
+/// for it, as Replace… does, is stored in the design again, so the component stays internal.
+#[test]
+fn a_missing_internal_component_is_marked_and_replacing_it_keeps_it_internal() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("missing_internal");
+    for (name, height) in [("bracket.scprt", 2), ("spare.scprt", 4)] {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": dir.join(name).to_string_lossy()})).unwrap();
+    }
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": dir.join("frame.scasm").to_string_lossy()})).unwrap();
+    frame.execute("component.insert_design", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    frame.execute("file.save", &json!({})).unwrap();
+    std::fs::remove_file(dir.join("bracket.scprt")).unwrap();
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&dir.join("frame.scasm").to_string_lossy());
+    let found = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(!found[0].internal, "a part linked to its own file is not internal");
+
+    // The reply `doc.open` gives when the design's file no longer holds an internal component.
+    let reply = json!({"missing_links": [{"component": found[0].component, "name": "bracket", "path": found[0].path, "internal": true}]});
+    crate::missing_links::offer(&mut app, &reply);
+
+    let rows = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert!(rows.len() == 1 && rows[0].internal, "{rows:?}");
+    crate::missing_links::located(&mut app, rows[0].component, &dir.join("spare.scprt").to_string_lossy());
+    assert!(app.missing_links.is_none(), "the part is found: the window closes");
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    let path = links["links"][0]["path"].as_str().unwrap();
+    assert!(path.starts_with(".~internal/"), "{links}");
+    assert_eq!(links["links"][0]["found"], true, "{links}");
+    // Replacing it was one undo step: one undo and the component is linked as it was opened
+    // (in this test a part beside the design, whose file is gone).
+    app.run("edit.undo", json!({})).unwrap();
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    assert_eq!(links["links"][0]["path"], "bracket.scprt", "{links}");
+    assert_eq!(links["links"][0]["found"], false, "{links}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Recovery components (#6892): a design whose internal component was saved again after the
+/// design itself, as a crash leaves it, opens with the window listing it. Restore brings that
+/// work into the design; opened again with newer work, Discard goes back to the design's copy.
+/// Either way the window closes and the component is no longer marked.
+#[test]
+fn a_recovery_component_is_listed_on_open_and_restored_or_discarded() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("recovery_components");
+    let part_file = dir.join("bracket.scprt");
+    let save_part = |file: &std::path::Path, height: u32| {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": file.to_string_lossy()})).unwrap();
+    };
+    save_part(&part_file, 2);
+    let design = dir.join("frame.scasm");
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    frame.execute("component.insert_design", &json!({"path": part_file.to_string_lossy()})).unwrap();
+    let made = frame.execute("component.make_internal", &json!({"component": "bracket"})).unwrap();
+    let work = std::path::PathBuf::from(made["file"].as_str().unwrap());
+    frame.execute("file.save", &json!({})).unwrap();
+    let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    let link = |app: &mut SolveApp| app.session.execute("component.links", &json!({})).unwrap()["links"][0].clone();
+
+    // The part is saved again and the design is not: a recovery component.
+    save_part(&work, 5);
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&design.to_string_lossy());
+    let rows = app.recovery_components.as_ref().map(|r| r.rows.clone()).unwrap_or_default();
+    assert!(rows.len() == 1 && rows[0].name == "bracket" && rows[0].member == "bracket.scprt", "{rows:?}");
+    assert!((volume(&mut app) - 12.0).abs() < 1e-6, "held as the design's file has it");
+    crate::recovery_components::restore(&mut app, rows[0].component);
+    assert!(app.recovery_components.is_none(), "settled: the window closes");
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    assert!((volume(&mut app) - 30.0).abs() < 1e-6, "the restored work is in the design");
+    let restored = link(&mut app);
+    assert!(restored.get("recovery").is_none() && restored["changed"] == false, "{restored}");
+    app.session.execute("file.save", &json!({})).unwrap();
+
+    // Newer work again, discarded this time: the design's copy is unpacked again.
+    let kept = std::fs::read(&work).unwrap();
+    save_part(&work, 9);
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&design.to_string_lossy());
+    let rows = app.recovery_components.as_ref().map(|r| r.rows.clone()).unwrap_or_default();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    crate::recovery_components::discard(&mut app, rows[0].component);
+    assert!(app.recovery_components.is_none());
+    assert_eq!(std::fs::read(&work).unwrap(), kept, "the design's copy is back");
+    assert!((volume(&mut app) - 30.0).abs() < 1e-6);
+    let discarded = link(&mut app);
+    assert!(discarded.get("recovery").is_none() && discarded["changed"] == false, "{discarded}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file that belongs to another design, opened by itself (#6892): the window names the design
+/// and, when that design is found, opens it. Opened while its design is open in another tab, as
+/// Edit in place does, no window shows. Without its design, the file opens as a new unsaved design
+/// of its own, or is not left open at all.
+#[test]
+fn an_internal_file_opened_by_itself_asks_and_each_answer_does_what_it_says() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("internal_file");
+    let lost = scratch("internal_file_lost");
+    std::fs::create_dir_all(dir.join("taken")).unwrap();
+    let mut part = Session::default();
+    part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 2})).unwrap();
+    part.execute("file.save", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    let design = dir.join("counter.sc");
+    let mut counter = Session::default();
+    counter.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    counter.execute("component.insert_design", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    let made = counter.execute("component.make_internal", &json!({"component": "bracket"})).unwrap();
+    let work = std::path::PathBuf::from(made["file"].as_str().unwrap());
+    counter.execute("file.save", &json!({})).unwrap();
+    // Copies taken out of the work folder: one a folder below the design, one with no design near it.
+    let (taken, alone) = (dir.join("taken").join("bracket.scprt"), lost.join("bracket.scprt"));
+    std::fs::copy(&work, &taken).unwrap();
+    std::fs::copy(&work, &alone).unwrap();
+    let open_file = |app: &SolveApp| app.session.path.clone().unwrap_or_default();
+
+    // Its design is found: the window offers it, and the answer opens it in place of the file.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&taken.to_string_lossy());
+    let asked = app.internal_file.clone().expect("the window shows");
+    assert_eq!(asked.design, "counter.sc", "{asked:?}");
+    assert!(asked.owner.as_deref().is_some_and(|owner| owner.ends_with("counter.sc")), "{asked:?}");
+    crate::internal_file::open_owner(&mut app);
+    assert!(app.internal_file.is_none());
+    assert!(open_file(&app).ends_with("counter.sc"), "{}", open_file(&app));
+    assert!(!app.docs.background().any(|s| s.path.as_deref().is_some_and(|p| p.ends_with("bracket.scprt"))), "the file is not left open in a tab");
+    // With the design open in another tab, its work file opens with no question.
+    app.open_path(&work.to_string_lossy());
+    assert!(open_file(&app).ends_with("bracket.scprt"), "{}", open_file(&app));
+    assert!(app.internal_file.is_none(), "{:?}", app.internal_file);
+
+    // No design near it: the window says so, and the file opens as a new design to save as its own.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&alone.to_string_lossy());
+    let asked = app.internal_file.clone().expect("the window shows");
+    assert!(asked.design == "counter.sc" && asked.owner.is_none(), "{asked:?}");
+    crate::internal_file::open_copy(&mut app);
+    assert!(app.internal_file.is_none());
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    assert!(app.session.path.is_none() && app.session.is_dirty(), "a new, unsaved design");
+    let volume = app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 12.0).abs() < 1e-6, "with the part's body: {volume}");
+
+    // Neither answer: the file is not left open by itself.
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&alone.to_string_lossy());
+    assert!(app.internal_file.is_some());
+    crate::internal_file::close(&mut app);
+    assert!(app.internal_file.is_none() && app.session.path.is_none() && !app.session.is_dirty(), "a blank design");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&lost);
+}
+
+/// Insert from Design (#6892): the window lists what another design holds, a sub-assembly with
+/// its parts under it, and Insert brings the ticked ones into this design as internal components
+/// of its own. Ticking a sub-assembly ticks everything under it and brings it whole; with one
+/// of its parts unticked, the parts left ticked come as parts. A design that holds nothing says
+/// so and shows no window.
+#[test]
+fn insert_from_design_lists_another_designs_internal_components_and_inserts_the_ticked_ones() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("insert_from_design");
+    let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let run = |s: &mut Session, id: &str, params: serde_json::Value| s.execute(id, &params).unwrap_or_else(|e| panic!("{id}: {e}"));
+    for (name, height) in [("arm", 1), ("pin", 2), ("plate", 3)] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 2, "width": 3, "height": height}));
+        run(&mut part, "file.save", json!({"path": text(&dir.join(format!("{name}.scprt")))}));
+    }
+    let mut hinge = Session::default();
+    run(&mut hinge, "file.new", json!({"kind": "assembly"}));
+    run(&mut hinge, "file.save", json!({"path": text(&dir.join("hinge.scasm"))}));
+    for name in ["arm", "pin"] {
+        run(&mut hinge, "component.insert_design", json!({"path": text(&dir.join(format!("{name}.scprt")))}));
+        run(&mut hinge, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut hinge, "file.save", json!({}));
+    let source = dir.join("source.sc");
+    let mut made = Session::default();
+    run(&mut made, "file.save", json!({"path": text(&source)}));
+    for file in ["plate.scprt", "hinge.scasm"] {
+        run(&mut made, "component.insert_design", json!({"path": text(&dir.join(file))}));
+    }
+    for name in ["plate", "hinge"] {
+        run(&mut made, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut made, "file.save", json!({}));
+    let empty = dir.join("empty.sc");
+    run(&mut Session::default(), "file.save", json!({"path": text(&empty)}));
+
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.session.execute("file.save", &json!({"path": text(&dir.join("target.sc"))})).unwrap();
+    crate::insert_from_design::open(&mut app, &text(&empty));
+    assert!(app.insert_from_design.is_none(), "nothing to pick from, no window");
+    assert!(app.status.as_ref().is_some_and(|status| !status.2), "{:?}", app.status);
+
+    crate::insert_from_design::open(&mut app, &text(&source));
+    let shown = app.insert_from_design.clone().expect("the window shows");
+    let rows: Vec<(&str, &str, usize)> = shown.rows.iter().map(|row| (row.pick.as_str(), row.kind.as_str(), row.depth)).collect();
+    assert_eq!(
+        rows,
+        [("hinge.scasm", "assembly", 0), ("hinge.scasm/arm.scprt", "part", 1), ("hinge.scasm/pin.scprt", "part", 1), ("plate.scprt", "part", 0)],
+        "{shown:?}"
+    );
+    // Nothing ticked: Insert leaves the window as it is.
+    crate::insert_from_design::insert(&mut app);
+    assert!(app.insert_from_design.is_some());
+    // Ticking the sub-assembly ticks everything under it, and it comes whole.
+    let ticks = |app: &SolveApp| app.insert_from_design.as_ref().unwrap().rows.iter().map(|row| row.ticked).collect::<Vec<_>>();
+    fn window(app: &mut SolveApp) -> &mut crate::insert_from_design::InsertFromDesign {
+        app.insert_from_design.as_mut().unwrap()
+    }
+    crate::insert_from_design::tick(window(&mut app), 0, true);
+    assert_eq!(ticks(&app), [true, true, true, false]);
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm"]);
+    // Unticking the pin leaves the sub-assembly unticked and mixed: the arm comes as a part.
+    crate::insert_from_design::tick(window(&mut app), 2, false);
+    assert_eq!(ticks(&app), [false, true, false, false]);
+    assert!(crate::insert_from_design::mixed(window(&mut app), 0));
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm/arm.scprt"]);
+    // The pin ticked again: everything under the sub-assembly is ticked, so it is too.
+    crate::insert_from_design::tick(window(&mut app), 2, true);
+    assert_eq!(ticks(&app), [true, true, true, false]);
+    assert!(!crate::insert_from_design::mixed(window(&mut app), 0));
+    crate::insert_from_design::tick(window(&mut app), 3, true);
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm", "plate.scprt"]);
+    crate::insert_from_design::insert(&mut app);
+    assert!(app.insert_from_design.is_none());
+    assert!(app.status.as_ref().is_some_and(|status| !status.2), "{:?}", app.status);
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    let names: Vec<&str> = links["links"].as_array().unwrap().iter().filter_map(|link| link["name"].as_str()).collect();
+    assert_eq!(names, ["hinge", "plate"], "{links}");
+    assert!(links["links"].as_array().unwrap().iter().all(|link| link["internal"] == true), "{links}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Use the engine's original component, including its existing unsupported, invalid-input and
 /// trap cases: the refusal requires no new WIT variant or importer rebuild.
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]

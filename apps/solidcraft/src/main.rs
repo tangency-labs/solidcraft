@@ -34,6 +34,8 @@ mod desktop_transparency;
 mod device_lost;
 mod gpu_startup;
 #[cfg(target_os = "windows")]
+mod hidden_folder;
+#[cfg(target_os = "windows")]
 mod native_crash;
 #[cfg(target_os = "macos")]
 mod native_crash_macos;
@@ -2067,6 +2069,9 @@ fn main() -> eframe::Result {
     // Files opened from Finder and the Dock arrive as events, not arguments.
     #[cfg(target_os = "macos")]
     open_documents::install();
+    // A design's work folder is hidden by its name elsewhere; Windows needs the attribute (#6892).
+    #[cfg(target_os = "windows")]
+    solidcraft_engine::set_work_folder_hider(hidden_folder::hide);
     let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_app = created.clone();
     let starting = settings.clone();

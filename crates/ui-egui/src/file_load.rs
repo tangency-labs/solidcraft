@@ -793,8 +793,13 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
                 crate::verify_job::start_after_reuse(app);
             }
             let s = &app.session;
-            request.answer(Ok(json!({"path": request.path, "features": s.doc.features.len(),
-                "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name})));
+            let mut reply = json!({"path": request.path, "features": s.doc.features.len(),
+                "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name});
+            // The kind of design its file holds, as `doc.open` says it (#6892).
+            if s.design_kind != solidcraft_engine::io::DesignKind::Single {
+                reply["kind"] = json!(s.design_kind.name());
+            }
+            request.answer(Ok(reply));
             true
         }
         Err(e) => {
@@ -1894,8 +1899,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 }
                 let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
-                // A design it could not read is said as when that was all it was asked.
-                if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
+                // Each design it could not read is said as when that was all it was asked: every one
+                // goes to Messages, and the status line keeps the last.
+                for f in r.as_ref().ok().and_then(|v| v["failed"].as_array()).into_iter().flatten() {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
                     app.set_status(format!("{name}: {why}"), true);
                 }
@@ -1996,6 +2002,10 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         app.say_newer_file();
                         app.say_plugin_data();
                         app.say_signature(&made.result);
+                        app.say_kind_note(&made.result);
+                        crate::missing_links::offer(app, &made.result);
+                        crate::recovery_components::offer(app, &made.result);
+                        crate::internal_file::offer(app, &made.result);
                     } else if request.note.is_none()
                         && let Some(note) = linked_signing_note(&request.path)
                     {

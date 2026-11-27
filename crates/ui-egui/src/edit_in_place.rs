@@ -51,6 +51,47 @@ pub struct PartContext {
     pub bounds: Aabb3,
     /// The part's tab was opened for this edit, so Finish Edit closes it again.
     pub opened: bool,
+    /// The assembly's components as its Browser lists them, with the one edited marked: where
+    /// the part sits, drawn dull above the part's own tree.
+    pub tree: Arc<Vec<ContextRow>>,
+}
+
+/// One component of the assembly around a part edited in place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextRow {
+    pub name: String,
+    /// How deep it is nested: 0 for a component of the assembly itself.
+    pub depth: usize,
+    /// The component being edited.
+    pub edited: bool,
+}
+
+/// The components of `doc`, each under its parent in the order the design holds them, with
+/// `edited` marked. A design whose parents loop lists what can be reached and no more.
+pub(crate) fn context_rows(doc: &solidcraft_engine::doc::Document, edited: u64) -> Vec<ContextRow> {
+    fn under(doc: &solidcraft_engine::doc::Document, parent: u64, depth: usize, edited: u64, rows: &mut Vec<ContextRow>) {
+        if depth > MAX_DEPTH || rows.len() >= MAX_ROWS {
+            return;
+        }
+        for component in doc.components.iter().filter(|c| c.parent == parent && c.id != parent) {
+            if rows.len() >= MAX_ROWS {
+                return;
+            }
+            rows.push(ContextRow { name: component.name.clone(), depth, edited: component.id == edited });
+            under(doc, component.id, depth + 1, edited, rows);
+        }
+    }
+    const MAX_DEPTH: usize = 32;
+    const MAX_ROWS: usize = 2000;
+    let mut rows = Vec::new();
+    under(doc, 0, 0, edited, &mut rows);
+    rows
+}
+
+/// A tab's name while its design is a part edited in place: the assembly, then the part, so the
+/// tab says where the part belongs ("counter › bracket").
+pub(crate) fn tab_name(context: &PartContext, name: &str) -> String {
+    format!("{} \u{203a} {name}", context.assembly_name)
 }
 
 /// Update Links run on the assembly while its part is edited in place.
@@ -89,11 +130,26 @@ impl EditInPlace {
 }
 
 /// A linked component the window edits in place when it is double-clicked: in a saved design
-/// (its links are found from its file) with `double_click_components` on.
+/// (its links are found from its file) with `double_click_components` on. An internal component
+/// (#6892) is never one: a double-click makes it the active component, as for a component made
+/// in the design, and Edit in Place in its menu opens it in its own tab.
 pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components
         && app.session.path.is_some()
         && app.session.doc.links.get(&component).is_some_and(|link| link.is_design())
+        && !is_internal(app, component)
+}
+
+/// Whether `component` is an internal component: its part is stored inside this design's file.
+fn is_internal(app: &SolveApp, component: u64) -> bool {
+    app.session.doc.links.get(&component).is_some_and(|link| solidcraft_engine::doc::internal::linked(&link.path).is_some())
+}
+
+/// An internal component (#6892) while the hybrid environment is off: its part has no work file
+/// to open, so it is not offered for editing in place. A component linked to a file of its own
+/// is edited in place in either environment, as before.
+pub(crate) fn internal_off(app: &SolveApp, component: u64) -> bool {
+    !solidcraft_engine::experimental_file_kinds() && is_internal(app, component)
 }
 
 /// A component double-clicked in the browser: a linked one is edited in place (Preferences:
@@ -306,6 +362,9 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
     let Some(assembly) = app.session.path.clone() else {
         return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };
+    if internal_off(app, component) {
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_internal_off").to_string());
+    }
     let links = app.session.execute("component.links", &json!({})).map_err(|e| e.to_string())?;
     let Some(link) = links["links"].as_array().into_iter().flatten().find(|l| l["component"].as_u64() == Some(component)).cloned() else {
         return Err(app.tr_label("ui.relink_not_linked").to_string());
@@ -313,6 +372,11 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
     let Some(part) = link["file"].as_str().map(str::to_string) else {
         return Err(app.tr_label("ui.relink_not_linked").to_string());
     };
+    // A part inside another design (#6892) has no file of its own to open: it is edited in
+    // the design that holds it.
+    if let Some(holder) = link["inside"].as_str() {
+        return Err(solidcraft_ui_text::format("ui.edit_in_place_inside", &[("name", &file_name(holder))]));
+    }
     if !ask {
         // A network location not allowed yet, a missing file or one open in another SolidCraft
         // would ask or stop the open: as a command, that is its answer.
@@ -343,6 +407,7 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
         meshes: Arc::new(meshes),
         bounds,
         opened,
+        tree: Arc::new(context_rows(&app.session.doc, component)),
     };
     Ok((context, link))
 }
@@ -533,6 +598,14 @@ fn finish_with(app: &mut SolveApp, save: bool) -> Result<bool, String> {
     if context.opened {
         crate::documents::close(app, part_tab, false);
     }
+    // An internal component (a part stored inside the assembly's file, #6892) goes back into that
+    // file now, so the file holds the work whether or not the assembly is saved afterwards. Where
+    // it can't (a signed or read-only assembly, a file changed elsewhere), the status line says
+    // why, and saving the assembly stores it.
+    let internal = app.session.doc.links.get(&context.component).is_some_and(|link| solidcraft_engine::doc::internal::linked(&link.path).is_some());
+    if internal && let Err(why) = app.run("component.write_back", json!({"component": context.component})) {
+        app.set_status(why, true);
+    }
     // Coming back to its tab reads what changed, unless it read nothing (`update_changed_links`
     // off, the web build without file times): then the part is read here.
     if (!app.preferences.update_changed_links || cfg!(target_arch = "wasm32")) && app.file_load.idle() {
@@ -651,17 +724,47 @@ pub(crate) fn draw_context(app: &SolveApp, sc: &mut GpuScene) {
 
 /// Above the browser's rows while a part is edited in place: which assembly it is in (Finish
 /// Editing is on the MODEL tab).
-pub(crate) fn browser_strip(app: &SolveApp, ui: &mut egui::Ui) {
-    let Some(context) = &app.edit_in_place.active else { return };
-    let t = Tokens::get();
+pub(crate) fn browser_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
+    // A new part being modelled in this design has the same band: Finish Edit goes back to the
+    // design, which asks for the part's name and stores it.
+    if crate::new_internal::active(app).is_some() {
+        let name = crate::documents::tab_name(app, &app.session);
+        if band(ui, &solidcraft_ui_text::format("ui.edit_in_place_banner", &[("name", &name)])) {
+            crate::new_internal::finish(app);
+        }
+        return;
+    }
+    let Some(context) = app.edit_in_place.active.clone() else { return };
     let refreshing = app.edit_in_place.refresh.as_ref().is_some_and(|r| crate::documents::same_path(&r.assembly, &context.assembly));
     let key = if refreshing { "ui.edit_in_place_refreshing" } else { "ui.edit_in_place_banner" };
     let text = solidcraft_ui_text::format(key, &[("name", &context.assembly_name)]);
-    ui.horizontal(|ui| {
-        ui.add_space(t.space_6);
-        crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
+    if band(ui, &text) {
+        finish(app);
+    }
+}
+
+/// A notice band over the tree: where the part belongs on the left, and Finish Edit as a button
+/// at the right, so leaving the part is at hand where the tree is. True when it was pressed.
+fn band(ui: &mut egui::Ui, text: &str) -> bool {
+    let t = Tokens::get();
+    let mut finish_edit = false;
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_6 as i8)).show(ui, |ui| {
+        crate::ui_kit::banner(ui, crate::ui_kit::AssistantTone::Neutral, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_12;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = solidcraft_ui_text::tr("cmd.component_finish_edit");
+                    let button = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small);
+                    crate::scenario::publish_target("edit_in_place:finish", button.rect);
+                    finish_edit = button.clicked();
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        crate::ui_kit::text(ui, text, crate::ui_kit::Text::Hint("edit_in_place"));
+                    });
+                });
+            });
+        });
     });
-    ui.add_space(t.space_3);
+    finish_edit
 }
 
 #[cfg(test)]

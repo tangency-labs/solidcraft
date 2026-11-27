@@ -462,6 +462,21 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### internal component
+
+A part or assembly that is stored inside a design file and linked by a component of that design.
+
+It is a whole file of its own kind, with its own timeline. While the design is open, it is
+unpacked to a work folder beside the design file and edited there as any linked file is; saving
+the design stores it again. A component linked to a file outside the design is an *external
+component*. Experimental.
+
+- **In SolidCraft:** `component.make_internal`, `component.write_back`; `internal` in
+  `component.links` and in `doc.open`'s `missing_links`; the `internal/` parts of a design file.
+- **Don't use:** virtual part, embedded part, member, temp file.
+- **Elsewhere:** internal component, virtual component, embedded part.
+- **For translators:** not a *virtual component* (one with no geometry).
+
 ### item number
 
 The number that names a row of a bill of materials, the one a parts list and a balloon show.
@@ -778,6 +793,18 @@ design's parameters.
 - **Don't use:** amount, count (for a quantity).
 - **Elsewhere:** quantity, BOM quantity, base quantity.
 - **For translators:** not a count of placements (`count`).
+
+### recovery component
+
+An internal component whose unpacked file holds work that the design file does not.
+
+It is found when the design is opened, usually after a crash. The design keeps showing and
+saving what its file holds until someone restores the unpacked work or discards it.
+
+- **In SolidCraft:** `component.restore_recovery`, `component.discard_recovery`;
+  `recovery_components` in `doc.open`'s reply; `recovery` in `component.links`.
+- **Don't use:** temp file, backup, autosave (the recovery of an unsaved design is a different thing).
+- **Elsewhere:** recovered file, autorecover file.
 
 ### reference edge
 

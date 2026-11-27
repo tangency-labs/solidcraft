@@ -1029,6 +1029,12 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design: true opens a copy of it as a new, unsaved single design that has no file,
+    /// leaving the file as it is; saving it asks where. Experimental (#6892): how a file that
+    /// belongs to another design (`internal_of` in the reply) becomes a design of its own.
+    /// Default: false.
+    #[serde(default)]
+    pub as_copy: Option<bool>,
     /// For a design saved without the bodies of its linked designs (`file.save`'s
     /// `linked_bodies: false`): which linked design files are read for those bodies as it opens.
     /// all (the default): every one the caller may read. folder: only those in the design's own
@@ -1099,6 +1105,15 @@ pub struct OpenParams {
     pub tab: Option<u64>,
 }
 
+/// The design a file belongs to, from the tag in its header (experimental, #6892).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InternalOfReport {
+    /// The name the owning design's file had when the tag was made. It can be out of date.
+    pub design: String,
+    /// The tag's key: the owner is the design that holds a file with the same key.
+    pub key: String,
+}
+
 /// Another SolidCraft that has the design open, from its lock file.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct OpenElsewhere {
@@ -1126,6 +1141,14 @@ pub struct OpenedDesign {
     /// Only with `read_only`: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
+    /// Only with `as_copy`: true. The design is new and unsaved, and has no file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_copy: Option<bool>,
+    /// Experimental (#6892): only when the file belongs to another design, as its header says:
+    /// an internal component's file, or a drawing's. Opened by itself it is most likely a
+    /// recovery file; `as_copy` opens it as a design of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internal_of: Option<InternalOfReport>,
     /// Only when another SolidCraft has the design open (its lock file is fresh).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_elsewhere: Option<OpenElsewhere>,
@@ -1139,9 +1162,52 @@ pub struct OpenedDesign {
     /// With `verify: true`, when the file carries a signature: what verification found.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignatureReport>,
+    /// Experimental (#6892): the kind of design the file's header says, when it isn't a single
+    /// design: `part` or `assembly`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Experimental (#6892): `true` for a part that holds a sheet metal body (a mark its model
+    /// gives it, never saved); absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_metal: Option<bool>,
+    /// With the experimental file kinds on: the file's extension names another kind than its
+    /// header, which wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind_note: Option<String>,
+    /// Under Parts and assemblies: the linked parts found neither at their link's path nor in a
+    /// library folder. Each keeps its last bodies; `component.relink {component, path}` points it
+    /// at its file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_links: Vec<MissingLink>,
+    /// Experimental (#6892): the internal components whose unpacked file beside the design
+    /// was already there and differs from what the design's file holds, by name: work saved in
+    /// the part and not yet in the design's file (after a crash, for one). The unpacked file is
+    /// left as it is, the design reads it, and the next save of the design stores it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_components: Vec<String>,
+    /// Experimental (#6892): the internal components that could not be unpacked beside
+    /// the design, each with why. The design reads them from its file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub internal_not_unpacked: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A linked part `doc.open` couldn't find (#6892).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MissingLink {
+    /// The linked component, by id.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// The file the link looked for, whole.
+    pub path: String,
+    /// `true` for an internal component (one stored inside this design's file) that the file no
+    /// longer holds and that is not unpacked either: replace it with another file
+    /// (`component.relink`) or take it again from the design it came from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub internal: bool,
 }
 
 /// What a signature check found: the reply of `file.verify`, and part of `doc.open`'s when it

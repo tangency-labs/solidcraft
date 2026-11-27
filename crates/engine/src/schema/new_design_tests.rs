@@ -7,7 +7,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<NewDesignParams>(), &["name", "new_tab"]);
+    assert_keys(input_schema_for::<NewDesignParams>(), &["kind", "name", "new_tab"]);
     let issues = |p: Value| crate::schema::issues("file.new", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
     assert!(issues(json!({})).is_empty());
     assert!(issues(json!({"name": "Gearbox"})).is_empty());

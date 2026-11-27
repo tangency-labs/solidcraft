@@ -19,13 +19,15 @@ use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, Me
 
 use super::CommandSpec;
 use super::design_link::{
-    LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, real_file, resolve, same_file, stored,
+    LinkState, absolute, inside, inside_design_folder, link_presence, link_target, on_disk, read_linked_file, real_file, resolve, same_file, stored,
 };
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
-    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
-    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignContentsParams, DesignContentsResult, DesignInserted, DesignMember,
+    ExtractParams, ExtractResult, InsertDesignParams, InsertDesignResult, InsertFromDesignParams, InsertFromDesignResult, JointDiagnostic,
+    LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MakeInternalParams, MakeInternalResult, PickedMember, RecoveryParams,
+    RecoveryResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult, WriteBackParams,
+    WriteBackResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -46,6 +48,11 @@ const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
 const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+const MAKE_INTERNAL_CONTRACT: TypedContract<MakeInternalParams> = TypedContract::new();
+const DESIGN_CONTENTS_CONTRACT: TypedContract<DesignContentsParams> = TypedContract::new();
+const INSERT_FROM_DESIGN_CONTRACT: TypedContract<InsertFromDesignParams> = TypedContract::new();
+const RECOVERY_CONTRACT: TypedContract<RecoveryParams> = TypedContract::new();
+const WRITE_BACK_CONTRACT: TypedContract<WriteBackParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
@@ -88,6 +95,39 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file, and the importer that read it"),
+    CommandSpec::new("component.make_internal", "Make Internal", crate::checked!("component.make_internal", make_internal))
+        .icon("chain")
+        .contract(&MAKE_INTERNAL_CONTRACT)
+        .output(output_schema_for::<MakeInternalResult>)
+        .params(
+        "component: id or name of a component — experimental (Parts and assemblies): a linked one has its design file copied into this design's \
+         file as a stored part, unpacked beside this design while it is open, and is linked to that copy; the file it came from is left as it is; \
+         one that is not linked (made in this design) has its history, subcomponents and joints moved to such a stored part, as \
+         component.extract moves them to a file; this design must be saved; returns member (the part's name inside the file), file (the \
+         unpacked file to open and edit) and previous_path",
+    ),
+    CommandSpec::new("component.design_contents", "List Design Contents", crate::checked!("component.design_contents", design_contents))
+        .icon("inspect")
+        .noundo()
+        .contract(&DESIGN_CONTENTS_CONTRACT)
+        .output(output_schema_for::<DesignContentsResult>)
+        .params(
+        "path: a saved design → members: [{pick, member, name, kind (part|assembly|design), placements, members?}], the internal components \
+         its file holds and, for a sub-assembly, its own; read from the file without building its model (experimental, hybrid environment)",
+    ),
+    CommandSpec::new("component.insert_from_design", "Insert from Design", crate::checked!("component.insert_from_design", insert_from_design))
+        .icon("component")
+        .contract(&INSERT_FROM_DESIGN_CONTRACT)
+        .output(output_schema_for::<InsertFromDesignResult>)
+        .params(
+        "path: a saved design to pick from; members: [each a `pick` of component.design_contents, e.g. \"hinge.scasm\" or \
+         \"hinge.scasm/arm.scprt\"] — experimental (hybrid environment): each picked part or sub-assembly is copied into this design's file as \
+         an internal component with its timeline (a sub-assembly whole, with its parts and their joints) and placed in the active component \
+         where the other design had it; independent of the design it came from; a part the design already holds unchanged under that name is \
+         placed once more instead (reused); link?: bool (default false): keep each picked one linked to the design it is in instead of copying \
+         it: nothing is stored here, component.update_links reads it from that design again, and it is edited there; this design must be \
+         saved; returns inserted: [{pick, component, name, member, file, reused?, linked?}]",
+    ),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)
@@ -113,6 +153,35 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+    ),
+    CommandSpec::new("component.write_back", "Write Back Internal Component", crate::checked!("component.write_back", write_back))
+        .icon("update")
+        .noundo()
+        .contract(&WRITE_BACK_CONTRACT)
+        .output(output_schema_for::<WriteBackResult>)
+        .params(
+        "component: id or name of an internal component — writes its unpacked file back into this design's file without saving the design: \
+         only that part of the file changes; refused for a recovery component, a read-only or signed design, and a file changed by another \
+         program or computer (a save stores it then); returns member and bytes (the file's size)",
+    ),
+    CommandSpec::new("component.restore_recovery", "Restore Recovery Component", crate::checked!("component.restore_recovery", restore_recovery))
+        .icon("update")
+        .noundo()
+        .contract(&RECOVERY_CONTRACT)
+        .output(output_schema_for::<RecoveryResult>)
+        .params(
+        "component: id or name of a recovery component (an internal component whose unpacked file differed from the design's file when the \
+         design opened; component.links marks it recovery) — keeps the unpacked file's work: the component is then out of date, and \
+         component.update_links brings that work into the design",
+    ),
+    CommandSpec::new("component.discard_recovery", "Discard Recovery Component", crate::checked!("component.discard_recovery", discard_recovery))
+        .icon("break")
+        .noundo()
+        .contract(&RECOVERY_CONTRACT)
+        .output(output_schema_for::<RecoveryResult>)
+        .params(
+        "component: id or name of a recovery component — drops the unpacked file's work and unpacks what the design's file holds again; the \
+         dropped work is kept beside it (backup)",
     ),
     CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
         .icon("chain")
@@ -204,13 +273,16 @@ fn step_import_flat(doc: &Document, link: &DesignLink) -> bool {
 /// the copy says so ([`Document::linked_bodies_left_out`]), so opening it reads them from the
 /// linked files again ([`read_left_out_bodies`]). A link whose file cannot be reached now, or
 /// changed since the link read it, keeps its bodies: they may be the only copy
-/// ([`link_file_problem`]). `doc` is the design in the session, saved at `from`, whose link
-/// paths are whole.
+/// ([`link_file_problem`]). An internal component (#6892) keeps its bodies as well: its part is
+/// in this file, so the design sent alone shows it before any work file exists to read it from.
+/// `doc` is the design in the session, saved at `from`, whose link paths are whole.
 pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document>, doc: &Document, from: Option<&str>) {
     let features: Vec<u64> = doc
         .links
         .iter()
-        .filter(|(comp, link)| link.importer.is_none() && link_file_problem(doc, **comp, link, from).is_none())
+        .filter(|(comp, link)| {
+            link.importer.is_none() && solidcraft_doc::internal::linked(&link.path).is_none() && link_file_problem(doc, **comp, link, from).is_none()
+        })
         .flat_map(|(comp, l)| {
             let meshes = if l.is_design() { mesh_feature_of(doc, *comp, l) } else { None };
             std::iter::once(l.feature).chain(meshes)
@@ -1418,7 +1490,7 @@ fn read_link(file: &Path, own: Option<&str>, any: bool) -> Result<Vec<u8>> {
     // connects to the host), so a refused path skips the self-link check, which resolves it, and
     // `read_linked_file` says why it is refused.
     let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
-    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), &on_disk(file))) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
     read_linked_file(file, own, any).map_err(|e| EngineError::Other(e.reason))
@@ -1457,7 +1529,7 @@ enum DigestLookup {
 fn lookup_cached_sha256(file: &Path, own: Option<&str>) -> Option<DigestLookup> {
     let digests = DIGESTS.lock().ok()?;
     let generation = digests.0;
-    let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
+    let stamp = solidcraft_io::vfs::design_path_stamp(&on_disk(file).to_string_lossy(), own);
     if let Some(stamp) = stamp
         && let Some(known) = digests.1.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
     {
@@ -2980,6 +3052,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
     // Phase 1: classify target links and snapshot `before` states upfront before any mutation.
     let mut targets: Vec<TargetLink> = Vec::with_capacity(links.len());
+    // Internal components (#6892) read from what this design's file held, not from disk, by the
+    // key their file is read under; and where a library folder had a file its link did not find.
+    let mut held_reads: std::collections::HashMap<(PathBuf, Option<std::ffi::OsString>), Vec<u8>> = std::collections::HashMap::new();
+    let mut library_notes: Vec<(usize, String)> = Vec::new();
     for (comp, link) in links {
         if solidcraft_doc::progress::cancelled() {
             break;
@@ -3018,7 +3094,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let old = (old_step.clone(), old_records.clone());
-        let file = resolve(own.as_deref(), &link.path);
+        let mut file = resolve(own.as_deref(), &link.path);
         let before = s.model.result(link.feature).map(|r| (*r.state).clone());
         if link.importer.is_some() {
             if let Some(error) = importer_file_refusal(s, &file) {
@@ -3030,8 +3106,30 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
             targets.push(TargetLink::Importer { comp, cname, link, old, file, before });
         } else {
+            // A part stored inside this design that isn't unpacked (a read-only folder, the
+            // browser): the bytes this design's file held. A recovery component is read as the
+            // file holds it too, until it is restored or discarded.
+            let member = solidcraft_doc::internal::linked(&link.path);
+            let unpacked = solidcraft_io::vfs::design_path_is_file(&file.to_string_lossy(), own.as_deref()) == Some(true);
+            let kept = member
+                .filter(|name| s.recovery_components.contains(*name) || !unpacked)
+                .and_then(|name| super::design_internal::stored(&s.doc, &s.internal_held, name));
+            // Not where the link says: a library folder may have it (experimental, #6892). The
+            // link keeps naming its own file; the note says where this read came from.
+            if member.is_none()
+                && let Some((found, folder)) = super::design_link::found_in_library(&file)
+            {
+                library_notes.push((
+                    targets.len(),
+                    format!("{cname}: not at {}; found in the library folder {} as {}", file.display(), folder.display(), found.display()),
+                ));
+                file = found;
+            }
             // Safe: `link_refused` already authorized this path before touching disk.
             let canonical = real_file(&file).unwrap_or_else(|| absolute(&file));
+            if let Some(kept) = kept {
+                held_reads.insert((canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string)), kept.as_bytes().to_vec());
+            }
             let flat = step_import_flat(&s.doc, &link);
             targets.push(TargetLink::Native { comp, cname, link, old, file, canonical, flat, before });
         }
@@ -3043,7 +3141,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     for target in &targets {
         if let TargetLink::Native { file, canonical, .. } = target {
             let key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
-            if seen_files.insert(key.clone()) {
+            if !held_reads.contains_key(&key) && seen_files.insert(key.clone()) {
                 file_jobs.push((key, file.clone()));
             }
         }
@@ -3060,6 +3158,11 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     for ((key, _), result) in file_jobs.into_iter().zip(read_results) {
         let entry = result.unwrap_or_else(|| Err("linked file read failed".to_string()));
         file_reads.insert(key, entry);
+    }
+    for (key, bytes) in held_reads {
+        let sha256 = DesignLink::file_digest(&bytes);
+        let bytes_hash = digest(bytes.as_slice());
+        file_reads.insert(key, Ok((std::sync::Arc::new(bytes), sha256, bytes_hash)));
     }
 
     // Phase 2B: check per-link `unchanged_read` cache and deduplicate unique sources that need evaluation.
@@ -3197,6 +3300,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
     // Phase 3: apply all mutations in exact deterministic order without refreshing inside the loop.
     let mut link_warnings: Vec<Vec<String>> = vec![Vec::new(); count];
+    for (slot, note) in library_notes {
+        link_warnings[slot].push(note);
+    }
     let mut failed: Vec<LinkFailure> = Vec::new();
     let mut read_components: Vec<u64> = Vec::new();
     let mut kept_imports: Vec<std::sync::Arc<solidcraft_kernel::StepImport>> = Vec::new();
@@ -3219,7 +3325,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
             TargetLink::Failed { comp, cname, error } => {
                 solidcraft_doc::progress::item(Some((&cname, slot, count)));
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                let path = s.doc.links.get(&comp).map(|link| link.path.clone()).unwrap_or_default();
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone(), path });
                 link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
             }
             TargetLink::Kicad { comp, cname, link, importer } => {
@@ -3235,7 +3342,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                         read_components.push(comp);
                     }
                     Err(e) if go_on => {
-                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone(), path: link.path.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
                     }
                     Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
@@ -3247,7 +3354,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     Ok(bytes) => bytes,
                     Err(e) if go_on => {
                         let error = e.to_string();
-                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone(), path: link.path.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
                         continue;
                     }
@@ -3289,7 +3396,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     Ok((read_linked, _)) => read_linked,
                     Err(e) if go_on => {
                         let error = e.to_string();
-                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone(), path: link.path.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
                         continue;
                     }
@@ -3317,7 +3424,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 let (sha256, bytes_hash) = match file_reads.get(&read_key) {
                     Some(Ok((_, sha256, bytes_hash))) => (sha256.clone(), *bytes_hash),
                     Some(Err(e)) if go_on => {
-                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone(), path: link.path.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
                         continue;
                     }
@@ -3325,7 +3432,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     None => {
                         let error = "linked file read failed".to_string();
                         if go_on {
-                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone(), path: link.path.clone() });
                             link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
                             continue;
                         }
@@ -3355,7 +3462,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 let (eval_file, eval) = match evaluated.get(&source_key) {
                     Some(Ok((eval_file, eval))) => (eval_file, eval.clone()),
                     Some(Err(e)) if go_on => {
-                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                        failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone(), path: link.path.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
                         continue;
                     }
@@ -3363,7 +3470,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     None => {
                         let error = "linked source evaluation failed".to_string();
                         if go_on {
-                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone(), path: link.path.clone() });
                             link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
                             continue;
                         }
@@ -4172,6 +4279,327 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
+/// `component.make_internal`: the linked design becomes a part stored inside this design's file
+/// (`cmd/design_internal.rs`), and the component links that copy.
+fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.make_internal";
+    if !super::experimental_file_kinds() {
+        return Err(bad(cmd, "storing a part inside a design is experimental: choose the hybrid environment in Preferences › General › Environment"));
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(bad(cmd, "storing a part inside a design needs a folder to unpack it to, which the browser does not have"));
+    }
+    let comp = component_key(s, p, "component", cmd)?;
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the part is stored inside its file"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    // A component made in this design (New Part, New Component) is not linked to anything yet:
+    // its history moves to a design of its own first, written inside the work folder, and that
+    // design is stored like any other. The file written on the way is removed again.
+    if !s.doc.links.contains_key(&comp) {
+        if str_(p, "path").is_some() {
+            return Err(bad(cmd, "`path` replaces what a linked component is linked to; this component is not linked"));
+        }
+        let folder = super::design_internal::work_folder(&own)
+            .ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?
+            .join(".~new");
+        let made = own_design_then_internal(s, comp, &folder, cmd);
+        let _ = std::fs::remove_dir_all(&folder);
+        return made;
+    }
+    // With `path`: linked to that file first, in this same step (replacing an internal component).
+    if let Some(path) = str_(p, "path") {
+        relink(s, &json!({"component": comp, "path": path}))?;
+    }
+    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    if solidcraft_doc::internal::linked(&link.path).is_some() {
+        return Err(bad(cmd, "that part is already stored inside this design"));
+    }
+    link_refused(Some(&own), &link.path).map_err(|e| bad(cmd, e.to_string()))?;
+    let source = resolve(Some(&own), &link.path);
+    let previous_path = stored(Some(&own), &source);
+    let bytes = read_link(&source, Some(&own), false).map_err(|e| bad(cmd, e.to_string()))?;
+    // The copy says in its header which design it belongs to, so it tells what it is when it is
+    // opened away from this design: a recovery file, or a copy taken out of the work folder.
+    // A part file that can't carry the tag (plain JSON, or signed) is stored as it is.
+    let tag = solidcraft_io::InternalOf {
+        design: Path::new(&own).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
+        key: DesignLink::file_digest(format!("{}|{own}|{comp}", DesignLink::file_digest(&bytes)).as_bytes()).chars().take(16).collect(),
+    };
+    let bytes = solidcraft_io::with_internal_of(&bytes, Some(&tag)).unwrap_or(bytes);
+    let member = super::design_internal::free_name(&s.doc, &own, &source);
+    let file =
+        super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;
+    super::design_internal::write(&file, &bytes).map_err(|why| bad(cmd, why))?;
+    // Kept by the session too, until a save puts it in the file: the part is not lost with its
+    // work file.
+    s.internal_held.insert(member.clone(), bytes.clone().into());
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+        kept.path = solidcraft_doc::internal::link(&member);
+        // The copy is what the component shows now, so it is up to date with it.
+        kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
+    }
+    reply(cmd, MakeInternalResult { component: comp, member, file: file.to_string_lossy().into_owned(), previous_path, param_warnings: Vec::new() })
+}
+
+/// How deep sub-assemblies inside sub-assemblies are followed.
+const MEMBER_DEPTH: usize = 16;
+/// Make Internal for a component that is not linked: `component.extract` writes its history,
+/// subcomponents and joints to a design in `folder`, and Make Internal stores that design. A
+/// component that holds components becomes a sub-assembly, any other a part.
+fn own_design_then_internal(s: &mut Session, comp: u64, folder: &Path, cmd: &'static str) -> Result<Value> {
+    let name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    // A file name of the component's own: what a file name cannot hold becomes `_`.
+    let stem: String = name.trim().chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '_' }).take(80).collect();
+    let stem = if stem.trim().is_empty() { "part".to_string() } else { stem.trim().to_string() };
+    let holds_components = s.doc.components.iter().any(|c| c.parent == comp && c.id != comp);
+    let file = folder.join(format!("{stem}.{}", if holds_components { "scasm" } else { "scprt" }));
+    std::fs::create_dir_all(folder).map_err(|e| bad(cmd, format!("{}: {e}", folder.display())))?;
+    extract::extract(s, &json!({"component": comp, "path": file.to_string_lossy()}))?;
+    make_internal(s, &json!({"component": comp}))
+}
+
+/// The most picks one `component.insert_from_design` takes.
+const MAX_PICKS: usize = 256;
+
+/// The internal components the design file `container` holds, and theirs, below `prefix`.
+fn members_of(container: &[u8], prefix: &str, depth: usize) -> Vec<DesignMember> {
+    if depth > MEMBER_DEPTH {
+        return Vec::new();
+    }
+    let Ok(held) = solidcraft_io::internal_components(container) else { return Vec::new() };
+    if held.is_empty() {
+        return Vec::new();
+    }
+    // The design's own record of who uses each one: names and placements. A design that does
+    // not read still lists what its file holds, under the files' own names.
+    let doc = solidcraft_io::read_design(container).ok();
+    held.into_iter()
+        .map(|(member, bytes)| {
+            let link = solidcraft_doc::internal::link(&member);
+            let component = doc.as_ref().and_then(|doc| doc.links.iter().find(|(_, used)| used.path == link).map(|(id, _)| *id));
+            let name = component
+                .and_then(|id| doc.as_ref()?.components.iter().find(|c| c.id == id).map(|c| c.name.clone()))
+                .unwrap_or_else(|| member.rsplit_once('.').map_or(member.as_str(), |(stem, _)| stem).to_string());
+            let placements = component.map_or(0, |id| doc.as_ref().map_or(0, |doc| doc.occurrences.iter().filter(|o| o.component == id).count()));
+            let lower = member.to_lowercase();
+            let kind = if lower.ends_with(".scasm") {
+                "assembly"
+            } else if lower.ends_with(".scprt") {
+                "part"
+            } else {
+                "design"
+            };
+            let pick = if prefix.is_empty() { member.clone() } else { format!("{prefix}/{member}") };
+            let members = members_of(&bytes, &pick, depth + 1);
+            DesignMember { pick, member, name, kind: kind.to_string(), placements, members }
+        })
+        .collect()
+}
+
+/// `component.design_contents`: what a design file holds, for picking from.
+fn design_contents(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.design_contents";
+    let path = str_(p, "path").ok_or_else(|| bad(cmd, "`path` must be a saved design"))?;
+    let bytes = read_link(Path::new(path), s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
+    reply(cmd, DesignContentsResult { path: path.to_string(), members: members_of(&bytes, "", 0), param_warnings: Vec::new() })
+}
+
+/// The bytes of the internal component `pick` names inside the design file `source`, with the
+/// name it has in the file that holds it and, for one the design itself holds, where the design
+/// first places it.
+fn picked(source: &[u8], pick: &str) -> std::result::Result<(String, Vec<u8>, Option<solidcraft_doc::Mat>), String> {
+    let mut container = source.to_vec();
+    let mut name = String::new();
+    let mut placement = None;
+    let segments: Vec<&str> = pick.split('/').collect();
+    if segments.len() > MEMBER_DEPTH || segments.iter().any(|segment| segment.is_empty()) {
+        return Err(format!("`{pick}` is not a pick of component.design_contents"));
+    }
+    for (level, segment) in segments.iter().enumerate() {
+        let held = solidcraft_io::internal_components(&container).map_err(|e| e.to_string())?;
+        let Some((member, bytes)) = held.into_iter().find(|(member, _)| member.eq_ignore_ascii_case(segment)) else {
+            return Err(format!("the design holds no internal component `{pick}`"));
+        };
+        if level == 0 && segments.len() == 1 {
+            let link = solidcraft_doc::internal::link(&member);
+            placement = solidcraft_io::read_design(&container).ok().and_then(|doc| {
+                let component = doc.links.iter().find(|(_, used)| used.path == link).map(|(id, _)| *id)?;
+                doc.occurrences.iter().find(|o| o.component == component).map(|o| o.transform)
+            });
+        }
+        container = bytes;
+        name = member;
+    }
+    Ok((name, container, placement))
+}
+
+/// `component.insert_from_design`: internal components picked from another design become
+/// internal components of this one, each a copy with its timeline, placed where it was.
+fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_from_design";
+    if !super::experimental_file_kinds() {
+        return Err(bad(cmd, "internal components are experimental: choose the hybrid environment in Preferences › General › Environment"));
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(bad(cmd, "an internal component needs a folder to unpack it to, which the browser does not have"));
+    }
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the picked parts are stored inside its file"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    let path = str_(p, "path").ok_or_else(|| bad(cmd, "`path` must be a saved design"))?;
+    let picks: Vec<String> = match p.get("members").and_then(Value::as_array) {
+        Some(list) if !list.is_empty() && list.len() <= MAX_PICKS && list.iter().all(Value::is_string) => {
+            list.iter().filter_map(|pick| pick.as_str().map(str::to_string)).collect()
+        }
+        _ => return Err(bad(cmd, format!("`members` must be 1 to {MAX_PICKS} picks of component.design_contents"))),
+    };
+    let source = read_link(Path::new(path), Some(&own), false).map_err(|e| bad(cmd, e.to_string()))?;
+    let keep_linked = p.get("link").and_then(Value::as_bool).unwrap_or(false);
+    let design = Path::new(&own).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut inserted = Vec::new();
+    for pick in picks {
+        let (given, bytes, placement) = picked(&source, &pick).map_err(|why| bad(cmd, format!("{path}: {why}")))?;
+        // Row-major 3x4, as `component.insert_design` takes it.
+        let rows = placement.map(|at| (0..3).flat_map(|row| (0..4).map(move |column| at[column][row])).collect::<Vec<f64>>());
+        // Kept linked: the component follows the part where it is, inside the other design.
+        // Nothing is stored here. A second pick of the same one is one more placement.
+        if keep_linked {
+            let file = pick.split('/').fold(Path::new(path).join(".~internal"), |file, part| file.join(part));
+            let target = link_target(&file);
+            let reused = s.doc.links.values().any(|link| !link.path.is_empty() && link_target(&resolve(Some(&own), &link.path)) == target);
+            let name = given.rsplit_once('.').map_or(given.as_str(), |(stem, _)| stem).to_string();
+            let mut params = json!({"path": file.to_string_lossy(), "name": name});
+            if reused {
+                params["reuse"] = json!(true);
+            }
+            if let Some(rows) = &rows {
+                params["to_matrix"] = json!(rows);
+            }
+            let made = insert_design(s, &params)?;
+            let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+            let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
+            inserted.push(PickedMember { pick, component, name, member: given, file: file.to_string_lossy().into_owned(), reused, linked: true });
+            continue;
+        }
+        // A part this design already holds is not stored a second time: it is placed once more.
+        if let Some(member) = super::design_internal::same_part(&s.doc, &s.internal_held, &own, &given, &bytes)
+            && let Some(file) = super::design_internal::work_file(Some(&own), &member)
+        {
+            let mut params = json!({"path": file.to_string_lossy(), "reuse": true});
+            if let Some(rows) = &rows {
+                params["to_matrix"] = json!(rows);
+            }
+            let made = insert_design(s, &params)?;
+            let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+            let name = s.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+            inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: true, linked: false });
+            continue;
+        }
+        let member = super::design_internal::free_name(&s.doc, &own, Path::new(&given));
+        // The copy belongs to this design now, and says so.
+        let tag = solidcraft_io::InternalOf {
+            design: design.clone(),
+            key: DesignLink::file_digest(format!("{}|{own}|{member}|{}", DesignLink::file_digest(&bytes), inserted.len()).as_bytes())
+                .chars()
+                .take(16)
+                .collect(),
+        };
+        let bytes = solidcraft_io::with_internal_of(&bytes, Some(&tag)).unwrap_or(bytes);
+        let file = super::design_internal::work_file(Some(&own), &member)
+            .ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;
+        super::design_internal::write(&file, &bytes).map_err(|why| bad(cmd, why))?;
+        s.internal_held.insert(member.clone(), bytes.clone().into());
+        let name = given.rsplit_once('.').map_or(given.as_str(), |(stem, _)| stem).to_string();
+        let mut params = json!({"path": file.to_string_lossy(), "name": name});
+        if let Some(rows) = &rows {
+            params["to_matrix"] = json!(rows);
+        }
+        let made = insert_design(s, &params)?;
+        let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+        if let Some(kept) = s.doc_mut().links.get_mut(&component) {
+            kept.path = solidcraft_doc::internal::link(&member);
+            kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
+        }
+        let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
+        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: false, linked: false });
+    }
+    reply(cmd, InsertFromDesignResult { inserted, param_warnings: Vec::new() })
+}
+
+/// `component.write_back`: the internal component's unpacked file goes into the design's file
+/// (`cmd/design_internal.rs`), which is otherwise left as it is, the design unsaved or not.
+fn write_back(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.write_back";
+    let comp = component_key(s, p, "component", cmd)?;
+    let member = s
+        .doc
+        .links
+        .get(&comp)
+        .and_then(|link| solidcraft_doc::internal::linked(&link.path))
+        .map(str::to_string)
+        .ok_or_else(|| bad(cmd, "that component is not an internal component"))?;
+    if s.recovery_components.contains(&member) {
+        return Err(bad(cmd, "that component waits as a recovery component: restore or discard it first"));
+    }
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "this design has no file yet: save it to store the component"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    if s.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty()) {
+        return Err(bad(cmd, "this design is signed: save it to store the component"));
+    }
+    if s.disk_changed() {
+        return Err(bad(cmd, "the design's file was changed by another program or computer: save the design to store the component"));
+    }
+    let file =
+        super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder for the component"))?;
+    let bytes = read_link(&file, Some(&own), false).map_err(|e| bad(cmd, e.to_string()))?;
+    let written = super::design_internal::write_back(&own, &member, &bytes).map_err(|why| bad(cmd, why))?;
+    s.internal_held.insert(member.clone(), bytes.clone().into());
+    // The file is ours as written: the next save does not take it for another program's change.
+    s.disk = solidcraft_io::design_lock::stamp(&own);
+    reply(cmd, WriteBackResult { component: comp, member, bytes: written, param_warnings: Vec::new() })
+}
+
+fn restore_recovery(s: &mut Session, p: &Value) -> Result<Value> {
+    settle_recovery(s, p, "component.restore_recovery", true)
+}
+
+fn discard_recovery(s: &mut Session, p: &Value) -> Result<Value> {
+    settle_recovery(s, p, "component.discard_recovery", false)
+}
+
+/// Settle a recovery component (`cmd/design_internal.rs`): `restore` keeps its unpacked file's
+/// work, which the design then finds out of date; otherwise what the design's file holds is
+/// unpacked over it, the dropped work kept beside it as a backup.
+fn settle_recovery(s: &mut Session, p: &Value, cmd: &str, restore: bool) -> Result<Value> {
+    let comp = component_key(s, p, "component", cmd)?;
+    let member = s
+        .doc
+        .links
+        .get(&comp)
+        .and_then(|link| solidcraft_doc::internal::linked(&link.path))
+        .filter(|member| s.recovery_components.contains(*member))
+        .map(str::to_string)
+        .ok_or_else(|| bad(cmd, "that component is not a recovery component"))?;
+    let file = super::design_internal::work_file(s.path.as_deref(), &member).ok_or_else(|| bad(cmd, "this design has no file"))?;
+    let mut backup = None;
+    if !restore {
+        let held = super::design_internal::stored(&s.doc, &s.internal_held, &member)
+            .cloned()
+            .ok_or_else(|| bad(cmd, "this design's file holds no copy of that component to go back to"))?;
+        solidcraft_io::vfs::check_new(&file.to_string_lossy()).map_err(|e| bad(cmd, e.to_string()))?;
+        // Atomic, and the work being dropped stays beside it as `<file>.bak`.
+        solidcraft_io::write_atomic(&file, held.as_bytes(), true).map_err(|e| bad(cmd, format!("{}: {e}", file.display())))?;
+        backup = Some(format!("{}.bak", file.display()));
+    }
+    s.recovery_components.remove(&member);
+    reply(cmd, RecoveryResult { component: comp, member, file: file.to_string_lossy().into_owned(), backup, param_warnings: Vec::new() })
+}
+
 /// What reads `link`'s file: the built-in STEP reader, an importer, or (for a design) nothing
 /// to name.
 fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
@@ -4260,6 +4688,11 @@ enum ListEntry {
         any: bool,
         kept_sha256: Option<String>,
         is_left_out: bool,
+        // An internal component (#6892): the design that holds it when that is another design,
+        // and whether it is stored in this one and waits as a recovery component.
+        holder: Option<String>,
+        internal: bool,
+        recovery: bool,
     },
 }
 
@@ -4296,6 +4729,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 if seen_shown.insert(shown.clone()) {
                     unique_shown.push(shown.clone());
                 }
+                let holder = inside(&file).map(|(holder, _)| holder.to_string_lossy().into_owned());
+                let internal = solidcraft_doc::internal::linked(&l.path);
+                let recovery = internal.is_some_and(|member| s.recovery_components.contains(member));
                 entries.push(ListEntry::LookUp {
                     c,
                     name,
@@ -4307,6 +4743,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     any: l.importer.is_some(),
                     kept_sha256: l.file_sha256.clone(),
                     is_left_out: left_out(&s.doc, c, l),
+                    holder,
+                    internal: internal.is_some(),
+                    recovery,
                 });
             }
             Some(solidcraft_io::vfs::Remote::Network(host)) => {
@@ -4375,6 +4814,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 file: String::new(),
                 found: None,
                 changed: None,
+                internal: false,
+                recovery: false,
+                inside: None,
                 state: None,
                 reason: None,
             },
@@ -4387,6 +4829,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 file: shown,
                 found: None,
                 changed: None,
+                internal: false,
+                recovery: false,
+                inside: None,
                 state: Some(LinkState::NotAllowed),
                 reason: Some(reason),
             },
@@ -4413,11 +4858,21 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 state: LinkState::Unreadable,
                 reason: "names a device, not a file".into(),
             },
-            ListEntry::LookUp { c, name, configuration, importer, path, shown, abs, any, kept_sha256, is_left_out } => {
+            ListEntry::LookUp { c, name, configuration, importer, path, shown, abs, any, kept_sha256, is_left_out, holder, internal, recovery } => {
                 let (found, presence) = statuses.get(&shown).cloned().unwrap_or((None, None));
+                // An internal component of another design is there when that design is.
+                let found = holder.as_deref().map_or(found, |holder| solidcraft_io::vfs::design_path_is_file(holder, own));
+                // That design may no longer hold the part: read (once per change of its file,
+                // [`file_sha256`]), and not found when it does not.
+                let held = holder.as_ref().filter(|_| found == Some(true)).map(|_| file_sha256(Path::new(&shown), own, false));
+                let dropped = matches!(held, Some(None));
+                let found = if dropped { Some(false) } else { found };
                 // Whether the file is no longer what this design last read (#9739): `null`
                 // when it isn't found, or the link keeps no digest (made before they were).
-                let current = kept_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| digests_map.get(&(abs, any)).cloned().flatten());
+                let current = match held {
+                    Some(now) => now.filter(|_| kept_sha256.is_some()),
+                    None => kept_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| digests_map.get(&(abs, any)).cloned().flatten()),
+                };
                 let changed = current.as_ref().zip(kept_sha256.as_ref()).map(|(now, kept)| now != kept);
                 // A link opened without its bodies has read nothing of its file yet.
                 let changed = if found == Some(true) && is_left_out { Some(true) } else { changed };
@@ -4429,9 +4884,24 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 // Why a file that can't be reached can't be: `None` when it can be read.
                 let (state, reason) = match presence {
                     Some((state, reason)) => (Some(state), Some(reason)),
+                    None if dropped => (Some(LinkState::Missing), read_link(Path::new(&shown), own, false).err().map(|e| e.to_string())),
                     None => (None, None),
                 };
-                LinkInfo::Looked { component: c, configuration, importer, name, path, file: shown, found, changed, state, reason }
+                LinkInfo::Looked {
+                    component: c,
+                    configuration,
+                    importer,
+                    name,
+                    path,
+                    file: shown,
+                    found,
+                    changed,
+                    internal,
+                    recovery,
+                    inside: holder,
+                    state,
+                    reason,
+                }
             }
         })
         .collect();

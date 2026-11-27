@@ -256,7 +256,12 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
+pub(crate) mod insert_from_design;
+pub(crate) mod internal_file;
+pub(crate) mod missing_links;
 pub mod mouse_gesture;
+pub(crate) mod new_internal;
+pub(crate) mod recovery_components;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
 pub use solidcraft_ui_kit::navigation_bar;
@@ -985,6 +990,17 @@ pub struct SolveApp {
     pub locks: Option<open_elsewhere::Locks>,
     /// Opens waiting for "this design is open elsewhere" to be answered, first asked first.
     pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
+    /// Linked parts an open couldn't find, waiting to be located (#6892).
+    pub missing_links: Option<missing_links::MissingLinks>,
+    /// Internal components an open found with unsaved work beside the design, waiting to be
+    /// restored or discarded (#6892).
+    pub recovery_components: Option<recovery_components::RecoveryComponents>,
+    /// A file that belongs to another design, opened by itself, waiting to be answered (#6892).
+    pub internal_file: Option<internal_file::InternalFile>,
+    /// A design being picked from, for Insert from Design (#6892).
+    pub insert_from_design: Option<insert_from_design::InsertFromDesign>,
+    /// Components made by New inside a design, waiting to be stored as internal components (#6892).
+    pub new_internal: new_internal::State,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1342,6 +1358,11 @@ impl SolveApp {
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
+            missing_links: None,
+            recovery_components: None,
+            internal_file: None,
+            insert_from_design: None,
+            new_internal: new_internal::State::default(),
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -1798,6 +1819,8 @@ impl SolveApp {
         prefs::apply_sketch_limit(&self.preferences);
         // Before a file given at start is read: whether its parts are healed (#17689).
         prefs::apply_tolerance_heal(&self.preferences);
+        // Before anything is opened or saved: the experimental saving switches (#19988, #6892).
+        prefs::apply_experiments(&self.preferences);
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
             self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();
@@ -3150,6 +3173,11 @@ impl SolveApp {
             }
             return;
         }
+        if id == "component.insert_from_design" {
+            // Insert from Design asks for the design, then shows what it holds to pick from.
+            insert_from_design::pick(self);
+            return;
+        }
         if id == "doc.open" {
             // Open asks for the file (and a board for its import options) rather than running
             // the command with no path.
@@ -4079,6 +4107,14 @@ impl SolveApp {
     }
 
     /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
+    /// With the experimental file kinds on (#6892): an opened file whose extension names another
+    /// kind of design than its header, which wins. `doc.open` words the note.
+    pub(crate) fn say_kind_note(&mut self, result: &serde_json::Value) {
+        if let Some(note) = result.get("kind_note").and_then(serde_json::Value::as_str) {
+            self.set_status(note.to_string(), false);
+        }
+    }
+
     pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
         let Some(signature) = result.get("signature") else { return };
         let status = signature.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -4165,6 +4201,10 @@ impl SolveApp {
         self.say_newer_file();
         self.say_plugin_data();
         self.say_signature(&r);
+        self.say_kind_note(&r);
+        missing_links::offer(self, &r);
+        recovery_components::offer(self, &r);
+        internal_file::offer(self, &r);
         Ok(())
     }
 
@@ -5119,6 +5159,12 @@ impl SolveApp {
         import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        missing_links::show(self, ui.ctx());
+        recovery_components::show(self, ui.ctx());
+        internal_file::show(self, ui.ctx());
+        insert_from_design::show(self, ui.ctx());
+        new_internal::settle(self);
+        new_internal::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

@@ -210,6 +210,8 @@ fn a_newer_files_reply_matches_the_output_schema() {
         not_kept: Some(vec!["x".into()]),
         param_warnings: Vec::new(),
         signature: None,
+        kind: None,
+        sheet_metal: None,
     })
     .unwrap_or_default();
     assert_eq!(

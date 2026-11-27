@@ -28,6 +28,20 @@ macro_rules! general_preferences {
             /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
             /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
             dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
+            /// The environment new files are made in (#6892, experimental): `single` (the default: one
+            /// design holds parts, sheet metal and assemblies, as always) or `parts_and_assemblies` (New
+            /// makes a part `.scprt`, which may hold sheet metal, or an assembly `.scasm`, and extensions
+            /// pick and check a design's kind, [`apply_experiments`]). Anything else reads as `single`.
+            /// Files already made keep their kind either way.
+            environment: String = ENVIRONMENT_SINGLE.into(), PAGE_GENERAL;
+            /// Experimental (#6892): folders searched, in order, for a linked part that isn't where its
+            /// link says (each folder, then its subfolders), with the file kinds on. No control yet: set
+            /// through `ui.prefs`, until the library places page of #19614 can hold them.
+            experimental_part_library_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
+            /// Experimental (#19988): every save deflates the model cache inside the design harder, about
+            /// half its size for a few tens of ms on a large design ([`apply_experiments`]). Off by
+            /// default: saves are as before. No format change; every release opens such a file.
+            experimental_smaller_saves: bool = false, PAGE_GENERAL => check_id("prefs.experimental_smaller_saves");
             /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it
             /// has just one (#13098). Off: the list starts empty, as before.
             export_selects_only_body: bool = true, 0;

@@ -29,7 +29,7 @@ fn mesh() -> MeshData {
 
 /// A container made part by part, with exactly these parts.
 fn container(parts: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(DesignCompression::Fast);
     for (name, bytes) in parts {
         writer.part(name, bytes, true).unwrap();
     }
@@ -204,7 +204,7 @@ fn a_part_name_that_could_forge_lines_is_quoted() {
 #[test]
 fn a_part_that_does_not_read_adds_the_hash_of_the_whole_file() {
     let payload = b"payload that the test damages, kept uncompressed";
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(DesignCompression::Fast);
     writer.part("container.json", br#"{"format":"solidcraft-container/1"}"#, true).unwrap();
     writer.part("notes/readme.txt", payload, false).unwrap();
     let mut bytes = writer.finish().unwrap();

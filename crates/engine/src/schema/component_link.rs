@@ -378,7 +378,9 @@ impl JsonSchema for ComponentList {
 
 /// Read the linked designs and STEP files again and replace the bodies of the components whose file changed,
 /// as one undo step. Without `component` or `components`, every linked component is read. A
-/// component that is not linked is refused.
+/// component that is not linked is refused. Every link, or a list, goes on past a design it
+/// cannot read (that component keeps its bodies and is named in `failed`); one `component` is
+/// refused instead.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct UpdateLinksKeys {
@@ -440,7 +442,7 @@ pub struct UpdateLinksResult {
     pub unchanged: Vec<String>,
     /// What the update noticed, also joints whose faces are gone or that no longer solve.
     pub warnings: Vec<String>,
-    /// With a `components` list: the designs that could not be read.
+    /// Without `component`: the designs that could not be read, by name and file.
     pub failed: Vec<LinkFailure>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -455,6 +457,8 @@ pub struct LinkFailure {
     pub name: String,
     /// Why the design could not be read.
     pub error: String,
+    /// The file the link looked for, whole.
+    pub path: String,
 }
 
 /// Replace the source of a linked component with another saved design, for all its occurrences,
@@ -573,6 +577,191 @@ pub struct BreakLinkResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Store a linked component's design inside this design's file (experimental, #6892): the linked
+/// file is copied in as a part of this design, unpacked beside it while it is open, and the
+/// component follows that copy from then on. The file it came from is left as it is. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct MakeInternalParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The linked component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// A saved design to store instead of the one the component is linked to, `.sc`, `.scprt`,
+    /// `.scasm` or `.json`: the component is linked to it first, as `component.relink` does, in
+    /// the same undo step. This is how an internal component is replaced and stays internal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// List the internal components a design file holds (experimental, #6892): its parts and
+/// sub-assemblies, and theirs, read from the file without building its model. This is what
+/// `component.insert_from_design` picks from.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DesignContentsParams {
+    /// A saved design, `.sc`, `.scprt` or `.scasm`.
+    pub path: String,
+}
+
+/// What `component.design_contents` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignContentsResult {
+    /// The design read, as given.
+    pub path: String,
+    /// Its internal components, by the names they have inside the file.
+    pub members: Vec<DesignMember>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One internal component of a design file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignMember {
+    /// What `component.insert_from_design` takes to pick it: its name inside the file, after
+    /// the names of the sub-assemblies it is inside, with `/` between (`hinge.scasm/arm.scprt`).
+    pub pick: String,
+    /// Its name inside the file that holds it.
+    pub member: String,
+    /// The name of the component that uses it there; its file name without the extension when
+    /// no component does.
+    pub name: String,
+    /// `part`, `assembly`, or `design` for any other design file.
+    pub kind: String,
+    /// How many times the design that holds it places it.
+    pub placements: usize,
+    /// A sub-assembly's own internal components.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<DesignMember>,
+}
+
+/// Insert internal components picked from another design (experimental, #6892): each picked part
+/// or sub-assembly is copied into this design's file as an internal component of its own, with its
+/// timeline, and placed in the active component where the other design had it. A sub-assembly
+/// comes whole, with its parts and the joints between them. The copies are independent of the
+/// design they came from, which is left as it is. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct InsertFromDesignParams {
+    /// The saved design to pick from, `.sc`, `.scprt` or `.scasm`.
+    pub path: String,
+    /// What to take: each a `pick` of `component.design_contents`.
+    pub members: Vec<String>,
+    /// Keep each picked one linked to the design it is in, instead of copying it: nothing is
+    /// stored in this design, `component.update_links` reads it from that design again, and it
+    /// is edited there. Default false: a copy, independent of where it came from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub link: bool,
+}
+
+/// What `component.insert_from_design` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InsertFromDesignResult {
+    /// What was brought, in the order asked.
+    pub inserted: Vec<PickedMember>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One internal component brought by `component.insert_from_design`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PickedMember {
+    /// The pick it came from.
+    pub pick: String,
+    /// The component, by id: a new one, or with `reused` the one the design had.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// The name the part has inside this design's file, which is its unpacked file's name.
+    pub member: String,
+    /// The unpacked file, whole: the one to open to edit it.
+    pub file: String,
+    /// The design already held this part under this name, unchanged: nothing was stored, and
+    /// its component got one more placement.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reused: bool,
+    /// With `link`: the component is linked to the part inside the design picked from, and
+    /// `file` is that link, not a file on disk.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked: bool,
+}
+
+/// What `component.make_internal` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MakeInternalResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The name the part has inside this design's file, which is its unpacked file's name.
+    pub member: String,
+    /// The unpacked file, whole: the one to open to edit the part.
+    pub file: String,
+    /// The file it was linked to, as the link stored it.
+    pub previous_path: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Write an internal component back into this design's file without saving the design
+/// (experimental, #6892): the part's unpacked file replaces the copy the design's file holds, and
+/// nothing else in the file changes. Refused for a recovery component, a design opened read-only,
+/// a signed design, and a file another program or computer changed: a save stores it then.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct WriteBackParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The internal component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.write_back` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct WriteBackResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The internal component's name inside this design's file.
+    pub member: String,
+    /// The size of the design's file as written, in bytes.
+    pub bytes: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Settle a recovery component (experimental, #6892): `component.restore_recovery` and
+/// `component.discard_recovery` take the same parameter.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct RecoveryParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The recovery component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.restore_recovery` and `component.discard_recovery` return.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoveryResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The internal component's name inside this design's file.
+    pub member: String,
+    /// Its unpacked file, whole.
+    pub file: String,
+    /// After a discard: where the dropped work was kept, beside the unpacked file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `component.links` takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -640,6 +829,22 @@ pub enum LinkInfo {
         /// True also for a link that has no bodies yet: the design was saved without them and
         /// has not read the file since it opened.
         changed: Option<bool>,
+        /// Experimental (#6892): `true` for an internal component, one stored inside this
+        /// design's file, whose `file` is where it is unpacked while the design is open.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        internal: bool,
+        /// Experimental (#6892): `true` for a recovery component, an internal component whose
+        /// unpacked file was found differing from the design's file when the design opened. It
+        /// shows what the design's file holds until `component.restore_recovery` takes the
+        /// unpacked file's work or `component.discard_recovery` drops it; `changed` is then about
+        /// that unpacked file.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        recovery: bool,
+        /// Experimental (#6892): for a link to an internal component of another design, that
+        /// design's file. `file` then names the component inside it and is no file on disk;
+        /// `found` and `changed` are about that design and the part it holds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inside: Option<String>,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,6 +6,9 @@ mod easyprint;
 #[path = "file_import.rs"]
 pub(crate) mod import;
 
+#[path = "file_kind.rs"]
+pub(crate) mod kind;
+
 #[path = "file_open_steps.rs"]
 pub(crate) mod open_steps;
 
@@ -25,8 +28,8 @@ use crate::params::{bad, bool_, num, str_, string_list};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
-    ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
-    OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
+    ExportResult, GpgKeysParams, GpgKeysResult, InternalOfReport, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing,
+    OpenedFile, OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
     RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
@@ -86,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "holes?: none|mounting|pads|all (default mounting: the board's mounting holes, every unplated hole and each hole of a MountingHole footprint; pads adds the plated holes of through-hole pads, all adds vias; a hole left out is solid board and closed copper, and a hole that reaches the board's edge or a cutout is always kept); ",
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
-            "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
+            "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere), as_copy?: bool (a design: open a copy as a new, unsaved single design with no file, leaving the file as it is); ",
             "linked_bodies?: all|folder (a design saved without the bodies of its linked designs and STEP files, file.save's `linked_bodies: false`: which linked files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
@@ -410,10 +413,13 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("file.new", NEW_TAB_NEEDS_TABS));
     }
     let name = str_(p, "name").unwrap_or("Untitled");
+    // The kind is checked before anything changes (experimental, #6892).
+    let design_kind = kind::for_new(p.get("kind"))?;
     s.replace_design(Session::new(Document::new(name)));
+    s.design_kind = design_kind;
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
+    let reply = NewDesignResult { name: name.to_string(), kind: kind::reported(design_kind), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
 
@@ -2061,6 +2067,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     let read_only = bool_(p, "read_only").unwrap_or(false);
+    let as_copy = bool_(p, "as_copy").unwrap_or(false);
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
@@ -2073,7 +2080,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let which = super::component_link::LinkedRead::read(p, "doc.open")?;
     let linked = super::component_link::read_left_out_bodies(&mut doc, Some(path), s.validation(), which);
     let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
-    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain, linked)
+    opened_design(s, opened, path, read_only, as_copy, disk, verify.then_some(file.report), file.chain, linked)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -2122,6 +2129,7 @@ fn reads_natively(path: &str) -> bool {
         || solidcraft_io::is_kicad_path(path)
         || solidcraft_io::formats::open_extensions(true).iter().any(|e| e.eq_ignore_ascii_case(&extension))
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
+        || solidcraft_io::DesignKind::for_path(path).is_some()
 }
 
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
@@ -2156,6 +2164,7 @@ fn opened_design(
     opened: Session,
     path: &str,
     read_only: bool,
+    as_copy: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
     chain: Option<solidcraft_io::ProvenanceChain>,
@@ -2164,6 +2173,29 @@ fn opened_design(
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    // The internal components are unpacked beside it where they are not yet (#6892). A
+    // design opened read-only writes nothing and reads them from its file.
+    // Nor does a copy (`as_copy`): it leaves the file it came from as it is.
+    // And only in the hybrid environment (the experiment on): a single design environment
+    // makes no work folder, and reads the parts from the file as a read-only open does. A save
+    // there keeps them as the file holds them.
+    let writes = !read_only && !as_copy && super::experimental_file_kinds();
+    let unpacked = if writes { super::design_internal::unpack(&s.doc, path) } else { super::design_internal::Unpacked::default() };
+    // An unpacked file that differs from the design's file is a recovery component: held as the
+    // file has it until `component.restore_recovery` or `component.discard_recovery` settles it.
+    s.recovery_components = unpacked.differ.iter().cloned().collect();
+    let (kind, kind_note) = kind::opened(path);
+    s.design_kind = kind;
+    // A top container's drawings get files of their own kind there too, where they have none (#6892).
+    if writes {
+        super::design_drawings::unpack(&s.doc, path, kind);
+    }
+    // A file that belongs to another design says so in its header (#6892): kept for its saves,
+    // and reported, so whoever opened it can say what it is.
+    s.internal_of = solidcraft_io::read_internal_of_file(path);
+    // What the file holds is the document's own copy again.
+    s.internal_held.clear();
+    let internal_of = s.internal_of.as_ref().map(|tag| InternalOfReport { design: tag.design.clone(), key: tag.key.clone() });
     // Both from the reading the design came from (`read_design`): the signature check, when it
     // was asked for, is the check of these bytes.
     s.provenance_chain = chain;
@@ -2174,6 +2206,16 @@ fn opened_design(
     if !s.keep_print_faces && !s.doc.print_faces.is_empty() {
         s.doc_mut().print_faces.clear();
         s.mark_saved();
+    }
+    // A copy is a new single design with no file and no tag: saving it asks where.
+    if as_copy {
+        s.path = None;
+        s.disk = None;
+        s.read_only = false;
+        s.design_kind = solidcraft_io::DesignKind::Single;
+        s.internal_of = None;
+        s.recovery_components.clear();
+        s.mark_unsaved();
     }
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let now = solidcraft_io::design_lock::now_secs();
@@ -2188,7 +2230,9 @@ fn opened_design(
         features: s.doc.features.len(),
         errors,
         name: s.doc.name.clone(),
-        read_only: read_only.then_some(true),
+        read_only: (read_only && !as_copy).then_some(true),
+        as_copy: as_copy.then_some(true),
+        internal_of,
         open_elsewhere,
         newer_file: s.doc.newer_file.as_ref().map(|file| NewerFileReport {
             format: file.format,
@@ -2199,6 +2243,12 @@ fn opened_design(
         }),
         warnings: opened_warnings(s.doc.newer_file.as_ref().map(|file| file.warnings()), linked),
         signature: s.provenance.as_ref().map(signature_report),
+        kind: kind::reported(kind),
+        sheet_metal: kind::sheet_metal_mark(s),
+        kind_note,
+        missing_links: kind::missing_links(s),
+        recovery_components: unpacked.differ,
+        internal_not_unpacked: unpacked.failed,
         param_warnings: Vec::new(),
     }))
 }
@@ -2424,6 +2474,9 @@ fn write(
     // Saving an unnamed or borrowed-named design to a new file names it after that file
     // (not an undoable edit); a name the user chose is kept (#4907).
     let renamed = saved_name(&s.doc.name, s.path.as_deref(), path, s.user_named).map(|stem| (s.doc.name.clone(), stem));
+    // The kind of design the file holds (experimental, #6892): checked before anything changes.
+    let kind = kind::for_save(s, cmd, path, format)?;
+    let kind_before = std::mem::replace(&mut s.design_kind, kind);
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
@@ -2432,6 +2485,7 @@ fn write(
     s.linked_bodies = linked_bodies.unwrap_or(kept);
     let r = write_file(s, path, format, compression, preview, cache, sign, signing_key);
     if r.is_err() {
+        s.design_kind = kind_before;
         s.linked_bodies = kept;
     }
     if r.is_err()
@@ -2566,7 +2620,14 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    // The linked bodies were deliberately left out with their cache.
+    // A file that belongs to another design keeps its tag when it is saved where it is (#6892).
+    // Saved anywhere else it is a file of its own, and so is a signed file, whose header stays.
+    let tag = s.internal_of.clone().filter(|_| format == "container" && s.path.as_deref() == Some(path));
+    let (bytes, tag) = match tag.as_ref().map(|tag| solidcraft_io::with_internal_of(&bytes, Some(tag))) {
+        Some(Ok(tagged)) => (tagged, tag),
+        _ => (bytes, None),
+    };
+    // Left out with the linked bodies ([`Session::container_bytes`]): not a cache that went missing.
     let cache = cache && (s.linked_bodies || s.doc.links.is_empty());
     if !s.linked_bodies {
         notes.extend(super::component_link::kept_linked_bodies(s));
@@ -2589,7 +2650,27 @@ fn write_bytes(
         })?;
     }
     super::component_link::forget_file_digests();
+    // The session now holds the internal components as this file does (#6892): a later save
+    // still has a part whose work file has gone since.
+    if format == "container"
+        && let Ok(held) = solidcraft_io::internal_components(&bytes)
+    {
+        s.internal_held = held.into_iter().map(|(name, part)| (name, part.into())).collect();
+    }
+    // A first save or a Save As: the internal components are unpacked beside the new file
+    // too, so its links find them (#6892). The file itself holds them either way. A save the
+    // host writes has no folder beside it to unpack into.
+    if !host_save {
+        for why in super::design_internal::carry(&s.doc, &s.internal_held, s.path.as_deref(), path) {
+            notes.push(format!("A part stored inside the design was not unpacked beside {path}: {why}"));
+        }
+        // The drawing files beside it now hold the drawings as saved (#6892).
+        if format == "container" {
+            super::design_drawings::refresh(&s.doc, path, s.design_kind);
+        }
+    }
     s.path = Some(path.to_string());
+    s.internal_of = tag;
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     // Inspect the directory once. A save over the opening limit keeps its history for the next save.
@@ -2609,6 +2690,8 @@ fn write_bytes(
         not_kept: None,
         param_warnings: Vec::new(),
         signature,
+        kind: (format == "container").then(|| kind::reported(s.design_kind)).flatten(),
+        sheet_metal: kind::sheet_metal_mark(s),
     };
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
@@ -3096,44 +3179,31 @@ impl Session {
         provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
         saving: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        let design = if saving { self.design_saved(path) } else { self.design_at(path) };
+        let mut design = if saving { self.design_saved(path) } else { self.design_at(path) };
+        // The internal components go in from the files they are unpacked to (#6892).
+        super::design_internal::pack(&mut design, &self.internal_held, self.path.as_deref(), &self.recovery_components);
         // The saved model and the thumbnail hold the linked bodies too: a file saved without
         // them has neither, and evaluates when it opens.
         let cache = cache && !(design.linked_bodies_left_out && !design.links.is_empty());
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| crate::thumbnail::png(self)).flatten();
-        match provenance {
-            Some(save) => solidcraft_io::write_design_container_with_provenance(
-                &design,
-                compression,
-                preview.as_ref(),
-                geometry.as_ref(),
-                thumbnail.as_deref(),
-                save,
-            ),
-            // The container the design was opened from: its blobs whose content has not changed
-            // are copied as they are, instead of being encoded and compressed again. A part is
-            // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
-            // this save writes, so the file reads back the same either way.
-            None => match self.reuse_container().as_deref() {
-                Some(bytes) => solidcraft_io::write_design_container_reusing(
-                    &design,
-                    compression,
-                    preview.as_ref(),
-                    geometry.as_ref(),
-                    thumbnail.as_deref(),
-                    bytes,
-                ),
-                None => solidcraft_io::write_design_container_with_thumbnail(
-                    &design,
-                    compression,
-                    preview.as_ref(),
-                    geometry.as_ref(),
-                    thumbnail.as_deref(),
-                ),
-            },
-        }
+        // The container the design was opened from: its blobs whose content has not changed
+        // are copied as they are, instead of being encoded and compressed again. A part is
+        // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
+        // this save writes, so the file reads back the same either way. A signed save encodes
+        // every part.
+        let reuse = if provenance.is_none() { self.reuse_container() } else { None };
+        solidcraft_io::write_design_container_as(
+            &design,
+            self.design_kind,
+            compression,
+            preview.as_ref(),
+            geometry.as_ref(),
+            thumbnail.as_deref(),
+            provenance,
+            reuse.as_deref(),
+        )
     }
 
     /// The container the design was opened from, read for a save to copy its unchanged blobs:
@@ -4444,10 +4514,16 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
+    // Read before the entry can be discarded below: the copy's header says what the design was.
+    let (kind, internal_of) = crate::recovery::header(&dir, id);
     // The copy holds the linked bodies the design had; a link not read before the copy was made
     // is read now by the same rule as when the design opens.
     let (opened, warnings) = Session::opened_at_reading(doc, None, entry.path.as_deref(), s.validation(), which);
     s.replace_design(opened);
+    // A recovered part or assembly is still one, and a design's work file still belongs to its
+    // design, so it saves back to its place (#6892).
+    s.design_kind = kind;
+    s.internal_of = internal_of.filter(|_| entry.path.is_some());
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
@@ -4512,6 +4588,168 @@ mod tests {
         };
         assert!(has_thumbnail(&mut s, "part.3mf"));
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
+
+    /// Experimental file kinds (#6892): a new design's first save takes the kind its extension
+    /// names and the header keeps it; a save as another kind is refused, a renamed file opens as
+    /// what its header says with a note, and a JSON save of a part is refused. Off, extensions
+    /// mean nothing and the kind a file holds is still kept. The switch is only ever turned on
+    /// here: a single design saves and opens the same either way, so other tests are unaffected.
+    #[test]
+    fn file_kinds_follow_the_header_and_refuse_a_save_as_another_kind() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-file-kinds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let saved = s.execute("file.save", &json!({"path": at("bracket.scprt")})).unwrap();
+        assert_eq!(saved["kind"], "part", "{saved}");
+        assert_eq!(s.design_kind, DesignKind::Part);
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("bracket.scprt")), DesignKind::Part);
+        // Saved again, and as another part: still a part, and the reply says so.
+        assert_eq!(s.execute("file.save", &json!({})).unwrap()["kind"], "part");
+        assert_eq!(s.execute("file.save_as", &json!({"path": at("bracket-2.scprt")})).unwrap()["kind"], "part");
+        // As an assembly, a single design or JSON: refused, and the file is not written.
+        for (name, says) in [("bracket.scasm", "create a new assembly"), ("bracket.sc", "create a new single design"), ("bracket.json", "header")] {
+            let refused = s.execute("file.save_as", &json!({"path": at(name)})).unwrap_err().to_string();
+            assert!(refused.contains(says) && refused.contains("a part"), "{name}: {refused}");
+            assert!(!std::path::Path::new(&at(name)).exists(), "{name}");
+        }
+        assert_eq!(s.design_kind, DesignKind::Part, "a refused save changes nothing");
+        // Renamed on disk: the header wins, and the reply says so.
+        std::fs::copy(at("bracket.scprt"), at("renamed.scasm")).unwrap();
+        let mut o = Session::default();
+        let opened = o.execute("doc.open", &json!({"path": at("renamed.scasm")})).unwrap();
+        assert_eq!(opened["kind"], "part", "{opened}");
+        assert!(opened["kind_note"].as_str().is_some_and(|note| note.contains("holds a part")), "{opened}");
+        assert!(opened.get("newer_file").is_none(), "this build knows its own kinds: {opened}");
+        assert_eq!(o.design_kind, DesignKind::Part);
+        // Opened from its own name: no note.
+        let plain = o.execute("doc.open", &json!({"path": at("bracket.scprt")})).unwrap();
+        assert!(plain.get("kind_note").is_none(), "{plain}");
+        // Off: the extension means nothing and the kind is kept as it came.
+        assert_eq!(kind::checked(&o, "file.save_as", &at("x.scasm"), "container", false).unwrap(), DesignKind::Part);
+        assert_eq!(kind::checked(&Session::default(), "file.save", &at("x.scprt"), "container", false).unwrap(), DesignKind::Single);
+        assert_eq!(kind::opened_with(&at("renamed.scasm"), false), (DesignKind::Part, None));
+        // A single design: no kind in any reply, and its file is as before.
+        let mut single = Session::default();
+        single.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let plain = single.execute("file.save", &json!({"path": at("plain.sc")})).unwrap();
+        assert!(plain.get("kind").is_none(), "{plain}");
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("plain.sc")), DesignKind::Single);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// New files of a kind (#6892): `file.new {kind}` makes a design of that kind, whose first save
+    /// must use its extension; a single design is the default; a kind needs Parts and assemblies.
+    #[test]
+    fn file_new_makes_a_design_of_a_kind_that_saves_only_as_that_kind() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-new-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut s = Session::default();
+        let made = s.execute("file.new", &json!({"name": "Frame", "kind": "assembly"})).unwrap();
+        assert_eq!(made["kind"], "assembly", "{made}");
+        assert_eq!(s.design_kind, DesignKind::Assembly);
+        let refused = s.execute("file.save", &json!({"path": at("frame.sc")})).unwrap_err().to_string();
+        assert!(refused.contains("this design is an assembly"), "{refused}");
+        assert_eq!(s.execute("file.save", &json!({"path": at("frame.scasm")})).unwrap()["kind"], "assembly");
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("frame.scasm")), DesignKind::Assembly);
+        // The default, and `single`, make a single design, with no kind in the reply.
+        for p in [json!({}), json!({"kind": "single"}), json!({"kind": null})] {
+            let made = s.execute("file.new", &p).unwrap();
+            assert!(made.get("kind").is_none() && s.design_kind == DesignKind::Single, "{p}: {made}");
+        }
+        assert_eq!(s.execute("file.new", &json!({"kind": "part"})).unwrap()["kind"], "part");
+        // Sheet metal is a part, not a kind (step 16); an unknown kind is refused and changes
+        // nothing; so is a kind with the environment off.
+        let sheet = s.execute("file.new", &json!({"kind": "sheet_metal"})).unwrap_err().to_string();
+        assert!(sheet.contains("a sheet metal part is a part"), "{sheet}");
+        assert!(s.execute("file.new", &json!({"kind": "weldment"})).is_err());
+        assert_eq!(s.design_kind, DesignKind::Part);
+        let off = kind::for_new_with(Some(&json!("part")), false).unwrap_err().to_string();
+        assert!(off.contains("Parts and assemblies is off"), "{off}");
+        assert_eq!(kind::for_new_with(Some(&json!("single")), false).unwrap(), DesignKind::Single);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What each kind holds (#6892, steps 13 and 16): a part holds sheet metal too (Convert works in
+    /// place); an assembly refuses a body made from nothing and sheet metal, with what to do
+    /// instead, and the design is unchanged; the ribbon's check gives the same reason; a single
+    /// design is never restricted. With the experiment off nothing is refused.
+    #[test]
+    fn a_command_that_does_not_fit_the_kind_is_refused_with_what_to_do_instead() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        for id in ["sheet.convert", "sheet.flange", "sheet.recognize", "sheet.export_dxf", "sheet.flat_pattern"] {
+            assert_eq!(kind::refusal_with(DesignKind::Part, id, true), None, "a part holds sheet metal: {id}");
+        }
+        let mut assembly = Session::default();
+        assembly.execute("file.new", &json!({"kind": "assembly"})).unwrap();
+        let refused = assembly.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_err().to_string();
+        assert!(refused.contains("an assembly holds parts from their own files and their joints: create a new part, then insert it"), "{refused}");
+        assert!(assembly.model.state().bodies.is_empty());
+        for id in ["solid.cylinder", "sheet.flange"] {
+            assert!(kind::refusal_with(DesignKind::Assembly, id, true).is_some(), "{id}");
+        }
+        let spec = super::super::find_command("solid.box").unwrap();
+        assert!(spec.allowed(&assembly).unwrap_err().contains("create a new part, then insert it"), "the ribbon says the same");
+        // Still open (step 13): assembly features, more bodies in a part, solids in sheet metal.
+        for (kind, id) in [(DesignKind::Assembly, "solid.extrude"), (DesignKind::Assembly, "solid.hole"), (DesignKind::Part, "solid.box")] {
+            assert_eq!(kind::refusal_with(kind, id, true), None, "{kind:?} {id}");
+        }
+        // A single design is never restricted, and nothing is with the experiment off.
+        for id in ["solid.box", "sheet.flange", "sheet.convert"] {
+            assert_eq!(kind::refusal_with(DesignKind::Single, id, true), None, "{id}");
+            assert_eq!(kind::refusal_with(DesignKind::Assembly, id, false), None, "{id}");
+        }
+    }
+
+    /// One part kind and a sheet metal mark (#6892, step 16): a part that holds a sheet metal body
+    /// says `sheet_metal: true` in its save and open replies, a plain part doesn't; `sheet.parts`
+    /// lists the sheet bodies of the design and of an assembly's linked parts, with thickness and
+    /// flat. (A file saved as a sheet metal part by an earlier build reads as a part: the io
+    /// container tests.)
+    #[test]
+    fn a_part_that_holds_sheet_metal_is_marked_and_listed_for_nesting() {
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-sheet-mark-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut panel = Session::default();
+        panel.execute("file.new", &json!({"kind": "part", "name": "Panel"})).unwrap();
+        panel.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2, "body_name": "Panel"})).unwrap();
+        panel.execute("sheet.recognize", &json!({"body": "Panel", "new_rule": "Plate 2 mm"})).unwrap();
+        let saved = panel.execute("file.save", &json!({"path": at("panel.scprt")})).unwrap();
+        assert!(saved["kind"] == "part" && saved["sheet_metal"] == true, "{saved}");
+        let listed = panel.execute("sheet.parts", &json!({})).unwrap();
+        let body = &listed["parts"][0]["bodies"][0];
+        assert!(listed["sheet_metal"] == true && body["body"] == "Panel", "{listed}");
+        assert!((body["thickness_mm"].as_f64().unwrap() - 2.0).abs() < 1e-9 && body["flat_pattern"] == true, "{listed}");
+        let mut reopened = Session::default();
+        let opened = reopened.execute("doc.open", &json!({"path": at("panel.scprt")})).unwrap();
+        assert!(opened["kind"] == "part" && opened["sheet_metal"] == true, "{opened}");
+        // A plain part has no mark.
+        let mut bracket = Session::default();
+        bracket.execute("file.new", &json!({"kind": "part"})).unwrap();
+        bracket.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let plain = bracket.execute("file.save", &json!({"path": at("bracket.scprt")})).unwrap();
+        assert!(plain.get("sheet_metal").is_none(), "{plain}");
+        // An assembly lists its linked sheet metal part and leaves the solid one out.
+        let mut frame = Session::default();
+        frame.execute("file.new", &json!({"kind": "assembly"})).unwrap();
+        frame.execute("file.save", &json!({"path": at("frame.scasm")})).unwrap();
+        frame.execute("component.insert_design", &json!({"path": at("panel.scprt")})).unwrap();
+        frame.execute("component.insert_design", &json!({"path": at("bracket.scprt"), "translate": [60, 0, 0]})).unwrap();
+        let nest = frame.execute("sheet.parts", &json!({})).unwrap();
+        let parts = nest["parts"].as_array().unwrap();
+        assert!(parts.len() == 1 && parts[0]["component"].is_u64(), "{nest}");
+        assert_eq!(parts[0]["bodies"][0]["body"], "Panel", "{nest}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// File > Revert to Saved without a dialog (#16629): the design is read again from its file,

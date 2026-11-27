@@ -90,6 +90,14 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
 pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
+    // The work file of a part stored inside the design: the link names the part.
+    if let Some(member) = super::design_internal::member_at(design, file) {
+        return solidcraft_doc::internal::link(&member);
+    }
+    // An internal component of another design: that design's path as a link keeps it, then the part.
+    if let Some((holder, pick)) = inside(file) {
+        return format!("{}/{}{pick}", stored(design, &holder), solidcraft_doc::internal::LINK);
+    }
     let whole = absolute(file);
     let Some(base) = base_dir(design) else {
         return whole.to_string_lossy().into_owned();
@@ -103,7 +111,44 @@ pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
 
 /// A link's absolute target, resolving directory aliases while keeping file symlinks distinct.
 pub(super) fn link_target(file: &Path) -> PathBuf {
+    if let Some((holder, pick)) = inside(file) {
+        return pick.split('/').fold(link_target(&holder).join(INSIDE), |path, part| path.join(part));
+    }
     parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
+}
+
+/// The folder name that, after a design file's path, starts the name of one of its internal
+/// components ([`inside`]).
+const INSIDE: &str = ".~internal";
+
+/// A link to an internal component of another design (experimental, #6892): `file` is that
+/// design's path, then `.~internal`, then the component's name, after the names of the
+/// sub-assemblies it is inside (`lib/library.sc/.~internal/hinge.scasm/arm.scprt`). Gives the
+/// design that holds it and the pick `component.design_contents` lists it by. No file is at such
+/// a path: every read goes to the design ([`read_linked_file`]), and a build that does not know
+/// them reports the link as not found and keeps its bodies.
+pub(super) fn inside(file: &Path) -> Option<(PathBuf, String)> {
+    let parts: Vec<PathPart<'_>> = file.components().collect();
+    let at = parts.iter().position(|part| matches!(part, PathPart::Normal(name) if name.to_str() == Some(INSIDE)))?;
+    // With nothing before it, it is one of the design's own internal components.
+    if at == 0 || at + 1 >= parts.len() {
+        return None;
+    }
+    let holder: PathBuf = parts[..at].iter().map(|part| part.as_os_str()).collect();
+    let pick: Option<Vec<&str>> = parts[at + 1..]
+        .iter()
+        .map(|part| match part {
+            PathPart::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect();
+    solidcraft_io::is_design_path(&holder.to_string_lossy()).then_some(holder).zip(pick.map(|pick| pick.join("/")))
+}
+
+/// The file the disk is asked about for the link at `file`: the design that holds it when it
+/// names an internal component of another design ([`inside`]), else itself.
+pub(super) fn on_disk(file: &Path) -> PathBuf {
+    inside(file).map_or_else(|| file.to_path_buf(), |(holder, _)| holder)
 }
 
 /// The place `file` really is, every link in its path followed (`None`: it cannot be resolved, as
@@ -114,6 +159,10 @@ pub(super) fn real_file(file: &Path) -> Option<PathBuf> {
 
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
+    // A part stored inside the design (experimental, #6892): the file it is unpacked to.
+    if let Some(file) = solidcraft_doc::internal::linked(link).and_then(|member| super::design_internal::work_file(design, member)) {
+        return file;
+    }
     let p = Path::new(link);
     match p.is_relative().then(|| base_dir(design)).flatten() {
         // Browser storage keys do not let the OS resolve `..` for us.
@@ -246,9 +295,10 @@ type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
-    // A link to a design that came from the session names no file: it stays as it is.
-    let links: BTreeMap<u64, DesignLink> =
-        doc.links.iter().map(|(c, l)| (*c, DesignLink { path: if l.path.is_empty() { String::new() } else { map(&l.path) }, ..l.clone() })).collect();
+    // A link to a part stored inside the design names the part, wherever the design is saved,
+    // and a link to a design that came from the session names no file: both stay as they are.
+    let through = |path: &str| if path.is_empty() || solidcraft_doc::internal::linked(path).is_some() { path.to_string() } else { map(path) };
+    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: through(&l.path), ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
     ((links != doc.links).then_some(links), sources.then_some(drawings))
@@ -365,7 +415,7 @@ fn refusal(shown: &str, design: Option<&str>) -> Option<LinkProblem> {
 /// Cheap, for a design being opened, which must not read every file it links. A refused network
 /// or device path is judged from its text alone, with nothing asked of the disk or the network.
 pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkProblem> {
-    let shown = file.display().to_string();
+    let shown = on_disk(file).display().to_string();
     refusal(&shown, design).or_else(|| solidcraft_io::vfs::len(&shown).err().map(|e| io_problem(&shown, &e)))
 }
 
@@ -376,6 +426,11 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 /// reason to show. Every kind of link reads its file here.
 /// `any`: the file is one an importer plugin reads, whatever its name, under the STEP size limit.
 pub(super) fn read_linked_file(file: &Path, design: Option<&str>, any: bool) -> Result<Vec<u8>, LinkProblem> {
+    // An internal component of another design: that design is read, and the part taken from it.
+    if let Some((holder, pick)) = inside(file) {
+        let bytes = read_linked_file(&holder, design, false)?;
+        return super::design_internal::member(&bytes, &pick).map_err(|why| problem(LinkState::Missing, format!("{}: {why}", holder.display())));
+    }
     let shown = file.display().to_string();
     if let Some(why) = refusal(&shown, design) {
         return Err(why);
@@ -393,10 +448,96 @@ pub(super) fn read_linked_file(file: &Path, design: Option<&str>, any: bool) -> 
     solidcraft_io::vfs::read_design_path(&shown, design, limit).map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(kind, e)))
 }
 
+/// The folders searched for a linked design that isn't where its link says (experimental,
+/// #6892): set from Preferences ([`set_part_library_folders`]), and `SOLIDCRAFT_PART_LIBRARY` for
+/// runs that read no preferences.
+static PART_LIBRARY: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// The most subfolders of one library folder searched, as #19614's folder places read.
+const LIBRARY_SUBFOLDERS: usize = 64;
+
+/// Search `folders`, in order, for linked designs that aren't where their links say, from now on
+/// (with the experimental file kinds on). The app sets it from its preferences.
+pub fn set_part_library_folders(folders: Vec<String>) {
+    let folders = folders.into_iter().map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).map(PathBuf::from).collect();
+    if let Ok(mut kept) = PART_LIBRARY.lock() {
+        *kept = folders;
+    }
+}
+
+/// The library folders: the ones set, then `SOLIDCRAFT_PART_LIBRARY`'s (separated as `PATH` is).
+fn part_library_folders() -> Vec<PathBuf> {
+    let mut folders = PART_LIBRARY.lock().map(|kept| kept.clone()).unwrap_or_default();
+    if let Some(list) = solidcraft_geom::env::var_os("PART_LIBRARY") {
+        folders.extend(std::env::split_paths(&list).filter(|p| !p.as_os_str().is_empty()));
+    }
+    folders
+}
+
+/// Where a linked design missing at `file` was found in a library folder, and the folder, with
+/// the experimental file kinds on; none for a file that is there.
+pub(super) fn found_in_library(file: &Path) -> Option<(PathBuf, PathBuf)> {
+    if !super::experimental_file_kinds() || file.exists() {
+        return None;
+    }
+    search_library(file, &part_library_folders())
+}
+
+/// `file`'s name looked for in each of `folders`, in order: in the folder itself, then in its
+/// subfolders (by name, at most [`LIBRARY_SUBFOLDERS`]; a link to a folder is not followed). So
+/// one folder of parts and a folder of such folders both work, as #19614's library places do.
+fn search_library(file: &Path, folders: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
+    let name = file.file_name()?;
+    for folder in folders {
+        let direct = folder.join(name);
+        if direct.is_file() {
+            return Some((direct, folder.clone()));
+        }
+        let Ok(entries) = std::fs::read_dir(folder) else { continue };
+        let mut subfolders: Vec<PathBuf> = entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect();
+        subfolders.sort();
+        if let Some(found) = subfolders.iter().take(LIBRARY_SUBFOLDERS).map(|sub| sub.join(name)).find(|p| p.is_file()) {
+            return Some((found, folder.clone()));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// Library folders (#6892): a file's name is looked for in each folder, then in its
+    /// subfolders, in order; the first match wins; past 64 subfolders nothing more is read.
+    #[test]
+    fn a_missing_design_is_looked_for_in_the_library_folders_in_order() {
+        let root = std::env::temp_dir().join(format!("solidcraft-part-library-{}", std::process::id()));
+        let (first, second) = (root.join("first"), root.join("second"));
+        for dir in [first.join("bolts"), second.clone()] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let missing = root.join("job").join("bolt.scprt");
+        assert_eq!(search_library(&missing, &[first.clone(), second.clone()]), None);
+        std::fs::write(second.join("bolt.scprt"), b"x").unwrap();
+        assert_eq!(search_library(&missing, &[first.clone(), second.clone()]), Some((second.join("bolt.scprt"), second.clone())));
+        // A subfolder of the first folder comes before the second folder.
+        std::fs::write(first.join("bolts").join("bolt.scprt"), b"x").unwrap();
+        assert_eq!(search_library(&missing, &[first.clone(), second.clone()]), Some((first.join("bolts").join("bolt.scprt"), first.clone())));
+        // Directly in the folder comes before its subfolders.
+        std::fs::write(first.join("bolt.scprt"), b"x").unwrap();
+        assert_eq!(search_library(&missing, &[first.clone(), second.clone()]).map(|f| f.0), Some(first.join("bolt.scprt")));
+        // Only the first 64 subfolders, by name, are read.
+        let many = root.join("many");
+        for i in 0..=LIBRARY_SUBFOLDERS {
+            std::fs::create_dir_all(many.join(format!("{i:03}"))).unwrap();
+        }
+        std::fs::write(many.join(format!("{LIBRARY_SUBFOLDERS:03}")).join("bolt.scprt"), b"x").unwrap();
+        assert_eq!(search_library(&missing, std::slice::from_ref(&many)), None, "the 65th subfolder is not read");
+        std::fs::write(many.join("000").join("bolt.scprt"), b"x").unwrap();
+        assert!(search_library(&missing, &[many]).is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn link_paths_are_kept_relative_to_the_design_and_follow_save_as() {

@@ -56,6 +56,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<OpenParams>(),
         &[
+            "as_copy",
             "color",
             "components",
             "copper",
@@ -207,11 +208,19 @@ fn replies_match_the_output_schema() {
         errors: 0,
         name: "a".into(),
         read_only: None,
+        as_copy: None,
+        internal_of: None,
         open_elsewhere: Some(OpenElsewhere { host: "h".into(), user: "u".into(), app: "1".into(), opened: 7 }),
         newer_file: None,
         warnings: None,
         param_warnings: Vec::new(),
         signature: None,
+        kind: None,
+        sheet_metal: None,
+        kind_note: None,
+        missing_links: Vec::new(),
+        recovery_components: vec!["Top.scprt".into()],
+        internal_not_unpacked: Vec::new(),
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(busy)).unwrap_or_default());
     // A design a newer SolidCraft saved: the notice and what wasn't read.
@@ -221,6 +230,8 @@ fn replies_match_the_output_schema() {
         errors: 0,
         name: "a".into(),
         read_only: None,
+        as_copy: None,
+        internal_of: None,
         open_elsewhere: None,
         newer_file: Some(NewerFileReport {
             format: 99,
@@ -232,6 +243,12 @@ fn replies_match_the_output_schema() {
         warnings: Some(vec!["Saved by a newer SolidCraft".into(), "Not read: feature 3. Saving keeps it.".into()]),
         param_warnings: Vec::new(),
         signature: None,
+        kind: None,
+        sheet_metal: None,
+        kind_note: None,
+        missing_links: Vec::new(),
+        recovery_components: vec!["Top.scprt".into()],
+        internal_not_unpacked: Vec::new(),
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(newer)).unwrap_or_default());
     let warned = run(&mut s, "doc.open", json!({"path": at("part.sc"), "pathh": 1}));

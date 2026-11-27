@@ -90,6 +90,7 @@ pub use construct_auto::construct_methods;
 pub use construct_auto::is_construct_tool;
 pub use design_link::LinkProblem;
 pub use design_link::LinkState;
+pub use design_link::set_part_library_folders;
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
 pub(crate) use drawing_sketch::refuse_outside_drawing;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
@@ -130,6 +131,8 @@ pub(crate) use file::NAMES_MESSAGE;
 pub(crate) use file::READER_MESSAGE;
 pub(crate) use file::UP_MESSAGE;
 pub(crate) use file::import::realign_imports;
+pub(crate) use file::kind::in_new_part;
+pub use file::kind::{experimental_file_kinds, file_kinds_on_for_tests, refusal as kind_refusal, set_experimental_file_kinds};
 pub(crate) use file::mesh_crease_angle;
 pub(crate) use file::names_form;
 pub use file::open_steps::OpenSteps;
@@ -181,7 +184,11 @@ pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
+mod design_drawings;
+mod design_internal;
+pub use design_internal::{in_work_folder, internal_owner, set_work_folder_hider, tidy_work_folder, unpack_work_files};
 mod design_link;
+mod design_stamps;
 mod documents;
 mod file;
 mod file_library;
@@ -526,6 +533,11 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        // A command that doesn't fit the open file's kind (experimental, #6892): disabled, with
+        // what to do instead as its tooltip.
+        if let Some(why) = file::kind::refusal(s.design_kind, self.id).filter(|_| !file::kind::in_new_part(s)) {
+            return Err(why);
+        }
         if let Some(entry) = &s.active_sheet_sketch
             && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete")
             && !(entry.view.is_some() && matches!(self.id, "drawing.open" | "drawing.close"))

@@ -68,7 +68,8 @@ pub(crate) fn update_links(app: &mut SolveApp) {
 
 /// Open Linked Design for a link `component.links` reported (`link`).
 pub(crate) fn open_linked(app: &mut SolveApp, link: &Value) {
-    let Some(file) = link["file"].as_str() else {
+    // A part inside another design (#6892) is opened by opening that design.
+    let Some(file) = link["inside"].as_str().or(link["file"].as_str()) else {
         app.set_status("The linked design has no file path", true);
         return;
     };

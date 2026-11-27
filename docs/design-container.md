@@ -12,6 +12,17 @@ The independent versions let document migrations evolve without changing blob en
 Existing serialized document fields are retained automatically, without a second copy
 of the document schema or a deep clone of embedded payloads.
 
+A drawing file's `container.json` adds `"content":"drawing"`. Experimentally (#6892,
+`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scprt`) or
+`"assembly"` (`.scasm`). A part may hold sheet metal: that is a mark its model gives it (its sheet
+metal bodies), reported as `sheet_metal: true` and never saved. The experiment's earlier
+`"sheet_metal"` header (`.scsht`) reads as a part. A single design (`.sc`) writes no `content`,
+so its file is what it always was. The kind never changes with the file's name. Releases
+since 0.45.0-rc.1 open such a file as a design from a newer SolidCraft and keep its
+`container.json` when saving it. The checks that go with the kinds (a new design takes its first file's
+kind, a save as another kind is refused) are off unless Preferences › General › Environment is
+Parts and assemblies (experimental), which also makes New offer a part or an assembly; or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
+
 Within `document.json`:
 
 - Import features have empty `step` and a `step_blob` reference.
@@ -34,13 +45,16 @@ Both counts must be divisible by three; the byte length must match exactly. Coor
 must be finite and at most 1e9 mm in magnitude; indices must address an existing vertex.
 Names and colours remain in JSON. Signed zero and full coordinate precision survive.
 
-The default `fast` policy stores STEP and binary meshes without Deflate for faster
-saving and reading. Small document metadata uses Deflate level one; PNG/JPEG are
-stored directly. An explicit `compact` policy compresses STEP and mesh payloads at
-level one. Readers support both policies. This deliberately favors interactive file
-operations over maximum compression; compressed STEP was slower in the storage benchmark.
-Use `"compression":"compact"` with `file.save` or `file.save_as` to favor file size,
-or `io::write_design_container_with_compression` from Rust.
+The default `fast` policy stores binary meshes without Deflate for faster saving and
+reading, unless a mesh is larger than the design file limit. STEP sources (and import
+records) are always Deflate-compressed at level two, under either policy, so a large
+import still fits in a design file (#3221). Small document metadata uses Deflate level
+one; PNG/JPEG are stored directly. An explicit `compact` policy also compresses smaller
+mesh payloads at level one, and deflates the model cache at level six instead of one
+(see [Model cache](#model-cache)). Readers support both policies. This deliberately
+favors interactive file operations over maximum compression. Use
+`"compression":"compact"` with `file.save` or `file.save_as` to favor file size, or
+`io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
@@ -150,9 +164,18 @@ A design whose stored names predate format 14 (marked `?`) saves without a model
 those names find no face or edge, and the features holding them ask for their
 references to be picked again (a sketch names the projections it lost instead).
 
-Both entries are Deflate-compressed (level one) under either compression policy: the
-encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
-for a few tens of milliseconds.
+Both entries are Deflate-compressed under either compression policy: the encoded
+bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts), for a
+few tens of milliseconds. `fast` uses level one, whose fixed Huffman codes are quickest;
+`compact` uses level six, which roughly halves the stored cache again. Measured with the
+container's own Deflate on an 11.8 MB `cache/bodies.bin`: level one 1.77 MB in 14 ms,
+level six 0.93 MB in 46 ms (a whole save of that design took about 180 ms); reading it
+back took 13 and 10 ms. A modelled part's 571 KB cache went from 74 KB to 38 KB. The
+experimental preference **Smaller saved files** (Preferences › General › Saving, off by
+default, #19988) makes `fast` saves deflate the cache at level six too, and nothing
+else; command-line runs, which read no preferences, turn it on with `SOLIDCRAFT_SMALLER_SAVES=1`.
+The three levels are one table, `CACHE_LEVELS` in `crates/io/src/design.rs`.
+Every release reads every level, so none of this changes the format.
 
 `cache/bodies.bin` holds every distinct body once, in
 [SolidCraft's native B-rep encoding](native-brep.md), as contiguous slices. The

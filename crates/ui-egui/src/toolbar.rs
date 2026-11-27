@@ -737,7 +737,12 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     };
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
-    let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
+    // Under Parts and assemblies, New makes a file of a kind (#6892): a part keeps Ctrl+N.
+    let mut rows = if crate::prefs::parts_and_assemblies(&app.preferences) {
+        vec![row("new_part", app.tr("ui.new_part"), "Ctrl+N", "new", true), row("new_assembly", app.tr("ui.new_assembly"), "", "new", true)]
+    } else {
+        vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)]
+    };
     // The icon `drawing.create` itself uses.
     rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
@@ -759,6 +764,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
+    rows.push(row("component.insert_from_design", &format!("{}…", app.tr_label("Insert from Design")), "", "component", shown));
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
@@ -869,9 +875,13 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "new_drawing" => FileAction::NewDrawing.run(app),
         "open" => FileAction::Open.run(app),
         "clear_recent" => FileAction::ClearRecent.run(app),
+        // Parts and assemblies' New rows (#6892): a part is what New makes there.
+        "new_part" => FileAction::New.run(app),
+        "new_assembly" => crate::documents::new_design_of(app, Some("assembly")),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
         "component.insert_design" => FileAction::Command("component.insert_design").run(app),
+        "component.insert_from_design" => FileAction::Command("component.insert_from_design").run(app),
         "file.export_stl" => FileAction::Command("file.export_stl").run(app),
         "file.export_3mf" => FileAction::Command("file.export_3mf").run(app),
         "file.export_step" => FileAction::Command("file.export_step").run(app),
@@ -946,6 +956,10 @@ pub fn save(app: &mut SolveApp) {
         }
         return;
     }
+    // A new part made in this design is named and stored first (#6892); the save follows.
+    if crate::new_internal::before_save(app) {
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -961,7 +975,9 @@ pub fn save(app: &mut SolveApp) {
 }
 
 pub(crate) fn save_as(app: &mut SolveApp) {
-    save_as_with_extension(app, solidcraft_engine::io::DESIGN_EXT);
+    // A part or an assembly is offered its own extension (#6892).
+    let extension = app.session.design_kind.extension();
+    save_as_with_extension(app, extension);
 }
 
 /// Save As offering a copy's name ("Bracket copy"), so the file it is a copy of is kept.
@@ -988,7 +1004,11 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
         return;
     }
     let name = format!("{name}.{extension}");
-    app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
+    // A kind's file is only ever that kind's extension; a single design may be `.sc` or JSON.
+    let kind = app.session.design_kind;
+    let extensions =
+        if kind == solidcraft_engine::io::DesignKind::Single { vec![solidcraft_engine::io::DESIGN_EXT, "json"] } else { vec![kind.extension()] };
+    app.pick_save(&name, &extensions, |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
             && {
@@ -5622,6 +5642,42 @@ mod dropdown_toggle_tests {
 mod app_bar_tests {
     use super::*;
 
+    /// Under Parts and assemblies the File menu's New makes a file of a kind: New part (Ctrl+N) and
+    /// New assembly; New elsewhere makes a part. Under Single design it
+    /// is New design, as before (#6892).
+    #[test]
+    fn the_environment_decides_what_new_makes() {
+        use solidcraft_engine::io::DesignKind;
+        let mut h = crate::scenario::Harness::new();
+        let ids = |app: &SolveApp| -> Vec<String> {
+            file_rows(app)
+                .iter()
+                .filter_map(|r| match r {
+                    app_bar::FileRow::Item(i) if i.id.starts_with("new") && i.id != "new_drawing" => Some(i.id.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(crate::prefs::Prefs::default().environment, crate::prefs::ENVIRONMENT_SINGLE);
+        assert_eq!(ids(&h.app), ["new"]);
+        h.app.preferences.environment = crate::prefs::ENVIRONMENT_PARTS_AND_ASSEMBLIES.into();
+        crate::prefs::apply_experiments(&h.app.preferences);
+        // Other tests in this process apply preferences that turn the engine's switch off.
+        solidcraft_engine::file_kinds_on_for_tests();
+        // One part kind: a part may hold sheet metal (step 16).
+        assert_eq!(ids(&h.app), ["new_part", "new_assembly"]);
+        for (id, kind) in [("new_assembly", DesignKind::Assembly), ("new_part", DesignKind::Part)] {
+            run_file_row(&mut h.app, id);
+            assert_eq!(h.app.session.design_kind, kind, "{id}");
+        }
+        FileAction::New.run(&mut h.app);
+        assert_eq!(h.app.session.design_kind, DesignKind::Part, "New, Ctrl+N and Home make a part");
+        // Any value but Parts and assemblies is a single design.
+        h.app.preferences.environment = "something else".into();
+        assert!(!crate::prefs::parts_and_assemblies(&h.app.preferences));
+        assert_eq!(ids(&h.app), ["new"]);
+    }
+
     #[test]
     fn toolbar_focus_rings_hug_bar_bodies_and_follow_lifted_tile_cells() {
         use crate::scenario::{Harness, rect_of};
@@ -6435,9 +6491,10 @@ mod app_bar_tests {
         // plugin's row at its foot is on screen without scrolling the menu.
         h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
-        // The plugin slot is the File menu's last row, and Revert to Saved made the menu one row taller:
-        // in the default 1600 x 1000 window it would sit below the fold, so give the window room.
-        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        // The plugin slot is the File menu's last row. Revert to Saved made the menu one row taller, and
+        // New Assembly (#6892) one more: in the default 1600 x 1000 window it would sit below the fold, so
+        // give the window room.
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
