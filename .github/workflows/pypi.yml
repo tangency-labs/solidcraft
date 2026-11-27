@@ -1,6 +1,9 @@
-# Publishing a GitHub release uploads its Python wheels (solidcraft-*.whl, made by release.yml's
-# python job from the release's own solidcraft-cli) to PyPI. A pre-release goes to TestPyPI
-# instead, never to PyPI. Uploads use PyPI trusted publishing (this workflow's OIDC identity), so no
+# A GitHub release's Python wheels (solidcraft-*.whl, made by release.yml's python job from the
+# release's own solidcraft-cli) go to TestPyPI when it is published as a pre-release, and to PyPI
+# when it becomes a full release: `released` fires both when a pre-release is flipped to a release
+# and when a release is published as one, so `published` uploads pre-releases only (a stable
+# publish would otherwise upload twice) and the flip never re-uploads to TestPyPI. A pre-release
+# never reaches PyPI. Uploads use PyPI trusted publishing (this workflow's OIDC identity), so no
 # token is stored. Nightlies are published with GITHUB_TOKEN, which starts no other workflow (as for
 # flatpak-pages.yml), so a nightly reaches TestPyPI only when this workflow is run by hand with its tag.
 #
@@ -16,7 +19,7 @@ name: Python packages
 
 on:
   release:
-    types: [published]
+    types: [published, released]
   workflow_dispatch:
     inputs:
       tag:
@@ -44,13 +47,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          prerelease="$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease)"
+          if [ "$EVENT" = release ]; then
+            prerelease="$EVENT_PRERELEASE"
+          else
+            prerelease="$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease)"
+          fi
           if [ "$prerelease" = true ]; then index=testpypi; else index=pypi; fi
+          # `published` of a full release: its `released` event uploads it to PyPI.
+          skip=false
+          if [ "$EVENT" = release ] && [ "$ACTION" = published ] && [ "$prerelease" != true ]; then skip=true; fi
+          # `released` of a release that is still a pre-release can't happen; never send one to PyPI.
+          if [ "$EVENT" = release ] && [ "$ACTION" = released ] && [ "$prerelease" = true ]; then skip=true; fi
           mkdir -p dist
-          gh release download "$TAG" --pattern 'solidcraft-*.whl' --dir dist || true
+          if [ "$skip" = false ]; then
+            gh release download "$TAG" --pattern 'solidcraft-*.whl' --dir dist || true
+          fi
           if compgen -G 'dist/*.whl' >/dev/null; then found=true; else found=false; fi
-          echo "$TAG: prerelease=$prerelease, wheels: $found, index: $index"
+          echo "$TAG: $EVENT ${ACTION:-}, prerelease=$prerelease, skip=$skip, wheels: $found, index: $index"
           ls -l dist
           { echo "found=$found"; echo "index=$index"; } >>"$GITHUB_OUTPUT"
       - if: steps.fetch.outputs.found == 'true'
