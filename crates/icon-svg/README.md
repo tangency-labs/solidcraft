@@ -20,5 +20,4 @@ The UI kit's `IconSet::parse` wraps this document with its host set; plugin chec
 parser with SolidCraft's source palette. Package paths, source byte limits and view boxes are
 checked by callers before parsing.
 
-The parser was extracted from `solidcraft-ui-kit` and retains its SolidCraft Brand and Interface
-Licence; see `LICENSE`.
+Licence: MIT OR Apache-2.0, like the rest of SolidCraft.

@@ -334,7 +334,12 @@ fn failures_count_the_kind_of_error_only_and_operations_their_time() {
     assert_eq!(error_kind(&solidcraft_engine::EngineError::Cancelled("x".into())), None, "a cancel is no failure");
     let feature = solidcraft_engine::EngineError::Feature(Box::new(solidcraft_engine::FeatureFailure {
         error: "the fillet radius is too large for the Secret Bracket".into(),
-        code: solidcraft_engine::kernel::ErrorCode { call: "Blend".into(), kind: 7, operation: "smlib::blend::rolling".into() },
+        code: solidcraft_engine::kernel::ErrorCode {
+            call: "Blend".into(),
+            kind: 7,
+            operation: "smlib::blend::rolling".into(),
+            class: "unclassed".into(),
+        },
     }));
     assert_eq!(error_kind(&feature).as_deref(), Some("kernel.blend.7"), "the call and the kernel's number only");
 }

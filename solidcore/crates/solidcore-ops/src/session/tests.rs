@@ -150,6 +150,7 @@ fn a_kernel_failure_leaves_its_code_to_take() {
         call: "fails",
         kind: solidcore::error::ErrorKind::InvalidInput.code(),
         operation: "the routine",
+        class: ErrorClass::Unclassed,
     };
     assert_eq!(take_failure_code(), Some(code));
     assert_eq!(take_failure_code(), None, "taken once");
@@ -179,6 +180,7 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "refuses",
             kind: solidcore::error::ErrorKind::InvalidInput.code(),
             operation: "the routine",
+            class: ErrorClass::Unclassed,
         })
     );
     let r: Result<Result<()>> = run("refuses itself", |_| {
@@ -193,6 +195,20 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "refuses itself",
             kind: FailureCode::OPS,
             operation: "NoEffect",
+            class: ErrorClass::Unclassed,
+        })
+    );
+    let r: Result<Result<()>> = run("refuses mesh", |_| {
+        Ok(Err(Error::Mesh("uncertified fitted profile".into())))
+    });
+    assert_eq!(r, Ok(Err(Error::Mesh("uncertified fitted profile".into()))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses mesh",
+            kind: FailureCode::OPS,
+            operation: "Mesh",
+            class: ErrorClass::Unclassed,
         })
     );
     let r: Result<()> = run("panics", |_| panic!("on purpose"));
@@ -203,6 +219,7 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "panics",
             kind: FailureCode::OPS,
             operation: "Internal",
+            class: ErrorClass::Unclassed,
         })
     );
     let token = CancelToken::new();
@@ -210,6 +227,77 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
     let r: Result<()> = crate::cancel::within(&token, || run("cancelled", |_| Ok(())));
     assert_eq!(r, Err(Error::Cancelled));
     assert_eq!(take_failure_code(), None);
+}
+
+/// A call's code carries the class solidcore gives the kernel error it failed with, read down
+/// its cause chain, whether the call fails with it or its answer refuses with it as ops typed
+/// it: a refusal, a defect, a port failure; a kind solidcore does not class, and a failure ops
+/// decided itself, are unclassed.
+#[test]
+fn a_failure_code_carries_the_kernels_class_of_its_error() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{Failure, Reason};
+
+    all_fixes();
+    let _ = take_failure_code();
+    let refusal = || {
+        Failure::new(
+            "test::blend",
+            BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+        )
+        .into_error()
+    };
+    let defect = || Failure::new("test::blend", BlendFailure::StageFailed).into_error();
+    let over = |cause: SolidError| {
+        Failure::new("test::stage", Reason::Failed("a stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    let failing: Vec<(SolidError, ErrorClass)> = vec![
+        (refusal(), ErrorClass::Refusal),
+        (over(refusal()), ErrorClass::Refusal),
+        (defect(), ErrorClass::Defect),
+        (
+            SolidError::unported("test::callee", "test.unit"),
+            ErrorClass::PortFailure,
+        ),
+        (
+            SolidError::port_invariant("test::invariant", "broken"),
+            ErrorClass::PortFailure,
+        ),
+        (SolidError::sm_err("test::status"), ErrorClass::Unclassed),
+        (
+            SolidError::invalid_input("test::input", "bad"),
+            ErrorClass::Unclassed,
+        ),
+    ];
+    for (e, class) in failing {
+        let (kind, operation) = (e.kind().code(), e.operation());
+        let r: Result<()> = run("fails", |_| Err(e.clone()));
+        assert!(r.is_err(), "{e:?}");
+        let code = take_failure_code();
+        assert_eq!(
+            code,
+            Some(FailureCode {
+                call: "fails",
+                kind,
+                operation,
+                class
+            }),
+            "{e:?}"
+        );
+        // the same error, as ops typed it, refused in the call's answer
+        let r: Result<Result<()>> = run("refuses", |_| Ok(Err(status(e.clone()))));
+        assert!(matches!(r, Ok(Err(_))), "{e:?}");
+        assert_eq!(take_failure_code().map(|c| c.class), Some(class), "{e:?}");
+    }
+    let r: Result<Result<()>> = run("refuses itself", |_| Ok(Err(Error::NoEffect)));
+    assert_eq!(r, Ok(Err(Error::NoEffect)));
+    assert_eq!(
+        take_failure_code().map(|c| c.class),
+        Some(ErrorClass::Unclassed)
+    );
 }
 
 /// An attempt a call tries and gives up after its refusal was noted puts the note back: the
@@ -767,6 +855,7 @@ fn a_call_out_of_fuel_part_way_stops_and_leaves_its_body() {
             call: "out of fuel part way",
             kind: solidcore::error::ErrorKind::OutOfFuel.code(),
             operation: "session::tests::loop",
+            class: ErrorClass::Unclassed,
         })
     );
     let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));

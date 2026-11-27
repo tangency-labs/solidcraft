@@ -34,6 +34,8 @@ const MOST_CLEAN: usize = 1 << 20;
 pub struct CheckMemo {
     clean: HashSet<ContentId>,
     current: Option<Stars>,
+    last_clean: [usize; 3],
+    update_skips: usize,
 }
 
 impl std::fmt::Debug for CheckMemo {
@@ -47,6 +49,20 @@ impl CheckMemo {
     #[must_use]
     pub fn len(&self) -> usize {
         self.clean.len()
+    }
+
+    /// How many faces, edges and vertices the last check began found clean, and so skipped
+    /// the geometric tests of.
+    #[must_use]
+    pub fn last_clean(&self) -> [usize; 3] {
+        self.last_clean
+    }
+
+    /// How many edge use pairs the tolerance updates after booleans skipped as found clean before
+    /// ([`crate::topology::brep::validation::update_tolerances_after_boolean`]), all told.
+    #[must_use]
+    pub fn update_skips(&self) -> usize {
+        self.update_skips
     }
 
     /// Whether it keeps none.
@@ -74,8 +90,10 @@ impl Stars {
     /// whose neighbourhood has no digest, or that a broken link leaves unreadable, has none.
     pub(crate) fn of(b: &Brep, salt: ContentId) -> Self {
         let mut out = Self::default();
+        let salt = body_salt(b, salt);
+        let parts = Parts::of(b);
         for f in b.face_list().iter().copied() {
-            if let Some(d) = face_digest(b, f, salt) {
+            if let Some(d) = face_digest(b, f, salt, &parts) {
                 out.faces.insert(f, d);
             }
             if let Ok(face) = b.face(f) {
@@ -85,12 +103,12 @@ impl Stars {
             }
         }
         for e in b.edge_list().iter().copied() {
-            if let Some(d) = edge_digest(b, e, salt, &out.faces) {
+            if let Some(d) = edge_digest(b, e, salt, &parts, &out.faces) {
                 out.edges.insert(e, d);
             }
         }
         for v in b.vertex_list().iter().copied() {
-            if let Some(d) = vertex_digest(b, v, salt, &out.faces, &out.edges) {
+            if let Some(d) = vertex_digest(b, v, salt, &parts) {
                 out.vertices.insert(v, d);
             }
         }
@@ -143,11 +161,29 @@ pub(crate) fn salt(k: &Kernel, level: u8, stitched: bool) -> Option<ContentId> {
     Some(d.finish())
 }
 
+/// `salt` with what the tests read of the body as a whole: its tolerance (the floor of
+/// the vertex gap tests and the limit of the tolerance a check may grow), whether it is
+/// only validated and whether editing is enabled (which decide whether a trim may be raised).
+fn body_salt(b: &Brep, salt: ContentId) -> ContentId {
+    let mut d = Digest::new();
+    d.tag(0xB0D7);
+    d.hashed(&salt);
+    d.f64(b.tolerance());
+    d.bool(b.validate_only());
+    d.bool(b.editing_enabled());
+    d.finish()
+}
+
 /// Starts the check of a body whose digests are `stars`: which of them are clean is read
 /// from the kernel's memo, for [`face_clean`], [`edge_clean`] and [`vertex_clean`].
 pub(crate) fn begin(k: &Kernel, mut stars: Stars) {
     let mut memo = k.check_memo.borrow_mut();
     stars.mark(&memo.clean);
+    memo.last_clean = [
+        stars.clean_faces.len(),
+        stars.clean_edges.len(),
+        stars.clean_vertices.len(),
+    ];
     memo.current = Some(stars);
 }
 
@@ -210,16 +246,13 @@ pub(crate) fn vertex_clean(k: &Kernel, v: VertexId) -> bool {
 /// The digest of face `f`'s neighbourhood: its surface, tolerance and parameter domain, and
 /// loop by loop, edge use by edge use, each use's sense and trim, its edge's curve, interval
 /// and tolerance, and the point and tolerance of the vertex it starts at.
-fn face_digest(b: &Brep, f: FaceId, salt: ContentId) -> Option<ContentId> {
+fn face_digest(b: &Brep, f: FaceId, salt: ContentId, parts: &Parts) -> Option<ContentId> {
     use crate::topology::edgeuse::p1 as eu1;
     let mut d = Digest::new();
     d.tag(0xF);
     d.hashed(&salt);
-    let face = b.face(f).ok()?;
-    face.surface.as_ref()?.content(&mut d)?;
-    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
-    face.uv_domain.content(&mut d)?;
-    d.hashed(&face.rectangular_trim);
+    // the surface, tolerance, domain and rectangular-trim flag ([`surface_id`])
+    parts.surface(b, f, &mut d)?;
     let fu = crate::topology::face::p2::upward_faceuse(b, f).ok()??;
     let loopuses = eu1::faceuse_loopuses(b, fu, false, None).ok()?;
     d.usize(loopuses.len());
@@ -230,18 +263,16 @@ fn face_digest(b: &Brep, f: FaceId, salt: ContentId) -> Option<ContentId> {
         if edgeuses.is_empty() {
             // a vertex loop
             for vu in crate::topology::loopuse::vertexuses(b, lu, None).ok()? {
-                vertex_point(b, crate::topology::vertexuse::vertex(b, vu?).ok()??, &mut d)?;
+                parts.vertex(b, crate::topology::vertexuse::vertex(b, vu?).ok()??, &mut d)?;
             }
         }
         for eu in edgeuses {
             d.hashed(&eu1::orientation(b, eu).ok()?);
-            let (trim, holder) = eu1::uv_trim_curve(b, eu).ok()?;
-            trim.content(&mut d)?;
-            d.bool(holder == Some(eu));
+            parts.trim(b, eu, &mut d)?;
             let e = eu1::edge(b, eu).ok()??;
-            edge_geometry(b, e, &mut d)?;
+            parts.edge(b, e, &mut d)?;
             let vu = eu1::vertexuse(b, eu).ok()??;
-            vertex_point(b, crate::topology::vertexuse::vertex(b, vu).ok()??, &mut d)?;
+            parts.vertex(b, crate::topology::vertexuse::vertex(b, vu).ok()??, &mut d)?;
         }
     }
     Some(d.finish())
@@ -253,16 +284,17 @@ fn edge_digest(
     b: &Brep,
     e: EdgeId,
     salt: ContentId,
+    parts: &Parts,
     faces: &HashMap<FaceId, ContentId>,
 ) -> Option<ContentId> {
     use crate::topology::edgeuse::p1 as eu1;
     let mut d = Digest::new();
     d.tag(0xE);
     d.hashed(&salt);
-    edge_geometry(b, e, &mut d)?;
+    parts.edge(b, e, &mut d)?;
     let edge = b.edge(e).ok()?;
     for v in edge.vertices {
-        vertex_point(b, v, &mut d)?;
+        parts.vertex(b, v, &mut d)?;
     }
     d.bool(edge.vertices[0] == edge.vertices[1]);
     let uses = &edge.edgeuses;
@@ -274,9 +306,7 @@ fn edge_digest(
         d.bool(eu1::is_loop_edgeuse(b, eu).ok()?);
         d.hashed(&place(eu1::radial(b, eu).ok()?));
         d.hashed(&place(eu1::mate(b, eu).ok()?));
-        let (trim, holder) = eu1::uv_trim_curve(b, eu).ok()?;
-        trim.content(&mut d)?;
-        d.bool(holder == Some(eu));
+        parts.trim(b, eu, &mut d)?;
         match eu1::face(b, eu).ok()? {
             Some(f) => d.hashed(faces.get(&f)?),
             None => d.bool(false),
@@ -285,20 +315,22 @@ fn edge_digest(
     Some(d.finish())
 }
 
-/// The digest of vertex `v`'s neighbourhood: its point and tolerance and, use by use, the
-/// kind of the use's owner and the digests of the face and the edge it is on.
-fn vertex_digest(
-    b: &Brep,
-    v: VertexId,
-    salt: ContentId,
-    faces: &HashMap<FaceId, ContentId>,
-    edges: &HashMap<EdgeId, ContentId>,
-) -> Option<ContentId> {
+/// The digest of vertex `v`'s neighbourhood, as far as its tests read: its point and
+/// tolerance (with its uses' UV points and cached gaps) and, use by use, the kind of the
+/// use's owner, which of the vertex's faces it is on and that face's surface, and the edge
+/// uses the gap and sector tests read at the vertex: the use's own edge use, its clockwise
+/// neighbour (the one ending at the vertex), their mates and the mates' clockwise
+/// neighbours, each with its sense, trim and edge geometry. Not the rest of the faces' or
+/// edges' boundaries, which no vertex test reads, so an edit elsewhere on a face leaves its
+/// other vertices clean.
+fn vertex_digest(b: &Brep, v: VertexId, salt: ContentId, parts: &Parts) -> Option<ContentId> {
+    use crate::topology::edgeuse::p1 as eu1;
     use crate::topology::{vertexuse as tvu, VertexuseOwner};
     let mut d = Digest::new();
-    d.tag(0x7);
+    d.tag(0x77);
     d.hashed(&salt);
-    vertex_point(b, v, &mut d)?;
+    parts.vertex(b, v, &mut d)?;
+    let mut ring = Ring::default();
     let uses = &b.vertex(v).ok()?.vertexuses;
     d.usize(uses.len());
     for &vu in uses {
@@ -310,14 +342,205 @@ fn vertex_digest(
             VertexuseOwner::Unknown => 4,
         });
         match tvu::faceuse(b, vu).ok()? {
-            Some(fu) => d.hashed(faces.get(&b.faceuse(fu).ok()?.face?)?),
+            Some(fu) => ring.face(b, parts, b.faceuse(fu).ok()?.face?, &mut d)?,
             None => d.bool(false),
         }
-        match tvu::edgeuse(b, vu).ok()? {
-            Some(eu) => d.hashed(edges.get(&b.edgeuse(eu).ok()?.edge?)?),
-            None => d.bool(false),
+        let eu = tvu::edgeuse(b, vu).ok()?;
+        let cw = match eu {
+            Some(eu) => b.edgeuse(eu).ok()?.cw,
+            None => None,
+        };
+        let mate = |x: Option<crate::topology::EdgeuseId>| match x {
+            Some(x) => eu1::mate(b, x).ok(),
+            None => Some(None),
+        };
+        let cw_of = |x: Option<crate::topology::EdgeuseId>| match x {
+            Some(x) => b.edgeuse(x).ok().map(|r| r.cw),
+            None => Some(None),
+        };
+        let eu_mate = mate(eu)?;
+        let cw_mate = mate(cw)?;
+        for x in [eu, cw, eu_mate, cw_mate, cw_of(eu_mate)?, cw_of(cw_mate)?] {
+            ring.edgeuse(b, parts, x, &mut d)?;
         }
     }
+    Some(d.finish())
+}
+
+/// The faces and edge uses a vertex digest has met, numbered in the order it met them:
+/// the digest writes each one's number, so it says which uses share a face or are the same
+/// edge use, and writes each one's content the first time.
+#[derive(Default)]
+struct Ring {
+    faces: Vec<FaceId>,
+    edgeuses: Vec<crate::topology::EdgeuseId>,
+}
+
+impl Ring {
+    /// Writes face `f`'s number and, the first time, its surface digest.
+    fn face(&mut self, b: &Brep, parts: &Parts, f: FaceId, d: &mut Digest) -> Option<()> {
+        if let Some(i) = self.faces.iter().position(|&x| x == f) {
+            d.usize(i);
+            return Some(());
+        }
+        d.usize(self.faces.len());
+        self.faces.push(f);
+        parts.surface(b, f, d)
+    }
+
+    /// Writes edge use `x`'s number and, the first time, its sense, loop membership, trim,
+    /// edge geometry and face; `false` for none.
+    fn edgeuse(
+        &mut self,
+        b: &Brep,
+        parts: &Parts,
+        x: Option<crate::topology::EdgeuseId>,
+        d: &mut Digest,
+    ) -> Option<()> {
+        use crate::topology::edgeuse::p1 as eu1;
+        let Some(x) = x else {
+            d.bool(false);
+            return Some(());
+        };
+        d.bool(true);
+        if let Some(i) = self.edgeuses.iter().position(|&y| y == x) {
+            d.usize(i);
+            return Some(());
+        }
+        d.usize(self.edgeuses.len());
+        self.edgeuses.push(x);
+        d.hashed(&eu1::orientation(b, x).ok()?);
+        d.bool(eu1::is_loop_edgeuse(b, x).ok()?);
+        parts.trim(b, x, d)?;
+        match eu1::edge(b, x).ok()? {
+            Some(e) => parts.edge(b, e, d)?,
+            None => d.bool(false),
+        }
+        match eu1::face(b, x).ok()? {
+            Some(f) => self.face(b, parts, f, d)?,
+            None => d.bool(false),
+        }
+        Some(())
+    }
+}
+
+/// The digests of each edge's geometry ([`edge_geometry`]) and each vertex's point
+/// ([`vertex_point`]), taken once per [`Stars::of`]: a face, an edge and a vertex digest
+/// each write an edge's or a vertex's digest where they wrote its content. `None` for one
+/// whose content has none.
+struct Parts {
+    edges: HashMap<EdgeId, Option<ContentId>>,
+    vertices: HashMap<VertexId, Option<ContentId>>,
+    surfaces: HashMap<FaceId, Option<ContentId>>,
+    trims: HashMap<crate::topology::EdgeuseId, Option<ContentId>>,
+}
+
+impl Parts {
+    fn of(b: &Brep) -> Self {
+        let edges = b
+            .edge_list()
+            .iter()
+            .map(|&e| (e, edge_geometry_id(b, e)))
+            .collect();
+        let vertices = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, vertex_point_id(b, v)))
+            .collect();
+        let surfaces = b
+            .face_list()
+            .iter()
+            .map(|&f| (f, surface_id(b, f)))
+            .collect();
+        let trims = b
+            .edge_list()
+            .iter()
+            .filter_map(|&e| b.edge(e).ok())
+            .flat_map(|edge| edge.edgeuses.iter().copied())
+            .map(|eu| (eu, trim_id(b, eu)))
+            .collect();
+        Self {
+            edges,
+            vertices,
+            surfaces,
+            trims,
+        }
+    }
+
+    /// Writes edge use `eu`'s trim digest; `None` when it has none.
+    fn trim(&self, b: &Brep, eu: crate::topology::EdgeuseId, d: &mut Digest) -> Option<()> {
+        let id = match self.trims.get(&eu) {
+            Some(id) => (*id)?,
+            None => trim_id(b, eu)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+
+    /// Writes face `f`'s surface digest; `None` when it has none.
+    fn surface(&self, b: &Brep, f: FaceId, d: &mut Digest) -> Option<()> {
+        let id = match self.surfaces.get(&f) {
+            Some(id) => (*id)?,
+            None => surface_id(b, f)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+
+    /// Writes edge `e`'s geometry digest; `None` when it has none.
+    fn edge(&self, b: &Brep, e: EdgeId, d: &mut Digest) -> Option<()> {
+        let id = match self.edges.get(&e) {
+            Some(id) => (*id)?,
+            None => edge_geometry_id(b, e)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+
+    /// Writes vertex `v`'s point digest; `None` when it has none.
+    fn vertex(&self, b: &Brep, v: VertexId, d: &mut Digest) -> Option<()> {
+        let id = match self.vertices.get(&v) {
+            Some(id) => (*id)?,
+            None => vertex_point_id(b, v)?,
+        };
+        d.hashed(&id);
+        Some(())
+    }
+}
+
+fn edge_geometry_id(b: &Brep, e: EdgeId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0xE6);
+    edge_geometry(b, e, &mut d)?;
+    Some(d.finish())
+}
+
+/// Edge use `eu`'s UV trim and whether it holds the trim itself (or reads its mate's).
+fn trim_id(b: &Brep, eu: crate::topology::EdgeuseId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x7A);
+    let (trim, holder) = crate::topology::edgeuse::p1::uv_trim_curve(b, eu).ok()?;
+    trim.content(&mut d)?;
+    d.bool(holder == Some(eu));
+    Some(d.finish())
+}
+
+/// Face `f`'s surface, tolerance, parameter domain and whether its domain is its trim.
+fn surface_id(b: &Brep, f: FaceId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x5F);
+    let face = b.face(f).ok()?;
+    face.surface.as_ref()?.content(&mut d)?;
+    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
+    face.uv_domain.content(&mut d)?;
+    d.hashed(&face.rectangular_trim);
+    Some(d.finish())
+}
+
+fn vertex_point_id(b: &Brep, v: VertexId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x76);
+    vertex_point(b, v, &mut d)?;
     Some(d.finish())
 }
 
@@ -372,4 +595,116 @@ fn vertex_point(b: &Brep, v: VertexId, d: &mut Digest) -> Option<()> {
         d.f64(f.face_uv.y);
     }
     Some(())
+}
+
+// ---- the tolerance update a boolean's result gets ---------------------------------------------
+
+/// What every pair digest of one tolerance update ([`update_pair_digest`]) is taken under: the
+/// kernel's inputs, the update's level and the body's own scalars. `None` when the memo is off
+/// ([`Kernel::memoize_curve_caches`]).
+pub(crate) fn update_salt(k: &Kernel, b: &Brep, level: u8) -> Option<ContentId> {
+    let check = salt(k, level, false)?;
+    let mut d = Digest::new();
+    d.tag(0x0BD7);
+    d.hashed(&check);
+    Some(body_salt(b, d.finish()))
+}
+
+/// The digest of everything the tolerance update reads for edge use `eu` and its mate on face
+/// `f` as it comes to them ([`crate::topology::brep::validation::update_tolerances_after_boolean`]):
+/// the face's surface, tolerance and domain; the two uses' sense, the trim they share and their
+/// edge's curve, interval and tolerance, with the edge/face gaps they cached; the ends' vertices
+/// (point and tolerance) with the UV point and gaps cached on the two end uses themselves; and the
+/// clockwise neighbours of both uses (sense, trim, edge geometry), which the ends' UV points are
+/// solved from. The update measures the pair's vertex/edge, vertex/face and edge/face gaps from
+/// exactly those (a cached gap read as it is) and compares them with the vertices' and the edge's
+/// tolerances. Taken when the update comes to the pair, after what came before it grew, so it
+/// names the tolerances the pair's tests see.
+pub(crate) fn update_pair_digest(
+    b: &Brep,
+    f: FaceId,
+    eu: crate::topology::EdgeuseId,
+    mate: crate::topology::EdgeuseId,
+    salt: ContentId,
+) -> Option<ContentId> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let mut d = Digest::new();
+    d.tag(0x0BA1);
+    d.hashed(&salt);
+    let face = b.face(f).ok()?;
+    face.surface.as_ref()?.content(&mut d)?;
+    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
+    face.uv_domain.content(&mut d)?;
+    d.hashed(&face.rectangular_trim);
+    let use_geometry = |x: crate::topology::EdgeuseId, d: &mut Digest| -> Option<()> {
+        d.hashed(&eu1::orientation(b, x).ok()?);
+        d.bool(eu1::is_loop_edgeuse(b, x).ok()?);
+        let (trim, holder) = eu1::uv_trim_curve(b, x).ok()?;
+        trim.content(d)?;
+        d.bool(holder == Some(x));
+        let e = eu1::edge(b, x).ok()??;
+        let edge = b.edge(e).ok()?;
+        edge.curve.as_ref()?.content(d)?;
+        edge.interval.content(d)?;
+        d.f64(crate::topology::edge::tolerance(b, e).ok()?);
+        Some(())
+    };
+    for x in [eu, mate] {
+        use_geometry(x, &mut d)?;
+        let g = b.edgeuse(x).ok()?.max_edge_face_gap;
+        d.f64(g.gap_3d);
+        d.hashed(&g.edgeuse.map(|y| y == x));
+        d.f64(g.edge_t);
+        d.f64(g.face_uv.x);
+        d.f64(g.face_uv.y);
+        let vu = eu1::vertexuse(b, x).ok()??;
+        use_vertex(b, vu, &mut d)?;
+        match b.edgeuse(x).ok()?.cw {
+            Some(cw) => use_geometry(cw, &mut d)?,
+            None => d.bool(false),
+        }
+    }
+    Some(d.finish())
+}
+
+/// Writes vertex use `vu`'s vertex (point and tolerance) and the use's UV point and cached
+/// vertex/edge and vertex/face gaps: what the update reads of the end of an edge use.
+fn use_vertex(b: &Brep, vu: crate::topology::VertexuseId, d: &mut Digest) -> Option<()> {
+    let v = crate::topology::vertexuse::vertex(b, vu).ok()??;
+    let vertex = b.vertex(v).ok()?;
+    vertex.point.content(d)?;
+    d.f64(vertex.tolerance);
+    let u = b.vertexuse(vu).ok()?;
+    d.f64(u.uv_point.x);
+    d.f64(u.uv_point.y);
+    let e = u.vertex_edge_gap;
+    d.f64(e.gap_3d);
+    d.hashed(&e.vertexuse.map(|x| x == vu));
+    d.f64(e.edge_t);
+    let g = u.vertex_face_gap;
+    d.f64(g.gap_3d);
+    d.hashed(&g.vertexuse.map(|x| x == vu));
+    d.f64(g.face_uv.x);
+    d.f64(g.face_uv.y);
+    Some(())
+}
+
+/// Whether a tolerance update found the edge use pair with digest `d` ([`update_pair_digest`]) with no
+/// gap over its tolerance before: the update then grows nothing there and reports nothing.
+pub(crate) fn update_clean(k: &Kernel, d: ContentId) -> bool {
+    let mut memo = k.check_memo.borrow_mut();
+    let clean = memo.clean.contains(&d);
+    if clean {
+        memo.update_skips = memo.update_skips.saturating_add(1);
+    }
+    clean
+}
+
+/// Keeps `d` as an edge use pair a tolerance update found with no gap over its tolerance.
+pub(crate) fn keep_update_clean(k: &Kernel, d: ContentId) {
+    let mut memo = k.check_memo.borrow_mut();
+    if memo.clean.len() >= MOST_CLEAN {
+        memo.clean.clear();
+    }
+    memo.clean.insert(d);
 }

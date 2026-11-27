@@ -7,6 +7,7 @@ use solidcraft_theme::Tokens;
 pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
+pub(super) const HANDLE: &str = "sc_form_handle";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
 pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
 const LABEL_TOOLTIP: &str = "sc_row_label_tooltip";
@@ -193,6 +194,10 @@ pub fn label(ui: &Ui) -> &str {
     ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(LABEL)).map(String::as_str).unwrap_or("")
 }
 
+fn handle_tag(ui: &Ui) -> Option<&str> {
+    ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(HANDLE)).map(String::as_str)
+}
+
 /// Publish accessibility and scenario geometry. Tokens: `none`.
 pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
     let t = Tokens::get();
@@ -270,6 +275,15 @@ pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     })
 }
 
+/// Expression row whose scenario/accessibility handles use `handle` instead of `label`, for
+/// disambiguating rows that share a caption in the same dialog.
+pub fn expr_row_as(ui: &mut Ui, label: &str, handle: &str, value: &mut String) -> bool {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(HANDLE, handle.to_owned())), |ui| {
+        expr_row(ui, label, value)
+    })
+    .inner
+}
+
 /// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
 pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
@@ -277,6 +291,17 @@ pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
             super::fields::scrub(ui, scrub, value, true);
         }
         super::field(ui, value)
+    })
+}
+
+/// Expression row with a checked field; preserves completion, Enter and label scrubbing.
+/// Its scrubbed value stops at zero, as `expr_row_positive`'s does.
+pub fn checked_expr_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, flagged: bool) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
+        }
+        super::checked_field(ui, value, hint, flagged).0
     })
 }
 
@@ -443,7 +468,8 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
     // beside the label keeps its own hover and click.
     let scrub_width = if help.is_some() { (label_width - t.space_16 - t.space_4).max(0.0) } else { label_width };
     let scrub_rect = egui::Rect::from_min_size(label_rect.min, vec2(scrub_width, rect.height()));
-    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.scope_id().with(("sc_row_scrub", text)), egui::Sense::drag()));
+    // Pointer-only scrub drag; keep labels out of keyboard Tab order.
+    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.scope_id().with(("sc_row_scrub", text)), egui::Sense::DRAG));
     let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
     let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + gutter).min(rect.right()), rect.top()), rect.max);
     let result = ui
@@ -460,10 +486,11 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
             },
         )
         .inner;
-    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{text}"), rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{text}"), label_rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{text}"), control_rect);
-    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{text}"), rect.center());
+    let handle_key = handle_tag(ui).unwrap_or(text);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{handle_key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{handle_key}"), label_rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{handle_key}"), control_rect);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{handle_key}"), rect.center());
     result
 }
 
@@ -570,6 +597,80 @@ pub fn section_heading(ui: &mut Ui, title: &str) {
 
 pub fn section<R>(ui: &mut Ui, id: impl egui::AsIdSalt, title: &str, default_open: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     section_count(ui, id, title, default_open, None::<usize>, add)
+}
+
+/// Bordered disclosure with a palette-colored summary icon when collapsed.
+pub fn card_section<R>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    title: &str,
+    default_open: bool,
+    summary_icon: Option<&str>,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    card_section_with_hover(ui, id, title, default_open, summary_icon, |_| {}, add)
+}
+
+/// A card disclosure whose header hover can drive a preview outside the card.
+pub fn card_section_with_hover<R>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    title: &str,
+    default_open: bool,
+    summary_icon: Option<&str>,
+    hover: impl FnOnce(bool),
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let tokens = Tokens::get();
+    let id = ui.make_persistent_id(id);
+    let mut open = ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
+    let card = egui::Frame::new()
+        .inner_margin(egui::Margin::same(tokens.space_8 as i8))
+        .corner_radius(tokens.control_radius)
+        .stroke(tokens.control_border_stroke(tokens.dialog_rule))
+        .show(ui, |ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), tokens.control_height), egui::Sense::hover());
+            let header = ui.interact(rect, id.with("header"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            if header.clicked() {
+                open = !open;
+                header.request_focus();
+                ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+            }
+            let icon = summary_icon.filter(|_| !open);
+            let leading = tokens.form_section_icon_size.min(rect.width());
+            let trailing = if icon.is_some() { tokens.control_height.min((rect.width() - leading).max(0.0)) } else { 0.0 };
+            let center = rect.center().y;
+            let rtl = solidcraft_ui_text::bidi::has_rtl(title) || ui.layout().main_dir() == egui::Direction::RightToLeft;
+            let leading_x = if rtl { rect.right() - leading / 2.0 } else { rect.left() + leading / 2.0 };
+            let chevron_rect = egui::Rect::from_center_size(egui::pos2(leading_x, center), vec2(leading, leading));
+            let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+            if rtl && !open {
+                crate::icons::paint_ink_mirrored(&painter, chevron_rect, "chevron_right", tokens.form_dim);
+            } else {
+                super::disclosure(&painter, chevron_rect.center(), open, tokens.form_dim);
+            }
+            let (text_left, text_right) = if rtl {
+                let left = rect.left() + trailing;
+                (left, (chevron_rect.left() - tokens.space_6).max(left))
+            } else {
+                let right = rect.right() - trailing;
+                ((chevron_rect.right() + tokens.space_6).min(right), right)
+            };
+            let text = egui::Rect::from_min_max(egui::pos2(text_left, rect.top()), egui::pos2(text_right, rect.bottom()));
+            paint_text(ui, text, title, crate::type_face::semibold(tokens.font_label), tokens.form_ink, false);
+            if let Some(icon) = icon.filter(|_| trailing > 0.0) {
+                let icon_x = if rtl { rect.left() + trailing / 2.0 } else { rect.right() - trailing / 2.0 };
+                let area = egui::Rect::from_center_size(egui::pos2(icon_x, center), vec2(trailing, trailing));
+                crate::icons::paint_icon(ui.painter(), area, icon, f32::from(tokens.icon.a()) / 255.0);
+            }
+            header.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, title));
+            ui.ctx().accesskit_node_builder(header.id, |node| node.set_expanded(open));
+            solidcraft_ui_registry::publish_target(&format!("dialog:card_header:{title}"), rect);
+            hover(header.contains_pointer());
+            open.then(|| add(ui))
+        });
+    solidcraft_ui_registry::publish_rect(&format!("dialog:card:{title}"), card.response.rect);
+    card.inner
 }
 
 /// Section with a renderer/method tag. Shares disclosure, typography and badge tokens with section_count.
@@ -837,13 +938,13 @@ pub fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R
 
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
-    let label = label(ui);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    let handle = handle_tag(ui).unwrap_or_else(|| label(ui));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{handle}"), response.rect);
     // A click lands where the field shows: a field scrolled out of a dialog's field area, under
     // its footer, has no handle (a click at its centre would press the button over it).
     let shown = response.rect.intersect(ui.clip_rect());
     if shown.is_positive() {
-        solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), shown.center());
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{handle}"), shown.center());
     }
 }
 
@@ -1038,38 +1139,4 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         solidcraft_ui_registry::publish_handle(&id, response.rect.center());
     }
     response
-}
-
-/// A two-line named item beside an enable checkbox and compact actions.
-/// Tokens: control_height, space_4/8/16, dialog_rule/footer, form_ink/dim, font_label/small.
-pub fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut bool, actions_width: f32, actions: impl FnOnce(&mut Ui)) -> bool {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height() + t.space_16), egui::Sense::hover());
-    t.container_rect(ui.painter(), rect, t.radius_lg, t.dialog_body, t.dialog_rule);
-    let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
-    let changed = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).backing_on_hover_text(solidcraft_ui_text::tr_label("Enable rule")).changed()
-        })
-        .inner;
-    let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());
-    let text = egui::Rect::from_min_max(
-        egui::pos2(check.right() + t.space_4, rect.top()),
-        egui::pos2((right - t.space_8).max(check.right() + t.space_4), rect.bottom()),
-    );
-    let title = egui::Rect::from_min_max(text.min, egui::pos2(text.right(), text.center().y));
-    let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
-    paint_text(ui, title, name, crate::type_face::semibold(t.font_label), t.form_ink, false);
-    paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
-    let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));
-    solidcraft_ui_registry::publish_rect(&format!("dialog:inline:{name}"), title);
-    solidcraft_ui_registry::publish_rect("dialog:report:rule_report", detail);
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(egui::Rect::from_min_max(egui::pos2(right, rect.top()), rect.max))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        actions,
-    );
-    changed
 }

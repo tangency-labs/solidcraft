@@ -109,6 +109,9 @@ pub struct Request {
     pub tab: Option<u64>,
     /// How many times it ran again because the design changed while it ran.
     pub tries: u8,
+    /// An open into a new design tab at this place among the tabs (files dropped on the tab bar,
+    /// `doc.open`'s `tab`), never in place of the design shown, blank or not.
+    pub new_tab_at: Option<usize>,
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
@@ -145,6 +148,7 @@ impl Request {
             serial: crate::operations::serial(),
             tab: None,
             tries: 0,
+            new_tab_at: None,
             auto_verify: false,
             plugin_import: false,
             from_home: false,
@@ -292,10 +296,10 @@ struct Running {
     rx: Receiver<Job>,
     phase: Arc<AtomicU8>,
     progress: Arc<Progress>,
-    preview_rx: Option<Receiver<egui::ColorImage>>,
-    preview: Option<egui::TextureHandle>,
+    preview_rx: Option<Receiver<crate::ui_kit::PreviewImage>>,
+    preview: Option<crate::ui_kit::PreviewTextures>,
     /// Pictures of the model as far as it is built (the picture, features built).
-    partial_rx: Option<Receiver<(egui::ColorImage, usize)>>,
+    partial_rx: Option<Receiver<(crate::ui_kit::PreviewImage, usize)>>,
     /// The picture shown is of the first this many features (`None`: the saved preview).
     built: Option<usize>,
     /// A STEP file read a piece per frame on this thread (the web app), instead of on a worker.
@@ -723,8 +727,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             Kind::ExportDxf | Kind::ExportSheet => {
                 let (command, params) = request.command();
                 let r = app.run(command, params);
-                if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                if let Ok(reply) = &r
+                    && !request.path.is_empty()
+                {
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), reply), false);
                 }
                 r
             }
@@ -860,6 +866,17 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
+    // The tab to open in is the window's business, not the command's.
+    let new_tab_at = match options.remove("tab").filter(|_| kind == Kind::Open) {
+        None => None,
+        Some(v) => match open_tab_param(&v) {
+            Ok(at) => Some(at),
+            Err(e) => {
+                let _ = req.reply.send(json!({"ok": false, "error": e}));
+                return None;
+            }
+        },
+    };
     // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
     // A value that is no boolean stays in the options, for the engine's own check of them.
     let new_tab =
@@ -880,6 +897,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         serial: crate::operations::serial(),
         tab: None,
         tries: 0,
+        new_tab_at,
         auto_verify: false,
         plugin_import: id == "file.import",
         from_home: false,
@@ -889,6 +907,11 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// `doc.open`'s `tab`: a place among the design tabs (0 is the first; past the last is the end).
+fn open_tab_param(v: &Value) -> Result<usize, String> {
+    v.as_u64().map(|at| usize::try_from(at).unwrap_or(usize::MAX)).ok_or_else(|| "doc.open: `tab` must be a whole number, 0 or more".to_string())
 }
 
 /// What to say once a linked design is inserted: whether its file carries a signature, without
@@ -960,6 +983,14 @@ fn start(app: &mut SolveApp) {
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
         crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
+        return;
+    }
+    if request.new_tab_at.is_some()
+        && let Err(e) = crate::documents::tab_room(app)
+    {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
+        app.set_status(e.clone(), true);
+        request.answer(Err(e));
         return;
     }
     if matches!(request.kind, Kind::Open | Kind::Recover { .. })
@@ -1381,11 +1412,9 @@ fn step_opening(
 /// the finished model), or `None` when there is nothing to show yet, too much to draw, or the
 /// load ended meanwhile (`stop`).
 #[cfg(not(target_arch = "wasm32"))]
-fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<egui::ColorImage> {
-    use solidcraft_engine::geom::Aabb3;
-    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
-    let mut scene = Scene::default();
-    let mut bounds = Aabb3::EMPTY;
+fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<crate::ui_kit::PreviewImage> {
+    use solidcraft_viewport::{Rgb, SceneMesh};
+    let mut meshes = Vec::new();
     let mut triangles = 0usize;
     for body in &world.bodies {
         if stop() {
@@ -1396,29 +1425,17 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
         if triangles > 4_000_000 {
             return None;
         }
-        bounds = bounds.union(&mesh.bounds());
-        scene.meshes.push(SceneMesh::solid(mesh, Rgb(176, 186, 199)));
+        meshes.push(SceneMesh::solid(mesh, Rgb(176, 186, 199)));
     }
-    if bounds.is_empty() {
-        return None;
-    }
-    let mut camera = Camera::default();
-    camera.set_view(StandardView::Iso);
-    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
-    scene.radius = bounds.diagonal();
-    if stop() || !preview_work_fits(&scene, &camera) {
-        return None;
-    }
-    preview_image(&scene, &camera)
+    preview_image(meshes, |scene, camera| !stop() && preview_work_fits(scene, camera))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
+fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<crate::ui_kit::PreviewImage> {
     use solidcore_record::Vec3;
-    use solidcraft_engine::geom::{Aabb3, Mesh};
-    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
-    let mut scene = Scene::default();
-    let mut bounds = Aabb3::EMPTY;
+    use solidcraft_engine::geom::Mesh;
+    use solidcraft_viewport::{Rgb, SceneMesh};
+    let mut meshes = Vec::new();
     for cached in preview.meshes {
         let mut mesh = Mesh {
             positions: cached.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect(),
@@ -1440,33 +1457,20 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
         for normal in &mut mesh.normals {
             *normal = normal.normalized().unwrap_or(Vec3::Z);
         }
-        bounds = bounds.union(&mesh.bounds());
         let [r, g, b] = cached.color.unwrap_or([0.69, 0.73, 0.78]).map(|c| (c * 255.0).round() as u8);
-        scene.meshes.push(SceneMesh::solid(Arc::new(mesh), Rgb(r, g, b)));
+        meshes.push(SceneMesh::solid(Arc::new(mesh), Rgb(r, g, b)));
     }
-    if bounds.is_empty() {
-        return None;
-    }
-    let mut camera = Camera::default();
-    camera.set_view(StandardView::Iso);
-    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
-    scene.radius = bounds.diagonal();
-    if !preview_work_fits(&scene, &camera) {
-        return None;
-    }
-    preview_image(&scene, &camera)
+    preview_image(meshes, preview_work_fits)
 }
 
-/// The preview picture, drawn on the GPU by the renderer the app installs (none: no picture).
+/// The loading preview's picture, drawn as every file preview is
+/// ([`solidcraft_engine::thumbnail`]).
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_image(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> Option<egui::ColorImage> {
-    match solidcraft_engine::capture::rgba(scene, camera, 320, 200) {
-        Ok(picture) => Some(egui::ColorImage::from_rgba_unmultiplied([320, 200], &picture.rgba)),
-        Err(e) => {
-            log::warn!("no preview picture: {e}");
-            None
-        }
-    }
+fn preview_image(
+    meshes: Vec<solidcraft_viewport::SceneMesh>,
+    fits: impl FnOnce(&solidcraft_viewport::Scene, &solidcraft_viewport::Camera) -> bool,
+) -> Option<crate::ui_kit::PreviewImage> {
+    solidcraft_engine::thumbnail::render_meshes(meshes, fits).map(|picture| crate::home::preview_image(&picture))
 }
 
 /// Bound drawing work as well as file size: repeated full-screen triangles (a hostile file) must
@@ -1595,14 +1599,14 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(running) = &mut app.file_load.running {
         if !running.cancelled() && running.matches(&app.session) {
             if let Some(image) = running.preview_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-                running.preview = Some(ctx.load_texture("opening-preview", image, egui::TextureOptions::LINEAR));
+                running.preview = Some(crate::ui_kit::PreviewTextures::load(ctx, "opening-preview", image));
                 running.built = None;
             }
             // The model as far as it is built, unless the file's saved picture (all of it) is up.
             if let Some((image, built)) = running.partial_rx.as_ref().and_then(|rx| rx.try_iter().last())
                 && (running.preview.is_none() || running.built.is_some())
             {
-                running.preview = Some(ctx.load_texture("opening-preview", image, egui::TextureOptions::LINEAR));
+                running.preview = Some(crate::ui_kit::PreviewTextures::load(ctx, "opening-preview", image));
                 running.built = Some(built);
             }
         } else {
@@ -1779,7 +1783,11 @@ fn behind(app: &mut SolveApp, mut running: Running) {
     let request = &running.request;
     let key = format!("file:{}", request.serial);
     let uid = made.session.uid;
-    match crate::documents::open_tab_behind(app, made.session) {
+    let opened = match request.new_tab_at {
+        Some(at) => crate::documents::open_tab_behind_at(app, made.session, at),
+        None => crate::documents::open_tab_behind(app, made.session),
+    };
+    match opened {
         Ok(()) => {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
@@ -1853,12 +1861,12 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
         let request = &running.request;
         match job {
             Ok(made) if request.kind.exports() && request.print => {
-                crate::drawing_workspace::print::written(app, &request.path);
+                crate::drawing_workspace::print::written(app, &request.path, &made.result);
                 request.answer(Ok(made.result));
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), &made.result), false);
                 }
                 request.answer(Ok(made.result));
             }
@@ -1917,18 +1925,17 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     }
                     app.big_operation = true;
                 } else {
-                    // No tab left for it: `adopt` said why, and nothing else of the open happens.
+                    // A tab of its own at the place asked for, or the blank design's place.
                     // Opened by a program, not the user: nothing is asked about its links.
                     app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
-                    let adopted = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| {
-                        if request.new_tab {
-                            crate::documents::adopt_in_new_tab(app, made.session)
-                        } else {
-                            crate::documents::adopt(app, made.session)
-                        }
+                    let shown = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| match request.new_tab_at {
+                        Some(at) => crate::documents::open_tab_at(app, made.session, at).map_err(|e| app.set_status(e, true)).is_ok(),
+                        None if request.new_tab => crate::documents::adopt_in_new_tab(app, made.session),
+                        None => crate::documents::adopt(app, made.session),
                     });
                     app.docs.quiet_open = false;
-                    if !adopted {
+                    // No tab left for it: the status said why, and nothing else of the open happens.
+                    if !shown {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {
@@ -2199,7 +2206,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             if let Some(preview) = r.preview.as_ref().filter(|_| !cancelled) {
                 let w = ui.available_width();
-                ui.image((preview.id(), egui::vec2(w, w * 200.0 / 320.0)));
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(w, w * 200.0 / 320.0), egui::Sense::hover());
+                ui_kit::file_preview(ui, response.id.with("preview"), rect, Some(preview.art()), response.hovered(), 1.0);
                 let note = match r.built {
                     Some(built) => solidcraft_ui_text::format("file_load.built", &[("built", &built.to_string()), ("total", &total.to_string())]),
                     None => solidcraft_ui_text::tr("file_load.preview_note").to_string(),
@@ -3157,7 +3165,8 @@ M30
             let base = app.session.doc.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let (preview_tx, preview_rx) = std::sync::mpsc::channel();
-            preview_tx.send(egui::ColorImage::new([2, 2], vec![egui::Color32::RED; 4])).unwrap();
+            let picture = egui::ColorImage::new([2, 2], vec![egui::Color32::RED; 4]);
+            preview_tx.send(crate::ui_kit::PreviewImage { picture, shadow: None }).unwrap();
             app.file_load.running = Some(Running {
                 request: Request::new("old.solidcraft", if insert { Kind::Insert } else { Kind::Open }),
                 base,
@@ -3205,8 +3214,8 @@ M30
                 corner_normals: Default::default(),
             }],
         };
-        let picture = saved_picture(preview).unwrap();
-        assert_eq!(picture.size, [320, 200]);
+        let picture = saved_picture(preview).unwrap().picture;
+        assert_eq!(picture.size, solidcraft_engine::thumbnail::SIZE);
         assert!(picture.pixels.iter().any(|p| u16::from(p.r()) > u16::from(p.g()) * 2));
     }
 

@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
+// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
+// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
+// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
+// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
@@ -1889,6 +1894,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -2253,8 +2259,14 @@ mod tests {
             fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
             // A change outside what computes models keeps the commit's digest, as a commit of it does.
             write(&root, "solidcore/docs/reference.md", "# changed\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() { edited }\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() { edited }\n");
             write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
-            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the interface and the notes compute no model");
+            assert_eq!(
+                build_script::evaluation_source(&root).as_deref(),
+                Some(clean.as_str()),
+                "the interface, notes, tests and goldens compute no model"
+            );
             let _ = fs::remove_dir_all(&root);
         }
 
@@ -2716,6 +2728,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn native_cache_prededup_encodes_unique_bodies_once_and_preserves_metadata() -> Result<()> {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel::{DisplayShare, FacePaint, Paint};
+
+        let base = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))?;
+        let share = DisplayShare::new(base.clone());
+        let shared_placed = base.clone().with_display_share(&share, solidcraft_doc::IDENTITY);
+        let colored = base.clone().with_color(Some([0.2, 0.4, 0.6]));
+        let painted = base.clone().with_paint(Some(Paint {
+            opacity: 0.5,
+            faces: vec![FacePaint { face: 0, color: [1.0, 0.0, 0.0], opacity: 0.8, name: None }],
+            name: None,
+        }));
+        // Clearing face paint keeps inherited `regularization_protected = true`, so this body
+        // shares `base`'s record and has `color == None, paint == None` yet encodes differently.
+        let protected = painted.clone().with_paint(None);
+
+        let model =
+            saved_model(vec![base.clone(), base.clone(), base.clone(), base.clone(), base.clone(), shared_placed, colored, painted, protected]);
+
+        let before = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get);
+        let (manifest_bytes, payload_bytes) = native_cache::encode_model(&model, b"{}", usize::MAX)?;
+        let encoded_unique = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get) - before;
+        assert_eq!(encoded_unique, 4, "9 bodies + 1 share with 4 distinct encodings must encode only 4 times");
+
+        let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(invalid)?;
+        assert_eq!(manifest["slices"].as_array().map(Vec::len), Some(4));
+        let body_entries = manifest["bodies"].as_array().ok_or_else(|| invalid("bodies"))?;
+        assert_eq!(body_entries.len(), 9);
+        for entry in &body_entries[..6] {
+            assert_eq!(entry[0], json!(0), "identical body copies must map to slice 0");
+        }
+        assert_eq!(manifest["shares"], json!([0]), "display share of base must reuse slice 0");
+        assert_ne!(body_entries[6][0], json!(0), "colored body must keep its own slice");
+        assert_ne!(body_entries[7][0], json!(0), "painted body must keep its own slice");
+        assert_ne!(body_entries[8][0], json!(0), "boundary-protected body must not collapse into base's slice");
+        assert!(!payload_bytes.is_empty());
+
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        let round_tripped = DesignContainerReader::new(Cursor::new(&bytes))?.geometry().ok_or_else(|| invalid("missing cache"))?;
+        assert_eq!(round_tripped.bodies.len(), 9);
+        assert_eq!(round_tripped.bodies[0].color(), None);
+        assert!(round_tripped.bodies[5].display_share().is_some());
+        assert_eq!(round_tripped.bodies[6].color(), Some([0.2, 0.4, 0.6]));
+        assert_eq!(round_tripped.bodies[7].paint().map(|p| p.faces.len()), Some(1));
+        assert_eq!(round_tripped.bodies[8].paint(), None);
+        Ok(())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn opening_adopts_the_model_with_a_large_point_clouds_properties() {
@@ -2738,6 +2801,7 @@ mod tests {
             colors: Colors::default(),
             source_points: count as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3762,6 +3826,7 @@ mod tests {
             colors: Colors::default(),
             source_points: 3,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3850,8 +3915,9 @@ mod tests {
     fn portable_thumbnail_is_keyed_bounded_and_does_not_read_sources() {
         // IO validates an opaque PNG header/hash; UI tests exercise real PNG decoding.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        png.extend(240u32.to_be_bytes());
-        png.extend(150u32.to_be_bytes());
+        for side in crate::THUMBNAIL_SIZE {
+            png.extend((side as u32).to_be_bytes());
+        }
         let mut doc = Document::from_json(&document().to_json()).unwrap();
         if let FeatureKind::Import { step, .. } = &mut doc.features[0].kind {
             *step = "source data".repeat(250_000).into();
@@ -3863,7 +3929,7 @@ mod tests {
         assert!(count.get() < 256 * 1024);
         assert_eq!(reader.read_document().unwrap(), doc);
         let original = parts(&bytes);
-        for field in ["format", "app", "document", "payload"] {
+        for field in ["format", "document", "payload"] {
             let mut entries = original.clone();
             let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
             key[field] = json!("mismatch");
@@ -3872,6 +3938,12 @@ mod tests {
             assert!(read_design_thumbnail(&changed).is_none());
             assert_eq!(crate::read_design(&changed).unwrap(), doc);
         }
+        // A picture another version saved is still the design's picture: an update hides none.
+        let mut entries = original.clone();
+        let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
+        key["app"] = json!("0.0.1");
+        entries.insert("cache/thumbnail.json".into(), serde_json::to_vec(&key).unwrap());
+        assert_eq!(read_design_thumbnail(&package(&entries)), Some(png.clone()));
         let mut entries = original.clone();
         let source = entries.keys().find(|k| k.ends_with(".step")).unwrap().clone();
         entries.insert(source, b"corrupt source".to_vec());
@@ -4272,7 +4344,10 @@ mod tests {
                 legacy.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
                 legacy.write_all(&data).unwrap();
             }
-            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), doc);
+            // Its features keep the order of the pieces they split bodies into (#21552).
+            let mut upgraded = doc.clone();
+            upgraded.features.iter_mut().for_each(|f| f.least_face_piece_order = true);
+            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), upgraded);
         }
     }
 

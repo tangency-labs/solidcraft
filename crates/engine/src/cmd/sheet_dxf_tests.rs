@@ -532,6 +532,144 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
     assert!(note.is_some_and(|e| note_layout(e).0 == 5.0));
 }
 
+/// The value of a header variable.
+fn header_var(dxf: &str, var: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().collect();
+    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    pairs[pairs.iter().position(|(c, v)| *c == 9 && *v == var).unwrap_or_default() + 1].1.to_string()
+}
+
+/// The drawing's units: `mm` (the default) is unchanged, and `inches` writes every coordinate,
+/// the extents, the DASHED pattern, the bend-note radii and the pocket layers in inches.
+/// The lengths a shape holds, in a stable order, so two drawings of the same part compare by
+/// geometry: the reader brings both back to millimetres, and the inch file's 1e-9 inch grid
+/// stays within 3e-8 mm of the millimetre one.
+fn lengths(s: &DxfShape) -> Vec<f64> {
+    let mut out = Vec::new();
+    let pt = |p: Vec2, o: &mut Vec<f64>| {
+        o.push(p.x);
+        o.push(p.y);
+    };
+    match s {
+        DxfShape::Insert { at, scale, column_spacing, row_spacing, .. } => {
+            pt(*at, &mut out);
+            pt(*scale, &mut out);
+            out.extend([*column_spacing, *row_spacing]);
+        }
+        DxfShape::SourceEllipse { c, major, major_radius, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+            out.push(*major_radius);
+        }
+        DxfShape::SourceSpline { ctrl, fit, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+            for p in fit {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::SourcePolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::SourceOmitted { .. } => {}
+        DxfShape::Point(p) => pt(*p, &mut out),
+        DxfShape::Line(a, b) => {
+            pt(*a, &mut out);
+            pt(*b, &mut out);
+        }
+        DxfShape::Polyline { points } => {
+            for p in points {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::LwPolyline { verts, .. } => {
+            for (p, _) in verts {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::BulgedPolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::Circle { c, r } | DxfShape::Arc { c, r, .. } => {
+            pt(*c, &mut out);
+            out.push(*r);
+        }
+        DxfShape::Ellipse { c, major, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+        }
+        DxfShape::Spline { ctrl, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::Text { at, height, .. } | DxfShape::AlignedText { at, height, .. } => {
+            pt(*at, &mut out);
+            out.push(*height);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
+    let mut s = tray_with(&[]);
+    let mm = export(&mut s, json!({}));
+    assert_eq!(export(&mut s, json!({"units": "mm"})), mm);
+    assert_eq!((header_var(&mm, "$INSUNITS"), header_var(&mm, "$MEASUREMENT")), ("4".to_string(), "1".to_string()));
+    let inches = export(&mut s, json!({"units": "inches"}));
+    assert_eq!((header_var(&inches, "$INSUNITS"), header_var(&inches, "$MEASUREMENT")), ("1".to_string(), "0".to_string()));
+    assert!(s.execute("sheet.export_dxf", &json!({"units": "feet"})).is_err());
+    // The same entities in the same order: the inch file's lengths, read back in millimetres,
+    // are the millimetre file's to the grid.
+    let (mm_es, in_es) = (entities(&mm), entities(&inches));
+    assert_eq!(mm_es.len(), in_es.len());
+    for (m, i) in mm_es.iter().zip(&in_es) {
+        assert_eq!(m.0, i.0, "the files must hold the same entities in the same order");
+        assert_eq!(m.2, i.2, "{}", m.0);
+        let (want, got) = (lengths(&m.1), lengths(&i.1));
+        assert_eq!(want.len(), got.len(), "{}", m.0);
+        assert!(want.iter().zip(&got).all(|(a, b)| (a - b).abs() < 3e-8), "{}: {want:?} vs {got:?}", m.0);
+    }
+    // The file's DASHED pattern is half and quarter inches.
+    let types: Vec<(i32, &str)> =
+        inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    let at = types.iter().position(|(c, v)| *c == 2 && *v == "DASHED").unwrap();
+    let pattern: Vec<f64> = types[at..].iter().take_while(|(c, _)| *c != 0).filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
+    assert_eq!(pattern, vec![0.5, -0.25]);
+    // The bend notes read their radii in inches too: 1 mm is 0.0394 of them.
+    let mut notes = |params: Value| -> Vec<String> {
+        entities(&export(&mut s, params))
+            .iter()
+            .filter(|e| e.0 == "TEXT")
+            .map(|e| {
+                let DxfShape::Text { text, .. } = &e.1 else { panic!("{e:?}") };
+                text.clone()
+            })
+            .collect()
+    };
+    let plain_notes = notes(json!({"bend_notes": true}));
+    let inch_notes = notes(json!({"bend_notes": true, "units": "inches"}));
+    assert_eq!(inch_notes.len(), plain_notes.len());
+    for (plain, inch) in plain_notes.iter().zip(&inch_notes) {
+        let text = plain.replacen("R1", "R0.0394", 1);
+        assert_eq!(inch.as_str(), text.as_str(), "{plain} -> {inch}");
+    }
+    // A pocket layer names its depth in the drawing's units.
+    let mut s = plate_with(&[]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    let dxf = export(&mut s, json!({"units": "inches"}));
+    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_0.039370_IN"), "1 mm deep, in inches");
+}
+
 #[test]
 fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
     // The included angle is 180° less the bend angle: 122° for a 58° bend, 90° for a 90° one.
@@ -551,6 +689,42 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
         // Without notes the setting changes nothing in the file.
         assert_eq!(plain.first(), plain.get(1), "{deg}°");
     }
+}
+
+/// `markings: false` leaves the letter contours and the bend notes out; the outline, the cut-outs
+/// and the bends stay, and a letter's pocket is no longer etched.
+#[test]
+fn the_markings_option_leaves_the_letters_and_the_notes_out() {
+    let mut s = tray_with(&marks());
+    let plain = entities(&export(&mut s, json!({})));
+    assert!(plain.iter().any(|e| layer_of(e) == "TEXT"), "the default export has the letters");
+    // The letters and their counters are gone, as are the notes when asked for together.
+    let bare = export(&mut s, json!({"markings": false}));
+    let es = entities(&bare);
+    assert!(
+        !es.iter().any(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH"),
+        "{:?}",
+        es.iter().filter(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH").map(|e| (e.0.clone(), layer_of(e))).collect::<Vec<_>>()
+    );
+    assert!(es.iter().any(|e| layer_of(e) == "OUTLINE") && es.iter().any(|e| layer_of(e) == "BEND_UP"));
+    assert!(entities(&export(&mut s, json!({"markings": false, "bend_notes": true}))).iter().all(|e| e.0 != "TEXT"));
+    // The hole and the slot are no letters: they stay on CUT.
+    let cut = es.iter().filter(|e| layer_of(e) == "CUT").collect::<Vec<_>>();
+    assert_eq!((count_of(&cut, "CIRCLE"), count_of(&cut, "LINE")), (1, 4), "{cut:?}");
+    assert_eq!(export(&mut s, json!({"markings": true})), export(&mut s, json!({})));
+    assert!(s.execute("sheet.export_dxf", &json!({"markings": "no"})).is_err());
+    // A pocket that is letters (a shallow text cut) is a marking and goes with them.
+    let mut p = Session::default();
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut p, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut p, "sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(export(&mut p, json!({})).contains("ETCH"));
+    assert!(!export(&mut p, json!({"markings": false})).contains("ETCH"));
 }
 
 /// A body whose base flange names its rule keeps that rule's notes whichever rule is active when
@@ -1644,7 +1818,7 @@ mod caller_circle_compatibility {
     }
     fn expect_arcs(lp: &Loop2) {
         assert!(super::super::loop_circle(lp).is_none());
-        assert!(solidcraft_kernel::services::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
+        assert!(solidcraft_kernel::affine::loop_circle(lp).is_none(), "generic recognition must remain strict");
         let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
         assert!(json.get("circle").is_none());
         let segments = json["segments"].as_array().unwrap();
@@ -1666,7 +1840,7 @@ mod caller_circle_compatibility {
         assert!(center.dist(second) > 0.0 && center.dist(second) < 1e-9);
         assert!(other_radius > radius && other_radius - radius < 1e-9);
         let lp = halves(center, radius, second, other_radius);
-        assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
+        assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
         expect_circle(&lp, center, radius);
     }
     #[test]
@@ -1760,7 +1934,7 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         ],
     };
     assert_eq!(super::loop_circle(&lp), Some((center, 8.0)));
-    assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
+    assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
     let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
     assert!(error.to_string().contains("arc endpoints collapse"));
 
@@ -1787,4 +1961,83 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         .expect("the real default flat-pattern exporter retains its whole-circle result");
     let es = entities(&dxf);
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
+}
+
+/// #17752: with `hardware_notes`, each press-in hardware hole is named in the DXF by a note beside
+/// it on layer HARDWARE (`M3 nut`, a stud's length after it), 3 mm high, level with the hole and
+/// just clear of its rim; layers on a single layer leave the notes out, and a sheet with no
+/// hardware has no such layer. Without the option there are no notes and no layer.
+#[test]
+fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
+    let mut s = plate_with(&[]);
+    assert!(!layer_table(&export(&mut s, json!({"hardware_notes": true}))).contains_key("HARDWARE"), "no hardware, no layer");
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    run(&mut s, "solid.hole", json!({"position": [50, 10, 2.5], "diameter": 3}));
+    let unasked = export(&mut s, json!({}));
+    assert!(!layer_table(&unasked).contains_key("HARDWARE") && entities(&unasked).iter().all(|e| e.0 != "TEXT"), "notes are asked for");
+    let dxf = export(&mut s, json!({"hardware_notes": true}));
+    let all = entities(&dxf);
+    let notes: Vec<&Entity> = all.iter().filter(|e| e.0 == "TEXT").collect();
+    assert!(notes.iter().all(|e| layer_of(e) == "HARDWARE"), "{notes:?}");
+    let mut texts: Vec<String> = notes.iter().map(|e| encoded_text(e)).collect();
+    texts.sort();
+    assert_eq!(texts, ["M3 nut", "M4 stud 10 mm"], "the plain hole has no note");
+    assert_eq!(layer_table(&dxf).get("HARDWARE"), Some(&(8, "Continuous".to_string())));
+    let circles: Vec<(Vec2, f64)> = all.iter().filter_map(|e| if let DxfShape::Circle { c, r } = &e.1 { Some((*c, *r)) } else { None }).collect();
+    assert_eq!(circles.len(), 3);
+    for note in &notes {
+        assert_eq!(note_layout(note), (3.0, 0.0));
+        let at = second_point(note);
+        let beside = circles.iter().any(|(c, r)| at.dist(*c + Vec2::new(r + 1.5, -1.5)) < 1e-9);
+        assert!(beside, "{} is beside no hole: {at:?} {circles:?}", encoded_text(note));
+    }
+    // The note's height is the caller's, as a bend note's is.
+    let tall = entities(&export(&mut s, json!({"hardware_notes": true, "note_height": 5})));
+    assert!(tall.iter().filter(|e| e.0 == "TEXT").all(|e| note_layout(e).0 == 5.0));
+    // On a single layer a note would sit with the cut contours: none.
+    let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
+    assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
+}
+
+/// The file for a shop (#17752): a sheet with press-in hardware, exported with the default options,
+/// gives what the same sheet gives with plain holes of the hardware's size and nothing else: the
+/// same layers and entities, the mounting holes as circles, no HARDWARE layer and no note texts.
+/// The hardware is only a property of the hole, so the sheet's STEP is the same too.
+#[test]
+fn a_sheet_with_press_in_hardware_exports_only_the_sheet_and_its_holes() {
+    let mut with = plate_with(&[]);
+    run(&mut with, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut with, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    let listed = run(&mut with, "sheet.flat_pattern", json!({}))["hardware"].as_array().cloned().unwrap_or_default();
+    let diameters: Vec<f64> = listed.iter().filter_map(|h| h["hole_diameter"].as_f64()).collect();
+    assert_eq!(diameters.len(), 2, "{listed:?}");
+    let mut without = plate_with(&[]);
+    for (d, at) in diameters.iter().zip([[30.0, 30.0, 2.5], [70.0, 30.0, 2.5]]) {
+        run(&mut without, "solid.hole", json!({"position": at, "diameter": d}));
+    }
+    let (dxf, plain) = (export(&mut with, json!({})), export(&mut without, json!({})));
+    assert_eq!(layer_table(&dxf), layer_table(&plain));
+    assert!(!layer_table(&dxf).contains_key("HARDWARE"));
+    let (a, b) = (entities(&dxf), entities(&plain));
+    let shapes = |es: &[Entity]| es.iter().map(|e| (e.0.clone(), e.1.clone(), e.2.clone())).collect::<Vec<_>>();
+    assert_eq!(shapes(&a), shapes(&b));
+    assert_eq!(count(&a, "CIRCLE"), 2, "the mounting holes are plain circles");
+    assert!(a.iter().all(|e| e.0 != "TEXT"), "no note texts");
+    assert!(!dxf.contains("nut") && !dxf.contains("stud") && !dxf.contains("HARDWARE"));
+    // STEP: the bodies are all it writes, and the hardware is not a body or a part of one. Its data
+    // section (the header holds the time) is the same as the plain sheet's.
+    let step = |s: &mut Session, name: &str| {
+        // The same file name in a folder of its own: the STEP product is named after the file.
+        let dir = std::env::temp_dir().join(format!("solidcraft-pih-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("sheet.step");
+        run(s, "file.export_step", json!({"path": path.to_string_lossy()}));
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        text.split_once("DATA;").map(|(_, data)| data.to_string()).unwrap_or(text)
+    };
+    let (with_step, plain_step) = (step(&mut with, "with"), step(&mut without, "plain"));
+    assert!(!with_step.is_empty());
+    assert_eq!(with_step, plain_step);
 }

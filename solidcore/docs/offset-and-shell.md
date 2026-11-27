@@ -161,6 +161,7 @@ job (§5.1).
 | `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
 | `OffsetFailure::TubeFolds`, `TubeNotCertified` | a rounded offset's cap is the tube of radius \|d\| about a convex edge, `c + d u` with `u` on the arc between the faces' normals turned to the offset's side; it folds where `d (u · k) ≥ 1` (`k` the edge's curvature vector); `TubeNotCertified` when that is neither proved nor ruled out (#13685) | the edge, the distance and, for `TubeFolds`, `largest`, the largest distance at which the edge's tube is proved not to fold (none if none is; only the tube is proved there, so other defects can still appear at or near it) | on the first cap built for each edge, in every offset but the local operation (not a closing wall) | `offset_executive/p1.rs`, `refuse_folding_tube`; `query/tangent_edge.rs`, `tube_regularity` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
+| `OffsetFailure::WallsMeetAcross` | an inset's two opposite planar walls meet: their faces are exactly twice the distance apart across material, capped by a protrusion (a square boss inset by half its width), while the body keeps a cavity; or, in an unmerged inset (the merge alone changes topology, keeping the cavity's regions), a point of an offset face is closer than the distance to an opposite planar face, so the two insets crossed (a floor under a blind hole thinner than two walls); the points tested, both ways round, are each face's interior point, its vertices and the middles of its edges cut where, seen along the normal, they meet the other face's boundary, classified on the exact trims, within a budget past which nothing is refused | the face, the distance and `largest`, half the narrowest such gap | in the extended inset but the local operation: the meeting before the faces are offset, the crossing on the built faces before the stitch | `offset_executive/p2.rs`, `refuse_meeting_planar_insets`, `refuse_crossing_planar_insets` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
@@ -409,6 +410,21 @@ sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
 operation (`solidcore-ops/src/offset.rs`, `draft`).
 
+**A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
+about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
+material region and no cavity), the draft removes the set W = { r_new(z) ≤ ρ ≤ r_old(z) } over
+the wall's slab by the boolean difference B − W [5] (`contract_complete_cone`,
+`topology/brep/local_operation.rs`). The drafted cone must be the old one's axis and slab to the
+body's tolerance (`coaxial_slab`: the axes' offset and tilt over the slab, the seams' twist, the
+drafted net's end rows on the old end planes), both radii positive and r_new nowhere past r_old;
+both are affine in height, so their ends decide. An end where r_new is below r_old by more than the
+tolerance gets an annular cap drawn on the old end plane, in the old frame; the other end is the
+hinge. The boolean cuts every wall W passes through, so holes or pockets the drafted side reaches
+break out through it, where the local operation's offset faces would cross loops it cannot
+resolve (`LoopCrossing::Unmerged`, `offset_executive/crossing_loops.rs`). Only the static entry
+point (`local_operation_simple`) takes this path; a partial wall, a plane, or a draft that moves a
+wall outward still goes through the local operation.
+
 **A draft into another shell.** A cone or cylinder drafted about the pull sweeps, at each height h
 above its hinge circle, the points whose ψ = atan t − atan((ρ − r0) / h) lies between 0 and the
 lean (`largest_clear_angle`, `offset/draft.rs`). A cavity's wall (or another lump) bounded by cones,
@@ -438,6 +454,21 @@ stitch:
 5. **A solid** goes to `shell_difference`: an inset is the input minus the offset, an outset the
    offset minus the input, by the manifold boolean configured with the input's tolerance and 20°
    (`configure_operands`).
+
+`shell_brep_simple` (`offset_executive/p2.rs`), the entry every caller's shell goes through,
+first turns the seam of each cone or cylinder face whose loops are a band and holes about its
+axis to the middle of the widest angle the holes leave free (`offset/shell_seams.rs`): the
+offset keeps each face's loops, so a hole whose offset grows past a seam its rim did not reach
+would cross an edge nothing splits. The faces the shell keeps get their seams
+back afterwards. A face that is not such a band is left, and the reason is kept as a value
+(`Leave`), not as an error. A turn that is tried and fails is a failure: the face keeps the
+seam it had, and the turn's typed cause goes into the shell's `SeamReport`
+(`shell_brep_simple_reporting`). It does not refuse the shell, because a seam turn moves no
+point of the body. If a turn before the shell fails, the shell builds, or is refused, exactly
+as it would without that turn. If a turn back fails, the result is the same valid body, with
+that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
+(`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
+then each other feature on its own.
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with

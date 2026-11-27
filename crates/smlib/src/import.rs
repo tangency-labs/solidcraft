@@ -599,17 +599,24 @@ fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f
     }
     let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
     let y = cross(z, x);
-    let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
-        let d = add(scale(u, s), scale(v, t));
-        [dot(d, x), dot(d, y)]
-    });
-    let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
-    let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+    let range = if x == u && y == v {
+        // Equal surface coefficients mean equal parameters. Projecting onto the same
+        // rounded axes again changes the domain on every record import.
+        [u0, v0, u1, v1]
+    } else {
+        let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
+            let d = add(scale(u, s), scale(v, t));
+            [dot(d, x), dot(d, y)]
+        });
+        let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
+        let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+        [lo(0), lo(1), hi(0), hi(1)]
+    };
     a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
     a.r3(flat::FACE_PLANE_ORIGIN, origin);
     a.r3(flat::FACE_PLANE_AXIS, z);
     a.r3(flat::FACE_PLANE_REF_DIRECTION, x);
-    a.r(flat::FACE_RANGE).extend([lo(0), lo(1), hi(0), hi(1)]);
+    a.r(flat::FACE_RANGE).extend(range);
     Ok(())
 }
 

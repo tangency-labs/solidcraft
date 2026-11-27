@@ -1771,7 +1771,7 @@ mod tests {
 
     /// The kit functions that translate a label or text for display or announcement, read off
     /// `crates/ui-egui/src/ui_kit/`. Not here: the painters that expect an already translated
-    /// string (`caption`, `summary_row`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
+    /// string (`caption`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
     /// `tool_choices`), `segmented` (it measures its options with `tr_label` but paints the raw
     /// option, so a catalog entry could not translate it — a wiring gap of its own) and the
     /// measurement helpers (`metrics::label_width`, `ContentWidth::*`). The `hint` arguments of
@@ -1917,7 +1917,10 @@ mod tests {
         fn inside_kit(&self, path: &std::path::Path) -> bool {
             let module = module_path(path);
             module.get(1).is_some_and(|module| module == "ui_kit")
-                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
+                && !module.get(2).is_some_and(|name| {
+                    crate::test_support::KIT_COMPONENTS.contains(&name.as_str())
+                        || crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str())
+                })
         }
     }
 
@@ -2847,5 +2850,12 @@ mod tests {
         let lo = Locale::for_language("lo");
         assert_eq!(lo.name(), "ພາສາລາວ");
         assert!(is_supported("lo"));
+    }
+
+    #[test]
+    fn inside_kit_excludes_directory_backed_kit_components() {
+        let context = Context::new(&[]);
+        assert!(!context.inside_kit(std::path::Path::new("crates/ui-kit/src/panel_runtime/workspace.rs")));
+        assert!(context.inside_kit(std::path::Path::new("crates/ui-kit/src/choice.rs")));
     }
 }

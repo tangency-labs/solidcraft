@@ -509,6 +509,129 @@ fn a_messages_changes_undo_as_one_step() {
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
+#[test]
+fn show_in_model_highlights_only_the_assistants_features() {
+    use solidcraft_engine::Sel;
+
+    let (mut app, tx) = app_in_a_turn();
+    let plate = app.run("solid.box", json!({"length": 60, "width": 40, "height": 8, "corner": [0, 0, 0], "body_name": "Plate"})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let hole = ask(&tx, "engine.execute", json!({"command": "solid.hole", "params": {"position": [15, 12, 8], "diameter": 6, "targets": ["Plate"]}}));
+    frame(&mut app);
+    let reply = hole.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let hole = reply["result"]["feature"].as_u64().unwrap();
+    let human_box = app.run("solid.box", boxed(90.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(features.as_slice(), [hole]);
+
+    app.agent_chat.open = true;
+    app.home.open = false;
+    let selection = vec![Sel::Feature { id: human_box }];
+    app.session.selection = selection.clone();
+    let cam = app.cam;
+    let target = Sel::Feature { id: hole };
+    let show = |app: &mut SolveApp| panel::run(app, &crate::fonts::test_context(), panel::PanelAction::ShowModelChanges(index));
+    show(&mut app);
+    assert_eq!(app.highlighted(), [selection[0].clone(), target.clone()]);
+    assert_eq!(app.session.selection, selection);
+    assert_eq!(app.cam, cam);
+    let faces = crate::viewport::displayed_selection(&app, &target);
+    assert!(!faces.is_empty());
+    assert!(faces.iter().all(|face| matches!(face, Sel::Face { body, .. } if body == "Plate")), "{faces:?}");
+    assert!(!app.highlighted().contains(&Sel::Feature { id: plate }), "the earlier human edit is outside the card");
+
+    app.run("select.set", json!({"items": []})).unwrap();
+    assert_eq!(app.highlighted().as_slice(), std::slice::from_ref(&target), "changing selection keeps the separate model highlight");
+    app.home.open = true;
+    assert!(!app.highlighted().contains(&target), "Home does not show the model");
+    let _ = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| app.ui(ui));
+    assert!(app.home.open, "the Home frame did not leave Home");
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "returning from Home does not restore the highlight");
+    app.home.open = true;
+    show(&mut app);
+    app.home.open = false;
+    assert!(!app.highlighted().contains(&target), "the control does not arm from Home");
+    show(&mut app);
+    assert!(app.highlighted().contains(&target));
+    show(&mut app);
+    assert!(app.highlighted().is_empty());
+    show(&mut app);
+    undo_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), None);
+    assert!(!app.highlighted().contains(&target));
+}
+
+#[test]
+fn showing_model_changes_does_not_resume_after_the_design_revision_changes() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let (index, features) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            Item::Changes { features, .. } => Some((index, features)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(features.as_slice(), [feature]);
+    app.agent_chat.open = true;
+    app.home.open = false;
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index));
+
+    app.run("solid.box", boxed(20.0)["params"].clone()).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(model_changes_index(&app), None);
+
+    toggle_model_changes(&mut app, index);
+    assert_eq!(model_changes_index(&app), Some(index), "the unchanged completion can be shown again on request");
+    app.agent_chat.swap_document(&mut AgentChat::default());
+    assert!(app.agent_chat.model_changes_shown.is_none());
+}
+
+#[test]
+fn show_in_model_omits_a_feature_the_user_overwrites_before_completion() {
+    let (mut app, tx) = app_in_a_turn();
+    let feature = app.run("solid.box", boxed(0.0)["params"].clone()).unwrap()["feature"].as_u64().unwrap();
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "change the height and add another box".into(), false, None, Vec::new());
+    let reply = ask(&tx, "engine.execute", json!({"command": "timeline.edit", "params": {"feature": feature, "set": {"height": "12"}}}));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    app.run("timeline.edit", json!({"feature": feature, "set": {"height": "14"}})).unwrap();
+
+    let reply = ask(&tx, "engine.execute", boxed(25.0));
+    frame(&mut app);
+    let made = reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["result"]["feature"].as_u64().unwrap();
+    end_turn(&mut app);
+    let features = app.agent_chat.items.iter().find_map(|item| match item {
+        Item::Changes { features, .. } => Some(features.as_slice()),
+        _ => None,
+    });
+    assert_eq!(features, Some([made].as_slice()), "only the feature whose current definition the assistant wrote is offered");
+}
+
 /// The conversation knows a design by its revision: the very design the host gave it, never an
 /// equal copy, and only the host's own type gets the design back (#13438).
 #[test]
@@ -581,18 +704,7 @@ fn the_gate_refuses_and_limits() {
 fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     // Distinct designs: what counts is which `Arc` a snapshot holds.
     let doc = |_: usize| Arc::new(solidcraft_engine::doc::Document::default());
-    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot {
-        label: String::new(),
-        doc: d.clone(),
-        active_sketch: None,
-        sketching_view: None,
-        sketch_restore_marker: None,
-        active_sheet_sketch: None,
-        pending_moves: Default::default(),
-        part: None,
-        visibility: Default::default(),
-        section: None,
-    };
+    let snap = |d: &Arc<solidcraft_engine::doc::Document>| solidcraft_engine::Snapshot::with_doc(d.clone());
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
     let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
@@ -629,7 +741,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
     // A full history of steps that all kept one design (section steps): the turn's steps follow
     // the step on top at its start.
-    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let step = |i: usize| {
+        let mut s = snap(&docs[3]);
+        s.label = i.to_string();
+        s
+    };
     let start = UndoMark::of(&[step(1), step(2), step(3)]);
     let mut undo = vec![step(3), step(4), step(5)];
     assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
@@ -6474,6 +6590,55 @@ fn timed_chat() -> (crate::scenario::Harness, Script) {
     (h, script)
 }
 
+#[test]
+fn current_stage_follows_the_active_plan_above_the_conversation() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    let stage_rect = || crate::scenario::rect_of("agent_chat:current_stage");
+    let report_plan = |steps: &[(&str, &str)]| {
+        script.report(Event::Plan(steps.iter().map(|(name, status)| (name.to_string(), status.to_string())).collect()));
+    };
+    send(&mut h.app, &ctx, "make a mounting plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "a turn can run without a plan");
+
+    report_plan(&[("Set the hole diameter", "pending"), ("\n Inspect the mounting face\nMore detail", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 1);
+    assert!(stage_rect().unwrap().bottom() <= crate::scenario::rect_of("agent_chat:conversation").unwrap().top());
+
+    report_plan(&[("Inspect the mounting face", "completed"), ("Drill the holes", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Drill the holes"), 1);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 0);
+
+    report_plan(&[("Drill the holes", "completed"), ("Measure the diameter", "pending"), (" ", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "no named running step");
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    report_plan(&[]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "an empty plan clears the line");
+
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    ended(&script, "");
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the turn ended");
+    assert!(h.app.agent_chat.items.iter().any(|i| matches!(i, Item::Plan(steps) if steps.iter().any(|(name, _)| name == "Measure the diameter"))));
+
+    send(&mut h.app, &ctx, "add a second plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the next turn starts without the old plan");
+    report_plan(&[("Make the second plate", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    cancel(&mut h.app);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "Stop hides the line before the agent acknowledges it");
+}
+
 /// Move everything in the conversation `ms` into the past, as if that long had gone by.
 fn age(chat: &mut AgentChat, ms: f64) {
     for stamp in &mut chat.times {
@@ -6878,4 +7043,121 @@ fn the_header_shows_stop_and_login_only_when_they_apply() {
         assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
     }
     assert!(State::NeedsAuth.shows_auth_status());
+}
+
+/// The shared document diff produces accurate per-turn Undo card summaries (added/edited/removed
+/// features with names and types, parameter `old -> new` edits, History marker moves, and empty
+/// output when nothing changed) while preserving `changed_note` verbatim.
+#[test]
+fn turn_diff_summary_reports_features_parameters_and_marker() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let empty = app.session.doc.as_ref().clone();
+    assert!(turn_diff_summary(&empty, &empty).is_empty());
+    assert!(changed_note(&empty, &empty).is_none());
+
+    app.run("parameters.add", json!({"name": "w", "expression": "10", "unit": "mm"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(turn_diff_summary(&empty, &app.session.doc), [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let base = app.session.doc.as_ref().clone();
+    let mut edited = base.clone();
+    edited.features[0].name = "MainPlate".into();
+    edited.params.iter_mut().find(|p| p.name == "w").unwrap().expr = "25".into();
+    edited.marker = Some(0);
+    assert_eq!(
+        turn_diff_summary(&base, &edited),
+        ["~ MainPlate (Box)".to_string(), format!("~ w: {w_expr} -> 25"), "~ History marker before MainPlate".to_string()]
+    );
+    let edited_note = changed_note(&base, &edited).unwrap();
+    assert!(edited_note.contains(&format!("parameters: w {w_expr} -> 25")), "{edited_note}");
+    assert!(edited_note.contains("features: MainPlate (edited)"), "{edited_note}");
+    assert!(edited_note.contains("the History marker is now before MainPlate, so it"), "{edited_note}");
+
+    let mut removed = edited.clone();
+    removed.features.clear();
+    removed.params.retain(|p| p.name != "w");
+    removed.marker = None;
+    assert_eq!(turn_diff_summary(&edited, &removed), ["- MainPlate (Box)", "- w", "~ History marker at end"]);
+    let removed_note = changed_note(&edited, &removed).unwrap();
+    assert!(removed_note.contains("w (removed)"), "{removed_note}");
+    assert!(removed_note.contains("MainPlate (removed)"), "{removed_note}");
+    assert!(removed_note.contains("the History marker is now at the end"), "{removed_note}");
+}
+
+/// Large turns cap their Undo card diff summary cleanly with a "+N more" overflow line without
+/// altering `changed_note`'s own item cap.
+#[test]
+fn turn_diff_summary_caps_large_turns_with_overflow_indicator() {
+    use solidcraft_engine::doc::Param;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("parameters.add", json!({"name": "seed", "expression": "10", "unit": "mm"})).unwrap();
+    let before = app.session.doc.as_ref().clone();
+    let seed = before.params.iter().find(|p| p.name == "seed").cloned().unwrap();
+
+    let mut exact = before.clone();
+    exact.params.extend((0..MAX_CHANGES_SUMMARY).map(|i| Param { name: format!("q{i}"), ..seed.clone() }));
+    let exact_lines = turn_diff_summary(&before, &exact);
+    assert_eq!(exact_lines.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(exact_lines[MAX_CHANGES_SUMMARY - 1], format!("+ q{} = {}", MAX_CHANGES_SUMMARY - 1, seed.expr));
+
+    let mut many = before.clone();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..seed.clone() }));
+    let capped = turn_diff_summary(&before, &many);
+    let expected_more = 20 - (MAX_CHANGES_SUMMARY - 1);
+    assert_eq!(capped.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(capped[0], format!("+ p0 = {}", seed.expr));
+    assert_eq!(capped[MAX_CHANGES_SUMMARY - 1], format!("+{expected_more} more"));
+    assert!(changed_note(&before, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", seed.expr)));
+}
+
+/// Completing a turn populates `Item::Changes::summary` and exposes it in `ui.agent_chat` status;
+/// undoing marks the card undone while preserving its diff summary, and a no-change turn adds none.
+#[test]
+fn undo_card_records_turn_diff_summary_and_exposes_it_in_status() {
+    let (mut app, tx) = app_in_a_turn();
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+    end_turn(&mut app);
+
+    let (n, summary) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, item)| match item {
+            Item::Changes { steps: 2, summary, .. } => Some((i, summary.clone())),
+            _ => None,
+        })
+        .expect("the turn's changes item is present");
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(summary, [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let state = status(&app);
+    assert_eq!(state["items"][n]["changes"], json!(2));
+    assert_eq!(state["items"][n]["features"], json!(1));
+    assert_eq!(state["items"][n]["undone"], json!(false));
+    assert_eq!(state["items"][n]["summary"], json!(summary));
+
+    undo_changes(&mut app, n);
+    let after_undo = status(&app);
+    assert_eq!(after_undo["items"][n]["undone"], json!(true));
+    assert_eq!(after_undo["items"][n]["summary"], json!(summary));
+
+    // A no-change turn records no `Item::Changes`.
+    let before_count = app.agent_chat.items.len();
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "inspect".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert!(!app.agent_chat.items[before_count..].iter().any(|i| matches!(i, Item::Changes { .. })));
 }

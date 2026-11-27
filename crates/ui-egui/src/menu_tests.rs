@@ -2509,7 +2509,7 @@ fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
 fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let name = body(&h.app);
     h.frames(3);
     context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
@@ -2530,7 +2530,7 @@ fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
 fn appearance_hovered_quick_choice_applies_without_opening_editor() {
     use crate::scenario::Harness;
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let name = body(&h.app);
     let rows = context_menu::items(&h.app, &Target::Body { name: name.clone() });
     let appearance = find(&rows, "Appearance");
@@ -2551,7 +2551,7 @@ fn appearance_hovered_quick_choice_applies_without_opening_editor() {
 fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2577,7 +2577,7 @@ fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
 fn appearance_submenu_closes_when_the_pointer_moves_to_another_row() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2626,7 +2626,7 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
             .collect()
     }
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2660,7 +2660,7 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
 /// open in a harness with the pointer on the menu.
 fn component_menu() -> (crate::scenario::Harness, u64) {
     let mut h = crate::scenario::Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let b = body(&h.app);
     h.app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = h.app.session.doc.components[0].id;
@@ -2882,7 +2882,17 @@ mod browser_rows {
         right_click(&mut h, plate + half, true);
         assert!(h.app.viewport.context_menu.is_some());
         assert_eq!(h.app.menu.target, Target::Body { name: "Plate".into() });
-        right_click(&mut h, origin + half, true);
+        // The click goes to a part of the Origin row the open menu does not cover: the menu is
+        // placed to fit the window, and a long one reaches up over the rows above Plate.
+        let menu = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).expect("the Plate menu");
+        // The row's handle is 120 pt into the row, so there is room left of a menu opened there.
+        let mut on_origin = origin + half;
+        let near = menu.expand(16.0);
+        if near.contains(on_origin) {
+            on_origin.x = near.left() - 8.0;
+        }
+        assert!(!near.contains(on_origin), "the Origin row is under the menu at {on_origin:?}: {menu:?}");
+        right_click(&mut h, on_origin, true);
         assert!(h.app.viewport.context_menu.is_some(), "a right-click on another row opens that row's menu");
         assert_eq!(h.app.menu.target, Target::Origin);
 
