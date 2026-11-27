@@ -41,7 +41,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::{Continuity, ExtendRefusal, Extended};
+use super::{Continuity, ExtendRefusal};
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -62,7 +62,7 @@ const NAMING_TRIES: usize = 60;
 pub enum SideExtension {
     /// Not asked.
     NotAsked,
-    /// Extended: the length across it ([`Extended::across`]).
+    /// Extended: the length across it ([`Extended::across`](super::Extended::across)).
     Extended(Across),
     /// Left: the surface closes in the side's direction.
     Closed,
@@ -103,10 +103,11 @@ pub struct ExtendedSides {
     /// What was done at each side of the source's box, in [`BoxSide::ALL`]'s order.
     pub sides: [SideExtension; 4],
     /// How far the result over the source's box is from the source: the sum of the sides'
-    /// [`Extended::source`], each on the one before.
+    /// [`Extended::source`](super::Extended::source), each on the one before.
     pub source: f64,
-    /// The largest construction bound of the sides' extensions ([`Extended::extension`]):
-    /// each extension is within this of its construction.
+    /// The largest construction bound of the sides' extensions
+    /// ([`Extended::extension`](super::Extended::extension)): each extension is within this of
+    /// its construction.
     pub extension: f64,
 }
 

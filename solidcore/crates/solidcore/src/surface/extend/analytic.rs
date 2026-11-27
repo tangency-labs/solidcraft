@@ -102,8 +102,7 @@ use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::{Direction, Surface as Net};
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
-use crate::surface::offset_surface::{extends_as_itself, OffsetSurface, SS_UNKNOWN};
-use crate::surface::procedural_blend::exact::revolved_circle_torus;
+use crate::surface::offset_surface::{generator_is_circle, OffsetSurface, SS_UNKNOWN};
 use crate::surface::side::{Across, BoxSide, Bracket};
 use crate::surface::surface::{Surface, SurfaceKind};
 use std::f64::consts::PI;
@@ -281,10 +280,10 @@ pub(super) fn analytic_extended_sides(
 /// (module docs: up to a quarter of the turn it leaves open); its other sides are left
 /// [`SideExtension::NotAsked`], for the caller to extend as any revolution's. Such a
 /// revolution is a torus but for its label (the offset of a round about a circle is one),
-/// which the offset extends as itself ([`extends_as_itself`]). The torus is the one its
-/// generating arc reads ([`revolved_circle_torus`], a reading), proved on its form by
-/// [`lies_on`] before it is taken. `None` for any other surface, and for a form off the torus
-/// read.
+/// which the offset extends as itself (`extends_as_itself`). The torus is the one its
+/// generator's circle reads off its NURB form (`generator_is_circle`, a reading, whatever curve
+/// the generator was made from), proved on that form by [`lies_on`] before it is taken. `None`
+/// for any other surface, and for a form off the torus read.
 ///
 /// # Errors
 ///
@@ -302,13 +301,15 @@ pub(super) fn revolution_turned_on(
         offsets.push(o.offset_distance());
         carrier = o.base_surface();
     }
-    let SurfaceKind::SurfOfRevolution(rev) = carrier.kind() else {
-        return Ok(None);
-    };
-    if !extends_as_itself(k, carrier) {
+    if !matches!(carrier.kind(), SurfaceKind::SurfOfRevolution(_)) {
         return Ok(None);
     }
-    let Some((centre, axis, major, minor)) = revolved_circle_torus(carrier)? else {
+    // its generator read off its NURB form, whatever curve it was made from (a B-spline arc
+    // or a circle), as the offset reads it; a NURB that cannot be made is not one
+    let Ok(SurfaceKind::SurfOfRevolution(rev)) = carrier.kind_with_nurb(k) else {
+        return Ok(None);
+    };
+    let Some((circle, _)) = generator_is_circle(rev) else {
         return Ok(None);
     };
     if !(distance.is_finite() && distance > 0.0) {
@@ -321,6 +322,22 @@ pub(super) fn revolution_turned_on(
         return Ok(None);
     };
     let form = form.into_owned();
+    // the torus: about the axis through the circle's foot on it, of the circle's distance from
+    // the axis and its radius (to the net's first point, an end of the generator's arc)
+    let position = rev.position();
+    let axis = position.x_axis().cross(position.y_axis());
+    let from = circle - position.origin();
+    let height = axis.dot(from);
+    let centre = position.origin() + axis * height;
+    let major = (from - axis * height).length();
+    let Some(first) = form
+        .gw_nurb()
+        .and_then(|n| n.cpts().first().and_then(|r| r.first()).copied())
+    else {
+        return Ok(None);
+    };
+    let w = if first.w == NOW { 1.0 } else { first.w };
+    let minor = (Vec3::new(first.x / w, first.y / w, first.z / w) - circle).length();
     let implicit = Implicit::Torus {
         centre,
         axis,
@@ -330,7 +347,10 @@ pub(super) fn revolution_turned_on(
     if !lies_on(&form, &implicit)? {
         return Ok(None);
     }
-    let open = TURN - (rev.end_angle_deg() - rev.start_angle_deg()).to_radians();
+    let open = TURN
+        - (rev.end_angle_deg() - rev.start_angle_deg())
+            .abs()
+            .to_radians();
     let frame = Frame {
         origin: centre,
         axis,
@@ -413,7 +433,8 @@ fn extended_on(
         }
         let iso = match along {
             _ if round => {
-                if open <= 0.0 {
+                // (a turn not proved open, NaN too, is closed)
+                if open.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
                     *done = SideExtension::Closed;
                     continue;
                 }

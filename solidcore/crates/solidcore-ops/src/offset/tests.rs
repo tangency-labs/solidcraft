@@ -1061,15 +1061,7 @@ fn posts_with_rounded_tops() -> Body {
         .iter()
         .map(|&(sx, sy)| edge_at(&b, [sx * (a + h), sy * (c + h), 10.0]))
         .collect();
-    crate::blend::blend(
-        &b,
-        crate::blend::Blend::Round,
-        &rims,
-        &[6.0],
-        &[],
-        crate::blend::Corners::Filled,
-    )
-    .unwrap();
+    blend(&b, Blend::Round, &rims, &[6.0], &[], Corners::Filled).unwrap();
     b
 }
 
@@ -1084,12 +1076,13 @@ fn posts_with_rounded_tops() -> Body {
 /// on past the round's ends, three quarters of a turn, to the walls' offsets, at sqrt(16 - t^2)
 /// from the axis along them, and through its point outward on the diagonal.
 #[test]
-#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_box_whose_posts_have_rounded_tops_shells() {
+    use solidcore::query::api_queries::{point_distance, vertex_distance, vertex_on_edge};
     use std::f64::consts::FRAC_1_SQRT_2;
     all_fixes();
     let (a, c) = (41.0, 23.5);
-    for t in [0.5, 1.0] {
+    // ops computes no square root, so sqrt(16 - t^2) is written out
+    for (t, along) in [(0.5, 3.968_626_966_596_886), (1.0, 3.872_983_346_207_417)] {
         let b = posts_with_rounded_tops();
         assert_eq!(b.counts().unwrap(), [18, 48, 32]);
         let o = order(&b);
@@ -1101,44 +1094,69 @@ fn a_box_whose_posts_have_rounded_tops_shells() {
         assert!(b.is_manifold_solid().unwrap(), "t {t}");
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert!(report.is_valid(), "t {t}: {}", report.text);
-        let along = (16.0 - t * t).sqrt();
+        let k = Kernel::default();
+        let brep = b.lock();
         for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-            for want in [
+            // each end of the round's edge along the post top's offset: the record's vertex
+            // nearest the closed form, within its own tolerance of it, and the body's vertex
+            // there
+            let ends = [
                 [sx * (a - t), sy * (c - along), 10.0 - t],
                 [sx * (a - along), sy * (c - t), 10.0 - t],
-            ] {
-                // the vertex nearest the closed form, within its own tolerance of it
-                let (near, tol) = record
-                    .vertices
-                    .iter()
-                    .map(|v| {
-                        let d = [0, 1, 2].map(|i| v.point[i] - want[i]);
-                        (
-                            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt(),
-                            v.tolerance,
-                        )
+            ]
+            .map(|[x, y, z]| {
+                let want = Point3::new(x, y, z);
+                let (i, near) = (0..record.vertices.len())
+                    .map(|i| {
+                        let v = &record.vertices[i];
+                        let p = Point3::new(v.point[0], v.point[1], v.point[2]);
+                        (i, point_distance(p, want).unwrap().value)
                     })
-                    .fold((f64::INFINITY, 0.0), |m, x| if x.0 < m.0 { x } else { m });
+                    .fold((0, f64::INFINITY), |m, x| if x.1 < m.1 { x } else { m });
+                let tol = record.vertices[i].tolerance;
                 assert!(
                     near <= tol,
                     "t {t}: no vertex at {want:?} ({near}, tolerance {tol})"
                 );
-            }
+                let id = *brep
+                    .vertex_list()
+                    .iter()
+                    .min_by(|&&u, &&w| {
+                        let d = |v| vertex_distance(&brep, v, want).unwrap().value;
+                        d(u).total_cmp(&d(w))
+                    })
+                    .unwrap();
+                (u32::try_from(i).unwrap(), id)
+            });
+            // the edge joining the two in the record runs through the arc's point outward on
+            // the diagonal: the body's edge nearest that point ends at both, and the point is
+            // within that edge's tolerance of it
+            let joined = record
+                .edges
+                .iter()
+                .find(|e| {
+                    let [p, q] = e.vertices;
+                    [p, q] == [ends[0].0, ends[1].0] || [q, p] == [ends[0].0, ends[1].0]
+                })
+                .unwrap_or_else(|| panic!("t {t}: no edge joins the round's ends"));
             let h = 4.0 * FRAC_1_SQRT_2;
             let mid = Point3::new(sx * (a + h), sy * (c + h), 10.0 - t);
-            let k = Kernel::default();
-            let brep = b.lock();
-            let on = brep
+            let (arc, on) = brep
                 .edge_list()
                 .iter()
-                .filter_map(|&e| edge_closest_point(&k, &brep, e, mid).ok())
-                .map(|p| p.closest.distance)
-                .fold(f64::INFINITY, f64::min);
-            // within the largest edge tolerance of the body
-            let tol = record.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+                .filter_map(|&e| {
+                    let p = edge_closest_point(&k, &brep, e, mid).ok()?;
+                    Some((e, p.closest.distance))
+                })
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .unwrap();
+            for (_, v) in ends {
+                assert!(vertex_on_edge(&k, &brep, v, arc).unwrap(), "t {t}");
+            }
             assert!(
-                on <= tol,
-                "t {t}: no edge through {mid:?} ({on}, tolerance {tol})"
+                on <= joined.tolerance,
+                "t {t}: no edge through {mid:?} ({on}, tolerance {})",
+                joined.tolerance
             );
         }
     }
