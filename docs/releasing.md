@@ -313,6 +313,53 @@ When the token expires, create a new one the same way and run step 2 again. If a
 published while the secret was missing or expired, submit it afterwards with
 `gh workflow run winget.yml -R bherbruck/solidcraft -f tag=v<version>`.
 
+## Python packages
+
+`release.yml`'s `python` job turns each platform's released `solidcraft-cli` into a wheel of the
+Python client (`python/`, [python-api.md](python-api.md)) with `packaging/python/wheels.sh`. It
+repackages the binaries that the Linux, macOS and Windows jobs built and signed; it never rebuilds
+them. The wheels are:
+
+| Package | Wheel platform tag |
+|---|---|
+| `solidcraft-<version>-linux-<arch>.tar.gz` | `manylinux_2_<glibc>_x86_64`, `manylinux_2_<glibc>_aarch64` (the newest glibc symbol the binary needs) |
+| `solidcraft-cli-<version>-macos-universal.zip` | `macosx_11_0_universal2` |
+| `solidcraft-<version>-windows-<arch>-portable.zip` | `win_amd64`, `win32`, `win_arm64` |
+| none | `py3-none-any`, with no binary: it finds `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI` |
+
+The job installs the Linux x86_64 wheel into a clean environment and runs the client's tests
+against the binary inside it. It then uploads the wheels as `release-python`, so they are attached
+to the draft and listed in `SHA256SUMS.txt` like every other asset. Wheel versions follow PEP 440:
+`0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a nightly.
+
+Publishing the release runs `pypi.yml`, which uploads the release's wheels with PyPI trusted
+publishing, so no token is stored. A stable release goes to PyPI. A pre-release goes to TestPyPI
+only. Like `winget.yml`, a publication made with `GITHUB_TOKEN` (every nightly) doesn't trigger it;
+to upload one by hand, run `gh workflow run pypi.yml -R tangency-labs/solidcraft --ref v<version> -f tag=v<version>`
+(from the tag: the environments deploy from `v*` tags only, step 2).
+A release with no wheels uploads nothing. PyPI refuses to replace a file it already has, so a
+version is uploaded once.
+
+The workflow does nothing until the owner turns it on, once:
+
+1. Create the `solidcraft` project's trusted publisher on <https://pypi.org/manage/account/publishing/>
+   (a "pending publisher" before the first upload): owner `tangency-labs`, repository `solidcraft`,
+   workflow `pypi.yml`, environment `pypi`. Do the same on <https://test.pypi.org> with environment
+   `testpypi`.
+2. Create the repository environments `pypi` and `testpypi` (Settings > Environments), and under
+   each one's "Deployment branches and tags" choose "Selected branches and tags" with the tag rule
+   `v*` only. PyPI trusts the workflow file name and the environment, not the ref it ran from, and
+   `workflow_dispatch` runs from any ref: without the rule, anyone who can push a branch could
+   dispatch a changed `pypi.yml` from it and publish under the project's name. A release event runs
+   from its tag, so releases are unaffected. Requiring a reviewer on `pypi` adds a manual approval
+   before each upload.
+3. Set the repository variable: `gh variable set PYTHON_PUBLISH -R tangency-labs/solidcraft --body true`.
+
+A platform wheel holds the whole `solidcraft-cli`. PyPI's default limit is 100 MB per file, and the
+universal macOS binary may come close to it: the `python` job's log lists every wheel's size. If one
+is over the limit, ask PyPI for a larger limit for the project
+(<https://github.com/pypi/support>), and upload the wheels again with `pypi.yml` once it is granted.
+
 ## macOS signing and notarization
 
 `packaging/macos/package.sh` signs with the hardened runtime and notarizes when the release

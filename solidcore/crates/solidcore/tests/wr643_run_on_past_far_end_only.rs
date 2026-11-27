@@ -154,12 +154,12 @@ fn wr643_knife_edge_rounds_with_the_run_on_past_the_far_end_only() {
     }
 }
 
-/// The mirrored r 2 round: since the ball's regularity is judged on every kernel (WR-696,
-/// WR-685 addendum 2026-11-06), `BallIsRegular` refuses it as a fold ("touch circles move
-/// back", a radius below 1.6875 fits), a straight extruded edge whose sections are all the
-/// same; the other side and r 0.5 and 5 on this one build. Known failing, tangency-labs/solidcore#2963.
+/// The mirrored r 2 round, with the ball's regularity judged on every kernel (WR-696, WR-685
+/// addendum 2026-11-06): a straight extruded edge whose sections are all the same, so the ball
+/// cannot fold along it. `BallIsRegular` refused it as a fold ("touch circles move back", a
+/// radius below 1.6875 fits; tangency-labs/solidcore#2963, #13731); it builds, as the other
+/// side and r 0.5 and 5 on this one do.
 #[test]
-#[ignore = "BallIsRegular refuses it as a fold: tangency-labs/solidcore#2963"]
 fn wr643_mirrored_knife_edge_round_r2() {
     assert_knife_edge_round(2.0, -1.0);
 }

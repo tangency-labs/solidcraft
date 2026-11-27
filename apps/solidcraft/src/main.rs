@@ -350,6 +350,10 @@ impl eframe::App for App {
                     self.solve.open_chosen_file(&f);
                 }
             }
+            // Workshop links: from this launch's command line, another launch or macOS.
+            for link in single_instance::take_links() {
+                solidcraft_ui_egui::workshop::open_link(&mut self.solve, ctx, &link);
+            }
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -1266,6 +1270,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         })),
         open_path: Some(Box::new(open_with::open_with_default_app)),
         open_bytes: None,
+        workshop_get: Some(std::sync::Arc::new(workshop_get)),
     }
 }
 
@@ -1303,6 +1308,40 @@ fn http_download(url: &str, to: &std::path::Path, progress: &dyn Fn(u64, Option<
     }
     file.sync_all().map_err(|e| fail(format!("{}: {e}", to.display())))?;
     Ok(())
+}
+
+/// HTTPS GET for Workshop links (docs/workshop-links.md): workshop.solidcraft.io only, no
+/// redirects, certificates from the operating system, a 30 s limit, at most 32 MB, and the
+/// response's signature headers, which the index is checked against.
+fn workshop_get(url: &str) -> Result<solidcraft_ui_egui::workshop::Signed, String> {
+    use std::time::Duration;
+    let host = solidcraft_ui_egui::workshop::index::HOST;
+    if !url.strip_prefix("https://").and_then(|rest| rest.strip_prefix(host)).is_some_and(|path| path.starts_with('/')) {
+        return Err(format!("only {host} is asked"));
+    }
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .https_only(true)
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .user_agent("SolidCraft")
+        .max_redirects(0)
+        .build()
+        .into();
+    let mut response = agent.get(url).header("Accept", "application/json").call().map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    if status != 200 {
+        return Err(format!("the Workshop answered HTTP {status}"));
+    }
+    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let (signature, key_id) = (header("x-workshop-signature"), header("x-workshop-key-id"));
+    let body = response.body_mut().with_config().limit(32 << 20).read_to_vec().map_err(|e| e.to_string())?;
+    Ok(solidcraft_ui_egui::workshop::Signed { body, signature, key_id })
 }
 
 /// HTTP for the agent chat's API agents (OpenAI-compatible endpoints, docs/agent-chat.md): to the
@@ -1696,9 +1735,18 @@ fn main() -> eframe::Result {
     // `--read-only`: the files named open read-only (Save asks for a new file), here or in the
     // window they are handed to.
     let mut read_only = false;
-    let mut args = std::env::args().skip(1);
+    // `--open-url solidcraft://workshop/…`: a Workshop page's Open in SolidCraft link, which the
+    // system hands over (docs/workshop-links.md). Looked up and asked about in the window.
+    // The link is the one argument read then: whatever else the command line holds (text a
+    // crafted link may have split into more arguments) is ignored, never taken as options or files.
+    let open_url = startup::open_url_argument(std::env::args_os().skip(1));
+    let mut links: Vec<String> = open_url.clone().flatten().into_iter().collect();
+    let mut args: Box<dyn Iterator<Item = String>> =
+        if open_url.is_some() { Box::new(std::iter::empty()) } else { Box::new(std::env::args().skip(1)) };
     while let Some(a) = args.next() {
         match a.as_str() {
+            // A `file:` URL names a local file; one that doesn't (another host, a bad escape) is dropped.
+            s if s.starts_with("file://") => files.extend(startup::file_url_path(s).map(|p| p.to_string_lossy().into_owned())),
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
@@ -1727,7 +1775,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [--open-url solidcraft://workshop/...] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1737,21 +1785,30 @@ fn main() -> eframe::Result {
     // Files given while SolidCraft already runs open in that window, and this launch ends (#18055).
     // Not with a control port, the sample or safe mode, which want a window of their own; no answer
     // within a moment starts normally.
-    if !files.is_empty()
+    // Workshop links go the same way; a window from before them refuses, and this launch opens them.
+    if (!files.is_empty() || !links.is_empty())
         && !new_instance
         && !safe_mode
         && !sample
         && control_port.is_none()
         && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
     {
+        if !links.is_empty() && single_instance::forward_links(&endpoint, &links) {
+            links.clear();
+        }
         let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
         // A window from before `--read-only` refuses read-only files, and this launch opens them itself.
-        let handed =
-            if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
-        if handed {
+        let handed = files.is_empty()
+            || if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
+        if handed && links.is_empty() {
             return Ok(());
         }
+        if handed {
+            files.clear();
+        }
     }
+    // The window looks the links up once it is ready.
+    single_instance::hold_links(links);
     // The log on disk, which a problem report attaches the end of (`log_file`); the run
     // before's log is kept beside it. After the hand-off above: a launch that only passes its
     // files to the running window must not move that window's log aside.

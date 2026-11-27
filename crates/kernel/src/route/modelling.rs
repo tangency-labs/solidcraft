@@ -29,6 +29,10 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 }
 
 fn primitive(p: &Primitive) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::of_primitive(p), &[], |k, _| k.primitive(p).map(Some)) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the primitive is empty".into())));
+    }
     match which(OpKind::of_primitive(p)) {
         Which::Solidcore => Solidcore.primitive(p),
     }
@@ -61,6 +65,13 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
 /// everything or an intersection of disjoint bodies. The result carries its exact history
 /// ([`Body::history`]) over the operands `[a, b]` where the kernel reports it.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Boolean, &[a, b], |k, f| match f {
+        [fa, fb] => k.boolean(fa, fb, op),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a boolean takes two bodies".into())),
+    }) {
+        return made;
+    }
     match which(OpKind::Boolean) {
         Which::Solidcore => Solidcore.boolean(a, b, op),
     }
@@ -70,6 +81,13 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 /// faces around the edges is refused with [`crate::KernelError::TooLarge`] ([`crate::fillet_max`]
 /// finds the largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Fillet, &[body], |k, f| match f {
+        [fb] => k.fillet(fb, edges, radius, FilletTurn::Mitre).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a fillet takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the fillet is empty".into())));
+    }
     match which(OpKind::Fillet) {
         Which::Solidcore => Solidcore.fillet(body, edges, radius, FilletTurn::Mitre),
     }
