@@ -4371,7 +4371,14 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
         // No command puts a balloon there, and this design has no placed part: one saved by hand.
         let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
         let edge = solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
-        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
+        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon {
+            id,
+            view: flat,
+            edge,
+            at: [40.0, 40.0],
+            parts_list: None,
+            along: None,
+        })]);
         Ok(())
     })
     .unwrap();
