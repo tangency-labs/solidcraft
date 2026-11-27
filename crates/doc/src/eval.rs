@@ -18591,8 +18591,14 @@ fn eval_feature_kind(
                             // line cuts at the same place whatever `extend` says.
                             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
                             let sheet = sketch_curve_sheet(ss, &ids, &mb.body, *extend)?;
-                            let parts = kernel::split_body_by_sheet_where_it_cuts(&mb.body, &sheet, 0)?
-                                .ok_or_else(|| DocError::Invalid(format!("the sketch curves do not cut `{body}` through")))?;
+                            // A surface body is cut into its regions, each a surface body, as by a
+                            // whole surface body tool (#22525): a sheet has no sides to keep.
+                            let parts = if mb.is_surface() {
+                                kernel::split_sheet_where_it_cuts(&mb.body, &sheet)?
+                            } else {
+                                kernel::split_body_by_sheet_where_it_cuts(&mb.body, &sheet, 0)?
+                            }
+                            .ok_or_else(|| DocError::Invalid(format!("the sketch curves do not cut `{body}` through")))?;
                             parts
                                 .into_iter()
                                 .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
