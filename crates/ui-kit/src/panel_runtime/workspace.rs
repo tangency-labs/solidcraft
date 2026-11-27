@@ -1601,7 +1601,8 @@ impl WorkspacePanelHost {
             }
             // A desktop window's landing is outside the app; the desktop host shows it.
             if preview.window.is_none() {
-                ui_kit::panel_host_preview(ui, egui_rect(preview.bounds), true, None, opacity);
+                let switch = range_switch_label(runtime, preview);
+                ui_kit::panel_host_preview(ui, egui_rect(preview.bounds), true, switch.as_deref(), opacity);
             }
             if let Some(marker) = preview.tab_marker {
                 ui_kit::panel_host_tab_insertion(ui, egui_rect(marker), opacity);
@@ -2433,6 +2434,16 @@ fn pointer_instance(target: &HostPointerTarget) -> Option<&InstanceId> {
         | HostPointerTarget::Menu { instance } => Some(instance),
         _ => None,
     }
+}
+
+/// The label of the header action a Bottom resize preview amounts to, when it lands in another of
+/// the panel's height intervals (the 1D/2D timeline switch).
+fn range_switch_label(runtime: &PanelRuntime, preview: &HostPreview) -> Option<String> {
+    let Some(LayoutAction::Apply { mutations, .. }) = &preview.action else { return None };
+    let [Mutation::SetBottomHeight { section, height }] = mutations.as_slice() else { return None };
+    let service = runtime.layout();
+    let (instance, action) = bottom_range_action(service.layout(), service.registry(), section, *height).ok()??;
+    runtime.instance_presentation(&instance).ok()?.actions.into_iter().find(|binding| binding.id == action).map(|binding| binding.label)
 }
 
 fn chrome_label(

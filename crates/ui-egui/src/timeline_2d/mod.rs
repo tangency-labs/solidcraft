@@ -189,6 +189,43 @@ mod tests {
         h.frames(3);
     }
 
+    /// Holds the bottom History's top edge dragged by `dy` points (positive is down) without letting
+    /// go, and returns the preview's rectangle and the 1D/2D switch label painted on it, if any.
+    fn hold_top_edge(h: &mut Harness, dy: f32) -> (egui::Rect, Option<&'static str>) {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        let frame = h.app.universal_panel_frame().unwrap();
+        let section = frame.layout.sections.iter().find(|s| s.instance.0 == "history").unwrap().section.clone();
+        let edge = frame
+            .controls
+            .iter()
+            .find(|c| matches!(&c.target, HostControlTarget::Pointer(HostPointerTarget::Resize { section: s, .. }) if *s == section))
+            .unwrap();
+        let at = crate::panel_runtime::egui_rect(edge.bounds).center();
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frame_with(vec![button(at, true)]);
+        for step in 1..=8 {
+            h.frame_with(vec![egui::Event::PointerMoved(at + egui::vec2(0.0, dy * step as f32 / 8.0))]);
+        }
+        let preview = h.app.universal_panel_frame().and_then(|frame| frame.preview.clone()).expect("the drag shows a preview");
+        let label = ["Show 1D Timeline", "Show 2D Timeline"]
+            .into_iter()
+            .find(|label| h.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == *label)));
+        (crate::panel_runtime::egui_rect(preview.bounds), label)
+    }
+
+    /// Lets go of a held panel edge where the pointer is.
+    fn release_pointer(h: &mut Harness) {
+        let at = h.ctx.input(|input| input.pointer.latest_pos()).unwrap_or_default();
+        h.frame_with(vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }]);
+        h.frames(3);
+    }
+
     /// Clicks the host control for `target` and lets the frame settle.
     fn click_control(h: &mut Harness, target: &crate::panel_runtime::HostControlTarget) {
         let frame = h.app.universal_panel_frame().unwrap();
@@ -200,7 +237,9 @@ mod tests {
 
     /// The bottom History is the 2D Timeline once its row is tall: the preference raises it to the
     /// standard height, its top edge resizes it (skipping the gap below the 2D minimum, where it
-    /// snaps back to the one-row strip), and turning the preference off lowers it.
+    /// snaps back to the one-row strip), and turning the preference off lowers it. Across that gap
+    /// the row keeps the view it has until the drag is well past the middle (hysteresis), and while
+    /// a release would switch, the preview shows the switch's label.
     #[test]
     fn test_timeline_2d_is_the_history_panel_taller_and_resizes() {
         let mut h = Harness::new();
@@ -214,9 +253,36 @@ mod tests {
 
         drag_top_edge(&mut h, -60.0);
         assert_eq!(panel_rect(&h, "history").unwrap().height(), start.height() + 60.0);
-        drag_top_edge(&mut h, 300.0);
-        assert!(!crate::panel_runtime::timeline_tall(&h.app), "dragged into the gap it snaps to the strip");
+        let chrome = panel_rect(&h, "history").unwrap().height() - grid_height(&h);
+        let two_rows = canvas::MIN_DOCK_HEIGHT + chrome;
+        h.app.preferences.timeline_2d = false;
+        h.frames(4);
+        let strip = panel_rect(&h, "history").unwrap().height();
+        h.app.preferences.timeline_2d = true;
+        h.frames(4);
+        let gap = two_rows - strip;
+
+        // From 2D, a drag into the middle of the gap stops at two rows and stays 2D.
+        let tall = panel_rect(&h, "history").unwrap().height();
+        drag_top_edge(&mut h, tall - (strip + gap / 2.0));
+        assert!(crate::panel_runtime::timeline_tall(&h.app));
+        assert_eq!(grid_height(&h), canvas::MIN_DOCK_HEIGHT, "two rows at least");
+        // Near the strip the preview drops to it and names the switch; nothing switches before release.
+        let (shown, label) = hold_top_edge(&mut h, two_rows - (strip + gap * 0.1));
+        assert_eq!((shown.height(), label), (strip, Some("Show 1D Timeline")));
+        assert!(crate::panel_runtime::timeline_tall(&h.app));
+        release_pointer(&mut h);
+        assert!(!crate::panel_runtime::timeline_tall(&h.app), "released near the strip it switches to 1D");
         assert!(!h.app.preferences.timeline_2d, "the preference follows the row");
+
+        // From 1D, the same middle keeps the strip; near the 2D minimum it switches, labelled.
+        drag_top_edge(&mut h, -gap / 2.0);
+        assert!(!crate::panel_runtime::timeline_tall(&h.app), "the middle of the gap keeps the strip");
+        let (shown, label) = hold_top_edge(&mut h, -gap * 0.9);
+        assert_eq!((shown.height(), label), (two_rows, Some("Show 2D Timeline")));
+        release_pointer(&mut h);
+        assert!(crate::panel_runtime::timeline_tall(&h.app) && h.app.preferences.timeline_2d);
+        assert_eq!(grid_height(&h), canvas::MIN_DOCK_HEIGHT);
 
         h.app.preferences.timeline_2d = true;
         h.frames(4);
@@ -1241,10 +1307,10 @@ mod tests {
         h.call("ui.resize", json!({"width": 1400, "height": 900}));
         h.frames(2);
 
-        // 1. Verify minimum height leaves scrollbar clearance below the first row
-        let one_row_bottom = canvas::HEADER_TOTAL_HEIGHT + canvas::ROW_HEIGHT;
-        assert_eq!(canvas::MIN_DOCK_HEIGHT, one_row_bottom + canvas::SCROLLBAR_RESERVE_HEIGHT);
-        assert!(canvas::MIN_DOCK_HEIGHT >= one_row_bottom + 8.0);
+        // 1. Verify minimum height shows two rows and leaves scrollbar clearance below them
+        let two_rows_bottom = canvas::HEADER_TOTAL_HEIGHT + 2.0 * canvas::ROW_HEIGHT;
+        assert_eq!(canvas::MIN_DOCK_HEIGHT, two_rows_bottom + canvas::SCROLLBAR_RESERVE_HEIGHT);
+        assert!(canvas::MIN_DOCK_HEIGHT >= two_rows_bottom + 8.0);
 
         // Dragging the top edge all the way down stops at the minimum height
         drag_top_edge(&mut h, 120.0);
