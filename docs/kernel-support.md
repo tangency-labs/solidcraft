@@ -21,7 +21,7 @@ later.
 | Kernel | Adapter | Maintained by | Build feature | Operations | Naming gate | Accuracy gate |
 |---|---|---|---|---|---|---|
 | solidcore | `crates/kernel` (`Solidcore`) | SolidCraft | always on | all (`OpKind::ALL`) | the reference | the reference |
-| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude and revolve of sketch profiles (not tapered, not arcs joined first), boolean, fillet (constant radius, mitred turns) | fails: 168 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
+| Open CASCADE (OCCT) 8.0.1, experiment | `crates/kernel` (`backend/occt.rs`), over `vendor/occt-capi` | SolidCraft (experiment) | `backend-occt` | box, cylinder, sphere, torus, extrude and revolve of sketch profiles (not tapered, not arcs joined first), boolean, fillet (constant radius, mitred turns), equal chamfer, shell, thicken, offset faces, draft, loft (two sections, no rails), split of a body by a plane (one piece each side), trim of a sheet by a plane | fails: 179 of 185 corpus designs (solidcore 182) | fails: 2 of 30 cases looser (at most 2.2e-13), 0 wrong |
 
 The Open CASCADE row is an experiment that checks the interface fits a second kernel; no build we
 ship routes anything to it. OCCT is LGPL-2.1 with the Open CASCADE exception: it lives in
@@ -74,6 +74,18 @@ OCCT's result has solidcore's volume (and the closed form) to 1e-9, its area, fa
 counts and centroid, and passes the shared check. These results carry no history yet, so features
 that name their faces find them by geometry only; unequal chamfers, chamfers that carry a face on
 and closed hollows stay on solidcore.
+
+**Split and trim by a plane** (`splits_by_a_plane_match_solidcore_piece_by_piece` and
+`sheets_trimmed_by_a_plane_match_solidcore` in `backend/occt.rs`, and the matrix's split and trim
+rows): a cube cut across, the same plane turned over, a cube cut corner to corner and a cylinder
+halved along its axis give, piece by piece and in solidcore's order (the piece on the plane's
+back first), solidcore's volume (and the closed form) to 1e-9, its area, face and edge counts and
+centroid. Square sheets, one with a hole, trimmed by a plane keep solidcore's area, face and edge
+counts. Matrix: split 5 cases, OCCT 4 pass / 0 fail / 1 unsupported (a plane that misses the
+cube, solidcore's whole body), 0 looser; trim 2 cases, 2 pass, 1 looser below 1e-12 (area
+1.6e-14 against 0 on the sheet with a hole). A plane that misses or nicks the body, several pieces
+a side, splits and trims by faces or sketch curves, trims keeping picked regions and trims of
+solids stay on solidcore. Pieces and trims carry no history yet.
 
 **Naming corpus** (`cargo test --profile ci -p solidcraft-cli --test naming_corpus --features
 solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel, at 650f436b37): 182
