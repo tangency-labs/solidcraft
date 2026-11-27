@@ -324,6 +324,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
                     "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
                     "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "part_fills_crop": {"type": "boolean", "description": "true: the crop box is the part itself and no background search runs, for a crop that tightly frames it (default false)"},
                     "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
                     "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
                 }),
@@ -554,12 +555,13 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking, solidcraft-sheetmetal) from the copy built into SolidCraft. `file` defaults to reference.md; \
-             each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
+             solidcraft-editing, solidcraft-checking, solidcraft-reporting, solidcraft-sheetmetal) from the copy built into SolidCraft. \
+             `file` defaults to reference.md, or SKILL.md for skills without reference.md; each skill also has SKILL.md. \
+             Unknown skills or files are refused with the available ones.",
             object(
                 json!({
                     "skill": string("Skill name, such as solidcraft-modeling"),
-                    "file": {"type": "string", "description": "Document of that skill", "default": "reference.md"},
+                    "file": {"type": "string", "description": "Document of that skill (defaults to reference.md, or SKILL.md when the skill has none)", "default": "reference.md"},
                 }),
                 &["skill"],
             ),
@@ -1430,9 +1432,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
-        "compare_picture" => {
-            mapped("inspect.compare_picture", pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]))
-        }
+        "compare_picture" => mapped(
+            "inspect.compare_picture",
+            pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]),
+        ),
         "inspect_design" => {
             let keys: &[&str] = if a.get("bodies").is_some_and(Value::is_array) { &["timeline"] } else { &["timeline", "bodies"] };
             mapped("document.inspect", inspect_params(a, a.get("measure").and_then(Value::as_bool).unwrap_or(true), keys))
@@ -2647,7 +2650,7 @@ fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -
     let n = SHOT.fetch_add(1, Ordering::Relaxed);
     let dir = crate::scratch_dir().unwrap_or_else(vfs::temp_dir);
     let path = dir.join(format!("compare-{n}.png")).to_string_lossy().to_string();
-    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]);
     params["overlay"] = json!(path);
     let ran = exec(b, "inspect.compare_picture", params);
     let png = vfs::read(&path, MAX_IMAGE_BYTES);

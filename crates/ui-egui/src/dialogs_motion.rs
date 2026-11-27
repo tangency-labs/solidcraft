@@ -435,7 +435,7 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
             )
         });
         match made {
-            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), false),
+            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&path))]), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
