@@ -40,12 +40,12 @@
 //! parts of different length (brett19's point 1 on #22033 review 5). A weld whose end follows the
 //! plate's end comes later. A J or U face reads its arc from an end square to the joint: one whose
 //! ends are both cut at an angle gives no section. A right outer face turned 45° or more from the
-//! left one (a corner joint) is refused ([`GrooveRefusal::OuterFaceWrongSide`]); corner joints
-//! come in the next PR.
+//! left one (a corner joint), or too near 45° to tell, is refused
+//! ([`GrooveRefusal::OuterFaceWrongSide`]); corner joints come in the next PR.
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
-use solidcraft_kernel::services::measure::{Adjacency, Straight, straight_direction};
+use solidcraft_kernel::services::measure::{Adjacency, FaceRun, Normal, Straight, straight_direction};
 use solidcraft_kernel::services::prism::{
     ChannelFill, FillFailure, FillNote, FillOptions, FillSide, PlanarPiece, extrude_planar_regions, fill_channel, planar_edges,
 };
@@ -82,10 +82,14 @@ pub enum GrooveRefusal {
     /// A part's outer face `face` is not a plane.
     #[error("the {part:?} part's outer face {face} is not a plane")]
     OuterFaceNotPlane { part: JointPart, face: usize },
-    /// The right part's outer face `face` is not on the arrow side the left one's sets: it does not
-    /// face within 45° of the left outer face's side, or does not run from its toe within 45° of
-    /// straight away from the left part (a face turned back over the groove, or a corner joint's).
-    #[error("the {part:?} part's outer face {face} is not on the arrow side of the joint")]
+    /// The right part's outer face `face` is not clearly a butt joint's on the arrow side the left
+    /// one sets: it does not face within 45° of the left outer face's side, or does not run from
+    /// its toe within 45° of straight away from the left part, by more than [`same_side`]'s margin.
+    /// That is a corner joint's face (turned 45° or more, not built yet), one too near 45° to tell,
+    /// or a face turned back over the groove (brett19's point A on #22033 review 6).
+    #[error(
+        "the {part:?} part's outer face {face} is not clearly within 45° of the left outer face: a corner joint, not built yet, or a face turned back over the groove"
+    )]
     OuterFaceWrongSide { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) strays across the joint's direction
     /// by more than the zone tolerance ([`Body::face_straying`]): it does not run straight along
@@ -95,6 +99,11 @@ pub enum GrooveRefusal {
     /// also names a groove face with no length along the joint.
     #[error("face {face} of the {part:?} part is not straight along the joint")]
     GrooveFaceNotStraight { part: JointPart, face: usize },
+    /// Groove face `face` of a part is never whole across the joint: its runs along the joint
+    /// ([`face_read`]) overlap by no more than the zone tolerance (a plate whose ends lean past
+    /// each other), so no stretch has its whole section (brett19's point D on #22033 review 6).
+    #[error("face {face} of the {part:?} part has its whole section nowhere along the joint: its ends lean past each other")]
+    GrooveFaceNeverWhole { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) is a surface whose straightness
     /// along the joint ops cannot prove (no bound from [`Body::face_straying`]): it may be
     /// straight, but it is not taken unproved.
@@ -251,9 +260,10 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
 /// outer face from its toe edge ([`Body::edge_inward`], read from the face's loop, so an outer face
 /// that is not convex is read as a convex one is). Swapping the parts reverses `d`. The origin is
 /// the middle of the left toe's first edge. The right outer face must lie on the same side: facing
-/// within 45° of `y`, and running from its toe within 45° of `x`, away from the left part. The 45°
-/// keeps a face square to the left one (a corner joint, not covered) off the line the rounding
-/// decides (brett19's point 3 on #22033 review 5).
+/// within 45° of `y`, and running from its toe within 45° of `x`, away from the left part, each by
+/// more than a margin ([`same_side`]). The 45° keeps a face square to the left one (a corner joint,
+/// not covered) off the line the rounding decides (brett19's point 3 on #22033 review 5), and the
+/// margin keeps a face at 45° off it (his point A on review 6).
 ///
 /// # Errors
 /// The errors of [`chain`] for either pick; [`GrooveRefusal::OuterFaceNotPlane`];
@@ -275,20 +285,43 @@ pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
     let (Some(&toe), Some(&right_toe)) = (chains[0].toe.first(), chains[1].toe.first()) else {
         return Err(GrooveRefusal::Invalid("a chain with no toe edge"));
     };
-    let (frame, _) = signed_frame(left, toe, d, outer[0])?;
-    same_side(right, right_toe, &frame, outer[1])?;
+    let (frame, _) = signed_frame(left, toe, d, outer[0].value)?;
+    let margin = side_margin(picks, &outer, sweep::zone_tolerance()?)?;
+    same_side(right, right_toe, &frame, outer[1].value, margin)?;
     Ok(frame)
 }
 
-/// The outward normal of `pick`'s outer face.
+/// The outward normal of `pick`'s outer face, with its proved bound.
 ///
 /// # Errors
 /// [`GrooveRefusal::OuterFaceNotPlane`] for an outer face that is not a plane.
-fn outer_normal(pick: &GroovePick<'_>, part: JointPart) -> Result<[f64; 3]> {
+fn outer_normal(pick: &GroovePick<'_>, part: JointPart) -> Result<Normal> {
     match pick.part.face_plane_normal(pick.order, pick.outer)? {
-        Some(n) => Ok(n.value),
+        Some(n) => Ok(n),
         None => Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer }),
     }
+}
+
+/// How far either side of 45° [`same_side`] refuses rather than decides (brett19's point A on
+/// #22033 review 6): the two outer normals' proved bounds ([`Body::face_plane_normal`]), the
+/// product of the two outer faces' band half widths for the zone tolerance `zone`
+/// ([`Body::face_run`]: the joint's direction may lean inside them, which moves `y · outer` by up
+/// to that product), and a few ulps for the comparisons' own rounding. shortcut: the direction into
+/// the right outer face from its toe is rounded, not certified ([`Body::edge_inward`]); a proved
+/// bound for it if a face this near 45° comes up.
+///
+/// # Errors
+/// [`GrooveRefusal::OuterFaceNotPlane`] for an outer face ops gives no plane's band; the errors of
+/// the ops calls.
+fn side_margin(picks: [&GroovePick<'_>; 2], outer: &[Normal; 2], zone: f64) -> Result<f64> {
+    let mut slopes = [0.0; 2];
+    for ((pick, part), slope) in picks.into_iter().zip([JointPart::Left, JointPart::Right]).zip(&mut slopes) {
+        match pick.part.face_run(pick.order, pick.outer, zone)? {
+            FaceRun::Plane { slope: s, .. } => *slope = s,
+            _ => return Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer }),
+        }
+    }
+    Ok(outer[0].bound + outer[1].bound + slopes[0] * slopes[1] + 8.0 * f64::EPSILON)
 }
 
 /// Whether face `f` runs straight along `d` within the zone tolerance ([`Body::face_straying`]).
@@ -340,17 +373,18 @@ fn signed_frame(left: &GroovePick<'_>, toe: usize, d: [f64; 3], outer: [f64; 3])
 
 /// Whether the right part's outer face, of outward normal `outer`, lies on the arrow side the
 /// left one sets in `frame`: facing nearer its `y` than across the joint, and running from the toe
-/// edge `toe` nearer its `x` than its `y`, away from the left part ([`Body::edge_inward`]). Each
-/// is a comparison of two components of one unit vector, so a face square to the left one has a
-/// component near 1 against one near 0 and is refused whatever the rounding.
+/// edge `toe` nearer its `x` than its `y`, away from the left part ([`Body::edge_inward`]), each
+/// by more than `margin` ([`side_margin`]). Each is a comparison of two components of one unit
+/// vector, so a face square to the left one has a component near 1 against one near 0, and one at
+/// 45° two equal components, and both are refused whatever the rounding.
 ///
 /// # Errors
 /// [`GrooveRefusal::OuterFaceWrongSide`]; the errors of the ops calls.
-fn same_side(right: &GroovePick<'_>, toe: usize, frame: &Plane, outer: [f64; 3]) -> Result<()> {
+fn same_side(right: &GroovePick<'_>, toe: usize, frame: &Plane, outer: [f64; 3], margin: f64) -> Result<()> {
     let inward = right.part.edge_inward(right.order, toe, right.outer)?;
     let along = |axis: Vec3, v: [f64; 3]| affine::distance_along([0.0; 3], point(axis), v);
-    let faces_up = along(frame.y, outer) > along(frame.x, outer).abs();
-    let runs_away = along(frame.x, inward) > along(frame.y, inward).abs();
+    let faces_up = along(frame.y, outer) > along(frame.x, outer).abs() + margin;
+    let runs_away = along(frame.x, inward) > along(frame.y, inward).abs() + margin;
     if faces_up && runs_away { Ok(()) } else { Err(GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: right.outer }) }
 }
 
@@ -405,7 +439,7 @@ pub struct Stretch {
 /// [`GrooveRefusal::OuterFaceWrongSide`];
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
-/// [`GrooveRefusal::GrooveFaceNotProved`];
+/// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceNotProved`];
 /// [`GrooveRefusal::Fill`] with the size that builds. The errors of the ops calls otherwise, a
 /// fill's input the kernel refuses among them.
 pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result<GrooveWeld> {
@@ -469,12 +503,12 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     let Some(toe) = toe_edge(left, &faces[0])? else {
         return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: left.outer });
     };
-    let (frame, d) = signed_frame(left, toe, d, outer[0])?;
+    let (frame, d) = signed_frame(left, toe, d, outer[0].value)?;
     let right = picks[1];
     let Some(right_toe) = toe_edge(right, &faces[1])? else {
         return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Right, face: right.outer });
     };
-    same_side(right, right_toe, &frame, outer[1])?;
+    same_side(right, right_toe, &frame, outer[1].value, side_margin(picks, &outer, zone)?)?;
 
     // each groove face's span along the joint and its section, read from its own edges
     let mut reads: [Vec<FaceRead>; 2] = [Vec::new(), Vec::new()];
@@ -483,7 +517,8 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
         for &face in f {
             match face_read(pick, &topology, face, &frame, d, zone)? {
                 Some(r) if r.span[1] - r.span[0] > zone => read.push(r),
-                _ => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
+                Some(_) => return Err(GrooveRefusal::GrooveFaceNeverWhole { part, face }),
+                None => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
             }
         }
     }
@@ -645,9 +680,9 @@ fn face_name(side: FillSide) -> &'static str {
 /// One fill note in weld words. A concave face below a plate's surface by more than the zone
 /// tolerance `zone` (within it, a rounding of the surface's level) is a warning: it dips all along
 /// the weld, so it is an incompletely filled groove (ISO 6520-1 no. 511) as a long imperfection,
-/// which ISO 5817:2023 Table 1 permits at no quality level: levels C and D allow it only as short
-/// imperfections (at most 25 mm in any 100 mm of weld, or a quarter of a weld shorter than that),
-/// level B not at all (brett19's point 2 on #22033 review 5; checked against the standard on 17 Nov).
+/// which ISO 5817:2023 permits at no quality level: Table 1, no. 1.14 allows it only as short
+/// imperfections (subclauses 3.2 and 3.3: at most 25 mm in any 100 mm of weld, or a quarter of a
+/// weld shorter than that), at every level for plates over 3 mm and at D and C only for 0.5 to 3 mm.
 fn weld_note(note: &FillNote, zone: f64) -> WeldNote {
     let (text, warning) = match *note {
         FillNote::DeeperThanChannel { asked, channel } => {
@@ -663,7 +698,7 @@ fn weld_note(note: &FillNote, zone: f64) -> WeldNote {
             format!(
                 "the concave {} dips {depth:.2} mm below the chord, {left:.2} mm below the left plate's surface and {right:.2} mm \
                  below the right one's, all along the weld: an incompletely filled groove (ISO 6520-1 no. 511) that ISO 5817 \
-                 permits at no quality level (C and D allow it only as short imperfections, B not at all)",
+                 permits at no quality level (Table 1, no. 1.14 allows it only as short imperfections)",
                 face_name(side)
             ),
             true,
@@ -711,9 +746,11 @@ fn fill_text(why: &FillFailure, fit: Option<f64>) -> String {
 /// of the line where they meet, θ the angle between them, or zone / cos(θ/2) past 90°: under 3.9
 /// zones for faces that meet at 30° to 150° (a 60° V's bevel meets its root face at 30°). Two
 /// reads of the point are then under 7.8 zones apart, 8 with their rounding. shortcut: faces that
-/// meet at under 30° or over 150° (a groove face nearly in line with its neighbour) may read
-/// further apart and are refused as a section that changes; a bound from their angle if such a
-/// groove comes up.
+/// meet at under 30° or over 150° (a groove face nearly in line with its neighbour), or that meet
+/// tangentially (a round groove's wall at its root, a J's arc at its bevel), may read further
+/// apart and are refused as a section that changes; a bound from their angle or the edges' own
+/// tolerance if such a groove is refused. The round groove's build test (brett19's point C on
+/// #22033 review 6) shows a swept groove's tangent reads within it: its vertices are exact.
 const ALLOWANCE: f64 = 8.0;
 
 /// A groove face read across the joint ([`face_read`]).
