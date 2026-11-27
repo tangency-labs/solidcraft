@@ -1042,12 +1042,15 @@ pub struct RailedToPoint {
 /// the apex is a last section whose curves are the base's with every control point on it, each
 /// rail guiding there the point it guided at the base. Each column of rows is skinned on its own
 /// through the rows' parameters, as a loft to a point through them makes its walls, and each
-/// rail is certified against those walls. `opts.cap` and `opts.degree` are not used.
+/// rail is certified against those walls. `opts.cap` and `opts.degree` are not used. It takes
+/// three to sixteen rails: the warp's stations stay off the apex, where one or two rails' maps
+/// need a station's middle.
 ///
 /// # Errors
 ///
-/// `InvalidInput` for an apex not finite or within the body tolerance of the base's plane, a
-/// rail not ending on the apex, and those of [`loft_rails`].
+/// `InvalidInput` for fewer than three rails or more than sixteen, an apex not finite or within
+/// the body tolerance of the base's plane, a rail not ending on the apex, and those of
+/// [`loft_rails`].
 pub fn loft_rails_to_point(
     k: &mut Kernel,
     base: &RailSection<'_>,
@@ -1057,6 +1060,11 @@ pub fn loft_rails_to_point(
 ) -> Result<RailedToPoint> {
     if !(apex.x.is_finite() && apex.y.is_finite() && apex.z.is_finite()) {
         return Err(invalid("the apex of a loft to a point is not finite"));
+    }
+    if !(3..=MAX_RAILS).contains(&rails.len()) {
+        return Err(invalid(
+            "a railed loft to a point takes 3 to 16 guide rails",
+        ));
     }
     let normal = base
         .normal

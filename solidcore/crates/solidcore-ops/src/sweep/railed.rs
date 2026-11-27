@@ -147,7 +147,7 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
     })
 }
 
-/// The loft from `section` (closed, capped) to the point `apex` guided by one to sixteen
+/// The loft from `section` (closed, capped) to the point `apex` guided by three to sixteen
 /// `rails`, each from the section to the apex ([`solidcore::sweep::loft_rails::loft_rails_to_point`]):
 /// the section capped, one wall per curve meeting at the apex, each guided edge certified within
 /// `how.tolerance` of its rail. `how.cap` is not used.
@@ -162,7 +162,7 @@ pub fn loft_rails_to_point(
     rails: &[Curve],
     how: &RailLoft,
 ) -> Result<Body> {
-    if !(1..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
+    if !(3..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
         || !super::coord_ok(&apex)
     {
         return Err(Error::Argument);

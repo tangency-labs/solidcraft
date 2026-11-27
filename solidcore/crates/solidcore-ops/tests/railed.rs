@@ -160,7 +160,26 @@ fn a_rail_missing_the_apex_is_refused() {
         &rails,
         &RailLoft::new(1e-6),
     );
-    assert!(made.is_err(), "{made:?}");
+    assert!(
+        matches!(&made, Err(Error::Refused { reason, .. }) if reason.contains("does not end on the apex")),
+        "{made:?}"
+    );
+}
+
+/// One or two rails to an apex are the kernel's own construction, not this one: refused.
+#[test]
+fn two_rails_to_an_apex_are_refused() {
+    let rails: Vec<Curve> = [[1.0, -1.0], [-1.0, 1.0]]
+        .iter()
+        .map(|c| line([c[0], c[1], 0.0], [0.0, 0.0, 10.0]))
+        .collect();
+    let made = loft_rails_to_point(
+        &section(1.0, 0.0),
+        [0.0, 0.0, 10.0],
+        &rails,
+        &RailLoft::new(1e-6),
+    );
+    assert!(matches!(made, Err(Error::Argument)), "{made:?}");
 }
 
 /// The kernel's refusal past the wires reaches ops as its own error, naming the bound.
