@@ -45,10 +45,12 @@
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use solidcore_ops::measure::FaceHit;
-use solidcore_ops::sweep::{self, Curve};
-use solidcore_ops::{Body, Order, affine, curve, make_sphere};
 use solidcore_record::brep::Curve as RecordCurve;
+use solidcraft_kernel::affine;
+use solidcraft_kernel::curves as curve;
+use solidcraft_kernel::services::measure::FaceHit;
+use solidcraft_kernel::services::sweep::{self, Curve};
+use solidcraft_kernel::services::{ExactBody as Body, Order, make_sphere};
 
 /// Why a spot is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -94,7 +96,13 @@ pub enum SpotRefusal {
     EdgeNotMeasured { sheet: usize, face: usize },
     /// An ops call failed.
     #[error(transparent)]
-    Ops(#[from] solidcore_ops::Error),
+    Ops(#[from] solidcraft_kernel::services::Error),
+    /// A placement call refused its numbers, in the kernel's words.
+    #[error(transparent)]
+    Placement(#[from] affine::AffineRefused),
+    /// A curve call refused, in the kernel's words.
+    #[error(transparent)]
+    Curve(#[from] curve::CurveRefused),
 }
 
 type Result<T> = std::result::Result<T, SpotRefusal>;
@@ -123,6 +131,10 @@ pub enum MarkFaces {
     /// sheet's thickness), so the spot shows on both faces whatever the sheets; on both faces when
     /// the style has no ball.
     WhereBallHidden,
+    /// Only on the last sheet's outer face (along `normal`).
+    Upper,
+    /// Only on the first sheet's outer face (against `normal`).
+    Lower,
 }
 
 /// The marks of a [`SpotStyle`]: three zones on an outer face, a core out to diameter `core`, a
@@ -266,13 +278,13 @@ pub fn proposed_spot_diameter(thicknesses: &[f64]) -> Result<f64> {
     Ok(5.0 * thicknesses.iter().fold(f64::INFINITY, |m, &t| m.min(t)).sqrt())
 }
 
-fn positive(v: f64) -> bool {
+pub(crate) fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.0
 }
 
 /// The first and the last sheet's thickness; refuses fewer than two sheets, or a thickness that is
 /// not finite and positive.
-fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
+pub(crate) fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
     let [first, .., last] = *thicknesses else {
         return bad("fewer than two sheets");
     };
@@ -394,6 +406,8 @@ impl Layout {
                 None => [false, false],
                 Some(MarkFaces::Both) => [true, true],
                 Some(MarkFaces::WhereBallHidden) => [!shows(last), !shows(first)],
+                Some(MarkFaces::Upper) => [true, false],
+                Some(MarkFaces::Lower) => [false, true],
             },
             ball,
             pin,
@@ -607,7 +621,7 @@ pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: 
     if !positive(diameter) {
         return bad("a spot diameter that is not finite and positive");
     }
-    let copies = sheets.iter().map(|(b, o)| b.copy_with_order(o)).collect::<solidcore_ops::Result<Vec<_>>>()?;
+    let copies = sheets.iter().map(|(b, o)| b.copy_with_order(o)).collect::<solidcraft_kernel::services::Result<Vec<_>>>()?;
     let Some((body, order)) = copies.get(picked) else {
         return bad("a picked sheet not in the list");
     };

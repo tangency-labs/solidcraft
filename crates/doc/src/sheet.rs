@@ -12,8 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb2, Ring};
 
 use crate::expr::{self, Kind, Value};
 use crate::{DocError, Document, Result};
@@ -38,6 +38,11 @@ pub const TAB_OVERLAPS: &str = "the tab would overlap another panel of the sheet
 pub const TAB_SEVERAL: &str = "not supported yet: a tab that would join more than one panel; draw it out from an edge of one panel only";
 /// A tab lies inside the face already.
 pub const TAB_ADDS_NOTHING: &str = "the tab adds no material: it lies inside the face already; draw it out past an edge of the face";
+/// A tab fills where a cut took a bend away, out past where the bend's other side began.
+pub const TAB_PAST_BEND: &str = "not supported yet: a tab that fills where a cut took a bend away must end before the far side of that bend; past it, the tab would run into the next panel in the flat pattern";
+/// Part of what a tab fills where a cut took material away would still be cut away.
+pub const TAB_CUT_AWAY: &str =
+    "not supported yet: part of the tab would still be cut away in the flat pattern, by another cut or a relief; keep the tab clear of them";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
@@ -77,6 +82,13 @@ pub struct SheetRule {
     /// end is cut straight from that corner to where its flange's end starts).
     #[serde(default = "rule_corner_relief_shape")]
     pub corner_relief_shape: String,
+    /// What is cut beside a bend's end where its panel runs on past it: `rectangular` (a slot
+    /// `relief_width` wide, from `relief_depth` inside the panel's tangent line out), `obround`
+    /// (that slot with a half round inner end) or `tear` (no material: the panel is torn from the
+    /// bend along the bend's end). A choice, not an expression; saved only when it isn't
+    /// `rectangular`.
+    #[serde(default = "rule_bend_relief_shape", skip_serializing_if = "is_rectangular_bend_relief")]
+    pub bend_relief_shape: String,
     /// The space between a flat hem's leg and the face it folds over (its bend's inner radius is
     /// half of it).
     #[serde(default = "rule_hem_gap")]
@@ -155,6 +167,14 @@ fn rule_corner_relief() -> String {
 fn rule_corner_relief_shape() -> String {
     ReliefShape::Notch.name().into()
 }
+fn rule_bend_relief_shape() -> String {
+    BendReliefShape::Rectangular.name().into()
+}
+/// A rule with the rectangular bend relief leaves the setting out of the design, which then
+/// saves as it did before the setting existed.
+fn is_rectangular_bend_relief(s: &str) -> bool {
+    BendReliefShape::parse(s) == Some(BendReliefShape::Rectangular)
+}
 /// Why a bend radius of 0 is refused wherever it is given (a rule, a fold, a flange): every bend
 /// keeps an inside radius. At 0 the inside fiber would close to nothing (all of its length
 /// compressed away), no press brake or forming tool makes that, and the part could not be built
@@ -186,6 +206,7 @@ impl SheetRule {
             relief_depth: rule_relief_depth(),
             corner_relief: rule_corner_relief(),
             corner_relief_shape: rule_corner_relief_shape(),
+            bend_relief_shape: rule_bend_relief_shape(),
             hem_gap: rule_hem_gap(),
             gap: rule_gap(),
             angle_display: rule_angle_display(),
@@ -254,6 +275,47 @@ impl ReliefShape {
     }
 }
 
+/// The shape of the bend relief cut beside a bend's end where its panel runs on past it (a
+/// rule's `bend_relief_shape`, or an edge flange's own).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BendReliefShape {
+    /// A slot `relief_width` wide from `relief_depth` inside the panel's tangent line out past
+    /// the flange.
+    #[default]
+    Rectangular,
+    /// The same slot, its inner end a half round `relief_width` across: no sharp inside corner
+    /// for a laser or a crack to start from.
+    Obround,
+    /// No material removed: the panel is torn from the bend along the bend's end as it folds.
+    Tear,
+}
+
+impl BendReliefShape {
+    pub const ALL: [BendReliefShape; 3] = [BendReliefShape::Rectangular, BendReliefShape::Obround, BendReliefShape::Tear];
+
+    pub fn parse(s: &str) -> Option<BendReliefShape> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "rectangular" => Some(BendReliefShape::Rectangular),
+            "obround" => Some(BendReliefShape::Obround),
+            "tear" => Some(BendReliefShape::Tear),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BendReliefShape::Rectangular => "rectangular",
+            BendReliefShape::Obround => "obround",
+            BendReliefShape::Tear => "tear",
+        }
+    }
+
+    pub fn is_rectangular(&self) -> bool {
+        *self == BendReliefShape::Rectangular
+    }
+}
+
 /// How a rule's bend angles read in the DXF bend notes (a rule's `angle_display`). The bend
 /// table gives both angles, and a flange's `angle` is always the bend angle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,6 +368,7 @@ pub struct RuleValues {
     pub relief_depth: f64,
     pub corner_relief: f64,
     pub corner_relief_shape: ReliefShape,
+    pub bend_relief_shape: BendReliefShape,
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: AngleDisplay,
@@ -358,6 +421,8 @@ impl Document {
             corner_relief_shape: ReliefShape::parse(&r.corner_relief_shape).ok_or_else(|| {
                 DocError::Invalid(format!("unknown corner relief shape `{}` (notch, round, rectangular or tear)", r.corner_relief_shape))
             })?,
+            bend_relief_shape: BendReliefShape::parse(&r.bend_relief_shape)
+                .ok_or_else(|| DocError::Invalid(format!("unknown bend relief shape `{}` (rectangular, obround or tear)", r.bend_relief_shape)))?,
             hem_gap: with_t(&r.hem_gap, Kind::Length)?,
             gap: with_t(&r.gap, Kind::Length)?,
             angle_display: AngleDisplay::parse(&r.angle_display)
@@ -495,6 +560,26 @@ pub struct SheetPerforation {
     pub outline: Option<Vec<Region2>>,
 }
 
+/// The mounting hole of press-in hardware (a self-clinching nut, stud or standoff) in the flat
+/// (#17752): the hardware the hole is for, and the hole's circle, in the flat's own coordinates as
+/// the sheet keeps them (`SurfaceSheet::shown` reads them as the flat pattern is read).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetHardware {
+    /// The hole feature that cut it (or the pattern or mirror that copied it).
+    pub feature: u64,
+    pub kind: crate::hardware_catalog::HardwareKind,
+    /// The thread as written (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length (mm); none for a nut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The id of the part that stands for it (`nut.m3`).
+    pub part: String,
+    pub center: Vec2,
+    /// The hole's radius (mm).
+    pub radius: f64,
+}
+
 /// A pocket in the flat: `region` recessed from `z0` to `z1` through the thickness, z 0 the
 /// bottom and z t the top. A sheet made from surfaces is an oriented surface: the input surfaces
 /// with their outward normals, continuous across every bend. Its top is the normal side,
@@ -624,6 +709,28 @@ pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
         .collect()
 }
 
+/// A [`Region2`] pre-tessellated at `1e-3` mm with per-loop bounding boxes (inflated by `1e-9`)
+/// for fast repeated point-in-region queries identical to [`Region2Geom::contains`].
+pub(crate) struct PolyRegion {
+    outer: (Aabb2, Ring<Vec2>),
+    holes: Vec<(Aabb2, Ring<Vec2>)>,
+}
+
+impl PolyRegion {
+    pub(crate) fn from_region(r: &Region2) -> Self {
+        let loop_ring = |l: &Loop2| {
+            let ring = l.polyline(1e-3);
+            let bounds = ring.iter().copied().collect::<Aabb2>().inflated(1e-9);
+            (bounds, ring)
+        };
+        Self { outer: loop_ring(&r.outer), holes: r.holes.iter().map(loop_ring).collect() }
+    }
+
+    pub(crate) fn contains(&self, p: Vec2) -> bool {
+        self.outer.0.contains(p) && self.outer.1.contains(p) && !self.holes.iter().any(|(b, h)| b.contains(p) && h.contains(p))
+    }
+}
+
 /// Hole centers of a perforation field (#732) on a flat `regions`: a staggered (60°, odd rows
 /// shifted half a pitch) or square grid from the flat's lower-left corner plus margin + radius; a
 /// hole is kept where it is at least margin clear of the material's edges and cut-outs, and of
@@ -634,35 +741,57 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
     let zones = avoid;
     let clear = p.diameter / 2.0 + p.margin;
     let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
-    let mut add = |l: &Loop2| {
-        let pts = l.polyline(1e-3);
+    fn push_ring(segs: &mut Vec<(Vec2, Vec2)>, pts: &Ring<Vec2>) {
         for (&a, &b) in pts.edges() {
             segs.push((a, b));
         }
-    };
-    for r in regions {
-        add(&r.outer);
-        r.holes.iter().for_each(&mut add);
     }
-    zones.iter().for_each(|z| add(&z.outer));
+    let poly_regions: Vec<PolyRegion> = regions
+        .iter()
+        .map(|r| {
+            let pr = PolyRegion::from_region(r);
+            push_ring(&mut segs, &pr.outer.1);
+            for (_, h) in &pr.holes {
+                push_ring(&mut segs, h);
+            }
+            pr
+        })
+        .collect();
+    let poly_zones: Vec<PolyRegion> = zones
+        .iter()
+        .map(|z| {
+            let pz = PolyRegion::from_region(z);
+            push_ring(&mut segs, &pz.outer.1);
+            pz
+        })
+        .collect();
     let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
     if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
         return Vec::new();
     }
     // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
     let mut field = Aabb2 { min: lo, max: hi };
-    if let Some(outline) = &p.outline {
+    let poly_outline: Option<Vec<PolyRegion>> = if let Some(outline) = &p.outline {
         let n = segs.len();
-        for r in outline {
-            for l in std::iter::once(&r.outer).chain(&r.holes) {
-                segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
-            }
-        }
+        let out_polys: Vec<PolyRegion> = outline
+            .iter()
+            .map(|r| {
+                let pr = PolyRegion::from_region(r);
+                push_ring(&mut segs, &pr.outer.1);
+                for (_, h) in &pr.holes {
+                    push_ring(&mut segs, h);
+                }
+                pr
+            })
+            .collect();
         field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
         if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
             return Vec::new();
         }
-    }
+        Some(out_polys)
+    } else {
+        None
+    };
     // Segments bucketed in a grid, so each hole only checks the edges near it.
     let cell = (2.0 * clear).max(p.pitch).max(1.0);
     let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
@@ -703,9 +832,9 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
             let c = Vec2::new(x, y);
             let (i, j) = idx(x, y);
             let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
-            if regions.iter().any(|r| r.contains(c))
-                && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
-                && !zones.iter().any(|z| z.contains(c))
+            if poly_regions.iter().any(|r| r.contains(c))
+                && poly_outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                && !poly_zones.iter().any(|z| z.contains(c))
                 && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
             {
                 out.push(c);
@@ -763,6 +892,27 @@ mod tests {
         for name in ["", "sheet", "sheet:Body1", "sheet:Body1:top", "sheet::base:top", "sheet:Body1::top", "sheet:Body1:base:", "Body1:base:top"] {
             assert_eq!(split_sheet_face_name(name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn a_rule_reads_its_bend_relief_shape_and_saves_it_only_when_it_is_not_rectangular() {
+        let doc = Document::default();
+        let (vals, _) = doc.param_values();
+        let steel = SheetRule::steel();
+        assert_eq!(doc.rule_values(&vals, &steel).unwrap().bend_relief_shape, BendReliefShape::Rectangular);
+        assert!(serde_json::to_value(&steel).unwrap().get("bend_relief_shape").is_none());
+        for (text, shape) in [(" Obround ", BendReliefShape::Obround), ("TEAR", BendReliefShape::Tear), ("rectangular", BendReliefShape::Rectangular)]
+        {
+            let rule = SheetRule { bend_relief_shape: text.into(), ..steel.clone() };
+            assert_eq!(doc.rule_values(&vals, &rule).unwrap().bend_relief_shape, shape, "{text}");
+        }
+        let obround = SheetRule { bend_relief_shape: "obround".into(), ..steel.clone() };
+        let saved = serde_json::to_value(&obround).unwrap();
+        assert_eq!(saved["bend_relief_shape"], "obround");
+        let back: SheetRule = serde_json::from_value(saved).unwrap();
+        assert_eq!(back, obround);
+        let err = doc.rule_values(&vals, &SheetRule { bend_relief_shape: "round".into(), ..steel }).unwrap_err().to_string();
+        assert!(err.contains("rectangular, obround or tear"), "{err}");
     }
 
     #[test]
@@ -832,6 +982,125 @@ mod tests {
             assert!((bend.included_angle_deg() - included).abs() < 1e-9, "{bend:?}");
             assert!((AngleDisplay::Bend.of(bend.angle_deg) - deg).abs() < 1e-9);
             assert!((AngleDisplay::Included.of(bend.angle_deg) - included).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn perforation_grid_matches_uncached_region_contains_bit_for_bit() {
+        fn ref_perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerforation) -> Vec<Vec2> {
+            let zones = avoid;
+            let clear = p.diameter / 2.0 + p.margin;
+            let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
+            let mut add = |l: &Loop2| {
+                let pts = l.polyline(1e-3);
+                for (&a, &b) in pts.edges() {
+                    segs.push((a, b));
+                }
+            };
+            for r in regions {
+                add(&r.outer);
+                r.holes.iter().for_each(&mut add);
+            }
+            zones.iter().for_each(|z| add(&z.outer));
+            let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
+            if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
+                return Vec::new();
+            }
+            let mut field = Aabb2 { min: lo, max: hi };
+            if let Some(outline) = &p.outline {
+                let n = segs.len();
+                for r in outline {
+                    for l in std::iter::once(&r.outer).chain(&r.holes) {
+                        segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
+                    }
+                }
+                field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
+                if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
+                    return Vec::new();
+                }
+            }
+            let cell = (2.0 * clear).max(p.pitch).max(1.0);
+            let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
+            let mut grid: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
+            let idx = |x: f64, y: f64| -> (usize, usize) {
+                (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
+            };
+            for (i, (a, b)) in segs.iter().enumerate() {
+                let (i0, j0) = idx(a.x.min(b.x) - clear, a.y.min(b.y) - clear);
+                let (i1, j1) = idx(a.x.max(b.x) + clear, a.y.max(b.y) + clear);
+                for j in j0..=j1 {
+                    for ii in i0..=i1 {
+                        if let Some(c) = grid.get_mut(j * nx + ii) {
+                            c.push(i);
+                        }
+                    }
+                }
+            }
+            let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
+                let (d, l) = (b - a, (b - a).dot(b - a));
+                let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
+                c.dist(a + d * t)
+            };
+            let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
+            let mut out = Vec::new();
+            let mut row = 0usize;
+            let Aabb2 { min: flo, max: fhi } = field;
+            loop {
+                let y = flo.y + clear + row as f64 * dy;
+                if y > fhi.y - clear + 1e-9 {
+                    break;
+                }
+                let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
+                let mut step = 0.0;
+                while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
+                    let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
+                    let c = Vec2::new(x, y);
+                    let (i, j) = idx(x, y);
+                    let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
+                    if regions.iter().any(|r| r.contains(c))
+                        && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                        && !zones.iter().any(|z| z.contains(c))
+                        && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
+                    {
+                        out.push(c);
+                    }
+                    step += p.pitch;
+                }
+                row += 1;
+            }
+            out
+        }
+
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+        let panel = Region2 {
+            outer: rect(0.0, 0.0, 120.0, 80.0),
+            holes: vec![
+                Loop2::circle(Vec2::new(25.0, 25.0), 8.0).reversed(),
+                Loop2::circle(Vec2::new(60.0, 40.0), 10.0).reversed(),
+                Loop2::circle(Vec2::new(95.0, 55.0), 7.0).reversed(),
+                rect(85.0, 12.0, 105.0, 28.0).reversed(),
+            ],
+        };
+        let avoid = vec![
+            Region2 { outer: rect(0.0, 36.0, 120.0, 44.0), holes: Vec::new() },
+            Region2 { outer: rect(45.0, 0.0, 52.0, 80.0), holes: vec![Loop2::circle(Vec2::new(48.5, 65.0), 1.5).reversed()] },
+        ];
+        let outline = vec![Region2 { outer: rect(8.0, 8.0, 112.0, 72.0), holes: vec![Loop2::circle(Vec2::new(30.0, 60.0), 6.0).reversed()] }];
+
+        for (square, from_right, with_outline) in [(false, false, false), (true, false, false), (false, true, true), (true, true, true)] {
+            let perf = SheetPerforation {
+                feature: 1,
+                diameter: 3.0,
+                pitch: 6.0,
+                margin: 2.0,
+                square,
+                from_right,
+                outline: with_outline.then(|| outline.clone()),
+            };
+            let got = perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            let want = ref_perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            assert!(!got.is_empty(), "expected non-empty perforation grid");
+            assert_eq!(got, want, "square={square} from_right={from_right} with_outline={with_outline}");
         }
     }
 }

@@ -9,7 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
+use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::inspect::{
     BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
 };
@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -259,7 +259,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
@@ -305,17 +305,63 @@ impl BodyMeasurement {
     }
 }
 
+/// Parse the region before any measurement; a malformed box must never become an unfiltered query.
+fn measure_region(p: &Value, cmd: &str) -> Result<Option<(solidcraft_geom::Aabb3, bool)>> {
+    let Some(region) = p.get("within") else {
+        if p.get("mode").is_some() {
+            return Err(bad(cmd, "`mode` requires `within`"));
+        }
+        return Ok(None);
+    };
+    let min = region.get("min").and_then(vec3).ok_or_else(|| bad(cmd, "`within.min` must be a point [x, y, z]"))?;
+    let max = region.get("max").and_then(vec3).ok_or_else(|| bad(cmd, "`within.max` must be a point [x, y, z]"))?;
+    let bounds = solidcraft_geom::Aabb3 { min, max };
+    if bounds.is_empty() {
+        return Err(bad(cmd, "`within.min` must not exceed `within.max`"));
+    }
+    let inside = match p.get("mode") {
+        None => false,
+        Some(Value::String(mode)) if mode == "intersects" => false,
+        Some(Value::String(mode)) if mode == "inside" => true,
+        _ => return Err(bad(cmd, "`mode` must be intersects or inside")),
+    };
+    Ok(Some((bounds, inside)))
+}
+
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
+        if p.get("within").is_some() || p.get("mode").is_some() {
+            return Err(bad(cmd, "`within` and `mode` cannot be combined with `items`"));
+        }
         return super::measure_sel::measure_items(s, items);
     }
+    let region = measure_region(p, cmd)?;
     let want = string_list(cmd, p, "bodies")?;
     let definitions = s.model.state();
     let st = s.world_state()?;
-    let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    let mut selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
+    }
+    if let Some((region, inside)) = region {
+        let bounds_list: Vec<solidcraft_kernel::Result<solidcraft_geom::Aabb3>> = if selected.len() > 1 {
+            solidcraft_kernel::map_on_threads(&selected, 16, |b| b.body.exact_bounds())
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(solidcraft_kernel::KernelError::Internal("bounding this body failed".into()))))
+                .collect()
+        } else {
+            selected.iter().map(|b| b.body.exact_bounds()).collect()
+        };
+        let mut matches = Vec::new();
+        for (body, bounds) in selected.into_iter().zip(bounds_list) {
+            let bounds = bounds.map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+            let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
+            if !bounds.is_empty() && matches_region {
+                matches.push(body);
+            }
+        }
+        selected = matches;
     }
     if bool_(p, "names_only").unwrap_or(false) {
         let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
@@ -725,32 +771,39 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     });
-    let definitions = s.model.state();
-    // Only bodies given in full are measured.
-    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
     let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
-    // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
-    let mut measured =
-        if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
-            .into_iter();
-    let bodies: Vec<DocumentBody> = st
-        .bodies
-        .iter()
-        .map(|b| {
-            let detail = match measured.next() {
-                Some(m) => {
-                    DocumentBodyDetail::Measured(Box::new(m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into()))))
-                }
-                None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
-            };
-            // Editing a sketch rolls the timeline back; a body deleted further on is `removed_later`.
-            DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
-        })
-        .collect();
-    let bodies = match bodies_detail {
-        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
-        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
-        BodiesDetail::Left => None,
+    let bodies = if bodies_detail == BodiesDetail::Left {
+        None
+    } else {
+        // Body names and measurements describe every placement in the world, as inspect.measure
+        // does. Sketches and timeline entries below still describe their definitions once.
+        let world = s.world_state()?;
+        // Sheet perforations belong to the definition and are placed by measure_sheet.
+        let definitions = s.model.state();
+        // Only bodies given in full are measured; names alone never need their geometry measured.
+        let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
+        let mut measured =
+            if with_measure { solidcraft_kernel::map_on_threads(&world.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
+                .into_iter();
+        let bodies: Vec<DocumentBody> = world
+            .bodies
+            .iter()
+            .map(|b| {
+                let detail = match measured.next() {
+                    Some(m) => DocumentBodyDetail::Measured(Box::new(
+                        m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into())),
+                    )),
+                    None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
+                };
+                // A rolled-back removal and visibility both use the placed body's world name.
+                DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
+            })
+            .collect();
+        match bodies_detail {
+            BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+            BodiesDetail::Names => Some(DocumentBodies::Names(world.bodies.iter().map(|b| b.name.clone()).collect())),
+            BodiesDetail::Left => None,
+        }
     };
     let sketches: Vec<DocumentSketch> = st
         .sketches
@@ -836,7 +889,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::points::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -898,7 +951,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 index: f.index,
                 name: names.get(f.index).cloned(),
                 exact: solidcraft_doc::naming::face_name_exact(b, f.index),
-                area: f.area,
+                area: super::measure_exact::face_area(&b.body, f.index).unwrap_or(f.area),
                 centroid: f.centroid.into(),
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
@@ -968,11 +1021,12 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
+    let doc = s.doc_mut();
     for b in &bodies {
-        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
-            s.doc_mut().materials.remove(b);
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL && !doc.has_copy_material_lineage(b) {
+            doc.materials.remove(b);
         } else {
-            s.doc_mut().materials.insert(b.clone(), canonical.clone());
+            doc.materials.insert(b.clone(), canonical.clone());
         }
     }
     typed_reply(cmd, MaterialAssignResult { bodies, material: canonical, param_warnings: Vec::new() })
@@ -1063,6 +1117,11 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(l) => a.bodies.insert(b.clone(), l.clone()),
             None => a.bodies.remove(b),
         };
+        // A mesh body has one face, the whole body: a look on that face would hide every body
+        // look from then on, so the body's look replaces it (#22573).
+        if st.body(b).is_some_and(|mb| mb.body.is_mesh()) {
+            a.faces.retain(|f| f.body != *b);
+        }
     }
     for (body, pt) in &faces {
         // One entry per face: a new one replaces any at the same spot.

@@ -33,10 +33,17 @@ macro_rules! graphics_preferences {
             graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
             /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
             ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
+            ground_shadow_style: GroundShadowStyle = GroundShadowStyle::Ellipse, PAGE_GRAPHICS;
             /// Joint badges draw quiet unless the joint lets its parts move, which shows what a
             /// construction has fully constrained. Off: every joint draws alike. The ring and axis
             /// style draws every joint alike either way.
             highlight_moving_joints: bool = true, PAGE_GRAPHICS => check_id("prefs.highlight_moving_joints");
+            /// How the view shows what an Isolate hid: not at all (the default), see-through, or as
+            /// edges (#8120). Chosen on the Isolation pill or the bar's Isolate slot.
+            isolate_others: solidcraft_engine::schema::view_navigation::IsolateShow = Default::default(), PAGE_GRAPHICS;
+            /// A click on a part shown transparent or wireframe while isolating selects it (the
+            /// default) or, off, goes through it to what is behind.
+            isolate_others_pick: bool = true, PAGE_GRAPHICS;
             /// How joints look in the viewport: 0 the ring and axis drawn before badges, or a badge with
             /// the joint type's pictogram: 1 white on dark, 2 solid accent, 3 solid amber, 4 outline,
             /// 5 a colour and outline for each family of types, 6 dots (`joint_symbols::STYLES`).
@@ -70,6 +77,9 @@ macro_rules! graphics_preferences {
             render_legacy_memory_admission: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_memory_admission");
             /// Restore the previous platform-specific fixed Render preview geometry budget.
             render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+            /// A scale bar in the view's bottom left corner: a round length in the design's units, at the
+            /// centre of the view in perspective (#375). Off by default.
+            scale_bar: bool = false, PAGE_GRAPHICS;
             /// A section hatches each cut body its own way (the default), or every one alike, in the cap
             /// colour at 45 degrees, as before.
             section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;

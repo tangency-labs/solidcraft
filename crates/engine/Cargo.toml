@@ -14,6 +14,8 @@ plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
+# Solidcore's own profiler, dumped as JSON Lines through `kernel::write_kernel_profiles`.
+solidcore-profile = ["solidcraft-kernel/solidcore-profile"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
@@ -44,6 +46,8 @@ solidcraft-viewport = { workspace = true }
 # The printed look of an inserted circuit board (src/cmd/board_layers.rs): its layers drawn
 # into an image; both already in the tree (ui-egui, render).
 tiny-skia = { workspace = true }
+# The checksum of the chunk a design's picture keeps its footprint in.
+crc32fast = { workspace = true }
 png = { workspace = true }
 solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
@@ -55,6 +59,8 @@ solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-dynamics = { workspace = true }
 solidcraft-io = { workspace = true }
+# Palette-role SVG validation shared with the UI icon renderer.
+solidcraft-icon-svg = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcraft-ui-text = { workspace = true }

@@ -45,12 +45,18 @@
 //!   its pieces are dropped ([`distinct_pieces`]): on a surface that covers itself (a spline
 //!   winding round one circle several times) upstream returns each cover of the face's
 //!   piece, and one of them stops inside the face where the surface ends.
+//! - **Touch points.** A plane that touches a face at a point gives a degenerate section
+//!   curve, which upstream's trimming (`CreateCurvesByTrimming`) skips, so the section lost
+//!   the point. Here it is kept where the point classifies on the face (`Point3DClassify`,
+//!   as `FaceIntersect` keeps a touch point) and lies on no other section curve. A
+//!   classification that fails fails the section
+//!   ([`TopologyFailure::TouchPointNotClassified`], with its cause).
 //! - **Not ported here.** The `SM_DEBUG_CODE` drawing blocks and
 //!   `SM_VALIDATE_INTERSECTORS`.
 
 use crate::curve::curve::Curve;
 use crate::error::topology::TopologyFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -58,6 +64,7 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::point_class::PointClassType;
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
 use crate::math::{max2, max4, EFF_ZERO, EFF_ZERO_SQRT};
@@ -71,7 +78,7 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p1 as brep1;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
-use crate::topology::face::{p2 as face2, p4 as face4};
+use crate::topology::face::{p2 as face2, p3 as face3, p4 as face4};
 use crate::topology::{Brep, FaceId};
 
 const OP_PLANE: &str = "topology::brep::planar_section::create_plane_from_bbox";
@@ -399,6 +406,10 @@ pub fn create_planar_section_curves(
     // against (upstream's local array stands in when the caller asks for none, but only
     // the caller's array is appended to: without the 3D output it stays empty)
     let mut section_3d: Vec<Curve> = Vec::new();
+    // Not upstream: every face's trimmed section curves, and the touch points on the faces
+    // (each with its UV curve, face and tolerance), kept apart until all are found
+    let mut found_3d: Vec<Curve> = Vec::new();
+    let mut touches: Vec<(Curve, Option<Curve>, FaceId, f64)> = Vec::new();
 
     // get all faces
     let faces = brep1::faces(b, None)?;
@@ -548,6 +559,36 @@ pub fn create_planar_section_curves(
         }
 
         // Trim curves to face (Calls SmFace::CurveOnClassify())
+        // Not upstream: the touch points (degenerate section curves, a plane touching the
+        // surface at a point), which the trimming skips, are kept where the point lies on
+        // the face, as `FaceIntersect` keeps a touch point (docs/ssi.md, invariant 8)
+        let mut touch_points: Vec<(Curve, Option<Curve>)> = Vec::new();
+        for (curve, uv) in curves_3d.iter().zip(&uv_curves) {
+            if !status_free(curve.is_degenerate(k, EFF_ZERO, None), false)? {
+                continue;
+            }
+            let point = curve.evaluate_point(k, curve.natural_interval().min())?;
+            // a classification that fails decides nothing: the touch point is neither kept
+            // nor silently dropped, the section fails with the cause
+            let class = match face3::point_3d_classify(k, b, f, point, max2(face_tol, tol)) {
+                Ok(c) => c,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(e) => {
+                    return Err(
+                        Failure::new(OP_SECTION, TopologyFailure::TouchPointNotClassified)
+                            .caused_by(e)
+                            .into_error(),
+                    )
+                }
+            };
+            if matches!(
+                class,
+                PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+            ) {
+                touch_points.push((curve.clone(), uv.clone()));
+            }
+        }
+
         let to_trim_3d: Vec<Option<Curve>> = curves_3d.into_iter().map(Some).collect();
         let trimmed = match face2::create_curves_by_trimming(
             k,
@@ -572,6 +613,9 @@ pub fn create_planar_section_curves(
         } else {
             distinct_pieces(k, trim_3d, tol)?
         };
+        // the touch points are judged against every face's curves, once all are found
+        found_3d.extend(trim_3d.iter().cloned());
+        touches.extend(touch_points.into_iter().map(|(p, uv)| (p, uv, f, tol)));
 
         // add results to output
         if opts.outputs.faces {
@@ -589,6 +633,53 @@ pub fn create_planar_section_curves(
         }
         if opts.outputs.uv_curves {
             out_uv.extend(trim_uv);
+        }
+    }
+
+    // a touch point is a section of its own unless it lies on a section curve of any face
+    // (a crossing curve ending on a face's boundary can leave a touch point at its end on
+    // the face beside it) or on a touch point kept before it (one on an edge is found
+    // from both faces)
+    let mut kept: Vec<Point3> = Vec::new();
+    for (curve, uv, f, tol) in touches {
+        let point = curve.evaluate_point(k, curve.natural_interval().min())?;
+        if kept.iter().any(|q| q.distance(point) <= tol) {
+            continue;
+        }
+        let mut on_curve = false;
+        for other in &found_3d {
+            let dropped = other.drop_point(
+                k,
+                &other.natural_interval(),
+                point,
+                None,
+                tol,
+                None,
+                SolverOperation::Intersect,
+            );
+            match dropped {
+                Ok(d) if d.success && d.distance <= tol => {
+                    on_curve = true;
+                    break;
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // a drop farther than the tolerance, or a failed one (which proves
+                // nothing), does not put the point on the curve
+                Ok(_) | Err(_) => {}
+            }
+        }
+        if on_curve {
+            continue;
+        }
+        kept.push(point);
+        if opts.outputs.faces {
+            out_faces.push(f);
+        }
+        if opts.outputs.curves_3d {
+            section_3d.push(curve);
+        }
+        if opts.outputs.uv_curves {
+            out_uv.push(uv);
         }
     }
 
@@ -813,6 +904,7 @@ fn status_free<T>(r: Result<T>, fallback: T) -> Result<T> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(fallback),
@@ -864,6 +956,44 @@ mod tests {
             assert!((a.distance(z) - 10.0).abs() < 1e-9);
         }
         assert!(r.uv_curves.is_none());
+    }
+
+    /// A plane at a torus' bounding box touches it at one point of its outer equator:
+    /// the section is that point (a degenerate curve), neither empty nor a curve through
+    /// it. The goldens' `upstream_torus_*_plane*` cases check the same on upstream's
+    /// `torus.smb`.
+    #[test]
+    fn a_plane_touching_a_torus_at_one_point_gives_that_point() {
+        for (normal, at) in [
+            (Vec3::Y, Point3::new(0.0, -15.0, 0.0)),
+            (Vec3::Y, Point3::new(0.0, 15.0, 0.0)),
+            (Vec3::X, Point3::new(-15.0, 0.0, 0.0)),
+        ] {
+            let mut k = Kernel::default();
+            let mut b =
+                crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 10.0, 5.0)
+                    .unwrap();
+            let opts = PlanarSectionOptions {
+                approx_tol_3d: Some(0.01),
+                outputs: SectionOutputs {
+                    curves_3d: true,
+                    ..SectionOutputs::default()
+                },
+                ..PlanarSectionOptions::default()
+            };
+            let r = create_planar_section_curves(&k, &mut b, at, normal, &opts).unwrap();
+            let curves = r.curves_3d.unwrap();
+            assert_eq!(curves.len(), 1, "{at:?}: {} curves", curves.len());
+            let c = &curves[0];
+            let ivl = c.natural_interval();
+            for t in [ivl.min(), 0.5 * (ivl.min() + ivl.max()), ivl.max()] {
+                let p = c.evaluate_point(&k, t).unwrap();
+                assert!(
+                    p.distance(at) < 1e-6,
+                    "{at:?}: the section runs through {p:?}"
+                );
+            }
+        }
     }
 
     /// A cylinder of radius `r` and height `h` whose rational NURBS winds round its circle
