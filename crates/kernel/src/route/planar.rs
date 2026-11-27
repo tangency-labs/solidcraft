@@ -56,6 +56,15 @@ pub fn is_square_to_radius(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool
     }
 }
 
+/// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false` where
+/// `dir` is of no length.
+#[must_use]
+pub fn on_line(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.on_line(p, origin, dir, tol),
+    }
+}
+
 /// The centre of the circle through `a`, `b` and `c`; `None` for points on one line.
 #[must_use]
 pub fn circumcentre(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
@@ -280,6 +289,8 @@ mod tests {
         assert_eq!(tangent_arc_centre(a, b, [0.0, 1.0]), sketch_arc::tangent_arc_centre(a, b, [0.0, 1.0]));
         assert_eq!(joint_turn([1.0, 0.0], [0.0, 1.0]).ok(), turn::joint_turn([1.0, 0.0], [0.0, 1.0]).ok());
         assert_eq!(straight_length(a, b), paper_gaps::straight_length(a, b));
+        assert_eq!(on_line(c, a, [1.0, 1.0], 1e-9), sketch_arc::on_line(c, a, [1.0, 1.0], 1e-9));
+        assert_eq!(on_line(c, a, b, 1e-9), sketch_arc::on_line(c, a, b, 1e-9));
         assert_eq!(distance(a, b), sketch_arc::distance(a, b));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), sketch_arc::left_side_along_line(a, [2.0, 0.0], a, b, 1e-9));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), Some(true));
