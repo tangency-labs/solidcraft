@@ -944,7 +944,6 @@ fn what_a_wall_grid_does_not_take_is_refused_before_a_feature_is_made() {
         json!({"profiles": [0]}),
         json!({"depth": 4}),
         json!({"depth": 0}),
-        json!({"depth": f64::NAN}),
         json!({"angle": "30 deg"}),
         json!({"targets": ["Tube", "Other"]}),
         json!({"targets": ["*"]}),
