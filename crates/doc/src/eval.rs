@@ -7399,17 +7399,17 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
-            crate::profile_selection_indices_lenient(ss, sel)?
-                .0
-                .into_iter()
-                .map(|index| {
-                    ps.get(index)
-                        .map(|profile| profile.region.clone())
-                        .ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
-                })
-                .collect::<Result<Vec<_>>>()?
-        }
+        ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }
+        | ProfileSel::SidedCurves { .. } => crate::profile_selection_indices_lenient(ss, sel)?
+            .0
+            .into_iter()
+            .map(|index| {
+                ps.get(index).map(|profile| profile.region.clone()).ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
+            })
+            .collect::<Result<Vec<_>>>()?,
         ProfileSel::Points { points } => {
             let mut v = Vec::new();
             let mut taken = std::collections::BTreeSet::new();
