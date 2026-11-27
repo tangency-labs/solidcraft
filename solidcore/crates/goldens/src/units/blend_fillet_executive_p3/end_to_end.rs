@@ -3342,6 +3342,12 @@ mod corner_patch_certificates;
 #[path = "wr646_certificates.rs"]
 mod wr646_certificates;
 
+/// WR-458, WR-633 and WR-650 (#18921): the real-solid rows the offset surface's
+/// extension from its base moves, each certified on the body the golden records.
+#[cfg(test)]
+#[path = "wr458_certificates.rs"]
+mod wr458_certificates;
+
 #[cfg(test)]
 mod wr664_near_knot_trims {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -3873,9 +3879,12 @@ mod wr459_sphere_rows {
     /// face whose seam failure the kept boundary adds; the round's vertex near the seam,
     /// with main's coordinate bits and the bound on its distance from the seam (the
     /// measured distance rounded up); the other vertices within 1e-4 of the seam that the
-    /// check may be reporting, each with main's bits; and the hash of main's round surface
-    /// (`fnv1a64` of its `Debug` form) and of main's other faces (`fnv1a64` of their
-    /// sorted `geometry_text`s, joined by newlines); and main's one sphere face.
+    /// check may be reporting, each with main's bits; the hash of the round surface
+    /// (`fnv1a64` of its `Debug` form: main's, but for e1 r0.1, e1 r0.5 and e4 r0.5, whose
+    /// definitions' leader and seed curves and nets moved by at most 1.03e-13 relative when
+    /// the offset's extension became the default, each round re-certified against its
+    /// definition) and of main's other faces (`fnv1a64` of their sorted `geometry_text`s,
+    /// joined by newlines); and main's one sphere face.
     struct Row {
         name: &'static str,
         main_failures: &'static [Failure],
@@ -3929,7 +3938,7 @@ mod wr459_sphere_rows {
             added_on: 8,
             vertex: (27, [0x403627cf90d5c75d, 0xbe31ee9f830c0a25, 0xc0454a5b0aeac7b9], 4.2e-9),
             others: &[],
-            round_surface: 13763335099436623647,
+            round_surface: 17087500646884337043,
             main_faces: 14750437352760065621,
             main_sphere: 8,
         },
@@ -3939,7 +3948,7 @@ mod wr459_sphere_rows {
             added_on: 8,
             vertex: (27, [0x4036bf0d23081593, 0xbe56aa7ba247c332, 0xc0452256756ad4f1], 2.12e-8),
             others: &[],
-            round_surface: 14051174420061070167,
+            round_surface: 4904801595854769515,
             main_faces: 14750437352760065621,
             main_sphere: 8,
         },
@@ -3959,7 +3968,7 @@ mod wr459_sphere_rows {
             added_on: 1,
             vertex: (25, [0x4036bf0d230815a1, 0xbe56aa7bab70d538, 0x40452256756ad4ed], 2.12e-8),
             others: &[E4_V2],
-            round_surface: 744541229302824343,
+            round_surface: 12247167273146979092,
             main_faces: 16065100554185304934,
             main_sphere: 0,
         },
@@ -4222,7 +4231,9 @@ mod wr459_sphere_rows {
             row.main_faces,
             "{name}: the faces but the round's and the added patch are not main's"
         );
-        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not main's");
+        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not the row's");
+        // and the round is its definition, its net re-certified within its bound of it
+        round_definition_proof::certified_blends(&Kernel::default(), &mut body, name);
 
         // the round's vertex near the seam is main's, bit for bit, within its bound of the
         // seam and inside its own tolerance

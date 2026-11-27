@@ -7231,7 +7231,7 @@
   "ui.ribbon_exit": "Sortir",
   "ui.ribbon_labels": "Mostrar el text sota les icones de la cinta",
   "ui.ribbon_menus_skip_pinned": "Deixar les ordres fixades fora dels menús desplegables",
-  "ui.ribbon_pin_footer": "Les ordres fixades es mostren a la cinta. Passeu el punter per una fila per fixar-la o deixar-la de fixar.",
+  "ui.ribbon_pin_footer": "Les ordres fixades es mostren a la cinta. Fixeu o deixeu de fixar una ordre des del seu menú ⋯.",
   "ui.ribbon_workspace": "Espai de treball",
   "ui.right": "Dreta",
   "ui.right_click_confirms": "El botó dret confirma les entrades dels diàlegs",
