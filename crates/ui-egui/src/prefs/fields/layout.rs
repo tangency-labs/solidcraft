@@ -90,9 +90,6 @@ macro_rules! layout_preferences {
             /// shows: one component's while it shows one (#11430). Off: they step through every feature of
             /// the design, as they did before.
             history_steps_component: bool = true, PAGE_LAYOUT;
-            /// Panels dock and float below the view's axis navigator instead of pushing it aside;
-            /// only a panel let go on the navigator covers it. Off: as before.
-            keep_navigator_clear: bool = true, PAGE_LAYOUT;
             /// Each design tab keeps its open dialog or tool, and its toolbar tab, while another design is
             /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
             /// them and shows the MODEL tab.

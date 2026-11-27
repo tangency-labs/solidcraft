@@ -682,7 +682,7 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
             restore(path);
             return;
         }
-        app.set_status(format!("{path} is no longer there"), true);
+        app.set_status(format!("{} is no longer there", crate::display_user_path(path)), true);
         return;
     }
     app.open_chosen_file(path);
@@ -1076,8 +1076,9 @@ fn texture(textures: Option<&PreviewTextures>) -> Option<crate::ui_kit::PreviewA
 
 /// Abbreviate only an actual home-directory ancestor; the source path is kept for actions.
 pub(crate) fn friendly_path(path: &str) -> String {
+    let shown = crate::display_user_path(path);
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    abbreviated_path(path, home.as_deref().map(std::path::Path::new))
+    abbreviated_path(shown, home.as_deref().map(std::path::Path::new))
 }
 
 fn abbreviated_path(path: &str, home: Option<&std::path::Path>) -> String {
@@ -1881,6 +1882,18 @@ mod tests {
         assert_eq!(h.recent.len(), MAX_RECENT);
         assert_eq!(h.recent.first().map(String::as_str), Some("/d/5.solidcraft"));
         assert_eq!(h.recent.iter().filter(|p| p.as_str() == "/d/5.solidcraft").count(), 1);
+    }
+
+    /// Preferences that list a design twice (an older version, or two pages writing them) show it
+    /// once (#23033), and still hold no more than the list's size.
+    #[test]
+    fn saved_preferences_that_list_a_design_twice_show_it_once() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut listed: Vec<String> = vec!["/d/a.sc".into(), "/d/b.sc".into(), "/d/a.sc".into()];
+        listed.extend((0..20).map(|i| format!("/d/{i}.sc")));
+        app.load_prefs(&serde_json::json!({ "recent": listed }).to_string());
+        assert_eq!(app.home.recent[..3], ["/d/a.sc", "/d/b.sc", "/d/0.sc"]);
+        assert_eq!(app.home.recent.len(), MAX_RECENT);
     }
 
     /// Samples build in the background and make a picture; picking one opens its design.

@@ -290,3 +290,51 @@ pub fn turn_to_parallel(axis: Vec3, normal: Vec3, line: Vec3) -> Result<SquareTu
         line_off_axis,
     })
 }
+
+/// Whether two 3D directions agree within cosine threshold `min_cos` (`a·b >= min_cos`, or
+/// `|a·b| >= min_cos` when `unsigned` is true).
+#[must_use]
+pub fn directions_aligned(a: Vec3, b: Vec3, min_cos: f64, unsigned: bool) -> bool {
+    let d = a.dot(b);
+    let score = if unsigned { d.abs() } else { d };
+    score >= min_cos
+}
+
+/// How far a frame's origin and Z axis moved between two column-major 4×4 transforms:
+/// `(origin_shift_mm, z_angle_deg)`.
+#[must_use]
+pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [_, _, [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *before;
+    let [_, _, [az0, az1, az2, _], [at0, at1, at2, _]] = *after;
+    let shift = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let az = Vec3::new(az0, az1, az2);
+    let angle_deg = bz.cross(az).length().atan2(bz.dot(az)).to_degrees();
+    (shift, angle_deg)
+}
+
+/// How far two rigid column-major 4×4 transforms differ: `(translation_mm, rotation_deg)`.
+#[must_use]
+pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [[ax0, ax1, ax2, _], [ay0, ay1, ay2, _], [az0, az1, az2, _], [at0, at1, at2, _]] = *a;
+    let [[bx0, bx1, bx2, _], [by0, by1, by2, _], [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *b;
+    let t = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let ax = Vec3::new(ax0, ax1, ax2);
+    let ay = Vec3::new(ay0, ay1, ay2);
+    let az = Vec3::new(az0, az1, az2);
+    let bx = Vec3::new(bx0, bx1, bx2);
+    let by = Vec3::new(by0, by1, by2);
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let c00 = ax.dot(bx);
+    let c11 = ay.dot(by);
+    let c22 = az.dot(bz);
+    let c12 = ay.dot(bz);
+    let c21 = az.dot(by);
+    let c20 = az.dot(bx);
+    let c02 = ax.dot(bz);
+    let c01 = ax.dot(by);
+    let c10 = ay.dot(bx);
+    let sin2 = Vec3::new(c12 - c21, c20 - c02, c01 - c10).length();
+    let angle_deg = sin2.atan2(c00 + c11 + c22 - 1.0).to_degrees();
+    (t, angle_deg)
+}

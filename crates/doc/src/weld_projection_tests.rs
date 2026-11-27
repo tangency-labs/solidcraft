@@ -1,11 +1,14 @@
 //! Projection welds: round, elongated and ring projections, flat and with the dimple on either
 //! face, against their closed-form volumes; the kernel's check on every body; several projections
-//! in one weld; the refusals; the sizes ISO 8167 proposes; and the site of projections picked on a
-//! stack of boxes, with an oval past the face's edge and a projection off the face.
+//! in one weld; the refusals, a direction along the normal and sizes past the model's limit among
+//! them; the sizes ISO 8167 proposes, for measured thicknesses too; and the site of projections
+//! picked on a stack of boxes, with an oval past the face's edge, a projection off the face, and
+//! the sizes the weld refuses.
 
 use std::f64::consts::PI;
 
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, make_box};
+use solidcore_record::Vec3;
+use solidcraft_kernel::{SmlibCheck, validity};
 
 use super::*;
 
@@ -13,12 +16,13 @@ const T_U: f64 = 1.0;
 const T_L: f64 = 1.5;
 
 fn volume(b: &Body) -> f64 {
-    b.volume(1e-9).unwrap()
+    b.volume_at(1e-9).unwrap()
 }
 
+/// The record's check, and the kernel's own at its strictest level.
 fn check(b: &Body, what: &str) {
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{what}: {}", report.text);
+    let v = validity(b);
+    assert!(v.record.is_ok() && matches!(v.smlib, Some(SmlibCheck::Valid)), "{what}: {v:?}");
 }
 
 fn close(got: f64, want: f64, what: &str) {
@@ -103,9 +107,13 @@ fn zones_are(got: &[SpotPiece], dimple: Option<SpotSide>, want: impl Fn(usize, b
 
 /// The box round all of `pieces`.
 fn bounds(pieces: &[SpotPiece]) -> ([f64; 3], [f64; 3]) {
-    pieces.iter().map(|p| p.body.bounds().unwrap()).fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (a, b)| {
-        (std::array::from_fn(|i| lo[i].min(a[i])), std::array::from_fn(|i| hi[i].max(b[i])))
-    })
+    pieces
+        .iter()
+        .map(|p| p.body.exact_bounds().unwrap())
+        .map(|b| ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]))
+        .fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (a, b)| {
+            (std::array::from_fn(|i| lo[i].min(a[i])), std::array::from_fn(|i| hi[i].max(b[i])))
+        })
 }
 
 /// A round projection is the spot of its diameter in look A; with the dimple, that face's marks
@@ -167,8 +175,9 @@ fn several_projections_give_one_group_each() {
 }
 
 /// No projections, a dimple through the sheets, an oval not longer than wide, a ring whose inner
-/// diameter is not under its outer or leaves no room inside, no direction, a bad normal or stack
-/// are bad input.
+/// diameter is not under its outer or leaves no room inside, no direction or one along the normal
+/// (or off it by rounding only), an oval or a ring reaching past the model's size limit, a bad
+/// normal or stack are bad input.
 #[test]
 fn bad_projections_are_refused_as_invalid_input() {
     let bad = |shape: ProjectionShape, dimple: Option<SpotSide>| {
@@ -181,6 +190,12 @@ fn bad_projections_are_refused_as_invalid_input() {
     assert!(bad(ProjectionShape::Elongated { b1: f64::NAN, l1: 10.0, along: [1.0, 0.0, 0.0] }, None));
     assert!(bad(ProjectionShape::Ring { d1: 2.0, di: 2.0 }, None));
     assert!(bad(ProjectionShape::Ring { d1: 4.0, di: 0.05 }, None));
+    assert!(bad(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 0.0, 1.0] }, None));
+    assert!(bad(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [1e-9, 0.0, 1.0] }, None));
+    // centres 9e8 out: the oval's end and the ring's rim reach past 1e9
+    let far = |shape: ProjectionShape| projection_weld(&weld(vec![Projection { at: [9e8, 0.0, 0.0], shape }], None));
+    assert!(matches!(far(ProjectionShape::Elongated { b1: 4.0, l1: 4e8, along: [1.0, 0.0, 0.0] }), Err(ProjectionRefusal::Invalid(_))));
+    assert!(matches!(far(ProjectionShape::Ring { d1: 4e8, di: 3.9e8 }), Err(ProjectionRefusal::Invalid(_))));
     let round = vec![Projection { at: [0.0; 3], shape: ProjectionShape::Round { d1: 4.0 } }];
     assert!(matches!(projection_weld(&ProjectionWeld { normal: [0.0; 3], ..weld(round.clone(), None) }), Err(ProjectionRefusal::Invalid(_))));
     assert!(matches!(projection_weld(&ProjectionWeld { thicknesses: vec![1.0], ..weld(round, None) }), Err(ProjectionRefusal::Invalid(_))));
@@ -201,30 +216,40 @@ fn iso_8167_proposes_group_b_by_the_thinner_sheet() {
         assert_eq!(got, want, "t {t}");
     }
     assert!(matches!(proposed_projection(&[1.0], ProjectionKind::Spherical), Err(ProjectionRefusal::Invalid(_))));
+    // thicknesses as measured, a rounding off the boundary: 1 mm and 0.5 mm sheets
+    let t_one = 2.3 - 1.3;
+    let t_half = 2.2 - 1.7;
+    assert_eq!(size([t_one, 2.0], ProjectionKind::Ring).map(|p| (p.size, p.inner.unwrap())), Some((4.5, 2.0)), "t {t_one}");
+    assert_eq!(size([t_one, 2.0], ProjectionKind::Spherical).map(|p| p.size), Some(3.2), "t {t_one}");
+    assert_eq!(size([t_half, 2.0], ProjectionKind::Ring), None, "t {t_half}");
+    assert_eq!(size([t_half, 2.0], ProjectionKind::Spherical).map(|p| p.size), Some(2.0), "t {t_half}");
+}
+
+/// A direction in the face, however short, is the oval's: made unit, never replaced by the
+/// kernel's own choice.
+#[test]
+fn a_short_direction_in_the_face_is_kept() {
+    let got = one(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 1e-13, 0.0] }, None);
+    let (lo, hi) = bounds(&got);
+    assert!(hi[1] - lo[1] > 10.0 && hi[0] - lo[0] < 5.0, "{lo:?}..{hi:?}");
 }
 
 // ---- where a projection weld sits ----
 
-fn ordered(b: Body) -> (Body, Order) {
-    let (_, order) = b.to_record().unwrap();
-    (b, order)
-}
-
 /// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
-fn sheet(z: f64, t: f64) -> (Body, Order) {
-    ordered(make_box([-20.0, -20.0, z], [40.0, 40.0, t]).unwrap())
+fn sheet(z: f64, t: f64) -> Body {
+    solidcraft_kernel::box_solid(Vec3::new(-20.0, -20.0, z), Vec3::new(20.0, 20.0, z + t)).unwrap()
 }
 
 /// The record face of a box whose plane holds `p`.
-fn face_at((b, o): &(Body, Order), p: [f64; 3]) -> usize {
-    (0..o.faces.len()).find(|&f| b.face_square_level(o, f, [0.0, 0.0, 1.0], p).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
+fn face_at(b: &Body, p: [f64; 3]) -> usize {
+    (0..b.face_count()).find(|&f| b.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), p.into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
 }
 
 fn site(projections: &[Projection]) -> Result<ProjectionSite> {
     let lower = sheet(0.0, 1.5);
     let upper = sheet(1.5, 1.0);
-    let listed = [(&lower.0, &lower.1), (&upper.0, &upper.1)];
-    projection_site(&listed, 1, face_at(&upper, [0.0, 0.0, 2.5]), projections)
+    projection_site(&[&lower, &upper], 1, face_at(&upper, [0.0, 0.0, 2.5]), projections)
 }
 
 /// A round, an elongated and a ring projection picked on the upper sheet's top: the line runs
@@ -240,7 +265,7 @@ fn projections_picked_on_top_give_the_frame_the_sheets_and_the_moved_centres() {
     assert!(s.normal.iter().zip([0.0, 0.0, -1.0]).all(|(a, b)| (a - b).abs() < 1e-9), "{s:?}");
     assert_eq!(s.sheets.iter().map(|x| x.sheet).collect::<Vec<_>>(), [1, 0]);
     for (got, was) in s.projections.iter().zip(&picked) {
-        assert!((got.at[2] - 1.5).abs() < 1e-9 && (got.at[0] - was.at[0]).abs() < 1e-9, "{got:?}");
+        assert!((got.at[2] - 1.5).abs() < 1e-9 && (got.at[0] - was.at[0]).abs() < 1e-9 && (got.at[1] - was.at[1]).abs() < 1e-9, "{got:?}");
         assert_eq!(got.shape, was.shape);
     }
     let weld = ProjectionWeld {
@@ -261,4 +286,18 @@ fn an_oval_past_the_edge_or_a_projection_off_the_face_is_refused() {
     assert!(matches!(got, Err(ProjectionRefusal::AlongProjection { projection: 0, why: SeamRefusal::AtJoint { joint: 1, .. } })), "{got:?}");
     let off = Projection { at: [30.0, 0.0, 2.5], shape: ProjectionShape::Round { d1: 4.0 } };
     assert_eq!(site(&[off]), Err(ProjectionRefusal::AtProjection { projection: 0, why: SpotRefusal::PointOffFace }));
+}
+
+/// The site refuses what the weld refuses: a ring whose inner diameter is not under its outer, one
+/// with no room inside for its marks, an oval along the normal.
+#[test]
+fn a_site_refuses_the_sizes_the_weld_refuses() {
+    for shape in [
+        ProjectionShape::Ring { d1: 4.0, di: 4.0 },
+        ProjectionShape::Ring { d1: 4.0, di: 0.05 },
+        ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 0.0, 1.0] },
+    ] {
+        let got = site(&[Projection { at: [0.0, 0.0, 2.5], shape }]);
+        assert!(matches!(got, Err(ProjectionRefusal::Invalid(_))), "{shape:?}: {got:?}");
+    }
 }

@@ -24,6 +24,33 @@ fn reject(service: &mut LayoutService, mutations: Vec<Mutation>, rule: Rule) {
 }
 
 #[test]
+fn plugin_workspace_catalogue_and_layout_storage_keep_full_scoped_ids() {
+    let registry = synthetic_registry().unwrap();
+    let workspace = WorkspaceId::new(format!("plugin:{}/{}", "a".repeat(MAX_ID_BYTES), "b".repeat(MAX_ID_BYTES))).unwrap();
+    let envelope = LayoutEnvelope::new(Layout::empty(workspace.clone()));
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    catalogue.register_builtin("Plugin default", &envelope, &registry).unwrap();
+    catalogue
+        .register_workspace(commands::WorkspaceDescriptor {
+            id: workspace.clone(),
+            title_key: "fixture.workspace.title".into(),
+            default_preset: "Plugin default".into(),
+        })
+        .unwrap();
+    catalogue.remember(&envelope, None, &registry).unwrap();
+    let snapshot = catalogue.state().export().unwrap();
+    let restored = commands::InMemoryCatalogue::from_snapshot(&snapshot, &registry).unwrap();
+    assert_eq!(restored.state(), catalogue.state());
+    assert_eq!(restored.state().summaries()[0].id, workspace);
+    let remembered = restored.state().remembered(&workspace).unwrap().envelope(&registry, &workspace).unwrap();
+    assert_eq!(remembered.layout, envelope.layout);
+    let mut storage = FakePersistence::default();
+    let bytes = encode(&envelope, &registry).unwrap();
+    storage.save(&workspace, &bytes).unwrap();
+    assert_eq!(storage.load(&workspace).unwrap(), Some(bytes));
+}
+
+#[test]
 fn fixed_bottom_height_is_validated_without_weakening_other_zone_bounds() {
     let base = synthetic_registry().unwrap().get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
     for height in [f32::NAN, f32::INFINITY, 0.0, 119.0, 1201.0] {

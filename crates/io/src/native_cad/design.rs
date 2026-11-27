@@ -424,6 +424,8 @@ impl Builder {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation,
             targets,
@@ -651,6 +653,7 @@ impl Builder {
             angle2: second.map(deg),
             symmetric,
             convention: RevolveConvention::SketchNormal,
+            join_profile_arcs: false,
             to: None,
         };
         let id = self.add(kind, name)?;

@@ -1087,6 +1087,191 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     assert!(arc_before_line(&[span], 1e-5));
 }
 
+/// #22818: a 2.9 mm trimmed piece at the flattest spot `(0, 720)` of a 2400 mm polynomial cubic
+/// spline bends ~1e-4 to ~4e-4 mm off its chord — well above the 1e-5 zone tolerance, yet under
+/// the body-scaled tolerances used by `planar_edges` (~2.88e-3) and `sheet_regions` (~2.88e-4).
+/// It must stay the exact cubic spline it is (never flattened to a line or refitted to an arc),
+/// so a crescent between the spline and its chord reads back with its exact curve and nonzero
+/// signed area instead of collapsing to `[Line(a, b), Line(b, a)]`.
+#[test]
+fn a_short_piece_of_a_large_polynomial_spline_stays_free_form() {
+    let mut k = Kernel::default();
+    let r = 3553.0_f64;
+    let half = 1.45_f64;
+    let sag = half * half / (2.0 * r);
+    // Symmetric cubic matching y(±1.45) = 720 - sag and y(0) = 720 (off_chord = 4/3 sag ≈ 3.95e-4).
+    let p0 = p(-half, 720.0 - sag);
+    let p1 = p(-half / 3.0, 720.0 + sag / 3.0);
+    let p2 = p(half / 3.0, 720.0 + sag / 3.0);
+    let p3 = p(half, 720.0 - sag);
+    let h = |q: Point2| [q.x, q.y, 0.0, 1.0];
+    let (single, single_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(p1), h(p2), h(p3)],
+    );
+    // Exact de Casteljau split at t = 0.5: two 1.45 mm spans meeting at (0, 720), each with
+    // off_chord = sag / 3 ≈ 9.86e-5 (below 2.88e-4, above zone_tol_3d = 1e-5).
+    let q0 = p(-2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let r0 = p(-half / 3.0, 720.0);
+    let mid = p(0.0, 720.0);
+    let r1 = p(half / 3.0, 720.0);
+    let q2 = p(2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let (two_span, two_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(q0), h(r0), h(mid), h(r1), h(q2), h(p3)],
+    );
+    for tol in [2.88e-3, 2.88e-4] {
+        for forward in [true, false] {
+            let one = planar_pieces(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert!(
+                matches!(one.as_slice(), [Seg2::Cubic { .. }]),
+                "single span tol={tol} forward={forward}: {one:?}"
+            );
+            let projected_one = planar_curves(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_one.as_slice(), [PlanarPiece::Spline(_)]),
+                "single projected tol={tol} forward={forward}: {projected_one:?}"
+            );
+            let two = planar_pieces(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert_eq!(
+                two.len(),
+                2,
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            assert!(
+                two.iter().all(|s| matches!(s, Seg2::Cubic { .. })),
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            let projected_two = planar_curves(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_two.as_slice(), [PlanarPiece::Spline(_)]),
+                "two projected tol={tol} forward={forward}: {projected_two:?}"
+            );
+        }
+    }
+    // A collinear polynomial cubic still reads as a straight line.
+    let (flat, flat_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![
+            [0.0, 720.0, 0.0, 1.0],
+            [1.0, 720.0, 0.0, 1.0],
+            [2.0, 720.0, 0.0, 1.0],
+            [3.0, 720.0, 0.0, 1.0],
+        ],
+    );
+    let flat_segs = read(&k, &flat, flat_iv, true, &xy(), 2.88e-3).unwrap();
+    assert!(
+        matches!(flat_segs.as_slice(), [Seg2::Line { .. }]),
+        "{flat_segs:?}"
+    );
+    // A 1.45 mm half-span crescent (off_chord ≈ 9.86e-5 < tol = 2.88e-4) survives a 2D boolean
+    // difference and `sheet_regions` readback with its exact cubic and positive signed area.
+    let tol = 2.88e-4;
+    let half_cubic = Seg2::Cubic {
+        p0,
+        p1: q0,
+        p2: r0,
+        p3: mid,
+    };
+    let floor_y = 718.55;
+    let curved_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                half_cubic.reversed(),
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let chord_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                Seg2::Line { a: mid, b: p0 },
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let want_crescent = curved_notch.outer.signed_area().unwrap().value
+        - chord_notch.outer.signed_area().unwrap().value;
+    let sa = sheet(&mut k, &curved_notch, tol);
+    let sb = sheet(&mut k, &chord_notch, tol);
+    let diff = combine(&mut k, sa, sb, Boolean2d::Difference).unwrap();
+    let got = sheet_regions(&k, &diff, &xy(), tol).unwrap();
+    assert_eq!(got.regions.len(), 1, "{got:?}");
+    assert!(
+        got.regions[0]
+            .outer
+            .segs
+            .iter()
+            .any(|s| matches!(s, Seg2::Cubic { .. })),
+        "crescent must keep its cubic: {:?}",
+        got.regions[0]
+    );
+    let got_area = got.regions[0].outer.signed_area().unwrap();
+    assert_eq!(got_area.sign(), Some(true), "{got_area:?}");
+    assert!(
+        (got_area.value - want_crescent).abs() < 1e-8,
+        "{} vs {want_crescent}",
+        got_area.value
+    );
+}
+
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
 /// off it in its first span is no line; a cubic retracing its line is none; a curve twice round
 /// a circle is no arc.
@@ -2834,6 +3019,83 @@ mod arc_conversion_regressions {
             path_shapes(PlanarPath::Open(&[short]), PathStyle::Polyline, encoding)
                 .map_or(true, |shapes| matches!(shapes[..], [PathShape::Arc { .. }]))
         );
+    }
+
+    #[test]
+    fn polyline_piece_inside_one_writer_cell_joins_the_run_instead_of_refusing_the_path() {
+        use super::super::profile::Loop2;
+        // a drawing's hidden-line pass can leave a piece of an edge whose
+        // projection is far below the writer's grid (a circle seen edge on, cut beside its fold).
+        // A caller whose lengths are written on a 1e-3 grid, with three decimals elsewhere.
+        let encoding = scalar_encoding(|v| Some((v * 1e3).round() / 1e3));
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let (a, b, c) = (Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0002, 1.0));
+        // `b` and `b2` are distinct in storage but both written as (1, 0).
+        let b2 = Vec2::new(1.0002, 0.0);
+        let sliver = line(b, b2);
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+        // Written, the sliver is the point where its neighbours meet. Each polyline vertex is the
+        // stored start of the edge leaving it, so the joint is the next edge's start, `b2`.
+        let through = [line(a, b), sliver, line(b2, c)];
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&through), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A free-form piece whose controls are all written as one point is the same point.
+        let curl = Seg2::Cubic {
+            p0: b,
+            p1: Vec2::new(1.0001, 0.0001),
+            p2: Vec2::new(1.0002, 0.0001),
+            p3: b2,
+        };
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(a, b), curl, line(b2, c)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A closed loop that starts with the sliver still closes: its last edge ends at the
+        // written point the sliver is, where the first written edge starts.
+        let lp = Loop2 {
+            segs: vec![sliver, line(b2, c), line(c, a), line(a, b)],
+        };
+        assert_eq!(
+            path_shapes(PlanarPath::Closed(&lp), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b2), vertex(c), vertex(a)],
+                closed: true,
+            }])
+        );
+        // A path that is only the sliver draws nothing the file can hold: no entity, no refusal.
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&[sliver]), PathStyle::Polyline, encoding),
+            Ok(vec![])
+        );
+        // An authored zero-length line is not a sliver: it stays a two-vertex polyline.
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(b, b)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b), vertex(b)],
+                closed: false,
+            }])
+        );
+        // Exact output keeps each piece as its own entity, so it still refuses the sliver.
+        let error =
+            path_shapes(PlanarPath::Open(&through), PathStyle::Exact, encoding).unwrap_err();
+        assert_eq!(error.piece, Some((1, 3)));
+        assert_eq!(error.reason, "line endpoints collapse at writer precision");
     }
 
     #[test]
