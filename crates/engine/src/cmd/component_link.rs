@@ -25,7 +25,8 @@ use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
     InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams,
-    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, SetLinkParametersParams, SetLinkParametersResult, UpdateLinksParams, UpdateLinksResult,
+    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, SetLinkParametersParams, SetLinkParametersResult, UpdateLinksParams,
+    UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
