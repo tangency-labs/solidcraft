@@ -587,6 +587,7 @@ mod tests {
             panels: Vec::new(),
             shader_settings: Default::default(),
             pictures: Vec::new(),
+            declarations: Default::default(),
         };
         h.app.plugin_slots.inventory = Some(Inventory { root: None, plugins: vec![plugin], skipped: vec![] });
         let rows = export_slots(&h.app);
