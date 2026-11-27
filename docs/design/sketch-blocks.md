@@ -182,6 +182,9 @@ dimension are not refused.
   disagrees with the shape would also over-constrain the sketch. A dimension added with
   `if_redundant: "driven"` is placed as a driven (reference) dimension instead, measuring the
   block.
+- **A free block collapsed.** A free block has no length row, so a constraint that brings its
+  axis ends together would stack its members on the origin. Such a constraint is refused, as any
+  edit that shrinks a curve to a point is, and the message names the block.
 - **Make Block on geometry the outside already pins.** Two fixed members can't both move, but the
   block holds them where they are, so nothing changes and the block reports the DOF that is left.
   Make Block never moves geometry. It captures (u, v) from the current solved positions.
@@ -483,7 +486,8 @@ drive, which is what an open block already does, so saving the state costs older
   - Right-click opens the block's menu: Edit Block, Edit Contents, Select Block, Show (or Hide)
     Constraints and Dimensions, Explode Block and Delete Block.
   - Delete after a click deletes the block with its members and its axis, as Delete Block does,
-    in one undoable step. Explode Block is only the menu item.
+    in one undoable step. Explode Block is only the menu item. Delete Block on a block open for
+    Edit Contents closes it first, so the curves drawn in it are deleted with it.
 - **Canvas:**
   - One block glyph near the origin. `glyph_constraints` already collapses a pattern to one glyph
     (`sketch_tools.rs:2514`).

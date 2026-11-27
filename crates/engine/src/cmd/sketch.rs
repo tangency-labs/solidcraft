@@ -400,7 +400,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
-        .params("entities: [curve, point, constraint or block ids] (a block's id or its axis line explodes the block; its last member takes the block and its axis with it); preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
+        .params("entities: [curve, point, constraint or block ids] (a block's id or its axis line explodes the block; its last member takes the block and its axis with it; every member of the block open for Edit Contents closes it first, so the curves drawn in it go too); preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
     CommandSpec::new("sketch.detach_point", "Detach Sketch Point", crate::checked!("sketch.detach_point", detach_point))
         .icon("c_coincident")
         .enabled(in_sketch)
@@ -721,7 +721,7 @@ fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketc
     // that curve away (a corner made the midpoint of the opposite side of its rectangle).
     let gone = shrunk(&unsolved, sk);
     if strict && let Some(curve) = &gone {
-        return Err(EngineError::Other(format!("that would shrink {curve} to a point: its constraints can only be met without it")));
+        return Err(EngineError::Other(shrink_message(sk, curve)));
     }
     if !rep.keeps_orientation() || far || gone.is_some() {
         let (wires, wire_constraints) = (std::mem::take(&mut sk.wires), std::mem::take(&mut sk.wire_constraints));
@@ -798,6 +798,15 @@ fn shrunk(before: &Sketch, after: &Sketch) -> Option<String> {
         .and_then(|i| after.curves.get(i).map(|c| c.id.clone()))
 }
 
+/// Why a solve that shrank `curve` to a point is refused; a block's curve or axis names the block,
+/// which would collapse onto its origin.
+fn shrink_message(sk: &Sketch, curve: &str) -> String {
+    match sk.blocks.iter().find(|b| b.axis == curve || b.curves.iter().any(|c| c == curve)) {
+        Some(b) => format!("that would shrink block {} to a point: its constraints can only be met by collapsing it", b.label()),
+        None => format!("that would shrink {curve} to a point: its constraints can only be met without it"),
+    }
+}
+
 /// A solve moving some point further than this many times the sketch's size (and its largest
 /// dimension value) has thrown the geometry to a far solution.
 const FLUNG: f64 = 1000.0;
@@ -809,7 +818,7 @@ const FLUNG: f64 = 1000.0;
 /// store a sketch whose curve has been squeezed away and which can never be solved back.
 pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String> {
     if let Some(curve) = shrunk(before, after) {
-        return Some(format!("that would shrink {curve} to a point: its constraints can only be met without it"));
+        return Some(shrink_message(after, &curve));
     }
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
@@ -3341,7 +3350,7 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
                 return Err(bad(cmd, "that would throw points of the sketch far away: its constraints have no solution near the sketch as it is"));
             }
             if let Some(curve) = shrunk(sk, &trial) {
-                return Err(bad(cmd, format!("that would shrink {curve} to a point: its constraints can only be met without it")));
+                return Err(bad(cmd, shrink_message(&trial, &curve)));
             }
             *sk = trial;
             return Ok(());
@@ -5497,6 +5506,13 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         // 3D constraints and curves (#10608) go after the loop, so a curve and its own
         // constraint can be deleted together.
         let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
+        // Every member of the open block named: it is closed first, so the curves drawn in it go
+        // with it.
+        let mut ids = ids.clone();
+        if let Some(open) = sk.open_block_now().filter(|b| !b.curves.is_empty() && b.curves.iter().all(|c| ids.contains(c))).map(|b| b.id.clone()) {
+            let closed = sk.close_block(&open).map_err(|e| bad(cmd, e.to_string()))?;
+            ids.extend(closed.added);
+        }
         for id in &ids {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);

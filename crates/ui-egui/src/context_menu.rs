@@ -1873,7 +1873,8 @@ fn sketch_link_items(app: &SolveApp, sketch: u64, link: &str) -> Vec<Item> {
 }
 
 /// A block's row in the Browser: Edit Block opens its sketch if need be; the others work on the
-/// sketch being edited. Delete Block deletes its members, which takes the block and its axis.
+/// sketch being edited. Delete Block deletes its members, which takes the block and its axis (an
+/// open block is closed first, so the curves drawn in it go too).
 fn sketch_block_row_items(app: &SolveApp, sketch: u64, block: &str) -> Vec<Item> {
     let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
     let Some(b) = sk.blocks.iter().find(|b| b.id == block) else { return Vec::new() };

@@ -2983,6 +2983,46 @@ fn detach_point_refuses_a_mirrored_curve_in_a_closed_block() {
     assert!(why.contains("part of block"), "{why}");
 }
 
+/// A constraint that would shrink a free block's axis to a point, collapsing the block onto its
+/// origin, is refused.
+#[test]
+fn a_free_blocks_axis_cannot_shrink_to_a_point() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "free");
+    let axis = made["axis"].as_str().unwrap().to_string();
+    for p in [json!({"a": format!("{axis}.start"), "b": format!("{axis}.end")}), json!({"a": format!("{axis}.end"), "b": made["origin"]})] {
+        let why = refused(&mut s, "sketch.constraint.coincident", p.clone());
+        assert!(why.contains("shrink to a point"), "{p}: {why}");
+    }
+    // Both axis ends onto one outside point, one at a time.
+    let point = run(&mut s, "sketch.point", json!({"point": [-30, -30]}))["created"]["points"][0].clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": made["origin"], "b": point}));
+    let why = refused(&mut s, "sketch.constraint.coincident", json!({"a": format!("{axis}.end"), "b": point}));
+    assert!(why.contains("block Plate"), "{why}");
+    let why = refused(&mut s, "sketch.dimension", json!({"entities": [axis], "value": 0}));
+    assert!(why.contains("block Plate"), "{why}");
+    let sk = sketch(&s);
+    assert!(sk.blocks[0].points.iter().all(|(id, _)| sk.resolve_point(id).is_some()));
+}
+
+/// Delete Block on an open block closes it first: the curves drawn in it go with it, in one
+/// undo step.
+#[test]
+fn deleting_an_open_block_takes_what_was_drawn_in_it() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let axis = made["axis"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.block_open", json!({"block": made["block"]}));
+    let drawn = ids(&run(&mut s, "sketch.line", json!({"points": [[20, 10], [40, 20]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.delete", json!({"entities": ["l1", "l2", "l3", "l4", "c1"]}));
+    let sk = sketch(&s);
+    assert!(sk.blocks.is_empty(), "{:?}", sk.blocks);
+    assert!(sk.curve_index(&drawn).is_none() && sk.curve_index(&axis).is_none(), "{:?}", sk.curves.iter().map(|c| &c.id).collect::<Vec<_>>());
+    run(&mut s, "edit.undo", json!({}));
+    let sk = sketch(&s);
+    assert!(sk.blocks.len() == 1 && sk.blocks[0].is_open() && sk.curve_index(&drawn).is_some(), "one undo brings it all back, still open");
+}
+
 /// Detach Point and Unlink From Group change one curve, so a closed block's member refuses them.
 #[test]
 fn detach_and_unlink_refuse_a_closed_blocks_member() {
