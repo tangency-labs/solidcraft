@@ -26,7 +26,8 @@ use crate::wire::{Wire, arc_from_3_points, arc_polyline};
 #[path = "wire_dual.rs"]
 mod dual;
 use dual::{Dual, Num, V};
-use solidcraft_kernel::services::constraint::{self, circle_points, circumcenter, circumradius, size, unit, weight};
+use solidcraft_kernel::planar::{arc_circle_points, circle_points, plane_normal, plane_point};
+use solidcraft_kernel::services::constraint::{self, circumcenter, circumradius, size, unit, weight};
 
 /// Every residual below this (mm) ends the solve.
 const TOL: f64 = 1e-10;
@@ -221,7 +222,7 @@ impl PlaneOf {
     pub fn frame(&self) -> Option<(Vec3, Vec3)> {
         match self {
             PlaneOf::Origin(p) => Some((Vec3::ZERO, p.normal())),
-            PlaneOf::Model(m) => m.resolved.map(|p| (p.origin, constraint::plane_normal(&p))),
+            PlaneOf::Model(m) => m.resolved.map(|p| (p.origin, plane_normal(&p))),
         }
     }
     /// Whether these references currently identify the same origin plane or model target.
@@ -945,7 +946,7 @@ impl Sketch {
         if p.index == 0
             && let Some(q) = ids.points.get(p.wire.as_str()).and_then(|i| self.points.get(*i))
         {
-            return Some(Op::Fixed(constraint::plane_point(&frame, q.pos)));
+            return Some(Op::Fixed(plane_point(&frame, q.pos)));
         }
         // A 2D line's ends, for a line operand.
         match ids.curves.get(p.wire.as_str()).and_then(|i| self.curves.get(*i)).map(|c| &c.kind) {
@@ -957,7 +958,7 @@ impl Sketch {
                 } else {
                     return None;
                 };
-                self.points.get(i).map(|q| Op::Fixed(constraint::plane_point(&frame, q.pos)))
+                self.points.get(i).map(|q| Op::Fixed(plane_point(&frame, q.pos)))
             }
             _ => None,
         }
@@ -994,16 +995,14 @@ impl Sketch {
         let frame = self.frame.0?;
         let pos = |i: usize| self.points.get(i).map(|q| q.pos);
         match &self.curves.get(*ids.curves.get(id)?)?.kind {
-            crate::model::CurveKind::Line { a, b } => {
-                Some(vec![Op::Fixed(constraint::plane_point(&frame, pos(*a)?)), Op::Fixed(constraint::plane_point(&frame, pos(*b)?))])
-            }
+            crate::model::CurveKind::Line { a, b } => Some(vec![Op::Fixed(plane_point(&frame, pos(*a)?)), Op::Fixed(plane_point(&frame, pos(*b)?))]),
             crate::model::CurveKind::Circle { c, r } => {
-                let c = constraint::plane_point(&frame, pos(*c)?);
+                let c = plane_point(&frame, pos(*c)?);
                 Some(circle_points(c, frame.x, frame.y, *r, 0.0).into_iter().map(Op::Fixed).collect())
             }
             crate::model::CurveKind::Arc { c, a, .. } => {
                 let (c2, a2) = (pos(*c)?, pos(*a)?);
-                Some(constraint::arc_circle_points([c2.x, c2.y], [a2.x, a2.y], &frame).into_iter().map(Op::Fixed).collect())
+                Some(arc_circle_points([c2.x, c2.y], [a2.x, a2.y], &frame).into_iter().map(Op::Fixed).collect())
             }
             _ => None,
         }

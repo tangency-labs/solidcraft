@@ -12,8 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb2, Ring};
 
 use crate::expr::{self, Kind, Value};
 use crate::{DocError, Document, Result};
@@ -709,6 +709,28 @@ pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
         .collect()
 }
 
+/// A [`Region2`] pre-tessellated at `1e-3` mm with per-loop bounding boxes (inflated by `1e-9`)
+/// for fast repeated point-in-region queries identical to [`Region2Geom::contains`].
+pub(crate) struct PolyRegion {
+    outer: (Aabb2, Ring<Vec2>),
+    holes: Vec<(Aabb2, Ring<Vec2>)>,
+}
+
+impl PolyRegion {
+    pub(crate) fn from_region(r: &Region2) -> Self {
+        let loop_ring = |l: &Loop2| {
+            let ring = l.polyline(1e-3);
+            let bounds = ring.iter().copied().collect::<Aabb2>().inflated(1e-9);
+            (bounds, ring)
+        };
+        Self { outer: loop_ring(&r.outer), holes: r.holes.iter().map(loop_ring).collect() }
+    }
+
+    pub(crate) fn contains(&self, p: Vec2) -> bool {
+        self.outer.0.contains(p) && self.outer.1.contains(p) && !self.holes.iter().any(|(b, h)| b.contains(p) && h.contains(p))
+    }
+}
+
 /// Hole centers of a perforation field (#732) on a flat `regions`: a staggered (60°, odd rows
 /// shifted half a pitch) or square grid from the flat's lower-left corner plus margin + radius; a
 /// hole is kept where it is at least margin clear of the material's edges and cut-outs, and of
@@ -719,35 +741,57 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
     let zones = avoid;
     let clear = p.diameter / 2.0 + p.margin;
     let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
-    let mut add = |l: &Loop2| {
-        let pts = l.polyline(1e-3);
+    fn push_ring(segs: &mut Vec<(Vec2, Vec2)>, pts: &Ring<Vec2>) {
         for (&a, &b) in pts.edges() {
             segs.push((a, b));
         }
-    };
-    for r in regions {
-        add(&r.outer);
-        r.holes.iter().for_each(&mut add);
     }
-    zones.iter().for_each(|z| add(&z.outer));
+    let poly_regions: Vec<PolyRegion> = regions
+        .iter()
+        .map(|r| {
+            let pr = PolyRegion::from_region(r);
+            push_ring(&mut segs, &pr.outer.1);
+            for (_, h) in &pr.holes {
+                push_ring(&mut segs, h);
+            }
+            pr
+        })
+        .collect();
+    let poly_zones: Vec<PolyRegion> = zones
+        .iter()
+        .map(|z| {
+            let pz = PolyRegion::from_region(z);
+            push_ring(&mut segs, &pz.outer.1);
+            pz
+        })
+        .collect();
     let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
     if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
         return Vec::new();
     }
     // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
     let mut field = Aabb2 { min: lo, max: hi };
-    if let Some(outline) = &p.outline {
+    let poly_outline: Option<Vec<PolyRegion>> = if let Some(outline) = &p.outline {
         let n = segs.len();
-        for r in outline {
-            for l in std::iter::once(&r.outer).chain(&r.holes) {
-                segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
-            }
-        }
+        let out_polys: Vec<PolyRegion> = outline
+            .iter()
+            .map(|r| {
+                let pr = PolyRegion::from_region(r);
+                push_ring(&mut segs, &pr.outer.1);
+                for (_, h) in &pr.holes {
+                    push_ring(&mut segs, h);
+                }
+                pr
+            })
+            .collect();
         field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
         if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
             return Vec::new();
         }
-    }
+        Some(out_polys)
+    } else {
+        None
+    };
     // Segments bucketed in a grid, so each hole only checks the edges near it.
     let cell = (2.0 * clear).max(p.pitch).max(1.0);
     let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
@@ -788,9 +832,9 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
             let c = Vec2::new(x, y);
             let (i, j) = idx(x, y);
             let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
-            if regions.iter().any(|r| r.contains(c))
-                && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
-                && !zones.iter().any(|z| z.contains(c))
+            if poly_regions.iter().any(|r| r.contains(c))
+                && poly_outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                && !poly_zones.iter().any(|z| z.contains(c))
                 && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
             {
                 out.push(c);
@@ -938,6 +982,125 @@ mod tests {
             assert!((bend.included_angle_deg() - included).abs() < 1e-9, "{bend:?}");
             assert!((AngleDisplay::Bend.of(bend.angle_deg) - deg).abs() < 1e-9);
             assert!((AngleDisplay::Included.of(bend.angle_deg) - included).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn perforation_grid_matches_uncached_region_contains_bit_for_bit() {
+        fn ref_perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerforation) -> Vec<Vec2> {
+            let zones = avoid;
+            let clear = p.diameter / 2.0 + p.margin;
+            let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
+            let mut add = |l: &Loop2| {
+                let pts = l.polyline(1e-3);
+                for (&a, &b) in pts.edges() {
+                    segs.push((a, b));
+                }
+            };
+            for r in regions {
+                add(&r.outer);
+                r.holes.iter().for_each(&mut add);
+            }
+            zones.iter().for_each(|z| add(&z.outer));
+            let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
+            if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
+                return Vec::new();
+            }
+            let mut field = Aabb2 { min: lo, max: hi };
+            if let Some(outline) = &p.outline {
+                let n = segs.len();
+                for r in outline {
+                    for l in std::iter::once(&r.outer).chain(&r.holes) {
+                        segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
+                    }
+                }
+                field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
+                if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
+                    return Vec::new();
+                }
+            }
+            let cell = (2.0 * clear).max(p.pitch).max(1.0);
+            let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
+            let mut grid: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
+            let idx = |x: f64, y: f64| -> (usize, usize) {
+                (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
+            };
+            for (i, (a, b)) in segs.iter().enumerate() {
+                let (i0, j0) = idx(a.x.min(b.x) - clear, a.y.min(b.y) - clear);
+                let (i1, j1) = idx(a.x.max(b.x) + clear, a.y.max(b.y) + clear);
+                for j in j0..=j1 {
+                    for ii in i0..=i1 {
+                        if let Some(c) = grid.get_mut(j * nx + ii) {
+                            c.push(i);
+                        }
+                    }
+                }
+            }
+            let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
+                let (d, l) = (b - a, (b - a).dot(b - a));
+                let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
+                c.dist(a + d * t)
+            };
+            let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
+            let mut out = Vec::new();
+            let mut row = 0usize;
+            let Aabb2 { min: flo, max: fhi } = field;
+            loop {
+                let y = flo.y + clear + row as f64 * dy;
+                if y > fhi.y - clear + 1e-9 {
+                    break;
+                }
+                let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
+                let mut step = 0.0;
+                while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
+                    let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
+                    let c = Vec2::new(x, y);
+                    let (i, j) = idx(x, y);
+                    let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
+                    if regions.iter().any(|r| r.contains(c))
+                        && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                        && !zones.iter().any(|z| z.contains(c))
+                        && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
+                    {
+                        out.push(c);
+                    }
+                    step += p.pitch;
+                }
+                row += 1;
+            }
+            out
+        }
+
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+        let panel = Region2 {
+            outer: rect(0.0, 0.0, 120.0, 80.0),
+            holes: vec![
+                Loop2::circle(Vec2::new(25.0, 25.0), 8.0).reversed(),
+                Loop2::circle(Vec2::new(60.0, 40.0), 10.0).reversed(),
+                Loop2::circle(Vec2::new(95.0, 55.0), 7.0).reversed(),
+                rect(85.0, 12.0, 105.0, 28.0).reversed(),
+            ],
+        };
+        let avoid = vec![
+            Region2 { outer: rect(0.0, 36.0, 120.0, 44.0), holes: Vec::new() },
+            Region2 { outer: rect(45.0, 0.0, 52.0, 80.0), holes: vec![Loop2::circle(Vec2::new(48.5, 65.0), 1.5).reversed()] },
+        ];
+        let outline = vec![Region2 { outer: rect(8.0, 8.0, 112.0, 72.0), holes: vec![Loop2::circle(Vec2::new(30.0, 60.0), 6.0).reversed()] }];
+
+        for (square, from_right, with_outline) in [(false, false, false), (true, false, false), (false, true, true), (true, true, true)] {
+            let perf = SheetPerforation {
+                feature: 1,
+                diameter: 3.0,
+                pitch: 6.0,
+                margin: 2.0,
+                square,
+                from_right,
+                outline: with_outline.then(|| outline.clone()),
+            };
+            let got = perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            let want = ref_perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            assert!(!got.is_empty(), "expected non-empty perforation grid");
+            assert_eq!(got, want, "square={square} from_right={from_right} with_outline={with_outline}");
         }
     }
 }
