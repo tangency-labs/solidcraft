@@ -437,9 +437,8 @@ fn an_opposite_face_keeps_the_pcurves_it_is_given() {
     use solidcore::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
     let mut k = Kernel::default();
-    let surface = Surface::from(
-        create_cylinder_surface(&k, Point3::new(1.0, 2.0, 3.0), 4.0, 10.0).unwrap(),
-    );
+    let surface =
+        Surface::from(create_cylinder_surface(&k, Point3::new(1.0, 2.0, 3.0), 4.0, 10.0).unwrap());
     let nat = surface.natural_uv_domain_with_nurb(&k).unwrap();
     let domain = Extent2d::from_bounds(
         nat.min().x + 0.1 * nat.x_length(),
