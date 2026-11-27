@@ -1320,7 +1320,7 @@ const SAME_POINT_PX: f64 = 1e-3;
 /// the ends of every run. A line that closes without a sharp turn is one loop with no ends.
 fn round_line(painter: &egui::Painter, points: &[Pos2], closed: bool, stroke: Stroke) {
     let points: Vec<[f64; 2]> = points.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
-    let runs = solidcraft_kernel::services::stroke_runs::runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
+    let runs = solidcraft_kernel::planar::stroke_runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
     let r = stroke.width / 2.0;
     let on_screen = |p: &[f64; 2]| pos2(p[0] as f32, p[1] as f32);
     for run in &runs {

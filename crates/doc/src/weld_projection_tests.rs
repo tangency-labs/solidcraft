@@ -5,7 +5,8 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, make_box};
+use solidcore_record::Vec3;
+use solidcraft_kernel::{SmlibCheck, validity};
 
 use super::*;
 
@@ -13,12 +14,13 @@ const T_U: f64 = 1.0;
 const T_L: f64 = 1.5;
 
 fn volume(b: &Body) -> f64 {
-    b.volume(1e-9).unwrap()
+    b.volume_at(1e-9).unwrap()
 }
 
+/// The record's check, and the kernel's own at its strictest level.
 fn check(b: &Body, what: &str) {
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{what}: {}", report.text);
+    let v = validity(b);
+    assert!(v.record.is_ok() && matches!(v.smlib, Some(SmlibCheck::Valid)), "{what}: {v:?}");
 }
 
 fn close(got: f64, want: f64, what: &str) {
@@ -103,9 +105,13 @@ fn zones_are(got: &[SpotPiece], dimple: Option<SpotSide>, want: impl Fn(usize, b
 
 /// The box round all of `pieces`.
 fn bounds(pieces: &[SpotPiece]) -> ([f64; 3], [f64; 3]) {
-    pieces.iter().map(|p| p.body.bounds().unwrap()).fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (a, b)| {
-        (std::array::from_fn(|i| lo[i].min(a[i])), std::array::from_fn(|i| hi[i].max(b[i])))
-    })
+    pieces
+        .iter()
+        .map(|p| p.body.exact_bounds().unwrap())
+        .map(|b| ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]))
+        .fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (a, b)| {
+            (std::array::from_fn(|i| lo[i].min(a[i])), std::array::from_fn(|i| hi[i].max(b[i])))
+        })
 }
 
 /// A round projection is the spot of its diameter in look A; with the dimple, that face's marks
@@ -205,26 +211,20 @@ fn iso_8167_proposes_group_b_by_the_thinner_sheet() {
 
 // ---- where a projection weld sits ----
 
-fn ordered(b: Body) -> (Body, Order) {
-    let (_, order) = b.to_record().unwrap();
-    (b, order)
-}
-
 /// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
-fn sheet(z: f64, t: f64) -> (Body, Order) {
-    ordered(make_box([-20.0, -20.0, z], [40.0, 40.0, t]).unwrap())
+fn sheet(z: f64, t: f64) -> Body {
+    solidcraft_kernel::box_solid(Vec3::new(-20.0, -20.0, z), Vec3::new(20.0, 20.0, z + t)).unwrap()
 }
 
 /// The record face of a box whose plane holds `p`.
-fn face_at((b, o): &(Body, Order), p: [f64; 3]) -> usize {
-    (0..o.faces.len()).find(|&f| b.face_square_level(o, f, [0.0, 0.0, 1.0], p).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
+fn face_at(b: &Body, p: [f64; 3]) -> usize {
+    (0..b.face_count()).find(|&f| b.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), p.into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
 }
 
 fn site(projections: &[Projection]) -> Result<ProjectionSite> {
     let lower = sheet(0.0, 1.5);
     let upper = sheet(1.5, 1.0);
-    let listed = [(&lower.0, &lower.1), (&upper.0, &upper.1)];
-    projection_site(&listed, 1, face_at(&upper, [0.0, 0.0, 2.5]), projections)
+    projection_site(&[&lower, &upper], 1, face_at(&upper, [0.0, 0.0, 2.5]), projections)
 }
 
 /// A round, an elongated and a ring projection picked on the upper sheet's top: the line runs

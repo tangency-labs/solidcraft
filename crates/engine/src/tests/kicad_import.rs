@@ -334,6 +334,31 @@ fn a_board_opened_as_meshes_is_read_again_as_meshes() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// Update Links reads a board again with the holes it was opened with.
+#[test]
+fn update_links_keeps_the_holes_a_board_was_opened_with() {
+    let path = board_file("live-link-holes", 2.0);
+    let board = |width: f64| {
+        format!(
+            r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 0 0) (end {width} 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#
+        )
+    };
+    let via = std::f64::consts::PI * 0.3 * 0.3 * 2.0;
+    std::fs::write(&path, board(30.0)).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "holes": "all", "copper": "none", "silkscreen": false}));
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    assert_eq!(s.doc.links[&component].importer.as_ref().unwrap().options["holes"], json!("all"));
+    std::fs::write(&path, board(30.5)).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    let got = volume(&mut s);
+    assert!((got - (30.5 * 10.0 * 2.0 - via)).abs() < 0.01, "the via is still drilled: {got}");
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 /// A design received from someone else, saved at `design` in `dir`, whose one KiCad link names
 /// the project `x.kicad_pro` beside it: the session never opened the board, so only the trust
 /// checks decide whether Update Links reads it.
