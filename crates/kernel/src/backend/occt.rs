@@ -27,11 +27,12 @@ use std::sync::OnceLock;
 use occt_capi::{Boolean, Shape};
 use solidcore_ops::sweep::Curve;
 use solidcore_record::brep::Brep;
-use solidcore_record::{Plane, Region2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
-    Support, Taper,
+    SplitTool, Support, Taper, TrimKeep,
 };
+use solidcraft_kernel_api::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 use crate::body::Body;
 
@@ -149,6 +150,7 @@ impl Backend for Occt {
             OpKind::Shell => Support::Some("open at one face or more".into()),
             OpKind::Thicken => Support::Yes,
             OpKind::OffsetFaces => Support::Yes,
+            OpKind::Draft => Support::Yes,
             _ => Support::No,
         }
     }
@@ -270,12 +272,32 @@ impl Modelling for Occt {
         body.fillet_nearest(&points, radius).map_err(failed)
     }
 
+    fn fillet_removing(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
+        unsupported("a fillet that removes overflowing picks")
+    }
+
+    fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
+        unsupported("a fillet of several radii")
+    }
+
+    fn fillet_setback(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _setbacks: &[(Vec3, f64)]) -> Result<Shape, BackendError> {
+        unsupported("a setback fillet")
+    }
+
     fn chamfer(&self, body: &Shape, edges: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
         if edges.is_empty() || edges.len() > 1000 || !(distance > 1e-6 && distance < 1e6) || edges.iter().any(|p| !finite(&xyz(*p))) {
             return unsupported("a chamfer solidcore refuses");
         }
         let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
         body.chamfer_nearest(&points, distance).map_err(failed)
+    }
+
+    fn chamfer_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
+        unsupported("a chamfer")
+    }
+
+    fn chamfer_sides_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _d1: f64, _side: ChamferSide, _flip: bool) -> Result<Shape, BackendError> {
+        unsupported("a chamfer")
     }
 
     fn chamfer_sides(&self, _body: &Shape, _edges: &[Vec3], _d1: f64, _side: ChamferSide, _flip: bool) -> Result<Shape, BackendError> {
@@ -305,6 +327,66 @@ impl Modelling for Occt {
         }
         let points: Vec<[f64; 3]> = at.iter().map(|p| xyz(*p)).collect();
         body.offset_faces_nearest(&points, distance).map_err(failed)
+    }
+
+    fn draft(&self, body: &Shape, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Shape, BackendError> {
+        let (x, y) = (neutral.x, neutral.y);
+        let n = Vec3::new(x.y * y.z - x.z * y.y, x.z * y.x - x.x * y.z, x.x * y.y - x.y * y.x);
+        if faces.is_empty()
+            || !angle.is_finite()
+            || angle == 0.0
+            || angle.abs() >= std::f64::consts::FRAC_PI_2
+            || !finite(&xyz(pull))
+            || !finite(&xyz(n))
+        {
+            return unsupported("a draft solidcore refuses");
+        }
+        let points: Vec<[f64; 3]> = faces.iter().map(|p| xyz(*p)).collect();
+        body.draft_nearest(&points, xyz(neutral.origin), xyz(n), xyz(pull), angle).map_err(failed)
+    }
+
+    fn split_faces(&self, _body: &Shape, _faces: &[usize], _tool: &SplitTool<'_, Shape>) -> Result<(Shape, Vec<usize>), BackendError> {
+        unsupported("a face split")
+    }
+
+    fn split_body(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_faces(&self, _body: &Shape, _sheet: &Shape, _face: usize, _faces: &[usize]) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_sheet_where_it_cuts(&self, _body: &Shape, _sheet: &Shape, _face: usize) -> Result<Option<Vec<Shape>>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
+        unsupported("a trim")
+    }
+
+    fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_points(&self, _plane: &Plane, _region: &Region2, _path: &PointPath, _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_helix(&self, _plane: &Plane, _region: &Region2, _helix: &Helix<'_>) -> Result<Shape, BackendError> {
+        unsupported("a helical sweep")
+    }
+
+    fn loft(&self, _sections: &[(Plane, Loop2)], _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_regions(&self, _sections: &[(Plane, Region2)]) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft to a point")
     }
 }
 
@@ -337,6 +419,7 @@ mod tests {
                     | OpKind::Shell
                     | OpKind::Thicken
                     | OpKind::OffsetFaces
+                    | OpKind::Draft
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
@@ -556,6 +639,10 @@ mod tests {
         same_solid("a sheet thickened both ways", 200.0, || crate::route::thicken(&sheet()?, 2.0, true));
         // The top face up 2 (10 x 10 x 12); the side face at x = 10 in 1 (9 x 10 x 10).
         same_solid("a face moved out", 1200.0, || crate::route::offset_faces(&cube()?, &[v(5.0, 5.0, 10.0)], 2.0));
+        // The side at x = 10 tilted 0.1 rad about its line on z = 0, leaning in going up: the
+        // cube less a wedge of section 10 · 10 tan(0.1) / 2, 10 deep.
+        let wedge = 10.0 * 10.0 * 0.1_f64.tan() / 2.0 * 10.0;
+        same_solid("a side drafted", 1000.0 - wedge, || crate::route::draft(&cube()?, &[v(10.0, 5.0, 5.0)], &Plane::XY, v(0.0, 0.0, 1.0), 0.1));
         same_solid("a face moved in", 900.0, || crate::route::offset_faces(&cube()?, &[v(10.0, 5.0, 5.0)], -1.0));
     }
 
