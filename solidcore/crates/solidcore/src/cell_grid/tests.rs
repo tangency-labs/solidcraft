@@ -3842,3 +3842,470 @@ fn hostile_sketched_cells_are_refused_and_never_panic() {
         Err(CellGridError::Field(_))
     ));
 }
+
+/// The cell grid on a cylinder wall (`wall`): closure, the strip's cells kept once round, the
+/// sectors' radii, sweeps and placements, and hostile walls.
+mod wall_tests {
+    use std::collections::BTreeSet;
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, TAU};
+
+    use crate::cell_grid::wall::*;
+    use crate::cell_grid::{CellGridError, CellGridSpec, CellShape, Clip};
+    use crate::math::Vec2;
+
+    const SQRT3: f64 = 1.732_050_807_568_877_2;
+
+    /// A tube of outside radius 30 and bore 27, 40 long along z, both ends flat caps: the
+    /// outside wall.
+    fn tube() -> CylinderWall {
+        CylinderWall {
+            axis_point: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            x_dir: [1.0, 0.0, 0.0],
+            tangent: [0.0, 1.0, 0.0],
+            radius: 30.0,
+            convex: true,
+            z_lo: 0.0,
+            z_hi: 40.0,
+            facing_radius: Some(27.0),
+            open_lo: true,
+            open_hi: true,
+            tol: 1e-6,
+        }
+    }
+
+    /// The same tube's bore: x grows the other way round.
+    fn bore() -> CylinderWall {
+        CylinderWall {
+            tangent: [0.0, -1.0, 0.0],
+            radius: 27.0,
+            convex: false,
+            facing_radius: Some(30.0),
+            ..tube()
+        }
+    }
+
+    /// A solid rod of radius 30: no facing wall.
+    fn rod() -> CylinderWall {
+        CylinderWall {
+            facing_radius: None,
+            ..tube()
+        }
+    }
+
+    /// Square cells of web 2 that close 18 round `wall`, whole clip, at the default anchor.
+    fn closing_spec(wall: &CylinderWall) -> CellGridSpec {
+        let c = TAU * wall.radius;
+        let mut spec = CellGridSpec {
+            shape: CellShape::Square,
+            size: c / 18.0 - 2.0,
+            web: 2.0,
+            clip: Clip::Whole,
+            ..CellGridSpec::default()
+        };
+        let [x, y] = default_anchor(wall, &spec).unwrap();
+        spec.anchor = Vec2::new(x, y);
+        spec
+    }
+
+    /// `v` turned right-handed by `angle` about the unit `k`.
+    fn turn(k: [f64; 3], v: [f64; 3], angle: f64) -> [f64; 3] {
+        let (s, c) = angle.sin_cos();
+        let kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+        let kxv = [
+            k[1] * v[2] - k[2] * v[1],
+            k[2] * v[0] - k[0] * v[2],
+            k[0] * v[1] - k[1] * v[0],
+        ];
+        [0, 1, 2].map(|n| v[n] * c + kxv[n] * s + k[n] * kv * (1.0 - c))
+    }
+
+    fn apply(m: &[[f64; 4]; 4], p: [f64; 3]) -> [f64; 3] {
+        [0, 1, 2].map(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3])
+    }
+
+    /// The point of a sector's master at the fraction `f` of its sweep on the section's middle,
+    /// placed and unrolled.
+    fn unrolled_at(wall: &CylinderWall, plan: &WallCellPlan, s: &WallSector, f: f64) -> [f64; 2] {
+        let m = &plan.masters[s.master as usize];
+        let rm = (m.section_lo[0] + m.section_hi[0]) / 2.0;
+        let zm = (m.section_lo[1] + m.section_hi[1]) / 2.0;
+        let radial = turn(m.plane_y, m.plane_x, REVOLVE_SIGN * f * m.sweep);
+        let p = [0, 1, 2].map(|n| m.plane_origin[n] + radial[n] * rm + m.plane_y[n] * zm);
+        unroll_point(wall, apply(&s.placement, p)).unwrap()
+    }
+
+    /// Every sector's middle on the unrolled wall, sorted by row then round the wall.
+    fn mids(wall: &CylinderWall, plan: &WallCellPlan) -> Vec<[f64; 2]> {
+        let mut out: Vec<[f64; 2]> = plan
+            .sectors
+            .iter()
+            .map(|s| unrolled_at(wall, plan, s, 0.5))
+            .collect();
+        out.sort_by_key(|[x, z]| ((z * 1e6).round() as i64, (x * 1e6).round() as i64));
+        out
+    }
+
+    /// The sectors of `plan` sit round `wall` as 18 cells of size `s` per row, a web apart:
+    /// both ends of each sector half a cell from its middle, the middles one pitch apart, the
+    /// gap web / r between neighbours, across the seam too.
+    fn assert_evenly_round(wall: &CylinderWall, plan: &WallCellPlan, s: f64) {
+        let r = wall.radius;
+        let c = TAU * r;
+        let p = c / 18.0;
+        for sector in &plan.sectors {
+            let [mid, _] = unrolled_at(wall, plan, sector, 0.5);
+            let mut ends = [
+                unrolled_at(wall, plan, sector, 0.0)[0],
+                unrolled_at(wall, plan, sector, 1.0)[0],
+            ];
+            ends.sort_by(f64::total_cmp);
+            assert!((ends[0] - (mid - s / 2.0)).abs() < 1e-9, "{ends:?} round {mid}");
+            assert!((ends[1] - (mid + s / 2.0)).abs() < 1e-9, "{ends:?} round {mid}");
+        }
+        let all = mids(wall, plan);
+        for row in all.chunks(18) {
+            for k in 0..18 {
+                let next = if k == 17 { row[0][0] + c } else { row[k + 1][0] };
+                let gap = (next - row[k][0]) / r - s / r;
+                assert!((gap - (p - s) / r).abs() < 1e-9, "gap {gap} after {:?}", row[k]);
+                assert!((row[k][1] - row[0][1]).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn square_cells_whose_pitch_divides_the_circumference_close_at_0_and_90_degrees() {
+        let spec = CellGridSpec {
+            shape: CellShape::Square,
+            size: 5.0,
+            web: 1.2,
+            ..CellGridSpec::default()
+        };
+        assert_eq!(closing_steps(&spec, 18.0 * 6.2), Ok((18, 0)));
+        let turned = CellGridSpec {
+            angle: FRAC_PI_2,
+            ..spec
+        };
+        assert_eq!(closing_steps(&turned, 18.0 * 6.2), Ok((0, -18)));
+        // The anchor does not enter.
+        let far = CellGridSpec {
+            anchor: Vec2::new(1e8, -3e7),
+            ..spec
+        };
+        assert_eq!(closing_steps(&far, 18.0 * 6.2), Ok((18, 0)));
+    }
+
+    #[test]
+    fn a_size_that_does_not_go_round_is_refused_naming_the_two_nearest_that_do() {
+        let spec = CellGridSpec {
+            shape: CellShape::Square,
+            size: 8.0,
+            web: 2.0,
+            clip: Clip::Whole,
+            ..CellGridSpec::default()
+        };
+        let want = "square cells of size 8 and web 2 (pitch 10) do not go round evenly: the wall \
+                    is 188.50 mm round; size 8.472 closes with 18 cells, 7.921 with 19";
+        assert_eq!(
+            closing_steps(&spec, TAU * 30.0),
+            Err(CellGridError::Layout(want.into()))
+        );
+        assert_eq!(
+            plan_wall(&tube(), &spec, WallDepth::Through),
+            Err(CellGridError::Layout(want.into()))
+        );
+    }
+
+    #[test]
+    fn hexagons_and_triangles_close_but_are_not_cut_into_a_wall_yet() {
+        let (s, w) = (5.0, 1.2);
+        let c = 12.0 * SQRT3 * (s + w);
+        for (shape, steps) in [(CellShape::Hexagon, (24, -12)), (CellShape::Triangle, (12, 0))] {
+            let spec = CellGridSpec {
+                shape,
+                size: s,
+                web: w,
+                clip: Clip::Whole,
+                ..CellGridSpec::default()
+            };
+            assert_eq!(closing_steps(&spec, c), Ok(steps), "{shape:?}");
+            let wall = CylinderWall {
+                radius: c / TAU,
+                facing_radius: Some(c / TAU - 3.0),
+                ..tube()
+            };
+            match plan_wall(&wall, &spec, WallDepth::Through) {
+                Err(CellGridError::Parameter(m)) => assert!(m.contains("only square cells"), "{m}"),
+                other => panic!("{shape:?}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn whole_square_cells_round_a_tube_are_54_sectors_of_one_master() {
+        let wall = tube();
+        let spec = closing_spec(&wall);
+        let plan = plan_wall(&wall, &spec, WallDepth::Through).unwrap();
+        assert_eq!(plan.round, 18);
+        assert_eq!(plan.sectors.len(), 54);
+        assert_eq!(plan.masters.len(), 1);
+        let m = &plan.masters[0];
+        assert!((m.sweep - spec.size / 30.0).abs() < 1e-12);
+        // Through the 3 mm wall, 0.6 past each surface.
+        assert!((m.section_lo[0] - 26.4).abs() < 1e-12);
+        assert!((m.section_hi[0] - 30.6).abs() < 1e-12);
+        assert!((m.section_hi[1] - m.section_lo[1] - spec.size).abs() < 1e-12);
+        assert!((plan.open_area - 54.0 * spec.size * spec.size).abs() < 1e-6);
+        assert_evenly_round(&wall, &plan, spec.size);
+        // Three rows round mid-height, one pitch apart.
+        let p = TAU * 30.0 / 18.0;
+        let rows: Vec<f64> = mids(&wall, &plan).chunks(18).map(|r| r[0][1]).collect();
+        assert_eq!(rows.len(), 3);
+        for (row, want) in rows.iter().zip([20.0 - p, 20.0, 20.0 + p]) {
+            assert!((row - want).abs() < 1e-9, "{rows:?}");
+        }
+    }
+
+    #[test]
+    fn every_anchor_keeps_each_cell_of_the_wall_once() {
+        let wall = tube();
+        let c = TAU * 30.0;
+        let p = c / 18.0;
+        let want: BTreeSet<(i64, i64)> = (0..18)
+            .flat_map(|i| (-1..=1).map(move |j| (i, j)))
+            .collect();
+        for x in [0.0, p / 2.0, c - 1e-12, -c] {
+            let spec = CellGridSpec {
+                anchor: Vec2::new(x, 20.0),
+                ..closing_spec(&wall)
+            };
+            let plan = plan_wall(&wall, &spec, WallDepth::Through).unwrap();
+            assert_eq!(plan.sectors.len(), 54, "anchor x {x}");
+            let classes: BTreeSet<(i64, i64)> = plan
+                .sectors
+                .iter()
+                .map(|s| (s.i.rem_euclid(18), s.j))
+                .collect();
+            assert_eq!(classes, want, "anchor x {x}");
+        }
+    }
+
+    #[test]
+    fn square_cells_at_90_degrees_are_the_cells_at_0_and_30_degrees_is_refused() {
+        let wall = tube();
+        let spec = closing_spec(&wall);
+        let flat = plan_wall(&wall, &spec, WallDepth::Through).unwrap();
+        let turned_spec = CellGridSpec {
+            angle: FRAC_PI_2,
+            ..spec
+        };
+        let turned = plan_wall(&wall, &turned_spec, WallDepth::Through).unwrap();
+        assert_eq!(turned.round, 18);
+        assert_eq!(turned.masters, flat.masters);
+        let (a, b) = (mids(&wall, &flat), mids(&wall, &turned));
+        assert_eq!(a.len(), b.len());
+        for (p, q) in a.iter().zip(&b) {
+            assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9, "{p:?} {q:?}");
+        }
+        let slanted = CellGridSpec {
+            angle: FRAC_PI_6,
+            ..spec
+        };
+        assert!(matches!(
+            plan_wall(&wall, &slanted, WallDepth::Through),
+            Err(CellGridError::Parameter(_))
+        ));
+    }
+
+    #[test]
+    fn a_free_clipped_cell_at_an_open_end_reaches_past_it_and_at_a_closed_end_is_refused() {
+        let wall = tube();
+        let spec = CellGridSpec {
+            clip: Clip::Free,
+            ..closing_spec(&wall)
+        };
+        let plan = plan_wall(&wall, &spec, WallDepth::Through).unwrap();
+        // Rows at 20 + k p for k in -2..=2; the outer two are trimmed to the ends.
+        assert_eq!(plan.sectors.len(), 90);
+        let ov = 0.6;
+        let bottom = |s: &WallSector| s.placement[2][3];
+        let top = |s: &WallSector| {
+            s.placement[2][3] + plan.masters[s.master as usize].section_hi[1]
+        };
+        let lowest = plan.sectors.iter().map(bottom).fold(f64::INFINITY, f64::min);
+        let highest = plan.sectors.iter().map(top).fold(f64::NEG_INFINITY, f64::max);
+        assert!((lowest - (0.0 - ov)).abs() < 1e-9, "{lowest}");
+        assert!((highest - (40.0 + ov)).abs() < 1e-9, "{highest}");
+        assert_eq!(plan.sectors.iter().filter(|s| (top(s) - 40.6).abs() < 1e-9).count(), 18);
+        let closed = CylinderWall {
+            open_hi: false,
+            ..wall
+        };
+        match plan_wall(&closed, &spec, WallDepth::Through) {
+            Err(CellGridError::Parameter(m)) => assert!(m.contains("wall's end"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        // Whole cells stay clear of the closed end.
+        assert!(plan_wall(&closed, &closing_spec(&wall), WallDepth::Through).is_ok());
+    }
+
+    #[test]
+    fn a_depth_the_wall_cannot_take_is_refused() {
+        let spec = closing_spec(&tube());
+        assert_eq!(
+            plan_wall(&tube(), &spec, WallDepth::Blind(4.0)),
+            Err(CellGridError::Parameter(
+                "depth 4 is more than the wall's 3 mm; leave depth out to cut through".into()
+            ))
+        );
+        // The wall's thickness is through.
+        assert_eq!(
+            plan_wall(&tube(), &spec, WallDepth::Blind(3.0)),
+            plan_wall(&tube(), &spec, WallDepth::Through)
+        );
+        let blind = plan_wall(&tube(), &spec, WallDepth::Blind(1.5)).unwrap();
+        assert!((blind.masters[0].section_lo[0] - 28.5).abs() < 1e-12);
+        assert!((blind.masters[0].section_hi[0] - 30.6).abs() < 1e-12);
+        // A rod: no bore to cut through to, and no depth to its axis.
+        match plan_wall(&rod(), &spec, WallDepth::Through) {
+            Err(CellGridError::Parameter(m)) => assert!(m.contains("no bore"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        for d in [30.0, 31.0, 0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                plan_wall(&rod(), &spec, WallDepth::Blind(d)).is_err(),
+                "depth {d}"
+            );
+        }
+        let groove = plan_wall(&rod(), &spec, WallDepth::Blind(2.0)).unwrap();
+        assert!((groove.masters[0].section_lo[0] - 28.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_bore_unrolls_the_other_way_round_and_its_sectors_follow() {
+        let (outside, inside) = (tube(), bore());
+        let a = 0.1_f64;
+        let [x, z] = unroll_point(&outside, [30.0 * a.cos(), 30.0 * a.sin(), 5.0]).unwrap();
+        assert!((x - 3.0).abs() < 1e-12 && (z - 5.0).abs() < 1e-12);
+        let [x, _] = unroll_point(&inside, [27.0 * a.cos(), 27.0 * a.sin(), 5.0]).unwrap();
+        assert!((x - (TAU * 27.0 - 2.7)).abs() < 1e-9, "{x}");
+        let spec = closing_spec(&inside);
+        let plan = plan_wall(&inside, &spec, WallDepth::Through).unwrap();
+        assert_eq!(plan.sectors.len(), 54);
+        let m = &plan.masters[0];
+        assert!((m.section_lo[0] - 26.4).abs() < 1e-12);
+        assert!((m.section_hi[0] - 30.6).abs() < 1e-12);
+        assert_evenly_round(&inside, &plan, spec.size);
+        let blind = plan_wall(&inside, &spec, WallDepth::Blind(1.0)).unwrap();
+        assert!((blind.masters[0].section_hi[0] - 28.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_hostile_wall_or_grid_is_an_error_not_a_panic() {
+        let spec = closing_spec(&tube());
+        let walls = [
+            CylinderWall {
+                radius: f64::NAN,
+                ..tube()
+            },
+            CylinderWall {
+                radius: f64::INFINITY,
+                ..tube()
+            },
+            CylinderWall {
+                axis: [f64::NAN, 0.0, 1.0],
+                ..tube()
+            },
+            CylinderWall {
+                axis_point: [0.0, f64::INFINITY, 0.0],
+                ..tube()
+            },
+            CylinderWall {
+                z_hi: f64::INFINITY,
+                ..tube()
+            },
+            CylinderWall {
+                z_hi: -1.0,
+                ..tube()
+            },
+            CylinderWall {
+                tol: f64::NAN,
+                ..tube()
+            },
+            CylinderWall {
+                facing_radius: Some(f64::NAN),
+                ..tube()
+            },
+            CylinderWall {
+                tangent: [1.0, 0.0, 0.0],
+                ..tube()
+            },
+            CylinderWall {
+                axis: [0.0, 0.0, 2.0],
+                ..tube()
+            },
+            CylinderWall {
+                radius: 1e-9,
+                facing_radius: None,
+                ..tube()
+            },
+            CylinderWall {
+                radius: 1e9,
+                facing_radius: Some(1e9 - 3.0),
+                ..tube()
+            },
+        ];
+        for wall in &walls {
+            assert!(plan_wall(wall, &spec, WallDepth::Through).is_err(), "{wall:?}");
+            assert!(plan_wall(wall, &spec, WallDepth::Blind(1e-10)).is_err(), "{wall:?}");
+        }
+        for wall in &walls[..10] {
+            assert!(unroll_point(wall, [1.0, 2.0, 3.0]).is_err(), "{wall:?}");
+            assert!(default_anchor(wall, &spec).is_err(), "{wall:?}");
+        }
+        assert!(unroll_point(&tube(), [f64::NAN, 0.0, 0.0]).is_err());
+        assert!(unroll_point(&tube(), [0.0, 0.0, 7.0]).is_err());
+        for bad in [f64::NAN, f64::INFINITY, -1.0, 0.0, 1e300] {
+            assert!(closing_steps(&spec, bad).is_err(), "{bad}");
+        }
+        let grids = [
+            CellGridSpec {
+                size: f64::NAN,
+                ..spec
+            },
+            CellGridSpec {
+                web: f64::INFINITY,
+                ..spec
+            },
+            CellGridSpec {
+                angle: f64::NAN,
+                ..spec
+            },
+            CellGridSpec {
+                anchor: Vec2::new(f64::INFINITY, 0.0),
+                ..spec
+            },
+        ];
+        for grid in &grids {
+            assert!(plan_wall(&tube(), grid, WallDepth::Through).is_err(), "{grid:?}");
+        }
+        // A billion cells round: closes, then the strip reaches too many cells.
+        let tiny = CellGridSpec {
+            size: 1e-3,
+            web: 1e-3,
+            anchor: Vec2::new(1e-3, 20.0),
+            ..spec
+        };
+        let r = 1e9 * 2e-3 / TAU;
+        let huge = CylinderWall {
+            radius: r,
+            facing_radius: Some(r - 3.0),
+            ..tube()
+        };
+        assert!(matches!(
+            plan_wall(&huge, &tiny, WallDepth::Through),
+            Err(CellGridError::TooManyCells { .. })
+        ));
+    }
+}
