@@ -1050,6 +1050,8 @@ pub struct Session {
     /// the features nor the model's results (a joint drag frame) has no new body to pin.
     names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
+    /// [`Session::design_hidden`]'s last answer (#22107).
+    design_hidden_cache: std::sync::Mutex<Option<occurrences::DesignHiddenCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
     /// that walked the hidden lists made a frame cost grow with the size of the design.
@@ -1552,6 +1554,7 @@ impl Session {
             joints_settled: None,
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
@@ -3948,6 +3951,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
