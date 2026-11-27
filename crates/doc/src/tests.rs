@@ -464,6 +464,64 @@ fn a_sketch_whose_face_point_is_on_no_face_warns() {
     assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
 }
 
+/// A sketch saved on a face by a name worked out from geometry (an Align that kept no history
+/// guessed it, #20308) finds no face once that face has its exact name (#22919). Where the saved
+/// point still lies on a flat face on the sketch's own plane and the feature and side that made the
+/// named face still make one, the plane is the same, and the sketch opens on it with a note; a face
+/// that moved off that plane, a point on no face, a name whose root is gone and a name saved
+/// before format 14 still ask for the face to be picked again.
+#[test]
+fn a_sketch_on_a_face_saved_by_a_guessed_name_stays_on_the_same_plane() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3, name: &str| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: Some(name.into()), anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, Some("On top")).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap().clone();
+        let z = m.state().sketches.iter().find(|s| s.feature == id).map(|s| s.plane.origin.z);
+        (result, z)
+    };
+    // The top face's own name told apart by a move no face has: what its root names (the
+    // feature and the side that made it) is still there.
+    let top = {
+        let (doc, _) = plate_doc();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        naming::face_names_at(&m.state(), &[Vec3::new(10.0, 10.0, 20.0)]).pop().unwrap()
+    };
+    let guessed = format!("{top}@F99.1");
+    let guessed = guessed.as_str();
+    let (result, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let warning = result.warning.unwrap_or_default();
+    assert!(warning.contains("has a new name; the sketch stays on the same plane"), "{warning}");
+    assert!(z.is_some_and(|z| (z - 20.0).abs() < 1e-9), "{z:?}");
+    let lost = |result: &FeatureResult, name: &str| result.error.as_deref().and_then(reselect_parts) == Some(("On top", name));
+    // Picked on a plane 5 mm under the top face: the sketch would move, so the face under the
+    // point is not taken for it.
+    let (result, _) = sketch_on(15.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // The point is on no face.
+    let (result, _) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // A name whose root no face has any more (its sketch curve deleted and drawn again) is lost.
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), "F7:side:l47@F9.1");
+    assert!(lost(&result, "F7:side:l47@F9.1"), "{result:?}");
+    // A name saved before format 14 is never found by its point.
+    let legacy = format!("{}{guessed}", naming::LEGACY_MARK);
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), &legacy);
+    assert!(lost(&result, &legacy), "{result:?}");
+}
+
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
 /// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
 #[test]
