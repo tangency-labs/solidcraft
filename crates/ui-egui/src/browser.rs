@@ -1672,6 +1672,26 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     }
 }
 
+/// The Browser's view options, as on/off rows of its panel's ⋯ menu: (action id, label id, on).
+/// Each is a saved setting, off by default.
+pub(crate) fn menu_toggles(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)> {
+    vec![("history-without-folder", "prefs.browser_history_without_folder", app.preferences.browser_history_without_folder)]
+}
+
+/// A row of the Browser panel's header or ⋯ menu: the search's magnifier, or one of
+/// [`menu_toggles`], which turns its setting over.
+pub(crate) fn menu_action(app: &mut SolveApp, action: &str) -> Result<(), String> {
+    let setting = match action {
+        "history-without-folder" => "browser_history_without_folder",
+        _ => {
+            magnifier(app);
+            return Ok(());
+        }
+    };
+    let on = menu_toggles(app).iter().any(|(id, _, on)| *id == action && *on);
+    crate::prefs::set(app, &json!({ setting: !on })).map(|_| ())
+}
+
 /// In the compact layout with the History shown in the Browser, the Browser is the only side panel
 /// and holds the whole History, so it fills the window's height instead of hugging its rows (#14566).
 /// The panel host still folds it to its header when the user folds it.

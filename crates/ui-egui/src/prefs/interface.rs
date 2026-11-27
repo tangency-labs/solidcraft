@@ -687,13 +687,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "browser_eye_left",
                         value: |p| &mut p.browser_eye_left,
                     },
-                    // The History in the Browser without its folder row.
-                    Check {
-                        label: "prefs.browser_history_without_folder",
-                        help: "prefs.browser_history_without_folder_note",
-                        key: "browser_history_without_folder",
-                        value: |p| &mut p.browser_history_without_folder,
-                    },
                     Check {
                         label: "prefs.browser_body_features",
                         help: "prefs.browser_body_features_note",

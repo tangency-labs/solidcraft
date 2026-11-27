@@ -371,6 +371,7 @@ impl PanelController for VisibleSpecimen {
             } else {
                 Vec::new()
             },
+            menu_heading: None,
         }
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {

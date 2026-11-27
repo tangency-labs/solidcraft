@@ -2151,6 +2151,26 @@ mod tests {
         assert!(!h.app.preferences.history_in_browser);
     }
 
+    /// The option is a ticked or unticked row in the View section of the Browser panel's ⋯ menu,
+    /// and a click on the row turns the saved setting over.
+    #[test]
+    fn the_history_without_a_folder_option_is_a_row_of_the_browser_menu() {
+        let mut h = Harness::new();
+        assert!(!h.app.preferences.browser_history_without_folder, "off by default");
+        assert!(
+            crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("history-without-folder", "prefs.browser_history_without_folder", false)),
+            "a row of the menu, unticked"
+        );
+        crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();
+        assert!(h.app.preferences.browser_history_without_folder, "a click turns it on");
+        assert!(
+            crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("history-without-folder", "prefs.browser_history_without_folder", true)),
+            "ticked"
+        );
+        crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();
+        assert!(!h.app.preferences.browser_history_without_folder, "a second click turns it off");
+    }
+
     /// "History without a folder": the features are listed straight under the component, one
     /// level up, with no History folder row; off, they sit in the folder.
     #[test]

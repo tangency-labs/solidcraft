@@ -3429,6 +3429,7 @@ impl WorkspacePanelHost {
         let layout = runtime.layout().layout();
         let mut groups = Vec::new();
         let mut content_actions = Vec::new();
+        let mut content_heading: Option<String> = None;
         let mut tabs = Vec::new();
         match &menu {
             HostMenu::Panel(instance) => {
@@ -3488,6 +3489,7 @@ impl WorkspacePanelHost {
                         groups.push(admitted);
                     }
                 }
+                content_heading = metadata.get(instance).and_then(|presentation| presentation.menu_heading.clone());
                 let actions = metadata.get(instance).into_iter().flat_map(|presentation| &presentation.actions);
                 content_actions.extend(actions.filter(|entry| {
                     !frame.controls.iter().any(|control| {
@@ -3508,7 +3510,11 @@ impl WorkspacePanelHost {
         }
         let has_shared = !groups.is_empty();
         let has_content = !content_actions.is_empty();
-        let rows = groups.iter().map(Vec::len).sum::<usize>() + content_actions.len() + 2 * tabs.len() + usize::from(self.last_rejection.is_some());
+        let rows = groups.iter().map(Vec::len).sum::<usize>()
+            + content_actions.len()
+            + usize::from(has_content && content_heading.is_some())
+            + 2 * tabs.len()
+            + usize::from(self.last_rejection.is_some());
         let separators = (groups.len() + usize::from(has_content) + tabs.len()).saturating_sub(1);
         let Some(bounds) = menu_geometry(frame.layout.capacity, anchor, rows, separators) else {
             self.clear_menu();
@@ -3554,6 +3560,7 @@ impl WorkspacePanelHost {
                                 &label,
                                 shared_menu_icon(&shared, collapsed, frame.layout.direction),
                                 true,
+                                None,
                                 &mut self.menu_reveal,
                             );
                             self.menu_items.push(response.id);
@@ -3570,16 +3577,28 @@ impl WorkspacePanelHost {
                         if has_shared {
                             ui_kit::Menu::separator(ui);
                         }
+                        // A heading names the section, and its on/off rows show a check mark.
+                        if let Some(heading) = &content_heading {
+                            ui_kit::Menu::heading(ui, heading);
+                        }
                         let spec = layout.instance(instance).and_then(|panel| runtime.layout().registry().get(&panel.kind)).ok();
                         for action in content_actions {
                             let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
                             let registered = spec.and_then(|spec| spec.header_actions.iter().find(|entry| entry.id == action.id));
+                            let checked = content_heading.is_some().then_some(action.pressed).flatten();
+                            // An on/off row with no header icon puts its check mark where the icon goes.
+                            let icon = match registered {
+                                Some(entry) => entry.icon.as_str(),
+                                None if checked.is_some() => "",
+                                None => "settings",
+                            };
                             let response = menu_row(
                                 ui,
                                 control_id(runtime, owners, &target),
                                 &action.label,
-                                registered.map_or("settings", |entry| entry.icon.as_str()).into(),
+                                icon.into(),
                                 action.enabled,
+                                checked,
                                 &mut self.menu_reveal,
                             );
                             if response.enabled() {
@@ -3650,13 +3669,22 @@ fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separa
     Some(egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)))
 }
 
-fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, icon: ui_kit::Icon<'_>, enabled: bool, reveal: &mut Option<egui::Id>) -> egui::Response {
+fn menu_row(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    label: &str,
+    icon: ui_kit::Icon<'_>,
+    enabled: bool,
+    checked: Option<bool>,
+    reveal: &mut Option<egui::Id>,
+) -> egui::Response {
     let response = ui
         .push_id(id.with("menu"), |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 let registry_id = format!("panel:{id:?}");
                 let mut row = ui_kit::MenuItem::new(&registry_id, label, icon);
                 row.enabled = enabled;
+                row.checked = checked;
                 row.show(ui)
             })
             .inner
@@ -3761,7 +3789,7 @@ fn menu_instance(
     let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
     let check = runtime.layout().prepare(action.clone());
     let accessible = locale.format("ui.panel_host.focus_target", &[("title", label)]);
-    let response = menu_row(ui, control_id(runtime, owners, &target), &accessible, icon.into(), check.is_ok(), reveal);
+    let response = menu_row(ui, control_id(runtime, owners, &target), &accessible, icon.into(), check.is_ok(), None, reveal);
     if response.enabled() {
         items.push(response.id);
     }
@@ -3774,7 +3802,7 @@ fn menu_instance(
     }
     let target = HostControlTarget::PanelMenu { instance: instance.clone() };
     let actions_label = format!("{label} — {}", locale.text("ui.panel_host.menu"));
-    let response = menu_row(ui, control_id(runtime, owners, &target), &actions_label, "dots".into(), true, reveal);
+    let response = menu_row(ui, control_id(runtime, owners, &target), &actions_label, "dots".into(), true, None, reveal);
     if response.enabled() {
         items.push(response.id);
     }
