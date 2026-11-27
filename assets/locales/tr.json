@@ -6974,7 +6974,7 @@
   "ui.ribbon_exit": "Çıkış",
   "ui.ribbon_labels": "Şerit simgelerinin altında metin göster",
   "ui.ribbon_menus_skip_pinned": "Sabitlenen komutları açılır menülerin dışında bırak",
-  "ui.ribbon_pin_footer": "Sabitlenen komutlar şeritte görünür. Sabitlemek veya kaldırmak için bir satırın üzerine gelin.",
+  "ui.ribbon_pin_footer": "Sabitlenen komutlar şeritte görünür. Bir komutu ⋯ menüsünden sabitleyin veya sabitlemesini kaldırın.",
   "ui.ribbon_workspace": "Çalışma alanı",
   "ui.right": "Sağ",
   "ui.right_click_confirms": "Sağ tıklama iletişim kutusu girişlerini onaylar",

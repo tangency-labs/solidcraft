@@ -109,6 +109,7 @@ pub mod split;
 pub mod step_assembly;
 pub mod stitch;
 pub mod stop;
+pub mod stroke_runs;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
