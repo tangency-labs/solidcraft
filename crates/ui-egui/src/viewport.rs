@@ -10973,12 +10973,12 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // drawn where they are.
     let previewed = crate::dim_view::previewed_sketch(app);
     let dragging = app.viewport.point_drag.is_some();
+    let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
     let hover = app.viewport.hover.as_ref().filter(|h| {
         !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
             && !(dragging && matches!(h, Hit::SketchMidpoint { .. }))
     });
-    let col = Tokens::get().hover_profile_edge;
     match hover {
         Some(Hit::SketchPoint3d { at, .. } | Hit::PlacedSketchPoint { at, .. }) => {
             if let Some(p) = proj.to_screen(*at) {
