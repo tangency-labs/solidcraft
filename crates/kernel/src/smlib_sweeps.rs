@@ -81,12 +81,15 @@ pub(crate) struct Draft {
 #[cfg(test)]
 pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
-    body_from_record, curve, curve_tolerance, cylinder, cylinder_circle, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves,
-    loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_revolved_primitive, path_curve, project_onto_face, rail_curves,
-    railed_skin, revolve, screw, screw_radial, skin_sections, sphere, sweep, sweep_controlled, torus,
+    body_from_record, curve, curve_tolerance, cylinder, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_many_rails,
+    loft_to_point, loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections,
+    sphere, sweep, sweep_controlled, torus,
 };
 #[cfg(feature = "backend-occt")]
-pub(crate) use imp::{extrusion_curves, loft_curves_of, name_extrusion, name_loft, name_revolution, revolution_curves};
+pub(crate) use imp::{
+    cylinder_circle, extrusion_curves, loft_curves_of, name_cylinder, name_extrusion, name_loft, name_revolution, name_revolved_primitive,
+    revolution_curves,
+};
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
 /// the next pair, and so on, a part left over at the end of a level carried up as it is. Every
