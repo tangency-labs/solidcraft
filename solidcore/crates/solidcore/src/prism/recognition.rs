@@ -846,12 +846,13 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     let stored = [p0, p1, p2, p3, h0, h1, h2, h3]
         .into_iter()
         .fold(Vec2::ZERO, |cell, p| larger(cell, rounding(p)));
-    let sums = [(p0, p1), (p1, p2), (p2, p3), (p3, p0)]
-        .into_iter()
-        .fold(Vec2::ZERO, |cell, (a, b)| {
-            let sum = Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs());
-            larger(cell, rounding(sum))
-        });
+    let sums =
+        [(p0, p1), (p1, p2), (p2, p3), (p3, p0)]
+            .into_iter()
+            .fold(Vec2::ZERO, |cell, (a, b)| {
+                let sum = Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs());
+                larger(cell, rounding(sum))
+            });
     let control_rounding = Vec2::new(
         ellipse_bound_add(ellipse_bound_add(stored.x, stored.x), sums.x),
         ellipse_bound_add(ellipse_bound_add(stored.y, stored.y), sums.y),

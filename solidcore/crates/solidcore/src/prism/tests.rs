@@ -1941,10 +1941,7 @@ mod recognition {
                     "{major:?}"
                 );
                 assert!(major.cross(u).abs() < 1e-9, "{major:?} {u:?}");
-                assert!(
-                    (ratio - minor / u.length_hypot()).abs() < 1e-12,
-                    "{ratio}"
-                );
+                assert!((ratio - minor / u.length_hypot()).abs() < 1e-12, "{ratio}");
                 for seg in &path.segs {
                     for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
                         let d = seg.point_at(t) - c;
@@ -1959,7 +1956,9 @@ mod recognition {
         // A control or a corner moved by 64 EPSILON of the largest coordinate, a few
         // ULPs but more than any of the cells, is not one ellipse; neither is a gap.
         let size = ellipse.segs.iter().fold(0.0_f64, |size, seg| match *seg {
-            Seg2::Conic { a, apex, .. } => size.max(a.x.abs().max(a.y.abs()).max(apex.x.abs()).max(apex.y.abs())),
+            Seg2::Conic { a, apex, .. } => {
+                size.max(a.x.abs().max(a.y.abs()).max(apex.x.abs()).max(apex.y.abs()))
+            }
             _ => size,
         });
         let step = 64.0 * f64::EPSILON * size;
