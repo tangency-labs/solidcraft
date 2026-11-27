@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.palette_sketch_open_view": "When opening an existing sketch",
+    "ui.palette_sketch_open_view_note": "Remember a sketch's last camera view within its open design. New sketches use the normal view. The remembered view is not stored in the design file.",
+    "ui.palette_sketch_open_view.face": "Current behavior",
+    "ui.palette_sketch_open_view.last": "Last view, including Cancel",
+    "ui.palette_sketch_open_view.last_finished": "Last view from Finish only"
+  },
+  "ar": {
+    "ui.palette_sketch_open_view": "عند فتح رسم تخطيطي موجود",
+    "ui.palette_sketch_open_view_note": "تذكّر آخر عرض للكاميرا داخل التصميم المفتوح. تستخدم الرسومات الجديدة العرض المعتاد. لا يُحفظ العرض في ملف التصميم.",
+    "ui.palette_sketch_open_view.face": "السلوك الحالي",
+    "ui.palette_sketch_open_view.last": "آخر عرض، بما في ذلك الإلغاء",
+    "ui.palette_sketch_open_view.last_finished": "آخر عرض عند الإنهاء فقط"
+  },
+  "de": {
+    "ui.palette_sketch_open_view": "Beim Öffnen einer vorhandenen Skizze",
+    "ui.palette_sketch_open_view_note": "Die letzte Kameraansicht einer Skizze im geöffneten Entwurf merken. Neue Skizzen nutzen die normale Ansicht. Die Ansicht wird nicht in der Entwurfsdatei gespeichert.",
+    "ui.palette_sketch_open_view.face": "Bisheriges Verhalten",
+    "ui.palette_sketch_open_view.last": "Letzte Ansicht, auch nach Abbrechen",
+    "ui.palette_sketch_open_view.last_finished": "Letzte Ansicht nur nach Fertigstellen"
+  },
+  "he": {
+    "ui.palette_sketch_open_view": "בעת פתיחת סקיצה קיימת",
+    "ui.palette_sketch_open_view_note": "שמירת תצוגת המצלמה האחרונה של הסקיצה בעיצוב הפתוח. סקיצות חדשות משתמשות בתצוגה הרגילה. התצוגה אינה נשמרת בקובץ העיצוב.",
+    "ui.palette_sketch_open_view.face": "התנהגות נוכחית",
+    "ui.palette_sketch_open_view.last": "התצוגה האחרונה, כולל ביטול",
+    "ui.palette_sketch_open_view.last_finished": "התצוגה האחרונה לאחר סיום בלבד"
+  },
+  "ja": {
+    "ui.palette_sketch_open_view": "既存のスケッチを開くとき",
+    "ui.palette_sketch_open_view_note": "開いている設計でスケッチの最後のカメラ表示を記憶します。新しいスケッチには通常の表示を使います。表示は設計ファイルには保存されません。",
+    "ui.palette_sketch_open_view.face": "現在の動作",
+    "ui.palette_sketch_open_view.last": "最後の表示（キャンセルを含む）",
+    "ui.palette_sketch_open_view.last_finished": "完了したときの最後の表示のみ"
+  },
+  "ko": {
+    "ui.palette_sketch_open_view": "기존 스케치를 열 때",
+    "ui.palette_sketch_open_view_note": "열린 설계에서 스케치의 마지막 카메라 보기를 기억합니다. 새 스케치는 기본 보기를 사용합니다. 보기는 설계 파일에 저장되지 않습니다.",
+    "ui.palette_sketch_open_view.face": "현재 동작",
+    "ui.palette_sketch_open_view.last": "마지막 보기(취소 포함)",
+    "ui.palette_sketch_open_view.last_finished": "완료한 경우의 마지막 보기만"
+  },
+  "vi": {
+    "ui.palette_sketch_open_view": "Khi mở phác thảo hiện có",
+    "ui.palette_sketch_open_view_note": "Ghi nhớ góc nhìn cuối cùng của phác thảo trong thiết kế đang mở. Phác thảo mới dùng góc nhìn thông thường. Góc nhìn không được lưu vào tệp thiết kế.",
+    "ui.palette_sketch_open_view.face": "Hành vi hiện tại",
+    "ui.palette_sketch_open_view.last": "Góc nhìn cuối, kể cả khi Hủy",
+    "ui.palette_sketch_open_view.last_finished": "Chỉ góc nhìn cuối khi Hoàn tất"
+  },
+  "zh": {
+    "ui.palette_sketch_open_view": "打开现有草图时",
+    "ui.palette_sketch_open_view_note": "在打开的设计中记住草图上次的相机视角。新草图仍使用常规视角。此视角不会保存在设计文件中。",
+    "ui.palette_sketch_open_view.face": "当前行为",
+    "ui.palette_sketch_open_view.last": "上次视角，包括取消时",
+    "ui.palette_sketch_open_view.last_finished": "仅记住完成时的上次视角"
+  }
+}

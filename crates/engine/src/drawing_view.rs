@@ -703,19 +703,26 @@ pub fn check_centre_view(d: &Drawing, view: u64, what: &str, cmd: &str) -> Resul
     }
 }
 
-/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
-/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
-/// editable. Pictures leave out every section view for now.
-pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
-    match view.cut.as_ref()?.line.kind() {
-        SectionKind::Full if view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded() => {
-            Some("not supported yet: a shaded section view")
-        }
+/// Why a cutting line of `kind` can't be cut yet, if it can't (#13046): only a full section is
+/// cut so far.
+pub fn not_cut_yet_kind(kind: SectionKind) -> Option<&'static str> {
+    match kind {
         SectionKind::Full => None,
         SectionKind::Half => Some("not supported yet: a half section"),
         SectionKind::Offset => Some("not supported yet: an offset section"),
         SectionKind::Aligned => Some("not supported yet: an aligned section"),
     }
+}
+
+/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
+/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
+/// editable. Pictures leave out every section view for now.
+pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
+    let kind = view.cut.as_ref()?.line.kind();
+    if let Some(why) = not_cut_yet_kind(kind) {
+        return Some(why);
+    }
+    (view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()).then_some("not supported yet: a shaded section view")
 }
 
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
