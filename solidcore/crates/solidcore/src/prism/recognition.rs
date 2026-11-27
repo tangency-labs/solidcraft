@@ -798,12 +798,11 @@ fn corner_combination(terms: &[(f64, Vec2)]) -> Option<EllipsePoint> {
 /// c = c* + mean(e) for stored corner errors e, a corner is off by (e0 - e1 + e2 - e3) / 4,
 /// within the corners' largest half ULP; a control by mean(e) plus its two roundings, the
 /// half ULPs of |a| + |b| and of the control itself.
-/// The widening applies only while the control cell's reach along each axis of the
-/// ellipse stays within sqrt(EPSILON) of that semi-axis: half of the significand still
-/// resolves the ellipse's thinnest direction, so no point in a cell can fold a quarter or
-/// flip its turn. Beyond that the
-/// world spacing, not the curve, would decide the shape (a 4/3 split at x = 2^52), and
-/// only the local cell applies; a loop that does not resolve even that is refused.
+/// The stored points must also lie, along each semi-axis, within sqrt(EPSILON) of that
+/// semi-axis from the construction: half of the significand still resolves the ellipse in
+/// its thinnest direction, so the points cannot fold a quarter or flip its turn. Where the
+/// world spacing, not the curve, decides the shape (a 4/3 split at x = 2^52), the loop is
+/// refused.
 /// Joins are exact.
 fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     let [q0, q1, q2, q3] = lp.segs.as_slice() else {
@@ -868,25 +867,11 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     // The producer's rounding, and the returned centre's.
     let corner_rounding = add(corners_rounding, rounding(center));
     let control_rounding = add(add(corner_rounding, controls_rounding), largest(sums));
-    // A cell's reach along each axis of the ellipse, against sqrt(EPSILON) of that axis.
-    let resolves = |cell: Vec2| {
-        [major, minor].into_iter().all(|axis| {
-            let length = axis.length_hypot();
-            let reach = (cell.x * axis.x.abs() + cell.y * axis.y.abs()) / length;
-            reach <= length * f64::EPSILON.sqrt()
-        })
-    };
-    let widened = add(control_local, control_rounding);
-    let (corner_cell, control_cell) = if resolves(widened) {
-        (add(corner_local, corner_rounding), widened)
-    } else {
-        (corner_local, control_local)
-    };
-    if !resolves(control_cell) {
-        return None;
-    }
+    let corner_cell = add(corner_local, corner_rounding);
+    let control_cell = add(control_local, control_rounding);
 
     let offsets = [u, v, -u, -v];
+    let mut farthest = Vec2::ZERO;
     for ((corner, control), (from, to)) in corners
         .into_iter()
         .zip([h0, h1, h2, h3])
@@ -899,6 +884,20 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
         if !corner.fits(corner_cell) || !control.fits(control_cell) {
             return None;
         }
+        for point in [corner, control] {
+            let reach = Vec2::new(point.x.magnitude_bound(), point.y.magnitude_bound());
+            farthest = larger(farthest, reach);
+        }
+    }
+    // How far the stored points actually are from the construction, along each semi-axis,
+    // against sqrt(EPSILON) of that semi-axis.
+    let resolved = [major, minor].into_iter().all(|axis| {
+        let length = axis.length_hypot();
+        let reach = (farthest.x * axis.x.abs() + farthest.y * axis.y.abs()) / length;
+        reach <= length * f64::EPSILON.sqrt()
+    });
+    if !resolved {
+        return None;
     }
     if major.x < 0.0 || (major.x == 0.0 && major.y < 0.0) {
         major = -major;

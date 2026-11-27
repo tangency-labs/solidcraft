@@ -1986,15 +1986,23 @@ mod recognition {
         }
     }
 
-    // The stored rounding widens the quarter cells only while the ellipse resolves it
-    // (at most sqrt(EPSILON) of the minor semi-axis). Otherwise only the local cell
-    // applies, so a loop whose shape the world spacing decides stays four arcs.
+    // Inside their cells, the stored quarter points must also lie within sqrt(EPSILON) of
+    // each semi-axis from the construction, so a loop whose shape the world spacing
+    // decides stays four arcs, and an exact one is never refused for its size.
     #[test]
-    fn profile_ellipse_quarters_widen_only_where_the_ellipse_resolves_the_rounding() {
-        // At (2^40, 2^40) a corner's half ULP is 2^-13, above sqrt(EPSILON) * 8.
+    fn profile_ellipse_quarters_need_points_the_ellipse_resolves() {
+        // At (2^40, 2^40) the corners are rounded to 2^-12, far above sqrt(EPSILON) * 8.
         let far = Vec2::new(2.0_f64.powi(40), 2.0_f64.powi(40));
         let turned = sketch_ellipse_quarters(far, far + Vec2::new(-25.0, -20.0), 8.0);
         assert_eq!(turned.as_ellipse(), None);
+        // An exact turned ellipse thinner than sqrt(EPSILON) keeps its answer.
+        let u = Vec2::new(2.0_f64.powi(26), 2.0_f64.powi(26));
+        let thin = ellipse_quarters(Vec2::ZERO, u, Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            thin.as_ellipse(),
+            Some((Vec2::ZERO, u, 2.0_f64.powi(-26))),
+            "{thin:?}"
+        );
         // An exact turned circle at 2^52 keeps its answer: its points need no widening.
         let c = Vec2::new(2.0_f64.powi(52) + 2.0, 0.0);
         let circle = ellipse_quarters(c, Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0));
