@@ -1247,6 +1247,11 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
 /// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
 /// or the merge did. With each contact read as one touch at the cusp, the cut builds
 /// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
+/// Then seeds that failed at the other two contacts, 5e-10 to 3e-9 off: where the cut ends
+/// on the floor, the floor's section of the tool's arc face crossed the floor's side once
+/// 2.5e-4 from the cusp and the result was not a solid (seeds 32, 3, 4); and where it
+/// starts, the touch of the block's arc face and the tool's line face was found 1.5e-4 from
+/// the cusp and split the tool's line edge alone, and the merge failed (seeds 2, 14).
 #[test]
 #[allow(clippy::disallowed_methods)] // the oracle points' closed form, not ops computing geometry
 fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
@@ -1260,6 +1265,11 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         (8, 1e-9),
         (28, 1e-9),
         (33, 1e-9),
+        (2, 5e-10),
+        (32, 5e-10),
+        (3, 1e-9),
+        (4, 3e-9),
+        (14, 3e-9),
     ] {
         let tools = cusp_tools(&block, seed, noise);
         // the tools lie inside the block, touching its back face and each other: the cut
@@ -1585,6 +1595,152 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     );
     assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
     assert_eq!(token.polls(), Some(n + 1));
+}
+
+/// tangency-labs/solidcraft#22578: a rod along x (0 to 72, radius 4, chamfered ends, relief
+/// grooves of radius 3.25 at x 25 to 25.5 and 46.5 to 47) and a thread cut of pitch 1.25 and
+/// 21.25 turns from x = -1.25 along +x, a 60 degree V with a rounded root, its top on the rod's
+/// radius, so the coil's outer wall is a cylinder on the rod's own. The cut was refused by the
+/// check (a loop's edges one whole period apart in u) where its twin, the same cut from
+/// x = 73.25 along -x, builds. The twin is this design turned half a turn about the vertical
+/// line through x = 36, which maps the rod, its seam half-plane (y 0, z above the axis), the
+/// coil's profile and its half turns onto themselves: both cuts are one valid solid with the
+/// same face, edge and vertex counts. The coil comes to the cut through its record, as
+/// SolidCraft's does: its walls are their certified nets, without the screw definitions the
+/// record has no field for (built and cut in memory, with them, it built before too).
+///
+/// The volume is the rod's (Pappus over its polygon) less the thread's part inside it,
+/// integrated over the screw motion (volume element r dr du dphi; the chord of the profile at
+/// each radius, an exact integral along x, adaptive in r): 3430.968886633128 mm³, to 1e-12.
+/// The coil's walls lie within the sweep's tolerance of their screw surfaces, so the cut's
+/// volume is within the coil's area times that tolerance of it. Both end discs of the rod stay
+/// whole (the cut lost the one at x = 0).
+#[test]
+fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
+    use solidcore_ops::sweep::screw_sweep;
+    all_fixes();
+    let rod = [
+        [0.0, 0.0],
+        [72.0, 0.0],
+        [72.0, 3.375],
+        [71.375, 4.0],
+        [47.75, 4.0],
+        [46.99999999999999, 3.2500000000000027],
+        [46.49999999999999, 3.250000000000003],
+        [45.750000000000014, 4.0],
+        [26.25, 4.0],
+        [25.500000000000004, 3.2500000000000013],
+        [25.0, 3.2500000000000013],
+        [24.250000000000007, 4.0],
+        [0.6250000000000021, 4.0],
+        [0.0, 3.375],
+    ];
+    // (x, z) to (x, 0, z); `flip` turns it half a turn about the line x = 36 along z, which
+    // leaves the rod as it is (its polygon is its own image, to the last bits as sketched)
+    let at = |[x, z]: [f64; 2], flip: bool| {
+        if flip {
+            [72.0 - x, 0.0, z]
+        } else {
+            [x, 0.0, z]
+        }
+    };
+    let (pitch, turns, tolerance) = (1.25, 21.25, 1.25e-4);
+    let exact = 3_430.968_886_633_128;
+    let cut = |flip: bool| {
+        let n = rod.len();
+        let profile: Vec<Curve> = (0..n)
+            .map(|i| Curve::Line {
+                start: at(rod[i], false),
+                end: at(rod[(i + 1) % n], false),
+            })
+            .collect();
+        let stock = revolve(&profile, [0.0; 3], [1.0, 0.0, 0.0], TAU, true).unwrap();
+        // the V: its root an arc of radius 0.1 about (-1.25, 3.475), its flanks up to radius 4
+        let root = (-1.250_000_000_000_000_2, 3.474_999_999_999_999_6);
+        let (a, b) = (
+            [-1.336_602_540_378_443_4, 3.425],
+            [-1.163_397_459_621_557, 3.425],
+        );
+        let (c, d) = (
+            [-0.831_421_054_837_520_5, 4.0],
+            [-1.668_578_945_162_48, 4.0],
+        );
+        // the arc counter-clockwise about -y from a to b, angle 0 along +x (both turned too)
+        let s = if flip { -1.0 } else { 1.0 };
+        let section = vec![
+            Curve::Arc {
+                center: at([root.0, root.1], flip),
+                axis: [0.0, -s, 0.0],
+                reference: [s, 0.0, 0.0],
+                radius: 0.099_999_999_999_999_31,
+                start: -2.617_993_877_991_492_6,
+                end: -0.523_598_775_598_300_9,
+            },
+            Curve::Line {
+                start: at(b, flip),
+                end: at(c, flip),
+            },
+            Curve::Line {
+                start: at(c, flip),
+                end: at(d, flip),
+            },
+            Curve::Line {
+                start: at(d, flip),
+                end: at(a, flip),
+            },
+        ];
+        let origin = at([root.0, 0.0], flip);
+        let swept = screw_sweep(
+            &section,
+            origin,
+            [s, 0.0, 0.0],
+            pitch,
+            turns,
+            None,
+            tolerance,
+        );
+        // as SolidCraft hands it to the cut: through its record, its walls their nets alone
+        let coil = Body::from_record(&swept.unwrap().to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        // only the coil's walls stray from their surfaces, by the tolerance at most, and the
+        // cut keeps no more of them than the coil has
+        let bound = coil.area(1e-8).unwrap() * tolerance;
+        let r = boolean(stock, coil, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("flip {flip}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        let v = volume(&r);
+        let counts = r.counts().unwrap();
+        eprintln!(
+            "flip {flip}: volume {v} bound {bound} counts {counts:?} {}",
+            report.text
+        );
+        assert!(report.is_valid(), "flip {flip}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "flip {flip}");
+        assert!((v - exact).abs() <= bound, "flip {flip}: {v} vs {exact}");
+        // the rod's end discs, both whole: the coil's caps lie outside the rod (the start
+        // cap past its end, the end cap over the groove, whose radius is under the root's)
+        let (record, order) = r.to_record().unwrap();
+        let discs: Vec<(f64, f64)> = (0..record.faces.len())
+            .filter_map(|i| match &record.faces[i].surface {
+                Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                    Some((origin[0], r.face_area(&order, i, 1e-10).unwrap()))
+                }
+                _ => None,
+            })
+            .collect();
+        let disc = PI * 3.375 * 3.375;
+        assert_eq!(discs.len(), 2, "flip {flip}: {discs:?}");
+        for (x, a) in &discs {
+            assert!(*x == 0.0 || *x == 72.0, "flip {flip}: {discs:?}");
+            assert!((a - disc).abs() <= 1e-9 * disc, "flip {flip}: {discs:?}");
+        }
+        counts
+    };
+    // the twin first: it built before this change too
+    let twin = cut(true);
+    assert_eq!(cut(false), twin);
 }
 
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
@@ -3392,6 +3548,80 @@ fn a_traced_join_of_the_ten_wedges_in_turn_lies_on_its_operands_and_inside_none(
         assert!(
             classes.iter().any(|c| c[n] == PointClass::OnBoundary),
             "{from} at {p:?} is on no operand's boundary"
+        );
+    }
+}
+
+/// #21931: #17118's cut the other way round, each of the ten wedges less the target. A wedge
+/// reaches out of the target only where the target's groove rounds dip below its slopes near the
+/// top, so what is left is the wedge less its part inside the target, which the intersect of the
+/// target with the wedge gives. The sliver of a groove's round in the wedge's thin edge lies within
+/// the tolerance of the wedge's plane, which the cut keeps (it lies outside the target), so the
+/// sliver must be kept to close the leftover beside it. Deleted, the result was open; kept, it was
+/// made in the wedge's outside, so no face split the wedge's inside and the result had no solid
+/// region. Both came back as "not a closed solid".
+///
+/// The leftover is two pieces, at the two groove rounds the wedge's round passes into, each of
+/// three faces of the wedge and two of the target's round (the sliver one of them): 5 faces,
+/// 9 edges and 6 vertices (6 - 9 + 5 = 2). The cut
+/// and the intersect split the wedge along the same faces of the target, the sliver among them
+/// (the film between the sliver and the wedge's plane goes with the cut), so their volumes add
+/// up to the wedge's exactly. The bound is the accuracy the integration is asked for, 1e-11 of
+/// each volume, about 1.6e-11 over the wedge and the intersect, with a margin: 1e-10, against a
+/// leftover of 6.7e-5.
+#[test]
+fn each_traced_wedge_less_the_grooved_target_leaves_the_part_of_the_wedge_outside_it() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    for i in 0..10 {
+        let w = format!("wedge{i}");
+        let inside = boolean(body("target"), body(&w), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap()
+            .volume(1e-11)
+            .unwrap();
+        let want = body(&w).volume(1e-11).unwrap() - inside;
+        let r = boolean(body(&w), body("target"), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{w}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 2, "{w}");
+        assert_eq!(r.counts().unwrap(), [10, 18, 12], "{w}");
+        let v = r.volume(1e-11).unwrap();
+        assert!(
+            (v - want).abs() <= 1e-10,
+            "{w}: volume {v}, the wedge less its part inside the target {want}"
+        );
+    }
+}
+
+/// #21931: the intersect of each of the ten wedges with the target, the wedge first, is the
+/// intersect the other way round, which builds. The same sliver of a groove's round, kept here
+/// as the copy of the wedge's plane, was made in the wedge's outside, so the faces of the target
+/// that bound the intersect split no region of the wedge and the result had no solid region.
+/// Both orders keep the same faces, so the counts agree and the volumes differ by no more than
+/// ten times the accuracy the integration is asked for.
+#[test]
+fn each_traced_wedge_intersected_with_the_grooved_target_is_the_intersect_either_way_round() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    for i in 0..10 {
+        let w = format!("wedge{i}");
+        let want = boolean(body("target"), body(&w), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+        let r = boolean(body(&w), body("target"), BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{w}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "{w}");
+        assert_eq!(r.counts().unwrap(), want.counts().unwrap(), "{w}");
+        let (v, u) = (r.volume(1e-11).unwrap(), want.volume(1e-11).unwrap());
+        assert!(
+            (v - u).abs() <= 1e-10,
+            "{w}: volume {v}, the other way round {u}"
         );
     }
 }

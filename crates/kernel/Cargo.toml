@@ -40,6 +40,11 @@ sysinfo = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 
+[[example]]
+# The Open CASCADE experiment's row of the kernel support matrix (docs/kernel-support.md).
+name = "occt_matrix"
+required-features = ["backend-occt"]
+
 [features]
 # Solidcore's own profiler, written as JSON Lines through `write_kernel_profiles`.
 solidcore-profile = ["solidcraft-smlib/solidcore-profile"]

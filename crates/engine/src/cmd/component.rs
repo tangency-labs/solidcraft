@@ -177,6 +177,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&properties::BODY_COLLISION_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
         .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
+    CommandSpec::new("body.edge_lines", "Edge Lines", crate::checked!("body.edge_lines", properties::body_edge_lines))
+        .icon("eye")
+        .contract(&properties::BODY_EDGE_LINES_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyEdgeLinesResult>)
+        .params("body: its name, or bodies: several names; show?: bool (default true): false draws the bodies without their edge lines in every visual style (an overlay such as a thin label), true draws them as the style says; saved in the design"),
     CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
         .icon("measure")
         .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)
