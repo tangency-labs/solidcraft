@@ -1294,6 +1294,77 @@ pub fn arc_third_point_2d(
         .min_by(|x, y| length_2d(sub_2d(*x, h)).total_cmp(&length_2d(sub_2d(*y, h))))
 }
 
+/// Not upstream: the distance between two points.
+#[must_use]
+pub fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
+    length_2d(sub_2d(b, a))
+}
+
+/// Not upstream: the side of the line from `p` to `q` the region lies on that is on the left
+/// of the piece from `a` to `b` (a piece of a counter-clockwise loop lying on that line):
+/// `Some(true)` left of the line seen from `p` towards `q`, `Some(false)` right. `None` when
+/// an end of the piece lies further from the line than `tol` times the line's size, the line
+/// or the piece has no length, or a value is not finite.
+#[must_use]
+pub fn left_side_along_line_2d(
+    a: [f64; 2],
+    b: [f64; 2],
+    p: [f64; 2],
+    q: [f64; 2],
+    tol: f64,
+) -> Option<bool> {
+    let u = sub_2d(q, p);
+    let len = length_2d(u);
+    let size = 1.0 + len + length_2d(p);
+    // Whether the line has a length is its own matter; how far a piece may lie off it grows
+    // with where it is, as rounding does.
+    if !(tol.is_finite()
+        && tol >= 0.0
+        && len.is_finite()
+        && size.is_finite()
+        && len > tol * (1.0 + len))
+    {
+        return None;
+    }
+    let off = |x: [f64; 2]| {
+        let [dx, dy] = sub_2d(x, p);
+        (dx * u[1] - dy * u[0]).abs()
+    };
+    if !(off(a) <= tol * size * len && off(b) <= tol * size * len) {
+        return None;
+    }
+    let along = dot_2d(sub_2d(b, a), u);
+    if along > 0.0 {
+        Some(true)
+    } else if along < 0.0 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Not upstream: whether the region on the left of an arc piece (a piece of a counter-clockwise
+/// loop, about `centre` with `radius`, sweeping `sweep` radians, positive counter-clockwise)
+/// lies inside the circle about `c` of radius `r` the piece lies on: `Some(true)` inside,
+/// `Some(false)` outside. `None` when the piece's centre or radius is further from the circle's
+/// than `tol` times its size, the piece has no sweep, or a value is not finite.
+#[must_use]
+pub fn left_side_inside_circle_2d(
+    centre: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    c: [f64; 2],
+    r: f64,
+    tol: f64,
+) -> Option<bool> {
+    let size = 1.0 + r.abs() + length_2d(c);
+    if !(tol.is_finite() && tol >= 0.0 && size.is_finite() && sweep.is_finite() && sweep != 0.0) {
+        return None;
+    }
+    let on = distance_2d(centre, c) <= tol * size && (radius.abs() - r.abs()).abs() <= tol * size;
+    on.then_some(sweep > 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1819,6 +1890,93 @@ mod tests {
             Point2::new(f64::MAX, 0.0),
         ])
         .is_err());
+    }
+
+    /// A piece running along its line has the region on the line's left, one running against it
+    /// on its right; a piece off the line, a line or piece with no length and bad numbers give
+    /// none.
+    #[test]
+    fn a_piece_on_a_line_tells_the_side_its_region_is_on() {
+        let (p, q) = ([0.0, 1.0], [0.0, 21.0]);
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 9.0], [0.0, 5.0], p, q, 1e-9),
+            Some(false)
+        );
+        // Past the line's ends, on its carrier, still on it.
+        assert_eq!(
+            left_side_along_line_2d([0.0, 30.0], [0.0, 25.0], p, q, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_along_line_2d([1e-6, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 5.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, p, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, f64::NAN),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([f64::NAN, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(distance_2d([1.0, 1.0], [4.0, 5.0]), 5.0);
+        // A short line far from the origin tells the same side as at the origin.
+        for x in [0.0, 5e5] {
+            let (p, q) = ([x, 0.0], [x, 4e-4]);
+            assert_eq!(
+                left_side_along_line_2d([x, 1e-4], [x, 3e-4], p, q, 1e-9),
+                Some(true),
+                "{x}"
+            );
+            assert_eq!(
+                left_side_along_line_2d([x, 3e-4], [x, 1e-4], p, q, 1e-9),
+                Some(false),
+                "{x}"
+            );
+        }
+    }
+
+    /// A counter-clockwise arc piece has the region inside its circle, a clockwise one outside;
+    /// a piece on another circle, with no sweep or bad numbers gives none.
+    #[test]
+    fn an_arc_piece_tells_whether_its_region_is_inside_the_circle() {
+        let c = [0.0, 19.4];
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 1.2, c, 3.04, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, -1.2, c, 3.04, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d([0.0, 20.0], 3.04, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.05, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 0.0, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, f64::NAN, c, 3.04, 1e-9),
+            None
+        );
     }
 
     #[test]

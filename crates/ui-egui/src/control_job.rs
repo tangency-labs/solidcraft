@@ -953,7 +953,7 @@ impl SolveApp {
             let result = result.and_then(|reply| {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
-                        self.sketch_closed(sketch.as_u64());
+                        self.sketch_closed(sketch.as_u64(), false);
                     }
                 }
                 if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
