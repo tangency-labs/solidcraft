@@ -1841,8 +1841,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // broken references re-picked via #16661): remember where they sit now (in the model before
     // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
-        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. } | FeatureKind::Dogbone { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. }
+        | FeatureKind::Chamfer { edges: b, body: was, .. }
+        | FeatureKind::Dogbone { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
         && (a != b || body != was || sets_path(set, "edges"))
     {
@@ -1930,6 +1932,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
+    keep_object_refs(&f, &mut nf, [sets_path(set, "extent.to_ref"), sets_path(set, "extent.from_ref")]);
     let copy_sources_of = |kind: &FeatureKind| match kind {
         FeatureKind::Pattern { bodies, components, occurrences, join, .. }
             if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
@@ -3096,6 +3099,22 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
     keys
 }
 
+/// An extrude's To and From references (#8527) through an edit. The Extrude dialog reopens a
+/// reference as the point stored with it and sends that point back unchanged: the same point
+/// keeps the reference, so the extrude still follows it. Another point replaces it. An edit that
+/// gives a reference itself, or clears it, says what it is: `given` holds that for To and From.
+fn keep_object_refs(old: &Feature, new: &mut Feature, given: [bool; 2]) {
+    let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&old.kind, &mut new.kind) else { return };
+    let same =
+        |x: Option<solidcraft_doc::FacePick>, y: Option<solidcraft_doc::FacePick>| matches!((x, y), (Some(x), Some(y)) if x.0.dist(y.0) < 1e-6);
+    if !given[0] {
+        b.to_ref = if same(a.to, b.to) { a.to_ref.clone() } else { None };
+    }
+    if !given[1] {
+        b.from_ref = if same(a.from, b.from) { a.from_ref.clone() } else { None };
+    }
+}
+
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
@@ -3175,6 +3194,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .chain(super::features_more::COMMANDS)
         .chain(crate::features::lighten::COMMANDS)
+        .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
@@ -3195,6 +3215,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.refold"
                 | "sheet.convert"
                 | "sheet.recognize"
+                | "sheet.corner_join"
                 | "plastic.boss"
                 | "plastic.lip"
                 | "plastic.snap_fit"
@@ -3377,6 +3398,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
     }
+    let flange_corners = if matches!(old.kind, FeatureKind::SheetFlange { .. }) && cid == "sheet.flange" {
+        let corners = super::sheet::flange_corners(s, &params, cmd)?;
+        if let Some(parameters) = params.as_object_mut() {
+            parameters.remove("corners");
+        }
+        Some(corners)
+    } else {
+        None
+    };
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
@@ -3488,6 +3518,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
+    let given = match &new.kind {
+        FeatureKind::Extrude { extent, .. } => [extent.to_ref.is_some(), extent.from_ref.is_some()],
+        _ => [false; 2],
+    };
+    keep_object_refs(&old, &mut new, given);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
@@ -3499,6 +3534,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
+    }
+    if let (FeatureKind::SheetFlange { corners, .. }, Some(mut saved)) = (&mut new.kind, flange_corners) {
+        if s.doc.units.trim() != "mm" {
+            for corner in &mut saved {
+                if corner.kind == solidcraft_doc::CornerJoinKind::PartialOverlap
+                    && let Some(overlap) = &mut corner.overlap
+                {
+                    *overlap = s.doc.with_design_unit(overlap, solidcraft_doc::expr::Kind::Length).into();
+                }
+                if let Some(gap) = &mut corner.gap {
+                    *gap = s.doc.with_design_unit(gap, solidcraft_doc::expr::Kind::Length).into();
+                }
+            }
+        }
+        *corners = saved;
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its

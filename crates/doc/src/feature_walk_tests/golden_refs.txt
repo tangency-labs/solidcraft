@@ -3,6 +3,8 @@ frame_end_cap
   remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
 frame_member_turn
   remap_refs: member.feature
+dogbone
+  remap_bodies: body
 frame_gusset
   remap_refs: supports[0].member.feature, supports[0].plane.base.base.feature, supports[1].plane.base.base.feature
 body_transfer
@@ -163,6 +165,12 @@ sheet_contour
   sketches: [1]
   remap_refs: sketch
 sheet_flange
+  remap_bodies: body
+sheet_flange_with_corners
+  remap_refs: corners[0].covered, corners[0].covering, corners[1].covering
+  remap_bodies: body
+sheet_corner_join
+  remap_refs: covered, covering
   remap_bodies: body
 sheet_hem
   remap_bodies: body

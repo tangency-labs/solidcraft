@@ -60,6 +60,7 @@ pub mod dialogs_capture;
 pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
+pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
@@ -83,6 +84,7 @@ pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -137,6 +139,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
+pub(crate) mod keyboard_profiles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
@@ -450,9 +453,14 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
+pub mod workshop;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -650,6 +658,9 @@ pub struct Services {
     pub usage_http: Option<tickets::Http>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
     pub window_system: Option<&'static str>,
+    /// HTTPS GET to workshop.solidcraft.io with the signature headers, for Workshop links
+    /// (`workshop`); None: links are not opened (browser, tests).
+    pub workshop_get: Option<workshop::HttpGet>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -813,6 +824,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// Plugin updates found at start, and the one being downloaded or reviewed.
     pub(crate) plugin_updates: plugin_updates::State,
+    /// A Workshop link being looked up, downloaded or asked about (`workshop`).
+    pub(crate) workshop: workshop::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -1248,6 +1261,7 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             plugin_updates: Default::default(),
+            workshop: Default::default(),
             import_report: None,
             saving: None,
             host_saves: Vec::new(),
@@ -4798,6 +4812,7 @@ impl SolveApp {
         #[cfg(feature = "usage-stats")]
         usage_stats::tick(self, ctx);
         plugin_updates::tick(self, ctx);
+        workshop::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
@@ -5133,6 +5148,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // A Workshop link can arrive while Home shows: its question shows there too.
+                workshop::show(self, ui.ctx());
                 // The recovery banner's Discard all asks here (File view lists the designs inline).
                 recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
@@ -5177,6 +5194,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        workshop::show(self, ui.ctx());
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
