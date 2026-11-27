@@ -98,16 +98,59 @@ pub(crate) fn sub_into(acc: &mut Vec<f64>, f: &[f64]) {
     }
 }
 
+/// Adds `b` into `acc` in place with zero elimination, returning `None` if `b` is not finite
+/// or if any intermediate sum overflows to a non-finite value.
+#[inline]
+pub(crate) fn grow_into_checked(acc: &mut Vec<f64>, b: f64) -> Option<()> {
+    if !b.is_finite() {
+        return None;
+    }
+    if b == 0.0 {
+        return Some(());
+    }
+    let mut q = b;
+    let mut write = 0usize;
+    let n = acc.len();
+    for read in 0..n {
+        let Some(&c) = acc.get(read) else {
+            break;
+        };
+        if c == 0.0 {
+            continue;
+        }
+        let (s, err) = two_sum(q, c);
+        if !s.is_finite() || !err.is_finite() {
+            return None;
+        }
+        if err != 0.0 {
+            if let Some(slot) = acc.get_mut(write) {
+                *slot = err;
+            }
+            write += 1;
+        }
+        q = s;
+    }
+    acc.truncate(write);
+    if q != 0.0 {
+        acc.try_reserve(1).ok()?;
+        acc.push(q);
+    }
+    Some(())
+}
+
 /// Adds `e * b` into `acc` in place without allocating intermediate expansions.
 #[inline]
 pub(crate) fn add_scaled_into(acc: &mut Vec<f64>, e: &[f64], b: f64) -> Option<()> {
+    if !b.is_finite() {
+        return None;
+    }
     if b == 0.0 {
-        return (b.is_finite() && e.iter().all(|c| c.is_finite())).then_some(());
+        return e.iter().all(|c| c.is_finite()).then_some(());
     }
     for &c in e {
         let (err, prod) = product_pair(c, b)?;
-        grow_into(acc, err);
-        grow_into(acc, prod);
+        grow_into_checked(acc, err)?;
+        grow_into_checked(acc, prod)?;
     }
     Some(())
 }
@@ -161,11 +204,14 @@ pub(crate) fn product(a: f64, b: f64) -> Option<Vec<f64>> {
 
 /// `e b` as an expansion: each component's product, summed.
 pub(crate) fn scale(e: &[f64], b: f64) -> Option<Vec<f64>> {
+    if !b.is_finite() {
+        return None;
+    }
     if b == 0.0 {
-        return (b.is_finite() && e.iter().all(|c| c.is_finite())).then(Vec::new);
+        return e.iter().all(|c| c.is_finite()).then(Vec::new);
     }
     let mut acc = Vec::new();
-    let _ = acc.try_reserve(e.len().saturating_mul(2));
+    acc.try_reserve(e.len().saturating_mul(2)).ok()?;
     add_scaled_into(&mut acc, e, b)?;
     Some(acc)
 }
@@ -176,11 +222,11 @@ fn diff_products(a1: f64, b1: f64, a2: f64, b2: f64) -> Option<Vec<f64>> {
     let (e1, p1) = product_pair(a1, b1)?;
     let (e2, p2) = product_pair(a2, b2)?;
     let mut acc = Vec::new();
-    let _ = acc.try_reserve(4);
-    grow_into(&mut acc, e1);
-    grow_into(&mut acc, p1);
-    grow_into(&mut acc, -e2);
-    grow_into(&mut acc, -p2);
+    acc.try_reserve(4).ok()?;
+    grow_into_checked(&mut acc, e1)?;
+    grow_into_checked(&mut acc, p1)?;
+    grow_into_checked(&mut acc, -e2)?;
+    grow_into_checked(&mut acc, -p2)?;
     Some(acc)
 }
 
@@ -199,13 +245,13 @@ pub(crate) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
     let (ey, py) = product_pair(u.y, v.y)?;
     let (ez, pz) = product_pair(u.z, v.z)?;
     let mut acc = Vec::new();
-    let _ = acc.try_reserve(6);
-    grow_into(&mut acc, ex);
-    grow_into(&mut acc, px);
-    grow_into(&mut acc, ey);
-    grow_into(&mut acc, py);
-    grow_into(&mut acc, ez);
-    grow_into(&mut acc, pz);
+    acc.try_reserve(6).ok()?;
+    grow_into_checked(&mut acc, ex)?;
+    grow_into_checked(&mut acc, px)?;
+    grow_into_checked(&mut acc, ey)?;
+    grow_into_checked(&mut acc, py)?;
+    grow_into_checked(&mut acc, ez)?;
+    grow_into_checked(&mut acc, pz)?;
     Some(acc)
 }
 
@@ -213,7 +259,7 @@ pub(crate) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
 pub(crate) fn det3(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec<f64>> {
     let [x, y, z] = cross(a, b)?;
     let mut acc = Vec::new();
-    let _ = acc.try_reserve(12);
+    acc.try_reserve(12).ok()?;
     add_scaled_into(&mut acc, &x, c.x)?;
     add_scaled_into(&mut acc, &y, c.y)?;
     add_scaled_into(&mut acc, &z, c.z)?;
@@ -318,5 +364,26 @@ mod tests {
             "expected compact expansion, got {}",
             prod.len()
         );
+    }
+
+    #[test]
+    fn non_finite_scales_and_accumulation_overflow_return_none() {
+        // Non-finite scale on an empty expansion must be rejected.
+        let mut acc = Vec::new();
+        assert!(add_scaled_into(&mut acc, &[], f64::NAN).is_none());
+        assert!(add_scaled_into(&mut acc, &[], f64::INFINITY).is_none());
+        assert!(scale(&[], f64::NAN).is_none());
+        assert!(det3(Vec3::X, Vec3::Y, Vec3::new(f64::NAN, 0.0, 1.0)).is_none());
+        assert!(det3(Vec3::X, Vec3::Y, Vec3::new(f64::INFINITY, 0.0, 1.0)).is_none());
+
+        // Overflow during accumulation must return None.
+        let mut big = vec![f64::MAX];
+        assert!(add_scaled_into(&mut big, &[f64::MAX], 1.0).is_none());
+        assert!(dot(Vec3::new(f64::MAX, f64::MAX, 0.0), Vec3::new(1.0, 1.0, 0.0)).is_none());
+
+        // Exact cancellation of MAX + (-MAX) stays finite and yields 0.
+        let mut cancel = vec![f64::MAX];
+        add_scaled_into(&mut cancel, &[f64::MAX], -1.0).unwrap();
+        assert!(is_zero(&cancel));
     }
 }

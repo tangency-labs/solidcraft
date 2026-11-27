@@ -3285,7 +3285,8 @@ fn wrap_angle(d: f64) -> f64 {
 /// `e f` as an expansion.
 fn expansion_mul(e: &[f64], f: &[f64]) -> Option<Vec<f64>> {
     let mut acc = Vec::new();
-    let _ = acc.try_reserve(e.len().saturating_mul(f.len()).saturating_mul(2));
+    acc.try_reserve(e.len().saturating_mul(f.len()).saturating_mul(2))
+        .ok()?;
     crate::geom::expansion::add_mul_into(&mut acc, e, f)?;
     Some(acc)
 }
@@ -3364,8 +3365,9 @@ struct CircleNurbSegment {
     coeff_bounds: SegmentCoeffBounds,
 }
 
-/// Validated, coplanar rational quadratic circle NURB segments for repeated [`radial_deviation`]
-/// queries across subdivisions of the same curve (hoisted out of `curve_runs_along`).
+/// Validated, coplanar rational quadratic circle NURB segments for repeated
+/// [`CircleNurbSegments::radial_deviation`] queries across subdivisions of the same curve
+/// (hoisted out of `curve_runs_along`).
 struct CircleNurbSegments {
     c: Point3,
     r: f64,
@@ -3398,9 +3400,9 @@ impl CircleNurbSegments {
         }
         let plane_c = det3(px, py, c)?;
         let mut hw = Vec::new();
-        let _ = hw.try_reserve(n);
+        hw.try_reserve(n).ok()?;
         let mut diff = Vec::new();
-        let _ = diff.try_reserve(16);
+        diff.try_reserve(16).ok()?;
         for p in cpts {
             let w = if p.w == NOW { 1.0 } else { p.w };
             let z = if p.z == NOZ { 0.0 } else { p.z };
@@ -3420,7 +3422,7 @@ impl CircleNurbSegments {
         let r2 = product(r, r)?;
         let seg_count = (n - 1) >> 1;
         let mut segments = Vec::new();
-        let _ = segments.try_reserve(seg_count);
+        segments.try_reserve(seg_count).ok()?;
         for j in 0..seg_count {
             let (Some(ka), Some(kb)) = (at(2 * j + 2), at(2 * j + 3)) else {
                 return None;
@@ -3470,15 +3472,15 @@ impl CircleNurbSegments {
         let term = |i: usize, k: usize| -> Option<Vec<f64>> {
             let ((qi, wi), (qk, wk)) = (q.get(i)?, q.get(k)?);
             let mut d = Vec::new();
-            let _ = d.try_reserve(16);
+            d.try_reserve(16).ok()?;
             for (a, b) in qi.iter().zip(qk.iter()) {
                 add_mul_into(&mut d, a, b)?;
             }
             let mut rw = Vec::new();
-            let _ = rw.try_reserve(4);
+            rw.try_reserve(4).ok()?;
             add_scaled_into(&mut rw, r2, *wi)?;
             let mut rww = Vec::new();
-            let _ = rww.try_reserve(8);
+            rww.try_reserve(8).ok()?;
             add_scaled_into(&mut rww, &rw, *wk)?;
             sub_into(&mut d, &rww);
             Some(d)
@@ -3494,12 +3496,13 @@ impl CircleNurbSegments {
 
         let scaled_bounds = |t: &[f64], factor: f64| -> Option<(f64, f64)> {
             let mut e = Vec::new();
-            let _ = e.try_reserve(t.len().saturating_mul(2));
+            e.try_reserve(t.len().saturating_mul(2)).ok()?;
             add_scaled_into(&mut e, t, factor)?;
             expansion_bounds(&e)
         };
         let mut c2 = Vec::new();
-        let _ = c2.try_reserve(t02.len().saturating_add(t11.len()).saturating_mul(2));
+        c2.try_reserve(t02.len().saturating_add(t11.len()).saturating_mul(2))
+            .ok()?;
         add_scaled_into(&mut c2, &t02, 2.0)?;
         add_scaled_into(&mut c2, &t11, 4.0)?;
 
@@ -3541,6 +3544,9 @@ impl CircleNurbSegments {
             };
             // the segment's local parameters of the range, widened by their rounding
             let len = seg.kb - seg.ka;
+            if !(len.is_finite() && len > 0.0) {
+                return None;
+            }
             let local = |t: f64| (t.max(seg.ka).min(seg.kb) - seg.ka) / len;
             let slack = 8.0 * ROUNDOFF * (seg.ka.abs().max(seg.kb.abs()) / len + 1.0);
             let span = [(local(lo) - slack).max(0.0), (local(hi) + slack).min(1.0)];
@@ -3714,7 +3720,7 @@ impl CoplanarCircles {
         let concentric = a0 == e0;
         let offset_len = (a0 - e0).length();
         let mut offset2 = Vec::new();
-        let _ = offset2.try_reserve(12);
+        offset2.try_reserve(12).ok()?;
         for (p, q) in [(a0.x, e0.x), (a0.y, e0.y), (a0.z, e0.z)] {
             let d = sub(&[p], &[q]);
             add_mul_into(&mut offset2, &d, &d)?;
