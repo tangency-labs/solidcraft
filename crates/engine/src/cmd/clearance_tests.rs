@@ -682,6 +682,282 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     assert_eq!(a_near_ok, vec![("B", 0.0), ("C", 5.0)]);
 }
 
+/// Reference overlap volume (mm³) for the fixed fixture below: a flat-faced rib penetrating
+/// 1.35 mm (`d = 48.65 mm`) into an `R = 50 mm` cylinder over height `h = 13 mm`:
+/// `(R² · arccos(d / R) − d · √(R² − d²)) · h ≈ 270.7796 mm³`.
+const RIB_CYLINDER_OVERLAP_MM3: f64 = 270.7796;
+
+/// Saves a hollow cylinder (`CylBody`, outer radius 50, inner radius 40, z 0..40), a part with a
+/// mounting plate touching z = 40 and a rib penetrating 1.35 mm into the cylinder wall over z
+/// 27..40 (~271 mm³, with no vertex of either solid strictly inside the other), and a touching-only
+/// part without the penetrating rib.
+fn save_linked_cylinder_and_rib_parts(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let cyl_path = dir.join("cyl.sc");
+    let rib_path = dir.join("rib.sc");
+    let touch_path = dir.join("touch.sc");
+
+    let mut cyl = Session::default();
+    run(&mut cyl, "solid.cylinder", json!({"radius": 50, "height": 40, "base": [0, 0, 0], "operation": "new", "body_name": "CylBody"}));
+    run(&mut cyl, "solid.cylinder", json!({"radius": 40, "height": 42, "base": [0, 0, -1], "operation": "cut", "targets": ["CylBody"]}));
+    run(&mut cyl, "file.save", json!({"path": cyl_path.to_string_lossy()}));
+
+    // Under the 90° Z rotation matrix [0, -1, 0, tx,  1, 0, 0, ty,  0, 0, 1, tz]:
+    // local (lx, ly, lz) maps to world (-ly + tx, lx + ty, lz + tz).
+    // Plate: lx -10..10, ly -65..-42, lz 40..46 -> world relative to origin: x 42..65, y -10..10, z 40..46 (touches z = 40 at 0 mm gap).
+    // Rib:   lx -20..20, ly -65..-48.65, lz 27..40 -> world relative: x 48.65..65, y -20..20, z 27..40 (1.35 mm penetration, all corners at r >= 52.6 > 50).
+    let mut rib = Session::default();
+    run(
+        &mut rib,
+        "solid.box",
+        json!({"length": 20, "width": 23, "height": 6, "corner": [-10, -65, 40], "operation": "new", "body_name": "PartBody"}),
+    );
+    run(
+        &mut rib,
+        "solid.box",
+        json!({"length": 40, "width": 16.35, "height": 13, "corner": [-20, -65, 27], "operation": "join", "targets": ["PartBody"]}),
+    );
+    run(&mut rib, "file.save", json!({"path": rib_path.to_string_lossy()}));
+
+    let mut touch = Session::default();
+    run(
+        &mut touch,
+        "solid.box",
+        json!({"length": 20, "width": 23, "height": 6, "corner": [-10, -65, 40], "operation": "new", "body_name": "TouchBody"}),
+    );
+    run(&mut touch, "file.save", json!({"path": touch_path.to_string_lossy()}));
+
+    (cyl_path, rib_path, touch_path)
+}
+
+/// 1-level linked sub-assembly: a cylinder body in a linked component checked against a part
+/// inserted via `component.insert_design` with a non-identity rotation+translation matrix far from
+/// the origin, followed by `timeline.compute_all`. Verifies both the ~271 mm³ rib overlap (where
+/// no vertex of either solid is strictly inside the other) and the 0 mm touching-face contact.
+#[test]
+fn linked_subassembly_with_rotated_part_detects_rib_overlap_and_touching_face() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-linked-1level-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (cyl_path, rib_path, touch_path) = save_linked_cylinder_and_rib_parts(&dir);
+
+    let tx = -430.5;
+    let ty = -1100.0;
+    let tz = -693.8051;
+    let matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
+    let want_vol = RIB_CYLINDER_OVERLAP_MM3;
+
+    // Part A: overlapping rib (1.35 mm penetration, ~271 mm³) + touching mounting face (0 mm gap).
+    let mut sub = Session::default();
+    let cyl_ins = run(&mut sub, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    let part_ins = run(&mut sub, "component.insert_design", json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "matrix": matrix}));
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let part_body = part_ins["bodies"][0].as_str().unwrap().to_string();
+    let rebuilt = run(&mut sub, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    // Confirm the test point lies strictly inside both world bodies.
+    let probe = [tx + 49.3, ty, tz + 33.5];
+    for name in [&cyl_body, &part_body] {
+        let cls = run(&mut sub, "inspect.classify_points", json!({"body": name, "points": [probe]}));
+        assert_eq!(cls["results"][0]["class"], "inside", "{name}: {cls}");
+    }
+
+    let r = run(&mut sub, "inspect.clearance", json!({"bodies": [&part_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert_eq!(pair(&overlaps[0]), {
+        let mut expected = [cyl_body.clone(), part_body.clone()];
+        expected.sort();
+        expected
+    });
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "got {got_vol} vs expected {want_vol}: {r}");
+    assert!((f(&overlaps[0]["center"][0]) - (tx + 49.2)).abs() < 1.0, "{r}");
+    assert!((f(&overlaps[0]["center"][1]) - ty).abs() < 1.0, "{r}");
+    assert!((f(&overlaps[0]["center"][2]) - (tz + 33.5)).abs() < 1.0, "{r}");
+
+    // Part B: touching-only mounting face (0 mm gap, no rib overlap) must report in `near` at 0 mm.
+    let mut sub_touch = Session::default();
+    let cyl_ins =
+        run(&mut sub_touch, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    let touch_ins =
+        run(&mut sub_touch, "component.insert_design", json!({"path": touch_path.to_string_lossy(), "name": "TouchLink", "matrix": matrix}));
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let touch_body = touch_ins["bodies"][0].as_str().unwrap().to_string();
+    run(&mut sub_touch, "timeline.compute_all", json!({}));
+
+    let r = run(&mut sub_touch, "inspect.clearance", json!({"bodies": [&touch_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["overlaps"], json!([]), "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 1, "{r}");
+    assert_eq!(f(&near[0]["distance_mm"]), 0.0, "{r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 2-level nested linked sub-assembly: tests both inserting the saved sub-assembly into a parent
+/// scene with a second rotation+translation matrix, and placing linked components under a nested
+/// sub-assembly component (2-level occurrence path) with non-identity matrices at both levels.
+#[test]
+fn nested_two_level_linked_subassembly_detects_overlap() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-linked-2level-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (cyl_path, rib_path, _) = save_linked_cylinder_and_rib_parts(&dir);
+    let sub_path = dir.join("subasm.sc");
+
+    let tx = -430.5;
+    let ty = -1100.0;
+    let tz = -693.8051;
+    let inner_matrix = json!([0, -1, 0, tx, 1, 0, 0, ty, 0, 0, 1, tz]);
+    // Second rigid rotation+translation (+90° about X, plus translation) for the parent scene.
+    let outer_matrix = json!([1, 0, 0, 250.0, 0, 0, -1, 120.0, 0, 1, 0, -80.0]);
+    let want_vol = RIB_CYLINDER_OVERLAP_MM3;
+
+    // Build and save the sub-assembly containing both linked components.
+    let mut sub = Session::default();
+    run(&mut sub, "component.insert_design", json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "translate": [tx, ty, tz]}));
+    run(&mut sub, "component.insert_design", json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "matrix": inner_matrix}));
+    run(&mut sub, "file.save", json!({"path": sub_path.to_string_lossy()}));
+
+    // Case 2a: saved sub-assembly inserted into a parent scene with a non-identity matrix.
+    let mut scene_linked = Session::default();
+    let ins =
+        run(&mut scene_linked, "component.insert_design", json!({"path": sub_path.to_string_lossy(), "name": "SubAsm", "matrix": outer_matrix}));
+    let bodies: Vec<String> = ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    assert_eq!(bodies.len(), 2, "{ins}");
+    run(&mut scene_linked, "timeline.compute_all", json!({}));
+
+    let r = run(&mut scene_linked, "inspect.clearance", json!({"bodies": [&bodies[1]], "against": [&bodies[0]], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "2a got {got_vol} vs expected {want_vol}: {r}");
+
+    // Case 2b: true 2-level occurrence hierarchy (Scene -> SubAsm -> CylLink / RibLink), each with
+    // non-identity rotation+translation matrices.
+    let mut scene_nested = Session::default();
+    let sub_comp = run(&mut scene_nested, "component.create", json!({"name": "SubAsm", "activate": false}));
+    let sub_id = sub_comp["component"].as_u64().unwrap();
+    let sub_occ = sub_comp["occurrence"].as_u64().unwrap();
+    run(&mut scene_nested, "occurrence.move", json!({"occurrence": sub_occ, "matrix": outer_matrix, "capture": true, "move_grounded": true}));
+    let cyl_ins = run(
+        &mut scene_nested,
+        "component.insert_design",
+        json!({"path": cyl_path.to_string_lossy(), "name": "CylLink", "parent": sub_id, "translate": [tx, ty, tz]}),
+    );
+    let part_ins = run(
+        &mut scene_nested,
+        "component.insert_design",
+        json!({"path": rib_path.to_string_lossy(), "name": "RibLink", "parent": sub_id, "matrix": inner_matrix}),
+    );
+    let cyl_body = cyl_ins["bodies"][0].as_str().unwrap().to_string();
+    let part_body = part_ins["bodies"][0].as_str().unwrap().to_string();
+    run(&mut scene_nested, "timeline.compute_all", json!({}));
+
+    let r = run(&mut scene_nested, "inspect.clearance", json!({"bodies": [&part_body], "against": [&cyl_body], "clearance": 0.5}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.02 * want_vol, "2b got {got_vol} vs expected {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `solidcraft_kernel::overlap_witness` detects interior overlap when a rib pierces a cylinder
+/// wall without any vertex of either solid lying inside the other, and returns `None` when two
+/// solids only touch along a planar face (0 mm gap).
+#[test]
+fn overlap_witness_catches_rib_penetrating_cylinder_without_interior_vertices() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 50, "height": 40, "base": [0, 0, 0], "operation": "new", "body_name": "Cyl"}));
+    run(&mut s, "solid.box", json!({"length": 16.35, "width": 40, "height": 13, "corner": [48.65, -20, 27], "operation": "new", "body_name": "Rib"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 6, "corner": [35, -10, 40], "operation": "new", "body_name": "Touch"}));
+    let st = s.world_state().unwrap();
+    let cyl = st.body("Cyl").unwrap();
+    let rib = st.body("Rib").unwrap();
+    let touch = st.body("Touch").unwrap();
+    let (mc, mr, mt) = (cyl.mesh(), rib.mesh(), touch.mesh());
+    let sc = solidcraft_kernel::DistanceShape::new(&cyl.body, &mc, cyl.display_tol());
+    let sr = solidcraft_kernel::DistanceShape::new(&rib.body, &mr, rib.display_tol());
+    let stouch = solidcraft_kernel::DistanceShape::new(&touch.body, &mt, touch.display_tol());
+
+    let witness = solidcraft_kernel::overlap_witness(&sc, &sr).unwrap();
+    assert!(witness.is_some(), "rib penetrating cylinder wall must yield an exact overlap witness");
+    let no_witness = solidcraft_kernel::overlap_witness(&sc, &stouch).unwrap();
+    assert!(no_witness.is_none(), "touching-only solids must not produce an overlap witness: {no_witness:?}");
+}
+
+/// `timeline.compute_all` clears `clearance_cache` so a full recompute measures pairs afresh.
+#[test]
+fn timeline_compute_all_clears_clearance_cache() {
+    let mut s = Session::default();
+    cube(&mut s, "A", 10.0, [0.0, 0.0, 0.0]);
+    cube(&mut s, "B", 10.0, [9.0, 0.0, 0.0]);
+    let first = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(first["pairs_reused"], 0, "{first}");
+    let second = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(second["pairs_reused"], 1, "{second}");
+    run(&mut s, "timeline.compute_all", json!({}));
+    let after = run(&mut s, "inspect.clearance", json!({}));
+    assert_eq!(after["pairs_reused"], 0, "{after}");
+    assert_eq!(after["overlaps"].as_array().map(Vec::len), Some(1), "{after}");
+}
+
+/// Socket Reach (#21884), on the issue's example: a 19 mm socket over a bolt head with a wall
+/// 12 mm from the axis has 2.5 mm to spare; a rib 3 mm out of the wall into its path blocks it.
+/// The socket comes from the side the edge has no material on; flipped, it runs into the plate.
+#[test]
+fn a_socket_is_blocked_by_a_rib_in_its_path_and_not_by_a_wall_beside_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 100, "width": 60, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 30, 5], "radius": 6.5, "height": 5, "operation": "new", "body_name": "Head"}));
+    run(&mut s, "solid.box", json!({"corner": [42, 0, 5], "length": 5, "width": 60, "height": 40, "operation": "new", "body_name": "Wall"}));
+    // The head's top edge: a circle of radius 6.5 about (30, 30) at z = 10.
+    let reach = |s: &mut Session, extra: Value| {
+        let mut p = json!({"edge": [36.5, 30, 10], "diameter": 19, "length": 30});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        run(s, "inspect.socket_reach", p)
+    };
+    let clear = reach(&mut s, json!({}));
+    assert_eq!(clear["clear"], json!(true), "{clear}");
+    assert_eq!(clear["origin"], json!([30.0, 30.0, 10.0]), "{clear}");
+    assert!((f(&clear["direction"][2]) - 1.0).abs() < 1e-9, "away from the head, up: {clear}");
+    assert_eq!(clear["blocked"], json!([]), "the wall is 2.5 mm clear");
+    // A rib 3 mm out of the wall reaches 0.5 mm into the socket's path.
+    run(&mut s, "solid.box", json!({"corner": [39, 26, 5], "length": 3, "width": 8, "height": 40, "operation": "new", "body_name": "Rib"}));
+    let bodies_before = s.model.state().bodies.len();
+    let blocked = reach(&mut s, json!({}));
+    assert_eq!(blocked["clear"], json!(false), "{blocked}");
+    let rows = blocked["blocked"].as_array().cloned().unwrap_or_default();
+    assert_eq!(rows.iter().map(|r| r["body"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["Rib"], "{blocked}");
+    assert!(f(&rows[0]["volume_mm3"]) > 0.0 && f(&rows[0]["from_mm"]).abs() < 1e-6, "{blocked}");
+    // Ignored, the rib leaves the socket clear.
+    assert_eq!(reach(&mut s, json!({"ignore": ["Rib"]}))["clear"], json!(true));
+    // Flipped, the socket's space runs down through the head and the plate.
+    let down = reach(&mut s, json!({"flip": true}));
+    assert!((f(&down["direction"][2]) + 1.0).abs() < 1e-9, "{down}");
+    let bodies: Vec<&str> = down["blocked"].as_array().into_iter().flatten().filter_map(|r| r["body"].as_str()).collect();
+    assert!(bodies.contains(&"Plate") && bodies.contains(&"Head"), "{down}");
+    // Nothing is added to the design.
+    assert_eq!(s.model.state().bodies.len(), bodies_before);
+    // Refused: a straight edge, a socket of no size, an unknown body to ignore.
+    for (bad, why) in [
+        (json!({"edge": [50, 0, 0], "diameter": 19, "length": 30}), "a straight edge"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 0, "length": 30}), "no diameter"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 19, "length": -1}), "a negative length"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 19, "length": 30, "ignore": ["Nope"]}), "an unknown body"),
+    ] {
+        assert!(s.execute("inspect.socket_reach", &bad).is_err(), "{why}");
+    }
+}
+
 /// #22050: a tenon seated flush inside a matching slot/window (nominally coincident faces,
 /// vertices within ~3e-5 mm) is flush contact (0 mm), not left in `unchecked`, while a tenon
 /// that actually penetrates the slot wall is reported as an overlap (never falsely cleared),
@@ -825,4 +1101,157 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
     assert_eq!(mesh_json.get("exact"), Some(&json!(false)), "{mesh_json}");
     let a_near: Vec<(&str, f64)> = summary.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
     assert_eq!(a_near, vec![("C", 15.0)]);
+}
+
+#[test]
+fn memory_policy_scales_concurrency_chunks_and_refuses_below_headroom_floor() {
+    use super::{
+        DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS, MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES, check_memory_headroom,
+        chunk_size_for_memory, clearance_worker_limit, shape_cache_budget,
+    };
+
+    const GB: u64 = 1 << 30;
+    const MB: u64 = 1 << 20;
+
+    // Unknown host memory uses normal bounded defaults (never unbounded `usize::MAX`).
+    assert_eq!(clearance_worker_limit(1000, None), MAX_CLEARANCE_THREADS);
+    assert_eq!(chunk_size_for_memory(None), DEFAULT_CHUNK_PAIRS);
+    assert_eq!(shape_cache_budget(None), MAX_SHAPE_CACHE_BYTES);
+
+    // Concurrency and chunk sizes step down smoothly as headroom tightens.
+    assert_eq!(clearance_worker_limit(1000, Some(16 * GB)), MAX_CLEARANCE_THREADS);
+    assert_eq!(clearance_worker_limit(1000, Some(6 * GB)), 4);
+    assert_eq!(clearance_worker_limit(1000, Some(3 * GB)), 2);
+    assert_eq!(clearance_worker_limit(1000, Some(GB)), 1);
+    assert_eq!(clearance_worker_limit(0, Some(16 * GB)), 1);
+    assert_eq!(clearance_worker_limit(3, Some(16 * GB)), 3);
+
+    assert_eq!(chunk_size_for_memory(Some(16 * GB)), DEFAULT_CHUNK_PAIRS);
+    assert_eq!(chunk_size_for_memory(Some(3 * GB)), 32);
+    assert_eq!(chunk_size_for_memory(Some(GB)), 16);
+
+    assert_eq!(shape_cache_budget(Some(16 * GB)), MAX_SHAPE_CACHE_BYTES);
+    assert_eq!(shape_cache_budget(Some(512 * MB)), 64 << 20);
+    assert_eq!(shape_cache_budget(Some(64 * MB)), MIN_SHAPE_CACHE_BYTES);
+
+    // Above the headroom floor succeeds; below it returns a clear error instead of risking OOM abort.
+    assert!(check_memory_headroom("inspect.clearance", None, 100, 100).is_ok());
+    assert!(check_memory_headroom("inspect.clearance", Some(MIN_HEADROOM_BYTES), 100, 100).is_ok());
+    let err = check_memory_headroom("inspect.clearance", Some(MIN_HEADROOM_BYTES - 1), 42, 200).unwrap_err().to_string();
+    assert!(err.contains("not enough available memory") && err.contains("42 of 200 pairs remaining"), "{err}");
+}
+
+/// Placed component occurrences checked by `inspect.clearance` share their definition's display
+/// mesh (never caching deep-cloned moved meshes on each occurrence), keep lazy B-rep records
+/// unmaterialized for bodies pruned before exact checks, and release transient SMLib/ops kernel
+/// forms on completion while preserving forms that were already cached beforehand.
+#[test]
+fn placed_occurrences_share_definition_mesh_and_release_transient_kernel_forms() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    cube(&mut s, "Block", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    // Place multiple rigid occurrences of `Part`:
+    // - Part:1 at origin (identity)
+    // - Part:2 overlapping Part:1 by 1 mm³ at (9, 9, 9)
+    // - Part:3 near Part:1 with 2 mm gap at (12, 0, 0)
+    // - Part:4 far away at (500, 0, 0) so broad-phase AABB prunes it before exact geometry.
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [9.0, 9.0, 9.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [12.0, 0.0, 0.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [500.0, 0.0, 0.0]}));
+
+    let world_before = s.world_state().unwrap();
+    let names: Vec<String> = world_before.bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 4, "{names:?}");
+    // Ensure a pre-existing kernel form on the first body is preserved across `inspect.clearance`.
+    let prewarmed_name = names[0].clone();
+    let _ = world_before.bodies[0].body.exact_bounds().unwrap();
+    assert!(world_before.bodies[0].body.holds_kernel_form());
+    for b in world_before.bodies.iter().skip(1) {
+        assert!(!b.body.holds_kernel_form(), "{} started cold", b.name);
+        assert!(b.cached_mesh().is_none(), "{} started without a moved mesh copy", b.name);
+        assert!(b.body.has_pending_lazy_record(), "{} started with a lazy moved record", b.name);
+    }
+
+    let r = run(&mut s, "inspect.clearance", json!({"bodies": [names[0], names[3]], "against": [names[1], names[2]], "clearance": 6.0}));
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert!((f(&overlaps[0]["volume_mm3"]) - 1.0).abs() < 1e-6, "{r}");
+    assert_eq!(near.len(), 1, "{r}");
+    assert!((f(&near[0]["distance_mm"]) - 2.0).abs() < 1e-6, "{r}");
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+
+    let world_after = s.world_state().unwrap();
+    for b in &world_after.bodies {
+        if b.name == prewarmed_name {
+            assert!(b.body.holds_kernel_form(), "pre-existing kernel form on {} must be preserved", b.name);
+        } else {
+            assert!(!b.body.holds_kernel_form(), "transient kernel form on {} must be released", b.name);
+            assert!(b.cached_mesh().is_none(), "placed occurrence {} must not cache a moved display mesh copy", b.name);
+        }
+    }
+    // The far-away occurrence at x = 500 was pruned before exact geometry and kept its lazy record.
+    let far = world_after.bodies.iter().find(|b| b.name == names[3]).unwrap();
+    assert!(far.body.has_pending_lazy_record(), "pruned occurrence must keep its lazy record unmaterialized");
+}
+
+/// Multi-chunk `inspect.clearance` (more than `DEFAULT_CHUNK_PAIRS` close pairs) produces exact
+/// overlaps, near gaps, and nearest neighbours across chunk boundaries, and releases transient
+/// kernel forms once done.
+#[test]
+fn chunked_clearance_across_many_close_pairs_matches_exact_results() {
+    let mut s = Session::default();
+    // Two rows of 9 cubes each (9 × 9 = 81 cross-pairs, > DEFAULT_CHUNK_PAIRS = 64) packed within
+    // a 6 mm clearance window so all 81 pairs survive broad-phase pruning and span multiple chunks.
+    let mut moving = Vec::new();
+    let mut fixed = Vec::new();
+    for i in 0..9usize {
+        let m_name = format!("M{i}");
+        let f_name = format!("F{i}");
+        let y = (i as f64) * 1.5;
+        cube(&mut s, &m_name, 1.0, [0.0, y, 0.0]);
+        // F0 overlaps M0 by 0.2 × 1 × 1 = 0.2 mm³; F1..F8 sit 1.0 mm away along X from M1..M8.
+        let x = if i == 0 { 0.8 } else { 2.0 };
+        cube(&mut s, &f_name, 1.0, [x, y, 0.0]);
+        moving.push(m_name);
+        fixed.push(f_name);
+    }
+
+    // Large clearance (20 mm) makes all 81 moving×fixed pairs pass AABB pruning (> 64 chunk size).
+    let r = run(&mut s, "inspect.clearance", json!({"bodies": moving, "against": fixed, "clearance": 20.0, "nearest": 1}));
+    assert_eq!(r["pairs_checked"], 81, "{r}");
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert_eq!(pair(&overlaps[0]), ["F0", "M0"]);
+    assert!((f(&overlaps[0]["volume_mm3"]) - 0.2).abs() < 1e-6, "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 80, "all 80 non-overlapping pairs are within 20 mm: {r}");
+    // M1's nearest fixed neighbour is F0 (X overlaps [0.8, 1.0], Y gap = 0.5 mm);
+    // M2's nearest fixed neighbour is F2 at exactly 1.0 mm along X.
+    assert_eq!(r["nearest"]["M1"][0]["body"], "F0", "{r}");
+    assert!((f(&r["nearest"]["M1"][0]["distance_mm"]) - 0.5).abs() < 1e-6, "{r}");
+    assert_eq!(r["nearest"]["M2"][0]["body"], "F2", "{r}");
+    assert!((f(&r["nearest"]["M2"][0]["distance_mm"]) - 1.0).abs() < 1e-6, "{r}");
+}
+
+/// Under severe host memory pressure, `inspect.clearance` returns a structured error instead of
+/// proceeding into an allocation abort, leaving the session intact for subsequent calls.
+#[test]
+fn low_host_memory_returns_error_and_preserves_session() {
+    let mut s = Session::default();
+    cube(&mut s, "A", 10.0, [0.0, 0.0, 0.0]);
+    cube(&mut s, "B", 10.0, [11.0, 0.0, 0.0]);
+
+    let low = solidcraft_kernel::with_available_memory_for_test(Some(64 << 20), || s.execute("inspect.clearance", &json!({"clearance": 2.0})));
+    let err = low.unwrap_err().to_string();
+    assert!(err.contains("not enough available memory"), "{err}");
+
+    // Once memory headroom recovers, the session and design are intact and the same call succeeds.
+    let ok =
+        solidcraft_kernel::with_available_memory_for_test(Some(16u64 << 30), || s.execute("inspect.clearance", &json!({"clearance": 2.0}))).unwrap();
+    let near = ok["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 1, "{ok}");
+    assert!((f(&near[0]["distance_mm"]) - 1.0).abs() < 1e-6, "{ok}");
 }

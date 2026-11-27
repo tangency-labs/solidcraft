@@ -6,6 +6,11 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+**Activate Parent** (`component.activate.parent`), at the right end of the **MODEL** tab while a
+component is active, activates the component one level up: a part inside a subassembly goes back
+to the subassembly, and the top component goes back to the design. A double-click on empty space
+in the view does the same, unless Preferences, Design, `double_click_components` is off.
+
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**
 (`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
@@ -647,7 +652,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 

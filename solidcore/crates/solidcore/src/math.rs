@@ -560,6 +560,30 @@ impl Transform {
         Some([x, y])
     }
 
+    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `x` is the unit
+    /// cross product of `v`'s part square to `d` with `d`, and `y = d × x`; so `x`, `y` and `d` are
+    /// unit and square to each other within a few ulps for any `v` taken, `x × y` runs along `d`,
+    /// and `y` runs along `v`'s part square to `d`. `d` and `v` are made unit first, at any finite
+    /// length (nothing is squared before it is scaled). `None` when a coordinate is not finite, `d`
+    /// or `v` has no length, or `v`'s part square to `d` is no longer than its own rounding
+    /// ([`FRAME_LEAN`]): `y` would then follow the rounding, not `v`. Otherwise `y`'s direction is
+    /// off `v`'s part square to `d` by about `4ε / sin`, `sin` the sine of the angle between `v`
+    /// and `d`; a caller that needs it closer compares that sine itself.
+    #[must_use]
+    pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
+        if !(finite3(d) && finite3(v)) {
+            return None;
+        }
+        let (_, d) = d.length_and_unit()?;
+        let (_, v) = v.length_and_unit()?;
+        let (square, y) = (v - d * v.dot(d)).length_and_unit()?;
+        if square <= FRAME_LEAN {
+            return None;
+        }
+        let (_, x) = y.cross(d).length_and_unit()?;
+        Some([x, d.cross(x)])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their
@@ -675,6 +699,14 @@ impl Transform {
 
 /// The operation name of the refusals of the maps built from their numbers.
 const OP_MAPS: &str = "math::Transform";
+
+/// The remainder [`Transform::frame_axes`] refuses: taking the unit `v`'s part along the unit `d`
+/// out leaves a remainder of length `sin` (the sine of the angle between them) but for its
+/// rounding. For a `v` along `d` (or against it) the computed remainder is at most about 10 ulps:
+/// `|1 - |d|²|` for `d` unit within 2 ulps (4), the three-term `v · d` (`γ₃`, 3), and the product,
+/// the difference and the length (an ulp each). So a remainder no longer than 16 ulps is
+/// rounding, not `v`, and gives no direction (brett19 on #22066).
+pub const FRAME_LEAN: f64 = 16.0 * f64::EPSILON;
 
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
@@ -1197,6 +1229,13 @@ pub fn is_square_to_radius_2d(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> b
     unit_between_2d(centre, p).is_some_and(|radial| dot_2d(dir, radial).abs() <= 1e-6)
 }
 
+/// Not upstream: whether `p` lies on the line through `origin` along `dir`, within `tol` of it.
+/// `false` where `dir` is of no length or not finite.
+#[must_use]
+pub fn on_line_2d(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    unit_2d(dir).is_some_and(|u| dot_2d(left_2d(u), sub_2d(p, origin)).abs() <= tol)
+}
+
 /// Not upstream: the centre of the circle through `a`, `b` and `c`. `None` for points on one
 /// line (or not finite).
 #[must_use]
@@ -1292,6 +1331,77 @@ pub fn arc_third_point_2d(
         .map(|d| along_2d(mid, n, d))
         .filter(|p| p.iter().all(|v| v.is_finite()))
         .min_by(|x, y| length_2d(sub_2d(*x, h)).total_cmp(&length_2d(sub_2d(*y, h))))
+}
+
+/// Not upstream: the distance between two points.
+#[must_use]
+pub fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
+    length_2d(sub_2d(b, a))
+}
+
+/// Not upstream: the side of the line from `p` to `q` the region lies on that is on the left
+/// of the piece from `a` to `b` (a piece of a counter-clockwise loop lying on that line):
+/// `Some(true)` left of the line seen from `p` towards `q`, `Some(false)` right. `None` when
+/// an end of the piece lies further from the line than `tol` times the line's size, the line
+/// or the piece has no length, or a value is not finite.
+#[must_use]
+pub fn left_side_along_line_2d(
+    a: [f64; 2],
+    b: [f64; 2],
+    p: [f64; 2],
+    q: [f64; 2],
+    tol: f64,
+) -> Option<bool> {
+    let u = sub_2d(q, p);
+    let len = length_2d(u);
+    let size = 1.0 + len + length_2d(p);
+    // Whether the line has a length is its own matter; how far a piece may lie off it grows
+    // with where it is, as rounding does.
+    if !(tol.is_finite()
+        && tol >= 0.0
+        && len.is_finite()
+        && size.is_finite()
+        && len > tol * (1.0 + len))
+    {
+        return None;
+    }
+    let off = |x: [f64; 2]| {
+        let [dx, dy] = sub_2d(x, p);
+        (dx * u[1] - dy * u[0]).abs()
+    };
+    if !(off(a) <= tol * size * len && off(b) <= tol * size * len) {
+        return None;
+    }
+    let along = dot_2d(sub_2d(b, a), u);
+    if along > 0.0 {
+        Some(true)
+    } else if along < 0.0 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Not upstream: whether the region on the left of an arc piece (a piece of a counter-clockwise
+/// loop, about `centre` with `radius`, sweeping `sweep` radians, positive counter-clockwise)
+/// lies inside the circle about `c` of radius `r` the piece lies on: `Some(true)` inside,
+/// `Some(false)` outside. `None` when the piece's centre or radius is further from the circle's
+/// than `tol` times its size, the piece has no sweep, or a value is not finite.
+#[must_use]
+pub fn left_side_inside_circle_2d(
+    centre: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    c: [f64; 2],
+    r: f64,
+    tol: f64,
+) -> Option<bool> {
+    let size = 1.0 + r.abs() + length_2d(c);
+    if !(tol.is_finite() && tol >= 0.0 && size.is_finite() && sweep.is_finite() && sweep != 0.0) {
+        return None;
+    }
+    let on = distance_2d(centre, c) <= tol * size && (radius.abs() - r.abs()).abs() <= tol * size;
+    on.then_some(sweep > 0.0)
 }
 
 #[cfg(test)]
@@ -1819,6 +1929,93 @@ mod tests {
             Point2::new(f64::MAX, 0.0),
         ])
         .is_err());
+    }
+
+    /// A piece running along its line has the region on the line's left, one running against it
+    /// on its right; a piece off the line, a line or piece with no length and bad numbers give
+    /// none.
+    #[test]
+    fn a_piece_on_a_line_tells_the_side_its_region_is_on() {
+        let (p, q) = ([0.0, 1.0], [0.0, 21.0]);
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 9.0], [0.0, 5.0], p, q, 1e-9),
+            Some(false)
+        );
+        // Past the line's ends, on its carrier, still on it.
+        assert_eq!(
+            left_side_along_line_2d([0.0, 30.0], [0.0, 25.0], p, q, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_along_line_2d([1e-6, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 5.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, p, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, f64::NAN),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([f64::NAN, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(distance_2d([1.0, 1.0], [4.0, 5.0]), 5.0);
+        // A short line far from the origin tells the same side as at the origin.
+        for x in [0.0, 5e5] {
+            let (p, q) = ([x, 0.0], [x, 4e-4]);
+            assert_eq!(
+                left_side_along_line_2d([x, 1e-4], [x, 3e-4], p, q, 1e-9),
+                Some(true),
+                "{x}"
+            );
+            assert_eq!(
+                left_side_along_line_2d([x, 3e-4], [x, 1e-4], p, q, 1e-9),
+                Some(false),
+                "{x}"
+            );
+        }
+    }
+
+    /// A counter-clockwise arc piece has the region inside its circle, a clockwise one outside;
+    /// a piece on another circle, with no sweep or bad numbers gives none.
+    #[test]
+    fn an_arc_piece_tells_whether_its_region_is_inside_the_circle() {
+        let c = [0.0, 19.4];
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 1.2, c, 3.04, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, -1.2, c, 3.04, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d([0.0, 20.0], 3.04, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.05, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 0.0, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, f64::NAN, c, 3.04, 1e-9),
+            None
+        );
     }
 
     #[test]

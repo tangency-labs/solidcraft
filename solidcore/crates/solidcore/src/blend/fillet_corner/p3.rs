@@ -344,6 +344,10 @@ pub struct FilletCorner {
     /// faces' surfaces and loops; smlib#82, WR-697): set by its topology on a blend corner
     /// that is a Mixed one.
     pub mixed: Option<crate::blend::blend_corner::mixed::MixedCorner>,
+    /// Not the fork's (#19089): the support change's own members (its ring, its balls and,
+    /// until the patches take them, its two faces): set at its creation on a blend corner
+    /// that is one.
+    pub support_ball: Option<crate::blend::blend_corner::support_ball::SupportBall>,
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
@@ -726,6 +730,7 @@ impl FilletCorner {
             chamfer_mixed_convexity: false,
             setback: None,
             mixed: None,
+            support_ball: None,
             end_cap: None,
             turned_back_arcs: [None, None],
             roll_over: false,
@@ -1820,7 +1825,22 @@ impl FilletCorner {
             )?;
 
             // store New FilletSurface in m_vSurfaces
-            self.surfaces.extend(blends.into_iter().map(Surface::from));
+            let free_end = !self.extended_surface_patch
+                && self
+                    .blend
+                    .is_some_and(super::super::blend_corner::BlendCorner::is_end);
+            for blend in blends {
+                let surface = Surface::from(blend);
+                // A three-sided cap can have parallel parametric tangents at a corner.
+                // When the full control net is planar, trim the same boundary on its
+                // regular plane before computing pcurves for the cap.
+                let plane = if free_end {
+                    crate::sweep::skin_flat_walls::flat_spline_plane(env.k, &surface)
+                } else {
+                    None
+                };
+                self.surfaces.push(plane.unwrap_or(surface));
+            }
         }
 
         // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
@@ -2338,6 +2358,7 @@ impl FilletCorner {
                 || blend.is_end()
                 || blend.is_swept()
                 || blend.is_chamfer()
+                || blend.is_support_ball()
         }) {
             return Ok(());
         }

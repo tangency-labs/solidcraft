@@ -353,18 +353,23 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, w
     {
         return None;
     }
-    if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
-        // Within `tol` of its chord the piece is that line, unless the kernel says it is read as
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
+    let bend_tol = tol.min(zone.max(error * 10.0));
+    let rational = spans.iter().any(|s| {
+        let (lo, hi) = s.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p[2]), hi.max(p[2])));
+        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
+    });
+    if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, bend_tol, error, work).is_some()) {
+        // Within `bend_tol` of its chord the piece is that line, unless the kernel says it is read as
         // the arc it is proved on within `tol` first (a circle's or a conic's piece bending off
         // its chord by more than the zone tolerance, #17707); one that is no arc stays the line.
-        let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
         let bends = solidcore_ops::prism::arc_before_line(&spans, zone);
         let proved = if bends { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
         return Some(proved.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
-    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
-        .or_else(|| free_form(&spans, a, b, tol))
-        .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
+    let proved = if rational { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
+    let free_bend = (bend_tol - 2.0 * error).max(0.0);
+    proved.or_else(|| free_form(&spans, a, b, tol, free_bend)).or_else(|| if each_span { span_by_span(&spans, a, b, tol, free_bend) } else { None })
 }
 
 /// A polyline from parameter `ts` to `te` (either way round; segment i spans [i, i + 1]) as its
@@ -433,9 +438,9 @@ fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: 
 }
 
 /// Several `spans` end to end, from `a` to `b`, each as the segment it is: a span whose control
-/// polygon lies along its chord a line, the others as [`free_form`] reads them. Spans whose
-/// ends meet are left out; each segment starts where the one before ended.
-fn span_by_span(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2>> {
+/// polygon lies along its chord (within `bend_tol`) a line, the others as [`free_form`] reads
+/// them. Spans whose ends meet are left out; each segment starts where the one before ended.
+fn span_by_span(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64, bend_tol: f64) -> Option<Vec<Seg2>> {
     let spans: Vec<&Vec<H>> = spans.iter().filter(|s| s.first().zip(s.last()).is_some_and(|(p, q)| point(*p).dist(point(*q)) > tol)).collect();
     if spans.len() < 2 {
         return None;
@@ -444,9 +449,9 @@ fn span_by_span(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2
     let mut start = a;
     for (i, span) in spans.iter().enumerate() {
         let end = if i + 1 == spans.len() { b } else { point(*span.last()?) };
-        let seg = match free_form(std::slice::from_ref(*span), start, end, tol) {
+        let seg = match free_form(std::slice::from_ref(*span), start, end, tol, bend_tol) {
             Some(mut s) => s.pop()?,
-            None if span.iter().all(|p| (p[2] - 1.).abs() <= 1e-12) && off_chord(&span.iter().map(|p| point(*p)).collect::<Vec<_>>()) <= tol => {
+            None if span.iter().all(|p| (p[2] - 1.).abs() <= 1e-12) && off_chord(&span.iter().map(|p| point(*p)).collect::<Vec<_>>()) <= bend_tol => {
                 Seg2::Line { a: start, b: end }
             }
             None => return None,
@@ -471,9 +476,9 @@ fn off_chord(pts: &[Vec2]) -> f64 {
 /// One Bézier span that is neither a line nor an arc, as the exact free-form segment it is
 /// (a font's quadratic or cubic, a conic), its ends `a` and `b`. `None` for several spans (a
 /// curve that may wind about more than once), degrees past [`solidcore_record::MAX_BEZIER_DEGREE`],
-/// rational spans other than conics, and control polygons with no area (a curve doubling back
-/// along a line).
-fn free_form(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2>> {
+/// rational spans other than conics, and control polygons within `bend_tol` of their chord (a
+/// curve doubling back along a line).
+fn free_form(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64, bend_tol: f64) -> Option<Vec<Seg2>> {
     let [span] = spans else { return None };
     let pts: Vec<Vec2> = span.iter().map(|p| point(*p)).collect();
     let (first, last) = (*pts.first()?, *pts.last()?);
@@ -483,7 +488,7 @@ fn free_form(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2>> 
     // Twice the area the control polygon spans off the chord: none is a line, maybe doubling back.
     let chord = last - first;
     let off = pts.iter().map(|p| chord.cross(*p - first).abs()).fold(0., f64::max) / chord.len();
-    if !(off > tol) {
+    if !(off > bend_tol) {
         return None;
     }
     let rational = span.iter().any(|p| (p[2] - 1.).abs() > 1e-12);

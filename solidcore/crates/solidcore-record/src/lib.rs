@@ -4,10 +4,10 @@
 //! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
 //! exchange structure as parsed from a file with the units of its representation contexts and
 //! its Part 42 curves and surfaces ([`step`]), a sheet metal part's surfaces and its flat
-//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), curve
-//! queries' answers ([`curve_query`]), planar projections and outlines ([`projection`]), and how
-//! exactly a drawn curve stands for its source ([`CurveAccuracy`]).
-//! ([`CurveAccuracy`]).
+//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), hole stacks
+//! through touching bodies ([`hole_stacks`]), curve queries' answers ([`curve_query`]), planar
+//! projections and outlines ([`projection`]), round-tube copes ([`tube_cope`]), and how exactly
+//! a drawn curve stands for its source ([`CurveAccuracy`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It
@@ -30,6 +30,7 @@ pub mod curve_query;
 #[allow(missing_docs)]
 pub mod develop;
 pub mod frame;
+pub mod hole_stacks;
 pub mod native;
 pub mod plane;
 // Profiles are SolidCraft's sketch wire format, carried over as it is: each variant says what it
@@ -37,7 +38,10 @@ pub mod plane;
 #[allow(missing_docs)]
 pub mod profile;
 pub mod projection;
+pub mod round_face;
+pub mod shaft_spline;
 pub mod step;
+pub mod tube_cope;
 pub mod vec;
 
 pub use accuracy::CurveAccuracy;

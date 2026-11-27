@@ -906,6 +906,32 @@ fn with_extent_all_the_value_box_has_no_number_to_step() {
     }
 }
 
+/// Two Sides gives the second side the extent types of the first (#18691): its own Extent Type
+/// row, a To Object input for it, and an edit that keeps what was saved.
+#[test]
+fn two_sides_second_side_has_its_own_extent_type() {
+    for (second, all2, to2) in [(json!({"through_all2":true}), true, false), (json!({"to2":[5,5,-20],"to_offset2":"2 mm"}), false, true)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        assert!(h.widget("Extent Type 2").is_some(), "the second side's Extent Type row");
+        let d = h.app.dialog.as_ref().unwrap();
+        let crate::dialogs::Kind::Extrude { all2: shown_all2, .. } = &d.kind else { panic!("extrude") };
+        assert_eq!(*shown_all2, all2);
+        assert_eq!(d.inputs.iter().any(|i| i.label == crate::dialogs::TO_OBJECT2), to2);
+        // The hidden Distance 2 text is not read while the second side is All or To Object.
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *distance2 = "1 +".into();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK waited on the hidden Distance 2: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+        let saved = extent(&h);
+        assert_eq!((saved.through_all2, saved.to2.is_some()), (all2, to2), "OK keeps the second side's extent");
+    }
+}
+
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
 /// `-` typed first can be finished there.
 #[test]
@@ -1300,6 +1326,58 @@ fn surface_extrude_dialog_ends_at_a_picked_face() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+}
+
+/// Surface Extrude's Taper Angle (#10129): the row steps by a degree as Extrude's does, OK saves
+/// the taper with the feature and the walls lean (a 10 mm square over 10 mm at 1°: the far loop
+/// is 10 + 2 × 10 tan 1° wide), and editing shows it again. Symmetric takes no taper yet: the
+/// row is gone there and OK sends none, so the sheet is straight.
+#[test]
+fn surface_extrude_dialog_takes_a_taper_angle() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","distance":"10 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let taper = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { taper, .. }), .. }) => {
+            taper.clone()
+        }
+        _ => panic!("surface extrude dialog"),
+    };
+    let saved = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.taper.as_ref().map(|t| t.to_string()),
+        _ => panic!("the surface extrude"),
+    };
+    let width = |h: &Harness| {
+        let bb = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+        bb.max.x - bb.min.x
+    };
+    assert_eq!(saved(&h), None);
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "0 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h).as_deref(), Some("1 deg"));
+    let want = 10.0 + 2.0 * 10.0 * 1f64.to_radians().tan();
+    assert!((width(&h) - want).abs() < 1e-6, "{} vs {want}", width(&h));
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Direction"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Direction:Symmetric"}})).unwrap();
+    h.frames(2);
+    assert!(h.at(&json!({"handle":"dialog:Taper Angle up"})).is_err(), "Symmetric shows no Taper Angle");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h), None);
+    assert!((width(&h) - 10.0).abs() < 1e-9, "{}", width(&h));
 }
 
 /// Surface Extrude's Extent Type takes To Next (#16537): no pick and no length, OK makes each
@@ -1806,4 +1884,102 @@ fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     h.frames(2);
     assert!(shows(&h));
     assert_eq!(sent(&h).as_deref(), Some("Slab"));
+}
+
+/// A new Extrude with a box made before it: a sketch's square, its profile picked, the dialog open.
+fn new_extrude_over_a_box() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":2,"width":2,"height":2})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    h
+}
+
+fn taper(h: &Harness) -> Option<String> {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Extrude { taper, .. }) => Some(taper.clone()),
+        _ => None,
+    }
+}
+
+fn drag_taper(h: &mut Harness) {
+    let at = crate::scenario::handle_at("taper").unwrap();
+    h.step(&json!({"drag":[[at.x, at.y],[at.x + 60.0, at.y]], "steps": 6})).unwrap();
+    h.frames(2);
+}
+
+fn key(h: &mut Harness, key: &str) {
+    h.step(&json!({"key": key, "cmd": true})).unwrap();
+    h.frames(4);
+}
+
+// Ctrl+Z after dragging Extrude's taper handle undid the design under the open dialog and left
+// the angle (#22838). It takes back the drag first, with the keyboard in the dialog's value box
+// or nowhere; Ctrl+Y drags it again; with no drag left, Ctrl+Z undoes the design as before.
+#[test]
+fn undo_takes_back_a_dialogs_handle_drag_before_the_design() {
+    for keyboard_free in [false, true] {
+        let mut h = new_extrude_over_a_box();
+        let depth = h.app.session.undo.len();
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+        drag_taper(&mut h);
+        let dragged = taper(&h).unwrap();
+        assert_ne!(dragged, "0 deg", "the drag tilts the walls");
+        if keyboard_free {
+            h.ctx.memory_mut(|m| m.stop_text_input());
+            h.frames(1);
+        } else {
+            assert!(h.ctx.memory(|m| m.focused()).is_some(), "the value box has the keyboard back");
+        }
+        key(&mut h, "Z");
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"), "keyboard free: {keyboard_free}");
+        assert_eq!(h.app.session.undo.len(), depth, "the design is left as it was");
+        key(&mut h, "Y");
+        assert_eq!(taper(&h), Some(dragged.clone()), "Redo drags it again");
+        assert_eq!(h.app.session.redo.len(), 0);
+        key(&mut h, "Z");
+        assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+        if keyboard_free {
+            key(&mut h, "Z");
+            assert_eq!(h.app.session.undo.len(), depth - 1, "no drag left: the design's Undo, as before");
+        }
+    }
+}
+
+// A value typed after the drag is not thrown away by Undo: the drags are forgotten instead.
+#[test]
+fn undo_leaves_a_handle_drag_once_a_value_is_typed_after_it() {
+    let mut h = new_extrude_over_a_box();
+    drag_taper(&mut h);
+    let dragged = taper(&h).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7 mm"})).unwrap();
+    h.frames(2);
+    h.ctx.memory_mut(|m| m.stop_text_input());
+    h.frames(1);
+    let depth = h.app.session.undo.len();
+    key(&mut h, "Z");
+    assert_eq!(taper(&h), Some(dragged));
+    let Some(crate::dialogs::Kind::Extrude { distance, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("extrude") };
+    assert_eq!(distance, "7 mm");
+    assert_eq!(h.app.session.undo.len(), depth - 1, "the key works as before");
+}
+
+// Undo moved to another key takes back the drag too (#22838 review).
+#[test]
+fn undo_on_another_key_takes_back_a_handle_drag() {
+    let mut h = new_extrude_over_a_box();
+    crate::keymap::bind(&mut h.app, "edit.undo", "Ctrl+U", true).unwrap();
+    let depth = h.app.session.undo.len();
+    drag_taper(&mut h);
+    assert_ne!(taper(&h).as_deref(), Some("0 deg"));
+    key(&mut h, "U");
+    assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+    assert_eq!(h.app.session.undo.len(), depth);
 }

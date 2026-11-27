@@ -1985,6 +1985,80 @@ fn cut_never_deletes_a_target_its_tools_cannot_cover() {
     }
 }
 
+/// A slanted cut across a loft between two fit-point splines is made however unevenly the fit
+/// points are spaced (#22319). The sections are one outline at two sizes: a fit-point spline over
+/// a half circle of radius 20 (then 12, 30 mm up), closed by a line. The loft's side over the
+/// spline is one face. With a fit point every 30 degrees the neighbouring chords are equal, and
+/// the Extrude that cuts along the plane z = 15 + x / 2 was made. With fit points at 0, 20, 80,
+/// 100, 160 and 180 degrees the chords differ by 2.88 times; each span was one unit of the
+/// side's parameter, so the side's first derivative jumped where two spans met, and the cut was
+/// refused by the kernel's check ("Bad CurveCusp"). Both are made now: what the cut leaves and
+/// what an intersect with the same sketch keeps are the loft.
+#[test]
+fn a_slanted_cut_across_a_loft_between_unevenly_spaced_fit_point_splines_is_made() {
+    let even = (
+        json!([[20, 0], [17.320508076, 10], [10, 17.320508076], [0, 20], [-10, 17.320508076], [-17.320508076, 10], [-20, 0]]),
+        json!([[12, 0], [10.392304845, 6], [6, 10.392304845], [0, 12], [-6, 10.392304845], [-10.392304845, 6], [-12, 0]]),
+    );
+    let uneven = (
+        json!([
+            [20, 0],
+            [18.793852416, 6.840402867],
+            [3.472963553, 19.69615506],
+            [-3.472963553, 19.69615506],
+            [-18.793852416, 6.840402867],
+            [-20, 0]
+        ]),
+        json!([
+            [12, 0],
+            [11.276311449, 4.10424172],
+            [2.083778132, 11.817693036],
+            [-2.083778132, 11.817693036],
+            [-11.276311449, 4.10424172],
+            [-12, 0]
+        ]),
+    );
+    for (name, (low, high)) in [("a point every 30 degrees", even), ("points at 0, 20, 80, 100, 160, 180 degrees", uneven)] {
+        // The loft alone, then with the Extrude cutting or keeping what lies above the plane.
+        let built = |operation: Option<&str>| -> Session {
+            let mut s = Session::default();
+            s.set_validation(solidcraft_kernel::Validation::EachStep);
+            for (command, params) in [
+                ("sketch.create", json!({"plane": "XY", "name": "Low"})),
+                ("sketch.spline.fit_point", json!({"points": low.clone()})),
+                ("sketch.line", json!({"points": [[-20, 0], [20, 0]]})),
+                ("sketch.finish", json!({})),
+                ("sketch.create", json!({"plane": "XY", "offset": 30, "name": "High"})),
+                ("sketch.spline.fit_point", json!({"points": high.clone()})),
+                ("sketch.line", json!({"points": [[-12, 0], [12, 0]]})),
+                ("sketch.finish", json!({})),
+                ("solid.loft", json!({"sections": [{"sketch": "Low"}, {"sketch": "High"}], "body_name": "Loft"})),
+                ("sketch.create", json!({"plane": "XZ", "name": "Slant"})),
+                ("sketch.line", json!({"points": [[-40, 5], [40, -35], [40, -60], [-40, -60], [-40, 5]]})),
+                ("sketch.finish", json!({})),
+            ] {
+                s.execute(command, &params).unwrap_or_else(|e| panic!("{name}: {command}: {e}"));
+            }
+            if let Some(operation) = operation {
+                let slanted = json!({"sketch": "Slant", "distance": 100, "direction": "symmetric", "operation": operation, "targets": ["Loft"]});
+                s.execute("solid.extrude", &slanted).unwrap_or_else(|e| panic!("{name}: {operation}: {e}"));
+            }
+            s
+        };
+        let whole = built(None);
+        // The side over the spline, the side on the line, and the two caps.
+        assert_eq!(whole.model.state().body("Loft").map(|b| b.body.face_count()), Some(4), "{name}");
+        let (cut, kept) = (built(Some("cut")), built(Some("intersect")));
+        let state = cut.model.state();
+        let body = state.body("Loft").unwrap_or_else(|| panic!("{name}: the cut left no body"));
+        assert_eq!(body.body.shell_count(), 1, "{name}");
+        assert!(body.body.validity().is_empty(), "{name}: {:?}", body.body.validity());
+        let (all, below, over) = (volume(&whole, "Loft"), volume(&cut, "Loft"), volume(&kept, "Loft"));
+        assert!(below > 0.0 && over > 0.0, "{name}: {below} and {over}");
+        assert!((below + over - all).abs() < 1e-9 * all, "{name}: {below} + {over} against {all}");
+    }
+}
+
 /// A cut still takes away a target that lies wholly inside its tools (#15700): a cube inside a
 /// larger one, a cube cut by its exact copy, whose faces all coincide with the target's, and a
 /// cube that only two tools together cover, each reaching past its middle.
@@ -2152,6 +2226,23 @@ fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
     let (area, c) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
     let want = area * (sweep * (49.0 + c) + handle);
     assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
+}
+
+/// #17356: the 2 mm fillet of the outer top edges, after the inner top edges were rounded, was
+/// refused as cutting the part in pieces. The ray classifying a point beside the new round crosses
+/// the inner round's face twice within one leaf of its search tree, and only the far crossing was found.
+#[test]
+fn outer_top_fillet_after_the_inner_round_builds_one_closed_body() {
+    let s = replay(include_str!("../../../examples/regressions/fillet_outer_top_after_inner_round.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // a recorded volume: the rim is seven tapered lobes, and its round has no closed form
+    let (got, want) = (volume(&s, "Body1"), 323_074.223_6);
+    assert!((got - want).abs() < 1e-6 * want, "volume {got}, want {want}");
 }
 
 /// A section of #15701: an arch (a seven-point fit spline) on the plane x = `x`, offset 1 mm to

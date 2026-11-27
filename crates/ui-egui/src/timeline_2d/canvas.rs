@@ -1238,11 +1238,11 @@ fn paint_two_tier_header(
     let heading_rect = p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
-        solidcraft_ui_text::tr("timeline.2d_modeling_header"),
+        solidcraft_ui_text::tr_label("MODELING FEATURES"),
         FontId::proportional(t.font_small),
         t.text,
     );
-    let count_text = solidcraft_ui_text::format("timeline.2d_steps", &[("count", &total_features.to_string())]);
+    let count_text = solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", &total_features.to_string())]);
     let badge_left = (banner_rect.left() + 146.0).max(heading_rect.right() + 6.0);
     let badge_rect = Rect::from_min_size(pos2(badge_left, banner_rect.center().y - 8.0), vec2(58.0, 16.0));
     p.rect_filled(badge_rect, 3.0, accent.color.gamma_multiply(0.18));
@@ -1252,8 +1252,10 @@ fn paint_two_tier_header(
     // Right side: Active summary and quick transport buttons
     if banner_rect.width() > 320.0 {
         let active_features = app.session.doc.features.iter().take(marker_slot.min(total_features)).filter(|f| !f.suppressed).count();
-        let active_summary =
-            solidcraft_ui_text::format("timeline.2d_active", &[("active", &active_features.to_string()), ("total", &total_features.to_string())]);
+        let active_summary = solidcraft_ui_text::format(
+            "ui.timeline_2d_active_summary",
+            &[("active", &active_features.to_string()), ("total", &total_features.to_string())],
+        );
         p.text(
             pos2(banner_rect.right() - 85.0, banner_rect.center().y),
             egui::Align2::RIGHT_CENTER,
@@ -1485,7 +1487,7 @@ fn paint_pinned_left(
     p.text(
         pos2(banner_rect.left() + 28.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
-        solidcraft_ui_text::tr("timeline.2d_components"),
+        solidcraft_ui_text::tr_label("COMPONENTS"),
         FontId::proportional(t.font_small),
         t.text,
     );

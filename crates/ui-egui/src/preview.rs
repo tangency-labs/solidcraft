@@ -118,6 +118,14 @@ pub struct SketchPreview {
     pub wires: Vec<usize>,
 }
 
+/// The two flange panels of a corner in the actual computed preview mesh.
+pub struct FlangeCornerFaces {
+    pub sources: [solidcraft_engine::doc::SheetEdgeName; 2],
+    pub body: String,
+    pub mesh: Arc<Mesh>,
+    pub faces: [Vec<usize>; 2],
+}
+
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
     pub interaction: Option<JointInteraction>,
@@ -130,6 +138,9 @@ pub struct Built {
     pub outlines: Vec<(String, Arc<Mesh>)>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
+    /// What the feature says about itself when it builds without failing (a warning of its
+    /// reply): the sheet metal hardware dialog shows it.
+    pub warning: Option<String>,
     /// Extent of what the preview shows (the view's depth range must cover it).
     pub bounds: Aabb3,
     /// The smallest and largest radius a fillet used when it reduced one too large for its edges
@@ -149,6 +160,10 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// Source-rim pairs offered by the evaluated flange command.
+    pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    /// Current mesh faces for those source-rim pairs.
+    pub flange_faces: Vec<FlangeCornerFaces>,
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
@@ -201,6 +216,10 @@ const DETACHED: usize = 2;
 /// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
 const STALE_MOTION_MS: f64 = 500.0;
 
+/// How long a plugin dialog's inputs stay unchanged before its preview runs (#22297). A plugin
+/// preview runs the whole entry, which can take seconds: a quick series of changes costs one run.
+const PLUGIN_QUIET_MS: f64 = 300.0;
+
 /// Picking and feedback use the same placed geometry as the joint preview. The inverse
 /// placement maps a primary re-pick back to the unchanged document's coordinates.
 pub struct JointInteraction {
@@ -238,6 +257,12 @@ pub struct PreviewState {
     /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
     /// [`STALE_MOTION_MS`].
     running_motion: bool,
+    /// The running job is a plugin dialog's preview: once obsolete, it is cancelled between the
+    /// plugin's host calls instead of waited for (#22297).
+    running_plugin: bool,
+    /// A plugin dialog's preview inputs (their key) and when they last changed: its run starts
+    /// once they have stood for [`PLUGIN_QUIET_MS`].
+    plugin_inputs: Option<(u64, f64)>,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// What hovering one of them outlines (see [`Built::outlines`]).
@@ -250,6 +275,8 @@ pub struct PreviewState {
     pub sketches: Vec<SketchPreview>,
     /// Why the current inputs don't make a feature (nothing is previewed then).
     pub error: Option<String>,
+    /// What the previewed feature warns of while it builds (see [`Built::warning`]).
+    pub warning: Option<String>,
     /// A preview is being computed.
     pub busy: bool,
     /// Extent of the preview scene.
@@ -276,6 +303,10 @@ pub struct PreviewState {
     pub mirror_decided: Option<u64>,
     /// The members of the previewed Frame Member, for Remove Tube in its dialog.
     pub centrelines: Vec<crate::dialogs_frame::Centreline>,
+    /// Flange corners from the successful preview of the current inputs only.
+    pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    pub flange_faces: Vec<FlangeCornerFaces>,
+    pub hovered_corner: Option<usize>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -324,6 +355,13 @@ impl PreviewState {
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
+    }
+
+    pub(crate) fn corner_hover(&self) -> Option<&FlangeCornerFaces> {
+        if !self.active || self.rolled_back || self.error.is_some() {
+            return None;
+        }
+        self.flange_faces.get(self.hovered_corner?)
     }
 
     /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
@@ -390,6 +428,9 @@ impl PreviewState {
     fn hide_scene(&mut self) {
         self.drop_layer();
         self.interaction = None;
+        self.flange_corners.clear();
+        self.flange_faces.clear();
+        self.hovered_corner = None;
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -406,9 +447,11 @@ impl PreviewState {
         self.detach();
         self.running_tool = false;
         self.running_stream_key = None;
+        self.plugin_inputs = None;
         self.shown_key = None;
         self.error = None;
         self.plugin_view = None;
+        self.warning = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -417,6 +460,7 @@ impl PreviewState {
         self.mirror_decided = None;
         self.points.clear();
         self.centrelines.clear();
+        self.flange_corners.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -500,6 +544,7 @@ impl PreviewState {
                 self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
+                self.warning = b.warning;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
@@ -508,6 +553,9 @@ impl PreviewState {
                 self.points = b.points;
                 self.set_pose(b.joints);
                 self.centrelines = b.centrelines;
+                self.flange_corners = if self.error.is_none() { b.flange_corners } else { Vec::new() };
+                self.flange_faces = if self.error.is_none() { b.flange_faces } else { Vec::new() };
+                self.hovered_corner = None;
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -541,6 +589,7 @@ impl PreviewState {
                 self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
+                self.warning = None;
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
@@ -564,9 +613,16 @@ impl PreviewState {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            self.warning = None;
             // A constraint's reply says how free its part is with the inputs it was for: with other
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
+            if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                self.shown_key = None;
+            }
+            self.flange_corners.clear();
+            self.flange_faces.clear();
+            self.hovered_corner = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -582,12 +638,21 @@ impl PreviewState {
                 self.running_stream_key = None;
                 self.running_tool = false;
                 self.running_motion = false;
+                self.running_plugin = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
                 // key.
                 if k == key || intermediate {
                     self.apply(k, job);
+                    if k != key {
+                        if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                            self.shown_key = None;
+                        }
+                        self.flange_corners.clear();
+                        self.flange_faces.clear();
+                        self.hovered_corner = None;
+                    }
                 }
             }
         }
@@ -603,7 +668,12 @@ impl PreviewState {
         // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
         // stop it and start the latest value (#14264).
         let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
+        // A plugin preview for inputs since changed: its result would only be dropped, and the
+        // plugin stops at its next host call (#22297).
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key)
+            && (other_setup || stale_motion || self.running_plugin)
+            && self.detached.len() < DETACHED
+        {
             self.detach();
         }
     }
@@ -621,6 +691,19 @@ impl PreviewState {
         self.running_tool = false;
         self.running_stream_key = None;
         self.running_motion = false;
+        self.running_plugin = false;
+    }
+
+    /// Whether a plugin preview for inputs `key` may start at `now`: once they have stood for
+    /// [`PLUGIN_QUIET_MS`]. Inputs other than the last ones seen start the wait again.
+    fn plugin_quiet(&mut self, key: u64, now: f64) -> bool {
+        match self.plugin_inputs {
+            Some((k, since)) if k == key => now - since >= PLUGIN_QUIET_MS,
+            _ => {
+                self.plugin_inputs = Some((key, now));
+                false
+            }
+        }
     }
 }
 
@@ -687,7 +770,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             (command.clone(), params)
         };
         let fields: &[&str] = match command.as_str() {
-            "solid.extrude" => &["distance", "distance2", "to_offset"],
+            "solid.extrude" => &["distance", "distance2", "to_offset", "to_offset2"],
             "solid.offset_face" => &["distance"],
             // A radius dragged or typed: each result shows while the next computes, rather than
             // the preview holding still until the input stops changing.
@@ -809,10 +892,16 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let pv = &mut app.preview;
     pv.set_source(source, revision);
     pv.poll(key, stream_key);
+    insert_preview_bounds(app);
     crate::dialogs_assembly::update_alignment_order(app);
     let pv = &mut app.preview;
-    if pv.running.is_none() && pv.shown_key != Some(key) {
-        pv.started = crate::now_ms();
+    // A plugin preview waits until its inputs stand still (#22297).
+    let now = crate::now_ms();
+    // The inputs are noted even when their result is the one shown: a return to them restarts
+    // the wait for the next change.
+    let waiting = plugin.is_some() && !pv.plugin_quiet(key, now) && pv.shown_key != Some(key);
+    if pv.running.is_none() && pv.shown_key != Some(key) && !waiting {
+        pv.started = now;
         pv.running_stream_key = stream_key;
         pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
@@ -833,8 +922,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             crate::plugin_menu::dry_run(&mut scratch, id);
         }
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, PreviewWork { fallback, ..PreviewWork::default() });
+        app.preview.running_plugin = plugin.is_some() && app.preview.running.is_some();
     }
-    app.preview.busy = app.preview.running.is_some();
+    app.preview.busy = app.preview.running.is_some() || waiting;
     // Both worker results and the web's synchronous results are ready before their first draw.
     if app.preview.shown_key == Some(key)
         && app.preview.active
@@ -848,6 +938,35 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
     crate::dialogs_frame::settle_pick(app);
+}
+
+/// The Insert SVG/DXF preview is imported once at the sketch's origin and drawn where the window
+/// has it (`paint_sketches`), so its box follows the position, size and angle too: Fit and the
+/// view's depth range see where the drawing is now, not where it was imported.
+fn insert_preview_bounds(app: &mut SolveApp) {
+    let bounds = {
+        let Some(crate::dialogs::Kind::InsertDrawing(p)) = app.dialog.as_ref().map(|d| &d.kind) else { return };
+        let (Some((w, h)), Some(plane)) = (p.natural, app.preview.sketches.first().map(|s| s.sketch.plane)) else { return };
+        // The preview holds the drawing as imported at the sketch's origin: its middle there for
+        // "middle", its file coordinates for "file origin". Its box is the drawing's own box
+        // (`middle` is its centre in the file) at that anchor.
+        let (mx, my) = p.middle.unwrap_or((0.0, 0.0));
+        let (ax, ay) = match p.align {
+            crate::dialogs_insert_drawing::Align::Origin => (0.0, 0.0),
+            crate::dialogs_insert_drawing::Align::Middle => (mx, my),
+        };
+        let mut b = Aabb3::EMPTY;
+        for (x, y) in [
+            (mx - w / 2.0 - ax, my - h / 2.0 - ay),
+            (mx + w / 2.0 - ax, my - h / 2.0 - ay),
+            (mx + w / 2.0 - ax, my + h / 2.0 - ay),
+            (mx - w / 2.0 - ax, my + h / 2.0 - ay),
+        ] {
+            b.add(plane.to_world(crate::dialogs_insert_drawing::placed(solidcore_record::Vec2::new(x, y), p)));
+        }
+        b
+    };
+    app.preview.bounds = bounds;
 }
 
 /// What tells one preview computation from another: its commands, the document revision they
@@ -898,6 +1017,24 @@ fn compute_candidate(scratch: &Session, cmds: &[(String, Value)], colors: Colors
         return compute(scratch, base, colors);
     }
     result
+}
+
+fn flange_faces(after: &ModelState, sources: &[[solidcraft_engine::doc::SheetEdgeName; 2]]) -> Vec<FlangeCornerFaces> {
+    sources
+        .iter()
+        .filter_map(|sources| {
+            let mut candidates = after.surface_sheets.iter().filter_map(|sheet| {
+                let body = after.body(&sheet.body)?;
+                let faces = sources.each_ref().map(|source| sheet.bend_face_indices(body, source));
+                if faces.iter().any(Vec::is_empty) {
+                    return None;
+                }
+                Some(FlangeCornerFaces { sources: sources.clone(), body: body.name.clone(), mesh: body.mesh(), faces })
+            });
+            let corner = candidates.next()?;
+            candidates.next().is_none().then_some(corner)
+        })
+        .collect()
 }
 
 /// Evaluate the commands on the scratch session and build the preview scene.
@@ -960,8 +1097,20 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             // fillet or an edited one: the feature the replies name).
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
+            // What the features warn of while they build: the sheet metal hardware dialog says so.
+            let warnings: Vec<&str> = p.replies.iter().filter_map(|r| r.get("warning").and_then(Value::as_str)).filter(|w| !w.is_empty()).collect();
+            b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
             b.centrelines = crate::dialogs_frame::centrelines(&p);
+            if let Some((command, params)) = cmds.first() {
+                let editing = if command == "timeline.redefine" { params.get("feature").and_then(Value::as_u64) } else { None };
+                if command == "sheet.flange"
+                    || command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("sheet.flange")
+                {
+                    b.flange_corners = crate::dialogs_sheet::flange_corner_sources(&p.before, &p.after, editing);
+                    b.flange_faces = flange_faces(&p.after, &b.flange_corners);
+                }
+            }
             Ok(b)
         }
     }
@@ -1145,6 +1294,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1152,6 +1302,8 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1201,6 +1353,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1208,6 +1361,8 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1522,6 +1677,7 @@ fn build_scene(
         replaced,
         outlines,
         error: None,
+        warning: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1529,6 +1685,8 @@ fn build_scene(
         mirror_meets: None,
         points,
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1745,8 +1903,15 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     }) {
         return;
     }
+    // An Insert SVG/DXF window's preview is the drawing at the sketch's origin, moved here by
+    // the window's position, size and angle: the same placement `sketch.insert_svg` applies, so
+    // changing those moves this drawing without importing and evaluating it again.
+    let place = match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::InsertDrawing(p)) => Some(p),
+        _ => None,
+    };
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget, place)).sum();
     crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
@@ -1757,15 +1922,21 @@ pub(crate) fn paint_sketch(
     painter: &egui::Painter,
     proj: &crate::viewport::Proj,
     budget: &mut solidcraft_engine::render::SamplingBudget,
+    place: Option<&crate::dialogs_insert_drawing::Place>,
 ) -> usize {
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let sketch = &preview.sketch;
+    // An Insert SVG/DXF drawing's preview is imported at the sketch's origin and put down where
+    // the window has it, so its curves and its points move together and stay what OK adds.
+    let placed: Option<Box<dyn Fn(solidcore_record::Seg2) -> solidcore_record::Seg2>> =
+        place.map(|p| Box::new(move |seg| crate::dialogs_insert_drawing::placed_seg(seg, p)) as Box<dyn Fn(_) -> _>);
     for index in &preview.curves {
-        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+        crate::tools::paint_curve_placed(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget, placed.as_deref());
     }
     for index in &preview.points {
-        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-            painter.circle_filled(point, 3.0, stroke.color);
+        let point = sketch.sketch.point(*index).map(|q| place.map_or(q, |p| crate::dialogs_insert_drawing::placed(q, p)));
+        if let Some(screen) = point.and_then(|q| proj.to_screen(sketch.plane.to_world(q))) {
+            painter.circle_filled(screen, 3.0, stroke.color);
         }
     }
     // A 3D point (a corner a fillet keeps) is a dot, like a point on the plane; a curve is counted.
@@ -1987,6 +2158,7 @@ mod tests {
             replaced: vec!["Lid".into()],
             outlines: Vec::new(),
             error: None,
+            warning: None,
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),
@@ -1994,6 +2166,8 @@ mod tests {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             layer: None,
             joints: Vec::new(),
             plugin_view: None,
@@ -2121,6 +2295,71 @@ mod tests {
         }
     }
 
+    #[test]
+    fn flange_corner_preview_metadata_is_current_only() {
+        let sources = vec![[
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l1)|F7:bend.inner(F1:side:l1)").unwrap(),
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l2)|F7:bend.inner(F1:side:l2)").unwrap(),
+        ]];
+        let built = || Built { flange_corners: sources.clone(), ..pose() };
+        let mut preview = PreviewState::default();
+        preview.apply(1, Ok(built()));
+        assert_eq!(preview.flange_corners, sources);
+        let (pending, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((2, receiver));
+        preview.poll(2, None);
+        assert!(preview.flange_corners.is_empty(), "changed inputs must not offer old corners");
+        assert!(preview.active, "the last good geometry can stay visible");
+        preview.poll(1, None);
+        assert!(preview.running.is_some(), "the stale worker is still allowed to finish");
+        assert_ne!(preview.shown_key, Some(1), "returning to A must rebuild its discarded metadata");
+        pending.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert!(preview.running.is_none() && preview.flange_corners.is_empty());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((1, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert_eq!(preview.flange_corners, sources, "the rebuilt A offers its metadata again");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((1, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(2, None);
+        assert!(preview.flange_corners.is_empty(), "an obsolete result must be discarded");
+        assert_eq!(preview.shown_key, None);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((2, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(2, None);
+        assert_eq!(preview.flange_corners, sources, "the current successful result offers its corners");
+
+        for (tool, stream) in [(true, None), (false, Some(42))] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            preview.running = Some((1, receiver));
+            preview.running_tool = tool;
+            preview.running_stream_key = stream;
+            sender.send(Ok(built())).unwrap();
+            preview.poll(2, stream);
+            assert!(preview.active, "successful intermediate geometry may still be shown");
+            assert!(preview.flange_corners.is_empty(), "intermediate geometry cannot offer obsolete corners");
+            assert_eq!(preview.shown_key, None, "returning to the intermediate key also needs a rebuild");
+        }
+
+        for failure in [Err("invalid expression".into()), Ok(Built { error: Some("invalid tool".into()), ..built() })] {
+            preview.apply(2, Ok(built()));
+            preview.apply(2, failure);
+            assert!(preview.flange_corners.is_empty(), "a failed preview offers no corners");
+        }
+        preview.apply(2, Ok(built()));
+        preview.clear();
+        assert!(preview.flange_corners.is_empty(), "closing the preview clears its corners");
+        preview.apply(2, Ok(built()));
+        preview.reset();
+        assert!(preview.flange_corners.is_empty(), "another design cannot inherit these corners");
+    }
+
     /// The worker completes while the slider is still held or Play keeps advancing.
     /// Intermediate successful poses must reach the viewport, and the final value
     /// must still be computed rather than treating that intermediate pose as current.
@@ -2197,6 +2436,51 @@ mod tests {
         pv.running_motion = false;
         pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
         assert!(pv.running.is_some() && !progress.is_cancelled());
+    }
+
+    /// A plugin preview for inputs since changed is cancelled at once (#22297): its result would
+    /// only be dropped, and the plugin stops at its next host call. The current one keeps running.
+    #[test]
+    fn an_obsolete_plugin_preview_is_cancelled_not_waited_for() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_plugin = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, None, 1000.0 + 60_000.0);
+        assert!(pv.running.is_some() && !progress.is_cancelled(), "the current inputs' run is never cancelled");
+        pv.poll_at(2, None, 1001.0);
+        assert!(pv.running.is_none(), "the new inputs need not wait");
+        assert!(progress.is_cancelled(), "the obsolete run is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+        assert!(!pv.running_plugin);
+        // Any other preview that does not stream still waits for its running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_plugin = false;
+        pv.poll_at(2, None, 1001.0);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+    }
+
+    /// A plugin preview starts once its inputs have stood for 300 ms (#22297); other inputs start
+    /// the wait again.
+    #[test]
+    fn a_plugin_preview_waits_until_its_inputs_stand_still() {
+        let mut pv = PreviewState::default();
+        assert!(!pv.plugin_quiet(1, 0.0), "new inputs wait");
+        assert!(!pv.plugin_quiet(1, PLUGIN_QUIET_MS - 1.0));
+        assert!(pv.plugin_quiet(1, PLUGIN_QUIET_MS));
+        assert!(!pv.plugin_quiet(2, PLUGIN_QUIET_MS + 10.0), "a change starts the wait again");
+        assert!(!pv.plugin_quiet(2, 2.0 * PLUGIN_QUIET_MS));
+        assert!(pv.plugin_quiet(2, 2.0 * PLUGIN_QUIET_MS + 10.0));
+        pv.clear();
+        assert!(!pv.plugin_quiet(2, 10_000.0), "a reopened dialog waits again");
     }
 
     #[test]

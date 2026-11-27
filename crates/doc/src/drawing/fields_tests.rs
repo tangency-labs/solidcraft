@@ -59,7 +59,8 @@ fn the_drawings_fields() {
     // Without a number of its own, the drawing is numbered by the component its sheet documents,
     // by name; without either, nothing.
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let bracket =
+        Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: None };
     let number = || vec![field(Source::Drawing, "number")];
     assert_eq!(shown(&d, 0, Some(bracket), number()), "DRW-0042", "its own number first");
     Arc::make_mut(&mut d.properties).set(Owner::Design, "part_number", json!("")).unwrap();
@@ -133,7 +134,8 @@ fn revision_fields_read_the_newest_row() {
 fn empty_fields_are_named_by_source_and_key() {
     let mut d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let bracket =
+        Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: None };
     let content = Content(vec![
         field(Source::Component, "name"),
         Part::Text(" ".into()),
@@ -167,6 +169,7 @@ fn the_components_fields() {
         name: "Bracket",
         metadata: &metadata,
         properties: Some(&properties),
+        name_split: None,
         material: Some("Steel"),
         mass: Some("0.39 kg"),
         sheet_metal: None,
@@ -197,7 +200,15 @@ fn a_sheet_metal_parts_fields() {
     let d = drawing();
     let metadata = Metadata::default();
     let read = |sheet: &SheetMetal| {
-        let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: Some(sheet) };
+        let bracket = Component {
+            name: "Bracket",
+            metadata: &metadata,
+            properties: None,
+            name_split: None,
+            material: None,
+            mass: None,
+            sheet_metal: Some(sheet),
+        };
         SHEET_METAL.map(|key| shown(&d, 0, Some(bracket), vec![field(Source::Component, key)]))
     };
     // In SHEET_METAL's order: bend_radius, flat_length, flat_width, k_factor, sheet_rule, thickness.
@@ -209,7 +220,8 @@ fn a_sheet_metal_parts_fields() {
     assert_eq!([k(0.5), k(1.0 / 3.0), k(0.0), k(f64::NAN)], [Some("0.5".into()), Some("0.333".into()), Some("0".into()), None]);
     // A note reads them as text around them.
     let sheet = SheetMetal::of(&[al2()], "mm");
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: Some(&sheet) };
+    let bracket =
+        Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: Some(&sheet) };
     let note =
         vec![Part::Text("t = ".into()), field(Source::Component, "thickness"), Part::Text(", ".into()), field(Source::Component, "sheet_rule")];
     assert_eq!(shown(&d, 0, Some(bracket), note), "t = 2.00 mm, AL2");
@@ -245,7 +257,7 @@ fn sheet_metal_fields_show_only_what_every_sheet_body_agrees_on() {
     // Read through a sheet: empty for a component that isn't sheet metal, lost for one deleted.
     let d = drawing();
     let metadata = Metadata::default();
-    let plain = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let plain = Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: None };
     let content = Content(vec![field(Source::Component, "name"), field(Source::Component, "thickness"), field(Source::Component, "flat_length")]);
     let values = |component| Values { drawing: &d, sheet: 0, component };
     assert_eq!(values(Documented::Present(plain)).state(Source::Component, "thickness"), FieldState::Empty);
@@ -263,7 +275,7 @@ fn sheet_metal_fields_show_only_what_every_sheet_body_agrees_on() {
 #[test]
 fn the_finish_field_reads_the_finish_property_then_the_free_one() {
     fn part<'a>(metadata: &'a Metadata, properties: Option<&'a BTreeMap<String, String>>) -> Option<Component<'a>> {
-        Some(Component { name: "Bracket", metadata, properties, material: None, mass: None, sheet_metal: None })
+        Some(Component { name: "Bracket", metadata, properties, name_split: None, material: None, mass: None, sheet_metal: None })
     }
     let d = drawing();
     let free = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
@@ -321,7 +333,8 @@ fn unknown_fields_and_overrides_are_refused() {
 fn each_field_is_shown_empty_or_lost() {
     let d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let bracket =
+        Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: None };
     let blank = BTreeMap::from([("finish".to_string(), String::new())]);
     let state = |component, source, key| Values { drawing: &d, sheet: 0, component }.state(source, key);
     let present = Documented::Present(bracket);
@@ -416,7 +429,8 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
 fn a_field_its_source_lacks_reads_unknown() {
     let d = drawing();
     let metadata = Metadata::default();
-    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None, sheet_metal: None };
+    let bracket =
+        Component { name: "Bracket", metadata: &metadata, properties: None, name_split: None, material: None, mass: None, sheet_metal: None };
     let values = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
     assert_eq!(values.state(Source::Component, "weight"), FieldState::Unknown);
     assert_eq!(values.state(Source::Sheet, "scales"), FieldState::Unknown);
