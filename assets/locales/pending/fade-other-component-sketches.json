@@ -4,27 +4,35 @@
     "prefs.fade_other_component_sketches_help": "With a component active, draw the sketches of other components faded, as their bodies are"
   },
   "de": {
-    "prefs.fade_other_component_sketches": "Skizzen anderer Komponenten abblenden"
+    "prefs.fade_other_component_sketches": "Skizzen anderer Komponenten abblenden",
+    "prefs.fade_other_component_sketches_help": "Bei aktiver Komponente die Skizzen anderer Komponenten abgeblendet zeichnen, wie ihre Körper"
   },
   "nl": {
-    "prefs.fade_other_component_sketches": "Schetsen van andere componenten vervagen"
+    "prefs.fade_other_component_sketches": "Schetsen van andere componenten vervagen",
+    "prefs.fade_other_component_sketches_help": "Teken bij een actieve component de schetsen van andere componenten vervaagd, zoals hun lichamen"
   },
   "ja": {
-    "prefs.fade_other_component_sketches": "他のコンポーネントのスケッチを淡色表示"
+    "prefs.fade_other_component_sketches": "他のコンポーネントのスケッチを淡色表示",
+    "prefs.fade_other_component_sketches_help": "コンポーネントがアクティブなとき、他のコンポーネントのスケッチをそのボディと同様に淡色で表示します"
   },
   "zh": {
-    "prefs.fade_other_component_sketches": "淡化其他组件的草图"
+    "prefs.fade_other_component_sketches": "淡化其他组件的草图",
+    "prefs.fade_other_component_sketches_help": "组件处于活动状态时，其他组件的草图与其实体一样淡化显示"
   },
   "ko": {
-    "prefs.fade_other_component_sketches": "다른 구성요소의 스케치 흐리게 표시"
+    "prefs.fade_other_component_sketches": "다른 구성요소의 스케치 흐리게 표시",
+    "prefs.fade_other_component_sketches_help": "구성요소가 활성화되어 있으면 다른 구성요소의 스케치를 해당 바디처럼 흐리게 표시합니다"
   },
   "vi": {
-    "prefs.fade_other_component_sketches": "Làm mờ phác thảo của các thành phần khác"
+    "prefs.fade_other_component_sketches": "Làm mờ phác thảo của các thành phần khác",
+    "prefs.fade_other_component_sketches_help": "Khi một thành phần đang hoạt động, vẽ mờ các phác thảo của thành phần khác, giống như thân khối của chúng"
   },
   "ar": {
-    "prefs.fade_other_component_sketches": "تعتيم رسومات المكونات الأخرى"
+    "prefs.fade_other_component_sketches": "تعتيم رسومات المكونات الأخرى",
+    "prefs.fade_other_component_sketches_help": "عند تنشيط مكوّن، تُرسم رسومات المكونات الأخرى باهتة، كما هي أجسامها"
   },
   "he": {
-    "prefs.fade_other_component_sketches": "עמעום סקיצות של רכיבים אחרים"
+    "prefs.fade_other_component_sketches": "עמעום סקיצות של רכיבים אחרים",
+    "prefs.fade_other_component_sketches_help": "כאשר רכיב פעיל, סקיצות של רכיבים אחרים מוצגות מעומעמות, כמו הגופים שלהם"
   }
 }
