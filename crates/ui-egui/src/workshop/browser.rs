@@ -97,6 +97,56 @@ pub(crate) fn open(app: &mut SolveApp) {
     }
 }
 
+/// The kind filter's ids, in the window's order (0 is every kind).
+const KIND_IDS: &[&str] = &["all", "plugin", "model", "part"];
+
+/// `ui.workshop {open?, query?, kind?, choose?}`: the Workshop window as a click would drive it.
+/// `open` shows or hides it (opening reads the list when it hasn't been read), `query` and `kind`
+/// (`all`, `plugin`, `model`, `part`) set its search and filter, and `choose` (a listed id) asks
+/// the item's question, as Open… or Install… does. Returns the window's state and the shown ids.
+pub(crate) fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Value, String> {
+    if !offered(app) {
+        return Err("not supported yet: this app has no way to reach the Workshop (the desktop app has)".into());
+    }
+    if let Some(query) = p.get("query") {
+        let query = query.as_str().filter(|q| q.chars().count() <= catalog::MAX_QUERY).ok_or("`query` must be text of at most 200 characters")?;
+        app.workshop.browser.query = query.to_string();
+    }
+    if let Some(kind) = p.get("kind") {
+        let at = kind.as_str().and_then(|k| KIND_IDS.iter().position(|id| *id == k)).ok_or("`kind` must be all, plugin, model or part")?;
+        app.workshop.browser.kind = at;
+    }
+    match p.get("open").map(serde_json::Value::as_bool) {
+        Some(Some(true)) => open(app),
+        Some(Some(false)) => app.workshop.browser.open = false,
+        Some(None) => return Err("`open` must be true or false".into()),
+        None => {}
+    }
+    if let Some(id) = p.get("choose") {
+        let id = id.as_str().ok_or("`choose` must be a listed item's id")?;
+        let kind = lock(&app.workshop.browser.shared).catalog.items.iter().find(|i| i.id == id).map(|i| i.kind);
+        let kind = kind.ok_or_else(|| std::format!("no listed item `{id}`"))?;
+        choose(app, kind, id);
+    }
+    let browser = &app.workshop.browser;
+    let s = lock(&browser.shared);
+    let shown: Vec<&str> = filter_of(browser).apply(&s.catalog.items).take(MAX_ROWS).map(|i| i.id.as_str()).collect();
+    Ok(serde_json::json!({
+        "open": browser.open,
+        "query": browser.query,
+        "kind": KIND_IDS.get(browser.kind).copied().unwrap_or("all"),
+        "state": s.catalog.state,
+        "error": s.catalog.error,
+        "shown": shown,
+        "asking": app.workshop.ask.as_ref().map(|a| a.id.clone()),
+    }))
+}
+
+/// What the window's search and kind filter keep.
+fn filter_of(browser: &Browser) -> Filter {
+    Filter { kind: browser.kind.checked_sub(1).and_then(|k| catalog::Kind::ALL.get(k).copied()), tier: None, query: browser.query.clone() }
+}
+
 /// Read the list again in the background.
 pub(crate) fn refresh(app: &mut SolveApp) {
     let Some(get) = app.services.workshop_get.clone() else { return };
@@ -304,8 +354,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         s.ctx = Some(ctx.clone());
     }
     let browser = &mut app.workshop.browser;
-    let filter =
-        Filter { kind: browser.kind.checked_sub(1).and_then(|k| catalog::Kind::ALL.get(k).copied()), tier: None, query: browser.query.clone() };
+    let filter = filter_of(browser);
     let kinds = [tr("workshop.all"), tr("workshop.plugins"), tr("workshop.models"), tr("workshop.parts")];
     let mut chosen = None;
     let mut reread = false;

@@ -814,6 +814,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
+        "ui.workshop" => wrap(crate::workshop::browser::control(app, p)),
         "ui.inspect" => ui_inspect(app),
         "ui.file" => with(p, |q| ui_file(app, q)),
         "ui.documents" => {

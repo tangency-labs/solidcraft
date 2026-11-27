@@ -664,6 +664,7 @@ fn choosing_an_item_asks_as_a_link_does() {
     assert!(!crate::plugin_menu::rows(&h.app).iter().any(|r| matches!(r, crate::app_bar::FileRow::Item(i) if i.id == "workshop")));
     browser::open(&mut h.app);
     assert!(!h.app.workshop.browser.open, "no window without the Workshop");
+    assert!(browser::control(&mut h.app, &json!({"open": true})).is_err());
 
     browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
     browser::choose(&mut h.app, K::Plugin, "gears");
@@ -705,6 +706,26 @@ fn the_session_lists_what_the_window_shows() {
     assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(listed["items"][0]["id"], "gears");
     assert!(crate::plugin_menu::rows(&h.app).iter().any(|r| matches!(r, crate::app_bar::FileRow::Item(i) if i.id == "workshop")));
+
+    // `ui.workshop` drives the window as clicks would; bad values are refused.
+    let shown = browser::control(&mut h.app, &json!({"open": true, "kind": "plugin"})).unwrap();
+    assert_eq!((shown["open"].as_bool(), shown["state"].as_str()), (Some(true), Some("ready")));
+    assert_eq!(shown["shown"], json!(["gears"]));
+    let searched = browser::control(&mut h.app, &json!({"kind": "all", "query": "shelf"})).unwrap();
+    assert_eq!(searched["shown"], json!(["k3x9"]));
+    for bad in [
+        json!({"kind": "theme"}),
+        json!({"query": 3}),
+        json!({"query": "x".repeat(201)}),
+        json!({"open": "yes"}),
+        json!({"choose": "nothing"}),
+        json!({"choose": 1}),
+    ] {
+        assert!(browser::control(&mut h.app, &bad).is_err(), "{bad}");
+    }
+    let asked = browser::control(&mut h.app, &json!({"choose": "gears"})).unwrap();
+    assert_eq!(asked["asking"], "gears");
+    assert!(browser::control(&mut h.app, &json!({"open": false})).is_ok_and(|v| v["open"] == false));
 }
 
 /// The window as it draws, in English and German: names, versions, badges and buttons, and the
