@@ -2458,7 +2458,20 @@ fn arc_edge_far_mitre_cut_names_arc_length_reach_and_builds() {
             Some(named),
             v_cfg.marked,
         );
+        assert_eq!(
+            r3.event,
+            Some(BlendCornerEvent::Setback),
+            "{}: {}",
+            v_cfg.label,
+            r3.reason
+        );
         assert!(r3.ok, "{}, asked {named}: {}", v_cfg.label, r3.reason);
+        assert_eq!(
+            r3.setbacks,
+            vec![named; 3],
+            "{}: built setbacks",
+            v_cfg.label
+        );
         assert_eq!(
             get_faces(&b3).unwrap().len(),
             case3.faces_want,
