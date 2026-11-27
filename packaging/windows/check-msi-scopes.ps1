@@ -181,6 +181,7 @@ $ClsidKey = if ($Arch -eq 'x86') { 'Software\Classes\WOW6432Node\CLSID' } else {
 function Assert-Thumbnails([string] $Hive, [string] $Dir, [string] $Who) {
   $class = "${Hive}:\$ClsidKey\$ThumbClsid"
   Check (Test-Path -LiteralPath "$Dir\solidcraft_explorer.dll") "${Who}: solidcraft_explorer.dll"
+  Check ((Get-Command-Value $class) -eq 'SolidCraft design thumbnails') "${Who}: the thumbnail handler's class is named"
   Check ((Get-Command-Value "$class\InprocServer32") -ieq "$Dir\solidcraft_explorer.dll") "${Who}: the thumbnail handler's class names the installed DLL"
   Check ((Get-ItemProperty -LiteralPath "$class\InprocServer32" -ErrorAction SilentlyContinue).ThreadingModel -eq 'Apartment') "${Who}: the thumbnail handler is apartment-threaded"
   Check ($null -eq (Get-ItemProperty -LiteralPath $class -ErrorAction SilentlyContinue).DisableProcessIsolation) "${Who}: the thumbnail handler runs isolated (no DisableProcessIsolation)"
