@@ -135,7 +135,7 @@ fn container_bytes(parts: &[(&str, &[u8])], comment: &str) -> Vec<u8> {
 }
 
 /// Where the end-of-central-directory record starts.
-fn record(bytes: &[u8]) -> usize {
+pub(crate) fn record(bytes: &[u8]) -> usize {
     bytes.windows(4).rposition(|w| w == b"PK\x05\x06").unwrap()
 }
 
@@ -207,4 +207,77 @@ fn the_path_reader_shares_the_directory_checks() {
     assert_eq!(picture(&path), None);
     assert_eq!(model(&path), None);
     let _ = std::fs::remove_file(&path);
+}
+
+/// `bytes`, a container written without a comment, as a ZIP64 archive the `zip` crate opens: the
+/// same entries and directory, then a ZIP64 end record, its locator, and an end record whose
+/// counts, size and offset say "in the ZIP64 record".
+pub(crate) fn as_zip64(bytes: &[u8]) -> Vec<u8> {
+    let at = record(bytes);
+    let u16_at = |o: usize| u64::from(u16::from_le_bytes([bytes[at + o], bytes[at + o + 1]]));
+    let u32_at = |o: usize| u64::from(u32::from_le_bytes(bytes[at + o..at + o + 4].try_into().unwrap()));
+    let (entries, size, offset) = (u16_at(10), u32_at(12), u32_at(16));
+    let mut out = bytes[..at].to_vec();
+    let zip64_record = out.len() as u64;
+    out.extend_from_slice(b"PK\x06\x06");
+    out.extend_from_slice(&44_u64.to_le_bytes());
+    out.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    for field in [entries, entries, size, offset] {
+        out.extend_from_slice(&field.to_le_bytes());
+    }
+    out.extend_from_slice(b"PK\x06\x07\0\0\0\0");
+    out.extend_from_slice(&zip64_record.to_le_bytes());
+    out.extend_from_slice(&1_u32.to_le_bytes());
+    out.extend_from_slice(b"PK\x05\x06\0\0\0\0\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\0\0");
+    out
+}
+
+/// A plain end record: one disk, `entries` entries, a directory of `size` bytes at `offset`, and a
+/// comment of `comment` bytes.
+pub(crate) fn end_record(entries: u16, size: u32, offset: u32, comment: u16) -> Vec<u8> {
+    let mut out = b"PK\x05\x06\0\0\0\0".to_vec();
+    out.extend_from_slice(&entries.to_le_bytes());
+    out.extend_from_slice(&entries.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&offset.to_le_bytes());
+    out.extend_from_slice(&comment.to_le_bytes());
+    out
+}
+
+/// The zip crate opens `bytes` and finds the container's three entries in it.
+fn zip_crate_opens(bytes: &[u8]) -> bool {
+    zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).map(|a| a.len()).ok() == Some(3)
+}
+
+#[test]
+fn a_zip64_archive_behind_a_record_the_zip_crate_skips_is_refused() {
+    let zip64 = as_zip64(&good());
+    assert!(zip_crate_opens(&zip64));
+    assert!(open_archive(std::io::Cursor::new(zip64.clone())).is_none());
+    // After the ZIP64 records, a plain record the zip crate skips: its directory would start
+    // where the record does, so the crate goes back to the ZIP64 record before it.
+    let mut skipped = zip64.clone();
+    let position = skipped.len() as u32;
+    skipped.extend_from_slice(&end_record(1, 0, position, 0));
+    assert!(zip_crate_opens(&skipped));
+    assert!(open_archive(std::io::Cursor::new(skipped)).is_none(), "a record the zip crate skips hides a ZIP64 archive");
+}
+
+#[test]
+fn a_zip64_archive_behind_a_decoy_record_is_refused() {
+    let zip64 = as_zip64(&good());
+    // A plain record before the ZIP64 records whose comment runs to the end of the file, and a
+    // byte after the last record: the zip crate takes the last record, this check the first.
+    let at = record(&good());
+    let directory_end = zip64.len() - 22 - 20 - 56;
+    let mut decoy = zip64[..directory_end].to_vec();
+    decoy.extend_from_slice(&end_record(0, 0, 0, 56 + 20 + 22 + 1));
+    decoy.extend_from_slice(&zip64[directory_end..]);
+    decoy.push(0);
+    let locator = decoy.len() - 1 - 22 - 20;
+    let moved = (directory_end + 22) as u64;
+    decoy[locator + 8..locator + 16].copy_from_slice(&moved.to_le_bytes());
+    assert_eq!(at, directory_end, "the directory ends where the plain container's record began");
+    assert!(zip_crate_opens(&decoy));
+    assert!(open_archive(std::io::Cursor::new(decoy)).is_none(), "a decoy record hides a ZIP64 archive");
 }

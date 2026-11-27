@@ -222,3 +222,13 @@ fn a_source_longer_than_the_file_bound_is_refused_unread() {
     assert_eq!(keyed_picture(&mut huge), None);
     assert_eq!(huge.reads, 0);
 }
+
+#[test]
+fn a_zip64_design_is_a_miss_whatever_record_ends_it() {
+    let zip64 = crate::tests::as_zip64(&design(V2, 512, 384, 1000));
+    assert_eq!(read(&zip64), None);
+    let mut skipped = zip64;
+    let position = skipped.len() as u32;
+    skipped.extend_from_slice(&crate::tests::end_record(1, 0, position, 0));
+    assert_eq!(read(&skipped), None, "a record the zip crate skips hides a ZIP64 design");
+}
