@@ -59,11 +59,17 @@ the same for any feature.
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
 
-**Quick measurement** (off by default; turn it on under Preferences › Interface): with edges,
-faces, sketch curves or points selected, the view's bottom right corner, above History, shows
-what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
-position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
-(I) does more.
+**Quick measurement** (off by default; turn it on in Preferences › Graphics › Quick measurement
+in the view's corner): with edges, faces, sketch curves or points selected, the view's bottom right
+corner, above History, shows what they measure: an edge's length (Ø and R for a round one), a face's
+area and perimeter, a point's position, or two items' distance and angle. A click copies the readout.
+
+To measure the total length of a mixed chain of three or more lines, arcs or other sketch curves,
+turn on Quick measurement, then add the curves to the selection with Shift-click. The readout
+shows their count and combined length, including arc lengths, and updates as the selection changes.
+The curves need not be connected. Selecting only faces or sketch regions instead totals their area.
+For one or two items, use the readout or the Measure tool (I); two items show their distance and
+angle rather than a cumulative path length.
 
 **Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
