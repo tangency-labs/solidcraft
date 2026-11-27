@@ -3168,7 +3168,9 @@ pub fn local_extension_reach(
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
                     pieces(&piece, bounds, pair, None)?
                 }
-                (Exact::Torus(_), _) | (_, Exact::Torus(_)) => return Err(uncertified()),
+                (Exact::Torus(_), _) | (_, Exact::Torus(_)) | (Exact::Net(_), Exact::Net(_)) => {
+                    return Err(uncertified())
+                }
                 (&Exact::Plane(plane), Exact::Net(n)) | (Exact::Net(n), &Exact::Plane(plane)) => {
                     let guess = std::cell::Cell::new(None);
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
@@ -3258,7 +3260,6 @@ pub fn local_extension_reach(
                         }
                     }
                 }
-                (Exact::Net(_), Exact::Net(_)) => return Err(uncertified()),
             };
             if apart && !found.apart.contains(&e) {
                 found.apart.push(e);
