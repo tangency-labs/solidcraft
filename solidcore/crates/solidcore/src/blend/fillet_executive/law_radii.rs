@@ -84,19 +84,21 @@ impl FilletLaw {
 
     /// One radius law along a tangent chain: the law of [`FilletLaw::of_radii`] running from
     /// the chain's end nearest `start` (0) to its other end (1), each edge of `edges` (of
-    /// `b`, in any order) taking the part of it that its share of the chain's length gives, as
-    /// its edge map. An edge whose curve runs back along the chain takes the reversed law over
+    /// `b`, in any order) taking the part of it that its share of the chain gives, as its edge
+    /// map. An edge's share is its parameter interval as the smooth sequence joins the chain's
+    /// curves (each stretched so the joined curve's speed agrees where two edges meet), so the
+    /// radius is one smooth function of the joined curve's parameter. An edge whose curve runs back along the chain takes the reversed law over
     /// the mirrored part, so the radius is one function of the position along the chain and
     /// agrees where two edges meet. Within an edge the position runs with its curve's
     /// parameter, as it does for a law along one edge. The laws come in the order of `edges`.
     ///
     /// `None` when `edges` are not one open chain (each edge's two vertices distinct, the
     /// edges joined end to end, no vertex on more than two of them, two ends) or an edge is
-    /// no longer than the zone tolerance.
+    /// no longer than the zone tolerance or stops at an end.
     ///
     /// # Errors
     /// Those of [`FilletLaw::of_radii`], of the edges' vertices and curves, and of the
-    /// curves' lengths.
+    /// curves' lengths and derivatives.
     pub fn chain_of_radii(
         k: &Kernel,
         b: &Brep,
@@ -109,9 +111,13 @@ impl FilletLaw {
         let Some(path) = chain_path(b, edges, start)? else {
             return Ok(None);
         };
-        // each edge's length, in the chain's order
+        // each edge's share of the chain, in the chain's order: its parameter interval as the
+        // smooth sequence joins it (`CreateSmoothEdgeSequence`), stretched so the joined
+        // curve's speed agrees where two edges meet, so the law is one function of the
+        // joined curve's parameter and as smooth along it as its own curve
         let mut lengths = Vec::new();
-        for &(i, _) in &path {
+        let (mut stretch, mut exit_speed) = (1.0, None);
+        for &(i, reversed) in &path {
             let Some(&e) = edges.get(i) else {
                 return Ok(None);
             };
@@ -119,11 +125,32 @@ impl FilletLaw {
                 b.edge(e)?.curve.as_ref().ok_or_else(|| {
                     SolidError::invalid_input(OP_CHAIN, "an edge without a curve")
                 })?;
-            let length = curve.length(k, &topo_edge::interval(b, e)?, EFF_ZERO)?;
+            let interval = topo_edge::interval(b, e)?;
+            let length = curve.length(k, &interval, EFF_ZERO)?;
             if !(length.is_finite() && length > k.tolerances.zone_tol_3d) {
                 return Ok(None);
             }
-            lengths.push(length);
+            let speed = |t: f64| -> Result<f64> {
+                Ok(curve
+                    .evaluate(k, t, 1, false, true)?
+                    .get(1)
+                    .copied()
+                    .map_or(0.0, Vec3::length))
+            };
+            let (lo, hi) = (speed(interval.min())?, speed(interval.max())?);
+            let (entry, exit) = if reversed { (hi, lo) } else { (lo, hi) };
+            if !(entry.is_finite() && exit.is_finite() && entry > EFF_ZERO && exit > EFF_ZERO) {
+                return Ok(None);
+            }
+            if let Some(before) = exit_speed {
+                stretch *= entry / before;
+            }
+            exit_speed = Some(exit);
+            let share = interval.length() * stretch;
+            if !(share.is_finite() && share > 0.0) {
+                return Ok(None);
+            }
+            lengths.push(share);
         }
         let total: f64 = lengths.iter().sum();
         let mut laws: Vec<Option<Self>> = vec![None; edges.len()];
