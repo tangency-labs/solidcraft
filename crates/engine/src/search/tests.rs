@@ -5,7 +5,7 @@ use serde_json::json;
 use super::matcher::{damerau_levenshtein, fold_str, match_query_against_fields, score_text};
 use super::{
     ItemVisibility, MatchConfidence, MatchKind, SearchContext, SearchField, SearchGroup, SearchItem, SearchQuery, SearchRegistry, SearchScope,
-    SearchSource, SearchSurface, SearchSurfaces, SearchViewer, global_search,
+    SearchSource, SearchSurfaces, SearchViewer, global_search,
 };
 use crate::Session;
 
