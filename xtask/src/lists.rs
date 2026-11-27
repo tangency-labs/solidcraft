@@ -11,6 +11,8 @@
 //!   on every line, none older than 14 days (checked only).
 //! - `tests/kernel-cases/CASES`: every kernel rig case, sorted; it only shrinks, since new kernel
 //!   cases go to solidcore's corpus (checked only).
+//! - The `keys` in the engine's `hostile_params_never_panic` test: sorted, each parameter once
+//!   (checked only, so comments stay with their entries).
 //! - Growing Rust lists: no written array lengths on more than ten lines of entries.
 
 use std::path::{Path, PathBuf};
@@ -52,13 +54,58 @@ pub fn run(root: &Path, fix: bool) -> Result<(), String> {
         ));
     }
     check_arrays(root)?;
+    let hostile_params = "crates/engine/src/tests.rs";
+    let source = std::fs::read_to_string(root.join(hostile_params)).map_err(|e| format!("{hostile_params}: {e}"))?;
+    check_hostile_param_keys(&source).map_err(|e| {
+        format!(
+            "{hostile_params}: hostile_params_never_panic: {e}\nsort the `keys` entries lexicographically, remove duplicates, and keep each comment with its entry"
+        )
+    })?;
     crate::pending::check_locales(root)?;
     crate::pending::check_attribution(root)?;
     crate::known_failing::check_list(root)?;
     crate::kernel_cases::check_cases_list(root)?;
     println!(
-        "lists: growing arrays checked; message catalogs, the known-failing and quarantined tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly"
+        "lists: growing arrays checked; message catalogs, hostile parameter keys, the known-failing and quarantined tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly"
     );
+    Ok(())
+}
+
+fn check_hostile_param_keys(source: &str) -> Result<(), String> {
+    let ast = syn::parse_file(source).map_err(|e| e.to_string())?;
+    let function = ast
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Fn(function) if function.sig.ident == "hostile_params_never_panic" => Some(function),
+            _ => None,
+        })
+        .ok_or("missing hostile_params_never_panic test")?;
+    let init = function
+        .block
+        .stmts
+        .iter()
+        .find_map(|stmt| match stmt {
+            syn::Stmt::Local(local) if matches!(&local.pat, syn::Pat::Ident(pat) if pat.ident == "keys") => local.init.as_ref(),
+            _ => None,
+        })
+        .ok_or("missing `let keys = [...]` list")?;
+    let syn::Expr::Array(array) = init.expr.as_ref() else {
+        return Err("`keys` must be an array of string literals".into());
+    };
+    let mut previous: Option<String> = None;
+    for entry in &array.elems {
+        let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(key), .. }) = entry else {
+            return Err("`keys` must contain only string literals".into());
+        };
+        let key = key.value();
+        if let Some(previous) = &previous
+            && previous >= &key
+        {
+            return Err(format!("`keys` must be sorted and unique: {key:?} follows {previous:?}"));
+        }
+        previous = Some(key);
+    }
     Ok(())
 }
 
@@ -273,7 +320,24 @@ fn check_arrays(root: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{array_violations, canonical};
+    use super::{array_violations, canonical, check_hostile_param_keys};
+
+    #[test]
+    fn hostile_params_never_panic_keys_are_sorted_and_unique() {
+        let source = |entries: &str| {
+            format!(
+                "fn unrelated() {{ let keys = [\"z\", \"a\"]; }}\n\
+             #[test] fn hostile_params_never_panic() {{ let other = [\"z\", \"a\"]; let keys = [{entries}]; }}"
+            )
+        };
+        assert!(check_hostile_param_keys(&source("// first key\n\"a\", /* second key */ \"b\", ")).is_ok());
+        assert!(check_hostile_param_keys(&source("\"b\", \"a\"")).unwrap_err().contains("sorted and unique"));
+        assert!(check_hostile_param_keys(&source("\"a\", \"a\"")).unwrap_err().contains("sorted and unique"));
+        assert!(check_hostile_param_keys(&source("42")).is_err());
+        assert!(check_hostile_param_keys("fn unrelated() { let keys = [\"a\"]; }").is_err());
+        assert!(check_hostile_param_keys("fn hostile_params_never_panic() {}").is_err());
+        assert!(check_hostile_param_keys("fn hostile_params_never_panic() { let keys = make_keys(); }").is_err());
+    }
 
     #[test]
     fn growing_arrays_reject_lengths_and_allow_slices_short_tables_and_test_fixtures() {

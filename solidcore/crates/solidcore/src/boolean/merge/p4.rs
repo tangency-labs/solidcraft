@@ -1757,9 +1757,11 @@ fn plan_other_keep_order(
         });
     }
 
-    let mut face_edge_lists: Vec<Vec<EdgeId>> = Vec::with_capacity(other_keep.len());
+    let mut face_edge_lists: Vec<Vec<EdgeId>> = Vec::new();
+    let _ = face_edge_lists.try_reserve(other_keep.len());
     let mut edge_to_faces: BTreeMap<EdgeId, Vec<usize>> = BTreeMap::new();
-    let mut face_has_mated: Vec<bool> = Vec::with_capacity(other_keep.len());
+    let mut face_has_mated: Vec<bool> = Vec::new();
+    let _ = face_has_mated.try_reserve(other_keep.len());
     for (idx, &f) in other_keep.iter().enumerate() {
         let edges = traverser::face_edges(other, f)?;
         let mut mated = false;
@@ -1814,25 +1816,50 @@ fn plan_other_keep_order(
             .filter(|&i| face_has_mated.get(i).copied().unwrap_or(false))
             .collect();
         if !mated_starts.is_empty() {
-            // Re-walk the touching component starting from all initially mated faces so
-            // every face shares an already-mated edge when reached.
-            let mut in_order = BTreeSet::new();
-            let mut bfs = VecDeque::new();
-            for s in mated_starts {
-                if in_order.insert(s) {
-                    bfs.push_back(s);
+            // Preserve the component's original order in `other_keep` whenever every face
+            // already shares a mated edge (either initially or from an earlier face of the
+            // component); only reorder into BFS from `mated_starts` when an unmated face
+            // appears before any mated path reaches it.
+            let mut orig_order = comp;
+            orig_order.sort_unstable();
+            let mut sim_mated = initial_mated.clone();
+            let mut already_mated_in_order = true;
+            for &u in &orig_order {
+                let Some(edges) = face_edge_lists.get(u) else {
+                    already_mated_in_order = false;
+                    break;
+                };
+                if !edges.iter().any(|e| sim_mated.contains(e)) {
+                    already_mated_in_order = false;
+                    break;
                 }
+                sim_mated.extend(edges.iter().copied());
             }
-            while let Some(u) = bfs.pop_front() {
-                if let Some(&f) = other_keep.get(u) {
-                    touching.push(f);
+            if already_mated_in_order {
+                for u in orig_order {
+                    if let Some(&f) = other_keep.get(u) {
+                        touching.push(f);
+                    }
                 }
-                if let Some(edges) = face_edge_lists.get(u) {
-                    for &e in edges {
-                        if let Some(neighbors) = edge_to_faces.get(&e) {
-                            for &v in neighbors {
-                                if in_order.insert(v) {
-                                    bfs.push_back(v);
+            } else {
+                let mut in_order = BTreeSet::new();
+                let mut bfs = VecDeque::new();
+                for s in mated_starts {
+                    if in_order.insert(s) {
+                        bfs.push_back(s);
+                    }
+                }
+                while let Some(u) = bfs.pop_front() {
+                    if let Some(&f) = other_keep.get(u) {
+                        touching.push(f);
+                    }
+                    if let Some(edges) = face_edge_lists.get(u) {
+                        for &e in edges {
+                            if let Some(neighbors) = edge_to_faces.get(&e) {
+                                for &v in neighbors {
+                                    if in_order.insert(v) {
+                                        bfs.push_back(v);
+                                    }
                                 }
                             }
                         }
@@ -1861,7 +1888,8 @@ fn plan_other_keep_order(
         }
     }
 
-    let mut ordered = Vec::with_capacity(other_keep.len());
+    let mut ordered = Vec::new();
+    let _ = ordered.try_reserve(other_keep.len());
     ordered.extend(outer_disjoint);
     ordered.extend(touching);
     ordered.extend(inner_disjoint);
@@ -1967,7 +1995,10 @@ fn classify_other_region_split(
         fbox.expand_absolute(ftol);
         interior_bbox = interior_bbox.union(&fbox);
     }
-    if !interior_bbox.is_defined() {
+    if !interior_bbox.is_defined()
+        || !interior_bbox.is_bounded()
+        || interior_bbox.has_negative_volume()
+    {
         return Ok(OtherRegionSplit::Opaque);
     }
     interior_bbox.expand_absolute(4.0 * max_tol);
@@ -2086,7 +2117,10 @@ fn make_other_faces(
                 } else {
                     OtherRegionSplit::Opaque
                 };
-                region_splits.entry(old_r).or_default().push((split_epoch, split));
+                region_splits
+                    .entry(old_r)
+                    .or_default()
+                    .push((split_epoch, split));
                 split_epoch += 1;
             }
         }

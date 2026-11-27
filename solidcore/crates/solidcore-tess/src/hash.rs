@@ -2,11 +2,14 @@
 //! index, the mesher's lookups), in place of std's `SipHash`, seeded per process. Every map that
 //! takes it is only looked up, so no result depends on the hash: a walk of one is sorted first.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
 /// A map hashed by [`BitsHasher`].
 pub(crate) type BitsMap<K, V> = HashMap<K, V, BuildHasherDefault<BitsHasher>>;
+
+/// A set hashed by [`BitsHasher`].
+pub(crate) type BitsSet<K> = HashSet<K, BuildHasherDefault<BitsHasher>>;
 
 /// Each word folded in by a rotate, an xor and one multiply, a word at a time (as `simplify`'s
 /// welding hasher did). The product's low bits see only its factors' low bits, and a round float's

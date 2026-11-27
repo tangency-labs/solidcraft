@@ -3303,7 +3303,8 @@ mod native_camera_queue_preparation {
     #[test]
     fn native_batch_retained_plan_and_completed_images_allow_a_new_ram_epoch_before_next_capture() {
         let (mut s, _) = fixture(2);
-        let host = CpuHost::for_platform().unwrap();
+        // The exact ledger totals below are this host's: its RAM ledger is its own.
+        let host = CpuHost::for_platform_with_own_memory_ledger().unwrap();
         s.set_render_job_host(Some(host.clone())).unwrap();
         let wait_released = |handle: &solidcraft_render::job::JobHandle| {
             assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
@@ -3313,6 +3314,18 @@ mod native_camera_queue_preparation {
             }
             assert!(handle.work_released(), "terminal publication must finish releasing task backing");
         };
+        // Other tests in this process render on native hosts too, and their
+        // leases sit in the process-wide RAM ledger. Hold one there throughout:
+        // the totals checked below must not depend on what runs beside this test.
+        let (mut neighbour, _) = fixture(1);
+        let neighbour_host = CpuHost::for_platform().unwrap();
+        neighbour.set_render_job_host(Some(neighbour_host.clone())).unwrap();
+        let reply = neighbour.execute("render.start", &json!({"settings":{"width":2,"height":2}})).unwrap();
+        let neighbour_handle = neighbour.render_job_handle(serde_json::from_value(reply["job"].clone()).unwrap()).unwrap();
+        wait_released(&neighbour_handle);
+        let neighbour_frame = neighbour_handle.frame().unwrap().unwrap();
+        assert!(neighbour_host.admitted_bytes() > 0, "the neighbour's completed image stays admitted");
+
         let (mut first, worker) = initial(&mut s, json!({}));
         batch::finish_retained(&mut s, &mut first).unwrap();
         let mut plan = batch::take_plan(&mut first).unwrap();
@@ -3348,6 +3361,7 @@ mod native_camera_queue_preparation {
         wait_released(&second_handle);
         assert!(second_handle.frame().unwrap().is_some());
         assert!(!frame.png().is_empty(), "the earlier image remains valid across the next epoch");
+        assert!(!neighbour_frame.png().is_empty());
     }
 
     #[test]

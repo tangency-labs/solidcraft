@@ -168,10 +168,9 @@
 //!   call `GetType()` on null objects there (plan/upstream-issues.md UB-98).
 //! - **Manager destructor** leaves the objects it does not list in the store (upstream
 //!   allocates them from the context).
-//! - `RemoveCoincidentNoEdgeProtoVertex` keeps upstream's `return SM_SUCCESS` (read as
-//!   `TRUE`) when the point solve finds nothing (plan/upstream-issues.md WR-73); the
-//!   opt-in `Kernel::fixes.proto_vertex_miss_is_false` returns `FALSE` there
-//!   (tangency-labs/solidcore#848).
+//! - `RemoveCoincidentNoEdgeProtoVertex` returns `FALSE` when the point solve finds
+//!   nothing, where upstream returns `SM_SUCCESS`, read as `TRUE` (plan/upstream-issues.md
+//!   WR-73, tangency-labs/solidcore#848).
 //! - `Dump`, `Draw` and the `SM_DEBUG_CODE` blocks are not ported.
 //! - **Recursion.** None.
 
@@ -507,47 +506,39 @@ mod tests {
         Curve::from(crate::curve::offset_curve::OffsetCurve::empty())
     }
 
-    fn kernel_pass_on(pass_on: bool) -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
-        k
-    }
-
     /// fork bcc6f01 (`sm_WhichPVToCombine`, `if (pOrigPE->Evaluate(..) != SM_SUCCESS)
     /// return NULL`): the split point cannot be evaluated. Upstream compares the unset
     /// point with the end proto vertices (here one at the unset position, which then
     /// matches); the fork answers no proto vertex.
     #[test]
     fn which_pv_to_combine_without_a_split_point_is_none() {
-        for pass_on in [false, true] {
-            let k = kernel_pass_on(pass_on);
-            let geo = Geo(vec![unevaluable()]);
-            let mut m = manager();
-            let ivl = Extent1d::from_min_max(0.0, 1.0);
-            let v0 = m.new_proto_vertex(Vec3::UNDEF, 1e-5).unwrap();
-            let v1 = m
-                .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
-                .unwrap();
-            let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
-            let ed = m
-                .insert_edge_definition(EdgeDefinition::new(
-                    Some(C0),
-                    ivl,
-                    R0,
-                    L0,
-                    1e-5,
-                    None,
-                    None,
-                    Some(pe),
-                ))
-                .unwrap();
-            m.proto_edge_mut(pe)
-                .unwrap()
-                .edge_definitions_mut()
-                .push(ed);
-            let pv = m.which_pv_to_combine(&k, &geo, pe, 0.5, None).unwrap();
-            assert_eq!(pv, if pass_on { None } else { Some(v0) });
-        }
+        let k = Kernel::default();
+        let geo = Geo(vec![unevaluable()]);
+        let mut m = manager();
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let v0 = m.new_proto_vertex(Vec3::UNDEF, 1e-5).unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let ed = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                R0,
+                L0,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.proto_edge_mut(pe)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed);
+        let pv = m.which_pv_to_combine(&k, &geo, pe, 0.5, None).unwrap();
+        assert_eq!(pv, None);
     }
 
     /// fork bcc6f01 (`sm_IsInterior`, `sm_AreSameCurve`: "no value, no evidence"): the
@@ -557,18 +548,15 @@ mod tests {
     /// within tolerance and `sm_AreSameCurve` answers `true`.
     #[test]
     fn unevaluable_curve_is_not_interior_or_same() {
-        for pass_on in [false, true] {
-            let k = kernel_pass_on(pass_on);
-            let geo = Geo(vec![unevaluable(), line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
-            let ivl = Extent1d::from_min_max(0.0, 1.0);
-            let c1 = H(1, ClassObjectKind::Curve);
-            assert!(!proto::is_interior(&k, &geo, Some(C0), &ivl, 0.5, 1e-5).unwrap());
-            // upstream drops the unset point onto the line and takes the curves for the
-            // same; the fork answers no
-            let same =
-                proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-5).unwrap();
-            assert_eq!(same, !pass_on);
-        }
+        let k = Kernel::default();
+        let geo = Geo(vec![unevaluable(), line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let c1 = H(1, ClassObjectKind::Curve);
+        assert!(!proto::is_interior(&k, &geo, Some(C0), &ivl, 0.5, 1e-5).unwrap());
+        // upstream drops the unset point onto the line and takes the curves for the
+        // same; the port answers no, as the fork does
+        let same = proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-5).unwrap();
+        assert!(!same);
     }
 
     /// [`Geo`] whose edge 22 bounds face 21, so that (face 20, face 21) and (face 20,
@@ -870,12 +858,13 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v2)
             .unwrap());
         assert!(m.proto_vertices().is_empty());
-        // off the curve: no solution, and upstream's SM_SUCCESS reads as TRUE
+        // off the curve: no solution, so not removed (WR-73: upstream's SM_SUCCESS read as
+        // TRUE is not kept)
         let v3 = m
             .new_proto_vertex(Point3::new(1.0, 5.0, 0.0), 1e-5)
             .unwrap();
         m.add_proto_vertex(v3);
-        assert!(m
+        assert!(!m
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
@@ -883,7 +872,7 @@ mod tests {
         assert_eq!(k.work_counters.proto_vertex_point_solves(), 2);
     }
 
-    /// With `proto_vertex_miss_is_false`, a proto vertex that has proto edges is never
+    /// A proto vertex that has proto edges is never
     /// removed and a miss is `false` too, so its point solve is not run: on the curve or off
     /// it, the answer is `false` and no solve is counted. An edge-less proto vertex is solved
     /// as before, and so is every proto vertex under a fired cancel token, where the solve is
@@ -891,7 +880,6 @@ mod tests {
     #[test]
     fn a_proto_vertex_with_proto_edges_is_not_solved() {
         let mut k = Kernel::default();
-        k.fixes.proto_vertex_miss_is_false = true;
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -959,13 +947,12 @@ mod tests {
         assert_eq!(k.work_counters.proto_vertex_point_solves(), 3);
     }
 
-    /// tangency-labs/solidcore#848 (WR-73): with the opt-in, a proto vertex the proto
+    /// tangency-labs/solidcore#848 (WR-73): a proto vertex the proto
     /// edge does not reach is reported as not removed, so the caller goes on testing it
     /// against the remaining proto edges.
     #[test]
     fn issue_848_no_hit_is_false() {
-        let mut k = Kernel::default();
-        k.fixes.proto_vertex_miss_is_false = true;
+        let k = Kernel::default();
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -1010,11 +997,6 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, on)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[off]);
-        // the default keeps upstream's TRUE
-        k.fixes.proto_vertex_miss_is_false = false;
-        assert!(m
-            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
-            .unwrap());
     }
 
     #[test]

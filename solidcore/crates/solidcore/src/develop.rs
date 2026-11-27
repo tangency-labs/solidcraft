@@ -53,6 +53,7 @@
 //! | [`crossings`]                | `develop::crossings`                 |
 //! | [`curve_through`]            | `develop::curve_through`             |
 //! | [`Refusal`]                  | `DevelopError` (typed: no strings)   |
+//! | [`tear_slit`]                | `crates/doc`'s `tear_slits`          |
 //!
 //! Deviations: none (no upstream counterpart). No recursion: layouts and folds walk the joints
 //! breadth first, each joint once; root isolation, span crossings and refinements run on explicit
@@ -61,19 +62,31 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+mod bead;
 mod chart;
+mod contour;
 mod flat;
 mod fold;
 pub mod hermite;
+mod holes;
 mod layout;
 pub(crate) mod plane;
 mod refusal;
 mod rigid;
 mod seg;
 mod sheet;
+mod slit;
 
+pub use bead::{
+    bead_against, bead_flank_angle, bead_footprint, bead_form, bead_note, bead_outline,
+    line_in_chart, segment_in_region, Bead, BeadAgainst, BeadFace, BeadForm, BeadOutline, BeadPart,
+    BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
+    MIN_BEND_RISE,
+};
+pub use contour::{offset_closed_contour, offset_contour, ContourRefusal};
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
+pub use holes::{note_beside, same_circle, Circle};
 pub use layout::{crossings, curve_through, develop};
 pub use refusal::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 pub use rigid::{Rigid2, Rigid3};
@@ -81,6 +94,7 @@ pub use sheet::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip,
     Sheet, Surface, Tail, ZoneEnds,
 };
+pub use slit::tear_slit;
 
 /// The most panels one development takes: a work limit, never a truncation.
 pub const MAX_PANELS: usize = 10_000;

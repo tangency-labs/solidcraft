@@ -1948,12 +1948,15 @@ mod tests {
         );
     }
 
-    /// WR-212: blends put back whose stitched result leaves the solid open are refused as
-    /// not put back. The four vertical edges of a 14 x 6 x 10 post, blended again at r 3.5,
-    /// cross on each 6 mm face (tangency-labs/solidcore#1073), where the default kernel
-    /// builds an open body.
+    /// Blends put back whose bands overlap are refused as no room. The four vertical edges
+    /// of a 14 x 6 x 10 post, blended again at r 3.5: each round's band on a 6 mm end face
+    /// runs from its edge to its rail, r in from it, so past r = 3 (half the face) the two
+    /// bands on each end face overlap (tangency-labs/solidcore#1073), and the bands' check
+    /// (WR-542) refuses them before the post is edited. (Before that check ran by default,
+    /// the default kernel built an open body here, refused after the stitch as not put
+    /// back, WR-212.)
     #[test]
-    fn a_put_back_that_leaves_the_solid_open_is_refused() {
+    fn a_put_back_whose_bands_overlap_is_refused() {
         let mut k = Kernel::default();
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
         // each vertical edge between an end face (support 0) and a side face (support 1)
@@ -1988,8 +1991,11 @@ mod tests {
             b.face_list().len(),
             crate::topology::brep::p2::is_closed_manifold(&b)
         );
-        assert_eq!(ex.refusal(), OffsetFacesRefusal::NotPutBack);
-        assert!(ex.reason().contains("no closed solid"), "{}", ex.reason());
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::NoRoom);
+        assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
+        assert!(ex.reason().contains("inside the band"), "{}", ex.reason());
+        assert_eq!(b.face_list().len(), 6);
+        assert!(crate::topology::brep::p2::is_closed_manifold(&b).unwrap());
     }
 
     #[test]

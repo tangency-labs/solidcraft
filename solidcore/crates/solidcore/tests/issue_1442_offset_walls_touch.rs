@@ -151,12 +151,16 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     // Gauss-Kronrod (#14460) it is the closed form to 1.0e-15, held to 1e-14 below (forced to
     // accuracy 1e-11 and 1e-12 Gauss-Kronrod gives the same bits, the earlier Runge-Kutta
     // trim pieces forced to 1e-12 3.6e-15 short); before the gap closure this integrator gave
-    // 4554.583397012052, the figure the move is checked from.
+    // 4554.583397012052 on the marched body. With the exact analytic mate (WR-495, the only
+    // path since #18922) the floor's new edges are exact circles and lines: this body's old
+    // leak bound is 1.1e-11 (MEASURED), so the pre-#16735 integrator gives the closed form
+    // here too and the move is checked from the pinned value (it must reproduce, be
+    // origin-free and leak no more than that bound).
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
     assert!((v - want).abs() <= 1e-14 * want, "{v} vs {want}");
     let pinned = 4_554.583_419_533_318_f64;
     assert!((v - pinned).abs() <= 1e-12 * pinned, "{v} vs {pinned}");
-    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 4_554.583_397_012_052, pinned, 1e-6);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, pinned, pinned, 1e-6);
 }
 
 #[test]

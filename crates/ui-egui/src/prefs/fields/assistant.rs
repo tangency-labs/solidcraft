@@ -8,6 +8,10 @@
 macro_rules! assistant_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// Additional folders the built-in Assistant's MCP server may read, write and open
+            /// linked designs from (`--allow-path`, #20326). Empty by default: only the open
+            /// design's folder, the recovery folder and the server's scratch folder are in reach.
+            agent_allowed_paths: Vec<String> = Vec::new(), PAGE_ASSISTANT;
             agent_chat_open_at_start: bool = false, PAGE_ASSISTANT;
             /// Whether the chat is in its own window instead of the side panel, and that window's place
             /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be
@@ -32,6 +36,9 @@ macro_rules! assistant_preferences {
             /// they run on the window thread, and the window waits for each.
             agent_off_thread: bool = true, PAGE_ASSISTANT;
             agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
+            /// Keep one Assistant conversation across open design tabs and Edit in Place instead of a
+            /// separate chat per tab (#16282). Off by default so each tab keeps its own chat.
+            agent_shared_session: bool = false, PAGE_ASSISTANT;
             /// Each reply's thinking (the dimmed text a model streams while it works) starts folded, with
             /// a control to open it (#17072). Off: it is shown open, as before.
             agent_thinking_folded: bool = true, PAGE_ASSISTANT;
