@@ -2039,6 +2039,10 @@ pub struct FeatureResult {
     /// [`Model::adopt`] does before the model is used.
     #[serde(skip)]
     unkept: bool,
+    /// This unkept feature had an error when the model cache was saved (#18815): re-evaluating
+    /// it is expected to fail and leave `state` unchanged, so cached features after it still stand.
+    #[serde(skip)]
+    unkept_error: bool,
     #[serde(skip)]
     pub state: Arc<ModelState>,
 }
@@ -6332,6 +6336,7 @@ impl Model {
                 // A state the saved model did not keep is evaluated again from the one before it; the
                 // results after it that the model did keep still stand (#3220).
                 let unkept = reuse && self.results.get(i).filter(current).is_some_and(|old| old.unkept);
+                let unkept_error = unkept && self.results.get(i).is_some_and(|old| old.unkept_error);
                 if f.suppressed && !rolled_back {
                     reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
                 }
@@ -6339,6 +6344,7 @@ impl Model {
                 // has a result only while those picks are what they were.
                 if reuse
                     && !unkept
+                    && (failed.is_empty() || f.kind.input_sketches().iter().all(|id| !failed.contains_key(id)))
                     && let Some(old) = self
                         .results
                         .get(i)
@@ -6388,6 +6394,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        unkept_error: false,
                         state: state.clone(),
                     });
                     continue;
@@ -6408,7 +6415,7 @@ impl Model {
                 };
                 if let Some(e) = failed_sketch {
                     recomputed += 1;
-                    reuse = false;
+                    reuse &= unkept_error;
                     out.push(FeatureResult {
                         id: f.id,
                         name: f.name.clone(),
@@ -6424,6 +6431,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        unkept_error: false,
                         state: state.clone(),
                     });
                     continue;
@@ -6453,8 +6461,9 @@ impl Model {
                     if c.error.is_none() {
                         state = c.state.clone();
                     }
-                    // A kept result after a failed one would not be this evaluation's.
-                    reuse &= c.error.is_none();
+                    // A kept result after an unexpected failure (or unexpected recovery) would not
+                    // be this evaluation's; a feature saved as errored leaves `state` unchanged (#18815).
+                    reuse &= c.error.is_some() == unkept_error;
                     if reusing
                         && c.error.is_none()
                         && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
@@ -6482,6 +6491,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        unkept_error: false,
                         state: state.clone(),
                     });
                     if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
@@ -6513,10 +6523,10 @@ impl Model {
                     if r.error.is_none() {
                         state = r.state.clone();
                     }
-                    reuse &= r.error.is_none();
+                    reuse &= r.error.is_some() == unkept_error;
                     let ok = r.error.is_none();
                     let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
-                    out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
+                    out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
                     if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
                         s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
                     }
@@ -6833,7 +6843,7 @@ impl Model {
                 }
                 // Not in the cached result: its notes follow the sketches as they are now.
                 let warning = if error.is_none() { with_retained_notes(doc, warning, f, &state) } else { warning };
-                reuse &= error.is_none();
+                reuse &= error.is_some() == unkept_error;
                 if reusing
                     && error.is_none()
                     && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
@@ -6858,6 +6868,7 @@ impl Model {
                     stale: false,
                     fingerprint: fp,
                     unkept: false,
+                    unkept_error: false,
                     state: state.clone(),
                 });
             }
