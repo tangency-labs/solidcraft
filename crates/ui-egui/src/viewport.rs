@@ -5804,11 +5804,11 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
             continue;
         }
         let names = solidcraft_engine::doc::naming::face_names(b);
-        let m = b.mesh();
         let target_indices: std::collections::HashSet<usize> =
             names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)).map(|(i, _)| i).collect();
         let mut found_face = false;
         if !target_indices.is_empty() {
+            let m = b.mesh();
             let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
             for (t, f) in m.triangles.iter().zip(&m.tri_face) {
                 let fi = *f as usize;

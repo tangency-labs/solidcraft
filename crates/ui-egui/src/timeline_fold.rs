@@ -1022,9 +1022,9 @@ mod tests {
         h.frames(3);
         assert_eq!(super::plan_built_count(), plans_before_toggle + 1, "toggling a fold rebuilds once then caches again");
 
-        // Toggling `history_bar_groups` off invalidates and rebuilds once.
-        assert_eq!(h.call("ui.prefs", serde_json::json!({"history_bar_groups": false}))["ok"], true);
+        // Toggling `history_bar_groups` off invalidates and rebuilds once (`h.call` runs a frame).
         let plans_before_pref = super::plan_built_count();
+        assert_eq!(h.call("ui.prefs", serde_json::json!({"history_bar_groups": false}))["ok"], true);
         h.frames(3);
         assert_eq!(super::plan_built_count(), plans_before_pref + 1, "changing grouping preference rebuilds once then caches again");
     }
