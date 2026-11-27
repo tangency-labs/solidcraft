@@ -796,6 +796,46 @@ fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A slicer that reads STEP is sent the exact bodies as a `.step` file; one that does not (Cura)
+/// is refused before anything is written. A program the user picked counts as the slicer its name
+/// says, so a build of OrcaSlicer added under Custom… takes STEP too.
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_sends_step_to_the_slicers_that_read_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = std::env::temp_dir().join(format!("solidcraft-send-step-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = |name: &str| {
+        let p = dir.join(name);
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+    let (orca, cura) = (program("orca-slicer"), program("cura"));
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "corner": [0, 0, 0], "body_name": "Block"}));
+    crate::slicers::set_chosen_programs(&[orca.clone(), cura.clone()]);
+    let step = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "step"}));
+    let stp = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "STP"}));
+    let refused = s.execute("file.send_to_slicer", &json!({"slicer": cura, "bodies": ["Block"], "format": "step"}));
+    let unknown = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "iges"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let (step, stp) = (step.unwrap(), stp.unwrap());
+    let file = step["path"].as_str().unwrap().to_string();
+    assert!(file.ends_with(".step"), "{file}");
+    assert_eq!(step["format"], "step");
+    assert!(std::fs::read(&file).unwrap().starts_with(b"ISO-10303-21;"));
+    assert_eq!(stp["path"], step["path"], "stp names the same format");
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("does not take step"), "{refused}");
+    assert!(unknown.is_err());
+    // Only this test's file: the slicer folder is shared with the other sends.
+    std::fs::remove_file(&file).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 type Uploads = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A session whose "host" records what it is handed and answers `answer`.
@@ -1180,6 +1220,43 @@ fn converted_face_extrusion_keeps_its_source_bound_profile_across_reopen_and_und
     run(&mut s, "edit.undo", json!({}));
     check(&s, false);
     check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), false);
+}
+
+/// #22924: opening the lock file SolidCraft keeps beside an open design says what it is and
+/// which design to open, not that an importer could read it.
+#[test]
+fn open_names_the_design_a_lock_file_belongs_to() {
+    use solidcraft_io::design_lock;
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-lock-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let design = dir.join("hemisphere.sc");
+    let lock = design_lock::lock_path(&design);
+    let open_any = || Session::default().execute("doc.open", &json!({"path": lock.to_string_lossy()})).unwrap_err().to_string();
+    let open = || {
+        let error = open_any();
+        assert!(error.contains("lock file for hemisphere.sc") && error.contains("Open hemisphere.sc instead"), "{error}");
+        assert!(!error.contains("export STEP") && !error.contains("importer plugin"), "{error}");
+        error
+    };
+    let mut held = design_lock::Lock::mine(design_lock::now_secs());
+    held.host = "workshop-pc".into();
+    design_lock::write(&design, &held).unwrap();
+    let error = open();
+    assert!(error.contains("open in SolidCraft on workshop-pc"), "{error}");
+    // Outside the folders the caller may use, the lock is not read to say who holds it.
+    let refused = solidcraft_io::vfs::scoped(Some(Default::default()), open_any);
+    assert!(!refused.contains("workshop-pc"), "{refused}");
+    // A lock left by a crash says nothing about who has the design open now.
+    held.refreshed = 0;
+    design_lock::write(&design, &held).unwrap();
+    let error = open();
+    assert!(!error.contains("workshop-pc"), "{error}");
+    // Another program's file with such a name is not called SolidCraft's.
+    let other = dir.join(".~report.xlsx.lock");
+    std::fs::write(&other, b"someone").unwrap();
+    let error = Session::default().execute("doc.open", &json!({"path": other.to_string_lossy()})).unwrap_err().to_string();
+    assert!(error.contains("can't open .lock files"), "{error}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;

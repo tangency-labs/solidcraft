@@ -124,8 +124,8 @@ mod imp {
 
     use solidcore_ops::sweep::Curve as SkinCurve;
     use solidcore_ops::sweep::railed::{RailFit as SkinFit, RailLoft, RailSection as SkinSection};
+    use solidcraft_smlib::Brep;
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
-    use solidcraft_smlib::{Brep, CheckLevel};
 
     use solidcore_record::{Loop2, Vec2};
 
@@ -366,16 +366,16 @@ mod imp {
     /// checks each step, left with the body for the feature's end when it checks each feature,
     /// and not checked otherwise (`crate::validation`).
     fn body_of(brep: Brep, what: &str) -> Result<Body> {
-        use crate::validation::{Checked, Step};
+        use crate::validation::Step;
         let step = crate::validation::step();
-        if step == Step::Check {
-            let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
-            if !check.is_valid() {
-                return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
-            }
-        }
         let body = crate::native::body_from_smlib(&brep)?;
-        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep, &[]) } else { body })
+        drop(brep);
+        if step == Step::Check
+            && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), body.record())?
+        {
+            return Err(failed(what, format!("SMLib's check refuses the result: {detail}")));
+        }
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), &[]) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
@@ -939,12 +939,13 @@ mod imp {
 
     /// The profile `pieces` on `plane` turned `angle` radians (signed, right-handed about `axis`)
     /// about the axis through `origin` (both in the plane). Segments on the axis sweep nothing.
-    pub(crate) fn revolve(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    pub(crate) fn revolve(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, angle: f64, join_arcs: bool) -> Result<Body> {
         let k = axis.normalized().ok_or_else(|| KernelError::Invalid("revolve axis".into()))?;
         let (k, turn) = if angle < 0.0 { (-k, -angle) } else { (k, angle) };
         let turn = turn.min(std::f64::consts::TAU);
         let c = curves(plane, pieces)?;
-        let brep = Brep::revolve(&c, p(origin), p(k), turn, true).map_err(|e| failed("revolve", e))?;
+        let revolve = if join_arcs { Brep::revolve_joining_arcs } else { Brep::revolve };
+        let brep = revolve(&c, p(origin), p(k), turn, true).map_err(|e| failed("revolve", e))?;
         let body = body_of(brep, "revolve")?;
         let size = body.size().max(1e-9);
         let off_axis = |q: Vec3| {

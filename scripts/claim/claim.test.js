@@ -114,6 +114,27 @@ test('claim by the current claimant is a quiet thumbs up', async () => {
   assert.deepEqual(names(calls), ['react']);
 });
 
+test('claim by a claimant the bot could not assign is a quiet thumbs up, by a stranger is not', async () => {
+  const timeline = [labeled(ago(5 * H)), said('Claimed by @alice. Please open a draft PR referencing #7 within 72 h; the claim lapses otherwise.')];
+  let w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/claim', { labels: ['in progress'] }), now: NOW });
+  assert.deepEqual(names(w.calls), ['react']);
+  assert.equal(find(w.calls, 'react')[1].content, '+1');
+  w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/claim', { user: 'mallory', labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'react')[1].content, 'eyes');
+  assert.match(find(w.calls, 'comment')[1].body, /^Someone has claimed this already\./);
+  assert.equal(find(w.calls, 'addAssignees'), undefined);
+});
+
+test('a lapsed claim by a claimant the bot could not assign is claimed again as before', async () => {
+  const timeline = [labeled(ago(100 * H)), said('Claimed by @alice. Please open a draft PR referencing #7 within 72 h; the claim lapses otherwise.')];
+  const { github, calls } = fake({ timeline });
+  await claim.handleComment({ github, context: ctx('/claim', { labels: ['in progress'] }), now: NOW });
+  assert.deepEqual(find(calls, 'addAssignees')[1].assignees, ['alice']);
+  assert.match(find(calls, 'comment')[1].body, /^Claimed by @alice\./);
+});
+
 test('claim on an issue claimed by someone else names them and when it lapses', async () => {
   const { github, calls } = fake({ timeline: [labeled(ago(10 * H))] });
   await claim.handleComment({ github, context: ctx('/claim', { assignees: ['bob'], labels: ['in progress'] }), now: NOW });
@@ -377,6 +398,36 @@ test('the claimant\'s own PR just makes sure the label is there', async () => {
   const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice']) } });
   assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7)') }), []);
   assert.deepEqual(names(calls), ['addLabels']);
+});
+
+test('a PR by a claimant the bot could not assign posts nothing, by a stranger is still turned away', async () => {
+  const world = {
+    byNumber: { 7: openIssue(7, [], ['in progress']) },
+    timeline: [labeled(ago(5 * H)), said('Claimed by @alice through #40. The claim lapses after 14 days without pushes.')],
+  };
+  let w = fake(world);
+  assert.deepEqual(await claim.handlePull({ github: w.github, context: pullCtx(50, 'Thing (#7)') }), []);
+  assert.equal(w.calls.length, 0);
+  w = fake(world);
+  assert.deepEqual(await claim.handlePull({ github: w.github, context: pullCtx(51, 'Thing (#7)', '', 'mallory') }), []);
+  assert.deepEqual(names(w.calls), ['comment']);
+  assert.equal(find(w.calls, 'comment')[1].issue_number, 51);
+  assert.match(find(w.calls, 'comment')[1].body, /#7 is already claimed by someone else/);
+});
+
+test('a PR by an earlier claimant is turned away once the claim was released or someone is assigned', async () => {
+  const claimed = said('Claimed by @alice through #40. The claim lapses after 14 days without pushes.');
+  // Released, then labelled again without a new claim reply naming alice.
+  let w = fake({
+    byNumber: { 7: openIssue(7, [], ['in progress']) },
+    timeline: [labeled(ago(50 * H)), claimed, { event: 'unlabeled', label: { name: 'in progress' } }, labeled(ago(H))],
+  });
+  assert.deepEqual(await claim.handlePull({ github: w.github, context: pullCtx(50, 'Thing (#7)') }), []);
+  assert.match(find(w.calls, 'comment')[1].body, /#7 is already claimed by someone else/);
+  // An assignee holds the issue, whatever the older reply says.
+  w = fake({ byNumber: { 7: openIssue(7, ['bob'], ['in progress']) }, timeline: [labeled(ago(50 * H)), claimed] });
+  assert.deepEqual(await claim.handlePull({ github: w.github, context: pullCtx(50, 'Thing (#7)') }), []);
+  assert.match(find(w.calls, 'comment')[1].body, /#7 is already claimed by @bob/);
 });
 
 test('PRs from bots, references to PRs, closed and missing issues are ignored', async () => {

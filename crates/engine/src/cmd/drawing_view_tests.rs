@@ -11,7 +11,9 @@ use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, in_the_model, plate as sheet_plate, two_cubes, with_the_model};
+use crate::drawing_scene::tests::{
+    add_a_pin, carcass_and_door, configured_block, hinge_pair, in_the_model, plate as sheet_plate, two_cubes, with_the_model,
+};
 use crate::drawing_view::bend_dashes_mm;
 use crate::schema::tests::conforms;
 
@@ -1692,7 +1694,9 @@ fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
     assert!((dashed.1 - 100.0).abs() < 1e-6 && (solid - 240.0).abs() < 1e-6, "{dashed:?} {solid}");
     let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
-    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 4, "{svg}");
+    // Under the round caps each dash is stroked a line width shorter about its middle: 2.75 and 1,
+    // from 3.75 - 0.125 into the pattern.
+    assert_eq!(svg.matches("stroke-dasharray=\"2.75 1\" stroke-dashoffset=\"3.625\"").count(), 4, "{svg}");
     let plain = snap(&mut s, json!({"scale": "1:1", "scene": true}));
     assert!(strokes(&plain).iter().all(|(_, _, width)| *width == 0.5), "{plain}");
     assert_eq!(plain["scene"].to_string().matches("lengths_mm").count(), 0, "{plain}");
@@ -3912,7 +3916,7 @@ fn a_section_view_inspects_copies_and_draws() {
 /// hidden lines too, on paper round its model's middle.
 fn drawn_lines(s: &Session, id: u64) -> (ShownSet, Extents, crate::drawing_view::Lines) {
     use crate::drawing_view::{CHORD_MM, LineRequest, PreparedBodies};
-    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let view = crate::drawing_view::drawn_view(s, s.drawing("test").unwrap(), id).unwrap();
     let shown = crate::drawing_view::shown(s);
     let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
     let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
@@ -3985,7 +3989,7 @@ fn copies_of_a_part_are_cut_apart() {
     let (mut s, [front, ..]) = three_views_of(s);
     let cut = section_of(&mut s, front, SectionKind::Full, &[[5.0, -10.0], [5.0, 20.0]], ArrowSide::Right);
     let groups = |id: u64| {
-        let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+        let view = crate::drawing_view::drawn_view(&s, s.drawing("test").unwrap(), id).unwrap();
         let shown = crate::drawing_view::shown(&s);
         let (set, _) = crate::drawing_view::measured(&shown, &view).unwrap();
         let placed = crate::mesh_lines::placed(&s, &set.state, |_| true, "test").unwrap();
@@ -4029,7 +4033,7 @@ fn a_line_that_keeps_none_of_the_parts_shows_the_placeholder() {
     use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
     let (mut s, [front, ..]) = three_views();
     let cut = section_of(&mut s, front, SectionKind::Full, &[[-40.0, 0.0], [40.0, 0.0]], ArrowSide::Right);
-    let view = s.drawing("test").unwrap().resolve_view(cut).unwrap();
+    let view = crate::drawing_view::drawn_view(&s, s.drawing("test").unwrap(), cut).unwrap();
     assert_eq!(crate::drawing_view::measured(&crate::drawing_view::shown(&s), &view).err(), Some(Unmeasured::CutAway));
     let reply = inspect_view(&mut s, cut);
     assert_eq!(reply["extents"]["provenance"], json!("cut_away"), "{reply}");
@@ -4273,9 +4277,10 @@ fn a_round_hole_is_one_circle_on_a_flat_view() {
     assert_eq!(solid.iter().copied().filter(circle).count(), 1, "{solid:?}");
 }
 
-/// A flat pattern view draws one body's flat, so it is never exploded or posed, and it doesn't draw a
-/// configuration of its own yet. Edit refuses each and changes nothing. In a drawing saved so by hand,
-/// the edit rule refuses it too, and the sheet draws no lines for the view and says why.
+/// A flat pattern view draws one body's flat, so it is never exploded or posed, it doesn't follow the
+/// browser's eyes (#22107), and it doesn't draw a configuration of its own yet. Edit refuses each and
+/// changes nothing. In a drawing saved so by hand, the edit rule refuses it too, and the sheet draws no
+/// lines for the view and says why.
 #[test]
 fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     let mut s = sheet_plate();
@@ -4290,10 +4295,17 @@ fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     let e = edit_refused(&mut s, id, json!({"configuration": "Wide"}));
     assert!(e.contains(configured), "{e}");
     assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
-    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 3] = [
+    let e = edit_refused(&mut s, id, json!({"shows": "design"}));
+    assert!(e.contains("whatever the browser shows"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
+    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 4] = [
         (|o| o.exploded = Some(Exploded::View(1)), "a flat pattern view is never exploded: it draws one body's flat"),
         (|o| o.pose = Some(Pose::Study(StudyStep { id: 1, step: 0 })), "a flat pattern view has no position: it draws one body's flat"),
         (|o| o.configuration = Some(ViewConfiguration::Row(1)), configured),
+        (
+            |o| o.shows = Some(solidcraft_doc::drawing_view::Shows::Design),
+            "a flat pattern view draws its body's flat whatever the browser shows: it can't show only what the design shows",
+        ),
     ];
     for (set, why) in cases {
         s.edit_drawing(EDIT, |d| {
@@ -4359,7 +4371,14 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
         // No command puts a balloon there, and this design has no placed part: one saved by hand.
         let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
         let edge = solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
-        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
+        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon {
+            id,
+            view: flat,
+            edge,
+            at: [40.0, 40.0],
+            parts_list: None,
+            along: None,
+        })]);
         Ok(())
     })
     .unwrap();
@@ -4946,6 +4965,43 @@ fn a_bad_cutting_line_is_refused() {
     }
 }
 
+/// Section kinds that can't be cut yet (`half`, `offset` and `aligned`) and a section of a shaded
+/// parent are refused by `drawing.view.section` before anything is saved, so they never leave a
+/// failed view on the sheet that stops `drawing.export` (#19879).
+#[test]
+fn unsupported_section_views_are_refused_and_keep_the_sheet_exportable() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    for (kind, points, expected) in [
+        ("half", json!([[-10.0, 10.0], [50.0, 10.0], [50.0, 30.0]]), "not supported yet: a half section"),
+        ("offset", json!([[-10.0, 5.0], [50.0, 5.0], [50.0, 15.0], [110.0, 15.0]]), "not supported yet: an offset section"),
+        ("aligned", json!([[-10.0, 10.0], [50.0, 10.0], [80.0, 30.0]]), "not supported yet: an aligned section"),
+    ] {
+        let params = json!({
+            "parent": ids::encode(front),
+            "line": {"kind": kind, "points": points, "arrows": "right"},
+            "place": {"at": [300.0, 60.0]},
+        });
+        let why = create_refused(&mut s, SECTION, params);
+        assert!(why.contains(SECTION) && why.contains(expected), "{kind}: {why}");
+    }
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
+
+    // A full section of a shaded parent would inherit the shaded style, which isn't cut yet either.
+    edit_view(&mut s, front, json!({"visual_style": "shaded"}));
+    let shaded = create_refused(
+        &mut s,
+        SECTION,
+        json!({"parent": ids::encode(front), "line": {"kind": "full", "points": [[-10.0, 10.0], [110.0, 10.0]], "arrows": "right"}}),
+    );
+    assert!(shaded.contains(SECTION) && shaded.contains("not supported yet: a shaded section view"), "{shaded}");
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
+}
+
 /// A section view takes its letter as it is made, the next one free: A for the first, then B.
 #[test]
 fn a_section_views_letter_is_given() {
@@ -5089,7 +5145,7 @@ fn front_section(s: Session, points: &[[f64; 2]]) -> (Session, u64) {
 /// Section view `id`'s hatching as its sheet draws it, on paper round its model's middle as
 /// [`drawn_lines`]' lines are, with the bodies it shows.
 fn drawn_hatches(s: &Session, id: u64) -> (ShownSet, Vec<crate::drawing_view::BodyHatch>) {
-    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let view = crate::drawing_view::drawn_view(s, s.drawing("test").unwrap(), id).unwrap();
     let shown = crate::drawing_view::shown(s);
     let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
     let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
@@ -5494,4 +5550,188 @@ fn a_section_drawn_from_the_mesh_draws_the_cut_body() {
             .count()
     };
     assert!(cut_edges(1.0) > 0 && cut_edges(-1.0) > 0, "{} {}", cut_edges(1.0), cut_edges(-1.0));
+}
+
+/// The body names `v`'s lines name, each once.
+fn line_bodies(v: &Value) -> Vec<Value> {
+    let mut names: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["body"].clone()).collect();
+    names.sort_by_key(|n| n.to_string());
+    names.dedup();
+    names
+}
+
+/// `hide_bodies` leaves out one body of a part (#22107): from the front at 1:1 the carcass and the
+/// door are 220 mm across, the carcass alone 100. A body no part has, or none at that path, is
+/// refused by name; hiding every body leaves nothing and is refused; an empty name is refused.
+#[test]
+fn a_snapshots_hide_bodies_leaves_out_one_body() {
+    let mut s = carcass_and_door();
+    let both = snap(&mut s, json!({"scale": "1:1"}));
+    assert_eq!(line_bodies(&both), [json!("Carcass"), json!("Door")]);
+    assert!((boundary(&both).0.x - 220.0).abs() < 1e-6, "{both}");
+    let one = snap(&mut s, json!({"scale": "1:1", "hide_bodies": [{"path": [], "body": "Door"}]}));
+    assert_eq!(line_bodies(&one), [json!("Carcass")]);
+    assert!((boundary(&one).0.x - 100.0).abs() < 1e-6 && one["source"]["bodies"] == 1, "{one}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"body": "Lid"}]}));
+    assert!(e.contains("hide_bodies: no body `Lid` among the design's own bodies"), "{e}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"path": [7], "body": "Door"}]}));
+    assert!(e.contains("hide_bodies: no body `Door` at occurrence path [7]"), "{e}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"body": "Door"}, {"body": "Carcass"}]}));
+    assert!(e.contains("the source and hide leave no bodies to draw"), "{e}");
+    for (p, why) in [
+        (json!({"hide_bodies": [{"body": ""}]}), "named in 1 to 128 characters"),
+        (json!({"hide_bodies": [{"body": "D".repeat(129)}]}), "named in 1 to 128 characters"),
+        (json!({"hide_bodies": [{"body": "Door", "side": 1}]}), "side"),
+        (json!({"hide_bodies": [{"path": []}]}), "body"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+}
+
+/// `hide_bodies` on a saved view (#22107): made with it, the base view fits the carcass alone;
+/// inspect says where it comes from and lists every body with whether it draws it; a projected view follows it, naming its parent, until it sets its
+/// own (`[]` hides nothing); `null` follows again; an edit is one undo step; a copy alone keeps it. A
+/// body the design doesn't place is refused by name and changes nothing.
+#[test]
+fn a_saved_views_hide_bodies_follows_its_chain() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let door = json!([{"path": [], "body": "Door"}]);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150], "hide_bodies": door}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["hide_bodies"], json!({"value": door, "from": "this", "set": door}), "{inspected}");
+    assert!(inspected.get("unmatched").is_none(), "{inspected}");
+    // Every body the design places, before what the view leaves out, and whether it draws it.
+    let every_body = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Door", "drawn": false}]);
+    assert_eq!(inspected["bodies"], every_body, "{inspected}");
+
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [200, 250]}}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "it follows its parent");
+    let inspected = inspect_view(&mut s, side);
+    assert_eq!(
+        inspected["settings"]["hide_bodies"],
+        json!({"value": door, "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, side, json!({"hide_bodies": []}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["hide_bodies"]), steps + 1));
+    assert!((width(&mut s, side) - 220.0).abs() < 1e-6, "an empty list hides nothing, whatever the parent hides");
+    edit_view(&mut s, side, json!({"hide_bodies": null}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "null follows the parent again");
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, side) - 220.0).abs() < 1e-6);
+
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(view), "sheet": "Sheet 1", "position_mm": [300, 100]})))[0];
+    assert_eq!(saved(&s, alone).settings.hide_bodies.as_deref(), Some(&[HiddenBody { path: vec![], body: "Door".into() }][..]));
+
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let e = edit_refused(&mut s, view, json!({"hide_bodies": [{"body": "Lid"}]}));
+    assert!(e.contains("hide_bodies: no body `Lid` among the design's own bodies"), "{e}");
+    let e = edit_refused(&mut s, view, json!({"hide_bodies": [{"body": "Door"}, {"body": "Carcass"}]}));
+    assert!(e.contains("the source and hide leave no bodies to draw"), "{e}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "hide_bodies": [{"path": [9], "body": "Door"}]}));
+    assert!(e.contains("hide_bodies: no body `Door` at occurrence path [9]"), "{e}");
+    edit_view(&mut s, view, json!({"hide_bodies": null}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "null clears it");
+}
+
+/// A hidden body renamed since matches nothing (#22107, as dimensions don't follow a rename, #4892):
+/// the view draws it again, and inspect lists the entry as `unmatched` until the old name is back.
+#[test]
+fn a_renamed_hidden_body_is_unmatched() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "hide_bodies": [{"body": "Door"}]}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Door", "name": "Gate"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["unmatched"], json!([{"path": [], "body": "Door"}]), "{inspected}");
+    let gate = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Gate", "drawn": true}]);
+    assert_eq!(inspected["bodies"], gate, "the renamed body is listed by its new name, drawn: {inspected}");
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "the renamed body is drawn again");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Gate", "name": "Door"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!(inspect_view(&mut s, view).get("unmatched").is_none());
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+}
+
+/// `shows: "design"` (#22107): a view draws only the bodies the browser shows. Hiding the door's eye
+/// takes it out of that view and of the view projected from it, never of a view of every body.
+/// Hiding the Bodies folder leaves its placeholder (the design is never refused by its drawings);
+/// isolating the carcass leaves the carcass. Inspect says where the setting comes from, and `"all"`
+/// draws every body again. A value other than `all` or `design` is refused.
+#[test]
+fn a_view_that_shows_the_design_follows_the_browsers_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150], "shows": "design"}));
+    let (_, every) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 60]}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "nothing hidden yet");
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["shows"], json!({"value": "design", "from": "this", "set": "design"}), "{inspected}");
+    assert_eq!(inspect_view(&mut s, every)["settings"]["shows"], json!({"value": "all", "from": "default", "set": null}));
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "the door is hidden in the browser");
+    assert!((width(&mut s, every) - 220.0).abs() < 1e-6, "a view of every body still draws it");
+    // Inspect still lists every body the design places, and says the hidden door isn't drawn.
+    let listed = |drawn_door: bool| json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Door", "drawn": drawn_door}]);
+    assert_eq!(inspect_view(&mut s, view)["bodies"], listed(false));
+    assert_eq!(inspect_view(&mut s, every)["bodies"], listed(true), "a view of every body draws the door");
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [200, 250]}}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "a projected view follows its parent's choice");
+
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    let extents = inspect_view(&mut s, view)["extents"].clone();
+    assert_eq!((&extents["status"], &extents["provenance"]), (&json!("placeholder"), &json!("nothing_chosen")), "{extents}");
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "the door keeps its own eye");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    run(&mut s, "browser.visibility", json!({"items": ["Carcass"], "visible": true, "isolate": true}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "isolation is what the design shows");
+    run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6);
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    let reply = edit_view(&mut s, view, json!({"shows": "all"}));
+    assert_eq!(reply["changed"], json!(["shows"]));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "every body again");
+    for bad in [json!("Design"), json!(5), json!("visible")] {
+        let e = edit_refused(&mut s, view, json!({"shows": bad}));
+        assert!(e.contains("shows"), "{bad}: {e}");
+    }
+}
+
+/// `shows: "design"` follows the eyes of the design the drawing is in; a view of a linked design's
+/// file can't read that design's eyes yet (#3890), so it is refused by name.
+#[test]
+fn a_view_of_a_linked_design_cant_follow_its_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150]}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let linked = d.sources.iter().map(|source| source.id).max().unwrap() + 1;
+    d.sources.push(solidcraft_doc::drawing::Source { id: linked, path: Some("plate.solidcraft".into()) });
+    let mut record = View::clone(d.view(view).unwrap());
+    if let ViewKind::Base { source, .. } = &mut record.kind {
+        *source = linked;
+    }
+    d.views.retain(|v| v.id != view);
+    d.add_views([Arc::new(record)]);
+    s.doc_mut().put_drawing(Arc::new(d));
+    let e = edit_refused(&mut s, view, json!({"shows": "design"}));
+    assert!(e.contains("not supported yet: following the eyes of a linked design"), "{e}");
 }

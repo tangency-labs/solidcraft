@@ -31,12 +31,17 @@ fn front_view() -> (Session, u64) {
 }
 
 /// A drawing of `s`, open, with its front view at 1:1: the session and the view's id.
-fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
+fn drawn_from_the_front(s: Session) -> (Session, u64) {
+    drawn_from(s, NamedView::Front)
+}
+
+/// A drawing of `s`, open, with its view from `named` at 1:1: the session and the view's id.
+fn drawn_from(mut s: Session, named: NamedView) -> (Session, u64) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let id = d.allocate_id(&mut ids::IdSource::seeded(4896)).unwrap();
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
-    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(named) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
     d.add_views([Arc::new(View {
         id,
@@ -446,6 +451,39 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
         assert!(e.contains("a radial dimension has only `diameter`"), "{p}: {e}");
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A radial dimension on the circle where a countersink meets its bore reads the bore's diameter
+/// from above (#22308), as the bore's rim on the bottom face does: the kernel holds that edge only
+/// as a spline, split in two, and each of the two pieces, picked by its index, reads as the bore's
+/// circle. The issue's point on it reads its diameter by default.
+#[test]
+fn a_radial_dimension_reads_where_a_countersink_meets_its_bore() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "body_name": "Box"}));
+    let hole = json!({"position": [15, 20, 10], "diameter": 4.5, "type": "countersink", "cs_diameter": 9, "cs_angle": 90});
+    run(&mut s, "solid.hole", hole);
+    let (mut s, view) = drawn_from(s, NamedView::Top);
+    // The countersink's 90° cone meets the 2.25 mm bore 2.25 mm below the 4.5 mm rim.
+    // Its two pieces, by their name: the edge between the bore's side and the countersink's.
+    let pieces: Vec<usize> = {
+        let state = s.model.state();
+        let names = solidcraft_doc::naming::edge_names(state.body("Box").unwrap());
+        names.iter().enumerate().filter(|(_, name)| name.starts_with("F2:bore:side:0|F2:csink:side:0")).map(|(i, _)| i).collect()
+    };
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    let mut named = BTreeSet::new();
+    for index in pieces {
+        let across = add(&mut s, view, json!({"radial": {"edge": {"body": "Box", "index": index}, "diameter": true}}));
+        reads(&across, 4.5, "Ø4.50");
+        named.insert(across["record"]["kind"]["radial"]["edge"]["name"].as_str().unwrap().to_string());
+    }
+    assert_eq!(named.len(), 2, "{named:?}");
+    for at in [[17.25, 20.0, 7.75], [17.25, 20.0, 0.0]] {
+        let across = add(&mut s, view, json!({"radial": {"edge": at}}));
+        reads(&across, 4.5, "Ø4.50");
+        assert_eq!(across["record"]["kind"]["radial"]["diameter"], json!(true), "{at:?}: {across}");
+    }
 }
 
 /// A point on a curved edge names it wherever it falls between the edge's chords, a little way off it
@@ -3124,4 +3162,57 @@ fn a_set_targets_edit_reads_where_its_view_draws_its_parts() {
     let read = run(&mut s, INSPECT, json!({"dimension": exploded}));
     let values: Vec<f64> = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect();
     assert!(values.len() == 3 && values.iter().zip([10.0, 60.0, 50.0]).all(|(v, want)| (v - want).abs() < 1e-6), "{read}");
+}
+
+/// A view's `hide_bodies` leaves out one body of the design's own (#22107): a dimension with a corner
+/// on it is refused in words that name the body, and the drawing is left as it was; one added before
+/// warns until the edit is undone. A dimension on the body it still draws is added.
+#[test]
+fn a_dimension_is_refused_on_a_body_its_view_leaves_out() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Door"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    let across = json!({"view": v, "kind": {"linear": {"a": [80, 0, 0], "b": [100, 0, 0], "direction": "horizontal"}}});
+    let added = run(&mut s, ADD, across.clone());
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"path": [], "body": "Door"}]}}));
+    let words = "its hide leaves out body `Door`";
+    let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let e = refused(&mut s, across);
+    assert!(e.ends_with(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    let on_box = run(&mut s, ADD, json!({"view": v, "kind": {"linear": {"a": [0, 0, 0], "b": [80, 0, 0], "direction": "horizontal"}}}));
+    reads(&on_box, 80.0, "80.00");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
+}
+
+/// A view that shows only what the design shows (#22107) leaves out a body hidden in the browser: a
+/// dimension on it is refused in words that say so, and one added before warns until the body is
+/// shown again. A view of every body still takes it.
+#[test]
+fn a_dimension_is_refused_on_a_body_the_design_hides() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Door"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    let across = json!({"view": v, "kind": {"linear": {"a": [80, 0, 0], "b": [100, 0, 0], "direction": "horizontal"}}});
+    let added = run(&mut s, ADD, across.clone());
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"shows": "design"}}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null(), "nothing hidden yet");
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    let words = "it's hidden in the design and the view shows only what the design shows";
+    let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let e = refused(&mut s, across.clone());
+    assert!(e.ends_with(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"shows": "all"}}));
+    run(&mut s, ADD, across);
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
 }

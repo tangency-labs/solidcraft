@@ -17,10 +17,12 @@
 use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_develop::prelude::*;
 use solidcraft_develop::{Bent, Rigid2, Rigid3, Surface};
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::bspline::GAUSS_8;
 use solidcraft_geom::inertia::{self, Tensor3};
 use solidcraft_geom::prelude::*;
 
+use crate::sheet::PolyRegion;
 use crate::{DocError, Result, SurfaceSheet};
 
 /// What one hole takes out of the body, in the sheet's frame: its volume, the area its walls add
@@ -89,13 +91,18 @@ pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
         }
         bends.extend(Zone::new(z, bent, tabs));
     }
-    // Each panel's material in the flat, and the loose pieces with the panels they lie in.
-    let material: Vec<(usize, Region2)> = dev
+    // Each panel's material in the flat, and the loose pieces with the panels they lie in,
+    // pre-tessellated once for fast per-hole containment lookups.
+    let material: Vec<(usize, PolyRegion)> = dev
         .panels
         .iter()
         .enumerate()
-        .filter_map(|(i, p)| p.as_ref().map(|p| (i, p.region.clone())))
-        .chain(sk.loose.iter().filter_map(|l| dev.placements.get(l.panel).copied().flatten().map(|at| (l.panel, at.region(&l.region)))))
+        .filter_map(|(i, p)| p.as_ref().map(|p| (i, PolyRegion::from_region(&p.region))))
+        .chain(
+            sk.loose
+                .iter()
+                .filter_map(|l| dev.placements.get(l.panel).copied().flatten().map(|at| (l.panel, PolyRegion::from_region(&at.region(&l.region))))),
+        )
         .collect();
     // Panel `i`: where its chart lies in space, and where the flat lays the chart.
     let panel = |i: usize| -> Result<(Rigid3, Rigid2)> {
@@ -169,6 +176,7 @@ struct Zone {
     panels: [usize; 2],
     bent: Bent,
     region: Region2,
+    region_box: Aabb2,
     tabs: Vec<(Region2, usize)>,
 }
 
@@ -194,7 +202,8 @@ impl Zone {
         // Along the joint, where both of the zone's edges run.
         let a = |p: Vec2| (p - start).dot(along);
         let span = (a(z.near[0]).max(a(z.far[0])), a(z.near[1]).min(a(z.far[1])));
-        Some(Zone { start, along, across, span, width, neutral, panels: z.panels, bent, region: z.region.clone(), tabs })
+        let region_box = crate::sheet_surface_cuts::loop_box(&z.region.outer);
+        Some(Zone { start, along, across, span, width, neutral, panels: z.panels, bent, region: z.region.clone(), region_box, tabs })
     }
 
     /// A point of the flat as its distance along the zone's `a` edge and across toward its `b`
@@ -209,7 +218,7 @@ impl Zone {
     /// sheet's material, clear of its cuts, so the part of it in the zone's region is on the zone's
     /// material: a piece that bends, or a tab.)
     fn reach(&self, c: Vec2, r: f64) -> Option<Reach> {
-        if !overlaps(&self.region, c, r) {
+        if !self.region_box.inflated(r).contains(c) || !overlaps(&self.region, c, r) {
             return None;
         }
         Some(self.tabs.iter().find(|(tab, _)| overlaps(tab, c, r)).map_or(Reach::Bends, |(_, panel)| Reach::Tab(*panel)))
@@ -383,4 +392,100 @@ fn panels(a: f64, b: f64) -> impl Iterator<Item = (f64, f64)> {
         let mid = a + step * (k as f64 + 0.5);
         GAUSS_8.into_iter().map(move |(x, w)| (mid + step / 2.0 * x, w * step / 2.0))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use solidcore_record::Plane;
+    use solidcraft_kernel::{BoolOp, boolean, extrude};
+
+    use super::*;
+    use crate::sheet::{BendReliefShape, ReliefShape, SheetPerforation};
+    use crate::sheet_surface_convert::{ConvertRule, SheetFaces, convert_surfaces};
+    use crate::{IDENTITY, ModelBody};
+
+    #[test]
+    fn poly_region_and_zone_reach_match_uncached_reference_bit_for_bit() {
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+        let panel = Region2 {
+            outer: rect(0.0, 0.0, 100.0, 60.0),
+            holes: vec![Loop2::circle(Vec2::new(25.0, 30.0), 8.0).reversed(), Loop2::circle(Vec2::new(70.0, 25.0), 6.0).reversed()],
+        };
+        let cached = PolyRegion::from_region(&panel);
+        for ix in -2..=52 {
+            for iy in -2..=32 {
+                let p = Vec2::new(ix as f64 * 2.0, iy as f64 * 2.0);
+                assert_eq!(cached.contains(p), panel.contains(p), "point {p:?}");
+            }
+        }
+
+        // Build a bent L-bracket with circular cutouts, attach a perforation field, and verify
+        // both `Zone::reach` (with AABB early-reject) and `hole_masses`.
+        let l_profile = Region2 {
+            outer: Loop2::polygon(&[
+                Vec2::new(0.0, 0.0),
+                Vec2::new(80.0, 0.0),
+                Vec2::new(80.0, 2.0),
+                Vec2::new(2.0, 2.0),
+                Vec2::new(2.0, 60.0),
+                Vec2::new(0.0, 60.0),
+            ]),
+            holes: Vec::new(),
+        };
+        let mut solid = extrude(&Plane::XY, std::slice::from_ref(&l_profile), 0.0, 100.0).unwrap().remove(0);
+        let horiz = Plane::new(Vec3::ZERO, Vec3::Z, Vec3::X).unwrap();
+        let cutout = Region2 { outer: Loop2::circle(Vec2::new(50.0, 45.0), 8.0), holes: Vec::new() };
+        let cutter = extrude(&horiz, std::slice::from_ref(&cutout), -5.0, 10.0).unwrap().remove(0);
+        solid = boolean(&solid, &cutter, BoolOp::Cut).unwrap().unwrap();
+
+        let mb = ModelBody::new("PerfBracket".into(), solid, 1);
+        let rule = ConvertRule {
+            thickness: 2.0,
+            k_factor: 0.5,
+            bend_radius: 2.0,
+            gap: 0.1,
+            corner_relief: ReliefShape::Notch,
+            corner_relief_size: 1.0,
+            relief_width: 1.0,
+            relief_depth: 1.0,
+            bend_relief: BendReliefShape::Rectangular,
+        };
+        let conv =
+            convert_surfaces(&mb, &|_| Ok(rule), &[Vec3::new(0.0, 0.0, 50.0)], SheetFaces::Sheet { face: None, skip: &[] }, &[], false, &IDENTITY)
+                .unwrap();
+        let (mut sheet, _) = SurfaceSheet::converted("PerfBracket", "T1", &conv, 1).unwrap();
+        let perf = SheetPerforation { feature: 10, diameter: 4.0, pitch: 10.0, margin: 3.0, square: true, from_right: false, outline: None };
+        sheet.perforation_joints.push((10, sheet.sheet.joints.len()));
+        sheet.perforations.push(perf.clone());
+
+        let expected_holes = sheet.shown().perforation_holes(&perf).len();
+        assert!(expected_holes > 20, "expected >20 perforation holes, got {expected_holes}");
+        let masses = hole_masses(&sheet).unwrap();
+        assert_eq!(masses.len(), expected_holes);
+        let expected_vol = PI * 2.0 * 2.0 * 2.0;
+        for m in &masses {
+            assert!((m.volume - expected_vol).abs() < 1e-9, "volume {}", m.volume);
+        }
+
+        // Verify Zone::reach with region_box matches uncached `overlaps` across points inside,
+        // grazing, and well outside the bend zone.
+        let dev = sheet.develop().unwrap();
+        let fold = crate::sheet_surface_convert::fold_onto(&sheet.sheet, &dev, &sheet.places).unwrap();
+        let zone = Zone::new(&dev.zones[0], fold.bends[dev.zones[0].joint].unwrap(), Vec::new()).unwrap();
+        let b = zone.region_box;
+        let probes = [
+            b.center(),
+            Vec2::new(b.min.x - 1.5, b.center().y),
+            Vec2::new(b.min.x - 2.5, b.center().y),
+            Vec2::new(b.max.x + 1.5, b.center().y),
+            Vec2::new(b.max.x + 5.0, b.center().y),
+            Vec2::new(b.center().x, b.min.y - 3.0),
+            Vec2::new(b.center().x, b.max.y + 3.0),
+        ];
+        for p in probes {
+            assert_eq!(zone.reach(p, 2.0).is_some(), overlaps(&zone.region, p, 2.0), "probe {p:?}");
+        }
+    }
 }

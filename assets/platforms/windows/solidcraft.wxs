@@ -4,17 +4,32 @@
 
     wix build solidcraft.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
       -culture en-US -loc solidcraft.en-us.wxl -d Version=1.2.3 -d DisplayVersion=1.2.3-rc.1
-      -d BinDir=... -d IconPath=... -o out.msi
+      -d SortableVersion=00001.00002.00003 -d BinDir=... -d IconPath=... -o out.msi
 
-  Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
-  default; an update keeps the installed folder and skips this page), Ready, progress, and a Finish page with a ticked "Launch
-  SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
-  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`), and offers it under
+  A setup wizard: Welcome, who to install for (all users, the default, or just me), install folder
+  (Program Files\SolidCraft, or %LocalAppData%\Programs\SolidCraft just for me; an update keeps
+  the installed scope and folder and skips both pages), Ready, progress, and a Finish page with a
+  ticked "Launch SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
+  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`) and of `solidcraft://` links, and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
+
+  Install scope (docs/book/src/guide/getting-started.md, "Installing on Windows"). The package is
+  per-machine exactly as before unless asked otherwise: ALLUSERS=1, and the Word Count summary
+  keeps elevation, so `msiexec /i solidcraft.msi /qn` and an update behave as they always have.
+  "Just for me" is Windows Installer's per-user context: `ALLUSERS=2 MSIINSTALLPERUSER=1` on the
+  command line, or the choice in the wizard. Then the folder is %LocalAppData%\Programs\SolidCraft,
+  HKMU registry values and the file types go to HKCU, the Start menu shortcut to the user's own
+  Start menu, solidcraft-cli to the user's PATH, and no administrator is needed. A per-user
+  install is updated in its own context (the wizard finds it, the in-app updater passes the two
+  properties); Windows keeps the two contexts apart, so a per-user and a per-machine install
+  can live side by side, each updated on its own.
   Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <!-- This install is per-user ("just for me"). Windows Installer clears ALLUSERS for a per-user
+       install, or leaves ALLUSERS=2 with MSIINSTALLPERUSER=1; both mean the user's own context. -->
+  <?define PerUser = (NOT ALLUSERS OR (ALLUSERS=2 AND MSIINSTALLPERUSER=1)) ?>
   <!-- Never change the UpgradeCode: it is what lets a new MSI replace every earlier install,
        including those from before the product was renamed (docs/compatibility.md). -->
   <Package
@@ -63,13 +78,63 @@
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
 
-    <!-- An upgrade installs where the user put the previous version (written by SolidcraftApp). -->
+    <!-- An upgrade installs where the user put the previous version (written by SolidcraftApp,
+         under HKLM for all users and HKCU just for me). Each context reads only its own record. -->
     <!-- A pre-rename install recorded a different key, which isn't read: its upgrade (same
          UpgradeCode) removes the old folder and installs into Program Files\SolidCraft
          (docs/compatibility.md). -->
-    <Property Id="INSTALLFOLDER">
+    <Property Id="SOLIDCRAFTMACHINEDIR">
       <RegistrySearch Id="PreviousInstallFolder" Root="HKLM" Key="Software\SolidCraft" Name="InstallDir" Type="raw" />
     </Property>
+    <Property Id="SOLIDCRAFTUSERDIR">
+      <RegistrySearch Id="PreviousUserInstallFolder" Root="HKCU" Key="Software\SolidCraft" Name="InstallDir" Type="raw" />
+    </Property>
+    <Property Id="SOLIDCRAFTUSERVERSION">
+      <RegistrySearch Id="PreviousUserVersion" Root="HKCU" Key="Software\SolidCraft" Name="SortableVersion" Type="raw" />
+    </Property>
+    <Property Id="SOLIDCRAFTUSERPRODUCT">
+      <RegistrySearch Id="PreviousUserProductCode" Root="HKCU" Key="Software\SolidCraft" Name="ProductCode" Type="raw" />
+    </Property>
+    <!-- The program itself in that folder: a record alone (a folder deleted by hand) is no install. -->
+    <Property Id="SOLIDCRAFTUSEREXE">
+      <RegistrySearch Id="PreviousUserInstallExe" Root="HKCU" Key="Software\SolidCraft" Name="InstallDir" Type="directory">
+        <FileSearch Id="PreviousUserInstallExeFile" Name="solidcraft.exe" />
+      </RegistrySearch>
+    </Property>
+    <!-- After the wizard's own scope actions below (InstallUISequence), before costing. -->
+    <SetProperty Id="INSTALLFOLDER" Action="SetInstallFolderMachine" Value="[SOLIDCRAFTMACHINEDIR]" Before="CostInitialize" Sequence="both"
+        Condition="SOLIDCRAFTMACHINEDIR AND NOT $(var.PerUser)" />
+    <SetProperty Id="INSTALLFOLDER" Action="SetInstallFolderUser" Value="[SOLIDCRAFTUSERDIR]" After="SetInstallFolderMachine" Sequence="both"
+        Condition="SOLIDCRAFTUSERDIR AND $(var.PerUser)" />
+    <!-- Just for me, a first install: the user's own programs folder (FOLDERID_UserProgramFiles). -->
+    <SetProperty Id="INSTALLFOLDER" Action="SetInstallFolderUserDefault" Value="[LocalAppDataFolder]Programs\SolidCraft\" After="SetInstallFolderUser" Sequence="both"
+        Condition="NOT INSTALLFOLDER AND $(var.PerUser)" />
+
+    <!-- The wizard (full UI only; `/qn` and `/passive` skip it and take the command line as it is).
+         A scope given on the command line is kept and its page skipped. -->
+    <SetProperty Id="SolidcraftScopeFixed" Action="SetSolidcraftScopeFixed" Value="1" After="AppSearch" Sequence="ui"
+        Condition="MSIINSTALLPERUSER=1 OR NOT ALLUSERS" />
+    <!-- Only a per-user SolidCraft is installed: update it there, as a per-machine one is. The
+         wizard's process keeps the context it started in (all users), where FindRelatedProducts
+         can't see a per-user install, and the install reuses the wizard's result. So the wizard
+         names the per-user version to replace itself, from the ProductCode it recorded. -->
+    <SetProperty Id="SolidcraftUserUpgrade" Action="SetSolidcraftUserUpgrade" Value="1" After="SetSolidcraftScopeFixed" Sequence="ui"
+        Condition="SOLIDCRAFTUSEREXE AND SOLIDCRAFTUSERPRODUCT AND NOT SOLIDCRAFTMACHINEDIR AND NOT WIX_UPGRADE_DETECTED AND NOT SolidcraftScopeFixed AND NOT (SOLIDCRAFTUSERVERSION &gt; &quot;$(var.SortableVersion)&quot;)" />
+    <!-- MajorUpgrade's downgrade check can't see that install either: refuse an older version
+         here (SortableVersion is zero-padded, so strings compare as versions). -->
+    <SetProperty Id="SolidcraftUserDowngrade" Action="SetSolidcraftUserDowngrade" Value="1" After="SetSolidcraftUserUpgrade" Sequence="ui"
+        Condition="SOLIDCRAFTUSEREXE AND NOT SOLIDCRAFTMACHINEDIR AND NOT WIX_UPGRADE_DETECTED AND NOT SolidcraftScopeFixed AND SOLIDCRAFTUSERVERSION &gt; &quot;$(var.SortableVersion)&quot;" />
+    <Launch Condition="NOT SolidcraftUserDowngrade" Message="A newer version of SolidCraft is already installed." />
+    <SetProperty Id="ALLUSERS" Action="SetPerUserUpgradeAllUsers" Value="2" After="SetSolidcraftUserUpgrade" Sequence="ui"
+        Condition="SolidcraftUserUpgrade" />
+    <SetProperty Id="MSIINSTALLPERUSER" Action="SetPerUserUpgradeInstall" Value="1" After="SetPerUserUpgradeAllUsers" Sequence="ui"
+        Condition="SolidcraftUserUpgrade" />
+    <SetProperty Id="WIX_UPGRADE_DETECTED" Action="SetPerUserUpgradeProduct" Value="[SOLIDCRAFTUSERPRODUCT]" After="SetPerUserUpgradeInstall" Sequence="ui"
+        Condition="SolidcraftUserUpgrade" />
+    <!-- The two folders the scope page switches between; an earlier install's folder in each. -->
+    <SetProperty Id="SolidcraftMachineFolder" Action="SetSolidcraftMachineFolder" Value="[INSTALLFOLDER]" After="CostFinalize" Sequence="ui" Condition="NOT $(var.PerUser)" />
+    <SetProperty Id="SolidcraftUserFolder" Action="SetSolidcraftUserFolder" Value="[LocalAppDataFolder]Programs\SolidCraft\" After="SetSolidcraftMachineFolder" Sequence="ui" />
+    <Property Id="SolidcraftScope" Value="machine" />
 
     <Feature Id="Main" Title="SolidCraft" Level="1">
       <ComponentGroupRef Id="SolidcraftFiles" />
@@ -78,12 +143,15 @@
     <!-- WixUI_InstallDir without its licence page (MIT OR Apache-2.0: nothing to accept). -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <UI>
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
-      <!-- An update keeps the folder of the installed version: the components keep their GUIDs
-           (see MajorUpgrade), so they must not move to another folder. -->
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="3" Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
+      <DialogRef Id="SolidcraftScopeDlg" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="SolidcraftScopeDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="3" Condition="NOT Installed AND SolidcraftScopeFixed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="SolidcraftScopeDlg" Order="2" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="SolidcraftScopeFixed" />
+      <!-- An update keeps the scope and folder of the installed version: the components keep their
+           GUIDs (see MajorUpgrade), so they must not move to another folder. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4" Condition="NOT Installed AND (WIX_UPGRADE_DETECTED OR SolidcraftUserUpgrade)" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="NOT Installed AND (WIX_UPGRADE_DETECTED OR SolidcraftUserUpgrade)" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchSolidcraft"
           Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>
@@ -96,6 +164,43 @@
     <!-- Runs in the wizard's own (unelevated) process, so the app starts as the user. -->
     <CustomAction Id="LaunchSolidcraft" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
   </Package>
+
+  <!-- Who to install for. All users stays the default: the same per-machine install as always. -->
+  <Fragment>
+    <UI>
+      <TextStyle Id="WixUI_Font_Emphasized" FaceName="Tahoma" Size="8" Bold="yes" />
+      <Dialog Id="SolidcraftScopeDlg" Width="370" Height="270" Title="!(loc.InstallScopeDlg_Title)">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallScopeDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.SolidcraftScopeDlgTitle)" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.SolidcraftScopeDlgDescription)" />
+        <Control Id="Scope" Type="RadioButtonGroup" X="20" Y="55" Width="330" Height="130" Property="SolidcraftScope">
+          <RadioButtonGroup Property="SolidcraftScope">
+            <RadioButton Value="machine" X="0" Y="0" Width="320" Height="16" Text="!(loc.SolidcraftScopeDlgPerMachine)" />
+            <RadioButton Value="user" X="0" Y="62" Width="320" Height="16" Text="!(loc.SolidcraftScopeDlgPerUser)" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="PerMachineDescription" Type="Text" X="37" Y="73" Width="310" Height="40" NoPrefix="yes" Text="!(loc.SolidcraftScopeDlgPerMachineDescription)" />
+        <Control Id="PerUserDescription" Type="Text" X="37" Y="135" Width="310" Height="40" NoPrefix="yes" Text="!(loc.SolidcraftScopeDlgPerUserDescription)" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="WelcomeDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Property="ALLUSERS" Value="1" Order="1" Condition="SolidcraftScope = &quot;machine&quot;" />
+          <Publish Property="MSIINSTALLPERUSER" Value="{}" Order="2" Condition="SolidcraftScope = &quot;machine&quot;" />
+          <Publish Property="INSTALLFOLDER" Value="[SolidcraftMachineFolder]" Order="3" Condition="SolidcraftScope = &quot;machine&quot; AND SolidcraftMachineFolder" />
+          <Publish Property="ALLUSERS" Value="2" Order="4" Condition="SolidcraftScope = &quot;user&quot;" />
+          <Publish Property="MSIINSTALLPERUSER" Value="1" Order="5" Condition="SolidcraftScope = &quot;user&quot;" />
+          <Publish Property="INSTALLFOLDER" Value="[SolidcraftUserFolder]" Order="6" Condition="SolidcraftScope = &quot;user&quot;" />
+          <Publish Event="NewDialog" Value="InstallDirDlg" Order="7" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+    </UI>
+  </Fragment>
 
   <Fragment>
     <ComponentGroup Id="SolidcraftFiles" Directory="INSTALLFOLDER">
@@ -123,41 +228,42 @@
             <Verb Id="open" Command="Open" TargetFile="SolidcraftExe" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
-        <!-- Compatibility shim (docs/compatibility.md): designs saved as .solidcraft (before .sc)
-             open as the same ProgId. Registered by hand: a
-             second Extension under one ProgId would write its open verb twice (WIX0091). -->
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Value="Solidcraft.Design" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Name="Content Type" Value="application/x-solidcraft" Type="string" />
-        <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default. -->
+        <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default
+             (the rest of their registration is in solidcraft-registry.wxi). -->
         <ProgId Id="Solidcraft.Model" Description="3D model" Icon="SolidcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Solidcraft.Model\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.step\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.stp\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.igs\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.iges\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.3mf\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.stl\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+      </Component>
 
-        <!-- "Open with" app list and the Run dialog (Win+R "solidcraft"). -->
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe" Name="FriendlyAppName" Value="SolidCraft" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".sc" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solidcraft" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stp" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".igs" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".iges" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".3mf" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stl" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\solidcraft.exe" Value="[#SolidcraftExe]" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\SolidCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
+      <!-- Everything else SolidCraft registers, under HKMU: HKLM for all users, HKCU just for me.
+           One component per scope, each with a GUID of its own: a component installed in both
+           contexts at once (both kinds of install on one PC) keeps its per-user registry values
+           when the per-user install is removed, which would leave this user's .sc files and
+           solidcraft:// links pointing at a deleted program. -->
+      <Component Id="SolidcraftRegistryMachine" Guid="3E8C2B71-5D0A-4E9B-A6F4-71C9D2E58B03" Condition="NOT $(var.PerUser)">
+        <?include solidcraft-registry.wxi ?>
+      </Component>
+      <Component Id="SolidcraftRegistryUser" Guid="9B47D6E2-0C3F-4A18-8E5D-26F1B9A7C4E6" Condition="$(var.PerUser)">
+        <?include solidcraft-registry.wxi ?>
+        <!-- The same goes for the Start menu shortcut (part of SolidcraftApp): removed with the
+             per-user install, from the user's own Start menu only. -->
+        <!-- Which version is installed, for the wizard's per-user update (SetPerUserUpgradeProduct). -->
+        <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="ProductCode" Value="[ProductCode]" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="SortableVersion" Value="$(var.SortableVersion)" Type="string" />
+        <RemoveFile Id="RemoveUserStartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft.lnk" On="uninstall" />
       </Component>
 
       <Component Id="SolidcraftCli">
         <File Id="SolidcraftCliExe" Source="$(var.BinDir)\solidcraft-cli.exe" KeyPath="yes" />
-        <!-- The install folder on the system PATH, so MCP clients and shells find `solidcraft-cli` by name;
-             removed again on uninstall. -->
+      </Component>
+      <!-- The install folder on the PATH, so MCP clients and shells find `solidcraft-cli` by name;
+           removed again on uninstall. The system PATH for all users, the user's own PATH just for
+           me (writing the system one needs an administrator). -->
+      <Component Id="SolidcraftPathMachine" Guid="6F0F3B0E-2D8B-4C47-9C3E-8B1B6E0B6A11" Condition="NOT $(var.PerUser)">
+        <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="CliOnPath" Value="system" Type="string" KeyPath="yes" />
         <Environment Id="SolidcraftPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" Permanent="no" />
+      </Component>
+      <Component Id="SolidcraftPathUser" Guid="0C5B8E43-7A1D-4F06-B2E9-3D5A9C4F7E28" Condition="$(var.PerUser)">
+        <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="CliOnPath" Value="user" Type="string" KeyPath="yes" />
+        <Environment Id="SolidcraftUserPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="no" Permanent="no" />
       </Component>
       <!-- Several unversioned files: an explicit GUID (WIX0367). -->
       <Component Id="SolidcraftLicences" Guid="CDEDEE8D-4BE9-4872-A2EA-EE623A6C7E91">

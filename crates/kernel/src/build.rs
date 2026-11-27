@@ -165,7 +165,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle, None)
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -173,7 +173,13 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle, None)
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::AsDrawn)
+}
+
+/// Revolve with contiguous pieces of the same circle joined before turning each profile.
+pub fn revolve_joining_arcs(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_joining_arcs");
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinArcs)
 }
 
 /// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
@@ -188,7 +194,7 @@ pub fn revolve_whole_sides(
     one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
 ) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
-    revolved(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
+    revolved(plane, regions, axis_origin, axis_dir, angle, RevolveProfile::JoinFreeForm(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -197,16 +203,14 @@ pub fn revolve_whole_sides(
 /// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
 const AXIS_SNAP: f64 = 1e-4;
 
-/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]), with the runs of segments `one_curve`
-/// says are one curve turned as one curve each (none: each segment on its own).
-fn revolved(
-    plane: &Plane,
-    regions: &[Region2],
-    axis_origin: Vec2,
-    axis_dir: Vec2,
-    angle: f64,
-    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
-) -> Result<Vec<Body>> {
+enum RevolveProfile<'a> {
+    AsDrawn,
+    JoinArcs,
+    JoinFreeForm(&'a dyn Fn(&Seg2, &Seg2) -> bool),
+}
+
+/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
+fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64, profile: RevolveProfile<'_>) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -271,8 +275,10 @@ fn revolved(
         let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-        let Some(one_curve) = one_curve else {
-            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+        let RevolveProfile::JoinFreeForm(one_curve) = profile else {
+            let pieces = crate::smlib_sweeps::pieces(given.oriented().loops());
+            let join_arcs = matches!(profile, RevolveProfile::JoinArcs);
+            out.push(crate::smlib_sweeps::revolve(plane, &pieces, o, axis, angle, join_arcs)?);
             continue;
         };
         // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
@@ -291,7 +297,7 @@ fn revolved(
             }
             k += l.lp.segs.len();
         }
-        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle)?);
+        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle, false)?);
     }
     Ok(out)
 }
@@ -1552,6 +1558,54 @@ impl PathSeg {
             .collect()
     }
 
+    /// The unit normal of a plane the whole path lies in, within `tol` radians: the axis of its
+    /// first arc, or else the turn between its first two directions of travel that are not
+    /// parallel, checked against every segment over its whole length: a line's direction, an
+    /// arc's axis, and a free-form segment's control points ([`PathSeg::control_points`]). A
+    /// straight path lies in many planes and gets one of them. `None` for a path that leaves
+    /// every plane, or has no direction. Solidcore decides it
+    /// ([`solidcore_ops::path_plane::plane_normal`]); this reads the segments for it.
+    pub fn plane_normal(path: &[PathSeg], tol: f64) -> Option<Vec3> {
+        use solidcore_ops::path_plane::{PathPlanePiece, PieceFit};
+        let directions = |s: &PathSeg| -> Vec<[f64; 3]> {
+            match s {
+                PathSeg::Line { .. } | PathSeg::Arc { .. } => s.tangents().map(|(a, b)| vec![point3(a), point3(b)]).unwrap_or_default(),
+                _ => (0..=8).filter_map(|i| s.along(f64::from(i) / 8.0).map(|(_, d)| point3(d))).collect(),
+            }
+        };
+        let fit = |s: &PathSeg| match *s {
+            PathSeg::Arc { axis, .. } => PieceFit::Axis(point3(axis)),
+            PathSeg::Line { .. } => PieceFit::Directions(directions(s)),
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => s.control_points(),
+        };
+        let pieces: Vec<PathPlanePiece> = path
+            .iter()
+            .map(|s| PathPlanePiece {
+                directions: directions(s),
+                arc_axis: if let PathSeg::Arc { axis, .. } = *s { Some(point3(axis)) } else { None },
+                // A sketch line or arc carried as a curve is checked as the line or arc it is.
+                fit: match *s {
+                    PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => fit(&PathSeg::of_sketch(&plane, &seg)),
+                    _ => fit(s),
+                },
+            })
+            .collect();
+        let [x, y, z] = solidcore_ops::path_plane::plane_normal(&pieces, tol)?;
+        Some(Vec3::new(x, y, z))
+    }
+
+    /// A free-form segment as [`PathSeg::plane_normal`] checks it against a plane: its start and
+    /// its control points in space (a rational Bézier span with positive weights lies in their
+    /// hull, so they decide the whole span). A segment that is no free-form span, or a control
+    /// point with no point in space, gives no points, which fit no plane.
+    fn control_points(&self) -> solidcore_ops::path_plane::PieceFit {
+        let Some(b) = self.space_bezier() else {
+            return solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(self.start()), points: None };
+        };
+        let points = b.ctrl().iter().map(|q| q.project().map(point3)).collect();
+        solidcore_ops::path_plane::PieceFit::ControlPoints { start: point3(b.start()), points }
+    }
+
     /// Points along the segment (an arc within `tol` of its chords), without its start.
     pub(crate) fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
         match *self {
@@ -1567,6 +1621,11 @@ impl PathSeg {
             }
         }
     }
+}
+
+/// A point or a direction as the plain numbers solidcore-ops takes.
+fn point3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
 /// `p` turned by `angle` about the unit axis `k` through `center` (right hand).

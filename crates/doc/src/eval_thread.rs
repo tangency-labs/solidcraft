@@ -71,7 +71,11 @@ pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).
+/// A designation with a tolerance class (`M8-6H`) is none: a tapped hole saves its class apart.
 pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
+    if crate::thread_forms::metric_class(s).1.is_some() {
+        return None;
+    }
     ThreadForm::Metric.parse(s, 1).ok().filter(|z| (z.lead - z.pitch).abs() < 1e-12).map(|z| (z.major, z.pitch))
 }
 
@@ -121,6 +125,9 @@ pub(super) struct ThreadAsk<'a> {
     /// The runout at the end away from where the thread starts, as (mm, pitches): its length
     /// is mm + pitches x the pitch. The start never fades: it runs off its free end.
     pub ease_out: (f64, f64),
+    /// A modelled internal thread runs down to a blind hole's bottom, trimmed at its plane, as an
+    /// external thread runs down to a shoulder ([`End::Shoulder`]), rather than stopping clear.
+    pub to_bottom: bool,
     /// A tapped hole's thread: `designation` is a catalogue size (ISO metric, or a catalogued
     /// UNC/UNF, G, Rp, Rc or NPT size), and a size that is not metric fits the hole drilled for it.
     pub tapped: bool,
@@ -334,6 +341,17 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         // fractional sizes absent from the catalogue. The parser has validated this callout.
         designation = given.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
     }
+    // An ISO metric tolerance class (ISO 965-1) is kept in the callout as written, after the
+    // size's own designation; the size, and so the groove and the fit, are the size's alone.
+    let size_designation = designation.clone();
+    if form == ThreadForm::Metric
+        && tapped.is_none()
+        && let Some(given) = ask.designation
+        && let (_, Some(class)) = crate::thread_forms::metric_class(given)
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        designation = format!("{designation}-{class}");
+    }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
         // The hole drilled for it, without borrowing an ISO minor-diameter rule.
@@ -348,7 +366,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         let try_instead = form
             .fit(dia, cyl.internal)
             .map(|(n, q)| form.format(n, q, q))
-            .filter(|a| *a != designation)
+            .filter(|a| *a != size_designation)
             .map(|a| format!("; this {kind} takes {a}"))
             .unwrap_or_default();
         return Err(DocError::Invalid(format!("an {designation} thread does not fit a {dia:.2} mm {kind}{try_instead}")));
@@ -431,7 +449,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         } else if !ends.free(side)? {
             let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
             let square = ease.get(side).copied().unwrap_or(0.0) == 0.0;
-            let clear = at_end && square && !cyl.internal && !form.is_taper() && {
+            let clear = at_end && square && (!cyl.internal || ask.to_bottom) && !form.is_taper() && {
                 let check = ends.clear_of_end_plane(side);
                 unchecked |= matches!(check, Err(DocError::Kernel(_)));
                 match check {
@@ -837,6 +855,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         hand,
         starts,
         ease_out,
+        to_bottom,
         tip,
         chamfer_angle,
         chamfer_depth,
@@ -855,6 +874,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     }
     if *tip != ThreadTip::None && !*modeled {
         return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
+    }
+    if *to_bottom && (!*modeled || ease_out.is_some()) {
+        return Err(DocError::Invalid("a thread runs to the bottom only when it is modelled and its end does not fade out".into()));
     }
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),
@@ -875,6 +897,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         from: from.map(|q| q.0),
         modeled: *modeled,
         ease_out: (0.0, 0.0),
+        to_bottom: *to_bottom,
         tapped: false,
         old_auto_size: *old_auto_size,
     };
@@ -1132,8 +1155,9 @@ fn cut_with_flanks(
     }
     let note = (square_stop && made.is_ok()).then(|| {
         format!(
-            "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
-            t.designation
+            "the {} thread's groove could not be run down to the {} here, so it stops clear of it and its last turn is left uncut",
+            t.designation,
+            if t.internal { "hole's bottom" } else { "shoulder" }
         )
     });
     let (nb, groove_tool, checked) = made?;
@@ -1263,6 +1287,7 @@ mod tests {
             from: None,
             modeled: true,
             ease_out: (0.0, 0.0),
+            to_bottom: false,
             tapped: false,
             old_auto_size: false,
         }
@@ -1333,6 +1358,35 @@ mod tests {
         assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
         // The square stop leaves about half a pitch's worth of groove uncut: well over a mm³.
         assert!(square > trimmed + 1.0, "{square} vs {trimmed}");
+    }
+
+    /// #22616: asked to, a modelled internal thread runs down to a blind hole's bottom, trimmed at
+    /// the bottom's plane as a thread at a shoulder is: more of the wall is cut than when it stops
+    /// clear of the bottom, and nothing past the bottom. Not asked, it stops clear, as before.
+    #[test]
+    fn an_internal_thread_asked_to_runs_down_to_a_blind_holes_bottom() {
+        // A 40 x 40 x 20 mm block with an 8.5 mm hole (M10's tap drill) 12 mm deep from the top.
+        let block = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let drill = kernel::cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::new(0.0, 0.0, 1.0), 4.25, 13.0).unwrap();
+        let body = kernel::boolean(&block, &drill, BoolOp::Cut).unwrap().unwrap();
+        let build = |to_bottom: bool| {
+            let mut st = ModelState::default();
+            st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
+            let on = thread_on(&st, 1, Vec3::new(4.25, 0.0, 14.0), &ThreadAsk { to_bottom, ..ask() }).unwrap();
+            let ends = on.ends;
+            let note = cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+            (ends, note, kernel::measure(&st.bodies[0].body).unwrap().volume)
+        };
+        let (clear, _, stops_clear) = build(false);
+        assert!(clear.contains(&End::Closed) && !clear.contains(&End::Shoulder), "{clear:?}");
+        let (ends, note, to_bottom) = build(true);
+        assert!(ends.contains(&End::Shoulder), "{ends:?}");
+        assert_eq!(note, None, "the groove reaches the bottom");
+        // The last turn or two of the groove more: at most the groove's ring (out to M10's major
+        // radius) over two pitches, so nothing is cut under the bottom.
+        let ring = std::f64::consts::PI * (5.0_f64.powi(2) - 4.25_f64.powi(2)) * 2.0 * 1.5;
+        let more = stops_clear - to_bottom;
+        assert!(more > 1e-3 && more < ring, "{more} mm³ more cut (at most {ring})");
     }
 
     /// A modelled thread on one hole leaves the other hole's wall a cylinder to thread: the

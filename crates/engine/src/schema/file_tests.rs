@@ -63,6 +63,7 @@ fn schemas_and_the_key_check_agree() {
             "format",
             "geometry",
             "history",
+            "holes",
             "linked_bodies",
             "max_points",
             "names",

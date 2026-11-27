@@ -342,6 +342,10 @@ pub struct PeriodicBoundaryEnd<O> {
 
 enum BoundaryRoot {
     NoCut,
+    /// The support contains the whole component (a range of solutions over its interval): the
+    /// smooth continuation of the component's own face beyond a tangent boundary, such as a
+    /// round's extension along the cylinder it is tangent to. It bounds no part of the component.
+    Contains,
     /// The root's curve parameter, its point, and its (u, v) on the boundary's displaced,
     /// extended support.
     One(f64, Point3, Point2),
@@ -4394,6 +4398,10 @@ impl OffsetGeometryCreation {
         let mut root: Option<(f64, Point3, Point2)> = None;
         for solution in roots.as_slice() {
             if solution.solution_type == SolutionType::RangeOfValues {
+                let (lo, hi) = (solution.start.param(0)?, solution.end.param(0)?);
+                if lo.min(hi) <= interval.min() && lo.max(hi) >= interval.max() {
+                    return Ok(BoundaryRoot::Contains);
+                }
                 return Ok(BoundaryRoot::Unresolved);
             }
             let parameter = solution.start.param(0)?;
@@ -4650,6 +4658,13 @@ impl OffsetGeometryCreation {
                                 continue 'seams;
                             }
                             return Ok(PeriodicEnd::Unresolved);
+                        }
+                        BoundaryRoot::Contains => {
+                            // No support bounds the component on this side of the seam: as
+                            // where there is none, the construction does not apply and the
+                            // ordinary trim does (T-1504).
+                            ordinary_end = true;
+                            continue 'seams;
                         }
                         BoundaryRoot::Unresolved => return Ok(PeriodicEnd::Unresolved),
                     };
