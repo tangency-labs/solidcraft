@@ -825,6 +825,10 @@ pub struct DrawingBoundsParams {
     /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dpi: Option<f64>,
+    /// Whether to also work out the smallest Simplify distance at which the insert fits a
+    /// sketch, as `auto_simplify`. Default: false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<bool>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -884,6 +888,12 @@ pub struct DrawingBoundsResult {
     /// texts): about what the insert adds curves for, so a window can tell whether the sketch
     /// takes the drawing as drawn.
     pub edges: usize,
+    /// With `fit`: the smallest Simplify distance, mm on the drawing to 0.01, at which the insert
+    /// adds it to a sketch without running out of points or curves: 0 when it fits as drawn.
+    /// Left out when no distance up to the cap (a hundredth of the drawing's span, and 100 mm)
+    /// does, and when `fit` is not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_simplify: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

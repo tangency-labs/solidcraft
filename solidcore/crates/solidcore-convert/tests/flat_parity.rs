@@ -574,7 +574,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
+            (pinned.len(), 38), // 37 with fillets/15437's block; 38 with the drafted peg re-exported for #22151 (report-drafted-peg-front-and-concave-rounds-together-r2), both within rounding
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

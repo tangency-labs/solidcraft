@@ -89,7 +89,7 @@ pub use cmd::addition;
 pub use cmd::auto_operation;
 pub use cmd::command_specs;
 pub use cmd::dimension_roles;
-pub use cmd::drawing_export::print_pdf;
+pub use cmd::drawing_export::{PrintedPdf, print_pdf};
 pub use cmd::extrude_reach;
 pub use cmd::find_command;
 pub use cmd::motion::AutomaticExplode;
@@ -207,6 +207,16 @@ impl EngineError {
             EngineError::Feature(f) => Some(&f.code),
             _ => None,
         }
+    }
+    /// The largest fitting size reported by the kernel when a blend is refused as too large, if
+    /// the backend reported one (#10849).
+    pub fn largest_fit(&self) -> Option<solidcraft_kernel::BlendFit> {
+        let text = match self {
+            EngineError::Feature(f) => f.error.as_str(),
+            EngineError::Other(s) => s.as_str(),
+            _ => return None,
+        };
+        solidcraft_kernel::named_blend_fit(text)
     }
 }
 

@@ -53,6 +53,7 @@ pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
+mod dialog_drag_undo;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -295,6 +296,7 @@ mod plugin_themes_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_tint;
 pub(crate) mod plugin_updates;
+pub(crate) mod plugin_workspaces;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -587,6 +589,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
+    /// The page runs in Safari, the one browser that reports a two-finger twist (Preferences
+    /// offers the twist there only, #22848).
+    pub browser_safari: bool,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
@@ -1112,6 +1117,7 @@ pub struct SolveApp {
     /// Plugin state kept between frames. New plugin state goes in [`app_plugins::State`].
     pub(crate) plugins: app_plugins::State,
     plugin_slots: plugin_slots::State,
+    pub(crate) plugin_workspaces: plugin_workspaces::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1407,6 +1413,7 @@ impl SolveApp {
             control_answering: Vec::new(),
             plugins: Default::default(),
             plugin_slots: Default::default(),
+            plugin_workspaces: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1758,7 +1765,17 @@ impl SolveApp {
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .map(|a| {
+                // A path listed twice (saved by an older version, or written by two pages) is
+                // shown once (#23033).
+                let mut recent: Vec<String> = Vec::new();
+                for p in a.iter().filter_map(Value::as_str) {
+                    if recent.len() < home::MAX_RECENT && !recent.iter().any(|r| r == p) {
+                        recent.push(p.to_string());
+                    }
+                }
+                recent
+            })
             .unwrap_or_default();
         self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
@@ -2032,6 +2049,10 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some("edit.undo" | "edit.redo") if r.is_ok() => {
+                self.agent_chat.clear_model_changes();
+                r
+            }
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
@@ -2226,7 +2247,8 @@ impl SolveApp {
                 };
                 render_workspace::selection_editor(self, &selected);
             }
-            if id == "view.layout" {
+            // The organization's layout stays; the command changes nothing while a policy sets it.
+            if id == "view.layout" && !self.policy.locks("layout") {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
@@ -3421,6 +3443,10 @@ impl SolveApp {
             if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            // An open sketch window would keep the keyboard from the tool's size boxes.
+            if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(_))) {
+                dialogs::cancel(self);
+            }
             self.tool = Some(t);
             self.set_tool_hint(tools::hint(id));
             return;
@@ -3899,13 +3925,14 @@ impl SolveApp {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
-    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
         v.extend(agent_chat::hovered_chip(self).iter().cloned());
+        v.extend(agent_chat::model_changes_targets(self));
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
@@ -4711,6 +4738,9 @@ impl SolveApp {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // The orbit's wrap setting covers label drags too; a synthetic drag (control channel,
+        // scripts) has no real cursor to move.
+        ui_kit::set_scrub_cursor_wrap(ctx, self.preferences.orbit_cursor_wrap && !self.synthetic_press);
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
@@ -5127,6 +5157,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {

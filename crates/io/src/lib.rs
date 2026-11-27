@@ -1869,7 +1869,7 @@ pub fn export_with_parts_noted(
 }
 
 /// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
-const EXPORT_THREADS: usize = 16;
+pub(crate) const EXPORT_THREADS: usize = 16;
 
 /// Keep each triangle's source index through welding so its face and colour follow it.
 type TaggedTriangles = (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>);
