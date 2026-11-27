@@ -2916,6 +2916,7 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
 
 /// A cylinder of radius `r` and height `h` about +Z from base centre `base`, its seam turned
 /// `seam_deg` about its axis (SolidCraft's cylinders put the seam where the sketch put it).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
 fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
     let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
     let (s, co) = seam_deg.to_radians().sin_cos();
