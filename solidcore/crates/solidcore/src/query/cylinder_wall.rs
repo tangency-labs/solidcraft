@@ -6,7 +6,7 @@
 //! The face's kind and frame are its record's ([`record_face`]): the wall's angle zero is the
 //! record's `Surface::Cylinder` frame x axis, so a grid anchored on it lands where the record
 //! says. The material side is read at the middle of the face's parameter box from the surface's
-//! normal turned by the upward face use ([`material_toward_axis`]); the facing surface is the one
+//! normal turned by the outside face use ([`material_toward_axis`]); the facing surface is the one
 //! [`facing_cylinders`] pairs it with.
 //!
 //! What is refused, each as [`CellGridError::Parameter`] with a message for the user:
@@ -28,6 +28,7 @@ use crate::query::brep::{evaluate_surface_normal, evaluate_surface_point};
 use crate::query::edge::{edge_faces, edge_vertices};
 use crate::surface::face_pair_cylinder::{facing_cylinders, material_toward_axis, CylinderFace};
 use crate::surface::face_surface::record_face;
+use crate::topology::face::p2::outer_faceuse;
 use crate::topology::{Brep, EdgeId, FaceId};
 
 /// The refusal for a face with openings, or one of several faces on one cylinder.
@@ -105,7 +106,7 @@ fn plane_normal(s: &Record) -> Option<Vec3> {
 }
 
 /// Whether face `f`'s material lies toward the axis, read at the middle of its parameter box
-/// from its surface's normal turned out of the material by its upward face use.
+/// from its surface's normal turned out of the material by its outside face use.
 fn toward_axis(
     k: &Kernel,
     b: &Brep,
@@ -115,15 +116,14 @@ fn toward_axis(
 ) -> Result<bool, CellGridError> {
     let face = b.face(f).map_err(kernel_err)?;
     let d = &face.uv_domain;
-    let uv = Point2::new(
-        0.5 * (d.u_min() + d.u_max()),
-        0.5 * (d.v_min() + d.v_max()),
-    );
+    let uv = Point2::new(0.5 * (d.u_min() + d.u_max()), 0.5 * (d.v_min() + d.v_max()));
     let surface = face.surface.as_ref();
     let point = evaluate_surface_point(k, surface, uv).map_err(kernel_err)?;
     let normal = evaluate_surface_normal(k, surface, uv).map_err(kernel_err)?;
-    let fu = face
-        .faceuse
+    // The use on the outside (the infinite region's shell) sees the face from out of the
+    // material: its `Same` orientation means the surface normal points out of the solid.
+    let fu = outer_faceuse(b, f)
+        .map_err(kernel_err)?
         .ok_or_else(|| refuse("the picked face is not in a shell"))?;
     let same = b.faceuse(fu).map_err(kernel_err)?.orientation == OrientType::Same;
     let outward = if same { normal } else { normal * -1.0 };
@@ -203,7 +203,9 @@ pub fn cylinder_wall(
         }
     };
     if !(radius.is_finite() && radius > 0.0) {
-        return Err(refuse("the picked cylinder's radius must be finite and positive"));
+        return Err(refuse(
+            "the picked cylinder's radius must be finite and positive",
+        ));
     }
 
     // One loop: a second loop is an opening in the wall.
@@ -228,7 +230,10 @@ pub fn cylinder_wall(
         let p: Point3 = b.vertex(vertices[0]).map_err(kernel_err)?.point;
         let z = (p - axis_point).dot(axis);
         let ang = k.tolerances.ang_tol_rad().sin();
-        let open = plane_normal(&label(k, b, others[0])?)
+        // A neighbour the record cannot label is not a planar cap: the end counts as closed.
+        let open = label(k, b, others[0])
+            .ok()
+            .and_then(|s| plane_normal(&s))
             .is_some_and(|n| n.cross(axis).length() <= ang);
         rims.push(Rim { z, open });
     }
@@ -256,7 +261,11 @@ pub fn cylinder_wall(
         if g == face {
             continue;
         }
-        let Some((gp, ga, _, gr)) = cylinder_of(&label(k, b, g)?) else {
+        // A face the record cannot label (an offset or STEP surface) is no cylinder of the wall.
+        let Ok(g_label) = label(k, b, g) else {
+            continue;
+        };
+        let Some((gp, ga, _, gr)) = cylinder_of(&g_label) else {
             continue;
         };
         let coaxial = axis.cross(ga).length() <= ang && (gp - axis_point).cross(ga).length() <= tol;
@@ -270,7 +279,10 @@ pub fn cylinder_wall(
             axis_point: gp,
             axis: ga,
             radius: gr,
-            material_toward_axis: toward_axis(k, b, g, gp, ga)?,
+            material_toward_axis: match toward_axis(k, b, g, gp, ga) {
+                Ok(t) => t,
+                Err(_) => continue,
+            },
         };
         if facing_cylinders(k, &this, &other)
             .map_err(kernel_err)?
@@ -379,7 +391,10 @@ mod tests {
         // The tangent on an outside is axis x x_dir, square to both.
         let (a, x, t) = (v3(w.axis), v3(w.x_dir), v3(w.tangent));
         assert!((a.cross(x) - t).length() < 1e-12, "{w:?}");
-        assert!(x.dot(a).abs() < 1e-12 && (t.length() - 1.0).abs() < 1e-12, "{w:?}");
+        assert!(
+            x.dot(a).abs() < 1e-12 && (t.length() - 1.0).abs() < 1e-12,
+            "{w:?}"
+        );
         assert_eq!(w.tol, TOL);
     }
 
@@ -430,7 +445,10 @@ mod tests {
         let block = create_box(&mut k, p(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let f = face_where(&k, &block, |s| plane_normal(s).is_some());
         let m = message(cylinder_wall(&k, &block, f, TOL));
-        assert!(m.contains("is a plane") && m.contains("pick a cylinder wall"), "{m}");
+        assert!(
+            m.contains("is a plane") && m.contains("pick a cylinder wall"),
+            "{m}"
+        );
 
         let ball = create_sphere(&mut k, p(0.0, 0.0, 0.0), 10.0).unwrap();
         let f = face_where(&k, &ball, |s| matches!(s, Record::Sphere { .. }));
@@ -440,13 +458,17 @@ mod tests {
         let cone = create_cone(&mut k, p(0.0, 0.0, 0.0), 20.0, 10.0, 30.0).unwrap();
         let f = face_where(&k, &cone, |s| matches!(s, Record::Cone { .. }));
         let m = message(cylinder_wall(&k, &cone, f, TOL));
-        assert!(m.contains("is a cone") && m.contains("not supported yet"), "{m}");
+        assert!(
+            m.contains("is a cone") && m.contains("not supported yet"),
+            "{m}"
+        );
     }
 
     #[test]
     fn a_half_wall_is_refused() {
         let mut k = Kernel::default();
-        let half = create_partial_cylinder(&mut k, p(0.0, 0.0, 0.0), 30.0, 40.0, 0.0, 180.0).unwrap();
+        let half =
+            create_partial_cylinder(&mut k, p(0.0, 0.0, 0.0), 30.0, 40.0, 0.0, 180.0).unwrap();
         let f = cylinder_face(&k, &half, 30.0);
         let m = message(cylinder_wall(&k, &half, f, TOL));
         assert!(m.contains("all the way round"), "{m}");
