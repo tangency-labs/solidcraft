@@ -4137,9 +4137,6 @@ impl FilletBrep {
                 let fs = solvers.solver(sid)?;
                 let side_eu = solver_edgeuse(fs, ii, OP)?;
                 let on_seam_face = seam_face.is_some() && eu1::face(target, side_eu)? == seam_face;
-                if on_seam_face {
-                    seam_rail = Some(ii);
-                }
                 let offset = solver_surface(fs, ii, OP)?;
                 let distance = offset.offset_distance().abs();
                 let base = offset.base_surface().clone();
@@ -4228,13 +4225,16 @@ impl FilletBrep {
                     b.uv,
                 )?;
                 // Not the fork's (tangency-labs/solidcraft#21940): at a Join whose side seam ends
-                // inside the band (`FilletCorner::seam_short_of_rails`, this foot's face: a sphere
-                // turned so that its seam runs from a closed rim's vertex into the face, ending at
-                // a pole short of the rails), the rails never cross the seam, and the name nearest the edge
-                // use's parameters, on the seam's other side, lies past the domain's end: the
-                // foot's name in the domain is taken (the same point of the surface, moved by
-                // whole periods only). Where the rails do cross the seam at the vertex, the
-                // name on the edge use's side stays, as above.
+                // inside the band (`FilletCorner::seam_short_of_rails`, this foot's face: a
+                // sphere turned so that its seam runs from a closed rim's vertex into the face,
+                // ending at a pole short of the rails), the rails never cross the seam, and the
+                // name nearest the edge use's parameters, on the seam's other side, lies past the
+                // domain's end: the foot's name in the domain is taken (the same point of the
+                // surface, moved by whole periods only). Where the rails do cross the seam at
+                // the vertex, the name on the edge use's side stays, as above.
+                if on_seam_face {
+                    seam_rail = Some(ii);
+                }
                 let foot = if on_seam_face
                     && !domain.contains_point(foot, 0.0)
                     && domain.contains_point(dropped.result_uv, 0.0)

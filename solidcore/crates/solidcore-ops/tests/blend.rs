@@ -6761,11 +6761,14 @@ fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
 /// about 1e-5 rad and the turn at which that pole passes the round's contact line on the sphere
 /// (`asin(c / r)`, c the contact's distance from the face: 0.2375 rad here), the seam ends inside
 /// the band the round takes off, never meeting the rail, and the round failed ("Fillet Corner
-/// Error: Unable to Compute Geometry"). Every round now builds a valid solid and adds (nub) or
-/// takes off (socket) the ring's closed form, whatever the turn. 1e-4 and 2e-4 rad are left out:
-/// the join itself is refused there, a separate problem.
+/// Error: Unable to Compute Geometry"). For #21940's part (the plate on the face's positive
+/// side, the sphere turned the positive way, from 1e-5 to 0.3 rad, about the turn where the pole
+/// meets the contact line too) every round now builds a valid solid and adds (nub) or takes off
+/// (socket) the ring's closed form. Not covered, failing on main as here with the rim split
+/// otherwise (later changes): the other turn sign or plate side, the nub on a sphere first
+/// turned a quarter about z, and 1e-4 and 2e-4 rad, where the join itself is refused.
 #[test]
-fn a_round_on_a_turned_spheres_rim_builds_whatever_the_turn() {
+fn a_round_on_a_turned_spheres_rim_builds() {
     use solidcore_ops::BooleanOp;
     all_fixes();
     let (r, f) = (0.975, 0.3);

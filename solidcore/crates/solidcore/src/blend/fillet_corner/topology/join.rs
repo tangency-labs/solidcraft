@@ -527,7 +527,8 @@ fn rolled_sides(
 ///
 /// Decided exactly: the seam is the arc of a great circle of the sphere from the vertex to the
 /// pole, and the ball touching the sphere at a point and the plane grows with the point's
-/// distance from the plane (`h r / (r - h)` for a round outside the sphere, its like inside);
+/// distance h from the plane (`h r / (r - h)`, for a nub as for a socket: the ball lies outside
+/// the sphere in both);
 /// so the largest ball along the seam is the one at the arc's point farthest from the plane
 /// ([`seam_point_farthest_from_plane`], in closed form), and `ball_touching_with` there decides.
 /// A seam that runs over the sphere's top and back down (a sphere turned so that its seam leaves
@@ -1075,6 +1076,32 @@ impl FilletCorner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #21940: the point of the seam arc farthest from the plane, for a sphere of radius 1
+    /// about the origin and the plane y = 0. Turned 0.1 about x, the seam from the rim's vertex
+    /// (1, 0, 0) to the pole (0, -sin 0.1, cos 0.1) rises all the way: the pole is the farthest.
+    /// An arc from (1, 0, 0) to (-cos 0.1, -sin 0.1, 0), as a seam running over the sphere's
+    /// top, passes (0, -1, 0), the farthest, inside the arc, at distance 1.
+    #[test]
+    fn the_seam_s_farthest_point_from_the_plane_is_in_closed_form() {
+        use crate::math::{Point3, Vec3};
+        let (c, n, o) = (
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+        );
+        let a = 0.1_f64;
+        let pole = Point3::new(0.0, -a.sin(), a.cos());
+        let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), pole, o, n)
+            .expect("the arc is defined");
+        assert!(p.distance(pole) < 1e-12, "{p:?}");
+        // a seam over the top: from (1, 0, 0) through (0, -1, 0)... to a pole near (-1, 0, 0)
+        let far = Point3::new(-a.cos(), -a.sin(), 0.0);
+        let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), far, o, n)
+            .expect("the arc is defined");
+        assert!((n.dot(p - o).abs() - 1.0).abs() < 1e-12, "{p:?}");
+        assert!(p.distance(Point3::new(0.0, -1.0, 0.0)) < 1e-12, "{p:?}");
+    }
     use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
 
     #[test]
