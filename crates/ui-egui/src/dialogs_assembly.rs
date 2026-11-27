@@ -2728,12 +2728,12 @@ pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[Str
     }
 }
 
-/// As-built: the row of a component inside one picked whole adds that component as a side of its
-/// own, where a second click on a row otherwise takes its bodies out again.
-pub(crate) fn row_adds_inside_whole(d: &Dialog, path: &[u64]) -> bool {
+/// As-built: the row of a component inside one picked whole, or around one, adds that component
+/// as a side of its own, where a second click on a row otherwise takes its bodies out again.
+pub(crate) fn row_adds_nested_whole(d: &Dialog, path: &[u64]) -> bool {
     let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
     f.as_built
-        && f.whole_components.iter().any(|w| w.path.len() < path.len() && path.starts_with(&w.path))
+        && f.whole_components.iter().any(|w| path.starts_with(&w.path) || w.path.starts_with(path))
         && !f.whole_components.iter().any(|w| w.path == path)
 }
 

@@ -2295,8 +2295,8 @@ fn occurrence_rows_inner(
         }
     } else if r.clicked && !r.double && !rename_here {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
-        let inside_whole = app.dialog.as_ref().is_some_and(|d| crate::dialogs_assembly::row_adds_inside_whole(d, path));
-        if !offer_bodies(app, &names, if inside_whole { Take::Add } else { Take::Toggle }) {
+        let nested_whole = app.dialog.as_ref().is_some_and(|d| crate::dialogs_assembly::row_adds_nested_whole(d, path));
+        if !offer_bodies(app, &names, if nested_whole { Take::Add } else { Take::Toggle }) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
         } else if let Some(d) = app.dialog.as_mut() {
             crate::dialogs_assembly::picked_whole_component(d, path, &names);

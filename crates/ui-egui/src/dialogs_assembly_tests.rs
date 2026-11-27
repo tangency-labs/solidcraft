@@ -2546,7 +2546,7 @@ fn outer_inner_other() -> (crate::scenario::Harness, u64, u64, u64) {
 /// A component that holds a sub-component, picked by its Browser row or selected when As-Built
 /// starts, is one component: the body its sub-component places counts as the picked component,
 /// so Components waits for the second one. The sub-component picked by its own row is itself, also
-/// after Outer's row; a body picked in the canvas counts as its own component.
+/// before or after Outer's row; a body picked in the canvas counts as its own component.
 #[test]
 fn as_built_takes_a_component_with_a_sub_component_as_one() {
     for preselected in [false, true] {
@@ -2591,6 +2591,17 @@ fn as_built_takes_a_component_with_a_sub_component_as_one() {
     assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "Inner's body stays, Position is next");
     let c = apply_commands(&h.app, d).unwrap();
     assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Outer, then Inner by its own row");
+
+    // The other order: Inner by its own row, then Outer by its row, are two components too.
+    let (mut h, outer, inner, _) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    click_row(&mut h, outer);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "both bodies, Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(outer)), "Inner, then Outer by its row");
 
     // Outer by its row, then a body of Other picked in the canvas.
     let (mut h, outer, _, other) = outer_inner_other();
