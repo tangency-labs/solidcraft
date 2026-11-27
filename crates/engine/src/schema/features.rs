@@ -867,8 +867,10 @@ pub struct OffsetPlaneParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PlaneAtAngleParams {
-    /// The plane to turn.
-    pub base: PlaneOrFace,
+    /// The plane to turn. Omitted with a body edge as `axis`: a flat face that meets the edge, so
+    /// the plane goes through the edge and `angle` is measured from that face (#20233).
+    #[serde(default)]
+    pub base: Option<PlaneOrFace>,
     /// The axis it turns about. A picked edge's or face's axis points the way its largest
     /// component is positive.
     pub axis: AxisLine,
@@ -1248,8 +1250,23 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub copy: Option<bool>,
+    /// Construction features (names or feature ids) moved with the bodies, such as a Center Pole
+    /// held by fixed points.
+    #[serde(default)]
+    pub carry: Option<Vec<ConstructionRef>>,
+    /// Construction features (names or feature ids) built on the bodies but left where they are.
+    #[serde(default)]
+    pub leave: Option<Vec<ConstructionRef>>,
     #[serde(flatten, deserialize_with = "super::feature_common")]
     pub common: super::FeatureCommon,
+}
+
+/// A construction feature, by name or by feature id.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ConstructionRef {
+    Name(String),
+    Id(u64),
 }
 
 /// Body features, component copies, or repeated placements moved together.
