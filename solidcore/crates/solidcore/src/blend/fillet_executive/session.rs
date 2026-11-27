@@ -5531,6 +5531,9 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner patch is not live"))?;
+        // the chamfer event's mitre of both convexities: the rails are trimmed, so the
+        // chamfers' surfaces are continued to their mitre point before the faces are made
+        crate::blend::blend_corner::chamfer::continue_chamfer_surfaces(k, pseudo, corner)?;
         corner.calc_corner_geom_with(&mut (), |corner, ()| {
             // SmFilletCorner::CreateCornerPatch, building into m_pFilletBrep.
             let body = intermediate

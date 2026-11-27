@@ -333,6 +333,12 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
+    /// The chamfer event's mitre of both convexities: the fillet geometries whose surfaces
+    /// end at a rail short of the mitre point, each with that point. Their surfaces are
+    /// continued to hold it once the rails are trimmed, before the faces are made
+    /// (`chamfer::continue_chamfer_surfaces`): the rails' trim reads them at the ends of
+    /// the surface's own parameter box.
+    pub chamfer_reach: Vec<(crate::blend::fillet_geom::p1::FilletGeomId, Point3)>,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -720,6 +726,7 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
+            chamfer_reach: Vec::new(),
             setback: None,
             mixed: None,
             end_cap: None,

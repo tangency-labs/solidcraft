@@ -63,6 +63,14 @@
 //! round so that the faces' normals point out of the material, chosen from the polygon's
 //! own normal.
 //!
+//! Three chamfers of both convexities (tangency-labs/solidcraft#23136; own design): one
+//! face's angle at V is reflex, the face between the two chamfers of one convexity, and the
+//! rail of a chamfer on that face lies on the far side of its edge from the face's other
+//! edge. The mitre is the same three lines `X_i`-`M`, with other signs in its tests, and `M`
+//! lies past the pair's rails on the odd chamfer's faces ([`MitreForms`]); the pair's
+//! surfaces are continued to hold it ([`continue_chamfer_surfaces`]). A Facet asked there is
+//! refused.
+//!
 //! The chamfers' own surfaces are the solvers': [`chamfer_corner_edge_geom`] requires
 //! them to hold the exact lines to the corner's tolerance, as [`place_chamfer_vertices`]
 //! requires of their crossings. A constant ball's are its planes to rounding; a constant
@@ -83,8 +91,10 @@
 //! Deviations: not a port; the only chamfer corner where it classifies the event (WR-716;
 //! a corner it declines is still the pinned 3x3 one). No recursion.
 
-use super::{foot_on_surface, swept::fmt_g, BlendChamferCorner};
-use crate::blend::fillet_corner::p1::{check_face_complimentary_corner_concavity, face_by_two_edgeuses};
+use super::{foot_on_surface, foot_step, swept::fmt_g, BlendChamferCorner};
+use crate::blend::fillet_corner::p1::{
+    check_face_complimentary_corner_concavity, face_by_two_edgeuses,
+};
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_executive::FitKind;
 use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletEdgeType, FilletErrorType};
@@ -102,7 +112,9 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::extend::Continuity;
 use crate::surface::plane::Plane;
+use crate::surface::side::BoxSide;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
@@ -694,7 +706,8 @@ fn mixed_forms(
         return None;
     }
     let odd = (0..n).find(|&i| {
-        concave.get((i + 1) % n) == concave.get((i + 2) % n) && concave.get(i) != concave.get((i + 1) % n)
+        concave.get((i + 1) % n) == concave.get((i + 2) % n)
+            && concave.get(i) != concave.get((i + 1) % n)
     })?;
     // the face between the pair: between chamfers odd + 1 and odd + 2
     let pair_face = (odd + 2) % n;
@@ -1046,8 +1059,7 @@ pub fn classify_chamfer(
     let mut reflex = vec![false; n];
     if mixed {
         for (i, slot) in reflex.iter_mut().enumerate() {
-            let (Some(&prev), Some(&this)) = (all_eus.get((i + n - 1) % n), all_eus.get(i))
-            else {
+            let (Some(&prev), Some(&this)) = (all_eus.get((i + n - 1) % n), all_eus.get(i)) else {
                 return Ok(ChamferClass::Declined("the ring is incomplete"));
             };
             *slot = check_face_complimentary_corner_concavity(k, b, vertex, prev, this, None)?;
@@ -1392,6 +1404,108 @@ fn uv_line(
     Ok(Some(Curve::from(line)))
 }
 
+/// `surface` continued past the sides of its parameter box that `point` lies past, so that
+/// it holds `point`: `None` where its box holds the point's foot already. A mitre line of
+/// chamfers of both convexities ends past a rail of each of the pair's chamfers, where their
+/// planes run on over the odd chamfer's wedge ([`MitreForms`]); a chamfer's surface ends at
+/// its rails. The continuation is the surface itself (its boundary span's polynomial, exact:
+/// [`Surface::extended_by_distance`]), on the same parameters, so the surface's curves stay
+/// as they are. The foot is one Newton step from the box's middle: the surface is affine in
+/// its parameters to the corner's tolerance, which the caller's UV line then requires of it.
+///
+/// # Errors
+///
+/// `SM_ERR` where the continuation is on other parameters than the surface; those of the
+/// evaluators and of [`Surface::extended_by_distance`].
+fn reaching(k: &Kernel, surface: &Surface, point: Point3, tol: f64) -> Result<Option<Surface>> {
+    let mut out: Option<Surface> = None;
+    // one side of each direction at most
+    for _ in 0..2 {
+        let now = out.as_ref().unwrap_or(surface);
+        let dom = now.natural_uv_domain_with_nurb(k)?;
+        let mid = dom.mid();
+        let Some((du, dv)) = foot_step(k, now, point, mid)? else {
+            return Ok(out);
+        };
+        let (u, v) = (mid.x + du, mid.y + dv);
+        // how far past each side, in parameters, and that side's length per parameter
+        let past = [
+            (BoxSide::UMin, dom.u_min() - u, true),
+            (BoxSide::UMax, u - dom.u_max(), true),
+            (BoxSide::VMin, dom.v_min() - v, false),
+            (BoxSide::VMax, v - dom.v_max(), false),
+        ];
+        let Some(&(side, over, along_u)) = past
+            .iter()
+            .filter(|(_, over, _)| *over > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return Ok(out);
+        };
+        let (a, b, span) = if along_u {
+            (
+                Point2::new(dom.u_min(), mid.y),
+                Point2::new(dom.u_max(), mid.y),
+                dom.x_length(),
+            )
+        } else {
+            (
+                Point2::new(mid.x, dom.v_min()),
+                Point2::new(mid.x, dom.v_max()),
+                dom.y_length(),
+            )
+        };
+        let across = now
+            .evaluate_point(k, a)?
+            .distance(now.evaluate_point(k, b)?);
+        if !(span > 0.0 && across.is_finite()) {
+            return Ok(out);
+        }
+        let distance = over * across / span;
+        if distance <= tol {
+            return Ok(out);
+        }
+        // a margin past the point: the surface's box is open at the point otherwise
+        let Some(extended) =
+            now.extended_by_distance(k, &dom, side, Continuity::Natural, 1.25 * distance + tol)?
+        else {
+            return Ok(out);
+        };
+        if extended.sides != BoxSide::ALL {
+            return Err(unbuildable(OP_EDGES, CornerStep::ChamferSurfaceOffEdgeLine));
+        }
+        out = Some(extended.surface);
+    }
+    Ok(out)
+}
+
+/// Continue the chamfers' surfaces that end at a rail short of the corner's mitre point
+/// ([`FilletCorner::chamfer_reach`], noted by [`chamfer_corner_edge_geom`]) so that each holds
+/// its point ([`reaching`]): after the rails are trimmed, before the faces are made. A surface
+/// two corners continue is continued by each in turn, on the same parameters.
+///
+/// # Errors
+///
+/// Those of [`reaching`] and of the fillet geometry's lookups.
+pub fn continue_chamfer_surfaces(
+    k: &Kernel,
+    pseudo: &mut FilletBrep,
+    corner: &mut FilletCorner,
+) -> Result<()> {
+    let tol = corner.approx_tol_3d;
+    for (g, point) in std::mem::take(&mut corner.chamfer_reach) {
+        let Some(surface) = pseudo.geom(g)?.fillet_surface(None)?.cloned() else {
+            continue;
+        };
+        if let Some(longer) = reaching(k, &surface, point, tol)? {
+            if let Some(slot) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? {
+                *slot = longer;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The corner's edges as exact lines (before the edges' own kinds compute theirs): each
 /// edge of the corner (the mitres X_i-M, or the facet's sides X_i-X_(i+1)) is the line
 /// between its exact vertices, its UV curve on each chamfer it bounds the exact line in
@@ -1427,6 +1541,7 @@ pub fn chamfer_corner_edge_geom(
     // place_chamfer_vertices holds to the same)
     let exact = GATE * size;
     let solved = corner.approx_tol_3d.max(exact);
+    let mut reach = Vec::new();
     let edge_type = if mitre {
         FilletEdgeType::FilletXFillet
     } else {
@@ -1487,6 +1602,17 @@ pub fn chamfer_corner_edge_geom(
                     )
                 })?
                 .clone();
+            // a mitre line of chamfers of both convexities ends past the surface's rail:
+            // its UV line is taken on the surface continued, which keeps its parameters,
+            // and the chamfer's own surface is continued once its rails are trimmed
+            // ([`continue_chamfer_surfaces`])
+            let mut surface = surface;
+            for end in [p, q] {
+                if let Some(longer) = reaching(k, &surface, end, solved)? {
+                    reach.push((g, end));
+                    surface = longer;
+                }
+            }
             // the chamfer's surface is its solver's; its feet are searches and its
             // parameters need not be affine along the line
             let uv = uv_line(k, &surface, p, q, span, solved)?.ok_or_else(|| {
@@ -1503,6 +1629,7 @@ pub fn chamfer_corner_edge_geom(
             .fillet_edge_mut(e)?
             .set_fillet_edge_type(FilletEdgeType::Precomputed);
     }
+    corner.chamfer_reach = reach;
     if mitre {
         return Ok(());
     }
@@ -2002,5 +2129,82 @@ mod tests {
             (m - Vec3::new(0.0, 0.0, -5.0 / 16.0)).length() < 1e-14,
             "{m:?}"
         );
+    }
+    /// The planes, face normals and forms of an inner corner of an L block (the material
+    /// `x < 0` or `y < 0` below `z = 0`): the edges leave V along -z (concave), +x and +y
+    /// (convex), face 0 the wall `x = 0`, face 1 the wall `y = 0`, face 2 the top, whose
+    /// angle at V is reflex. The chamfers' sizes are constant balls' offsets, which are
+    /// their setbacks at these right angles.
+    fn l_corner(sizes: [f64; 3]) -> (Vec<Vec3>, Vec<ChamferPlane>, MitreForms) {
+        let t = [
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let reflex = [false, false, true];
+        let w = sizes.map(|r| ChamferWidth::Offsets { prev: r, next: r });
+        let planes = chamfer_planes_at(&t, &w, &reflex).unwrap();
+        let mu = vec![
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ];
+        let forms = mixed_forms(&mu, &planes, &[true, false, false], &reflex).unwrap();
+        let planes = planes.into_iter().map(|(p, _, _)| p).collect();
+        (mu, planes, forms)
+    }
+
+    /// The L block's inner corner with chamfers of size s: the concave chamfer's plane is
+    /// `x + y = s`, the convex ones' `y + z = -s` and `x + z = -s` (their rails on the top
+    /// at `y = -s` and `x = -s`, on the reflex face's far side of their edges), so
+    /// `M = (s / 2, s / 2, -3 s / 2)`, past the convex chamfers' rails on the walls. The
+    /// crossings are `(0, s, -s)` on the wall `x = 0`, `(s, 0, -s)` on the wall `y = 0` and
+    /// `(-s, -s, 0)` on the top. Every form of the mixed mitre holds; those of a corner of
+    /// one convexity do not (the crossings are on V's side of the third chamfer).
+    #[test]
+    fn an_l_corner_s_mixed_mitre_point_is_past_the_convex_chamfers_rails() {
+        let s = 2.0;
+        let (mu, planes, forms) = l_corner([s; 3]);
+        let ones = [1.0; 3];
+        let m = mitre_point(&planes, &ones).unwrap();
+        assert!(
+            (m - Vec3::new(0.5 * s, 0.5 * s, -1.5 * s)).length() < 1e-14,
+            "{m:?}"
+        );
+        let xs = crossings(&mu, &planes, &ones).unwrap();
+        let want = [
+            Vec3::new(0.0, s, -s),
+            Vec3::new(s, 0.0, -s),
+            Vec3::new(-s, -s, 0.0),
+        ];
+        for (x, w) in xs.iter().zip(&want) {
+            assert!((*x - *w).length() < 1e-14, "{x:?} vs {w:?}");
+        }
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().all(|&g| g > 0.5), "{tests:?}");
+        let one = mitre_tests(&mu, &planes, &ones).unwrap();
+        assert!(one.iter().any(|&g| g < -0.5), "{one:?}");
+    }
+
+    /// With the concave chamfer c and the convex ones a (along x) and b (along y) the planes
+    /// `x + y = c`, `y + z = -a` and `x + z = -b` meet at `x = (c + a - b) / 2`,
+    /// `y = (c + b - a) / 2`: between the concave chamfer's rails (`x, y > 0`) where
+    /// `|a - b| < c`. At c = 1/2, a = 1, b = 2 the chamfer along y is too wide, and holds
+    /// up to `a + c = 3/2`, the factor 3/4 on its size; at b = 7/5 the mitre holds.
+    #[test]
+    fn an_l_corner_s_unequal_convex_chamfers_hold_while_they_differ_by_less_than_the_concave_one() {
+        let ones = [1.0; 3];
+        let (mu, planes, forms) = l_corner([0.5, 1.0, 2.0]);
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().any(|&g| g < -0.1), "{tests:?}");
+        let (i, hi) = too_wide_of(&mu, &planes, &forms).unwrap();
+        assert_eq!(i, 2);
+        assert!((hi - 0.75).abs() < 1e-14, "{hi}");
+
+        let (mu, planes, forms) = l_corner([0.5, 1.0, 1.4]);
+        let m = mitre_point(&planes, &ones).unwrap();
+        assert!((m - Vec3::new(0.05, 0.45, -1.45)).length() < 1e-14, "{m:?}");
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().all(|&g| g > 0.01), "{tests:?}");
     }
 }
