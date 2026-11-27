@@ -1406,7 +1406,41 @@ struct Keychain(&'static str);
 
 impl Keychain {
     fn entry(&self, id: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(self.0, id).map_err(|e| e.to_string())
+        keyring::Entry::new(self.0, id).map_err(keychain_error)
+    }
+}
+
+/// A missing Linux Secret Service is different from a locked wallet or a rejected key.
+/// Give the user a recovery step without changing the secure storage backend.
+fn keychain_message(detail: String, linux: bool) -> String {
+    if linux && (detail.contains("org.freedesktop.DBus.Error.ServiceUnknown") || detail.contains("org.freedesktop.DBus.Error.NameHasNoOwner")) {
+        format!(
+            "The Linux Secret Service is unavailable. Start a Secret Service provider. On KDE Plasma, enable the Secret Service API in KWallet settings, then sign out and back in. Details: {detail}"
+        )
+    } else {
+        detail
+    }
+}
+
+fn keychain_error(error: keyring::Error) -> String {
+    keychain_message(error.to_string(), cfg!(target_os = "linux"))
+}
+
+#[cfg(test)]
+#[test]
+fn unavailable_linux_keyring_names_the_recovery_step() {
+    for error in [
+        "org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable",
+        "org.freedesktop.DBus.Error.NameHasNoOwner: no service owns the name",
+    ] {
+        let message = keychain_message(error.into(), true);
+        assert!(message.contains("Start a Secret Service provider"));
+        assert!(message.contains("KWallet"));
+        assert!(message.ends_with(error));
+        assert_eq!(keychain_message(error.into(), false), error);
+    }
+    for error in ["wallet is locked", "permission denied", "other keyring failure"] {
+        assert_eq!(keychain_message(error.into(), true), error);
     }
 }
 
@@ -1484,16 +1518,16 @@ impl solidcraft_ui_egui::agent_chat::backend::Secrets for Keychain {
         match self.entry(id)?.get_password() {
             Ok(p) => Ok(Some(p)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(keychain_error(e)),
         }
     }
     fn set(&self, id: &str, secret: &str) -> Result<(), String> {
-        self.entry(id)?.set_password(secret).map_err(|e| e.to_string())
+        self.entry(id)?.set_password(secret).map_err(keychain_error)
     }
     fn delete(&self, id: &str) -> Result<(), String> {
         match self.entry(id)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(keychain_error(e)),
         }
     }
 }
