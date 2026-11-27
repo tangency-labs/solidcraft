@@ -85,5 +85,50 @@
     "Edit sketch": "编辑草图",
     "ui.stretch_sketch_changed": "伸长已修改草图: {changes}",
     "ui.stretch_sketch_not_changed": "草图未修改 ({why})，因此添加了一个伸长步骤"
+  },
+  "ar": {
+    "cmd.solid_stretch": "تمديد",
+    "ui.feature_kind.stretch": "تمديد",
+    "help.solid.stretch": "يجعل الجسم أطول أو أعرض أو أعلى بقطعه عرضيًا وملء الفجوة بشكله نفسه، فتبقى الثقوب والتقويسات والجدران بمقاساتها. استخدمه لتغيير حجم قطعة دون الرجوع إلى رسوماتها.",
+    "Cut from faces": "القطع من الأوجه",
+    "X direction": "اتجاه X",
+    "Y direction": "اتجاه Y",
+    "Z direction": "اتجاه Z",
+    "X cut at": "موضع القطع على X",
+    "Y cut at": "موضع القطع على Y",
+    "Z cut at": "موضع القطع على Z",
+    "Edit sketch": "تحرير الرسم",
+    "ui.stretch_sketch_changed": "غيّر التمديد الرسم: {changes}",
+    "ui.stretch_sketch_not_changed": "لم يتغير الرسم ({why})، لذا أُضيفت خطوة تمديد"
+  },
+  "he": {
+    "cmd.solid_stretch": "מתיחה",
+    "ui.feature_kind.stretch": "מתיחה",
+    "help.solid.stretch": "מאריכה, מרחיבה או מגביהה גוף על ידי חיתוך לרוחבו ומילוי הרווח בצורתו שלו, כך שחורים, עיגולים וקירות שומרים על מידותיהם. השתמשו בה כדי לשנות את גודל החלק בלי לחזור לסקיצות שלו.",
+    "Cut from faces": "חיתוך מפאות",
+    "X direction": "כיוון X",
+    "Y direction": "כיוון Y",
+    "Z direction": "כיוון Z",
+    "X cut at": "חיתוך X ב־",
+    "Y cut at": "חיתוך Y ב־",
+    "Z cut at": "חיתוך Z ב־",
+    "Edit sketch": "עריכת סקיצה",
+    "ui.stretch_sketch_changed": "המתיחה שינתה את הסקיצה: {changes}",
+    "ui.stretch_sketch_not_changed": "הסקיצה לא שונתה ({why}), ולכן נוסף שלב מתיחה"
+  },
+  "vi": {
+    "cmd.solid_stretch": "Kéo giãn",
+    "ui.feature_kind.stretch": "Kéo giãn",
+    "help.solid.stretch": "Làm thân khối dài hơn, rộng hơn hoặc cao hơn bằng cách cắt ngang và lấp khoảng trống bằng chính hình dạng của nó, nên các lỗ, góc bo và thành giữ nguyên kích thước. Dùng để đổi kích thước chi tiết mà không cần quay lại các phác thảo.",
+    "Cut from faces": "Cắt từ bề mặt",
+    "X direction": "Hướng X",
+    "Y direction": "Hướng Y",
+    "Z direction": "Hướng Z",
+    "X cut at": "Vị trí cắt X",
+    "Y cut at": "Vị trí cắt Y",
+    "Z cut at": "Vị trí cắt Z",
+    "Edit sketch": "Sửa phác thảo",
+    "ui.stretch_sketch_changed": "Kéo giãn đã thay đổi phác thảo: {changes}",
+    "ui.stretch_sketch_not_changed": "Phác thảo không thay đổi ({why}), nên đã thêm bước Kéo giãn"
   }
 }
