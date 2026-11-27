@@ -301,6 +301,10 @@ pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
 const FILE_COMMANDS: &[&str] = &[
     "canvas.insert",
     "component.insert_design",
+    "component.links",
+    "component.relink",
+    "component.replace_with_link",
+    "component.update_links",
     "motion.export",
     "motion.export_animation",
     "parameters.export",
@@ -322,6 +326,10 @@ fn input_only_command(id: &str) -> bool {
     matches!(
         id,
         "component.insert_design"
+            | "component.links"
+            | "component.relink"
+            | "component.replace_with_link"
+            | "component.update_links"
             | "file.insert_step"
             | "file.insert_mesh"
             | "file.insert_gerber"
