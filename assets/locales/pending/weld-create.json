@@ -1,0 +1,74 @@
+{
+  "en": {
+    "cmd.weld.create": "Weld",
+    "cmd.weld.delete": "Delete Weld",
+    "help.weld.create": "Add a weld graphic with its sizes and manufacturing settings. Use it to keep welding instructions with the design.",
+    "ui.weld.create.invalid_spans": "Enter a whole number of spans from 1 to 10000.",
+    "ui.weld.create.invalid_type": "Unknown weld type.",
+    "ui.weld.create.local_picks": "Picking geometry is not available in this panel yet. Create a weld graphic without picks.",
+    "ui.weld.create.symbol_unavailable": "The weld symbol editor is not available yet."
+  },
+  "ar": {
+    "cmd.weld.create": "لحام",
+    "cmd.weld.delete": "حذف اللحام",
+    "help.weld.create": "إضافة رسم لحام بمقاساته وإعدادات التصنيع لحفظ تعليمات اللحام مع التصميم.",
+    "ui.weld.create.invalid_spans": "أدخل عددًا صحيحًا من المقاطع من 1 إلى 10000.",
+    "ui.weld.create.invalid_type": "نوع لحام غير معروف.",
+    "ui.weld.create.local_picks": "تحديد الهندسة غير متاح في هذه اللوحة بعد. أنشئ رسم لحام دون تحديدات.",
+    "ui.weld.create.symbol_unavailable": "محرر رموز اللحام غير متاح بعد."
+  },
+  "he": {
+    "cmd.weld.create": "ריתוך",
+    "cmd.weld.delete": "מחיקת ריתוך",
+    "help.weld.create": "הוספת גרפיקת ריתוך עם מידות והגדרות ייצור לשמירת הוראות הריתוך עם התכנון.",
+    "ui.weld.create.invalid_spans": "יש להזין מספר שלם של מקטעים מ־1 עד 10000.",
+    "ui.weld.create.invalid_type": "סוג ריתוך לא מוכר.",
+    "ui.weld.create.local_picks": "בחירת גאומטריה עדיין אינה זמינה בחלונית זו. יש ליצור גרפיקת ריתוך ללא בחירות.",
+    "ui.weld.create.symbol_unavailable": "עורך סמלי הריתוך עדיין אינו זמין."
+  },
+  "ja": {
+    "cmd.weld.create": "溶接",
+    "cmd.weld.delete": "溶接を削除",
+    "help.weld.create": "寸法と製造設定を持つ溶接図形を追加します。溶接指示を設計とともに保存できます。",
+    "ui.weld.create.invalid_spans": "区間数を1から10000までの整数で入力してください。",
+    "ui.weld.create.invalid_type": "不明な溶接の種類です。",
+    "ui.weld.create.local_picks": "このパネルではジオメトリをまだ選択できません。選択なしで溶接図形を作成してください。",
+    "ui.weld.create.symbol_unavailable": "溶接記号エディターはまだ利用できません。"
+  },
+  "vi": {
+    "cmd.weld.create": "Mối hàn",
+    "cmd.weld.delete": "Xóa mối hàn",
+    "help.weld.create": "Thêm hình biểu diễn hàn kèm kích thước và thiết lập chế tạo để lưu hướng dẫn hàn cùng thiết kế.",
+    "ui.weld.create.invalid_spans": "Nhập số nguyên đoạn hàn từ 1 đến 10000.",
+    "ui.weld.create.invalid_type": "Loại mối hàn không xác định.",
+    "ui.weld.create.local_picks": "Bảng này chưa hỗ trợ chọn hình học. Tạo hình biểu diễn hàn không có lựa chọn.",
+    "ui.weld.create.symbol_unavailable": "Trình sửa ký hiệu hàn chưa khả dụng."
+  },
+  "zh": {
+    "cmd.weld.create": "焊接",
+    "cmd.weld.delete": "删除焊缝",
+    "help.weld.create": "添加含尺寸和制造设置的焊接图形，将焊接说明与设计一同保存。",
+    "ui.weld.create.invalid_spans": "输入1至10000之间的整数区段数。",
+    "ui.weld.create.invalid_type": "未知焊缝类型。",
+    "ui.weld.create.local_picks": "此面板尚不支持选择几何。请创建不含几何选择的焊接图形。",
+    "ui.weld.create.symbol_unavailable": "焊接符号编辑器尚不可用。"
+  },
+  "de": {
+    "cmd.weld.create": "Schweißnaht",
+    "cmd.weld.delete": "Schweißnaht löschen",
+    "help.weld.create": "Schweißgrafik mit Maßen und Fertigungseinstellungen hinzufügen, um Schweißanweisungen im Design zu speichern.",
+    "ui.weld.create.invalid_spans": "Eine ganze Anzahl von Abschnitten von 1 bis 10000 eingeben.",
+    "ui.weld.create.invalid_type": "Unbekannter Schweißnahttyp.",
+    "ui.weld.create.local_picks": "Geometrieauswahl ist in diesem Panel noch nicht verfügbar. Eine Schweißgrafik ohne Auswahl erstellen.",
+    "ui.weld.create.symbol_unavailable": "Der Schweißsymboleditor ist noch nicht verfügbar."
+  },
+  "ko": {
+    "cmd.weld.create": "용접",
+    "cmd.weld.delete": "용접 삭제",
+    "help.weld.create": "치수와 제조 설정이 있는 용접 그래픽을 추가합니다. 용접 지침을 설계와 함께 보관할 수 있습니다.",
+    "ui.weld.create.invalid_spans": "구간 수를 1부터 10000 사이의 정수로 입력하세요.",
+    "ui.weld.create.invalid_type": "알 수 없는 용접 유형입니다.",
+    "ui.weld.create.local_picks": "이 패널에서는 아직 형상을 선택할 수 없습니다. 선택 없이 용접 그래픽을 만드세요.",
+    "ui.weld.create.symbol_unavailable": "용접 기호 편집기는 아직 사용할 수 없습니다."
+  }
+}

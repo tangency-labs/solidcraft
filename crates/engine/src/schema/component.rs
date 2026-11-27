@@ -749,7 +749,14 @@ impl JsonSchema for ActivateParams {
     }
 }
 
-/// What `component.activate` returns.
+/// Make the parent of the active component the active one, at the placement the active one sits
+/// in: one level up a call, the design at the top. Refused while the design itself is active. A
+/// change of what is active, not an undo step. Replies as `component.activate` does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ActivateParentParams {}
+
+/// What `component.activate` and `component.activate.parent` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ActivateResult {
     /// The active component now, by id.
@@ -2346,6 +2353,34 @@ pub struct BodyCollisionParams {
     pub component: Option<IdOrName>,
     /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
     pub shape: String,
+}
+
+/// Draw bodies with or without their edge lines, whatever the visual style.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyEdgeLinesParams {
+    /// The body, by name. Give this or `bodies`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Several bodies, by name. Give this or `body`.
+    #[serde(default)]
+    pub bodies: Option<Vec<String>>,
+    /// `false` draws the bodies without their edge lines; `true` (the default) draws them as the
+    /// visual style says.
+    #[serde(default)]
+    pub show: Option<bool>,
+}
+
+/// What `body.edge_lines` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyEdgeLinesResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// Whether they now draw their edge lines.
+    pub show: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `body.collision` returns.

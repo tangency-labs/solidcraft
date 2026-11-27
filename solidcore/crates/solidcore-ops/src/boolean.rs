@@ -14,7 +14,6 @@
 //! the result valid and facing out, refuses a result it cannot prove, and keeps the proof on
 //! the result for the next proved operation that takes it (#14830).
 
-#[cfg(test)]
 use solidcore::boolean::apart::{union_if_apart, Apart};
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
@@ -94,6 +93,22 @@ fn expect_of(
     operands: &mut [(Brep, Proof)],
     contract: Contract,
 ) -> KernelResult<Expect> {
+    if contract == Contract::Proved && operands.len() >= 2 {
+        let taken: Vec<(Brep, Proof)> = operands
+            .iter_mut()
+            .map(|(b, p)| (std::mem::take(b), std::mem::take(p)))
+            .collect();
+        let checked = crate::session::run_parallel(k, taken, |wk, (mut b, proof)| {
+            let is_solid = Expect::under(wk, &mut b, proof, contract)? != Expect::FACES;
+            Ok((b, is_solid))
+        })?;
+        let mut all = true;
+        for ((dst_b, _), (b, is_solid)) in operands.iter_mut().zip(checked) {
+            *dst_b = b;
+            all &= is_solid;
+        }
+        return Ok(if all { Expect::SOLID } else { Expect::FACES });
+    }
     let mut all = true;
     for (b, proof) in operands.iter_mut() {
         all &= Expect::under(k, b, std::mem::take(proof), contract)? != Expect::FACES;
@@ -333,12 +348,27 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
         let mut held: Vec<(Brep, Proof)> = bodies.iter().map(take).collect();
         let expect = expect_of(k, &mut held, contract)?;
         let breps: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
-        match sm::union_all_breps(k, breps)? {
+        match sm::union_all_breps_with(k, breps, |kernel, pairs| {
+            crate::session::run_parallel(kernel, pairs, |wk, (a, b)| union_step(wk, a, b))
+        })? {
             Some(r) => finished(k, r, expect, contract),
             None => Ok(Done::Empty),
         }
     })?;
     result(d, Err(Error::Empty))?.ok_or(Error::Empty)
+}
+
+/// One pairwise union step for [`union_all_with`]: bodies proved apart unite side by side, while
+/// any other pair is `SmApiBoolean`'s union. Either result gets [`after_boolean`]'s update, so
+/// both routes leave the same tolerances for the next level.
+fn union_step(k: &mut Kernel, mut a: Brep, mut b: Brep) -> KernelResult<Brep> {
+    matched_tolerances(k, &mut a, &mut b)?;
+    let mut r = match union_if_apart(k, a, b)? {
+        Apart::United(r) => *r,
+        Apart::NotProved(a, b) => sm::boolean(k, *a, *b, BooleanOperation::Union)?.result,
+    };
+    after_boolean(k, &mut r)?;
+    Ok(r)
 }
 
 /// `a` op `b` for sheets of planar faces on one plane (`SmApiBoolean2d`): `None` when either has
@@ -508,6 +538,41 @@ mod tests {
         let u = union_all(vec![a]).unwrap();
         let v = u.volume(1e-8).unwrap();
         assert!((v - 2.0).abs() < 2.0 * 1e-9, "{v}");
+    }
+
+    /// Many overlapping boxes through parallel level-by-level `union_all_with(Contract::Proved)`
+    /// produce the exact closed-form volume and counts deterministically for even and odd counts.
+    #[test]
+    fn parallel_union_all_is_exact_and_deterministic() {
+        all_fixes();
+        for n in [16_u32, 17_u32] {
+            let make = || {
+                (0..n)
+                    .map(|i| make_box([f64::from(i) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+                    .collect::<Vec<_>>()
+            };
+            let u1 = union_all_with(make(), Contract::Proved).unwrap();
+            let u2 = union_all_with(make(), Contract::Proved).unwrap();
+            let want = 1.0 + f64::from(n - 1) * 0.5;
+            let v1 = u1.volume(1e-8).unwrap();
+            let v2 = u2.volume(1e-8).unwrap();
+            assert!((v1 - want).abs() < 1e-7, "n={n}: {v1} vs {want}");
+            assert_eq!(u1.counts().unwrap(), u2.counts().unwrap());
+            assert!((v1 - v2).abs() < 1e-12, "n={n}: {v1} vs {v2}");
+        }
+    }
+
+    /// Parallel `union_all` stops cleanly and returns `Error::Cancelled` when cancelled.
+    #[test]
+    fn parallel_union_all_respects_cancellation() {
+        all_fixes();
+        let boxes: Vec<Body> = (0..12_u32)
+            .map(|i| make_box([f64::from(i) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+            .collect();
+        let token = solidcore::kernel::CancelToken::new();
+        token.cancel();
+        let res = crate::cancel::within(&token, || union_all(boxes));
+        assert!(matches!(res, Err(Error::Cancelled)), "{res:?}");
     }
 
     /// `bodies` united as `union_all` pairs them, each pair by [`boolean`] (a boolean every

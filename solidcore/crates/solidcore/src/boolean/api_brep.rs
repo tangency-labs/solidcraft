@@ -801,6 +801,34 @@ pub fn combine_disjoint_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Brep> 
 /// Those of certified bounding-box queries, tolerance matching, disjoint merges, or pairwise
 /// unions.
 pub fn union_all_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Option<Brep>> {
+    union_all_breps_with(k, breps, |kernel, pairs| {
+        let mut out = Vec::new();
+        for (a, b) in pairs {
+            out.push(union_two_breps_serial(kernel, a, b)?);
+        }
+        Ok(out)
+    })
+}
+
+/// Like [`union_all_breps`], but delegates each level's overlapping pairwise unions to
+/// `run_pairs` (e.g. `solidcore-ops` runs independent pairs on worker threads while `solidcore`
+/// itself stays serial).
+///
+/// Each pair `(a, b)` returned by `run_pairs` must already have had tolerance matching and
+/// [`crate::topology::brep::validation::update_tolerances_after_boolean`] applied, and the
+/// output vector must match the length and order of `pairs`.
+///
+/// # Errors
+///
+/// Those of certified bounding-box queries, disjoint merges, or `run_pairs`.
+pub fn union_all_breps_with<F>(
+    k: &mut Kernel,
+    breps: Vec<Brep>,
+    mut run_pairs: F,
+) -> Result<Option<Brep>>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     if breps.len() <= 1 {
         return Ok(breps.into_iter().next());
     }
@@ -809,7 +837,7 @@ pub fn union_all_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Option<Brep>>
         let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
         items.push(UnionItem { index, brep, bbox });
     }
-    let Some(merged) = reduce_union_items(k, items)? else {
+    let Some(merged) = reduce_union_items(k, items, &mut run_pairs)? else {
         return Ok(None);
     };
     Ok(Some(merged.brep))
@@ -821,82 +849,135 @@ struct UnionItem {
     bbox: Option<crate::geom::extent3d::Extent3d>,
 }
 
+fn union_two_breps_serial(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Brep> {
+    use crate::boolean::apart::{union_if_apart, Apart};
+    crate::boolean::operand_tolerances::matched_tolerances(k, &mut a, &mut b)?;
+    let mut brep = match union_if_apart(k, a, b)? {
+        Apart::United(r) => *r,
+        Apart::NotProved(ba, bb) => boolean(k, *ba, *bb, BooleanOperation::Union)?.result,
+    };
+    let _ = crate::topology::brep::validation::update_tolerances_after_boolean(k, &mut brep)?;
+    Ok(brep)
+}
+
 fn boxes_disjoint_same_tol(a: &UnionItem, b: &UnionItem) -> bool {
     a.brep.tolerance().partial_cmp(&b.brep.tolerance()) == Some(core::cmp::Ordering::Equal)
         && matches!((a.bbox, b.bbox), (Some(ba), Some(bb)) if ba.are_disjoint(&bb, 0.0))
 }
 
-fn overlap_edges(items: &[UnionItem]) -> Vec<(usize, usize)> {
+fn dsu_find(parent: &mut [usize], mut x: usize) -> usize {
+    while let Some(&p) = parent.get(x) {
+        if p == x {
+            break;
+        }
+        if let Some(&gp) = parent.get(p) {
+            if let Some(slot) = parent.get_mut(x) {
+                *slot = gp;
+            }
+        }
+        x = p;
+    }
+    x
+}
+
+fn dsu_union(parent: &mut [usize], u: usize, v: usize) {
+    let ru = dsu_find(parent, u);
+    let rv = dsu_find(parent, v);
+    if ru != rv {
+        let (lo, hi) = (ru.min(rv), ru.max(rv));
+        if let Some(slot) = parent.get_mut(hi) {
+            *slot = lo;
+        }
+    }
+}
+
+/// Partition `items` into connected components under AABB overlap without materializing an edge
+/// list. Items with unknown (`None`) bounding boxes are conservatively connected to all other
+/// items in O(n) unions.
+fn partition_overlap_components(items: Vec<UnionItem>) -> Vec<Vec<UnionItem>> {
+    let n = items.len();
+    if n <= 1 {
+        return if n == 0 { Vec::new() } else { vec![items] };
+    }
+    if items.iter().any(|it| it.bbox.is_none()) {
+        // Any unboxed item conservatively overlaps every other item, collapsing all items into
+        // one component without scanning boxed pairs.
+        return vec![items];
+    }
     let mut boxed: Vec<(usize, crate::geom::extent3d::Extent3d)> = Vec::new();
-    let mut unboxed: Vec<usize> = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        match item.bbox {
-            Some(b) => boxed.push((i, b)),
-            None => unboxed.push(i),
+        if let Some(b) = item.bbox {
+            boxed.push((i, b));
         }
     }
     boxed.sort_by(|(_, a), (_, b)| a.min().x.total_cmp(&b.min().x));
-    let mut edges = Vec::new();
+    let mut parent: Vec<usize> = (0..n).collect();
     for (pos, &(i, ba)) in boxed.iter().enumerate() {
         for &(j, bb) in boxed.iter().skip(pos + 1) {
             if bb.min().x > ba.max().x {
                 break;
             }
-            if !ba.are_disjoint(&bb, 0.0) {
-                edges.push((i.min(j), i.max(j)));
-            }
-        }
-    }
-    for &u in &unboxed {
-        for other in 0..items.len() {
-            if other == u {
-                continue;
-            }
-            if other < u && items.get(other).is_some_and(|x| x.bbox.is_none()) {
-                continue;
-            }
-            edges.push((u.min(other), u.max(other)));
-        }
-    }
-    edges
-}
-
-fn connected_components(items: Vec<UnionItem>, edges: &[(usize, usize)]) -> Vec<Vec<UnionItem>> {
-    let n = items.len();
-    let mut parent: Vec<usize> = (0..n).collect();
-    let find = |parent: &mut [usize], mut x: usize| -> usize {
-        while let Some(&p) = parent.get(x) {
-            if p == x {
-                break;
-            }
-            if let Some(&gp) = parent.get(p) {
-                if let Some(slot) = parent.get_mut(x) {
-                    *slot = gp;
-                }
-            }
-            x = p;
-        }
-        x
-    };
-    for &(u, v) in edges {
-        let ru = find(&mut parent, u);
-        let rv = find(&mut parent, v);
-        if ru != rv {
-            let (lo, hi) = (ru.min(rv), ru.max(rv));
-            if let Some(slot) = parent.get_mut(hi) {
-                *slot = lo;
+            if dsu_find(&mut parent, i) != dsu_find(&mut parent, j) && !ba.are_disjoint(&bb, 0.0) {
+                dsu_union(&mut parent, i, j);
             }
         }
     }
     let mut groups: std::collections::BTreeMap<usize, Vec<UnionItem>> =
         std::collections::BTreeMap::new();
     for (i, item) in items.into_iter().enumerate() {
-        let root = find(&mut parent, i);
+        let root = dsu_find(&mut parent, i);
         groups.entry(root).or_default().push(item);
     }
     let mut components: Vec<Vec<UnionItem>> = groups.into_values().collect();
     components.sort_by_key(|c| c.iter().map(|it| it.index).min().unwrap_or(usize::MAX));
     components
+}
+
+/// Compute each item's AABB-overlap degree saturated at `cap`, using a streaming x-sweep without
+/// retaining an edge list.
+fn saturated_overlap_degrees(items: &[UnionItem], cap: usize) -> Vec<usize> {
+    let n = items.len();
+    let mut boxed: Vec<(usize, crate::geom::extent3d::Extent3d)> = Vec::new();
+    let mut unboxed_count = 0_usize;
+    for (i, item) in items.iter().enumerate() {
+        match item.bbox {
+            Some(b) => boxed.push((i, b)),
+            None => unboxed_count += 1,
+        }
+    }
+    let mut degree = vec![unboxed_count.min(cap); n];
+    if unboxed_count > 0 {
+        let unboxed_deg = n.saturating_sub(1).min(cap);
+        for (i, item) in items.iter().enumerate() {
+            if item.bbox.is_none() {
+                if let Some(slot) = degree.get_mut(i) {
+                    *slot = unboxed_deg;
+                }
+            }
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min().x.total_cmp(&b.min().x));
+    for (pos, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(pos + 1) {
+            if bb.min().x > ba.max().x {
+                break;
+            }
+            let di = degree.get(i).copied().unwrap_or(cap);
+            let dj = degree.get(j).copied().unwrap_or(cap);
+            if di >= cap && dj >= cap {
+                continue;
+            }
+            if !ba.are_disjoint(&bb, 0.0) {
+                if let Some(slot) = degree.get_mut(i) {
+                    *slot = slot.saturating_add(1).min(cap);
+                }
+                if let Some(slot) = degree.get_mut(j) {
+                    *slot = slot.saturating_add(1).min(cap);
+                }
+            }
+        }
+    }
+    degree
 }
 
 #[allow(
@@ -951,44 +1032,65 @@ fn sort_morton(items: &mut [UnionItem]) {
     });
 }
 
-fn union_two_items(k: &mut Kernel, mut a: UnionItem, mut b: UnionItem) -> Result<UnionItem> {
-    use crate::boolean::apart::{union_if_apart, Apart};
+fn union_two_items<F>(
+    k: &mut Kernel,
+    a: UnionItem,
+    b: UnionItem,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     let index = a.index.min(b.index);
     if boxes_disjoint_same_tol(&a, &b) {
-        let bbox = a.bbox.zip(b.bbox).map(|(ba, bb)| ba.union(&bb));
-        let brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+        let mut brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+        let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
         return Ok(UnionItem { index, brep, bbox });
     }
-    crate::boolean::operand_tolerances::matched_tolerances(k, &mut a.brep, &mut b.brep)?;
-    let mut brep = match union_if_apart(k, a.brep, b.brep)? {
-        Apart::United(r) => *r,
-        Apart::NotProved(ba, bb) => boolean(k, *ba, *bb, BooleanOperation::Union)?.result,
-    };
-    let _ = crate::topology::brep::validation::update_tolerances_after_boolean(k, &mut brep)?;
+    let mut results = run_pairs(k, vec![(a.brep, b.brep)])?;
+    let mut brep = results.pop().ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::union_two_items",
+            "missing pairwise union result",
+        )
+    })?;
     let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
     Ok(UnionItem { index, brep, bbox })
 }
 
-fn reduce_union_items(k: &mut Kernel, items: Vec<UnionItem>) -> Result<Option<UnionItem>> {
+fn reduce_union_items<F>(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<Option<UnionItem>>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     if items.len() <= 1 {
         return Ok(items.into_iter().next());
     }
-    let edges = overlap_edges(&items);
-    let components = connected_components(items, &edges);
+    let components = partition_overlap_components(items);
     if components.len() == 1 {
         let Some(comp) = components.into_iter().next() else {
             return Ok(None);
         };
-        return Ok(Some(reduce_union_component(k, comp)?));
+        return Ok(Some(reduce_union_component(k, comp, 0, run_pairs)?));
     }
     let mut disjoint: Vec<UnionItem> = Vec::new();
     for comp in components {
-        disjoint.push(reduce_union_component(k, comp)?);
+        disjoint.push(reduce_union_component(k, comp, 0, run_pairs)?);
     }
-    combine_disjoint_union_items(k, disjoint).map(Some)
+    combine_disjoint_union_items(k, disjoint, run_pairs).map(Some)
 }
 
-fn combine_disjoint_union_items(k: &mut Kernel, items: Vec<UnionItem>) -> Result<UnionItem> {
+fn combine_disjoint_union_items<F>(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     let mut by_tol: std::collections::BTreeMap<u64, Vec<UnionItem>> =
         std::collections::BTreeMap::new();
     let mut fallback = Vec::new();
@@ -1004,17 +1106,9 @@ fn combine_disjoint_union_items(k: &mut Kernel, items: Vec<UnionItem>) -> Result
     for group in by_tol.into_values() {
         if group.len() >= 2 {
             let index = group.iter().map(|x| x.index).min().unwrap_or(0);
-            let mut bbox: Option<crate::geom::extent3d::Extent3d> = None;
-            let mut breps = Vec::new();
-            for item in group {
-                bbox = match (bbox, item.bbox) {
-                    (Some(a), Some(b)) => Some(a.union(&b)),
-                    (None, b) => b,
-                    (a, None) => a,
-                };
-                breps.push(item.brep);
-            }
-            let brep = combine_disjoint_breps(k, breps)?;
+            let breps: Vec<Brep> = group.into_iter().map(|item| item.brep).collect();
+            let mut brep = combine_disjoint_breps(k, breps)?;
+            let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
             merged_groups.push(UnionItem { index, brep, bbox });
         } else if let Some(single) = group.into_iter().next() {
             merged_groups.push(single);
@@ -1024,7 +1118,7 @@ fn combine_disjoint_union_items(k: &mut Kernel, items: Vec<UnionItem>) -> Result
     let mut acc: Option<UnionItem> = None;
     for item in merged_groups.into_iter().chain(fallback) {
         acc = Some(match acc {
-            Some(prev) => union_two_items(k, prev, item)?,
+            Some(prev) => union_two_items(k, prev, item, run_pairs)?,
             None => item,
         });
     }
@@ -1036,24 +1130,25 @@ fn combine_disjoint_union_items(k: &mut Kernel, items: Vec<UnionItem>) -> Result
     })
 }
 
-fn reduce_union_component(k: &mut Kernel, mut comp: Vec<UnionItem>) -> Result<UnionItem> {
+const MAX_HUB_SPLIT_DEPTH: usize = 16;
+
+fn reduce_union_component<F>(
+    k: &mut Kernel,
+    mut comp: Vec<UnionItem>,
+    depth: usize,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     if comp.len() == 1 {
         if let Some(only) = comp.pop() {
             return Ok(only);
         }
     }
-    if comp.len() >= 5 {
-        let edges = overlap_edges(&comp);
-        let mut degree = vec![0_usize; comp.len()];
-        for &(u, v) in &edges {
-            if let Some(d) = degree.get_mut(u) {
-                *d += 1;
-            }
-            if let Some(d) = degree.get_mut(v) {
-                *d += 1;
-            }
-        }
+    if depth < MAX_HUB_SPLIT_DEPTH && comp.len() >= 5 {
         let hub_threshold = (comp.len() >> 1).max(4);
+        let degree = saturated_overlap_degrees(&comp, hub_threshold);
         let has_hub = degree.iter().any(|&d| d >= hub_threshold);
         let has_spoke = degree.iter().any(|&d| d < hub_threshold);
         if has_hub && has_spoke {
@@ -1066,17 +1161,16 @@ fn reduce_union_component(k: &mut Kernel, mut comp: Vec<UnionItem>) -> Result<Un
                     spokes.push(item);
                 }
             }
-            let spoke_edges = overlap_edges(&spokes);
-            let spoke_components = connected_components(spokes, &spoke_edges);
+            let spoke_components = partition_overlap_components(spokes);
             if spoke_components.len() > 1 {
                 let mut reduced_spokes = Vec::new();
                 for sc in spoke_components {
-                    reduced_spokes.push(reduce_union_component(k, sc)?);
+                    reduced_spokes.push(reduce_union_component(k, sc, depth + 1, run_pairs)?);
                 }
-                let combined_spokes = combine_disjoint_union_items(k, reduced_spokes)?;
+                let combined_spokes = combine_disjoint_union_items(k, reduced_spokes, run_pairs)?;
                 let mut all = hubs;
                 all.push(combined_spokes);
-                return reduce_pairwise_morton(k, all);
+                return reduce_pairwise_morton(k, all, run_pairs);
             }
             let mut restored = hubs;
             for sc in spoke_components {
@@ -1085,20 +1179,53 @@ fn reduce_union_component(k: &mut Kernel, mut comp: Vec<UnionItem>) -> Result<Un
             comp = restored;
         }
     }
-    reduce_pairwise_morton(k, comp)
+    reduce_pairwise_morton(k, comp, run_pairs)
 }
 
-fn reduce_pairwise_morton(k: &mut Kernel, mut level: Vec<UnionItem>) -> Result<UnionItem> {
+fn reduce_pairwise_morton<F>(
+    k: &mut Kernel,
+    mut level: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
     sort_morton(&mut level);
     while level.len() > 1 {
-        let mut next = Vec::new();
+        let mut next: Vec<UnionItem> = Vec::new();
+        let mut bool_indices: Vec<usize> = Vec::new();
+        let mut bool_pairs: Vec<(Brep, Brep)> = Vec::new();
         let mut it = level.into_iter();
         while let Some(a) = it.next() {
             match it.next() {
-                Some(b) => next.push(union_two_items(k, a, b)?),
+                Some(b) => {
+                    if boxes_disjoint_same_tol(&a, &b) {
+                        let index = a.index.min(b.index);
+                        let mut brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+                        let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+                        next.push(UnionItem { index, brep, bbox });
+                    } else {
+                        bool_indices.push(a.index.min(b.index));
+                        bool_pairs.push((a.brep, b.brep));
+                    }
+                }
                 None => next.push(a),
             }
         }
+        if !bool_pairs.is_empty() {
+            let results = run_pairs(k, bool_pairs)?;
+            if results.len() != bool_indices.len() {
+                return Err(SolidError::invalid_input(
+                    "boolean::api_brep::reduce_pairwise_morton",
+                    "pairwise union runner returned mismatched count",
+                ));
+            }
+            for (index, mut brep) in bool_indices.into_iter().zip(results) {
+                let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+                next.push(UnionItem { index, brep, bbox });
+            }
+        }
+        next.sort_by_key(|it| it.index);
         level = next;
     }
     level.pop().ok_or_else(|| {
