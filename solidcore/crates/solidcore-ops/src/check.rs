@@ -95,9 +95,7 @@ impl Refusal {
 }
 
 /// A check that could not run is a failed call: the failure callback gets it.
-impl crate::session::Answer
-    for std::result::Result<BrepCheck, Refusal>
-{
+impl crate::session::Answer for std::result::Result<BrepCheck, Refusal> {
     fn refusal(&self) -> Option<Error> {
         self.as_ref().err().map(Refusal::error)
     }
