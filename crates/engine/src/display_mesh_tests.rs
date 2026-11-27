@@ -186,7 +186,7 @@ fn a_torus_exports_a_closed_oriented_mesh_at_both_seams() {
             let p = Vec3::new(xyz[0] as f64, xyz[1] as f64, xyz[2] as f64);
             points[i] = p;
             let nearest = surface.nearest(p).expect("nearest torus point");
-            assert!(solidcraft_kernel::points::points_meet(p.to_array(), nearest.to_array(), 1e-5).unwrap(), "{p:?}");
+            assert!(solidcraft_kernel::points::points_meet(p.into(), nearest.into(), 1e-5).unwrap(), "{p:?}");
         }
         facet.positions.copy_from_slice(&points);
         assert!(facet.measure().area > 0.0, "{points:?}");
