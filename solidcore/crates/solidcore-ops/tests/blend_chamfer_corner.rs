@@ -150,11 +150,10 @@ fn top_and_vertical_chamfers_build_in_either_order() {
     for picks in [&[vertical, top][..], &[top, vertical][..]] {
         let b = make_box([0.0; 3], [20.0; 3]).unwrap();
         for points in picks {
-            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
-            solidcore_ops::blend(&b, Blend::Chamfer, &picked, &[2.0], &[], Corners::Filled)
-                .unwrap();
+            let picked: Vec<_> = points.iter().map(|&p| edge_at(&b, p)).collect();
+            blend(&b, Blend::Chamfer, &picked, &[2.0], &[], Corners::Filled).unwrap();
         }
-        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
         assert_eq!(b.counts().unwrap(), [14, 36, 24]);
         let v = b.volume(1e-10).unwrap();
         assert!((v - 7704.0).abs() <= 1e-9 * 7704.0, "{v} vs 7704");
@@ -186,8 +185,8 @@ fn top_chamfers_before_the_end_collision_match_the_octagon_slices() {
     ] {
         let b = make_box([0.0; 3], [20.0; 3]).unwrap();
         for (points, distance) in [(vertical, 2.0), (top, s)] {
-            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
-            solidcore_ops::blend(
+            let picked: Vec<_> = points.iter().map(|&p| edge_at(&b, p)).collect();
+            blend(
                 &b,
                 Blend::Chamfer,
                 &picked,
@@ -197,7 +196,7 @@ fn top_chamfers_before_the_end_collision_match_the_octagon_slices() {
             )
             .unwrap();
         }
-        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
         assert_eq!(b.counts().unwrap(), counts);
         let v = b.volume(1e-10).unwrap();
         assert!((v - want).abs() <= 1e-9 * want, "s={s}: {v} vs {want}");
@@ -603,8 +602,8 @@ fn top_chamfers_past_the_end_collision_meet_on_the_vertical_chamfers() {
             + 8.0 * (s - 1.0) * (s - 1.0) * (s - 1.0) / 3.0;
         let b = make_box([0.0; 3], [20.0; 3]).unwrap();
         for (points, distance) in [(vertical, 2.0), (top, s)] {
-            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
-            solidcore_ops::blend(
+            let picked: Vec<_> = points.iter().map(|&p| edge_at(&b, p)).collect();
+            blend(
                 &b,
                 Blend::Chamfer,
                 &picked,
@@ -614,7 +613,7 @@ fn top_chamfers_past_the_end_collision_meet_on_the_vertical_chamfers() {
             )
             .unwrap();
         }
-        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
         assert_eq!(b.counts().unwrap(), [14, 36, 24], "s={s}");
         let v = b.volume(1e-10).unwrap();
         assert!((v - want).abs() <= 1e-9 * want, "s={s}: {v} vs {want}");
@@ -653,10 +652,10 @@ fn sloping_top_chamfers_do_not_depend_on_the_edges_orientation() {
         .unwrap();
         let picked: Vec<_> = [[2.0, 5.0, 10.0], [-2.0, 5.0, 10.0]]
             .iter()
-            .map(|&p| common::edge_at(&b, p))
+            .map(|&p| edge_at(&b, p))
             .collect();
-        solidcore_ops::blend(&b, Blend::Chamfer, &picked, &[1.2], &[], Corners::Filled).unwrap();
-        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        blend(&b, Blend::Chamfer, &picked, &[1.2], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
         results.push((b.counts().unwrap(), b.volume(1e-10).unwrap()));
     }
     assert_eq!(results[0].0, results[1].0);
