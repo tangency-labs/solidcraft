@@ -1509,14 +1509,23 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<S
     Some(digest)
 }
 
-/// Drop cached file digests after SolidCraft writes a file, invalidating any path aliases and
-/// preventing an overlapping [`file_sha256`] read from publishing a stale digest under the same
-/// timestamp tick and size.
-pub(super) fn forget_file_digests() {
+#[cfg(test)]
+static FILE_DIGEST_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn clear_file_digests() {
     if let Ok(mut digests) = DIGESTS.lock() {
         digests.0 = digests.0.wrapping_add(1);
         digests.1.clear();
     }
+}
+
+/// Drop cached file digests after SolidCraft writes a file, invalidating any path aliases and
+/// preventing an overlapping [`file_sha256`] read from publishing a stale digest under the same
+/// timestamp tick and size.
+pub(super) fn forget_file_digests() {
+    #[cfg(test)]
+    let _guard = FILE_DIGEST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    clear_file_digests();
 }
 
 /// Only STEP has a source link; other formats accepted by Insert STEP keep their old behaviour.
@@ -6542,7 +6551,10 @@ mod tests {
         save_box(&part_a, 45.0);
         save_step_box(&step, 20.0, [200.0, 0.0, 0.0]);
         std::fs::remove_file(&gone).unwrap();
-        forget_file_digests();
+        // Hold the digest-cache test lock across the cold + warm listings so parallel `file.save`
+        // tests calling `forget_file_digests()` cannot wipe `DIGESTS` between the two calls.
+        let _digest_guard = FILE_DIGEST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_file_digests();
 
         FILE_HASH_COMPUTED.with(|n| n.replace(0));
         let listed = run(&mut s, "component.links", json!({}));
@@ -6573,6 +6585,7 @@ mod tests {
         let cached = run(&mut s, "component.links", json!({}));
         assert_eq!(FILE_HASH_COMPUTED.with(std::cell::Cell::get), 0);
         assert_eq!(cached, listed);
+        drop(_digest_guard);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
