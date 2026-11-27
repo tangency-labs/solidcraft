@@ -412,6 +412,9 @@ mod tests {
 
     #[test]
     fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
@@ -422,11 +425,11 @@ mod tests {
         }
         h.frames(3);
         assert!(panel_rect(&h, "history").is_some());
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_none());
         let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
         let start = checked();
-        // Open the grid from the loaded 1D History, as in the desktop. Its panel swap takes several passes.
-        h.call("ui.prefs", json!({"timeline_2d": true}));
-        assert!(panel_rect(&h, "timeline-2d").is_some());
+        let expand = HostPointerTarget::HeaderAction { instance: InstanceId("history".into()), action: ControlId("timeline-expand".into()) };
+        click_control(&mut h, &HostControlTarget::Pointer(expand));
         assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
         assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
 
