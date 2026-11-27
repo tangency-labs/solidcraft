@@ -2628,7 +2628,7 @@ fn evaluation_values_for_state(
     if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
         && scale != 1.0
     {
-        vals.insert(DESIGN_LEN.into(), Value { v: scale, len: 0, ang: 0 });
+        vals.insert(DESIGN_LEN.into(), Value::num(scale));
     }
     (vals, perr)
 }
@@ -6081,8 +6081,8 @@ impl Model {
         );
         let prefetched = parallel::prefetch_components(
             doc,
-            &vals,
-            &self.param_errors,
+            &base_vals,
+            &base_perr,
             &self.results,
             &self.empty,
             &self.frame_bodies,
@@ -6094,11 +6094,11 @@ impl Model {
             &prepared_imports,
             validation,
             heal,
-            ctx,
+            base_ctx,
             previous_context,
-            shared_ctx,
+            base_shared_ctx,
             self.no_cache,
-            prefetch_limit,
+            if has_driven { 0 } else { prefetch_limit },
             watched.cancelled(),
         );
         let mut poses = std::collections::HashMap::new();
