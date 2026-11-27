@@ -18,30 +18,7 @@ const CORNER: f64 = 0.35;
 /// Samples per profile segment where a closed sweep checks that its last section lands on its first.
 const SEG_SAMPLES: usize = 12;
 
-/// How the profile turns as it follows a sweep path.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum SweepOrientation {
-    /// Square to the path, turned along it by a rotation-minimising frame.
-    #[default]
-    Perpendicular,
-    /// As drawn: the profile only moves along the path, never turning.
-    Parallel,
-    /// Square to the path, its turn about the path fixed by a direction: the direction's
-    /// projection onto the profile's plane stays where it was at the start.
-    Direction(Vec3),
-}
-
-/// How guide rails reshape the profile at each station.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum RailFit {
-    /// The profile grows or shrinks evenly with its distance across to the rail (between the
-    /// two rails).
-    #[default]
-    Scale,
-    /// The profile stretches only across to the rail (between the rails), keeping its size the
-    /// other way.
-    Stretch,
-}
+pub use solidcraft_kernel_api::{RailFit, SweepOrientation};
 
 /// Sweep options beyond following the path. `twist` turns the profile about the path by that
 /// many radians over the path's length (right hand about the direction of travel, in proportion
