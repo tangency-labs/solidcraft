@@ -432,7 +432,12 @@ fn a_round_ends_on_a_procedural_cylinder_beyond_its_rational_charts_reach() {
                 ..
             }
         ));
-        b.face_mut(round)?.surface = Some(Surface::from(procedural));
+        // the face owns its surface, as the kernel's own blends leave it (a surface with no
+        // owner is not written with the body)
+        let owner = b.face(round)?.surface.as_ref().unwrap().owner();
+        let mut replacement = Surface::from(procedural);
+        *replacement.owner_mut() = owner;
+        b.face_mut(round)?.surface = Some(replacement);
         Ok(b)
     });
     let (_, before) = kernel_copy(&b);
