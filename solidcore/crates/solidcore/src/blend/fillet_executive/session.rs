@@ -2359,7 +2359,7 @@ impl<'target> FilletSession<'target> {
         if laws.len() != edges.len() {
             return Err(invalid("one variable-radius law per edge"));
         }
-        let mut objects = Vec::with_capacity(laws.len());
+        let mut objects = Vec::new();
         for law in laws {
             objects.push(Some(self.objects.allocate_law(law)?));
         }

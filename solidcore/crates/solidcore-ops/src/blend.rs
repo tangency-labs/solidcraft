@@ -3702,7 +3702,7 @@ pub fn fillet_variable_chain_from(
     }
     with_body("fillet_variable_chain", body, |k, b| {
         let list = b.edge_list();
-        let mut ids = Vec::with_capacity(edges.len());
+        let mut ids = Vec::new();
         for &i in edges {
             let Some(&e) = list.get(i) else {
                 return Ok(Err(Error::Argument));

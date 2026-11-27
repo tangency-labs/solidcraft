@@ -110,7 +110,7 @@ impl FilletLaw {
             return Ok(None);
         };
         // each edge's length, in the chain's order
-        let mut lengths = Vec::with_capacity(path.len());
+        let mut lengths = Vec::new();
         for &(i, _) in &path {
             let Some(&e) = edges.get(i) else {
                 return Ok(None);
@@ -155,7 +155,7 @@ impl FilletLaw {
 /// index in `edges` and whether its curve runs back along the chain (from its end vertex).
 /// `None` for edges that are not one open chain.
 fn chain_path(b: &Brep, edges: &[EdgeId], start: Vec3) -> Result<Option<Vec<(usize, bool)>>> {
-    let mut ends = Vec::with_capacity(edges.len());
+    let mut ends = Vec::new();
     for (n, &e) in edges.iter().enumerate() {
         if edges.get(..n).is_some_and(|before| before.contains(&e)) {
             return Ok(None);
@@ -190,7 +190,7 @@ fn chain_path(b: &Brep, edges: &[EdgeId], start: Vec3) -> Result<Option<Vec<(usi
     let near = |v: VertexId| -> Result<f64> { Ok(topo_vertex::point(b, v)?.distance(start)) };
     let mut at = if near(z)? < near(a)? { z } else { a };
     let mut used = vec![false; edges.len()];
-    let mut path = Vec::with_capacity(edges.len());
+    let mut path = Vec::new();
     while path.len() < edges.len() {
         let Some((i, &[s, t])) = ends
             .iter()
