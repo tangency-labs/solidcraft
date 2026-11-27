@@ -841,7 +841,7 @@ committed usable region or the render projection.
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
-icon ids and cached thumbnail textures; callers retain commands, document state,
+icon ids and `PreviewArt` pictures; callers retain commands, document state,
 persistence, thumbnail jobs and recovery decisions.
 
 - `page`, `content` and `rail` own the page background, responsive insets and
@@ -868,6 +868,27 @@ persistence, thumbnail jobs and recovery decisions.
   at narrow widths. Discard is optional for summaries; the return value is
   `(recover_response, optional_discard_response)`. `recovery_review` uses the same
   geometry with per-design Discard. Callers provide truthful metadata.
+
+### File previews
+
+`file_preview(ui, id, rect, art, hovered, opacity)` is the only way the app pictures a
+file or a part. Recent rows, sample cards, parts library cards, the parts dialog and the
+loading card all use it, and any new browser, picker or panel that shows files must too.
+It draws:
+
+- a backdrop and an isometric ground grid in the theme's 3D view colours
+  (`viewport_top`, `viewport_bottom`, `grid`, `grid_major`);
+- the cut-out picture, and the shadow of its footprint, when `art` is there (without it,
+  the grid alone: the caller adds its placeholder icon);
+- the lift while `hovered`: the model springs off the grid, its shadow softens and the
+  grid lights up around it in the accent. It asks for frames only while it moves, and
+  stays still when egui's animation time is zero.
+
+`hovered` is the whole card's pointer or keyboard focus, not only the picture's. The host
+decodes pixels into a `PreviewImage` and keeps the `PreviewTextures` it loads; `art()`
+gives the handle to draw. Pictures come from `solidcraft_engine::thumbnail`, which draws
+every one from the same isometric orthographic view, so the grid fits them all. A host
+does not draw its own backdrop, scale the picture or animate it.
 
 The exported `file_*` colour tokens provide readable light/dark foreground and
 background pairs, including File-specific secondary text. Thumbnails retain the

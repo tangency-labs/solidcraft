@@ -5,7 +5,7 @@ use solidcore_ops::{curve, curve_fit, fit_projection, pcurve, point_identity};
 use solidcore_record::brep::{Curve, Curve2};
 use solidcore_record::curve_query::{Crossing, CubicPiece, CurvePoint, CurveRayPoint, FitSplineBounds, PlaneSection};
 use solidcore_record::projection::PlanarSpline;
-use solidcore_record::{Plane, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2};
 use solidcraft_kernel_api::{CurveRefused, CurveSample, Curves};
 
 use super::Solidcore;
@@ -104,5 +104,10 @@ impl Curves for Solidcore {
 
     fn pcurve_eval(&self, c: &Curve2, t: f64) -> Option<[f64; 2]> {
         pcurve::eval(c, t)
+    }
+
+    fn seg_curve(&self, seg: &Seg2, plane: &Plane) -> Result<Option<Curve>, CurveRefused> {
+        let Some(placed) = solidcore_ops::sweep::Curve::from_seg2(seg, plane) else { return Ok(None) };
+        placed.to_record().map(|r| Some(r.curve)).map_err(refused)
     }
 }

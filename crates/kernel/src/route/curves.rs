@@ -4,7 +4,7 @@
 
 use solidcore_record::brep::{Curve, Curve2};
 use solidcore_record::projection::PlanarSpline;
-use solidcore_record::{Plane, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2};
 use solidcraft_kernel_api::{Curves, OpKind};
 
 pub use solidcore_record::curve_query::{Crossing, CubicPiece, CubicStanding, CurvePoint, CurveRayPoint, FitSplineBounds, PlanePart, PlaneSection};
@@ -172,9 +172,36 @@ pub fn pcurve_eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     }
 }
 
+/// Sketch segment `seg` placed in space on `plane` (sketch x, y and zero) as the record's curve;
+/// `None` for a zero-sweep arc, a conic whose weight is not finite and positive, or a Bézier of a
+/// degree the record does not hold.
+///
+/// # Errors
+/// The kernel's refusal of the placed curve, in its words.
+pub fn seg_curve(seg: &Seg2, plane: &Plane) -> Result<Option<Curve>, CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.seg_curve(seg, plane),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_routed_seg_curve_is_solidcores() {
+        use solidcore_ops::sweep::Curve as Placed;
+        let p = Vec2::new;
+        let segs = [
+            Seg2::Line { a: p(0.0, 0.0), b: p(3.0, 4.0) },
+            Seg2::Arc { center: p(0.0, 0.0), radius: 2.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: p(0.0, 0.0), radius: 2.0, start: 0.0, sweep: 0.0 },
+        ];
+        for seg in &segs {
+            let direct = Placed::from_seg2(seg, &Plane::XY).map(|c| c.to_record().map(|r| r.curve).map_err(|e| CurveRefused(e.to_string())));
+            assert_eq!(seg_curve(seg, &Plane::XY), direct.transpose());
+        }
+    }
     use solidcore_ops::{curve, fit_projection};
 
     #[test]
