@@ -5384,7 +5384,25 @@ fn driven_dimension_parameter_drives_downstream_feature_and_recomputes_on_geomet
     assert!(json.contains("\"driven_param\":\"diag\"") || json.contains("\"driven_param\": \"diag\""));
     let reopened = Document::from_json(&json).unwrap();
     assert!(reopened.is_driven_param("diag"));
-    let legacy = json.replace("\"driven_param\":\"diag\",", "").replace(",\"driven_param\":\"diag\"", "");
+    let mut legacy_val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    fn strip_driven_param(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(map) => {
+                map.remove("driven_param");
+                for child in map.values_mut() {
+                    strip_driven_param(child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    strip_driven_param(item);
+                }
+            }
+            _ => {}
+        }
+    }
+    strip_driven_param(&mut legacy_val);
+    let legacy = serde_json::to_string(&legacy_val).unwrap();
     let legacy_doc = Document::from_json(&legacy).unwrap();
     assert!(!legacy_doc.is_driven_param("diag"));
 }
