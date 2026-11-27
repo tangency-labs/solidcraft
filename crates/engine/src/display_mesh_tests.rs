@@ -153,3 +153,49 @@ fn what_reads_the_display_mesh_of_a_large_sheet_answers_as_before() {
     assert!(m.contains(Vec3::new(1500.0, 500.0, 1.0)) && m.contains(Vec3::new(1500.0, now.min.y + 1.0, now.max.z - 10.0)));
     assert!(!m.contains(Vec3::new(30.0, 20.0, 1.0)) && !m.contains(Vec3::new(1500.0, 500.0, 3.0)));
 }
+
+/// #2662: both periodic seams of a translated torus must survive tessellation.
+/// Check the exported binary STL's positions, winding and paired triangle sides.
+#[test]
+fn a_torus_exports_a_closed_oriented_mesh_at_both_seams() {
+    use std::collections::BTreeMap;
+    let mut s = Session::default();
+    run(&mut s, "solid.torus", json!({"major":20,"minor":2,"center":[100,-40,30],"body_name":"Ring"}));
+    let path = std::env::temp_dir().join(format!("solidcraft-torus-seams-{}.stl", std::process::id()));
+    run(&mut s, "file.export", json!({"path":path.to_string_lossy()}));
+    let bytes = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let count = u32::from_le_bytes(bytes[80..84].try_into().unwrap()) as usize;
+    assert!(count > 0);
+    assert_eq!(bytes.len(), 84 + count * 50);
+    let mut edges = BTreeMap::<([u32; 3], [u32; 3]), (usize, i32)>::new();
+    let mut volume = 0.0;
+    let center = Vec3::new(100.0, -40.0, 30.0);
+    for tri in bytes[84..].chunks_exact(50) {
+        let mut points = [Vec3::ZERO; 3];
+        let mut keys = [[0u32; 3]; 3];
+        for i in 0..3 {
+            let xyz: [f32; 3] = std::array::from_fn(|j| {
+                let offset = 12 + 12 * i + 4 * j;
+                f32::from_le_bytes(tri[offset..offset + 4].try_into().unwrap())
+            });
+            keys[i] = xyz.map(|x| if x == 0.0 { 0 } else { x.to_bits() });
+            let p = Vec3::new(xyz[0] as f64, xyz[1] as f64, xyz[2] as f64) - center;
+            points[i] = p;
+            assert!(((p.x.hypot(p.y) - 20.0).hypot(p.z) - 2.0).abs() < 1e-5, "{p:?}");
+        }
+        assert!((points[1] - points[0]).cross(points[2] - points[0]).len() > 0.0);
+        volume += points[0].dot(points[1].cross(points[2])) / 6.0;
+        for i in 0..3 {
+            let (a, b) = (keys[i], keys[(i + 1) % 3]);
+            assert_ne!(a, b);
+            let (key, sign) = if a < b { ((a, b), 1) } else { ((b, a), -1) };
+            let entry = edges.entry(key).or_default();
+            entry.0 += 1;
+            entry.1 += sign;
+        }
+    }
+    assert!(edges.values().all(|&edge| edge == (2, 0)), "every triangle side has one oppositely oriented neighbour");
+    let expected = 2.0 * std::f64::consts::PI.powi(2) * 20.0 * 4.0;
+    assert!((volume - expected).abs() < 0.01 * expected, "{volume} vs {expected}");
+}
