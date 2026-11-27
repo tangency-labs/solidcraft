@@ -4178,7 +4178,8 @@ mod tests {
         assert_eq!(plane_pair(first, second, 2e-5), Some(PlanePair::Line));
         assert!(line_distance(common, first, second, 2e-5, 1e-5) < 1e-9);
         let third = wall(common, Vec3::Y);
-        let CornerMeeting::Within(reach) = planes_corner(common, [first, second, third], 2e-5) else {
+        let CornerMeeting::Within(reach) = planes_corner(common, [first, second, third], 2e-5)
+        else {
             panic!("the almost coincident planes have a common corner");
         };
         assert!(reach < 1e-9, "{reach}");

@@ -189,7 +189,11 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_a_vanis
     drop(notifications);
     // the piece's plane and its twin's cross at a real line 50 away, on the twin's side, so
     // lifting the edge onto the piece moves its ends past each other: the edge would vanish
-    assert_eq!(e.kind(), solidcore::error::ErrorKind::OffsetEdgeVanishes, "{e}");
+    assert_eq!(
+        e.kind(),
+        solidcore::error::ErrorKind::OffsetEdgeVanishes,
+        "{e}"
+    );
     assert!(
         matches!(
             e.failure().map(|f| &f.reason),
@@ -197,6 +201,9 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_a_vanis
         ),
         "{e}"
     );
-    assert_eq!(e.sm_status(), Some(solidcore::error::SM_ERR_OFFSET_EDGE_VANISHES));
+    assert_eq!(
+        e.sm_status(),
+        Some(solidcore::error::SM_ERR_OFFSET_EDGE_VANISHES)
+    );
     assert_eq!(format!("{b:?}"), before, "refused, the input as it came in");
 }
