@@ -4,5 +4,47 @@
     "prefs.create_menu_groups_help": "Separate sketch-driven commands from direct objects and features in the Model Create menu.",
     "ui.create_from_sketch": "Create from Sketch",
     "ui.create_object_feature": "Create Object / Feature"
+  },
+  "ar": {
+    "prefs.create_menu_groups": "تجميع قائمة الإنشاء حسب سير العمل",
+    "prefs.create_menu_groups_help": "فصل الأوامر المعتمدة على الرسم التخطيطي عن أوامر إنشاء الأجسام والميزات مباشرةً في قائمة إنشاء النموذج.",
+    "ui.create_from_sketch": "إنشاء من رسم تخطيطي",
+    "ui.create_object_feature": "إنشاء جسم / ميزة"
+  },
+  "de": {
+    "prefs.create_menu_groups": "Erstellen-Menü nach Arbeitsablauf gruppieren",
+    "prefs.create_menu_groups_help": "Skizzenbasierte Befehle im Menü Modell > Erstellen von direkt erzeugten Objekten und Features trennen.",
+    "ui.create_from_sketch": "Aus Skizze erstellen",
+    "ui.create_object_feature": "Objekt / Feature erstellen"
+  },
+  "he": {
+    "prefs.create_menu_groups": "קיבוץ תפריט היצירה לפי תהליך עבודה",
+    "prefs.create_menu_groups_help": "הפרדת פקודות המבוססות על סקיצות מפקודות ליצירה ישירה של עצמים ומאפיינים בתפריט יצירת המודל.",
+    "ui.create_from_sketch": "יצירה מסקיצה",
+    "ui.create_object_feature": "יצירת עצם / מאפיין"
+  },
+  "ja": {
+    "prefs.create_menu_groups": "作成メニューを作業手順別にグループ化",
+    "prefs.create_menu_groups_help": "モデルの作成メニューでスケッチを使用するコマンドとオブジェクトやフィーチャーを直接作成するコマンドを分けます。",
+    "ui.create_from_sketch": "スケッチから作成",
+    "ui.create_object_feature": "オブジェクト / フィーチャーを作成"
+  },
+  "ko": {
+    "prefs.create_menu_groups": "작업 흐름별로 만들기 메뉴 그룹화",
+    "prefs.create_menu_groups_help": "모델 만들기 메뉴에서 스케치 기반 명령과 객체 및 피처를 직접 생성하는 명령을 구분합니다.",
+    "ui.create_from_sketch": "스케치에서 만들기",
+    "ui.create_object_feature": "객체 / 피처 만들기"
+  },
+  "vi": {
+    "prefs.create_menu_groups": "Nhóm menu Tạo theo quy trình làm việc",
+    "prefs.create_menu_groups_help": "Tách các lệnh dựa trên bản phác thảo khỏi các lệnh tạo trực tiếp đối tượng và tính năng trong menu Tạo của mô hình.",
+    "ui.create_from_sketch": "Tạo từ bản phác thảo",
+    "ui.create_object_feature": "Tạo đối tượng / tính năng"
+  },
+  "zh": {
+    "prefs.create_menu_groups": "按工作流程分组创建菜单",
+    "prefs.create_menu_groups_help": "在模型创建菜单中，将基于草图的命令与直接创建对象和特征的命令分开。",
+    "ui.create_from_sketch": "从草图创建",
+    "ui.create_object_feature": "创建对象 / 特征"
   }
 }
