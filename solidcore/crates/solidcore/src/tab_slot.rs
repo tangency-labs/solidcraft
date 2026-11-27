@@ -302,9 +302,9 @@ pub fn vary(
         // The top 53 bits as a fraction of [0, 1), then [-1, 1).
         let u = (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
         let wanted = (width + u * jitter).max(0.1 * width);
-        let lo = match k.checked_sub(1) {
+        let lo = match k.checked_sub(1).and_then(|p| starts.get(p)) {
             None => a + end_distance,
-            Some(p) => start - ((start - (starts[p] + width)) - g_min).max(0.0) / 2.0,
+            Some(&prev) => start - ((start - (prev + width)) - g_min).max(0.0) / 2.0,
         };
         let hi = match starts.get(k + 1) {
             None => b - end_distance,
