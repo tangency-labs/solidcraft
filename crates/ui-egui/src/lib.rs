@@ -84,6 +84,7 @@ pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -452,6 +453,10 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;

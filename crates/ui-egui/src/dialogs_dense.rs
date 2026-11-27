@@ -97,6 +97,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::Dogbone(_) => Some("solid.dogbone"),
         Kind::CellGrid(_) => Some("solid.cell_grid"),
+        Kind::Weld(_) => Some("weld.create"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
