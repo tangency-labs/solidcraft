@@ -289,6 +289,7 @@ pub use build::planar_face_record;
 pub use build::plane_gap;
 pub use build::plane_raised;
 pub use build::plane_rise;
+pub use build::revolve_joining_arcs;
 pub use build::revolve_whole_sides;
 pub use build::slab_sides;
 pub use build::sweep;

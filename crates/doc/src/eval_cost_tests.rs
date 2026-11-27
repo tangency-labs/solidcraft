@@ -1480,6 +1480,7 @@ fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
         angle2: None,
         symmetric: false,
         convention: Default::default(),
+        join_profile_arcs: false,
         to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
     };
     let revolve = add_named(&mut doc, kind);
@@ -6255,6 +6256,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevB"),
@@ -6323,6 +6325,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevC"),
@@ -8040,6 +8043,7 @@ fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevRoot"),
