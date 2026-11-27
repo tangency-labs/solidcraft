@@ -1713,6 +1713,9 @@ fn replay_corner_error(
         }
     }
     error.fillet_vertices = note.fillet_vertices.map(map);
+    if note.location.is_some() {
+        error.location = note.location;
+    }
     error.comment.clone_from(&note.comment);
     error.entity_name.clone_from(&note.entity_name);
 }

@@ -2104,7 +2104,7 @@ pub fn srf_srf_intersection_with_context(
                 && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
-                let c = surface_plane_curve(
+                if let Some(c) = ignore_status(surface_plane_curve(
                     k,
                     surface,
                     plane,
@@ -2113,24 +2113,25 @@ pub fn srf_srf_intersection_with_context(
                     opt_dir.as_deref().copied(),
                     approx_tol,
                     angle_tol,
-                )?;
-                // Not upstream: with `closed_by_start_direction`, a curve that does not leave
-                // the start along its heading is passed over (the intersectors below go on)
-                let headed = match wanted_heading {
-                    Some(h) => leaves_along(k, &c.curve_3d, h)?,
-                    None => true,
-                };
-                if headed {
-                    let (uv1, uv2) = if plane_first {
-                        (c.uv_plane, c.uv_surface)
-                    } else {
-                        (c.uv_surface, c.uv_plane)
+                ))? {
+                    // Not upstream: with `closed_by_start_direction`, a curve that does not leave
+                    // the start along its heading is passed over (the intersectors below go on)
+                    let headed = match wanted_heading {
+                        Some(h) => leaves_along(k, &c.curve_3d, h)?,
+                        None => true,
                     };
-                    return Ok(SrfSrfCurves {
-                        curve_3d: Some(c.curve_3d),
-                        uv_curve1: Some(uv1),
-                        uv_curve2: Some(uv2),
-                    });
+                    if headed {
+                        let (uv1, uv2) = if plane_first {
+                            (c.uv_plane, c.uv_surface)
+                        } else {
+                            (c.uv_surface, c.uv_plane)
+                        };
+                        return Ok(SrfSrfCurves {
+                            curve_3d: Some(c.curve_3d),
+                            uv_curve1: Some(uv1),
+                            uv_curve2: Some(uv2),
+                        });
+                    }
                 }
             }
         }
