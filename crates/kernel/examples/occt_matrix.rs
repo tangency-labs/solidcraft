@@ -29,6 +29,8 @@ const EXACT: f64 = 1e-9;
 enum Answer {
     /// A solid of this volume and area (`None`: area not derived for this case).
     Solid { volume: f64, area: Option<f64> },
+    /// A sheet (a surface body) of this area.
+    Sheet { area: f64 },
     /// Nothing left.
     Empty,
     /// A refusal.
@@ -58,6 +60,29 @@ fn one(b: Result<Vec<Body>>) -> Result<Option<Body>> {
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop2 {
     Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)])
+}
+
+/// Piece `i` of a split.
+fn piece(b: Result<Vec<Body>>, i: usize) -> Result<Option<Body>> {
+    Ok(b?.into_iter().nth(i))
+}
+
+/// A split of `body` by the plane through `origin` square to `normal`.
+fn split(body: Result<Body>, origin: Vec3, normal: Vec3) -> Result<Vec<Body>> {
+    use solidcraft_geom::PlaneGeom as _;
+    let plane = Plane::from_normal(origin, normal).ok_or_else(|| solidcraft_kernel::KernelError::Invalid("no plane".into()))?;
+    solidcraft_kernel::split_body(&body?, &solidcraft_kernel::SplitTool::Plane(plane))
+}
+
+/// A 10 square sheet on XY (with a hole of r 2 in its middle when `holed`), trimmed by the plane
+/// x = 3 (or x = 5 with the hole), keeping the side of x = 9.
+fn trimmed(holed: bool) -> Result<Option<Body>> {
+    use solidcraft_geom::PlaneGeom as _;
+    let holes = if holed { vec![Loop2::circle(Vec2::new(5.0, 5.0), 2.0)] } else { vec![] };
+    let sheet = solidcraft_kernel::patch_region(&Plane::XY, &Region2 { outer: rect(0.0, 0.0, 10.0, 10.0), holes })?;
+    let plane = Plane::from_normal(v(if holed { 5.0 } else { 3.0 }, 0.0, 0.0), v(1.0, 0.0, 0.0))
+        .ok_or_else(|| solidcraft_kernel::KernelError::Invalid("no plane".into()))?;
+    some(solidcraft_kernel::trim_keep(&sheet, &solidcraft_kernel::SplitTool::Plane(plane), solidcraft_kernel::TrimKeep::Side(v(9.0, 5.0, 0.0))))
 }
 
 fn cube(lo: f64, hi: f64) -> Result<Body> {
@@ -314,6 +339,45 @@ fn cases() -> Vec<Case> {
             },
             answer: Answer::Solid { volume: 12.0 * PI - rimv, area: Some(20.0 * PI - rima) },
         },
+        Case {
+            op: "split",
+            name: "a 10 cube split at z 3, the piece below",
+            build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)), 0),
+            answer: Answer::Solid { volume: 300.0, area: Some(200.0 + 4.0 * 30.0) },
+        },
+        Case {
+            op: "split",
+            name: "a 10 cube split at z 3, the piece above",
+            build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)), 1),
+            answer: Answer::Solid { volume: 700.0, area: Some(200.0 + 4.0 * 70.0) },
+        },
+        Case {
+            op: "split",
+            name: "a 10 cube split corner to corner, the back half",
+            build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 0.0), v(1.0, -1.0, 0.0)), 0),
+            // Two right triangles of 50, two sides of 100, the diagonal 10 x 10√2.
+            answer: Answer::Solid { volume: 500.0, area: Some(300.0 + 100.0 * 2f64.sqrt()) },
+        },
+        Case {
+            op: "split",
+            name: "an r 2 cylinder 5 long halved along its axis, the back half",
+            build: || piece(split(solidcraft_kernel::cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 2.0, 5.0), v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)), 0),
+            // Half the wall (π r h), two half discs, the 4 x 5 section.
+            answer: Answer::Solid { volume: 10.0 * PI, area: Some(10.0 * PI + 4.0 * PI + 20.0) },
+        },
+        Case {
+            op: "split",
+            name: "a plane that misses a 10 cube (the whole cube back)",
+            build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 20.0), v(0.0, 0.0, 1.0)), 0),
+            answer: Answer::Solid { volume: 1000.0, area: Some(600.0) },
+        },
+        Case { op: "trim", name: "a 10 square sheet trimmed at x 3, the right kept", build: || trimmed(false), answer: Answer::Sheet { area: 70.0 } },
+        Case {
+            op: "trim",
+            name: "a 10 square sheet with an r 2 hole trimmed through it, the right kept",
+            build: || trimmed(true),
+            answer: Answer::Sheet { area: 50.0 - 2.0 * PI },
+        },
     ]
 }
 
@@ -367,7 +431,24 @@ fn run(case: &Case, kernel: Kernel) -> Run {
                 Err(e) => out.why = format!("not measured: {e}"),
             }
         }
-        (Answer::Solid { .. }, Ok(None)) => out.why = "empty".into(),
+        (Answer::Sheet { area }, Ok(Some(body))) => {
+            out.worst_tolerance = Some(worst_tolerance(&body));
+            match solidcraft_kernel::measure(&body) {
+                Ok(m) => {
+                    let ae = relative(m.area, *area);
+                    out.area_error = Some(ae);
+                    if !body.is_surface() {
+                        out.why = "not a sheet".into();
+                    } else if ae > EXACT {
+                        out.why = format!("area {} (want {area})", m.area);
+                    } else {
+                        out.verdict = "pass";
+                    }
+                }
+                Err(e) => out.why = format!("not measured: {e}"),
+            }
+        }
+        (Answer::Solid { .. } | Answer::Sheet { .. }, Ok(None)) => out.why = "empty".into(),
         (Answer::Empty, Ok(None)) | (Answer::Refused, Err(_)) => out.verdict = "pass",
         (Answer::Empty | Answer::Refused, Ok(Some(_))) => out.why = "made a body".into(),
         (Answer::Refused, Ok(None)) => out.why = "empty, not refused".into(),
@@ -411,7 +492,7 @@ fn main() {
     let mut summary = String::from(
         "\n| op | cases | solidcore pass | occt pass / fail / unsupported | occt looser than solidcore (any / above 1e-12) |\n|---|---|---|---|---|\n",
     );
-    for op in ["box", "cylinder", "sphere", "torus", "extrude", "revolve", "boolean", "fillet"] {
+    for op in ["box", "cylinder", "sphere", "torus", "extrude", "revolve", "boolean", "fillet", "split", "trim"] {
         let of: Vec<&serde_json::Value> = rows.iter().filter(|r| r["op"] == op).collect();
         let count = |k: &str, v: &str| of.iter().filter(|r| r[k]["verdict"] == v).count();
         // Looser: larger than solidcore's beyond the last bits (1e-15), and also above 1e-12.
