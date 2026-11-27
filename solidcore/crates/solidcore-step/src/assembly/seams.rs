@@ -1047,33 +1047,42 @@ impl Assembly<'_> {
             else {
                 continue;
             };
-            let radial = x * u.cos() + y * u.sin();
-            let ring_radius = major_radius + minor_radius * w.cos();
-            let p = o + radial * ring_radius + z * (minor_radius * w.sin());
-            let v = index(self.vertices.len())?;
-            self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
-            // Round the axis the way u runs, round the tube the way v runs: the torus's whole
-            // (u, v) box, counter-clockwise.
-            let ring = BCurve::Circle {
-                frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
-                radius: ring_radius,
-            };
-            let tube_x = radial * w.cos() + z * w.sin();
-            let tube_y = z * w.cos() - radial * w.sin();
-            let tube = BCurve::Circle {
-                frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
-                radius: minor_radius,
-            };
-            let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
-            let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+            let bound = self.torus_seams(&frame, major_radius, minor_radius, u, w)?;
             let Some(face) = self.faces.get_mut(fi) else { continue };
             face.surface = turned;
-            face.loops.insert(0, Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]));
+            face.loops.insert(0, bound);
             face.outer = Some(0);
             face.extent = None;
             completed += 1;
         }
         Ok(completed)
+    }
+
+    /// The two full-circle seams bound one period in each direction, about the natural normal.
+    pub(crate) fn torus_seams(&mut self, frame: &Frame, major_radius: f64, minor_radius: f64, u: f64, w: f64) -> R<Bound> {
+        let o = Vec3::from(frame.origin);
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let radial = x * u.cos() + y * u.sin();
+        let ring_radius = major_radius + minor_radius * w.cos();
+        let p = o + radial * ring_radius + z * (minor_radius * w.sin());
+        let v = index(self.vertices.len())?;
+        self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
+        // Round the axis the way u runs, round the tube the way v runs: the torus's whole
+        // (u, v) box, counter-clockwise.
+        let ring = BCurve::Circle {
+            frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
+            radius: ring_radius,
+        };
+        let tube_x = radial * w.cos() + z * w.sin();
+        let tube_y = z * w.cos() - radial * w.sin();
+        let tube = BCurve::Circle {
+            frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
+            radius: minor_radius,
+        };
+        let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
+        let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+        Ok(Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]))
     }
 
     /// Turn each torus face whose bounds hold a seam round the axis (a full circle about it,

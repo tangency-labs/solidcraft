@@ -345,8 +345,8 @@ impl<'t> Assembly<'t> {
     /// A sphere face bounded by vertex loops alone, each at one of its poles (a face of a closed
     /// surface bounded by vertices is all of the surface): the whole sphere, its loop a meridian
     /// from the south pole to the north and back, which [`Assembly::complete_slits`] keeps as its
-    /// seam. The sphere is about `origin`, `axis` its north, `reference` its meridian's plane. Any
-    /// other face without an edge loop is refused.
+    /// seam. The sphere is about `origin`, `axis` its north, `reference` its meridian's plane. A
+    /// vertex bound away from either pole is refused.
     pub(crate) fn whole_sphere(&mut self, origin: P3, axis: P3, reference: P3, radius: f64, loops: &[Bound]) -> R<Vec<Bound>> {
         let unsupported_here = || unsupported("a face without an edge loop");
         let (o, z, x) = (v3(origin), v3(axis), v3(reference));
