@@ -1413,9 +1413,13 @@ impl Keychain {
 /// A missing Linux Secret Service is different from a locked wallet or a rejected key.
 /// Give the user a recovery step without changing the secure storage backend.
 fn keychain_message(detail: String, linux: bool) -> String {
-    if linux && (detail.contains("org.freedesktop.DBus.Error.ServiceUnknown") || detail.contains("org.freedesktop.DBus.Error.NameHasNoOwner")) {
+    if linux
+        && (detail.contains("org.freedesktop.DBus.Error.ServiceUnknown")
+            || detail.contains("org.freedesktop.DBus.Error.NameHasNoOwner")
+            || detail.contains("no secret service provider or dbus session found"))
+    {
         format!(
-            "The Linux Secret Service is unavailable. Start a Secret Service provider. On KDE Plasma, enable the Secret Service API in KWallet settings, then sign out and back in. Details: {detail}"
+            "The Linux Secret Service is unavailable. Restore your desktop's D-Bus session. Start a Secret Service provider. On KDE Plasma, enable the Secret Service API in KWallet settings, then sign out and back in. Details: {detail}"
         )
     } else {
         detail
@@ -1432,8 +1436,10 @@ fn unavailable_linux_keyring_names_the_recovery_step() {
     for error in [
         "org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable",
         "org.freedesktop.DBus.Error.NameHasNoOwner: no service owns the name",
+        "no secret service provider or dbus session found",
     ] {
         let message = keychain_message(error.into(), true);
+        assert!(message.contains("D-Bus session"));
         assert!(message.contains("Start a Secret Service provider"));
         assert!(message.contains("KWallet"));
         assert!(message.ends_with(error));
