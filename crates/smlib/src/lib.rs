@@ -146,7 +146,8 @@ pub enum Error {
         found: usize,
     },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
-    /// is missing, and the solidcore issue that ports it.
+    /// is missing, and the solidcore issue that ports it; or what solidcore cannot build yet, in
+    /// its words (solidcore-ops' `Unsupported`, a blend corner of a kind it has no patch for).
     Unported(&'static str),
     /// The work's token was stopped ([`stop::Stop::stop`]) before or during the call: no result,
     /// even one solidcore finished first. Never a failure of the operation on its input.
