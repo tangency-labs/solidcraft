@@ -1450,13 +1450,15 @@ mod web {
     /// the browser's device draws it, else the supported default. WebGL draws 1x, as desktop
     /// OpenGL does. eframe's web painter has no stencil buffer.
     fn install_viewport(app: &mut SolveApp, rs: &eframe::egui_wgpu::RenderState) {
+        // The window device's lost flag, for the panels and pictures drawn on it; eframe's web
+        // painter draws egui 1x.
+        solidcraft_ui_egui::gpu::watch_window(rs, 1);
         let backend = rs.adapter.get_info().backend;
         let depth = eframe::egui_wgpu::depth_format_from_bits(DEPTH_BITS, 0);
-        let supported = eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
+        let supported = solidcraft_ui_egui::gpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
         let requested = solidcraft_ui_egui::gpu::scene_samples(backend, app.preferences.msaa, &supported);
         let drawn = app.set_wgpu_split(rs, DEPTH_BITS, 0, requested);
-        // After the install, which sets egui's own counts: those leave out the scene's depth
-        // buffer, and they include counts WebGL would draw at 1x.
+        // The scene's counts (with its depth buffer), less those WebGL would draw at 1x.
         app.msaa_supported = solidcraft_ui_egui::gpu::scene_sample_choices(backend, supported);
         log::info!("SolidCraft graphics: {backend:?}, MSAA {drawn}x (saved {}x)", app.preferences.msaa);
     }

@@ -126,17 +126,8 @@ draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
-- `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
-  request when the requested card is unavailable or incompatible with the window surface.
-- `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
-  exposing the effective sample count so host paint callbacks can match it.
-- `src/winit.rs`: use that same effective count for depth and resolve attachments.
 - `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
   or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
-- Other backends retain requested MSAA, without another adapter or device probe.
-- `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
-  depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
-  device without it failed pipeline validation, a panic at start.
 - `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
   the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
   guarantees 1x and 4x).
@@ -147,35 +138,12 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
   defaults refused the device, so no window opened. An adapter at or above the defaults gets
   the same request as before.
-- `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
-  device and the window's surface up (instance, surface, adapter request, the chosen adapter,
-  device, renderer, surface configure, first present), so the app's crash journal can say which
-  step a crash inside the graphics driver happened in.
 - `src/lib.rs`, `src/winit.rs`: a window larger than the device's largest texture gets a surface
   clamped to it (`clamp_surface_extent`, aspect ratio kept) and egui is drawn at the matching
   smaller scale, instead of a `Surface::configure` validation panic (#869). The resize path and
   an unsupported surface no longer unwrap.
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
-- `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
-  (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
-  submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
-  driver lost is found by opening that command list rather than by the first queue write,
-  which panicked inside wgpu-core (`PendingWrites::activate`, #4172). An empty submission
-  only signalled a fence, which a reset D3D12 device let through (#6528).
-  A reset that lands after the probe is still met by a queue write or the present: the painter
-  runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
-  then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
-  error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
-  `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
-  eframe so startup can retry another backend instead of invoking wgpu's panic handler.
-- `src/lib.rs`, `src/winit.rs`: `stalled_frames` counts the frames in a row whose texture took
-  at least `STALLED_ACQUIRE` (950 ms) to acquire. wgpu waits at most a second for the next
-  image and D3D12 then goes on as if it had come, so a hung GPU shows only as frames that each
-  wait that second; the app restarts on another renderer after a few of them (#3321). Only the
-  main window counts. `refused_for` says how long the main window has skipped its frames on a
-  refused configure, which never reach the acquire.
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 

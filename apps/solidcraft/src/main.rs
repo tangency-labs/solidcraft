@@ -697,7 +697,7 @@ fn graphics_restart_args(args: impl IntoIterator<Item = String>) -> Vec<String> 
 
 /// The window's graphics device, watched for its loss.
 struct LostWatch {
-    lost: eframe::egui_wgpu::DeviceLost,
+    lost: solidcraft_ui_egui::gpu::DeviceLost,
     /// Where the next start runs once this device is lost ([`device_lost::restart_on_software`]).
     restart_on_software: bool,
     /// When the loss was seen: the app is closing to start again.
@@ -1960,8 +1960,10 @@ fn main() -> eframe::Result {
                 window_move
             };
             mark("app state and prefs");
+            // The window device's one lost callback, kept where the panels, the blur and the
+            // pictures drawn on it look (`gpu::window_device`). egui draws 1x (`multisampling`).
             let gpu = cc.wgpu_render_state.as_ref().map(|rs| LostWatch {
-                lost: rs.device_lost.clone(),
+                lost: solidcraft_ui_egui::gpu::watch_window(rs, 1).lost,
                 restart_on_software: device_lost::restart_on_software(after_loss, cpu_renderer),
                 lost_at: None,
                 reason: String::new(),
