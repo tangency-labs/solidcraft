@@ -28,6 +28,9 @@ mod fields;
 pub(crate) mod figures;
 mod general;
 mod graphics;
+#[cfg(test)]
+#[path = "ground_shadow_settings_tests.rs"]
+mod ground_shadow_tests;
 mod interface;
 mod mouse3d;
 mod navbar;
@@ -45,6 +48,16 @@ use crate::tool_modifiers::ModifierCombo;
 use crate::ui_kit;
 use crate::viewport::NavMode;
 use solidcraft_theme::Tokens;
+
+/// The enabled shadow's style. The existing `UiState::ground_shadow` flag still controls
+/// visibility, preserving saved boolean settings and the control channel's `groundShadow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundShadowStyle {
+    #[default]
+    Ellipse,
+    Projected,
+}
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
 pub const OPENSCAD_NAV: &str = "openscad";
@@ -268,6 +281,20 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
         chords: &[],
     },
+    // Public navigation documentation; no product code or assets are used.
+    // https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm
+    NavPreset {
+        id: "right-drag-orbit",
+        label: "Right-drag orbit",
+        help: "Right drag orbits; middle drag or Ctrl/Cmd+right drag pans; wheel zooms",
+        reverse_zoom: false,
+        reverse_drag_zoom: false,
+        middle_double_click: None,
+        // Restore orbit even when the previous mapping left the right button to its menu.
+        right_drag_orbits: Some(true),
+        bindings: &[bind(Right, NavKeys::CTRL, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
+        chords: &[],
+    },
     NavPreset {
         id: "solidworks",
         label: "SolidWorks",
@@ -442,13 +469,18 @@ impl NavPreset {
     pub(crate) fn translated_label(&self) -> &str {
         match self.id {
             "creo" => solidcraft_ui_text::tr("nav.creo.label"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.label"),
             TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
             _ => solidcraft_ui_text::tr_label(self.label),
         }
     }
 
     pub(crate) fn translated_help(&self) -> &str {
-        if self.id == "creo" { solidcraft_ui_text::tr("nav.creo.help") } else { solidcraft_ui_text::tr_label(self.help) }
+        match self.id {
+            "creo" => solidcraft_ui_text::tr("nav.creo.help"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.help"),
+            _ => solidcraft_ui_text::tr_label(self.help),
+        }
     }
 }
 
@@ -1590,11 +1622,17 @@ pub fn follow_theme_file_for_run(app: &mut SolveApp, path: &str) -> Result<(), S
     Ok(())
 }
 
+const THEME_FOLLOW_LOCKED: &str = "`theme_follow` is set by your organization's policy and cannot be changed here";
+
 const FOLLOW_UNAVAILABLE: &str = "`theme_follow` is not available in the browser: it follows a file on this computer; import the theme instead";
 
 /// Stop following a theme file: the preference and this run's launch flag. The chosen theme
 /// takes over again, with its own dark or light.
 fn stop_following(app: &mut SolveApp) {
+    // The organization's theme file stays on; the chosen theme waits underneath it.
+    if app.policy.locks("theme_follow") {
+        return;
+    }
     let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
     app.preferences.theme_follow.clear();
     app.prefs_window.follow.launch = None;
@@ -1638,6 +1676,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
     }
     let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or \"\" to stop following")?;
     let path = crate::theme_files::follow_path(path)?;
+    if app.policy.locks("theme_follow") {
+        return Err(THEME_FOLLOW_LOCKED.into());
+    }
     if path.is_empty() {
         stop_following(app);
         return Ok(());
@@ -3347,7 +3388,14 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             staged.theme = if gone.base.is_dark() { "dark" } else { "light" }.into();
         }
     }
+    let follow_locked = app.policy.locks("theme_follow");
     match rest.remove("theme_follow") {
+        // Writing back what was read is not a change (as for every other locked preference).
+        Some(value) if follow_locked => {
+            if !crate::policy::unchanged(app, "theme_follow", &value) {
+                return Err(THEME_FOLLOW_LOCKED.into());
+            }
+        }
         Some(value) => {
             if !FOLLOW_AVAILABLE {
                 return Err(FOLLOW_UNAVAILABLE.into());
@@ -3364,7 +3412,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") => {
+        None if rest.contains_key("theme") && !follow_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -7552,6 +7600,7 @@ mod tests {
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
+            ("new_body_default", json!(true), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
@@ -8512,6 +8561,8 @@ mod tests {
         assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
         assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
         assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");
+        let sign = control(&mut h.app, &json!({"accent": "#+fffff"}));
+        assert!(sign.as_ref().is_err_and(|e| e.contains("must be a colour as #rrggbb")), "a sign is not a hex digit (#22089): {sign:?}");
         control(&mut h.app, &json!({"accent": ""})).unwrap();
         h.frames(2);
         assert_eq!(solidcraft_theme::Tokens::get().accent, own);
@@ -11657,6 +11708,27 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
     }
 
+    /// Preferences saved with the cube navigator, gone since 0.43, say once why the signed axes
+    /// show instead (#19749); the axes are what they save, so a later start says nothing.
+    #[test]
+    fn a_saved_cube_navigator_says_once_that_the_signed_axes_replace_it() {
+        let note = |app: &SolveApp| app.messages.iter().filter(|m| m.text == app.tr("ui.navigator.cube_removed")).count();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.load_prefs(&json!({"preferences": {"navigator_style": "cube", "length_decimals": 4}}).to_string());
+        assert_eq!(app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(note(&app), 1);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some(app.tr("ui.navigator.cube_removed")));
+        let saved = app.prefs();
+        let mut again = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        again.load_prefs(&saved);
+        assert_eq!(note(&again), 0, "{saved}");
+        for style in ["axes", "custom", "zigzag"] {
+            let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            other.load_prefs(&json!({"preferences": {"navigator_style": style}}).to_string());
+            assert_eq!(note(&other), 0, "{style}");
+        }
+    }
+
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
@@ -12968,6 +13040,41 @@ mod tests {
     }
 
     #[test]
+    fn right_drag_orbit_picker_enables_orbit_and_persists_only_after_apply() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        choose_nav_preset(&mut h.app.preferences, nav_preset("solidworks"));
+        assert!(!h.app.preferences.right_drag_orbits);
+        let before = h.app.preferences.clone();
+        for apply in [false, true] {
+            h.call("ui.prefs", json!({"open":"Navigation"}));
+            scroll_to_and_click(&mut h, "prefs:nav");
+            h.step(&json!({"click":{"handle":"dialog:list:right-drag-orbit"}})).unwrap();
+            assert_eq!(h.app.preferences.nav, "right-drag-orbit");
+            assert!(h.app.preferences.right_drag_orbits);
+            assert!(!h.app.preferences.zoom_reverse);
+            assert_eq!(h.app.preferences.free_orbit, before.free_orbit, "orbit style remains a separate preference");
+            if apply {
+                h.call("ui.prefs", json!({"button":"apply"}));
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            if !apply {
+                assert_eq!(h.app.preferences, before);
+            }
+        }
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(restored.preferences.nav, "right-drag-orbit");
+        assert!(restored.preferences.right_drag_orbits);
+        assert_eq!(nav_mode(&restored, NavButton::Right, Modifiers::NONE), Some(NavMode::Orbit));
+        for mods in [Modifiers::CTRL, Modifiers::COMMAND] {
+            assert_eq!(nav_mode(&restored, NavButton::Right, mods), Some(NavMode::Pan));
+        }
+        assert_eq!(nav_mode(&restored, NavButton::Middle, Modifiers::NONE), Some(NavMode::Pan));
+        assert_eq!(nav_mode(&restored, NavButton::Left, Modifiers::NONE), None);
+    }
+
+    #[test]
     fn creo_preset_maps_navigation_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         assert_eq!(app.preferences.nav, "fusion");
@@ -13892,6 +13999,44 @@ mod ui_scale_regression_tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.ui_scale, 1.0, "Cancel restores the original scale");
         assert_eq!(h.ctx.zoom_factor(), 1.0);
+    }
+}
+
+pub(crate) fn ground_shadow_mode(app: &SolveApp) -> &'static str {
+    if !app.ui.ground_shadow {
+        "off"
+    } else {
+        match app.preferences.ground_shadow_style {
+            GroundShadowStyle::Ellipse => "ellipse",
+            GroundShadowStyle::Projected => "projected",
+        }
+    }
+}
+
+pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = ground_shadow_mode(app);
+    let label = |mode| match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut mode = before;
+    let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
+        for value in ["off", "ellipse", "projected"] {
+            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
+            row.selected = mode == value;
+            let choice = row.show(ui);
+            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
+            if choice.clicked() {
+                mode = value;
+                ui.close();
+            }
+        }
+    });
+    crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
+    crate::scenario::publish_target("view:ground_shadow_selector", response.rect);
+    if mode != before {
+        let _ = app.run("view.ground_shadow", json!({"mode":mode}));
     }
 }
 

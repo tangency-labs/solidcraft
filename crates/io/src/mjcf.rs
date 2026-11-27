@@ -4,6 +4,10 @@
 //! values needs no in-between links; a `ball` joint; no limit where a joint has none; and
 //! `<equality>` constraints, so a joint that closes a loop is kept rather than left out.
 //!
+//! Each hinge and slide that moves on its own gets a `motor`, whose control is the force or
+//! torque, limited to the joint's saved effort. A control of 0 is no force, so the model moves as
+//! it does without the motors until something drives them.
+//!
 //! Every body is written where the design places it now, and each hinge and slide's `ref` is its
 //! current value, so MuJoCo's initial configuration (`qpos0`) is the design as it is and a loop's
 //! constraint holds there. A body with several joints keeps the URDF chain's motion: joint `k`'s
@@ -78,6 +82,7 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
         names: body_names(&walked.model),
         constraint_names: Names::default(),
         equality: String::new(),
+        actuators: String::new(),
         warnings,
         xml: String::new(),
         bodies: 0,
@@ -101,6 +106,9 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
     w.couplings();
     if !w.equality.is_empty() {
         w.xml += &format!("  <equality>\n{}  </equality>\n", w.equality);
+    }
+    if !w.actuators.is_empty() {
+        w.xml += &format!("  <actuator>\n{}  </actuator>\n", w.actuators);
     }
     w.xml += "</mujoco>\n";
     let Writer { xml, bodies, joints, equalities, warnings, .. } = w;
@@ -167,6 +175,7 @@ struct Writer<'a, V: Fn(&UrdfJoint) -> f64> {
     names: Vec<String>,
     constraint_names: Names,
     equality: String,
+    actuators: String,
     warnings: Vec<String>,
     xml: String,
     bodies: usize,
@@ -213,6 +222,12 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
 
     fn is_ball(&self, j: &UrdfJoint) -> bool {
         j.source.is_some_and(|(id, _)| self.balls.contains(&id))
+    }
+
+    /// Whether `couplings` writes a constraint that moves `f` with the joint driving it: not when
+    /// either is a ball joint, which has no values to couple.
+    fn coupled(&self, f: &UrdfJoint) -> bool {
+        f.mimic.and_then(|m| self.model.joints.get(m.joint)).is_some_and(|d| !self.is_ball(f) && !self.is_ball(d))
     }
 
     /// Motion links, and joints whose limits leave them one value. A `joint` constraint holds
@@ -335,6 +350,13 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
                 num((self.value)(j) * scale(j)),
                 passive(j)
             );
+            // A follower moves with its driver and a held joint not at all: a motor would fight
+            // the constraint that keeps them so.
+            let held = j.limit.is_some_and(|(lo, hi)| lo == hi);
+            if !self.coupled(j) && !held {
+                let range = j.dynamics.effort.map(|e| format!(" ctrlrange=\"{} {}\"", num(-e), num(e))).unwrap_or_default();
+                self.actuators += &format!("    <motor name=\"{0}\" joint=\"{0}\"{range}/>\n", attr(&j.name));
+            }
         }
     }
 

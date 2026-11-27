@@ -7270,7 +7270,7 @@
   "ui.ribbon_exit": "Sair",
   "ui.ribbon_labels": "Mostrar texto abaixo dos ícones da faixa de opções",
   "ui.ribbon_menus_skip_pinned": "Deixar os comandos fixados fora dos menus suspensos",
-  "ui.ribbon_pin_footer": "Os comandos fixados aparecem na faixa de opções. Passe o mouse sobre uma linha para fixar ou desafixar.",
+  "ui.ribbon_pin_footer": "Os comandos fixados aparecem na faixa de opções. Fixe ou desafixe um comando pelo menu ⋯ dele.",
   "ui.ribbon_workspace": "Espaço de trabalho",
   "ui.right": "Direita",
   "ui.right_click_confirms": "O clique direito confirma as entradas da caixa de diálogo",

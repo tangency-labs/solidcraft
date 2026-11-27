@@ -163,7 +163,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         canvases,
         param_comments,
         text_params,
-        next_component_color_index,
+        next_component_color_index: _,
         materials,
         print_faces,
         // Read only by robot exports: no feature's geometry depends on it.
@@ -198,7 +198,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *marker == b.marker
         && *next_id == b.next_id
         && *reserved_body_names == b.reserved_body_names
-        && *components == b.components
+        && components.len() == b.components.len()
+        && components.iter().zip(&b.components).all(|(a, b)| same_eval_component(a, b))
         && *sheet == b.sheet
         && *plastic == b.plastic
         && *parts == b.parts
@@ -208,7 +209,6 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *canvases == b.canvases
         && *param_comments == b.param_comments
         && *text_params == b.text_params
-        && *next_component_color_index == b.next_component_color_index
         && *materials == b.materials
         && *print_faces == b.print_faces
         && *user_materials == b.user_materials
@@ -223,6 +223,24 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *saved_sections == b.saved_sections
         && *visibility == b.visibility
         && *point_clouds == b.point_clouds
+}
+
+/// Compare component fields that geometry evaluation can read; display and metadata fields
+/// (`history_hidden`, `identification_color`, `metadata`, etc.) never affect geometry (#22662).
+fn same_eval_component(a: &crate::Component, b: &crate::Component) -> bool {
+    let crate::Component {
+        id,
+        name,
+        parent,
+        identification_color: _,
+        identification_color_index: _,
+        metadata: _,
+        properties: _,
+        name_split: _,
+        history_hidden: _,
+        physical_override: _,
+    } = a;
+    *id == b.id && *name == b.name && *parent == b.parent
 }
 
 /// Compare feature definitions without traversing immutable imported payloads. A replacement
@@ -242,6 +260,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         touching,
         shell_piece_order,
         kernel_piece_order,
+        least_face_piece_order,
         pattern_names_in_order,
         inserted,
         link_faces,
@@ -263,6 +282,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *profile_frame == b.profile_frame
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
+        && *least_face_piece_order == b.least_face_piece_order
         && *pattern_names_in_order == b.pattern_names_in_order
         && *inserted == b.inserted
         && *link_faces == b.link_faces
