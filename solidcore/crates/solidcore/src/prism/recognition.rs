@@ -863,6 +863,127 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     Some((center, major, ratio))
 }
 
+/// How many binades the stored coordinates' own rounding may lie above the local cell
+/// in `loop_as_rounded_quarter_ellipse`: the corners must still resolve the ellipse's
+/// extent to at least half of the f64 significand. Beyond that the world spacing, not
+/// the curve, decides the shape (a 4/3 split at 2^52 stays refused).
+const ROUNDED_QUARTER_WORLD_BINADES: i32 = 26;
+
+/// `sum(k * p)` over stored points in double-double, and the same combination of the
+/// points' own rounding cells (half an ULP of each stored coordinate), bounded outward.
+fn stored_combination(terms: &[(f64, Vec2)]) -> Option<(EllipsePoint, Vec2)> {
+    let mut sum = EllipsePoint {
+        x: EllipseScalar::ZERO,
+        y: EllipseScalar::ZERO,
+    };
+    let mut cell = Vec2::ZERO;
+    for &(k, p) in terms {
+        let k_exact = EllipseScalar::exact(k)?;
+        sum = sum.plus(EllipsePoint {
+            x: EllipseScalar::exact(p.x)?.times(k_exact)?,
+            y: EllipseScalar::exact(p.y)?.times(k_exact)?,
+        })?;
+        cell = Vec2::new(
+            ellipse_bound_add(cell.x, ellipse_bound_mul(k.abs(), rounding_radius(p.x))),
+            ellipse_bound_add(cell.y, ellipse_bound_mul(k.abs(), rounding_radius(p.y))),
+        );
+    }
+    cell.is_finite().then_some((sum, cell))
+}
+
+/// Four 1/sqrt(2) quarters on a parallelogram whose stored corners and controls were
+/// each rounded at their world size, as a turned sketch ellipse is (#18399). Joins stay
+/// exact. The two parallelogram identities (opposite corners share one midpoint; each
+/// control is its quarter's fourth corner a + b - c) must hold within the local cell
+/// widened by the half ULP of every stored coordinate they use. When that rounding is
+/// large next to the local extent, the loop is refused.
+fn loop_as_rounded_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
+    let [q0, q1, q2, q3] = lp.segs.as_slice() else {
+        return None;
+    };
+    let quarter = |seg: &Seg2, next: &Seg2| match (*seg, *next) {
+        (Seg2::Conic { a, apex, b, w }, Seg2::Conic { a: next_a, .. })
+            if a.is_finite()
+                && apex.is_finite()
+                && b.is_finite()
+                && w == std::f64::consts::FRAC_1_SQRT_2
+                && b == next_a =>
+        {
+            Some((a, apex))
+        }
+        _ => None,
+    };
+    let [(p0, h0), (p1, h1), (p2, h2), (p3, h3)] = [
+        quarter(q0, q1)?,
+        quarter(q1, q2)?,
+        quarter(q2, q3)?,
+        quarter(q3, q0)?,
+    ];
+    let corners = [p0, p1, p2, p3];
+    let (min, max) = corners.iter().fold((p0, p0), |(min, max), p| {
+        (
+            Vec2::new(min.x.min(p.x), min.y.min(p.y)),
+            Vec2::new(max.x.max(p.x), max.y.max(p.y)),
+        )
+    });
+    let local = Vec2::new(
+        ellipse_local_resolution(min.x, max.x)?,
+        ellipse_local_resolution(min.y, max.y)?,
+    );
+    let world = [p0, p1, p2, p3, h0, h1, h2, h3]
+        .iter()
+        .fold(Vec2::ZERO, |cell, p| {
+            Vec2::new(
+                cell.x.max(rounding_radius(p.x)),
+                cell.y.max(rounding_radius(p.y)),
+            )
+        });
+    let reach = 2.0_f64.powi(ROUNDED_QUARTER_WORLD_BINADES);
+    if !(world.x <= local.x * reach && world.y <= local.y * reach) {
+        return None;
+    }
+    let mut identities = vec![stored_combination(&[
+        (0.5, p0),
+        (0.5, p2),
+        (-0.5, p1),
+        (-0.5, p3),
+    ])?];
+    // apex - a - b + c, with c the mean of the four corners.
+    for (i, apex) in [h0, h1, h2, h3].into_iter().enumerate() {
+        let [k0, k1, k2, k3] = [0, 1, 2, 3]
+            .map(|j| 0.25 - f64::from(u8::from(j == i)) - f64::from(u8::from(j == (i + 1) % 4)));
+        identities.push(stored_combination(&[
+            (k0, p0),
+            (k1, p1),
+            (k2, p2),
+            (k3, p3),
+            (1.0, apex),
+        ])?);
+    }
+    for (difference, cell) in identities {
+        let cell = Vec2::new(
+            ellipse_bound_add(local.x, cell.x),
+            ellipse_bound_add(local.y, cell.y),
+        );
+        if !difference.fits(cell) {
+            return None;
+        }
+    }
+    let rounded = |p: EllipsePoint| Vec2::new(p.x.hi + p.x.lo, p.y.hi + p.y.lo);
+    let (center, _) = stored_combination(&corners.map(|p| (0.25, p)))?;
+    let (u, _) = stored_combination(&[(0.5, p0), (-0.5, p2)])?;
+    let (v, _) = stored_combination(&[(0.5, p1), (-0.5, p3)])?;
+    if !matches!(u.cross(v)?.sign()?, 1 | -1) {
+        return None;
+    }
+    let (mut major, _, ratio, _) = ellipse_axes(rounded(u), rounded(v))?;
+    if major.x < 0.0 || (major.x == 0.0 && major.y < 0.0) {
+        major = -major;
+    }
+    let center = rounded(center);
+    center.is_finite().then_some((center, major, ratio))
+}
+
 /// Recognize one directed turn of circular arcs on exactly the same center and radius.
 /// Joins and the accumulated sweep must agree at the stored angles' floating-point
 /// resolution. No trigonometric endpoint or world-space tolerance is used. Ambiguous
@@ -957,7 +1078,9 @@ pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
 }
 
 /// Conservatively recognize one turn of an ellipse from rational quadratic pieces.
-/// Four quarter pieces retain their common-parallelogram recognition rules. Other
+/// Four quarter pieces retain their common-parallelogram recognition rules; when those
+/// exact rules refuse them, the same identities are checked in cells widened by each
+/// stored coordinate's own rounding (a turned ellipse, #18399). Other
 /// partitions require exact stored joins and reconstruct one fixed returned ellipse:
 /// shared vertices and tangent controls must fit componentwise cells no larger than
 /// half an ULP of the original vertices' local semiextent; required weights must lie
@@ -974,8 +1097,8 @@ pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
             |seg| matches!(seg, Seg2::Conic { w, .. } if *w == std::f64::consts::FRAC_1_SQRT_2),
         )
     {
-        // Preserve both acceptance and rejection of this already-supported case.
-        return loop_as_quarter_ellipse(lp);
+        // Every loop the exact quarter rules accept keeps their answer.
+        return loop_as_quarter_ellipse(lp).or_else(|| loop_as_rounded_quarter_ellipse(lp));
     }
     loop_as_general_ellipse(lp)
 }

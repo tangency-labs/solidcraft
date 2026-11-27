@@ -1898,8 +1898,18 @@ mod recognition {
     // quarter rules' exact equalities fail; the loop is still one ellipse.
     #[test]
     fn profile_ellipse_recognition_accepts_turned_sketch_quarters() {
-        let center = Vec2::new(40.0, 20.0);
-        let mut ends = vec![Vec2::new(15.0, 0.0), Vec2::new(50.0, 30.0)];
+        // The issue's ellipse at (40, 20), and the same shapes at (1000, 1000), where the
+        // world rounding of each corner is 64 times the local cell.
+        for center in [Vec2::new(40.0, 20.0), Vec2::new(1000.0, 1000.0)] {
+            assert_turned_sketch_quarters_are_one_ellipse(center);
+        }
+    }
+
+    fn assert_turned_sketch_quarters_are_one_ellipse(center: Vec2) {
+        let mut ends = vec![
+            center + Vec2::new(-25.0, -20.0),
+            center + Vec2::new(10.0, 10.0),
+        ];
         ends.extend((0..48).map(|i| {
             let angle = f64::from(i) * TAU / 48.0 + 0.1;
             center + Vec2::new(angle.cos(), angle.sin()) * 32.0
@@ -1946,7 +1956,7 @@ mod recognition {
             }
         }
         // An axis-aligned sketch ellipse keeps the quarter rules' exact answer.
-        let aligned = sketch_ellipse_quarters(center, Vec2::new(55.0, 20.0), 8.0);
+        let aligned = sketch_ellipse_quarters(center, center + Vec2::new(15.0, 0.0), 8.0);
         assert_eq!(
             aligned.as_ellipse(),
             Some((center, Vec2::new(15.0, 0.0), 8.0 / 15.0))
