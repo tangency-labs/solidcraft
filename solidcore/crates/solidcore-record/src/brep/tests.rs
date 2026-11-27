@@ -1306,3 +1306,14 @@ fn an_older_reader_refuses_an_offset_by_name() {
         .to_string();
     assert!(error.contains("unknown variant `blend_offset`"), "{error}");
 }
+
+/// A face's stand-in is fitted to half the least tolerance the record can state for it: its own
+/// when that is positive, finite and below the body's half, else the body's half; then half of
+/// that.
+#[test]
+fn a_face_stand_in_takes_half_the_least_stated_half_tolerance() {
+    assert_eq!(approximation_tolerance(1e-5, 2e-3), 5e-6);
+    assert_eq!(approximation_tolerance(1e-2, 2e-3), 5e-4);
+    assert_eq!(approximation_tolerance(f64::NAN, 2e-3), 5e-4);
+    assert_eq!(approximation_tolerance(0.0, 2e-3), 5e-4);
+}

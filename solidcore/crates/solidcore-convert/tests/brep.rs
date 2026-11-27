@@ -11,10 +11,15 @@
     clippy::redundant_closure,
     clippy::panic
 )] // a test's fixtures
+use solidcore::eval::Frame;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::Point2;
+use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::prism::extrude::extrude_region;
+use solidcore::prism::profile::{Loop2, Region2, Seg2};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::integrity;
@@ -1555,4 +1560,81 @@ fn a_tolerance_whose_zone_underflows_is_refused() {
         to_kernel(&mut k, &r, true),
         Err(Unsupported::Invalid(_))
     ));
+}
+
+/// An elliptic cylinder: the extrusion of a 2a by 2b ellipse (four conic walls), `h` high.
+fn elliptic_cylinder(k: &mut Kernel, a: f64, b: f64, h: f64) -> Brep {
+    let q = Point2::new;
+    let corners = [q(a, 0.0), q(0.0, b), q(-a, 0.0), q(0.0, -b)];
+    let outer = Loop2 {
+        segs: (0..4)
+            .map(|i| Seg2::Conic {
+                a: corners[i],
+                apex: corners[i] + corners[(i + 1) % 4],
+                b: corners[(i + 1) % 4],
+                w: std::f64::consts::FRAC_1_SQRT_2,
+            })
+            .collect(),
+    };
+    let frame = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    extrude_region(
+        k,
+        &frame,
+        &Region2 {
+            outer,
+            holes: Vec::new(),
+        },
+        0.0,
+        h,
+    )
+    .unwrap()
+}
+
+/// An elliptic cylinder (40 by 15, 10 high) offset as a whole body by 2 out and by 2 in, under its
+/// least radius of curvature (b^2 / a = 5.6): the kernel's offset keeps each wall as an implicit
+/// offset surface, which the record writes as its certified net within the face's approximation
+/// tolerance, keeping the offset as its definition, and reads back to the same record.
+#[test]
+fn an_implicit_offset_wall_goes_round_as_its_certified_net() {
+    for d in [2.0, -2.0] {
+        let mut k = kernel();
+        let mut body = elliptic_cylinder(&mut k, 40.0, 15.0, 10.0);
+        let options = OffsetOptions {
+            distance: d,
+            extend_convex_edges: true,
+            merge_results: true,
+        };
+        let mut offset = offset_brep_simple(&mut k, &mut body, options).unwrap();
+        let (record, _) = to_record(&mut k, &mut offset).unwrap_or_else(|e| panic!("d = {d}: {e}"));
+        let definitions = record
+            .faces
+            .iter()
+            .filter(|f| {
+                matches!(&f.surface, Surface::Blend { definition }
+                if matches!(
+                    definition.as_ref(),
+                    solidcore_record::brep::blend::BlendDefinition::Offset(_)
+                ))
+            })
+            .count();
+        assert!(definitions > 0, "d = {d}: the walls keep their offset");
+        let (mut back, _) =
+            to_kernel(&mut k, &record, true).unwrap_or_else(|e| panic!("d = {d}: {e}"));
+        let (again, _) = to_record(&mut k, &mut back).unwrap_or_else(|e| panic!("d = {d}: {e}"));
+        // the faces' surfaces, definitions and nets, bit for bit: the part this change is about.
+        // The edges' fitted pcurves are the kernel's own trims and move by rounding on a second
+        // write (SolidCraft #21927: a record that does not settle on a second write); that is
+        // outside the offset definition and is not compared here.
+        let faces = |r: &solidcore_record::brep::Brep| {
+            r.faces
+                .iter()
+                .map(|f| (f.surface.clone(), f.nurbs.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(faces(&again), faces(&record), "d = {d}");
+    }
 }
