@@ -344,6 +344,13 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
         return Ok(());
     }
     let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    // A fresh pin uses the compact constraint grid, even if an earlier drag made it full-size.
+    if tab == "SKETCH"
+        && crate::workspace::constraint_cell(id)
+        && let Some(ids) = app.toolbar_custom.gallery_buttons.get_mut(&format!("{WORKSPACE}/{tab}"))
+    {
+        ids.retain(|c| c != id);
+    }
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
     app.toolbar_custom.panels.insert(key(tab, panel), ids);

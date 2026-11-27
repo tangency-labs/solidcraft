@@ -1,9 +1,46 @@
 //! The 2D arithmetic of a sketch's arc snaps, on plain `[f64; 2]` points and directions: the
 //! circle through three points, the arc a typed radius or sweep gives, the tangent arc, the
-//! perpendicular bisector's centre and the direction a curve leaves a point in. The numbers are
-//! the kernel's (`solidcore::math`, `*_2d`); ops passes them on, so an application computes none.
+//! perpendicular bisector's centre and the direction a curve leaves a point in, and the side of a
+//! sketch curve a profile lies on. The numbers are the kernel's (`solidcore::math`, `*_2d`); ops
+//! passes them on, so an application computes none.
 
 use solidcore::math;
+
+/// The distance between two points (an arc's radius, from its centre and an end).
+#[must_use]
+pub fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    math::distance_2d(a, b)
+}
+
+/// Whether the region on the left of the piece from `a` to `b` of a counter-clockwise loop
+/// lies left of the line from `p` to `q` (`Some(true)`) or right of it (`Some(false)`); `None`
+/// when the piece is not on that line, within `tol` times its size.
+#[must_use]
+pub fn left_side_along_line(
+    a: [f64; 2],
+    b: [f64; 2],
+    p: [f64; 2],
+    q: [f64; 2],
+    tol: f64,
+) -> Option<bool> {
+    math::left_side_along_line_2d(a, b, p, q, tol)
+}
+
+/// Whether the region on the left of an arc piece of a counter-clockwise loop (about `centre`
+/// with `radius`, sweeping `sweep` radians) lies inside the circle about `c` of radius `r`
+/// (`Some(true)`) or outside it (`Some(false)`); `None` when the piece is not on that circle,
+/// within `tol` times its size.
+#[must_use]
+pub fn left_side_inside_circle(
+    centre: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    c: [f64; 2],
+    r: f64,
+    tol: f64,
+) -> Option<bool> {
+    math::left_side_inside_circle_2d(centre, radius, sweep, c, r, tol)
+}
 
 /// The unit direction from `from` to `to`; `None` where they coincide or are not finite.
 #[must_use]
