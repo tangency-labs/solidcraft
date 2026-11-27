@@ -190,6 +190,11 @@ jobs:
       # jobs with a target/ disk still build, without testing, so the disks main writes follow
       # main and a pull request recompiles only what it changed.
       warm: ${{ steps.paths.outputs.warm }}
+      # The build-variant checks (Shared crates build on their own, Build without usage statistics):
+      # every run with `native` but a pull request, which runs them only when it touches what they
+      # guard; the batch runs them before every merge.
+      shared: ${{ steps.paths.outputs.shared }}
+      no_usage_stats: ${{ steps.paths.outputs.no_usage_stats }}
       # The key a passing SolidCore result is kept under (its tree and the CI that tested it), and
       # the run whose result for that exact key this run reuses instead of testing again.
       solidcore_key: ${{ steps.paths.outputs.solidcore_key }}
@@ -460,19 +465,37 @@ jobs:
             oracle=false
             solidcore=false
           fi
-          # A push that only merges main into the change (Merge branch 'main', Update branch) when
-          # the change itself already passed: nothing new to test here, and main tests the merged
-          # result after it lands. Over three days, 872 of 1,241 such merges brought in nothing that
+          # A change that already passed (scripts/ci/main_merge.py): the same commit again (a label
+          # added again, approved-for-ci after a pass, a reopen), a "Re-run all jobs" after a pass, a
+          # commit with the same tree, or a push that only merges main into the change (Merge branch
+          # 'main', Update branch). Nothing new to test here, and the batch tests the merged
+          # result before it lands. Over 11 hours on 2026-11-26, 827 pull request runs covered 524
+          # heads: one full run per head is the goal. Over three days, 872 of 1,241 such merges brought in nothing that
           # touched the pull request's files, and each restarted the whole run.
           carried=
           if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
             carried=$(python3 -I scripts/ci/main_merge.py --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$REPO" \
-              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" | sed -n 's/^carried=//p')
+              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" | sed -n 's/^carried=//p')
             if [ -n "$carried" ]; then
-              echo "Only a merge of main into a change that passed in $carried: repository checks only."
+              echo "This change already passed in $carried: repository checks only."
               native=false
               solidcore=false
             fi
+          fi
+          # The build-variant checks guard the manifests and the feature-gated code. On a pull request
+          # they run only for a change that reaches them; merge groups, batches, main and the nightly
+          # always run them with the native checks, so nothing lands without them. Shared crates:
+          # a manifest or the lockfile (a shared crate's dependencies) or the check itself. Without
+          # usage statistics: a manifest, the lockfile, or a diff that mentions the feature.
+          shared=$native
+          no_usage_stats=$native
+          if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
+            shared=$deps
+            no_usage_stats=$deps
+            if grep -qxzE 'xtask/src/(shared|layers)\.rs' "$RUNNER_TEMP/ci-paths"; then shared=true; fi
+            if git diff "$BASE_SHA...$HEAD_SHA" | grep -qE '^[+-].*usage[-_]stats'; then no_usage_stats=true; fi
+            echo "shared=$shared no_usage_stats=$no_usage_stats (pull request: only when it touches what they guard)"
           fi
           # SolidCore's tests and checks read nothing outside solidcore/ (its own lockfile, toolchain
           # file and test data are inside it) but the steps that run them: this workflow and the
@@ -544,6 +567,8 @@ jobs:
             echo "batch_base=${batch_base:-}"
             echo "queue_tested=$queue_tested"
             echo "warm=$warm"
+            echo "shared=$shared"
+            echo "no_usage_stats=$no_usage_stats"
             echo "solidcore_key=$solidcore_key"
             echo "solidcore_reused=$solidcore_reused"
             echo "full=$full"
@@ -725,7 +750,7 @@ jobs:
     # what makes them movable to their own repository (#12935). The check builds them in a
     # scratch workspace, so it compiles the kernel and the UI stack again: it is a build, not
     # a static check, and it belongs in the heavy lane.
-    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true'
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.warm == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
@@ -1472,7 +1497,7 @@ jobs:
   no-usage-stats:
     name: Build without usage statistics
     needs: changes
-    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true'
+    if: needs.changes.outputs.no_usage_stats == 'true' || needs.changes.outputs.warm == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
     steps:
@@ -1590,8 +1615,11 @@ jobs:
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
-          # The shared crates build on their own: that job runs with the native flag, like Clippy.
+          # The build-variant checks: with the native flag, except on a pull request that does not
+          # touch what they guard (Select checks' `shared` and `no_usage_stats`).
+          SHARED_RUN: ${{ needs.changes.outputs.shared }}
           SHARED: ${{ needs.shared-crates.result }}
+          NO_USAGE_STATS_RUN: ${{ needs.changes.outputs.no_usage_stats }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1630,12 +1658,16 @@ jobs:
           fi
           if [ "$NATIVE" = true ]; then
             test "$CLIPPY" = success
-            test "$SHARED" = success
             # The archive for the action matrix and property tests exists nightly and by hand only.
             if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+          fi
+          if [ "$SHARED_RUN" = true ]; then
+            test "$SHARED" = success
+          fi
+          if [ "$NO_USAGE_STATS_RUN" = true ]; then
             test "$NO_USAGE_STATS" = success
           fi
           # The same output decides whether the GPU path tests run (their job's `if`).
