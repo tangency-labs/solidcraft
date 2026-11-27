@@ -223,8 +223,6 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
             let t = a.cross(radial0);
             let tangent0 = if t.dot(reading) >= 0.0 { t } else { -t };
             let (u0, z0) = ((plane.origin - o).dot(tangent0), (plane.origin - o).dot(a));
-            // Through the ring near the region, short of its far side.
-            let pad = ((d + overlap) * 2.5 + 2.0).min(r);
             let angles: Vec<_> = wall.iter().map(|f| wall_angles(&rec, *f, o, a, radial0, tangent0)).collect();
             let tau = std::f64::consts::TAU;
             // A sketch point's angle about the axis and height along it, as the wall lays it out.
@@ -259,6 +257,12 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                 let (x, y) = if along_axis { (a * kx.signum(), tangent) } else { (tangent, a * ky.signum()) };
                 // The region keeps its sketch coordinates: the frame's origin sits so its centroid lands on the wall.
                 let Some(local) = Plane::new(at_c - x * c.x - y * c.y, x, y) else { continue };
+                // Through the ring under the whole region, where the wall falls `sag` away from the
+                // region's tangent plane at its widest, short of the ring's far side.
+                let w = if along_axis { (c.y - lo2.y).max(hi2.y - c.y) } else { (c.x - lo2.x).max(hi2.x - c.x) };
+                let sag = r - (r * r - w * w).max(0.0).sqrt();
+                let far = (r + (r_in * r_in - w * w).max(0.0).sqrt() - overlap).max(r);
+                let pad = ((d + overlap) * 2.5 + 2.0 + sag).min(far);
                 prisms.extend(crate::extrude(&local, std::slice::from_ref(reg), -pad, pad)?);
             }
             slab
