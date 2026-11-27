@@ -10,6 +10,8 @@
 //! | [`Tangency`]            | (none)   |
 //! | [`g2_all_along`], [`G2`] | (none)   |
 //! | `bernstein_roots` (private) | (none) |
+//! | [`tube_regularity`], [`TubeRegularity`] | (none) |
+//! | [`side_along`], [`SideAlong`] | (none; SMLib's `EvaluateBinormal` gives one point's) |
 //!
 //! **The polynomials.** Each use of the edge carries its pcurve `(u(t), v(t)) = (X, Y) / W`
 //! on the edge's own parameter `t`, and its face's surface is its NURBS form `A / w` in the
@@ -148,6 +150,36 @@
 //! without a bounded margin.
 
 //!
+//! **A rounded offset's tube ([`tube_regularity`]).** A rounded offset caps a convex edge
+//! `c(t)` with the tube of radius `d` about it: the points `c + d u` for `u` on the arc
+//! between the two face use normals turned to the offset's side (#13685). That sweep is
+//! regular where `1 - d (u . k) > 0`, `k = (c'' - (c'' . c') c' / |c'|^2) / |c'|^2` the
+//! curvature vector (no Frenet frame: `k` is defined, and small, where the edge is straight),
+//! and folds over itself past it. On a piece of `t`, `c'` and `c''` are enclosed from the
+//! edge's NURBS form (`curve_derivs_over`) and the normals from the uses' `F` (as above), and
+//! `max over the arc of u . k` is bounded twice: from below by the arc's two ends (their
+//! enclosures' lower ends), or by `|k_p|` (`k_p` the projection of `k` on the arc's plane)
+//! where `k_p`'s direction is proved inside the arc; from above by `|k|` unless `k_p`'s
+//! direction is proved outside the arc, and then by the two ends. A piece whose lower bound
+//! times `d` is at least 1 is a fold; one whose upper bound times `d` is below 1 is regular;
+//! any other is halved, at most `MAX_TUBE_HALVINGS` times and to at most `MAX_TUBE_PIECES`
+//! pieces an edge, and is undecided past them. A piece whose normals or speed are not proved
+//! non-zero has no bound and is halved likewise. Where the normals are within rounding of one
+//! line (`1 - g^2`, `g = u_a . u_c`, not proved positive), the arc is short only if `g` is proved
+//! positive: then its ends plus `|k| sqrt(1 - g^2)` bound it from above; else (the normals near
+//! opposite, the arc near a half circle) only `|k|` does. The normals are the face uses' on
+//! the side of the edge use the offset builds from (their mates' turned round, when the edge's
+//! first use is on the other side). A blend's net only approximates its definition: where a
+//! use carries a margin `m` (the angle within which its definition's normal lies of its net's,
+//! as above), every point of the definition's arc lies within `2 m / (cos(theta / 2) - m)` of
+//! the net's arc (`cos(theta / 2) = sqrt((1 + g) / 2)`, the arcs matched by their chords'
+//! points), so both bounds widen by `|k|` times that; a piece whose margin is too loose is
+//! halved, and one whose definition is not enclosed is undecided. A fold names the largest radius at which the
+//! tube is proved not to fold (only the tube: other defects can appear at or near it):
+//! with `L` the largest lower bound over the pieces proved to fold, no radius past `U = 1 / L`
+//! is regular (the tube folds there on that piece), and `U <= d`; the same decision is run at
+//! `U (1 - 2^-j)` for `j` = 8 down to 1, and the first proved regular is named, none if none is.
+//!
 //! **G2: the curvature across ([`g2_all_along`]).** Each use's normal curvature across the
 //! edge (in the tangent plane, square to the edge) is the shape operator's trace less the
 //! normal curvature along the pcurve's tangent, `k = 2H - II(T) / I(T)`, so no direction across
@@ -202,6 +234,7 @@
 //! off an end a knot line runs through) and `MAX_SPLITS` (12) times to bound it, on an explicit stack; each piece
 //! between the pcurves' knots evaluates at most `MAX_POINTS` (one million) points of a cross product of degree at most `MAX_DEGREE` (4096).
 
+use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
 use crate::blend::fillet_section::definition_box::{definition_partials_over_box, gn_def_face_of};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
@@ -247,6 +280,14 @@ pub(crate) const MAX_DEPTH: u32 = 48;
 /// Subdivisions one root isolation may make: a root that touches its knot line (a double
 /// root, the only kind that keeps two sign changes as the pieces shrink) costs one a level.
 pub(crate) const MAX_SUBDIVISIONS: usize = 4096;
+/// Halvings of one piece [`tube_regularity`] makes before leaving it undecided: a piece is
+/// then 2^-16 of one between the pcurves' knots. A work budget (#13685).
+pub(crate) const MAX_TUBE_HALVINGS: u32 = 16;
+/// Pieces [`tube_regularity`] decides on one edge: past it the rest are undecided. Over the
+/// offset goldens and the kernel shell cases (13685-tubeprobe-4) a decided edge took at most
+/// 2119 pieces; the two edges that reached this budget were left undecided near the limit,
+/// on bodies whose check fails. A work budget, not a tolerance.
+pub(crate) const MAX_TUBE_PIECES: usize = 4096;
 /// The least cosine between a face use's normal from the face's evaluator and from its net
 /// at one point: below it the net is not the face's surface and the face is refused.
 const SAME_SURFACE_COS: f64 = 0.5;
@@ -2690,6 +2731,549 @@ fn g2_within(
         (None, None) => G2::Continuous,
     };
     Ok((Some(verdict), points))
+}
+
+/// The answer of [`tube_regularity`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TubeRegularity {
+    /// The tube is proved regular all along the edge.
+    Regular,
+    /// It folds over itself somewhere along the edge: `largest` is the largest radius at which
+    /// the tube is proved regular (module docs), `None` where none of the sizes tried is.
+    Folds {
+        /// The largest tube radius proved regular, when one is.
+        largest: Option<f64>,
+    },
+    /// It is neither proved regular nor proved to fold: a piece is undecided past the budget,
+    /// or the edge has no two face uses, or its curve no NURBS form, to decide it on.
+    NotCertified,
+}
+
+/// `[lower, upper]` of `max over the arc of u . k` on the piece `s` of the edge, times the
+/// sign: `None` where it has no bound (a speed or a normal not proved non-zero, or an
+/// evaluation that failed). Module docs.
+fn tube_bounds(
+    cn: &NurbsCurve,
+    pair: &Pair,
+    sigma: Ivl,
+    s: Ivl,
+    margin: f64,
+) -> Option<(f64, f64)> {
+    let one = Ivl::from(1.0);
+    let ders = curve_derivs_over(cn, s, 2, None).ok()?;
+    let (d1, d2) = (ders.get(1)?, ders.get(2)?);
+    let c1 = [d1.x, d1.y, d1.z];
+    let c2 = [d2.x, d2.y, d2.z];
+    let speed2 = dot(c1, c1);
+    if !speed2.is_positive() {
+        return None;
+    }
+    // k = (c'' - (c'' . c') c' / |c'|^2) / |c'|^2
+    let along = dot(c2, c1) / speed2;
+    let kv = scale(sub3(c2, scale(c1, along)), one / speed2);
+    let fa = pair.a.f(s).ok()?;
+    let fc = pair.c.f(s).ok()?;
+    let (na, nc) = (norm(fa), norm(fc));
+    if !na.is_positive() || !nc.is_positive() {
+        return None;
+    }
+    let ua = scale(fa, sigma / na);
+    let uc = scale(fc, sigma / nc);
+    let (ea, ec) = (dot(ua, kv), dot(uc, kv));
+    let g = dot(ua, uc);
+    let det = one - g * g;
+    let ends_lo = ea.lo.max(ec.lo);
+    let ends_hi = ea.hi.max(ec.hi);
+    let kmag = norm(kv);
+    // a blend's definition arc lies within `widen / |k|` of its net's (module docs)
+    let widen = if margin > 0.0 {
+        let half = (one + g) * Ivl::from(0.5);
+        if !half.is_positive() {
+            return None;
+        }
+        let w = half.sqrt() - Ivl::from(margin);
+        if !w.is_positive() {
+            return None;
+        }
+        (Ivl::from(2.0 * margin) / w * Ivl::from(kmag.hi)).hi
+    } else {
+        0.0
+    };
+    let widened = |(lo, hi): (f64, f64)| {
+        Some((
+            (Ivl::from(lo) - Ivl::from(widen)).lo,
+            (Ivl::from(hi) + Ivl::from(widen)).hi,
+        ))
+    };
+    if !det.is_positive() {
+        if g.lo > 0.0 {
+            // the arc is within rounding of a point: its ends bound it, plus |k| for the rest
+            let rest = Ivl::from(kmag.hi) * Ivl::from(det.hi.max(0.0)).sqrt();
+            return widened((ends_lo, (Ivl::from(ends_hi.max(0.0)) + rest).hi));
+        }
+        // the normals near opposite: the arc is near a half circle, and may hold k's direction
+        return widened((ends_lo, kmag.hi.max(ends_hi)));
+    }
+    // k_p = alpha u_a + beta u_c, its direction inside the arc where both are positive
+    let alpha = (ea - g * ec) / det;
+    let beta = (ec - g * ea) / det;
+    if alpha.lo > 0.0 && beta.lo > 0.0 {
+        let kp = Ivl::from((alpha * ea + beta * ec).lo.max(0.0)).sqrt();
+        widened((kp.lo.max(ends_lo), kmag.hi))
+    } else if alpha.hi < 0.0 || beta.hi < 0.0 {
+        widened((ends_lo, ends_hi))
+    } else {
+        widened((ends_lo, kmag.hi))
+    }
+}
+
+/// What one run of the tube decision found: a fold, and the largest lower bound of
+/// `max over the arc of u . k` over the pieces proved to fold (so `1 / least` bounds the
+/// largest regular radius from above); or regular; or undecided.
+enum TubeRun {
+    Regular,
+    Folds { least: f64 },
+    Undecided,
+}
+
+/// The tube decision at radius `d` (module docs). With `regular_only` it asks only whether the
+/// tube is proved regular, and stops at the first piece that folds or is left undecided (then
+/// [`TubeRun::Undecided`]): the sizing's runs need no more, and a radius past the limit is
+/// then not decided over the whole edge.
+fn tube_run(
+    k: &Kernel,
+    cn: &NurbsCurve,
+    pair: &Pair,
+    sigma: Ivl,
+    d: f64,
+    regular_only: bool,
+) -> Result<TubeRun> {
+    let di = Ivl::from(d);
+    let (mut folds, mut undecided, mut count) = (false, false, 0usize);
+    let mut least = f64::NEG_INFINITY;
+    let mut stack: Vec<(f64, f64, u32)> = pieces(&pair.breaks)
+        .into_iter()
+        .map(|(a, z)| (a, z, 0))
+        .collect();
+    while let Some((a, z, depth)) = stack.pop() {
+        if count % POLL_POINTS == 0 {
+            k.check_cancelled(OP)?;
+        }
+        count += 1;
+        // a blend's margin over the piece (module docs): none for other faces
+        let margin = if pair.a.definition.is_some() || pair.c.definition.is_some() {
+            match pair.margin(k, a, z)? {
+                Margin::Bounded(m) => Some(m),
+                Margin::Loose => None,
+                Margin::NotEnclosed => {
+                    if regular_only {
+                        return Ok(TubeRun::Undecided);
+                    }
+                    undecided = true;
+                    continue;
+                }
+            }
+        } else {
+            Some(0.0)
+        };
+        let bounds = margin.and_then(|m| tube_bounds(cn, pair, sigma, Ivl::new(a, z), m));
+        match bounds {
+            Some((lo, _)) if (di * Ivl::from(lo)).lo >= 1.0 => {
+                if regular_only {
+                    return Ok(TubeRun::Undecided);
+                }
+                folds = true;
+                least = least.max(lo);
+            }
+            Some((_, hi)) if (di * Ivl::from(hi)).hi < 1.0 => {}
+            _ => {
+                let m = 0.5 * (a + z);
+                if depth < MAX_TUBE_HALVINGS
+                    && count + stack.len() + 2 <= MAX_TUBE_PIECES
+                    && a < m
+                    && m < z
+                {
+                    stack.push((m, z, depth + 1));
+                    stack.push((a, m, depth + 1));
+                } else if regular_only {
+                    return Ok(TubeRun::Undecided);
+                } else {
+                    undecided = true;
+                }
+            }
+        }
+    }
+    Ok(if folds {
+        TubeRun::Folds { least }
+    } else if undecided {
+        TubeRun::Undecided
+    } else {
+        TubeRun::Regular
+    })
+}
+
+/// Whether the tube of radius `d` a rounded offset caps the edge of `eu` with is regular: the
+/// sweep of `c + d u`, `u` on the arc between the normals of the edge's two face uses on the
+/// side of `eu`'s face use, turned against them unless `outward` (module docs, "A rounded
+/// offset's tube"). A fold names the largest radius at which the tube is proved regular.
+///
+/// # Errors
+///
+/// A cancellation; those of reading the edge and its uses. An edge not between two face uses,
+/// one whose curve has no NURBS form, or whose uses' normals cannot be read, is
+/// [`TubeRegularity::NotCertified`], not an error.
+pub fn tube_regularity(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    d: f64,
+    outward: bool,
+) -> Result<TubeRegularity> {
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(TubeRegularity::NotCertified);
+    };
+    let pair = match Pair::of(k, b, e) {
+        Ok(Some(p)) => p,
+        Err(err) if err.is_unported_or_cancelled() => return Err(err),
+        Ok(None) | Err(_) => return Ok(TubeRegularity::NotCertified),
+    };
+    // the pair's uses are the edge's first use and its radial, on one side of the faces: the
+    // normals are turned round where `eu` is on the other side (its mate is one of them)
+    let side = if eu == pair.a.eu || eu == pair.c.eu {
+        1.0
+    } else {
+        match eu1::mate(b, eu)? {
+            Some(m) if m == pair.a.eu || m == pair.c.eu => -1.0,
+            _ => return Ok(TubeRegularity::NotCertified),
+        }
+    };
+    let Some(cn) = edge_nurbs(b, e)? else {
+        return Ok(TubeRegularity::NotCertified);
+    };
+    let sigma = Ivl::from(if outward { side } else { -side });
+    let least = match tube_run(k, &cn, &pair, sigma, d, false)? {
+        TubeRun::Regular => return Ok(TubeRegularity::Regular),
+        TubeRun::Undecided => return Ok(TubeRegularity::NotCertified),
+        TubeRun::Folds { least } => least,
+    };
+    // the largest radius named: `upper = 1 / least` bounds every regular radius from above (a
+    // piece where `max u . k >= least` folds past it), so the first of `upper (1 - 2^-j)`,
+    // j = 8 down to 1, the decision proves regular
+    let upper = 1.0 / least;
+    let mut largest = None;
+    if upper.is_finite() && upper > 0.0 {
+        for j in (1..=8).rev() {
+            let r = upper * (1.0 - (-f64::from(j)).exp2());
+            if r < d && matches!(tube_run(k, &cn, &pair, sigma, r, true)?, TubeRun::Regular) {
+                largest = Some(r);
+                break;
+            }
+        }
+    }
+    Ok(TubeRegularity::Folds { largest })
+}
+
+/// Edge `e`'s curve as NURBS data (a line, a conic or a B-spline curve); `None` for a curve with
+/// no NURBS form (or none whose data reads).
+///
+/// # Errors
+///
+/// A cancellation or an unported routine while reading it; those of reading the edge.
+fn edge_nurbs(b: &Brep, e: EdgeId) -> Result<Option<NurbsCurve>> {
+    use crate::curve::curve::CurveKind;
+    let Some(curve) = edge::curve(b, e)? else {
+        return Ok(None);
+    };
+    let line;
+    let base = match curve.kind() {
+        CurveKind::BSpline(c) => c,
+        CurveKind::Ellipse(c) => c.base(),
+        CurveKind::Parabola(c) => c.base(),
+        CurveKind::Hyperbola(c) => c.base(),
+        CurveKind::Line(c) => match c.base_with_nurb() {
+            Ok(l) => {
+                line = l;
+                &*line
+            }
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    Ok(NurbsCurve::of(base).ok())
+}
+
+/// `H = A' W - A W'` over `s` within one knot span of the curve (the span of its middle),
+/// enclosed: `W^2` times the curve's derivative, so the same direction, and a polynomial in the
+/// curve's parameter on the span. `None` where the basis is not enclosed.
+fn curve_h(cn: &NurbsCurve, s: Ivl) -> Option<I3> {
+    let p = cn.p;
+    let k = span(&cn.u, p, cn.n, s.mid());
+    let (n, dn) = basis(&cn.u, k, p, s)?;
+    let zero = Ivl::from(0.0);
+    let (mut a, mut da, mut w, mut dw) = ([zero; 3], [zero; 3], zero, zero);
+    for j in 0..=p {
+        let i = (k + j).checked_sub(p)?;
+        let c = cn.pw.get(4 * i..4 * i + 4)?;
+        let (nj, dj) = (*n.get(j)?, *dn.get(j)?);
+        for ((ax, dax), &cx) in a.iter_mut().zip(da.iter_mut()).zip(c) {
+            *ax = *ax + nj * Ivl::from(cx);
+            *dax = *dax + dj * Ivl::from(cx);
+        }
+        let cw = Ivl::from(*c.get(3)?);
+        w = w + nj * cw;
+        dw = dw + dj * cw;
+    }
+    let [x, y, z] = a;
+    let [dx, dy, dz] = da;
+    Some([dx * w - x * dw, dy * w - y * dw, dz * w - z * dw])
+}
+
+/// Halvings of one piece [`side_along`] makes before leaving it undecided: a piece is then
+/// 2^-24 of one between the knots. A work budget.
+const MAX_SIDE_HALVINGS: u32 = 24;
+
+/// Pieces [`side_along`] decides on one edge use before leaving it undecided. A work budget,
+/// not a tolerance.
+const MAX_SIDE_PIECES: usize = 4096;
+
+/// The answer of [`side_along`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SideAlong {
+    /// All along the edge, the binormal into the face has at most the part asked along the
+    /// direction.
+    Within,
+    /// The part is more at `at` (the edge's parameter): a point where it is proved, or the
+    /// middle of a piece all over which it is.
+    RunsOn {
+        /// Where it runs on.
+        at: f64,
+    },
+    /// A piece around `at` is not placed on either side, even halved, or the budget ran out.
+    Undecided {
+        /// The middle of the piece.
+        at: f64,
+    },
+}
+
+/// Whether the face of edge use `eu` runs on along `along` across the edge anywhere: the part
+/// along `along` of the unit binormal into the face (normal to the edge, in the face) is at
+/// most `max_part` all along the edge, proved over the whole edge interval, not at points.
+///
+/// The binormal is `sigma (F x H)` made unit: `F` the face use's normal along the pcurve,
+/// enclosed over a piece of the edge as [`tangent_all_along`] encloses it (module docs: the net's
+/// homogeneous point and partials over the pcurve's box, in rounded interval arithmetic), `H`
+/// the edge curve's derivative times `W^2` enclosed from its NURBS form (`curve_h`), and
+/// `sigma` the sign that turns it into the binormal [`evaluate_binormal`] gives, read once where
+/// the product is proved non-zero (a cosine under `SAME_SURFACE_COS` is refused, as for the
+/// face's normal). On a piece on one cell of the face's net, `sigma F . (H x along)` is a
+/// polynomial in the edge's parameter, bounded from its values at the piece's Chebyshev points
+/// as [`tangent_all_along`] bounds `Q` (module docs), and the piece is placed where that bound
+/// is within `max_part` times the floor of `|F x H| |along|` (a point past it runs on: a witness).
+/// Else `P = sigma (F x H) . along / (|F x H| |along|)` is enclosed over the piece: an
+/// upper end within `max_part` places the piece, a lower end past it is a piece all of which runs
+/// on ([`SideAlong::RunsOn`]), and any other piece is halved, at most `MAX_SIDE_HALVINGS` times
+/// and to at most `MAX_SIDE_PIECES` pieces, past which it is left undecided and the rest are
+/// still decided: a piece that runs on decides the edge, else one left undecided makes it
+/// [`SideAlong::Undecided`]. A piece whose product is not proved non-zero is halved the same way.
+/// The part's numerator is taken as `F . (H x along)`, the same triple product, so that zeros
+/// of `H x along` stay exact.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an `along` that is not finite or has no length, a `max_part`
+/// not finite in `(-1, 1)`, or a face use whose normal or binormal is not proved non-zero
+/// anywhere along the edge; [`SolidError::Unsupported`] for a procedural blend's or sweep's face
+/// (its net only approximates it), an edge whose curve has no NURBS form, and as [`tangent_all_along`]
+/// for the face and its pcurve; [`SolidError::Cancelled`] when the kernel's cancel token is
+/// cancelled; those of the evaluations.
+pub fn side_along(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    along: Vec3,
+    max_part: f64,
+) -> Result<SideAlong> {
+    let finite = [along.x, along.y, along.z].iter().all(|c| c.is_finite());
+    let part_ok = max_part.is_finite() && max_part > -1.0 && max_part < 1.0;
+    if !finite || !part_ok {
+        return Err(invalid("a direction and a part that are finite"));
+    }
+    let d = [Ivl::from(along.x), Ivl::from(along.y), Ivl::from(along.z)];
+    let nd = norm(d);
+    if !nd.is_positive() {
+        return Err(invalid("a direction of no length"));
+    }
+    let e = eu1::edge(b, eu)?.ok_or_else(|| invalid("an edge use without edge"))?;
+    let mut u = Use::new(k, b, eu)?;
+    // a procedural surface's net only approximates it (the definitions contract; the kinds
+    // `exact_nurbs_surface` turns down): the side is read on the net alone, so such a face is
+    // refused, not decided on the net
+    let procedural = {
+        let f = eu1::face(b, eu)?.ok_or_else(|| invalid("an edge use without face"))?;
+        b.face(f)?.surface.as_ref().is_some_and(|s| {
+            s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_))
+        })
+    };
+    if procedural || u.definition.is_some() {
+        return Err(unsupported(
+            "the side of an edge on a procedural blend or sweep (its net only approximates it)",
+        ));
+    }
+    let cn =
+        edge_nurbs(b, e)?.ok_or_else(|| unsupported("an edge whose curve has no NURBS form"))?;
+    let ivl = edge::interval(b, e)?;
+    let (t0, t1) = (ivl.min(), ivl.max());
+    let mut breaks = vec![t0, t1];
+    breaks.extend(u.nurb.knots().iter().copied().filter(|&t| t > t0 && t < t1));
+    breaks.extend(cn.u.iter().copied().filter(|&t| t > t0 && t < t1));
+    breaks.sort_by(f64::total_cmp);
+    breaks.dedup();
+    // `F` and `H = W^2 C'` over `s` (`None` where either is not enclosed)
+    let factors = |u: &Use, s: Ivl| -> Result<Option<(I3, I3)>> {
+        let Some(f) = u.f_box(s)? else {
+            return Ok(None);
+        };
+        Ok(curve_h(&cn, s).map(|h| (f, h)))
+    };
+    // the degree of `F . (H x d)` along a piece on one cell: `F`'s plus `H`'s (`W^2 C'` is
+    // `A' W - A W'`, of degree `2p - 2`, or `p - 1` where the weights are one value)
+    let rational = {
+        let w: Vec<f64> = cn.pw.chunks(4).filter_map(|c| c.get(3).copied()).collect();
+        w.first()
+            .is_some_and(|&first| w.iter().any(|&x| x != first))
+    };
+    let h_degree = if rational {
+        (2 * cn.p).saturating_sub(2)
+    } else {
+        cn.p.saturating_sub(1)
+    };
+    let degree = u.degree.saturating_add(h_degree);
+    let nodes = degree + 1;
+    let lebesgue_n = lebesgue(nodes);
+    // the face use's sense, then sigma, each at the first point where it can be read
+    let mut sigma = None;
+    'read: for (s0, s1) in pieces(&breaks) {
+        for t in chebyshev(s0, s1, 4) {
+            if u.sign.is_none() && !u.read_sign(k, b, t)? {
+                continue;
+            }
+            let Some(g) = factors(&u, Ivl::from(t))?.map(|(f, c1)| cross(f, c1)) else {
+                continue;
+            };
+            if !norm(g).is_positive() {
+                continue;
+            }
+            let mid = Vec3::new(g[0].mid(), g[1].mid(), g[2].mid());
+            let binormal =
+                evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())?.binormal;
+            let len = mid.length() * binormal.length();
+            if len.is_nan() || len <= 0.0 {
+                continue;
+            }
+            let c = mid.dot(binormal) / len;
+            if c.abs() < SAME_SURFACE_COS {
+                return Err(unsupported(
+                    "an edge use whose binormal and its NURBS forms' disagree",
+                ));
+            }
+            sigma = Some(Ivl::from(c.signum()));
+            break 'read;
+        }
+    }
+    let Some(sigma) = sigma else {
+        return Err(invalid(
+            "an edge use whose binormal is not proved non-zero anywhere along it",
+        ));
+    };
+    let mut stack: Vec<(f64, f64, u32)> = pieces(&breaks)
+        .into_iter()
+        .map(|(a, z)| (a, z, 0))
+        .collect();
+    let mut count = 0usize;
+    let mut undecided: Option<f64> = None;
+    while let Some((a, z, depth)) = stack.pop() {
+        if count % POLL_POINTS == 0 {
+            k.check_cancelled(OP)?;
+        }
+        count += 1;
+        let at = 0.5 * (a + z);
+        // the budget counts every piece, the knots' own too
+        if count > MAX_SIDE_PIECES {
+            return Ok(SideAlong::Undecided { at });
+        }
+        let piece = Ivl::new(a, z);
+        // on one cell, `sigma F . (H x d)` is a polynomial of degree `degree` in `t`: bounded from
+        // its values at the piece's Chebyshev points (module docs, `poly_range`), which are
+        // narrow where it is 0, against the floor of `|F x H| |d|` over the piece
+        if degree <= MAX_DEGREE && u.one_cell(piece)? {
+            let mut values = Vec::new();
+            let mut witness = None;
+            for t in chebyshev(a, z, nodes) {
+                let Some((f, h)) = factors(&u, Ivl::from(t))? else {
+                    values.clear();
+                    break;
+                };
+                let n = sigma * dot(f, cross(h, d));
+                let den = norm(cross(f, h)) * nd;
+                if den.is_positive() && (n / den).lo > max_part {
+                    witness = Some(t);
+                    break;
+                }
+                values.push(n);
+            }
+            if let Some(at) = witness {
+                return Ok(SideAlong::RunsOn { at });
+            }
+            let d2 = (degree as f64) * (degree as f64);
+            let eta = node_error(a, z) * d2 * (1.0 + gamma(2));
+            let floor = factors(&u, piece)?.map(|(f, h)| (norm(cross(f, h)) * nd).lo);
+            let placed = match (poly_range(&values, lebesgue_n, eta), floor) {
+                (Some(range), Some(floor)) => {
+                    !values.is_empty()
+                        && floor > 0.0
+                        && range.hi <= (Ivl::from(max_part) * Ivl::from(floor)).lo
+                }
+                _ => false,
+            };
+            if placed {
+                continue;
+            }
+        }
+        // the part as F . (H x d) / (|F x H| |d|), the triple product of (F x H) . d: where d
+        // and H have exact zeros (a direction along an axis, a curve in a coordinate plane) the
+        // zeros of H x d stay exact, where (F x H) . d would carry F's widths into them
+        let part = match factors(&u, piece)? {
+            Some((f, h)) => {
+                let ng = norm(cross(f, h));
+                ng.is_positive()
+                    .then(|| sigma * dot(f, cross(h, d)) / (ng * nd))
+            }
+            None => None,
+        };
+        match part {
+            Some(p) if p.hi <= max_part => {}
+            Some(p) if p.lo > max_part => return Ok(SideAlong::RunsOn { at }),
+            _ => {
+                if depth < MAX_SIDE_HALVINGS
+                    && count + stack.len() + 2 <= MAX_SIDE_PIECES
+                    && a < at
+                    && at < z
+                {
+                    stack.push((at, z, depth + 1));
+                    stack.push((a, at, depth + 1));
+                } else {
+                    // a piece around a point where the part crosses `max_part` is never placed:
+                    // go on, as another piece may run on all over
+                    undecided.get_or_insert(at);
+                }
+            }
+        }
+    }
+    if let Some(at) = undecided {
+        return Ok(SideAlong::Undecided { at });
+    }
+    Ok(SideAlong::Within)
 }
 
 #[cfg(test)]

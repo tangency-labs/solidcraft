@@ -8,6 +8,8 @@
 macro_rules! appearance_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// An accent colour (`#rrggbb`) over a theme that accepts one; empty (the default): the theme's.
+            accent: String = String::new(), PAGE_APPEARANCE;
             /// A picture behind the model in place of the view's background; empty for none.
             background_image: String = String::new(), PAGE_APPEARANCE;
             /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
@@ -34,6 +36,13 @@ macro_rules! appearance_preferences {
             /// The 3D view's background, one colour for the whole application (#7688), or `None` (the
             /// default) for the theme's gradient.
             viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
+            /// With `viewport_background` as the top colour, the 3D view's background at the bottom: a
+            /// gradient of the user's own (#9230). `None` (the default): `viewport_background` alone, one
+            /// colour; without `viewport_background` it does nothing.
+            viewport_background_bottom: Option<[u8; 3]> = None, PAGE_APPEARANCE;
+            /// A colour halfway down the user's gradient (#9230). `None` (the default): straight from top
+            /// to bottom; without `viewport_background_bottom` it does nothing.
+            viewport_background_middle: Option<[u8; 3]> = None, PAGE_APPEARANCE;
             /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
             /// uses (#4146).
             viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;

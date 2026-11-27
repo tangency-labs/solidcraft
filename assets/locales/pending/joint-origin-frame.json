@@ -22,5 +22,9 @@
   "zh": {
     "cmd.joint_origin_frame": "将原点导出为坐标系",
     "Export as a robot frame": "导出为机器人坐标系"
+  },
+  "fr": {
+    "cmd.joint_origin_frame": "Exporter l’origine comme repère",
+    "Export as a robot frame": "Exporter comme repère robot"
   }
 }

@@ -101,6 +101,11 @@ SolidCraft changes to egui and eframe:
   once. The control channel (#743) serves a request with it without waiting for the compositor's
   next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
   stalled each request for up to a second. Normal redraws still paint.
+- `crates/egui/src/viewport.rs`, `crates/egui-winit/src/lib.rs`, `winit/src/platform/macos.rs`,
+  `winit/src/platform_impl/macos/window_delegate.rs`: `ViewportCommand::TitlebarButtonsHidden(bool)`
+  hides or shows the traffic lights of an open macOS window (winit's `with_titlebar_buttons_hidden`
+  only worked at creation, and changing it by recreating the window loses the native frame). No
+  effect on other systems.
 
 - `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
   `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
@@ -137,6 +142,11 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   guarantees 1x and 4x).
 - `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
   instead of exactly 8192.
+- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
+  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
+  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
+  defaults refused the device, so no window opened. An adapter at or above the defaults gets
+  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which
@@ -268,6 +278,15 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/drop_handler.rs`, `src/platform_impl/linux/x11/event_processor.rs`:
+  while files are dragged over a window, send `WindowEvent::CursorMoved` with where the drag is
+  (Windows: `IDropTarget`'s `DragEnter`, `DragOver` and `Drop`, screen to client coordinates;
+  X11: each `XdndPosition`, root to window coordinates). winit 0.30 gives `HoveredFile` and
+  `DroppedFile` no position, and neither platform sends the window pointer motion while a drag
+  runs, so the app could not tell where files were dropped (the design tabs open files dropped
+  on them at that place). macOS and Wayland are unchanged.
+- `src/platform_impl/windows/definitions.rs`: `IDropTarget`'s `pt` is a `POINTL` passed by value,
+  as COM declares it; winit 0.30 declared a pointer, harmless only while nothing read it.
 - `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
   (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
   the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
@@ -282,3 +301,37 @@ SolidCraft changes:
   of the window) has no resize borders to keep and is winit's own, as is a maximized one. The
   hit test itself is the app's (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this
   copy.
+- `src/platform_impl/windows/event_loop.rs`, `util.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_touchpad_wheels`): a process-wide switch, off by default, which is winit's own behaviour.
+  Windows sends a precision touchpad's two-finger scroll as the wheel messages a mouse sends, so
+  winit reported it as lines, and in the SolidCraft presets it zoomed (vertical) or did nothing
+  (horizontal) (#15353). On, the event loop thread is registered with
+  `RegisterTouchpadCapableThread` (looked up by name; absent or failing means off), touchpad
+  `WM_POINTER` contacts go to `DefWindowProc` instead of becoming touches, and a touchpad's wheel
+  message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
+  factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
+  `LineDelta`. The registration is undone when the event loop drops.
+- `src/platform_impl/windows/keyboard_layout.rs`, `window_state.rs`, `event_loop.rs`
+  (`get_agnostic_mods_async`, `effective_modifiers`): while unfocused or gaining focus, read
+  modifier keys with `GetAsyncKeyState` (keeping AltGr filtering) and hold any pre-focus
+  modifiers in `WindowState::inherited_modifiers` until the thread's synchronous `GetKeyState`
+  observes them or the key is physically released. Clicking into an unfocused window while holding
+  Ctrl/Shift/Alt from another application otherwise saw stale `GetKeyState == 0` until the
+  modifier was released and pressed again (#20352). Test:
+  `effective_modifiers_tracks_unfocused_and_inherited_keys` (Windows).
+- `src/window.rs` (`WindowAttributes::with_owned_by`), `src/platform_impl/windows/window.rs`,
+  `linux/x11/window.rs`, `linux/wayland/window/mod.rs`, `macos/window_delegate.rs`, `macos/window.rs`:
+  a top-level window can name a live owner (#20252). Windows gives it a Win32 owner, X11 a
+  transient hint and Wayland an XDG toplevel parent. On macOS the owner keeps a list of the windows
+  it owns and puts them right above itself whenever it becomes the key window
+  (`raise_owned_windows`), which is what an owner does there: they come forward with it. When
+  it is minimized it takes them off the screen, and it brings those back when it is restored
+  (`hide_owned_windows`, `show_owned_windows`). When it moves, they move by what its top left
+  corner moved, as a child window does (`move_owned_windows`). While it is full screen they are
+  full-screen auxiliary windows that move to the active space, so they show in its space above
+  it and raising them does not leave that space; one on another screen stays there
+  (`owned_windows_join_full_screen`, undone by `owned_windows_leave_full_screen`). They are not AppKit child
+  windows. A child window is kept on its parent's screen, so one dragged to another screen
+  jumped back when the drag ended, and one opened on another screen did not come forward with
+  its parent (#22313). A window with an explicit parent
+  (`WindowAttributes::with_parent_window`) is a child window as in winit.

@@ -16,8 +16,10 @@
 //! Surfaces*, §3.2 (normal sections, Meusnier).
 
 pub mod agreement;
+mod boundary_reparam;
 pub mod check;
 pub mod collapse;
+pub mod constraint;
 pub mod curve;
 pub mod folded;
 pub mod form;
@@ -40,7 +42,7 @@ pub mod vec;
 
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
-pub use geometry::{Curve, Curve2, Frame, Surface};
+pub use geometry::{Curve, Curve2, Curve2Eval, Frame, Surface};
 pub use spline::{
     EvalCurve, EvalSurface, Partials, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_PARTIAL_ORDER,
     MAX_SPLINE_DEGREE,

@@ -239,7 +239,7 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let state = app.session.world_state().ok();
     let changes = after.and_then(|after| crate::preview::sketch_changes(state.as_ref().and_then(|state| state.sketch(sketch)), &after));
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget));
+    let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget, None));
     crate::scenario::publish_count("dimwin:preview_curves", curves as f64);
 }
 
@@ -315,7 +315,9 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.
-    let on_window = ctx.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p))));
+    let on_window = ctx.input(|i| {
+        (i.pointer.any_pressed() || i.pointer.any_click()) && i.pointer.interact_pos().is_some_and(|p| last.is_some_and(|r| r.contains(p)))
+    });
     let mut answer: Option<bool> = None;
     let mut escaped = false;
     let mut by = 0.0;
@@ -351,8 +353,12 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         if r.has_focus() {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                         }
-                        if crate::expression_complete::complete(ui, &r, &mut e.expr) {
+                        let completed = crate::expression_complete::complete(ui, &r, &mut e.expr);
+                        if completed {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
+                        }
+                        if r.changed() || completed {
+                            e.create_variable = None;
                         }
                         let can_step = step(&e.expr, 1.0).is_some();
                         let tip = |id: &str| {
@@ -386,9 +392,10 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 } else {
                     ui.data_mut(|d| d.remove::<f32>(wheel));
                 }
-                if let Some(error) = &error {
+                if let Some(error) = e.create_variable.as_ref().map(|offer| &offer.error).or(error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                 }
+                let create = super::create_variable_button(ui, e.create_variable.as_ref());
                 // The user parameters the value names, each in its own field (#16319).
                 let row_state = parameter_fields(app, ui, id, width, e, &rows, row_error.is_some());
                 if !rows.is_empty() {
@@ -410,21 +417,40 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let in_row = row_state.focused || on_row;
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let left = r.lost_focus() || row_state.lost;
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                let in_viewport =
+                    pointer_pos.is_some_and(|p| app.viewport.rect.is_none_or(|view| view.contains(p)) && !crate::shell::covered(app, p));
+                let left_click_outside = !on_window && in_viewport && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
+                    && pointer_pos.is_some_and(|p| super::hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                let lost_or_outside_press =
+                    left || (e.live.is_none() && (r.has_focus() || row_state.focused) && in_viewport && ui.input(|i| i.pointer.primary_pressed()));
                 let field = if left && enter {
                     Some(true)
-                } else if in_row {
+                } else if in_row && !left_click_outside {
                     None
-                } else if e.fresh > 0 || on_window || by != 0.0 {
+                } else if e.fresh > 0 || on_window || by != 0.0 || (lost_or_outside_press && press_on_reference) {
                     if !r.has_focus() {
                         r.request_focus();
                     }
                     None
+                } else if e.live.is_none() && lost_or_outside_press && left_click_outside {
+                    if !ui.input(|i| i.pointer.primary_clicked()) {
+                        super::CONSUMED_OUTSIDE_PRESS.set(true);
+                    }
+                    Some(true)
                 } else if left && !r.has_focus() {
                     Some(false)
                 } else {
                     None
                 };
                 answer = answer.or(field);
+                if create && let Some(offer) = e.create_variable.take() {
+                    e.expr = offer.definition;
+                    e.owned = true;
+                    e.typed = true;
+                    answer = Some(true);
+                }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     answer = Some(false);
                     escaped = true;
@@ -440,6 +466,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         && let Some(stepped) = step(&e.expr, by)
     {
         e.expr = stepped;
+        e.create_variable = None;
         // The whole new value is selected, so typing replaces it.
         select_all(ctx, id, e);
         ctx.request_repaint();

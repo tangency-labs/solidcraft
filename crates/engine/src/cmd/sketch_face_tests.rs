@@ -1109,3 +1109,17 @@ fn a_face_of_a_moved_and_turned_component_is_picked_by_its_world_point() {
         assert!((plane.origin.z - 40.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
     }
 }
+
+/// A sphere resting on a box's top touches it at one point, and the point is on both bodies. With
+/// no body or index given, the box's plane face is the one chosen: the sphere's face is refused
+/// (it is curved), and the search goes on to the box. The flat-needs-fixed refusal is not reached
+/// here: no buildable face reaches it.
+#[test]
+fn a_point_where_bodies_touch_picks_the_flat_face_of_the_other_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0],"body_name":"B"}));
+    run(&mut s, "solid.sphere", json!({"radius":2,"center":[10,10,12],"operation":"new","body_name":"A"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":{"face":[10,10,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!((plane.origin.z - 10.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
+}

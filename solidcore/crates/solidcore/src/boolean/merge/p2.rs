@@ -869,6 +869,7 @@ pub fn make_faceuse_attempt_with(
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
@@ -1202,18 +1203,7 @@ fn copy_uv_trim_curves_of_other_face(
             // surface): it is carried as before, unproved either way. A pair with exact data
             // is carried only on a bound within the tolerance: one not enclosed is
             // `Some(INFINITY)`, and a NaN bound proves nothing)
-            let turn_away = gap.is_some_and(|g| g.is_nan() || g > tol);
-            // (test-only seam of the goldens' WR-450 replay, feature `wr57-replay`: the
-            // carry before this gate kept every such trim)
-            #[cfg(feature = "wr57-replay")]
-            let turn_away = crate::surface::surface::replay::choose(
-                k,
-                surface,
-                crate::surface::surface::replay::Seam::CarryGate,
-                &[],
-                turn_away,
-            )?;
-            if turn_away {
+            if gap.is_some_and(|g| g.is_nan() || g > tol) {
                 continue;
             }
         }

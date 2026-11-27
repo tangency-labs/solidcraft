@@ -998,6 +998,19 @@ impl BSplineCurve {
                 .ok_or_else(no_control_point);
         }
 
+        // The inner ends of an unclamped knot vector are valid parameters.
+        // The legacy point evaluator refuses U[p] and U[m-p], but the
+        // derivative evaluator already evaluates those spans exactly.
+        let knots = cur.knots();
+        let degree = cur.degree();
+        if knots.get(degree) == Some(&t) || knots.iter().rev().nth(degree) == Some(&t) {
+            let mut point = [Vec3::ZERO];
+            crv_derivs_into(cur, t, Side::Left, &mut point)
+                .map_err(SolidError::nurbs_routine(OP_EVAL_PT))?;
+            let [point] = point;
+            return Ok(point);
+        }
+
         // LEFT/RIGHT doesn't matter on C0 curves for point evals
         crv_eval(cur, t, Side::Left).map_err(SolidError::nurbs_routine(OP_EVAL_PT))
     }
@@ -1259,6 +1272,89 @@ impl BSplineCurve {
 
         // Give derived Analytic curves a chance to update their 'step' data
         self.refresh_analytics()
+    }
+
+    /// Not upstream (#21511): makes the curve pass through one control point at `t`
+    /// without changing its shape. An interior `t` is inserted as a knot until its
+    /// multiplicity reaches the degree (knot insertion is exact up to rounding); an end of
+    /// the clamped natural interval already has it. Returns `false`, changing nothing, for
+    /// a `t` outside the natural interval or a curve of degree 0.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; those of [`Self::insert_one_knot`].
+    pub(crate) fn make_point_knot(&mut self, t: f64) -> Result<bool> {
+        let natural = self.natural_interval();
+        if !(natural.min() <= t && t <= natural.max()) {
+            return Ok(false);
+        }
+        let nurb = self.get_or_create_gw_nurb()?;
+        let p = nurb.degree();
+        if p == 0 {
+            return Ok(false);
+        }
+        if t == natural.min() || t == natural.max() {
+            return Ok(true);
+        }
+        let r = nurb.knots().iter().filter(|&&u| u == t).count();
+        if r < p {
+            self.insert_one_knot(t, p - r)?;
+        }
+        Ok(true)
+    }
+
+    /// Not upstream (#21511): moves the control point the curve passes through at the knot
+    /// `t` (multiplicity at least the degree, [`Self::make_point_knot`]) to `point`, as
+    /// [`Self::edit_end_point`] moves an end (a rational point is projected with its old
+    /// weight): the right limit's point when `from_right` (where a parameter interval
+    /// starts), else the left limit's. With the multiplicity `r >= p` of `t` starting at
+    /// knot index `s`, that is `P[s + r - p - 1]` from the right and `P[s - 1]` from the
+    /// left (the natural start is `P[0]`, the natural end `P[n]`). The curve then has
+    /// `point` at `t` exactly, before rounding; only spans in that control point's
+    /// support change. Returns `false`, changing nothing, when `t` is not such a knot or
+    /// has no limit on that side.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB.
+    pub(crate) fn move_point_at_knot(
+        &mut self,
+        t: f64,
+        from_right: bool,
+        point: Point3,
+    ) -> Result<bool> {
+        let nurb = self.get_or_create_gw_nurb()?;
+        let p = nurb.degree();
+        let knots = nurb.knots();
+        let Some(s) = knots.iter().position(|&u| u == t) else {
+            return Ok(false);
+        };
+        let r = knots.iter().skip(s).take_while(|&&u| u == t).count();
+        if p == 0 || r < p {
+            return Ok(false);
+        }
+        let idx = if from_right {
+            (s + r).checked_sub(p + 1)
+        } else {
+            s.checked_sub(1)
+        };
+        let Some(pw) = idx.and_then(|i| nurb.cpts_mut().get_mut(i)) else {
+            return Ok(false);
+        };
+        pw.x = point.x;
+        pw.y = point.y;
+        if pw.z != NOZ {
+            pw.z = point.z;
+        }
+        if pw.w != NOW {
+            pw.x *= pw.w;
+            pw.y *= pw.w;
+            if pw.z != NOZ {
+                pw.z *= pw.w;
+            }
+        }
+        self.refresh_analytics()?;
+        Ok(true)
     }
 
     /// Fixes up the knots with tolerance `tol` (`FixupKnotVector`; upstream default
@@ -1994,6 +2090,41 @@ mod tests {
         ];
         let u = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         BSplineCurve::from_nurb(Curve::new(pw, 3, u).unwrap(), 3, false)
+    }
+
+    #[test]
+    fn unclamped_curve_evaluates_both_inner_domain_ends() {
+        let knots = vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0];
+        let controls = [(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)];
+        // At U[2] the nonzero basis weights are 3/4 and 1/4 on P0,P1.
+        // At U[4] they are 1/4 and 3/4 on P2,P3. For a rational curve
+        // multiply these by the control weights, then divide by their sum.
+        for (weights, expected) in [
+            (
+                None,
+                [Vec3::new(0.2, 0.375, 0.0), Vec3::new(0.675, 0.15, 0.0)],
+            ),
+            (
+                Some([2.0, 1.0, 3.0, 1.0]),
+                [Vec3::new(11.0 / 70.0, 0.3, 0.0), Vec3::new(0.75, 0.2, 0.0)],
+            ),
+        ] {
+            let pw = controls
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, y))| match weights {
+                    Some(w) => CPoint::new(x * w[i], y * w[i], NOZ, w[i]),
+                    None => CPoint::new(x, y, NOZ, NOW),
+                })
+                .collect();
+            let curve = BSplineCurve::from_nurb(Curve::new(pw, 2, knots.clone()).unwrap(), 2, true);
+            for (t, expected) in [0.2, 0.8].into_iter().zip(expected) {
+                let point = curve.evaluate_point(t).unwrap();
+                assert!((point - expected).length() < 1e-12, "{t}: {point:?}");
+                assert!((point - curve.evaluate(t, 1, true, false).unwrap()[0]).length() < 1e-12);
+            }
+            assert!(curve.evaluate_point(0.5).is_ok());
+        }
     }
 
     #[test]

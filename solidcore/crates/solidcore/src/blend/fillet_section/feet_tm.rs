@@ -59,8 +59,8 @@ use super::form::binom;
 use super::interval::{cmax, round_down, round_up, Ivl};
 use super::series::{Ser, Trunc, VSer, MAX_S, V3};
 use super::station::{
-    ders_basis, gn_evaluate, gn_jacobian, gn_top_jets, knot, span, GnIncremental, GnSystem, Nurbs,
-    Partials,
+    ders_basis_flat, gn_jacobian_ref, gn_linearize_ref, gn_top_jets, knot, span, GnIncremental,
+    GnSystem, Nurbs, Partials,
 };
 use super::taylor_model::TmN;
 use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionProof};
@@ -88,7 +88,7 @@ macro_rules! tm_try {
     ($e:expr) => {
         match $e {
             Ok(v) => v,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => return Err(e),
             Err(_) => return Ok(None),
         }
     };
@@ -149,37 +149,36 @@ pub fn nurbs_partials_tm(
             BlendFailure::SectionNotProved(SectionProof::BoundFinite),
         ));
     }
-    let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
-    let nv = ders_basis(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
+    let nu = ders_basis_flat(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
+    let nv = ders_basis_flat(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
     let (la, lb) = (cn.p, cn.q);
-    let nb =
-        |m: &[Vec<Ivl>], a: usize, i: usize| m.get(a).and_then(|r| r.get(i)).copied().unwrap_or(IZ);
+    let hm_cols = lb + 1;
     // homogeneous point derivatives at the middle, Hm[a][b] (x, y, z, w)
-    let mut hm = vec![vec![[IZ; 4]; lb + 1]; la + 1];
-    for (a, row) in hm.iter_mut().enumerate() {
-        for (b, hab) in row.iter_mut().enumerate() {
+    let mut hm = vec![[IZ; 4]; (la + 1) * hm_cols];
+    for a in 0..=la {
+        for b in 0..=lb {
             let mut h = [IZ; 4];
             for i in 0..=cn.p {
                 for j in 0..=cn.q {
                     // ku >= p and kv >= q (sm_Span)
                     let li = 4 * ((ku + i - cn.p) * cn.nv + (kv + j - cn.q));
-                    let c = nb(&nu, a, i) * nb(&nv, b, j);
+                    let c = nu.at(a as isize, i as isize) * nv.at(b as isize, j as isize);
                     for (he, x) in h.iter_mut().zip(pw4(&cn.pw, li)) {
                         *he = *he + c * x;
                     }
                 }
             }
-            *hab = h;
+            if let Some(hab) = hm.get_mut(a * hm_cols + b) {
+                *hab = h;
+            }
         }
     }
     // about the local origin c: A - c w and its partials (the weight's unchanged)
-    let c0 = origin(hm.first().and_then(|r| r.first()).unwrap_or(&[IZ; 4]));
-    for row in &mut hm {
-        for hab in row.iter_mut() {
-            let [_, _, _, w] = *hab;
-            for (he, &cq) in hab.iter_mut().zip(&c0) {
-                *he = *he - Ivl::from(cq) * w;
-            }
+    let c0 = origin(hm.first().unwrap_or(&[IZ; 4]));
+    for hab in &mut hm {
+        let [_, _, _, w] = *hab;
+        for (he, &cq) in hab.iter_mut().zip(&c0) {
+            *he = *he - Ivl::from(cq) * w;
         }
     }
     // (u - um)^i / i! and (v - vm)^j / j!, then their products
@@ -199,38 +198,41 @@ pub fn nurbs_partials_tm(
             *x = (prev * dv).scale(Ivl::from(1.0) / Ivl::from(j as f64));
         }
     }
-    let mono: Vec<Vec<Ft>> = pu
-        .iter()
-        .map(|&a| pv.iter().map(|&b| a * b).collect())
-        .collect();
+    let mut mono = vec![Ft::constant(IZ); (la + 1) * hm_cols];
+    for (i, &a) in pu.iter().enumerate() {
+        for (j, &b) in pv.iter().enumerate() {
+            if let Some(slot) = mono.get_mut(i * hm_cols + j) {
+                *slot = a * b;
+            }
+        }
+    }
     let mono_at = |i: usize, j: usize| {
-        mono.get(i)
-            .and_then(|r| r.get(j))
+        mono.get(i * hm_cols + j)
             .copied()
             .unwrap_or_else(|| Ft::constant(IZ))
     };
     // the homogeneous partials A_ab, w_ab at the feet, a + b <= lk (0 past the degrees)
-    let mut av = vec![vec![[Ft::constant(IZ); 4]; lk + 1]; lk + 1];
+    let k_cols = lk + 1;
+    let mut av = vec![[Ft::constant(IZ); 4]; k_cols * k_cols];
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let mut h = [Ft::constant(IZ); 4];
             for i in a..=la {
                 for j in b..=lb {
                     let m = mono_at(i - a, j - b);
-                    let hij = hm.get(i).and_then(|r| r.get(j)).copied().unwrap_or([IZ; 4]);
+                    let hij = hm.get(i * hm_cols + j).copied().unwrap_or([IZ; 4]);
                     for (he, &x) in h.iter_mut().zip(&hij) {
                         *he = *he + m.scale(x);
                     }
                 }
             }
-            if let Some(x) = av.get_mut(a).and_then(|r| r.get_mut(b)) {
+            if let Some(x) = av.get_mut(a * k_cols + b) {
                 *x = h;
             }
         }
     }
     let hat = |a: usize, b: usize, e: usize| {
-        av.get(a)
-            .and_then(|r| r.get(b))
+        av.get(a * k_cols + b)
             .and_then(|h| h.get(e))
             .copied()
             .unwrap_or_else(|| Ft::constant(IZ))
@@ -244,7 +246,7 @@ pub fn nurbs_partials_tm(
         ));
     }
     let inv_w = w00.recip();
-    let mut out = Partials::<Ft>::default();
+    let mut out = Partials::<Ft>::with_order(lk);
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let mut v3 = [hat(a, b, 0), hat(a, b, 1), hat(a, b, 2)];
@@ -301,12 +303,12 @@ pub fn curve_derivs_tm(
             BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval),
         ));
     }
-    let nb = ders_basis(&cn.u, piece, p, Ivl::from(m), p);
+    let nb = ders_basis_flat(&cn.u, piece, p, Ivl::from(m), p);
     let mut am = vec![[IZ; 4]; p + 1];
     for (d, ad) in am.iter_mut().enumerate() {
         let mut h = [IZ; 4];
         for j in 0..=p {
-            let nj = nb.get(d).and_then(|r| r.get(j)).copied().unwrap_or(IZ);
+            let nj = nb.at(d as isize, j as isize);
             for (he, x) in h.iter_mut().zip(pw4(&cn.pw, 4 * (piece + j - p))) {
                 *he = *he + nj * x;
             }
@@ -553,17 +555,22 @@ pub fn gn_enclose_tm(
         }
         *pc = Ft::from_points(&coeffs);
     }
-    let point = Trunc::new(0, 0)?;
     // G at the polynomial for every t, and the preconditioner: Y, the inverse of the
     // Jacobian there at t = 0
     let pz = tm_try!(partials(&p0, 2));
-    let sx0 = p0.map(Ser::constant);
-    let sys0 = system_tm(&pz, &leader, &tangent, r, side, law_r, equal_setback);
-    let jac0 = tm_try!(gn_jacobian(&sys0, &sx0));
+    let [pz0, pz1] = &pz;
+    let (g0, jac0) = tm_try!(gn_linearize_ref(
+        [pz0, pz1],
+        &leader,
+        &tangent,
+        r,
+        side,
+        law_r,
+        equal_setback,
+    ));
     let jm = jac0.map(|row| row.map(|j| j.c.first().map_or(f64::NAN, |c| c.mid())));
     let y = tm_try!(inverse4(&jm));
-    let (g0, _) = tm_try!(gn_evaluate(&sys0, &sx0, point));
-    let dm = minus_y_times(&y, &g0.map(|g| g.at(0, 0)));
+    let dm = minus_y_times(&y, &g0);
     let dr = dm.map(|d| d.range());
     // the tube: a box R about the polynomial whose Krawczyk image lies inside it
     let (_, cr0, q0) = contraction_ranges(&y, &jac0);
@@ -603,8 +610,16 @@ pub fn gn_enclose_tm(
             *tc = tc.with_rem(Ivl::new(-ri, ri));
         }
         let pt = tm_try!(partials(&tube, 2));
-        let sys_t = system_tm(&pt, &leader, &tangent, r, side, law_r, equal_setback);
-        let jac = tm_try!(gn_jacobian(&sys_t, &tube.map(Ser::constant)));
+        let [pt0, pt1] = &pt;
+        let jac = tm_try!(gn_jacobian_ref(
+            [pt0, pt1],
+            &leader,
+            &tangent,
+            r,
+            side,
+            law_r,
+            equal_setback,
+        ));
         let (_, cr, q) = contraction_ranges(&y, &jac);
         let contracts = q < 1.0;
         if !contracts {
@@ -648,14 +663,23 @@ pub fn gn_enclose_tm(
     // the coefficients, order by order: x = b + C x, b = -Y R, C over the root's tube
     let lk = tr.s() + tr.e() + 1;
     let pk = tm_try!(partials(&x0, lk.max(2)));
-    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r, equal_setback);
-    let jk = tm_try!(gn_jacobian(&sysk, &x0.map(Ser::constant)));
+    let [pk0, pk1] = &pk;
+    let jk = tm_try!(gn_jacobian_ref(
+        [pk0, pk1],
+        &leader,
+        &tangent,
+        r,
+        side,
+        law_r,
+        equal_setback,
+    ));
     let (cm, cr, q) = contraction_ranges(&y, &jk);
     // 1 - q rounded down: the quotient rounded up is then at least the exact one
     let gap = round_down(1.0 - q);
     if !(gap.is_finite() && gap > 0.0) {
         return Ok(None);
     }
+    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r, equal_setback);
     let mut sx = x0.map(Ser::constant);
     // each order's G takes the lower orders' series as the last one left them: they are
     // kept, and only the coefficients x's new ones reach are computed (bit for bit a
@@ -668,48 +692,68 @@ pub fn gn_enclose_tm(
             continue;
         }
         let before = series.computed();
-        let evaluated = series.evaluate(&sx, tr.computing(tot, eps));
+        let evaluated = series.evaluate_g(&sx, tr.computing(tot, eps));
+        let mut early_err = None;
+        let mut not_finite = false;
+        match evaluated {
+            Ok(sg) => {
+                for i in 0..=tr.s().min(tot) {
+                    let kk = tot - i;
+                    // the section's jets of order n are the face curve's
+                    if kk > tr.e() || (n >= 1 && kk >= n) {
+                        continue;
+                    }
+                    let b = minus_y_times(&y, &sg.each_ref().map(|g| g.at(i, kk)));
+                    // P: close to the root, b + C P iterated on the middles
+                    let mut pp = b.map(|x| x.mid_poly());
+                    for _ in 0..4 {
+                        pp = plus_c_times(b, &cm, &pp).map(|x| x.mid_poly());
+                    }
+                    // the defect D = b + C P - P, and |x - P| <= |D| / (1 - q)
+                    let mut b_minus_p = b;
+                    for (bp, &pi) in b_minus_p.iter_mut().zip(&pp) {
+                        *bp = *bp - pi;
+                    }
+                    let dd = plus_c_times(b_minus_p, &cm, &pp).map(|v| v.range());
+                    let mut e = 0.0_f64;
+                    for di in &dd {
+                        e = cmax(e, di.mag());
+                    }
+                    let e = round_up(e / gap);
+                    if !e.is_finite() {
+                        not_finite = true;
+                        break;
+                    }
+                    let rems = plus_c_times(dd, &cr, &[Ivl::new(-e, e); 4]);
+                    for ((sxc, &pc), &rem) in sx.iter_mut().zip(&pp).zip(&rems) {
+                        sxc.set(i, kk, pc.with_rem(rem));
+                    }
+                }
+            }
+            Err(err) => early_err = Some(err),
+        }
         k.work_counters
             .add_feet_tm_coefficients(series.computed().saturating_sub(before));
-        let (sg, _, _, _) = tm_try!(evaluated);
-        for i in 0..=tr.s().min(tot) {
-            let kk = tot - i;
-            // the section's jets of order n are the face curve's
-            if kk > tr.e() || (n >= 1 && kk >= n) {
-                continue;
-            }
-            let b = minus_y_times(&y, &sg.each_ref().map(|g| g.at(i, kk)));
-            // P: close to the root, b + C P iterated on the middles
-            let mut pp = b.map(|x| x.mid_poly());
-            for _ in 0..4 {
-                pp = plus_c_times(b, &cm, &pp).map(|x| x.mid_poly());
-            }
-            // the defect D = b + C P - P, and |x - P| <= |D| / (1 - q)
-            let mut b_minus_p = b;
-            for (bp, &pi) in b_minus_p.iter_mut().zip(&pp) {
-                *bp = *bp - pi;
-            }
-            let dd = plus_c_times(b_minus_p, &cm, &pp).map(|v| v.range());
-            let mut e = 0.0_f64;
-            for di in &dd {
-                e = cmax(e, di.mag());
-            }
-            let e = round_up(e / gap);
-            if !e.is_finite() {
-                return Ok(None);
-            }
-            let rems = plus_c_times(dd, &cr, &[Ivl::new(-e, e); 4]);
-            for ((sxc, &pc), &rem) in sx.iter_mut().zip(&pp).zip(&rems) {
-                sxc.set(i, kk, pc.with_rem(rem));
-            }
+        if let Some(err) = early_err {
+            return match err {
+                e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }) => Err(e),
+                _ => Ok(None),
+            };
+        }
+        if not_finite {
+            return Ok(None);
         }
     }
+    let need_top = n >= 1 && n <= tr.e();
     let before = series.computed();
-    let evaluated = series.evaluate(&sx, tr);
+    let evaluated = series.evaluate_final(&sx, tr, need_top);
     k.work_counters
         .add_feet_tm_coefficients(series.computed().saturating_sub(before));
-    let (_, mut f, v, nrm) = tm_try!(evaluated);
-    gn_top_jets(n, tr, &nrm, &mut f);
+    tm_try!(evaluated);
+    let (mut f, v, nrm) = series.into_fv(tr, need_top);
+    if let Some(nrm) = nrm {
+        gn_top_jets(n, tr, &nrm, &mut f);
+    }
     let range_ser = |s: &Ser<Ft>| {
         let mut o = Ser::constant(IZ);
         for i in 0..=tr.s() {

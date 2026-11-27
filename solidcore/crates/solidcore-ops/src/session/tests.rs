@@ -150,6 +150,7 @@ fn a_kernel_failure_leaves_its_code_to_take() {
         call: "fails",
         kind: solidcore::error::ErrorKind::InvalidInput.code(),
         operation: "the routine",
+        class: ErrorClass::Unclassed,
     };
     assert_eq!(take_failure_code(), Some(code));
     assert_eq!(take_failure_code(), None, "taken once");
@@ -179,6 +180,7 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "refuses",
             kind: solidcore::error::ErrorKind::InvalidInput.code(),
             operation: "the routine",
+            class: ErrorClass::Unclassed,
         })
     );
     let r: Result<Result<()>> = run("refuses itself", |_| {
@@ -193,6 +195,20 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "refuses itself",
             kind: FailureCode::OPS,
             operation: "NoEffect",
+            class: ErrorClass::Unclassed,
+        })
+    );
+    let r: Result<Result<()>> = run("refuses mesh", |_| {
+        Ok(Err(Error::Mesh("uncertified fitted profile".into())))
+    });
+    assert_eq!(r, Ok(Err(Error::Mesh("uncertified fitted profile".into()))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses mesh",
+            kind: FailureCode::OPS,
+            operation: "Mesh",
+            class: ErrorClass::Unclassed,
         })
     );
     let r: Result<()> = run("panics", |_| panic!("on purpose"));
@@ -203,6 +219,7 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
             call: "panics",
             kind: FailureCode::OPS,
             operation: "Internal",
+            class: ErrorClass::Unclassed,
         })
     );
     let token = CancelToken::new();
@@ -210,6 +227,77 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
     let r: Result<()> = crate::cancel::within(&token, || run("cancelled", |_| Ok(())));
     assert_eq!(r, Err(Error::Cancelled));
     assert_eq!(take_failure_code(), None);
+}
+
+/// A call's code carries the class solidcore gives the kernel error it failed with, read down
+/// its cause chain, whether the call fails with it or its answer refuses with it as ops typed
+/// it: a refusal, a defect, a port failure; a kind solidcore does not class, and a failure ops
+/// decided itself, are unclassed.
+#[test]
+fn a_failure_code_carries_the_kernels_class_of_its_error() {
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{Failure, Reason};
+
+    all_fixes();
+    let _ = take_failure_code();
+    let refusal = || {
+        Failure::new(
+            "test::blend",
+            BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+        )
+        .into_error()
+    };
+    let defect = || Failure::new("test::blend", BlendFailure::StageFailed).into_error();
+    let over = |cause: SolidError| {
+        Failure::new("test::stage", Reason::Failed("a stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    let failing: Vec<(SolidError, ErrorClass)> = vec![
+        (refusal(), ErrorClass::Refusal),
+        (over(refusal()), ErrorClass::Refusal),
+        (defect(), ErrorClass::Defect),
+        (
+            SolidError::unported("test::callee", "test.unit"),
+            ErrorClass::PortFailure,
+        ),
+        (
+            SolidError::port_invariant("test::invariant", "broken"),
+            ErrorClass::PortFailure,
+        ),
+        (SolidError::sm_err("test::status"), ErrorClass::Unclassed),
+        (
+            SolidError::invalid_input("test::input", "bad"),
+            ErrorClass::Unclassed,
+        ),
+    ];
+    for (e, class) in failing {
+        let (kind, operation) = (e.kind().code(), e.operation());
+        let r: Result<()> = run("fails", |_| Err(e.clone()));
+        assert!(r.is_err(), "{e:?}");
+        let code = take_failure_code();
+        assert_eq!(
+            code,
+            Some(FailureCode {
+                call: "fails",
+                kind,
+                operation,
+                class
+            }),
+            "{e:?}"
+        );
+        // the same error, as ops typed it, refused in the call's answer
+        let r: Result<Result<()>> = run("refuses", |_| Ok(Err(status(e.clone()))));
+        assert!(matches!(r, Ok(Err(_))), "{e:?}");
+        assert_eq!(take_failure_code().map(|c| c.class), Some(class), "{e:?}");
+    }
+    let r: Result<Result<()>> = run("refuses itself", |_| Ok(Err(Error::NoEffect)));
+    assert_eq!(r, Ok(Err(Error::NoEffect)));
+    assert_eq!(
+        take_failure_code().map(|c| c.class),
+        Some(ErrorClass::Unclassed)
+    );
 }
 
 /// An attempt a call tries and gives up after its refusal was noted puts the note back: the
@@ -732,6 +820,124 @@ fn a_result_finished_after_the_cancel_is_not_returned() {
     );
     let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));
     assert_eq!(r, Ok(true), "the token is off the kernel after the call");
+}
+
+/// A call that spends its fuel part way stops at the kernel's next check with `OutOfFuel`, how
+/// much it spent and was given; the body it was editing is as it came in, and the failure's code
+/// is the kernel's out-of-fuel kind at the check that found the tank empty.
+#[test]
+fn a_call_out_of_fuel_part_way_stops_and_leaves_its_body() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let before = points(&b);
+    let _ = take_failure_code();
+    let r: Result<()> = crate::fuel::within(crate::fuel::Fuel::Limit(3), || {
+        with_body("out of fuel part way", &b, |k, br| {
+            let v = br.vertex_list()[0];
+            br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
+            loop {
+                k.check_cancelled("session::tests::loop")?;
+            }
+        })
+    });
+    assert_eq!(
+        r,
+        Err(Error::OutOfFuel {
+            op: "out of fuel part way",
+            spent: 4,
+            limit: 3,
+        })
+    );
+    assert_eq!(before, points(&b), "the edit was put back");
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "out of fuel part way",
+            kind: solidcore::error::ErrorKind::OutOfFuel.code(),
+            operation: "session::tests::loop",
+            class: ErrorClass::Unclassed,
+        })
+    );
+    let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));
+    assert_eq!(r, Ok(true), "no tank is left on the kernel after the call");
+}
+
+/// A call within its fuel answers what it answers without fuel; one whose kernel swallows the
+/// stop and finishes anyway still answers `OutOfFuel`, never a result built past its budget.
+#[test]
+fn fuel_takes_nothing_from_a_call_within_it_and_every_result_past_it() {
+    all_fixes();
+    let within = |n| {
+        crate::fuel::within(crate::fuel::Fuel::Limit(n), || {
+            run("polls five times", |k| {
+                let mut stops = 0;
+                for _ in 0..5 {
+                    // a fallback that drops the stop and carries on, as no kernel code should
+                    if k.check_cancelled("session::tests::swallowed").is_err() {
+                        stops += 1;
+                    }
+                }
+                Ok(stops)
+            })
+        })
+    };
+    assert_eq!(within(5), Ok(0));
+    assert_eq!(
+        within(4),
+        Err(Error::OutOfFuel {
+            op: "polls five times",
+            spent: 5,
+            limit: 4,
+        })
+    );
+    // the application's cancel is a cancel, whatever fuel is left
+    let token = CancelToken::new();
+    let r: Result<()> = crate::cancel::within(&token, || {
+        crate::fuel::within(crate::fuel::Fuel::Limit(100), || {
+            run("cancelled with fuel left", |k| {
+                token.cancel();
+                k.check_cancelled("session::tests::cancel")
+            })
+        })
+    });
+    assert_eq!(r, Err(Error::Cancelled));
+}
+
+/// A real boolean: with no limit (the default) it builds, and given one unit it stops at the
+/// kernel's first check past it with `OutOfFuel`, naming the call.
+#[test]
+fn a_boolean_out_of_fuel_is_refused_and_one_within_it_builds() {
+    all_fixes();
+    let pair = || {
+        (
+            make_box([0.0; 3], [2.0; 3]).unwrap(),
+            make_box([1.0; 3], [2.0; 3]).unwrap(),
+        )
+    };
+    let (a, b) = pair();
+    let built = crate::boolean::boolean(a, b, crate::BooleanOp::Union)
+        .unwrap()
+        .expect("the union of two overlapping cubes");
+    // two cubes of side 2 overlapping in a unit cube: 8 + 8 - 1
+    let volume = built.volume(1e-10).unwrap();
+    assert!((volume - 15.0).abs() < 1e-8, "{volume}");
+    // the L-shaped steps of the union: 12 faces, 30 edges, 20 vertices (V - E + F = 2)
+    assert_eq!(built.counts().unwrap(), [12, 30, 20]);
+    let (a, b) = pair();
+    let r = crate::fuel::within(crate::fuel::Fuel::Limit(1), || {
+        crate::boolean::boolean(a, b, crate::BooleanOp::Union)
+    });
+    assert!(
+        matches!(
+            r,
+            Err(Error::OutOfFuel {
+                op: "SmApiBoolean",
+                limit: 1,
+                ..
+            })
+        ),
+        "{r:?}"
+    );
 }
 
 /// Runs `f` on another thread and gives its answer: a failure here rather than a test that hangs
