@@ -14,6 +14,12 @@ use crate::model::{ConstraintKind, Result, Sketch};
 /// Positions closer than this, relative to their distance from the origin, are one place.
 const TOL: f64 = 1e-6;
 
+/// Centres of a link's circles closer than this, times one plus the larger of their radii, are
+/// one centre when a circle is matched: circles fitted to the section of a body come back about
+/// centres some 1e-6 of their radius apart where the body's faces are splines, and about one
+/// point where they are cylinders, cones and tori.
+const CONCENTRIC: f64 = 1e-5;
+
 /// Most (old point, new point) pairs compared to match points; past it nothing is matched.
 const MAX_MATCH_WORK: usize = 4_000_000;
 
@@ -141,43 +147,111 @@ fn arc_about_same_centre(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &
     }
 }
 
+/// Whether circles of radii `a` and `b` about `p` and `q` are about one centre: within
+/// [`CONCENTRIC`] times one plus the larger radius.
+fn concentric(p: Vec2, q: Vec2, a: f64, b: f64) -> bool {
+    p.dist(q) <= CONCENTRIC * (1.0 + a.abs().max(b.abs()))
+}
+
+/// The new circles (indices into `lay.curves`) the old circle of `radius` about old point
+/// `centre` may be: those about the point its centre became, and those about a centre
+/// [`concentric`] with where that point is (with where the old centre was, when it became no
+/// point). Concentric circles that shared their centre and no longer do, or the other way
+/// round, are still each other's candidates.
+fn circles_about(centre: usize, radius: f64, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Vec<usize> {
+    let became = map.get(centre).copied().flatten();
+    let at = became.and_then(|i| lay.pts.get(i)).or_else(|| old.get(centre)).copied();
+    lay.curves
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| match **n {
+            LCurve::Circle(x, s) => Some(x) == became || at.zip(lay.pts.get(x)).is_some_and(|(p, q)| concentric(p, *q, radius, s)),
+            _ => false,
+        })
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// The circles `hits` (indices into `lay.curves`) with `key` of each one's radius, those it
+/// gives a key for, sorted by key.
+fn by_radius(hits: &[usize], lay: &Layout, key: impl Fn(f64) -> Option<f64>) -> Vec<(usize, f64)> {
+    let mut by: Vec<(usize, f64)> = hits
+        .iter()
+        .filter_map(|j| match lay.curves.get(*j) {
+            Some(LCurve::Circle(_, s)) => Some((*j, key(*s)?)),
+            _ => None,
+        })
+        .collect();
+    by.sort_by(|x, y| x.1.total_cmp(&y.1));
+    by
+}
+
+/// The new circle (an index into `lay.curves`) the old circle of `radius` about old point
+/// `centre` becomes, among its candidates ([`circles_about`]) and beside the old circles `cur`
+/// holds about the same centre (on its point, or [`concentric`] with it):
+/// - as many old circles as new ones: the one of the same rank by radius, so the inner one
+///   stays the inner one whatever the radii became (a resized ring keeps its two rims);
+/// - fewer new ones: a new circle is the old one nearest to it in radius, and no other;
+/// - more new ones: the one nearest in radius, when one is clearly nearest.
+///
+/// None where two radii that would have to be told apart are equal.
+fn match_circle(centre: usize, radius: f64, cur: &[LCurve], old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<usize> {
+    let hits = circles_about(centre, radius, old, map, lay);
+    // The radii of the old circles about this centre, this one among them.
+    let family: Vec<f64> = cur
+        .iter()
+        .filter_map(|c| match *c {
+            LCurve::Circle(x, r) if x == centre || old.get(x).zip(old.get(centre)).is_some_and(|(p, q)| concentric(*p, *q, radius, r)) => Some(r),
+            _ => None,
+        })
+        .collect();
+    let by_rank = hits.len() == family.len() && hits.len() > 1;
+    if (by_rank || hits.len() < family.len()) && family.iter().filter(|r| **r == radius).count() != 1 {
+        return None;
+    }
+    if by_rank {
+        let by = by_radius(&hits, lay, Some);
+        if by.windows(2).any(|w| matches!(w, [x, y] if x.1 == y.1)) {
+            return None;
+        }
+        let rank = family.iter().filter(|r| **r < radius).count();
+        return by.get(rank).map(|(j, _)| *j);
+    }
+    if hits.len() < family.len() {
+        // A new circle is the old one nearest to it in radius: this one takes the nearest of
+        // those no other old circle is as near to.
+        let own = by_radius(&hits, lay, |s| {
+            family.iter().filter(|r| **r != radius).all(|r| (s - radius).abs() < (s - r).abs()).then_some((s - radius).abs())
+        });
+        return own.first().map(|(j, _)| *j);
+    }
+    // One candidate, or the one clearly nearest in radius.
+    match by_radius(&hits, lay, |s| Some((s - radius).abs())).as_slice() {
+        [(j, _)] => Some(*j),
+        [(j, d), (_, e), ..] if d < e => Some(*j),
+        _ => None,
+    }
+}
+
 /// The new curve (an index into `lay.curves`) old curve `c` becomes, and whether it is only a
-/// piece of the line `c` was: the curve of the same kind on the points `c`'s points became, for
-/// an arc without one the arc between the same ends about the same centre
-/// ([`arc_about_same_centre`]) or else the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
-/// line without one, the longest new line along it (where it was, or between the points its
-/// ends became).
-fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<(usize, bool)> {
+/// piece of the line `c` was: for a circle, the circle about its centre that it is among the
+/// old circles `cur` holds there ([`match_circle`]); else the curve of the same kind on the
+/// points `c`'s points became, for an arc without one the arc between the same ends about the
+/// same centre ([`arc_about_same_centre`]) or else the whole circle it lies on
+/// ([`circle_of_arc`], a piece too), or for a line without one, the longest new line along it
+/// (where it was, or between the points its ends became).
+fn match_curve(c: &LCurve, cur: &[LCurve], old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<(usize, bool)> {
+    if let LCurve::Circle(centre, radius) = *c {
+        return match_circle(centre, radius, cur, old, map, lay).map(|j| (j, false));
+    }
     let mapped: Option<Vec<usize>> = curve_points(c).iter().map(|p| map.get(*p).copied().flatten()).collect();
     if let Some(m) = &mapped {
-        let hits: Vec<usize> = lay
-            .curves
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| {
-                let at = curve_points(n);
-                same_shape(c, n) && (at == *m || matches!(c, LCurve::Line(..)) && at.iter().rev().eq(m.iter()))
-            })
-            .map(|(j, _)| j)
-            .collect();
-        match (hits.as_slice(), c) {
-            ([j], _) => return Some((*j, false)),
-            // Concentric circles: the one with the nearest radius, when one is clearly nearest.
-            ([_, _, ..], LCurve::Circle(_, r)) => {
-                let mut by: Vec<(usize, f64)> = hits
-                    .iter()
-                    .filter_map(|j| match lay.curves.get(*j) {
-                        Some(LCurve::Circle(_, s)) => Some((*j, (s - r).abs())),
-                        _ => None,
-                    })
-                    .collect();
-                by.sort_by(|x, y| x.1.total_cmp(&y.1));
-                return match by.as_slice() {
-                    [(j, d), (_, e), ..] if *d < *e => Some((*j, false)),
-                    _ => None,
-                };
-            }
-            _ => {}
+        let mut hits = lay.curves.iter().enumerate().filter(|(_, n)| {
+            let at = curve_points(n);
+            same_shape(c, n) && (at == *m || matches!(c, LCurve::Line(..)) && at.iter().rev().eq(m.iter()))
+        });
+        if let (Some((j, _)), None) = (hits.next(), hits.next()) {
+            return Some((j, false));
         }
     }
     if let Some(j) = arc_about_same_centre(c, old, map, lay) {
@@ -326,7 +400,7 @@ impl Sketch {
                 let held: Vec<usize> = needed.iter().copied().collect();
                 let map = match_points(&old_pos, &old_kind, &lay.pts, &new_kind, &held);
                 let curve_map: BTreeMap<usize, (usize, bool)> =
-                    needed_curves.iter().filter_map(|k| Some((*k, match_curve(cur.get(*k)?, &old_pos, &map, lay)?))).collect();
+                    needed_curves.iter().filter_map(|k| Some((*k, match_curve(cur.get(*k)?, cur, &old_pos, &map, lay)?))).collect();
                 // A new point a held one became is no candidate any more.
                 for i in map.iter().flatten() {
                     if let Some(kind) = new_kind.get_mut(*i) {
@@ -348,7 +422,7 @@ impl Sketch {
                     .filter(|k| within && !needed_curves.contains(k))
                     .filter_map(|k| {
                         let c = cur.get(k)?;
-                        let (j, piece) = match_curve(c, &old_pos, &id_points, lay)?;
+                        let (j, piece) = match_curve(c, cur, &old_pos, &id_points, lay)?;
                         let moved = match (c, lay.curves.get(j)) {
                             (LCurve::Circle(_, r), Some(LCurve::Circle(_, s))) => (r - s).abs(),
                             _ => 0.0,
