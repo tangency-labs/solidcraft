@@ -320,11 +320,7 @@ impl Body {
         };
         let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
         let mut out = Vec::new();
-        for (index, stretch) in pc::stretches(band, &defects, tol)
-            .map_err(status)?
-            .into_iter()
-            .enumerate()
-        {
+        for stretch in pc::stretches(band, &defects, tol).map_err(status)? {
             let starts = ts::place(stretch, spec.layout, spec.width, spec.end_distance, g_min)
                 .map_err(status)?;
             let tabs = match starts {
@@ -336,7 +332,7 @@ impl Body {
                         spec.width,
                         spec.end_distance,
                         g_min,
-                        ts::stretch_seed(spec.seed, index),
+                        ts::stretch_seed_at(spec.seed, ts::stretch_key(stretch)),
                         spec.width_jitter,
                     )
                     .map_err(status)?;
@@ -1012,6 +1008,47 @@ mod tests {
         assert!((v(&cut.tab_plate) - (43200.0 + sum * 6.0 * 7.0)).abs() < 1e-6);
         let slots: f64 = a.iter().map(|w| (w + 0.2) * 6.2 * 6.0).sum();
         assert!((v(&cut.slot_plate) - (96000.0 - slots)).abs() < 1e-6);
+    }
+
+    /// Request 3, per stretch: a bridge (legs x 20..60 and 100..140 on P, joined above) meets
+    /// Bottom along two stretches of one pair. Each stretch's widths are keyed on where it lies,
+    /// not on its index: the right leg alone (its stretch now the first) draws the same widths.
+    #[test]
+    fn a_stretch_keeps_its_widths_when_another_stretch_goes() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 8.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+            seed: 42,
+            width_jitter: 3.0,
+            tip_chamfer: 0.0,
+        };
+        let top = || make_box([20.0, 30.0, 20.0], [120.0, 6.0, 46.0]).unwrap();
+        let leg = |x: f64| make_box([x, 30.0, 6.0], [40.0, 6.0, 14.0]).unwrap();
+        let plan = |t: &Body| {
+            let (_, plan) = t.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
+            plan.iter()
+                .map(|st| {
+                    st.tabs
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|t| (t.start, t.width))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let both = plan(&union_all(vec![top(), leg(20.0), leg(100.0)]).unwrap());
+        let right = plan(&union_all(vec![top(), leg(100.0)]).unwrap());
+        assert_eq!((both.len(), right.len()), (2, 1), "{both:?} {right:?}");
+        assert!(both[1].iter().any(|t| (t.1 - 8.0).abs() > 1e-9), "{both:?}");
+        assert_eq!(both[1], right[0]);
+        assert_ne!(both[0], both[1]);
     }
 
     /// Request 4: a tip chamfer takes a 2 x 2 triangle off each of a tab's two free corners

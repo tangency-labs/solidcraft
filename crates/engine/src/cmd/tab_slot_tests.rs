@@ -71,6 +71,20 @@ fn a_width_jitter_is_seeded_and_the_slots_follow_the_tabs() {
     }
 }
 
+/// Two identical joints in one feature (the same plate sizes, other plate keys) draw other
+/// widths: the joint seed mixes in each pair's plate keys, so the twin walls' tabs differ.
+#[test]
+fn two_identical_joints_in_one_feature_get_different_widths() {
+    let mut s = fixture_f();
+    run(&mut s, "solid.box", json!({"corner": [20, 60, 6], "length": 120, "width": 6, "height": 60, "body_name": "Twin", "operation": "new"}));
+    let n = (volume(&s, "Wall"), volume(&s, "Twin"));
+    assert!((n.0 - n.1).abs() < 1e-6);
+    tab_slot(&mut s, json!({"tab_plates": ["Wall", "Twin"], "width_jitter": 4, "seed": 5})).unwrap();
+    let gain = (volume(&s, "Wall") - n.0, volume(&s, "Twin") - n.1);
+    assert!(gain.0 > 0.0 && gain.1 > 0.0, "{gain:?}");
+    assert!((gain.0 - gain.1).abs() > 1e-6, "the twin joints drew the same widths: {gain:?}");
+}
+
 #[test]
 fn a_tip_chamfer_trims_the_tabs_and_not_the_slots() {
     let mut s = fixture_f();
