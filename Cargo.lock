@@ -6779,7 +6779,6 @@ dependencies = [
  "solidcraft-look",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
- "solidcraft-viewport-gpu",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",

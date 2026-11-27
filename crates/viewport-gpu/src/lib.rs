@@ -49,21 +49,6 @@ pub fn depth_features(adapter: &wgpu::Adapter) -> wgpu::Features {
 /// web) and the offscreen ones ([`depth_features`]).
 pub const INDIRECT_DRAWS: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE;
 
-/// The window device's request on `adapter`, on top of egui-wgpu's own (`base`, its stock
-/// `device_descriptor`): the adapter's largest 2D texture (at least 8192, egui-wgpu's own ask) so a
-/// window spanning large monitors fits, never a limit the adapter does not offer (older drivers,
-/// such as Debian 11's Mesa 20.3, report 2 colour attachments where wgpu's defaults ask for 8, and
-/// the device was refused), and `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` where offered, so the
-/// 2x and 8x sample counts work where the adapter has them (WebGPU only guarantees 1x and 4x).
-/// An adapter at or above wgpu's defaults gets the same limits as egui-wgpu's request otherwise.
-pub fn window_device_request(adapter: &wgpu::Adapter, base: wgpu::DeviceDescriptor<'static>) -> wgpu::DeviceDescriptor<'static> {
-    let offered = adapter.limits();
-    let required_limits =
-        wgpu::Limits { max_texture_dimension_2d: offered.max_texture_dimension_2d.max(8192), ..base.required_limits }.or_worse_values_from(&offered);
-    let required_features = base.required_features | (adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
-    wgpu::DeviceDescriptor { required_limits, required_features, ..base }
-}
-
 /// The depth format to draw with on `device`: 32-bit float (reversed depth) where it can, with a
 /// stencil when `stencil` (the section cap needs one), else 24 bits with a stencil.
 pub fn depth_format(device: &wgpu::Device, stencil: bool) -> wgpu::TextureFormat {
