@@ -41,12 +41,12 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
         crate::ui_kit::Text::Note("projection"),
     );
     crate::ui_kit::text(ui, app.tr_label("dxf.tolerance_help"), crate::ui_kit::Text::Note("tolerance"));
+    if !crate::viewport::section_planes(app).is_empty() {
+        crate::ui_kit::text(ui, app.tr("dxf.sectioned"), crate::ui_kit::Text::Note("sectioned"));
+    }
 }
 
 pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) -> Result<(), String> {
-    if !crate::viewport::section_planes(app).is_empty() {
-        return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
-    }
     if !solidcraft_engine::cmd::view_dxf_exportable(&app.session) {
         return Err(app.tr_label("No visible bodies or sketches to export.").into());
     }
@@ -57,9 +57,14 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) 
     app.preferences.view_dxf_tolerance = tolerance;
     app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
     let camera = app.cam;
+    // The view as it is shown: cut by Section Analysis, or by a sketch's Slice (#22913).
+    let section: Vec<_> = crate::viewport::section_planes(app)
+        .iter()
+        .map(|plane| json!({"origin": [plane.origin.x, plane.origin.y, plane.origin.z], "normal": [plane.normal.x, plane.normal.y, plane.normal.z]}))
+        .collect();
     app.pick_save(&format!("{}-view.dxf", app.session.doc.name), &["dxf"], move |app, path| {
         if let Some(path) = path {
-            let params = json!({"camera":camera,"hidden":if dashed {"dashed"} else {"omit"},"tolerance":tolerance,"zero":if zero_origin {"origin"} else {"target"},"curves":"arcs","path":path});
+            let params = json!({"camera":camera,"hidden":if dashed {"dashed"} else {"omit"},"tolerance":tolerance,"zero":if zero_origin {"origin"} else {"target"},"curves":"arcs","section":section,"path":path});
             let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ExportDxf);
             request.options = params.as_object().cloned().unwrap_or_default();
             let _ = crate::file_load::begin_request(app, request);
@@ -177,6 +182,27 @@ mod tests {
         h.app.start("file.export_view_dxf");
         h.frames(3);
         assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewDxf { zero_origin: true, .. })));
+    }
+
+    /// #22913: with Section Analysis on, the dialog says the view is exported cut and exports it as the
+    /// section shows it, instead of refusing.
+    #[test]
+    fn view_dxf_exports_the_view_cut_by_section_analysis() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":10})).unwrap();
+        h.app.run("inspect.section", json!({"plane":"YZ","at":20})).unwrap();
+        h.app.cam.fov = 0.0;
+        h.app.cam.distance = 150.;
+        h.app.cam.target = Vec3::new(20., 15., 5.);
+        h.app.cam.set_view(StandardView::Top);
+        h.frames(3);
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        let note = h.app.tr("dxf.sectioned").to_string();
+        assert!(h.widget(&note).is_some(), "the dialog says the view is exported cut");
+        export_to(&mut h, "cut.dxf");
+        let (lo, hi) = entity_bounds(&std::fs::read_to_string(h.dir.join("cut.dxf")).unwrap());
+        assert!(near(lo, -20., -15.) && near(hi, 0., 15.), "half the plate: {lo:?} {hi:?}");
     }
 
     /// #17917: the dialog writes a round hole as one `CIRCLE`, not as a ring of line chords, and has
