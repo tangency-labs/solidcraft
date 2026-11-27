@@ -2677,14 +2677,17 @@ pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput])
     if f.editing.is_some() {
         return None;
     }
-    let picks: Vec<&Sel> =
-        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
     let doc = &app.session.doc;
     let mut occs: Vec<u64> = Vec::new();
-    for pick in picks {
-        let occ = side_occurrence(&app.session, pick)?;
-        if !occs.contains(&occ) {
-            occs.push(occ);
+    if f.as_built {
+        // The components as OK counts them: a component picked whole is one.
+        occs = occurrences(&app.session, sel_items(inputs, 0), &f.whole_components);
+    } else {
+        for pick in (0..2).filter_map(|i| sel_items(inputs, i).first()) {
+            let occ = side_occurrence(&app.session, pick)?;
+            if !occs.contains(&occ) {
+                occs.push(occ);
+            }
         }
     }
     let [a, b] = occs.as_slice() else { return None };
@@ -2723,6 +2726,15 @@ pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[Str
     if f.as_built && held && !bodies.is_empty() && !f.whole_components.contains(&whole) {
         f.whole_components.push(whole);
     }
+}
+
+/// As-built: the row of a component inside one picked whole adds that component as a side of its
+/// own, where a second click on a row otherwise takes its bodies out again.
+pub(crate) fn row_adds_inside_whole(d: &Dialog, path: &[u64]) -> bool {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    f.as_built
+        && f.whole_components.iter().any(|w| w.path.len() < path.len() && path.starts_with(&w.path))
+        && !f.whole_components.iter().any(|w| w.path == path)
 }
 
 /// As-built with fewer than two components in Components: they are still being picked.
