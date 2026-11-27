@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Convert welds to bodies</title>
+  <path d="M22.21 47.71L42 59.14L42 62L22.21 50.57Z" fill="#b8c3cf"/>
+  <path d="M61.79 47.71L42 59.14L42 62L61.79 50.57Z" fill="#8e9faf"/>
+  <path d="M42 36.29L61.79 47.71L42 59.14L22.21 47.71Z" fill="#e2e8ef"/>
+  <path d="M42 36.29L61.79 47.71L61.79 50.57L42 62L22.21 50.57L22.21 47.71Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.21 47.71L42 59.14L61.79 47.71" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42 59.14L42 62" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.72 27.36L52.52 38.79L52.52 53.07L32.72 41.64Z" fill="#b8c3cf"/>
+  <path d="M56.23 36.64L52.52 38.79L52.52 53.07L56.23 50.93Z" fill="#8e9faf"/>
+  <path d="M36.43 25.21L56.23 36.64L52.52 38.79L32.72 27.36Z" fill="#e2e8ef"/>
+  <path d="M36.43 25.21L56.23 36.64L56.23 50.93L52.52 53.07L32.72 41.64L32.72 27.36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.72 27.36L52.52 38.79L56.23 36.64" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52.52 38.79L52.52 53.07" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.72 37.36L52.52 48.79L48.8 55.21L29.01 43.79Z" fill="#328bd3"/>
+  <path d="M52.52 53.07L52.52 48.79L48.8 55.21Z" fill="#236ead"/>
+  <path d="M32.72 37.36L52.52 48.79L48.8 55.21L29.01 43.79Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52.52 53.07L52.52 48.79L48.8 55.21Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 14L30 14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 14L20 14L10 24Z" fill="#b9ddf8"/>
+  <path d="M10 14L20 14L10 24Z" fill="none" stroke="#236ead" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 22Q32 24 36 32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30 26L33.63 30.53" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 36L29.88 32.25L36.13 27.25Z" fill="#236ead"/>
+</svg>
