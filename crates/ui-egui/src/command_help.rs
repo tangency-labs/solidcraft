@@ -164,6 +164,7 @@ pub const DOCUMENTED: &[&str] = &[
     "pointcloud.insert",
     "pulley.insert",
     "shaft_spline.insert",
+    "sheet.check_shop",
     "sheet.convert",
     "sheet.corner_join",
     "sheet.export_bend_table",

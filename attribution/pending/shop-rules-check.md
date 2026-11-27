@@ -1,0 +1,1 @@
+| assets/sheet-metal/shop-rules.json | SolidCraft contributors | Original; the Generic fabrication shop rules profile: general sheet-metal design rules of thumb in our own words, no shop's rules; the shop check's rules (#20113) | MIT OR Apache-2.0 |

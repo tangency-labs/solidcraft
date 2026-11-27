@@ -79,6 +79,9 @@ macro_rules! unpaged_preferences {
             send_formats: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
+            /// Your own shop rules profiles, offered by Check Against Shop Rules beside the built-in Generic
+            /// one (#20113). No page reset discards this user-authored library.
+            shop_presets: solidcraft_engine::doc::shop_presets::Presets = solidcraft_engine::doc::shop_presets::Presets::default();
             /// A shape's shortcut (C, R, ...) starts the tool the menu lists it next to (#22247). A mode of
             /// the shape tools, set in the Sketch Palette's Feature Options while one runs and kept; no
             /// Preferences page shows or resets it. Off (the default): the key starts the family's tool

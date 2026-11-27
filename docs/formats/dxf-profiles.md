@@ -108,7 +108,7 @@ because the DXF records a pocket's depth nowhere else.
 - `text: cut` or `etch` chooses which role the letters cut through the sheet take; the profile
   then styles that role or leaves it out. With `cut_text` off those letters are not in the file,
   so the cutter does not cut them.
-- `layers: single` puts every entity on layer 0 and cannot be combined with a profile.
+- `layers: single` puts every entity on layer 0, and `layers: cut` the cut contours; neither can be combined with a profile.
 - `curves`, `note_height` and `per_body` work as without a profile. The entities and their order
   are the same; only their layers change.
 

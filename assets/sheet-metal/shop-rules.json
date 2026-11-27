@@ -1,0 +1,135 @@
+{
+  "format": "solidcraft-shop-rules",
+  "version": 1,
+  "note": "The built-in Generic profile: general sheet-metal design practice in SolidCraft's own words, with each value stated as a multiple of the sheet thickness (t) or the inside bend radius (R). It is not any shop's rules: your shop's numbers belong in a preset.",
+  "profiles": [
+    {
+      "id": "generic",
+      "name": "Generic",
+      "note": "General sheet-metal design practice, not any shop's rules. Distances are multiples of the sheet thickness t and the inside bend radius R, the rules of thumb taught for laser, punch and press-brake parts. Hole to bend is measured to where the bend starts, the stricter reading. It has no stock list or sheet size. Your shop's numbers belong in a preset: save one from this profile and edit it.",
+      "dxf_export": {
+        "layers": "single",
+        "bend_lines": false,
+        "bend_notes": false,
+        "hardware_notes": false,
+        "sources": [
+          {
+            "says": "general practice: a cutter takes every line on its layer as a cut, so a file for cutting has one layer of cut paths, with bend lines and notes left out"
+          }
+        ]
+      },
+      "rules": [
+        {
+          "id": "file.one_body",
+          "sources": [
+            {
+              "says": "general practice: a flat pattern is made from one solid sheet-metal body, so a part file holds one body and an assembly is split into its parts"
+            }
+          ]
+        },
+        {
+          "id": "file.uniform_thickness",
+          "sources": [
+            {
+              "says": "general practice: a sheet part is cut from one thickness of stock, so every feature is modelled at the same thickness"
+            }
+          ]
+        },
+        {
+          "id": "hole.min_diameter",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 1.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "says": "general practice: a hole is at least as wide as the sheet is thick, a common rule of thumb for punched and cut holes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_edge",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "says": "general practice: the rim of a hole is at least two thicknesses from the sheet's edge, so the web left does not tear or bulge"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_bend",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 2.5,
+              "relative_to": "thickness",
+              "plus_radius": 1.0,
+              "sources": [
+                {
+                  "says": "general practice: the rim of a hole is at least 2.5 thicknesses plus the inside bend radius from a bend, so bending does not stretch the hole out of round"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "flange.min",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 4.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "says": "general practice: a flange is at least four thicknesses long, so it rests on the die of a press brake when it is bent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "thread.modelling",
+          "sources": [
+            {
+              "says": "general practice: a tapped hole is drawn as a plain hole of the tap-drill size and the thread is named on the order"
+            }
+          ],
+          "wanted": "plain"
+        },
+        {
+          "id": "file.dxf_single_layer",
+          "sources": [
+            {
+              "says": "general practice: every cut path of the flat DXF is on one layer, with construction lines and notes on other layers or left out"
+            }
+          ]
+        },
+        {
+          "id": "file.dxf_closed_contours",
+          "sources": [
+            {
+              "says": "general practice: every cut path of the flat DXF is a closed shape, and no line is drawn twice or overlaps another"
+            }
+          ]
+        },
+        {
+          "id": "file.text_outlined",
+          "sources": [
+            {
+              "says": "general practice: text in the flat DXF is converted to outlines, as editable text is not cut geometry"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -44,7 +44,7 @@ pub mod shaft_spline;
 pub mod tessellate;
 pub mod tube_cope;
 
-pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
+pub use affine::{Affine, AffineRefused, AxisRefusal, FlangeReach, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, CurveSample, Curves};
 pub use dxf::Dxf;

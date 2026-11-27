@@ -576,7 +576,11 @@ notes tickbox for it when the sheet has hardware. Like the bend notes it is off 
 
 For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
-`0` instead of a layer for each role.
+`0` instead of a layer for each role. `"layers": "cut"` is in between: the cut contours (outline,
+cut-outs, cut text, perforation) are on layer `0`, and the bend lines, notes and markings keep
+their layers, the bend lines dashed. A cutter that wants one cut layer and a bender that wants the
+bend lines both get what they ask for. Check Against Shop Rules names the export each shop
+wants, and starts from it.
 
 A cutter's software often expects its own layer names and colours. A **DXF profile** is a small
 file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
@@ -606,7 +610,7 @@ From a script, pass it as `"profile"`, either the file's path or the profile its
 A role the profile does not mention keeps the layer in the table above, and without a profile
 the file is exactly as described there. The entities and their order do not change, only their
 layers; a role is written when both the export's options and the profile allow it, and
-`"layers": "single"` cannot be combined with a profile. A profile that names an unknown role or
+`"layers": "single"` and `"layers": "cut"` cannot be combined with a profile. A profile that names an unknown role or
 gives a colour, linetype or layer name that cannot be used is refused with a message saying
 which, and no file is written. The file format: `docs/formats/dxf-profiles.md`.
 

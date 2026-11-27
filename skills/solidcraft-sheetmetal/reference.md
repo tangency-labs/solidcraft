@@ -94,12 +94,17 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
   `bend_zones`, `perforations`, `hardware`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),
-  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
+  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`|`cut`: cut contours on layer 0, bend lines kept on their own dashed layers), `per_body?`.
   Layers: `OUTLINE`, `CUT`, `TEXT`/`ETCH`, `BEND_UP`/`BEND_DOWN`, `BEND_NOTES`,
   `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE` (only with `hardware_notes`).
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
+- `sheet.check_shop`: `shop` (`generic`, one of your preset ids, a profile file's path or a profile
+  object), `body?`, `dxf?`. Read-only. Core ships Generic, general design practice (no shop's rules); a shop's own
+  numbers are a preset: `sheet.shop_presets` (`profile?` gives Generic's or a preset's object to
+  edit), `sheet.save_shop_preset` (`name?`, `profile` or `path`), `sheet.delete_shop_preset`
+  (`id`). Presets are the user's, kept with their preferences. Format: `docs/formats/shop-rules.md`.
 
 ### On a drawing
 A note (`drawing.note.add`) or a title block cell on a sheet that documents a sheet metal part

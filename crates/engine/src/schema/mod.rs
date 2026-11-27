@@ -157,6 +157,7 @@ pub mod selection;
 pub mod settings;
 pub mod shaft_spline;
 pub mod sheet;
+pub mod sheet_check;
 pub mod silhouette;
 pub mod sketch;
 pub mod sketch_3d;

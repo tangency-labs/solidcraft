@@ -297,7 +297,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// - `plugin`: reviews, installs, removes, inspects or runs plugins.
 pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
 
-/// Commands outside the `file.` family that read or write files.
+/// Commands outside the `file.` family that read or write files, or the user's shop presets.
 const FILE_COMMANDS: &[&str] = &[
     "canvas.insert",
     "component.insert_design",
@@ -309,8 +309,11 @@ const FILE_COMMANDS: &[&str] = &[
     "pointcloud.insert",
     "pointcloud.reload",
     "render.export",
+    "sheet.check_shop",
+    "sheet.delete_shop_preset",
     "sheet.export_bend_table",
     "sheet.export_dxf",
+    "sheet.save_shop_preset",
     "sketch.export_dxf",
     "sketch.export_svg",
     "timeline.export_script",

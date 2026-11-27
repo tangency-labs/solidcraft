@@ -1426,7 +1426,8 @@ pub struct ExportDxfParams {
     #[serde(default)]
     pub markings: Option<bool>,
     /// roles: the layer for each role (and, with `hardware_notes`, layer HARDWARE).
-    /// single: every entity on layer 0, with no hardware notes. Default: roles.
+    /// single: every entity on layer 0, with no hardware notes. cut: the cut contours on layer 0,
+    /// the bend lines and notes on their own layers. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,
     /// A DXF profile: which layer, colour and linetype each role is written with, and the roles
@@ -1500,15 +1501,15 @@ impl JsonSchema for DxfTextParam {
     }
 }
 
-/// A DXF export's `layers`: false for the layer of each role, true for everything on layer 0, in
-/// any case (read by `sheet::dxf_layers`).
+/// A DXF export's `layers`: the layer of each role, everything on layer 0, or the cut contours on
+/// layer 0, in any case (read by `sheet::dxf_layers`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DxfLayersParam(pub(crate) bool);
+pub struct DxfLayersParam(pub(crate) solidcraft_doc::shop_rules::DxfLayers);
 
 impl<'de> Deserialize<'de> for DxfLayersParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        v.as_str().and_then(crate::cmd::dxf_layers).map(DxfLayersParam).ok_or_else(|| D::Error::custom("must be roles or single"))
+        v.as_str().and_then(crate::cmd::dxf_layers).map(DxfLayersParam).ok_or_else(|| D::Error::custom("must be roles, single or cut"))
     }
 }
 
@@ -1517,7 +1518,7 @@ impl JsonSchema for DxfLayersParam {
         "DxfLayers".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "roles or single, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"})
+        json_schema!({"description": "roles, single or cut, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee]|[Cc][Uu][Tt])$"})
     }
 }
 

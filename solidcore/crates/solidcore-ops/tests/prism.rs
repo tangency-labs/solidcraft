@@ -2627,3 +2627,105 @@ fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
     };
     assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
 }
+
+/// Two panels stand against the zone's edge on the same side: one reaches 20 mm, the other has a
+/// cubic far edge. The reach is unknown (`None`), not the 20 mm of the one that can be measured;
+/// a free-form panel that is not against that side of the bend is no part of it.
+#[test]
+fn flange_reach_is_unknown_when_a_panel_against_the_bend_cannot_be_measured() {
+    use solidcore_ops::prism::flange_reach;
+    let zone = rectangle(v(0.0, 29.0), v(10.0, 31.0));
+    let straight = rectangle(v(0.0, 31.0), v(5.0, 51.0));
+    let curved = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(5.0, 31.0),
+                    b: v(10.0, 31.0),
+                },
+                Seg2::Cubic {
+                    p0: v(10.0, 31.0),
+                    p1: v(12.0, 38.0),
+                    p2: v(3.0, 38.0),
+                    p3: v(5.0, 31.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let on =
+        |panels: &[Region2]| flange_reach(panels, &zone, v(0.0, 30.0), v(10.0, 30.0), true, 0.0);
+    let alone = on(std::slice::from_ref(&straight)).unwrap();
+    assert!((alone.from_edge - 20.0).abs() < 1e-9, "{alone:?}");
+    assert_eq!(on(&[straight.clone(), curved]), None);
+    // A free-form panel far off the bend (on the other side of the line) is skipped.
+    let far = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(0.0, 5.0),
+                    b: v(10.0, 5.0),
+                },
+                Seg2::Cubic {
+                    p0: v(10.0, 5.0),
+                    p1: v(12.0, 12.0),
+                    p2: v(-2.0, 12.0),
+                    p3: v(0.0, 5.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let skipped = on(&[straight, far]).unwrap();
+    assert!((skipped.from_edge - 20.0).abs() < 1e-9, "{skipped:?}");
+}
+
+/// A flat pattern is cut at its bend's zone by the planar boolean, and the flange reach is read
+/// across each panel: a 10 wide strip, a zone from y = 29 to 31, a 20 mm flange (from y = 31 to
+/// 51) and a 29 mm base. The reach is from the zone's edge, and from the centre line one more
+/// millimetre; a hole in the flange does not shorten it; a cut-out to its edge does.
+#[test]
+fn flange_reach_across_the_panels_a_zone_cuts_from_a_flat() {
+    use solidcore_ops::prism::flange_reach;
+    let zone = rectangle(v(0.0, 29.0), v(10.0, 31.0));
+    let reach = |flat: Region2| {
+        let panels = planar_regions_boolean(
+            &[flat],
+            std::slice::from_ref(&zone),
+            BooleanOp::Subtract,
+            1e-9,
+        )
+        .unwrap();
+        let on = |left| flange_reach(&panels, &zone, v(0.0, 30.0), v(10.0, 30.0), left, 0.0);
+        (on(true), on(false))
+    };
+    let (flange, base) = reach(rectangle(v(0.0, 0.0), v(10.0, 51.0)));
+    let (flange, base) = (flange.unwrap(), base.unwrap());
+    assert!((flange.from_edge - 20.0).abs() < 1e-9, "{flange:?}");
+    assert!((flange.from_line - 21.0).abs() < 1e-9, "{flange:?}");
+    assert!((base.from_edge - 29.0).abs() < 1e-9, "{base:?}");
+    let mut holed = rectangle(v(0.0, 0.0), v(10.0, 51.0));
+    holed.holes.push(Loop2::polygon(&[
+        v(4.0, 40.0),
+        v(4.0, 44.0),
+        v(6.0, 44.0),
+        v(6.0, 40.0),
+    ]));
+    let (flange, _) = reach(holed);
+    assert!((flange.unwrap().from_edge - 20.0).abs() < 1e-9);
+    let notched = Region2 {
+        outer: Loop2::polygon(&[
+            v(0.0, 0.0),
+            v(10.0, 0.0),
+            v(10.0, 51.0),
+            v(6.0, 51.0),
+            v(6.0, 45.0),
+            v(4.0, 45.0),
+            v(4.0, 51.0),
+            v(0.0, 51.0),
+        ]),
+        holes: vec![],
+    };
+    let (flange, _) = reach(notched);
+    assert!((flange.unwrap().from_edge - 14.0).abs() < 1e-9);
+}
