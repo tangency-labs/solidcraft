@@ -425,7 +425,7 @@ pub struct Constrained {
     pub determined_by: Option<Vec<String>>,
 }
 
-/// What `sketch.constraint.horizontal_vertical`, `parallel`, `perpendicular`, `collinear`,
+/// What `sketch.constraint.horizontal_vertical`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `collinear`,
 /// `concentric` and `midpoint` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstraintResult {
@@ -489,6 +489,16 @@ pub struct CoincidentResult {
 pub enum CoincidentMade {
     /// A coincident (or point-on-curve) constraint was added.
     Added(Constrained),
+    /// Two plain points were merged into one shared sketch point (or already shared it).
+    Merged {
+        /// The surviving shared point id.
+        point: String,
+        /// `true` when the two points already shared the same point.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        existing: bool,
+        /// The sketch's solve: `{solved, dof}`.
+        sketch: Value,
+    },
     /// The two points were already coincident, or the two lines already collinear: nothing was added.
     Existing {
         /// The constraint that already joins them.
@@ -806,21 +816,61 @@ fn horizontal_vertical_required(schema: &mut Schema) {
 impl<'de> Deserialize<'de> for HorizontalVerticalParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = fields(d)?;
+        horizontal_vertical_of(&m).map_err(D::Error::custom)
+    }
+}
+
+/// The keys `sketch.constraint.horizontal_vertical`, `horizontal` and `vertical` share, read as
+/// their handler reads them (`mode` only matters to the first).
+fn horizontal_vertical_of(m: &Fields) -> Read<HorizontalVerticalParams> {
+    let mode = text_of(m, "mode")?;
+    let sketch = sketch_of(m)?;
+    let if_redundant = if_redundant_of(m)?;
+    if let Some(list) = m.get("points").and_then(Value::as_array) {
+        let [a, b] = list.as_slice() else { return refuse("`points` needs exactly two point references") };
+        let points = Some([align_point(a)?, align_point(b)?]);
+        return Ok(HorizontalVerticalParams { line: None, points, mode, if_redundant, sketch });
+    }
+    let line = match m.get("line") {
+        None => None,
+        Some(Value::String(id)) => Some(id.clone()),
+        Some(_) => return refuse("`line` must be a curve id"),
+    };
+    Ok(HorizontalVerticalParams { line, points: None, mode, if_redundant, sketch })
+}
+
+/// Make a line horizontal (`sketch.constraint.horizontal`) or vertical
+/// (`sketch.constraint.vertical`), or two points level (same height) or plumb (one above the
+/// other), by `line` or by `points`: as `sketch.constraint.horizontal_vertical`, with the
+/// direction set by the command instead of by `mode`.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = horizontal_vertical_required)]
+pub struct AxisAlignParams {
+    /// A line's id. Read when `points` is not a list; ignored when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub line: Option<String>,
+    /// Exactly two points: ids, or a line's middle as `{midpoint: line_id}`. When it is a list,
+    /// `line` is ignored; anything else is ignored, as if the key were left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "[AlignPoint; 2]")]
+    pub points: Option<[AlignPoint; 2]>,
+    /// `refuse` (in any case) refuses the call when the sketch already determines the new
+    /// constraint, instead of keeping it as a redundant one (any other text keeps it). Read
+    /// only when the constraint turns out redundant.
+    #[serde(default)]
+    pub if_redundant: Option<String>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchKey>,
+}
+
+impl<'de> Deserialize<'de> for AxisAlignParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let m = fields(d)?;
         let read = || -> Read<Self> {
-            let mode = text_of(&m, "mode")?;
-            let sketch = sketch_of(&m)?;
-            let if_redundant = if_redundant_of(&m)?;
-            if let Some(list) = m.get("points").and_then(Value::as_array) {
-                let [a, b] = list.as_slice() else { return refuse("`points` needs exactly two point references") };
-                let points = Some([align_point(a)?, align_point(b)?]);
-                return Ok(Self { line: None, points, mode, if_redundant, sketch });
-            }
-            let line = match m.get("line") {
-                None => None,
-                Some(Value::String(id)) => Some(id.clone()),
-                Some(_) => return refuse("`line` must be a curve id"),
-            };
-            Ok(Self { line, points: None, mode, if_redundant, sketch })
+            let HorizontalVerticalParams { line, points, if_redundant, sketch, .. } = horizontal_vertical_of(&m)?;
+            Ok(Self { line, points, if_redundant, sketch })
         };
         read().map_err(D::Error::custom)
     }

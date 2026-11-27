@@ -2022,6 +2022,16 @@ fn main() -> eframe::Result {
             desktop_chooser::start(&cc.egui_ctx);
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
+            // Windows with OpenGL picked among every backend (the standard GPU startup): the
+            // system title bar after all, as an OpenGL-only start gets it (#22530, #2063).
+            let picked = cc.wgpu_render_state.as_ref().map(|rs| rs.adapter.get_info().backend);
+            let opengl_window = picked.is_some_and(|b| startup::system_title_bar_for_adapter(cfg!(target_os = "windows"), b));
+            let switch_to_system = custom_titlebar && opengl_window;
+            let custom_titlebar = custom_titlebar && !opengl_window;
+            if switch_to_system {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+                solidcraft_engine::note!("SolidCraft window: OpenGL adapter; using the system title bar");
+            }
             app.custom_titlebar = custom_titlebar;
             #[cfg(target_os = "windows")]
             {

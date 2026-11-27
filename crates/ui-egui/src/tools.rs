@@ -48,6 +48,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.dimension", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     // Constraint tools: pick-only; no tool-specific modifier chords.
     ToolModifiers { tool: "sketch.constraint.horizontal_vertical", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.constraint.horizontal", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.constraint.vertical", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.constraint.fix", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.constraint.coincident", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.constraint.tangent", scopes: &[], bindings: &[], audit: Audit::VerifiedNoOp },
@@ -82,7 +84,8 @@ pub enum Kind {
     Draw(usize),
     /// Pick sketch entities; `n` picks run the command.
     Pick(usize),
-    /// Pick one straight line, or two distinct points to align.
+    /// Pick one straight line, or two distinct points to align: Horizontal and Vertical (and the
+    /// combined command, which only agents and scripts start).
     HorizontalVertical,
     Dimension,
     /// A tool from `sketch_tools` (it handles its own clicks).
@@ -164,6 +167,8 @@ impl Tool {
             "sketch.point" => ("sketch.point", Kind::Draw(1)),
             "sketch.dimension" => ("sketch.dimension", Kind::Dimension),
             "sketch.constraint.horizontal_vertical" => ("sketch.constraint.horizontal_vertical", Kind::HorizontalVertical),
+            "sketch.constraint.horizontal" => ("sketch.constraint.horizontal", Kind::HorizontalVertical),
+            "sketch.constraint.vertical" => ("sketch.constraint.vertical", Kind::HorizontalVertical),
             "sketch.constraint.fix" => ("sketch.constraint.fix", Kind::Pick(1)),
             "sketch.constraint.coincident" => ("sketch.constraint.coincident", Kind::Pick(2)),
             "sketch.constraint.tangent" => ("sketch.constraint.tangent", Kind::Pick(2)),
@@ -217,6 +222,8 @@ pub fn hint(id: &str) -> String {
         "sketch.arc.center_point" => tr("sketch.hint.arc.center_point").into(),
         "sketch.dimension" => tr("sketch.hint.dimension").into(),
         "sketch.constraint.horizontal_vertical" => tr("sketch.hint.constraint.horizontal_vertical").into(),
+        "sketch.constraint.horizontal" => tr("sketch.hint.constraint.horizontal").into(),
+        "sketch.constraint.vertical" => tr("sketch.hint.constraint.vertical").into(),
         "sketch.slot.center_to_center" | "sketch.slot.overall" => tr("sketch.hint.slot").into(),
         "sketch.constraint.midpoint" => tr("sketch.hint.constraint.midpoint").into(),
         _ if id.starts_with("sketch.constraint.") => tr("sketch.hint.constraint.generic").into(),
@@ -342,7 +349,8 @@ pub(crate) fn constraint_cursor_icon(app: &SolveApp, tool: &Tool, proj: &Proj, p
     if tool.kind == Kind::Dimension && crate::dim_view::editing() {
         return None;
     }
-    if tool.kind == Kind::HorizontalVertical {
+    // Horizontal and Vertical go one way only and show their own icon.
+    if tool.kind == Kind::HorizontalVertical && axis_of_tool(tool.cmd).is_none() {
         return Some(horizontal_vertical_cursor_icon(app, tool, proj, pos, shift));
     }
     solidcraft_engine::find_command(tool.cmd).map(|spec| spec.icon).filter(|icon| !icon.is_empty())
@@ -420,13 +428,15 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     };
     let constraint_pick = app.tool.as_ref().is_some_and(is_constraint_pick_tool);
     let dimension_tool = app.tool.as_ref().is_some_and(|t| t.kind == Kind::Dimension);
+    let axis_tool = app.tool.as_ref().is_some_and(|t| axis_of_tool(t.cmd).is_some());
     let h = if let Some((point, _)) = midpoint {
         crate::sketch_tools::clear_snap();
         Some((point, Some("Midpoint".into())))
     } else if constraint_pick {
         crate::sketch_tools::clear_snap();
-        // Dimension still tracks the raw plane point so live previews/drags follow the pointer.
-        dimension_tool.then(|| crate::viewport::sketch_plane_cursor(app, proj, pos).map(|p| (p, None))).flatten()
+        // Dimension still tracks the raw plane point so live previews/drags follow the pointer, and
+        // so do Horizontal and Vertical, for their guide.
+        (dimension_tool || axis_tool).then(|| crate::viewport::sketch_plane_cursor(app, proj, pos).map(|p| (p, None))).flatten()
     } else if let Some(point) = app.tool.as_ref().and_then(|tool| crate::sketch_tools::periodic_start_snap(app, tool, proj, pos)) {
         Some((point, Some("Close smooth loop".into())))
     } else {
@@ -539,6 +549,15 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 let first = tool.point_picks.first().cloned();
                 let params = match first {
                     None => Some(json!({"line": id})),
+                    // Horizontal and Vertical on their own say which way: no `mode` is sent.
+                    Some(point) if axis_of_tool(tool.cmd).is_some() => {
+                        let state = crate::open_meshing::session_world(&app.session);
+                        app.session
+                            .active_sketch
+                            .and_then(|sid| state.sketch(sid))
+                            .and_then(|ss| point_line_points(&ss.sketch, &point, id))
+                            .map(|points| json!({"points": points}))
+                    }
                     Some(point) => {
                         let state = crate::open_meshing::session_world(&app.session);
                         app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| point_line_alignment(&ss.sketch, &point, id))
@@ -1027,7 +1046,9 @@ fn is_line_curve(sketch: Option<&solidcraft_engine::sketch::Sketch>, id: &str) -
 
 pub(crate) fn curve_compatible_with_constraint(cmd: &str, sketch: Option<&solidcraft_engine::sketch::Sketch>, id: &str) -> bool {
     match cmd {
-        "sketch.constraint.horizontal_vertical"
+        "sketch.constraint.horizontal"
+        | "sketch.constraint.vertical"
+        | "sketch.constraint.horizontal_vertical"
         | "sketch.constraint.parallel"
         | "sketch.constraint.perpendicular"
         | "sketch.constraint.collinear"
@@ -1448,7 +1469,23 @@ pub(crate) fn paint_curve(
     stroke: Stroke,
     budget: &mut solidcraft_engine::render::SamplingBudget,
 ) {
-    for part in crate::sketch_display::curve_with_budget(sketch, index, plane, proj, painter.ctx().pixels_per_point(), budget).parts {
+    paint_curve_placed(sketch, index, plane, painter, proj, stroke, budget, None);
+}
+
+/// [`paint_curve`], with each piece moved by `placed` first (the Insert SVG/DXF window's
+/// placement, drawn without importing the drawing again).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_curve_placed(
+    sketch: &solidcraft_engine::sketch::Sketch,
+    index: usize,
+    plane: &solidcore_record::Plane,
+    painter: &egui::Painter,
+    proj: &Proj,
+    stroke: Stroke,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+    placed: Option<&dyn Fn(solidcore_record::Seg2) -> solidcore_record::Seg2>,
+) {
+    for part in crate::sketch_display::curve_with_budget_placed(sketch, index, plane, proj, painter.ctx().pixels_per_point(), budget, placed).parts {
         let mode = sketch.curves.get(index).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
         paint_sketch_path(&part, mode, painter, proj, stroke);
     }
@@ -1621,7 +1658,7 @@ pub(crate) fn preview_curve(
 }
 
 pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
-    solidcraft_kernel::services::sketch_arc::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
+    solidcraft_kernel::planar::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
 }
 
 /// The polygon's actual straight edges, in the same orientation as the eventual command.
@@ -1681,6 +1718,41 @@ pub(crate) fn highlight_point(painter: &egui::Painter, sp: Pos2) {
     let tk = solidcraft_theme::Tokens::view();
     painter.circle_filled(sp, 4.0, tk.sel_vertex);
     painter.circle_stroke(sp, 6.0, Stroke::new(2.0, tk.sel_edge));
+}
+
+/// Which way the Horizontal (`Some(true)`) or Vertical (`Some(false)`) tool aligns; `None` for any
+/// other tool, the combined Horizontal/Vertical among them, which picks the nearer way itself.
+pub(crate) fn axis_of_tool(cmd: &str) -> Option<bool> {
+    match cmd {
+        "sketch.constraint.horizontal" => Some(true),
+        "sketch.constraint.vertical" => Some(false),
+        _ => None,
+    }
+}
+
+/// The screen ends of the guide through `anchor` (sketch coordinates) along the sketch's X axis
+/// (`horizontal`) or Y axis, reaching past both sides of `view`: `None` when the direction is
+/// seen end on or the anchor is off the screen side of the camera.
+pub(crate) fn axis_guide_ends(anchor: Vec2, horizontal: bool, to: impl Fn(Vec2) -> Option<Pos2>, view: egui::Rect) -> Option<[Pos2; 2]> {
+    let step = if horizontal { Vec2::new(1.0, 0.0) } else { Vec2::new(0.0, 1.0) };
+    let a = to(anchor)?;
+    // Both ways from the anchor, so a point behind the camera on one side still gives the line.
+    let along = to(anchor + step).map(|b| b - a).or_else(|| to(anchor - step).map(|b| a - b))?;
+    let length = along.length();
+    if !a.is_finite() || !length.is_finite() || length < 1e-3 {
+        return None;
+    }
+    let reach = 2.0 * (view.width() + view.height() + (a - view.center()).length());
+    let dir = along / length;
+    Some([a - dir * reach, a + dir * reach])
+}
+
+/// The thin dashed guide the Horizontal and Vertical tools show along their direction.
+fn paint_axis_guide(anchor: Vec2, horizontal: bool, plane: &solidcore_record::Plane, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
+    let Some(ends) = axis_guide_ends(anchor, horizontal, |p| proj.to_screen(plane.to_world(p)), proj.rect) else { return };
+    painter.extend(crate::ui_kit::dashed_line(&ends, painter.clip_rect(), stroke, 6.0, 4.0));
+    // Where it crosses the view, for checks: flat for a horizontal guide in a top view.
+    crate::scenario::publish_rect("viewport:axis_guide", egui::Rect::from_two_pos(ends[0], ends[1]).intersect(proj.rect));
 }
 
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
@@ -1763,6 +1835,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 highlight_point(painter, sp);
             }
         }
+    }
+    // Horizontal or Vertical: one thin dashed guide along that direction through the cursor for as
+    // long as the tool is on, after the first pick too (the picked point has its own ring).
+    if let Some(horizontal) = axis_of_tool(t.cmd)
+        && let Some((cursor, _)) = &t.hover
+    {
+        paint_axis_guide(*cursor, horizontal, &ss.plane, painter, proj, Stroke::new(1.0, tk.sketch_accent.gamma_multiply(0.7)));
     }
     let Some(hover) = t.hover.as_ref() else { return };
     let h = crate::sketch_dims::shown(app, t, hover);
@@ -1905,6 +1984,8 @@ mod constraint_cursor_tests {
 
         // Static command icons across constraint pick tools.
         for (cmd, expected) in [
+            ("sketch.constraint.horizontal", "c_horizontal"),
+            ("sketch.constraint.vertical", "c_vertical"),
             ("sketch.constraint.parallel", "c_parallel"),
             ("sketch.constraint.curvature", "c_smooth"),
             ("sketch.constraint.polygon", "c_polygon"),

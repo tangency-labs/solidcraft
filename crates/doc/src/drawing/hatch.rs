@@ -1,7 +1,7 @@
 //! Hatch patterns: named sets of line families in paper millimetres at scale 1, with angles in
 //! radians, and their original presets. A pattern travels with its drawing (`PatternSnapshot`);
 //! PAT files read into it (`solidcraft_io::pat`). Its marks come from solidcore's line-family
-//! clipping (`solidcraft_kernel::services::profile::clip_line_family`), which holds the family's geometry and
+//! clipping (`solidcraft_kernel::hatch::clip_line_family`), which holds the family's geometry and
 //! its limits; pattern lengths do not inherit a drawing view's scale.
 //!
 //! Validate after deserialization and before use: these records are mutable, and serde does not
@@ -13,7 +13,7 @@ use std::f64::consts::FRAC_PI_4;
 use serde::{Deserialize, Serialize};
 use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Region2, Vec2};
-use solidcraft_kernel::services::profile::{MAX_FAMILIES, Mark, clip_line_family};
+use solidcraft_kernel::hatch::{MAX_FAMILIES, Mark, clip_line_family};
 
 /// The longest pattern name, in ASCII bytes.
 pub const MAX_NAME_BYTES: usize = 31;

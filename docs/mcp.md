@@ -258,7 +258,7 @@ configuration folder exists, and no client program is started. Supported:
 | `--client` | Configuration file |
 | --- | --- |
 | `opencode` | `~/.config/opencode/opencode.json` (or `.jsonc`) |
-| `claude-desktop` | `%APPDATA%\Claude\claude_desktop_config.json`, `~/Library/Application Support/Claude/`, `~/.config/Claude/`, and the Microsoft Store package's folder |
+| `claude-desktop` | `%APPDATA%\Claude\claude_desktop_config.json`, `~/Library/Application Support/Claude/`, `~/.config/Claude/`, and the Microsoft Store package's folders (`%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Claude` and `%LOCALAPPDATA%\Claude-Data\claude_…`) |
 | `claude-code` | `~/.claude.json` (user scope `mcpServers`) |
 | `cursor` | `~/.cursor/mcp.json` |
 | `codex` | `$CODEX_HOME` or `~/.codex`, `config.toml` (CLI, IDE extension and desktop app) |
@@ -347,9 +347,10 @@ Start the app with its control channel for `solidcraft-live`, from PowerShell:
 
 Open `claude_desktop_config.json` with Claude Desktop's **Settings > Developer > Edit Config**
 rather than by its path: the Microsoft Store (MSIX) build of Claude Desktop can keep its data in
-its own package folder (`%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude`) instead of
-`%APPDATA%\Claude`, and Edit Config opens the file the app actually reads. Quit Claude Desktop
-completely (from the notification area) and start it again to load the servers.
+its own folders (`%LOCALAPPDATA%\Claude-Data\claude_…`, or in older versions
+`%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude`) instead of `%APPDATA%\Claude`, and Edit
+Config opens the file the app actually reads. `mcp setup` writes to each of these that exists.
+Quit Claude Desktop completely (from the notification area) and start it again to load the servers.
 
 ### Agent skills
 
@@ -515,7 +516,10 @@ The app answers a control request that runs longer than 60 seconds (a big fillet
 "still running" ([control-protocol.md](control-protocol.md#limits)); it has not failed, and was
 not cancelled. The bridged server then keeps the connection, where the reply will come, and
 asks the app (`control.pending`) every half second for up to 240 seconds more, saying on stderr
-how long it waits; when the request finishes, the tool call returns its real result. If it still
+how long it waits; when a client supplies `_meta.progressToken` (string or integer) on a `tools/call`
+request, the server also emits standard MCP `notifications/progress` notifications during `control.pending`
+waits and per-step `batch` runs (when `_meta.progressToken` is absent, no progress notifications are
+sent). When the request finishes, the tool call returns its real result. If it still
 runs after that, the tool call fails with an error starting `still running:` that names the
 request and says what it still does: it will still apply when it finishes, or will still write
 the file (an export or a save: the design does not change), or only reads (nothing changes). Don't
@@ -576,6 +580,12 @@ other calls do, on the connection it was sent on (`control.cancel`,
 Once it is removed, stopped or finished, later calls no longer wait for it and `pending` says
 `pending: null`. With nothing running, `cancel` says `nothing to cancel`. Only this server's own request can be
 cancelled; another client's requests are out of its reach.
+
+Standard MCP `notifications/cancelled` notifications are also handled out-of-band while a request
+is running: when `params.requestId` matches the in-flight request, a bridged server sends
+`control.cancel` immediately on a side channel (and aborts any active `control.pending` wait), and a
+local `batch` stops cleanly before the next step (rolling back when `rollback: true`). Notifications
+whose `requestId` does not match an active or queued request are ignored.
 
 ## Camera and close-up recipe
 

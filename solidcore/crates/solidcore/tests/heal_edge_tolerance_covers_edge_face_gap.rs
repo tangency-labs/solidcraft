@@ -588,9 +588,12 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         }
     }
     lowered.sort_by(f64::total_cmp);
+    // (the third moved 6.1e-12 relative, 4.0730163673638e-5 to 4.07301636733882e-5, when
+    // the offset's extension became the default; each still covers every edge end above,
+    // its rounding counted)
     assert_eq!(
         lowered,
-        [4e-5, 4e-5, 4.0730163673638e-5],
+        [4e-5, 4e-5, 4.07301636733882e-5],
         "the lowered vertices"
     );
 

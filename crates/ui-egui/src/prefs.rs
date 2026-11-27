@@ -28,6 +28,9 @@ mod fields;
 pub(crate) mod figures;
 mod general;
 mod graphics;
+#[cfg(test)]
+#[path = "ground_shadow_settings_tests.rs"]
+mod ground_shadow_tests;
 mod interface;
 mod mouse3d;
 mod navbar;
@@ -45,6 +48,16 @@ use crate::tool_modifiers::ModifierCombo;
 use crate::ui_kit;
 use crate::viewport::NavMode;
 use solidcraft_theme::Tokens;
+
+/// The enabled shadow's style. The existing `UiState::ground_shadow` flag still controls
+/// visibility, preserving saved boolean settings and the control channel's `groundShadow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundShadowStyle {
+    #[default]
+    Ellipse,
+    Projected,
+}
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
 pub const OPENSCAD_NAV: &str = "openscad";
@@ -493,6 +506,17 @@ impl Prefs {
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
+    }
+
+    /// The 3D view's own background: `viewport_background` alone gives one colour (#7688), with
+    /// `viewport_background_bottom` a gradient, and `viewport_background_middle` a colour halfway
+    /// down that gradient (#9230). `None`: the theme's gradient.
+    pub fn viewport_background_colours(&self) -> Option<solidcraft_theme::ViewBackground> {
+        let top = self.viewport_background?;
+        Some(match self.viewport_background_bottom {
+            Some(bottom) => solidcraft_theme::ViewBackground { top, middle: self.viewport_background_middle, bottom },
+            None => solidcraft_theme::ViewBackground::flat(top),
+        })
     }
 
     /// What a two-finger trackpad scroll does in the chosen preset (#15079).
@@ -1579,11 +1603,17 @@ pub fn follow_theme_file_for_run(app: &mut SolveApp, path: &str) -> Result<(), S
     Ok(())
 }
 
+const THEME_FOLLOW_LOCKED: &str = "`theme_follow` is set by your organization's policy and cannot be changed here";
+
 const FOLLOW_UNAVAILABLE: &str = "`theme_follow` is not available in the browser: it follows a file on this computer; import the theme instead";
 
 /// Stop following a theme file: the preference and this run's launch flag. The chosen theme
 /// takes over again, with its own dark or light.
 fn stop_following(app: &mut SolveApp) {
+    // The organization's theme file stays on; the chosen theme waits underneath it.
+    if app.policy.locks("theme_follow") {
+        return;
+    }
     let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
     app.preferences.theme_follow.clear();
     app.prefs_window.follow.launch = None;
@@ -1627,6 +1657,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
     }
     let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or \"\" to stop following")?;
     let path = crate::theme_files::follow_path(path)?;
+    if app.policy.locks("theme_follow") {
+        return Err(THEME_FOLLOW_LOCKED.into());
+    }
     if path.is_empty() {
         stop_following(app);
         return Ok(());
@@ -3336,7 +3369,14 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             staged.theme = if gone.base.is_dark() { "dark" } else { "light" }.into();
         }
     }
+    let follow_locked = app.policy.locks("theme_follow");
     match rest.remove("theme_follow") {
+        // Writing back what was read is not a change (as for every other locked preference).
+        Some(value) if follow_locked => {
+            if !crate::policy::unchanged(app, "theme_follow", &value) {
+                return Err(THEME_FOLLOW_LOCKED.into());
+            }
+        }
         Some(value) => {
             if !FOLLOW_AVAILABLE {
                 return Err(FOLLOW_UNAVAILABLE.into());
@@ -3353,7 +3393,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") => {
+        None if rest.contains_key("theme") && !follow_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -4130,9 +4170,10 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
-    // A template this version doesn't have for that kind (a newer one's, or a saved template since removed).
+    // A template this version doesn't have for that kind (a newer one's, or a built-in since removed).
+    // A template file is kept even while it can't be read: New Drawing names it when refused.
     for (chosen, assembly) in [(&mut p.part_drawing_template, false), (&mut p.assembly_drawing_template, true)] {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let default = template::default_for(assembly);
             log::warn!("preferences: there is no drawing template `{chosen}` for this kind of design; using `{default}`");
             *chosen = default.into();
@@ -4172,6 +4213,12 @@ pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
 /// those instead of dropping them.
 fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     let defaults = solidcraft_engine::plugin::HostLimits::default();
+    if p.plugin_max_deadline_ms == 0 {
+        p.plugin_max_deadline_ms = defaults.max_deadline_ms;
+    }
+    if p.plugin_max_host_calls == 0 {
+        p.plugin_max_host_calls = defaults.max_host_calls;
+    }
     if p.plugin_max_fuel == 0 {
         p.plugin_max_fuel = defaults.max_fuel;
     }
@@ -4230,6 +4277,23 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
 /// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
 pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
+}
+
+/// Whether `name` is a drawing template file's path (`drawing.template.save`'s `.scdwg`, or an older
+/// `.json`), which `drawing.create` reads as its template (#22120). It may serve either kind.
+pub(crate) fn is_template_file(name: &str) -> bool {
+    const MAX_PATH_BYTES: usize = 4096;
+    // The path as saved and as `drawing.create` reads it: a trailing space is no `.scdwg`.
+    let extension = std::path::Path::new(name).extension();
+    !name.trim().is_empty()
+        && name.len() <= MAX_PATH_BYTES
+        && extension.is_some_and(|e| e.eq_ignore_ascii_case("scdwg") || e.eq_ignore_ascii_case("json"))
+}
+
+/// Whether the template for new drawings of a part or an assembly may be `name`: one of that kind's
+/// built-ins, or a template file.
+pub(crate) fn is_new_drawing_template(name: &str, assembly: bool) -> bool {
+    is_template_for(name, assembly) || is_template_file(name)
 }
 
 /// Preferences create future windows; a missing ribbon value here uses the new default.
@@ -4381,9 +4445,9 @@ fn prepare_preferences(
     for (key, chosen, assembly) in
         [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
     {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
-            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+            return Err(format!("`{key}` must be one of {}, or a .scdwg or .json template file", kind.join(", ")));
         }
     }
     if !accepted::home_fit_size(&new) {
@@ -4399,7 +4463,9 @@ fn prepare_preferences(
         return Err("`origin_plane_scale` must be 0.5…4".into());
     }
     let new = migrate(new);
-    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
+    crate::plugins::host_limits(&new)
+        .validate()
+        .map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib / plugin_max_host_calls / plugin_max_deadline_ms: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }
@@ -5454,6 +5520,24 @@ mod tests {
                 assert!(text_found, "{key} shows its label \"{label}\" at {width}");
             }
         }
+    }
+
+    #[test]
+    fn layout_checkbox_search_results_share_a_column() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.call("ui.prefs", json!({"language":"en","open":"General"}));
+        h.app.prefs_window.shell.filter = "search".into();
+        h.frames(5);
+
+        let first = crate::scenario::rect_of("prefs:ribbon_reveal").unwrap();
+        let second = crate::scenario::rect_of("prefs:command_search_centred").unwrap();
+        assert!((second.left() - first.left()).abs() < 0.5, "checkboxes align: {first:?}, {second:?}");
+        let gap = second.top() - first.bottom();
+        assert!((0.0..first.height()).contains(&gap), "consecutive results: {first:?}, {second:?}");
+        h.step(&json!({"click":{"handle":"prefs:command_search_centred"}})).unwrap();
+        assert!(h.app.preferences.command_search_centred);
     }
 
     /// #16542: the Layout page's checkboxes line up in even columns, a group each for the
@@ -7475,6 +7559,8 @@ mod tests {
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
+            ("viewport_background_bottom", json!([0, 0, 0]), PAGE_APPEARANCE),
+            ("viewport_background_middle", json!([0, 0, 0]), PAGE_APPEARANCE),
             ("view_confirm_corner", json!(true), PAGE_LAYOUT),
             ("status_bar", json!(true), PAGE_LAYOUT),
             ("show_donate_button", json!(false), PAGE_GENERAL),
@@ -7495,6 +7581,7 @@ mod tests {
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
+            ("new_body_default", json!(true), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
@@ -8213,6 +8300,107 @@ mod tests {
         }
     }
 
+    /// Background → Gradient (#9230): a top and a bottom colour of the user's own fill the 3D view
+    /// as a gradient in either theme, a picture of the view has the same gradient, and it is saved
+    /// with the preferences. The bottom colour needs the top one: without it the view keeps the
+    /// theme's gradient. A bottom value that is not a colour is refused.
+    #[test]
+    fn the_3d_view_takes_a_gradient_of_its_own() {
+        use egui::Color32;
+        use serde_json::json;
+        use solidcraft_theme::Tokens;
+        use solidcraft_viewport::Rgb;
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.viewport_background_bottom, None);
+        let (top, bottom) = ([250, 200, 120], [20, 40, 90]);
+        for theme in ["light", "dark"] {
+            let out = h.call("ui.prefs", json!({"theme": theme, "viewport_background": top, "viewport_background_bottom": bottom}));
+            assert!(out["error"].is_null(), "{out}");
+            h.frames(2);
+            let (t, want) = (Tokens::get(), (Color32::from_rgb(250, 200, 120), Color32::from_rgb(20, 40, 90)));
+            assert_eq!((t.viewport_top, t.viewport_bottom), want, "{theme}");
+            assert_eq!((Tokens::view().viewport_top, Tokens::view().viewport_bottom), want, "{theme}: the view's side");
+            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
+            assert_eq!(scene.background, Some((Rgb(250, 200, 120), Rgb(20, 40, 90))), "{theme}: a picture of the view");
+        }
+
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.viewport_background_colours(), Some(solidcraft_theme::ViewBackground { top, middle: None, bottom }));
+
+        h.call("ui.prefs", json!({"viewport_background": null}));
+        h.frames(2);
+        let (t, dark) = (Tokens::get(), Tokens::dark());
+        assert_eq!((t.viewport_top, t.viewport_bottom), (dark.viewport_top, dark.viewport_bottom), "no top colour: the theme's gradient");
+
+        for bad in [json!([256, 0, 0]), json!("black"), json!([1, 2])] {
+            assert!(h.call("ui.prefs", json!({"viewport_background_bottom": bad}))["error"].is_string(), "{bad}");
+        }
+    }
+
+    /// Background → Gradient → Middle colour (#9230): a third colour of the user's halfway down
+    /// the gradient. The view paints two bands through it, a picture of the view has it, and it is
+    /// saved with the preferences. It belongs to the gradient: with one colour, or without a top
+    /// colour, it does nothing; cleared, the gradient runs straight from top to bottom again.
+    #[test]
+    fn the_3d_view_gradient_takes_a_middle_colour() {
+        use egui::Color32;
+        use serde_json::json;
+        use solidcraft_theme::{Tokens, ViewBackground};
+        use solidcraft_viewport::Rgb;
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.viewport_background_middle, None);
+        let (top, middle, bottom) = ([250, 200, 120], [90, 160, 60], [20, 40, 90]);
+        let out = h.call("ui.prefs", json!({"viewport_background": top, "viewport_background_middle": middle, "viewport_background_bottom": bottom}));
+        assert!(out["error"].is_null(), "{out}");
+        h.frames(2);
+        let colour = Color32::from_rgb(90, 160, 60);
+        assert_eq!((Tokens::get().viewport_middle, Tokens::view().viewport_middle), (Some(colour), Some(colour)));
+        let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
+        assert_eq!(scene.background_middle, Some(Rgb(90, 160, 60)), "a picture of the view");
+
+        // The view: two bands, the middle colour across the middle.
+        let ctx = egui::Context::default();
+        let t = Tokens::get();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom)
+        });
+        out.textures_delta.clear();
+        let mesh = out
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) => Some(mesh.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(mesh.indices.len(), 12, "two bands of two triangles");
+        let (high, low) = mesh.vertices.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v.pos.y), b.max(v.pos.y)));
+        for v in mesh.vertices.iter().filter(|v| v.color == colour) {
+            assert!((v.pos.y - (high + low) / 2.0).abs() < 0.5, "the middle colour sits halfway down: {:?}", v.pos);
+        }
+        assert_eq!(mesh.vertices.iter().filter(|v| v.color == colour).count(), 2);
+
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.viewport_background_colours(), Some(ViewBackground { top, middle: Some(middle), bottom }));
+
+        // One colour: no middle.
+        h.call("ui.prefs", json!({"viewport_background_bottom": null}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background_colours(), Some(ViewBackground::flat(top)));
+        assert_eq!(Tokens::get().viewport_middle, None);
+        // The gradient again, the middle cleared: straight from top to bottom.
+        h.call("ui.prefs", json!({"viewport_background_bottom": bottom, "viewport_background_middle": null}));
+        h.frames(2);
+        assert_eq!(Tokens::get().viewport_middle, None);
+        assert_eq!(crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap().background_middle, None);
+
+        for bad in [json!([256, 0, 0]), json!("green"), json!([1, 2])] {
+            assert!(h.call("ui.prefs", json!({"viewport_background_middle": bad}))["error"].is_string(), "{bad}");
+        }
+    }
+
     /// #14121: the size and colour of sketch dimension text are saved preferences of their own.
     /// An out-of-range scale and a value that is not an RGB colour are refused; a saved bad value
     /// falls back to its default without discarding the other preferences.
@@ -8354,6 +8542,8 @@ mod tests {
         assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
         assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
         assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");
+        let sign = control(&mut h.app, &json!({"accent": "#+fffff"}));
+        assert!(sign.as_ref().is_err_and(|e| e.contains("must be a colour as #rrggbb")), "a sign is not a hex digit (#22089): {sign:?}");
         control(&mut h.app, &json!({"accent": ""})).unwrap();
         h.frames(2);
         assert_eq!(solidcraft_theme::Tokens::get().accent, own);
@@ -11499,6 +11689,27 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
     }
 
+    /// Preferences saved with the cube navigator, gone since 0.43, say once why the signed axes
+    /// show instead (#19749); the axes are what they save, so a later start says nothing.
+    #[test]
+    fn a_saved_cube_navigator_says_once_that_the_signed_axes_replace_it() {
+        let note = |app: &SolveApp| app.messages.iter().filter(|m| m.text == app.tr("ui.navigator.cube_removed")).count();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.load_prefs(&json!({"preferences": {"navigator_style": "cube", "length_decimals": 4}}).to_string());
+        assert_eq!(app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(note(&app), 1);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some(app.tr("ui.navigator.cube_removed")));
+        let saved = app.prefs();
+        let mut again = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        again.load_prefs(&saved);
+        assert_eq!(note(&again), 0, "{saved}");
+        for style in ["axes", "custom", "zigzag"] {
+            let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            other.load_prefs(&json!({"preferences": {"navigator_style": style}}).to_string());
+            assert_eq!(note(&other), 0, "{style}");
+        }
+    }
+
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
@@ -13044,6 +13255,80 @@ mod tests {
         assert_eq!(first.1, third.1, "the projection is no undo step of its own");
     }
 
+    /// #22120: a template file saved from a drawing can be the template new drawings of a part or an
+    /// assembly start from, set or saved so; New Drawing starts from it, and refuses naming it once it
+    /// has gone. Any other file is refused when set.
+    #[test]
+    fn new_drawings_start_from_a_preferred_template_file() {
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        // A folder of this run's own, removed even when an assertion fails.
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+        let scratch = Scratch(std::env::temp_dir().join(format!("solidcraft-template-pref-{}-{stamp}", std::process::id())));
+        std::fs::create_dir(&scratch.0).unwrap();
+        let dir = scratch.0.clone();
+        let file = dir.join("Shop A1.scdwg").to_string_lossy().into_owned();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a1-part"})).unwrap();
+        app.run("drawing.template.save", json!({"path": file})).unwrap();
+        app.run("drawing.close", json!({})).unwrap();
+        assert!(set(&mut app, &json!({"part_drawing_template": dir.join("shop.pdf").to_string_lossy()})).is_err());
+        set(&mut app, &json!({"part_drawing_template": file, "assembly_drawing_template": file})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert_eq!(
+            (other.preferences.part_drawing_template.as_str(), other.preferences.assembly_drawing_template.as_str()),
+            (file.as_str(), file.as_str())
+        );
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!(d.sheets[0].sheet.size, SheetSize::Standard(PaperSize::A1), "from the file");
+        app.run("drawing.close", json!({})).unwrap();
+        let gone = dir.join("gone.scdwg").to_string_lossy().into_owned();
+        set(&mut app, &json!({"part_drawing_template": gone})).unwrap();
+        let refused = app.run("drawing.create", json!({})).unwrap_err();
+        assert!(refused.contains("gone.scdwg"), "{refused}");
+        assert_eq!(lenient(&json!({"part_drawing_template": gone})).part_drawing_template, gone, "kept while it can't be read");
+        assert!(set(&mut app, &json!({"part_drawing_template": format!("{file} ")})).is_err(), "as drawing.create would read it");
+    }
+
+    /// #22132 review: a template file chosen after Preferences was closed (Cancel or OK while the
+    /// Choose File dialog was still open) changes nothing; chosen while it is open, it is the row's.
+    #[test]
+    fn a_template_file_chosen_after_preferences_closed_is_ignored() {
+        let mut h = crate::scenario::Harness::new();
+        let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
+        let response = answer.clone();
+        h.app.services.pick_open = Some(Box::new(move |_: &[&str]| {
+            let response = response.clone();
+            Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
+        }));
+        let file = h.dir.join("Shop A3.scdwg").to_string_lossy().into_owned();
+        let built_in = h.app.preferences.part_drawing_template.clone();
+        for close in [Some("cancel"), Some("ok"), None] {
+            h.call("ui.prefs", json!({"open": "Design"}));
+            h.frames(3);
+            h.step(&json!({"widget": "Choose File…"})).unwrap();
+            h.frames(2);
+            assert!(h.app.file_picker_busy(), "the picker waits");
+            if let Some(button) = close {
+                h.call("ui.prefs", json!({"button": button}));
+            }
+            *answer.borrow_mut() = Some(Some(file.clone()));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            match close {
+                Some(button) => assert_eq!(h.app.preferences.part_drawing_template, built_in, "after {button}"),
+                None => assert_eq!(h.app.preferences.part_drawing_template, file, "while open"),
+            }
+        }
+    }
+
     /// A new drawing is set in the interface font when that is a family, and in the built-in font
     /// when it is a font file or none, still taking the preferred projection; it is no undo step of
     /// its own.
@@ -13660,6 +13945,44 @@ mod ui_scale_regression_tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.ui_scale, 1.0, "Cancel restores the original scale");
         assert_eq!(h.ctx.zoom_factor(), 1.0);
+    }
+}
+
+pub(crate) fn ground_shadow_mode(app: &SolveApp) -> &'static str {
+    if !app.ui.ground_shadow {
+        "off"
+    } else {
+        match app.preferences.ground_shadow_style {
+            GroundShadowStyle::Ellipse => "ellipse",
+            GroundShadowStyle::Projected => "projected",
+        }
+    }
+}
+
+pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = ground_shadow_mode(app);
+    let label = |mode| match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut mode = before;
+    let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
+        for value in ["off", "ellipse", "projected"] {
+            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
+            row.selected = mode == value;
+            let choice = row.show(ui);
+            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
+            if choice.clicked() {
+                mode = value;
+                ui.close();
+            }
+        }
+    });
+    crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
+    crate::scenario::publish_target("view:ground_shadow_selector", response.rect);
+    if mode != before {
+        let _ = app.run("view.ground_shadow", json!({"mode":mode}));
     }
 }
 

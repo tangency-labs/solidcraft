@@ -640,7 +640,7 @@ fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
-        ("solid.extrude", &["10", "10", "", "", "2", "1"]),
+        ("solid.extrude", &["10", "10", "", "", "", "2", "1"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
@@ -1398,7 +1398,8 @@ fn editing_a_primitive_shows_the_name_its_body_was_given() {
 }
 
 /// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
-/// or height and revolutions; the command gets exactly the chosen pair.
+/// or height and revolutions; the command gets exactly the chosen pair. A height is the centre
+/// line's or, chosen beside it, the coil's end to end (#20736).
 #[test]
 fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     let mut h = design("mm");
@@ -1457,6 +1458,20 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
     let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
     assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+    // #20736: the height measured end to end. The choice is sent only when it is Overall, and the
+    // coil then reaches 20 from end to end: its centre line is 17, a 3 mm section short.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    assert!(sent(&h).get("height_measure").is_none(), "the centre line is the default");
+    choose(&mut h, "ui.coil_height_measure", "ui.coil_overall");
+    assert_eq!(sent(&h)["height_measure"], "overall");
+    assert!(shows(&h, "ui.coil_overall_height") && !shows(&h, "ui.coil_path_height"));
+    ok(&mut h);
+    let m = h.app.run("inspect.measure", json!({})).unwrap();
+    let span = m["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(f64::NAN) - m["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((span - 20.0).abs() < 0.02, "{span}");
 }
 
 /// Combine's offset and rounding radius are lengths in the design's unit, as every other

@@ -35,3 +35,7 @@ sysinfo = { workspace = true }
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+
+[features]
+# Solidcore's own profiler, written as JSON Lines through `write_kernel_profiles`.
+solidcore-profile = ["solidcraft-smlib/solidcore-profile"]
