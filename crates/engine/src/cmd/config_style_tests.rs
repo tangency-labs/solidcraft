@@ -322,6 +322,12 @@ fn a_rule_names_a_feature_and_a_limit_needs_no_column() {
             "effect": {"type": "parameter_range", "parameter": "w", "minimum": "2 mm", "maximum": "9 mm"}}}),
     );
     assert!(matches!(s.doc.configs.rules[0].effect, solidcraft_doc::config::RuleEffect::DriveSuppression { feature, value: true } if feature == id));
-    assert!(s.execute("config.rule", &json!({"rule": {"id": "x", "name": "x", "condition": {"type": "always"},
-        "effect": {"type": "drive_suppression", "feature": "No such feature", "value": true}}})).is_err());
+    assert!(
+        s.execute(
+            "config.rule",
+            &json!({"rule": {"id": "x", "name": "x", "condition": {"type": "always"},
+        "effect": {"type": "drive_suppression", "feature": "No such feature", "value": true}}})
+        )
+        .is_err()
+    );
 }

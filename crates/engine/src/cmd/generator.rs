@@ -285,7 +285,13 @@ fn run_insert(s: &mut Session, cmd: &str, g: &Package, r: &Resolved, placement: 
     Ok(Inserted { component, occurrence, bodies, volume_mm3, bbox_mm, faces })
 }
 
-fn resolve_for_insert(cmd: &str, g: &Package, code: Option<&str>, fields: Option<Map<String, Value>>, options: Option<&Map<String, Value>>) -> Result<Resolved> {
+fn resolve_for_insert(
+    cmd: &str,
+    g: &Package,
+    code: Option<&str>,
+    fields: Option<Map<String, Value>>,
+    options: Option<&Map<String, Value>>,
+) -> Result<Resolved> {
     let refused = |r: Refusal| bad(cmd, r.message);
     match (code, fields) {
         (Some(c), None) => g.parse_with(c, options).map_err(refused),
