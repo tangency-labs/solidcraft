@@ -111,7 +111,7 @@ fn swatches_keep_pixels_and_cached_textures_until_the_package_is_reloaded() {
     let save = |colour| image::RgbaImage::from_pixel(128, 64, image::Rgba(colour)).save(dir.join("oak.png")).unwrap();
     save([137, 61, 23, 128]);
     let images = read_swatches(&dir, &entries);
-    let swatch = &images["oak.png"];
+    let swatch = &images.swatches["oak.png"];
     assert_eq!(swatch.image.size, [128, 64]);
     assert_eq!(swatch.image.pixels[0], egui::Color32::from_rgba_unmultiplied(137, 61, 23, 128));
     let ctx = crate::fonts::test_context();
@@ -119,10 +119,10 @@ fn swatches_keep_pixels_and_cached_textures_until_the_package_is_reloaded() {
     assert_eq!(swatch.texture(&ctx).id, texture.id);
     std::fs::write(dir.join("oak.png"), b"corrupted after loading").unwrap();
     assert_eq!(swatch.texture(&ctx).id, texture.id, "frames use the cache without touching the file");
-    assert!(read_swatches(&dir, &entries).is_empty(), "a bad reload omits the image");
+    assert!(read_swatches(&dir, &entries).swatches.is_empty(), "a bad reload omits the image");
     save([32, 64, 96, 255]);
     let changed = read_swatches(&dir, &entries);
-    assert_ne!(changed["oak.png"].texture(&ctx).id, texture.id, "changed artwork gets a fresh texture");
+    assert_ne!(changed.swatches["oak.png"].texture(&ctx).id, texture.id, "changed artwork gets a fresh texture");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -144,6 +144,7 @@ fn the_command_icon_and_option_pictures_are_drawn_where_the_command_is() {
         disabled: false,
         groups: Default::default(),
         entries: vec![seat.clone()],
+        ribbon_groups: Vec::new(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
@@ -174,6 +175,35 @@ fn the_command_icon_and_option_pictures_are_drawn_where_the_command_is() {
     h.frames(2);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().icon, icon);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ribbon_group_icons_are_loaded_from_the_package_and_missing_or_invalid_images_fall_back() {
+    let root = package("ribbon-groups", &[("gears/icons/gears.svg", SEAT), ("gears/icons/bad.svg", "<svg><text>bad</text></svg>")]);
+    let dir = root.join("gears");
+    let manifest = json!({
+        "id":"gears", "name":"Gears", "version":"1", "capabilities":["commands@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":["spur","bevel","worm"],"ribbon_groups":[
+            {"label":"Gears","icon":"icons/gears.svg","entries":["spur"]},
+            {"label":"Missing","icon":"icons/missing.svg","entries":["bevel"]},
+            {"label":"Invalid","icon":"icons/bad.svg","entries":["worm"]}
+        ]}
+    });
+    // The package reader hashes but never executes the component when listing metadata.
+    std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(dir.join("plugin.wasm"), []).unwrap();
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.session.plugin_state.packages.insert("gears".into(), dir.to_string_lossy().into_owned());
+    app.plugin_menu.listed = crate::plugin_menu::list(&app, None);
+    assert_eq!(app.plugin_menu.listed.len(), 1);
+    assert_eq!(app.plugin_menu.listed[0].ribbon_groups.len(), 3, "discovery keeps the declaration");
+    let buttons = crate::plugin_menu::ribbon_buttons(&app);
+    assert_eq!(buttons.len(), 3);
+    assert!(buttons[0].icon.starts_with("plugin:gears:icons/gears.svg:"));
+    assert!(!solidcraft_ui_kit::icons::resolve(&buttons[0].icon).placeholder);
+    assert_eq!(buttons[1].icon, GENERIC);
+    assert_eq!(buttons[2].icon, GENERIC);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -222,11 +222,11 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
     let layer = ui.layer_id();
     if render_ground {
-        let [top, bottom] = crate::render_workspace::tile_background(app);
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, bottom);
+        let (top, middle, bottom) = crate::render_workspace::tile_background(app);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, middle, bottom);
     } else if crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
         let t = Tokens::get();
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_middle, t.viewport_bottom);
     }
     let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {
@@ -1072,7 +1072,7 @@ mod tests {
             assert!(sketch_header_name(&app, owner).is_some(), "the view hosts the sketch");
             let ground = Rect::from_min_size(pos2(80.0, 130.0), vec2(600.0, 360.0));
             let ctx = crate::fonts::test_context();
-            let output =
+            let mut output =
                 ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))), ..Default::default() }, |ui| {
                     ground_chip(&mut app, ui, owner, ground);
                 });
@@ -1091,6 +1091,7 @@ mod tests {
                 !output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "Editing" || text.galley.text().contains(" · "))),
                 "{sheet:?}: no Editing state or sketch breadcrumb is drawn over the view"
             );
+            output.textures_delta.clear();
         }
     }
 

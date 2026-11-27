@@ -67,9 +67,16 @@ const PICKED_PLANES: [&str; 4] =
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
-        "solid.extrude" => {
-            &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
-        }
+        "solid.extrude" => &[
+            ("face", Pick),
+            ("faces", Picks),
+            ("face_body", Body),
+            ("from", Make),
+            ("to", Make),
+            ("to2", Make),
+            ("targets", Body),
+            ("participants", Body),
+        ],
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
         // A sweep profile given as a body face: the face point, in the frame of the body under it.
         // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
@@ -86,10 +93,11 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // turns a bare direction as `PrimitiveAxis` does and passes X, Y or Z by name through.
         "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", PrimitiveAxis), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
+        "shaft_spline.insert" => &[("shaft_face", Pick), ("shaft_start", Pick), ("bore_face", Pick), ("bore_start", Pick)],
         "solid.emboss" => &[("face", Make)],
         "solid.dome" => &[("face", Pick), ("body", Body)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
@@ -102,6 +110,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
+        // Split Body's other surface bodies keep the names of further placements, as a combine's
+        // tools do (#20040).
         "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("tool_faces", ToolPicks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
@@ -724,6 +734,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
             if let Some(name) = given.filter(|_| k > 0) {
                 p["name"] = Value::String(format!("{name} ({})", k + 1));
             }
+            // A carried construction is moved once, by the first move: the later moves leave it,
+            // or one built on a body they move would follow that body a second time.
+            if k > 0
+                && let Some(o) = p.as_object_mut()
+                && let Some(carried) = o.remove("carry")
+                && let Some(carried) = carried.as_array().filter(|c| !c.is_empty())
+            {
+                let mut leave = o.get("leave").and_then(Value::as_array).cloned().unwrap_or_default();
+                leave.extend(carried.iter().filter(|c| !leave.contains(c)).cloned().collect::<Vec<_>>());
+                o.insert("leave".into(), Value::Array(leave));
+            }
             map_local(s, &world, "solid.move", &p).unwrap_or(p)
         })
         .collect();
@@ -853,9 +874,9 @@ fn map_local_with_input(
             }
         }
         let points = match (&feature.kind, cmd) {
-            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None)],
-            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from)],
-            _ => [("to", None), ("from", None)],
+            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None), ("to2", None)],
+            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from), ("to2", extent.to2)],
+            _ => [("to", None), ("from", None), ("to2", None)],
         };
         for (key, point) in points {
             if let Some(point) = point {
@@ -1068,7 +1089,7 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
         (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
         (Feature::Cylinder { base, axis, .. }, "solid.cylinder") => vec![("base", point(base)), ("axis", point(axis))],
-        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", pt(axis.0))],
+        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", point(axis))],
         _ => Vec::new(),
     }
 }

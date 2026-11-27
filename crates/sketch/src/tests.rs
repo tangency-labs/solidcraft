@@ -1642,6 +1642,51 @@ fn rebuilt_projection_keeps_the_lines_drawn_on_it() {
 }
 
 #[test]
+fn closed_control_polygon_shares_points_including_the_closing_side() {
+    let mut sketch = Sketch::default();
+    let pts = [v(10.0, 10.0), v(30.0, 10.0), v(30.0, 30.0), v(10.0, 30.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline = sketch
+        .add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+    assert_eq!(sides.len(), 4);
+    assert_eq!(sketch.points.len(), 5);
+    assert!(matches!(sketch.curves[sides[3]].kind, CurveKind::Line { a, b } if a == pts[3] && b == pts[0]));
+    assert!(sketch.validate_spline_handles().is_ok());
+    assert!(sketch.add_spline_control_polygon(spline).is_err());
+    sketch.add_constraint(ConstraintKind::Horizontal { l: sides[0] }, None).unwrap();
+    sketch.add_constraint(ConstraintKind::Length { l: sides[0], value: 26.0 }, None).unwrap();
+    let solved = solve(&mut sketch);
+    assert!(solved.ok(), "{solved:?}");
+    let a = sketch.point(pts[0]).unwrap();
+    let b = sketch.point(pts[1]).unwrap();
+    assert!((a.dist(b) - 26.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6);
+    sketch.remove_points(&[pts[0]]);
+    assert!(sketch.curves.is_empty());
+    assert!(sketch.validate_spline_handles().is_ok());
+}
+
+#[test]
+fn control_polygon_ownership_round_trips_from_the_original_field() {
+    let mut sketch = Sketch::default();
+    let pts = [v(0.0, 10.0), v(10.0, 20.0), v(20.0, 10.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline =
+        sketch.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+
+    let mut old = serde_json::to_value(&sketch).unwrap();
+    for side in sides {
+        let curve = old["curves"][side].as_object_mut().unwrap();
+        assert!(!curve.contains_key("spline_handle_of"));
+        let owner = curve.remove("spline_control_polygon_of").unwrap();
+        curve.insert("spline_handle_of".into(), owner);
+    }
+    let reopened: Sketch = serde_json::from_value(old).unwrap();
+    assert_eq!(reopened, sketch);
+    reopened.validate_spline_handles().unwrap();
+}
+
+#[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
     // piece is that Bézier, and profile measurement must keep using the curve, not its chords.
@@ -3474,4 +3519,89 @@ fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
     let given = [Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.000099999), Vec2::new(5.0, 0.000100004), Vec2::new(10.0, 0.0)];
     let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
     assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
+}
+
+/// A sketch stops at the curve limit in force ([`crate::limits::max_curves`]; past the ceiling a
+/// design file is not opened), and the generic add refuses the circle radii the dedicated one does
+/// (a radius that is not a number would save and not open again).
+#[test]
+fn curves_stop_at_the_cap_and_circle_radii_are_checked() {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+    for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(sk.add_curve(CurveKind::Circle { c: a, r }, None).is_err(), "radius {r}");
+    }
+    let first = sk.add_line_pts(a, b, None).unwrap();
+    let line = sk.curves[first].clone();
+    let cap = crate::limits::max_curves();
+    sk.curves.extend((1..cap).map(|i| Curve { id: format!("filler{i}"), ..line.clone() }));
+    assert_eq!(sk.curves.len(), cap);
+    let points = sk.points.len();
+    assert_eq!(sk.add_line_pts(a, b, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_line(v(0.0, 5.0), v(5.0, 5.0), None, None, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_circle(v(0.0, 0.0), 1.0, Some(a), None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_curve(CurveKind::Line { a, b }, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.points.len(), points, "a refused curve adds no points");
+}
+
+/// Merging regions that include or border a narrow sliver (width between `MERGE_TOL` and
+/// `ENDPOINT_JOIN_TOL`) must never cancel the sliver's opposite sides against each other, nor
+/// jump across its short step edges when chaining the merged boundary.
+#[test]
+fn merge_regions_preserves_narrow_slivers_and_steps() {
+    for d in [1.3169768e-5, 5e-5, 9.9e-5] {
+        // (1) A narrow sliver profile alone stays a 4-segment rectangle.
+        let mut sk = Sketch::new();
+        rect(&mut sk, [v(0.0, 0.0), v(d, 0.0), v(d, 2.0), v(0.0, 2.0)]);
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 1);
+        let m = merge_regions(&[ps[0].region.clone()]);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].outer.segs.len(), 4, "d={d:e}: {m:?}");
+        assert!(m[0].holes.is_empty(), "d={d:e}: {m:?}");
+        assert!((m[0].area() - 2.0 * d).abs() < 1e-11, "d={d:e}: area={}", m[0].area());
+
+        // (2) Outer wall ring enclosing an inner pocket + shelf shifted left by `d`:
+        let mut sk = Sketch::new();
+        rect(&mut sk, [v(-16.5, -47.5), v(16.5, -47.5), v(16.5, 47.5), v(-16.5, 47.5)]);
+        rect(&mut sk, [v(-14.625, -45.375), v(14.625, -45.375), v(14.625, 45.375), v(-14.625, 45.375)]);
+        rect(&mut sk, [v(-14.625 - d, -1.0), v(14.625 - d, -1.0), v(14.625 - d, 1.0), v(-14.625 - d, 1.0)]);
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 4);
+
+        // (2a) Selecting all profiles except the sliver produces the outer box with one clean
+        // 4-segment sliver hole (never two 1-segment line holes).
+        let without_sliver: Vec<_> = ps.iter().filter(|p| p.area > 1e-2).map(|p| p.region.clone()).collect();
+        let merged1 = merge_regions(&without_sliver);
+        assert_eq!(merged1.len(), 1, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].outer.segs.len(), 4, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].holes.len(), 1, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].holes[0].segs.len(), 4, "d={d:e}: {:?}", merged1[0].holes);
+        assert!((merged1[0].area() - (33.0 * 95.0 - 2.0 * d)).abs() < 1e-8);
+
+        // (2b) Selecting the wall ring alone merges its 3 adjacent inner holes into 1 clean
+        // 8-segment stepped hole loop (never a diagonal + 1-segment line hole).
+        let merged9 = merge_regions(&[ps[0].region.clone()]);
+        assert_eq!(merged9.len(), 1, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].outer.segs.len(), 4, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].holes.len(), 1, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].holes[0].segs.len(), 8, "d={d:e}: {:?}", merged9[0].holes[0]);
+        let hole = &merged9[0].holes[0].segs;
+        for i in 0..hole.len() {
+            assert!(hole[i].end().dist(hole[(i + 1) % hole.len()].start()) <= 1e-12, "d={d:e}: hole corner {i} open: {hole:?}");
+        }
+        assert!((merged9[0].area() - (33.0 * 95.0 - 29.25 * 90.75 - 2.0 * d)).abs() < 1e-8);
+    }
+
+    // (3) A full circle cut at one point with radius in (MERGE_TOL, tol / TAU] stays a closed
+    // profile (matching `has_width`, which keeps circles wider than `MERGE_TOL`).
+    let mut sk = Sketch::new();
+    let r = 1.2e-6;
+    sk.add_circle(v(0.0, 0.0), r, None, None).unwrap();
+    sk.add_line(v(r, -1.0), v(r, 1.0), None, None, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "tiny circle touched at one point should stay a profile: {ps:?}");
+    let expected_area = std::f64::consts::PI * r * r;
+    assert!((ps[0].area - expected_area).abs() < 1e-16, "area={} expected={expected_area}", ps[0].area);
 }

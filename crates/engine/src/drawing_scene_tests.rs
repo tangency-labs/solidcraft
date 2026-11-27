@@ -479,6 +479,7 @@ fn sheet_sketch_strokes_refuse_hostile_geometry_without_a_polyline_fallback() {
             end: "1".into(),
             tolerance: 0.01,
             variable_unit: Default::default(),
+            radians_trig: false,
         })
     });
     for bad in cases {
@@ -1090,6 +1091,63 @@ fn a_title_blocks_text_follows_its_sheet_and_the_model() {
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
     assert_eq!(bytes(&settled(&mut s, first).scene), bytes(&built(&s, first).scene));
     assert_ne!(shown(&s), with_tower, "the mass read from the model as it is");
+}
+
+#[test]
+fn a_title_block_reads_name_split_properties_through_rename_undo_and_reopen() {
+    use solidcraft_geom::cell::{Content, Format, Part, Source};
+    use solidcraft_geom::title_block::CellKind;
+
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name": "C2600101_Housing"}))["component"].clone();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 35, "height": 8}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "drawing.create", json!({}));
+    let drawing = s.open_drawing.unwrap();
+    let record = s.drawing("test").unwrap();
+    let (sheet, source) = (record.sheets[0].id, record.sources[0].id);
+    let mut block = solidcraft_geom::title_block::default_block();
+    for (cell, property) in [("identification_number", "Num"), ("title", "Name")] {
+        let cell = block.cells.iter_mut().find(|c| c.name == cell).unwrap();
+        let CellKind::Text(text) = &mut cell.kind else { panic!("expected a text cell") };
+        text.content = Content(vec![Part::Field { source: Source::Component, key: format!("properties.{property}"), format: Format::default() }]);
+    }
+    let documents = json!({"source": ids::encode(source), "component": component});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block, "documents": documents}));
+    let shown = |s: &mut Session, expected| {
+        let scene = settled(s, sheet);
+        assert_eq!(bytes(&scene.scene), bytes(&built(s, sheet).scene));
+        let cells = &s.drawing_scenes.last.as_ref().unwrap().cells;
+        let read = |name| cells.iter().find(|cell| cell.name == name).unwrap().text.as_str();
+        assert_eq!([read("identification_number"), read("title")], expected);
+    };
+    shown(&mut s, ["", ""]);
+
+    let rule = json!({"separator": "_", "left_property": "Num", "right_property": "Name"});
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "name_split": rule}));
+    shown(&mut s, ["C2600101", "Housing"]);
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "properties": {"Num": "MANUAL"}}));
+    shown(&mut s, ["MANUAL", "Housing"]);
+
+    let undo_before_rename = s.undo.len();
+    in_the_model(&mut s, "component.rename", json!({"component": component, "name": "C2600102_Lid_Assembly"}));
+    assert_eq!(s.undo.len(), undo_before_rename + 1);
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+    in_the_model(&mut s, "edit.undo", json!({}));
+    shown(&mut s, ["MANUAL", "Housing"]);
+    in_the_model(&mut s, "edit.redo", json!({}));
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+    let mut s = reopened(&mut s, drawing, "derived-title.sc");
+    shown(&mut s, ["MANUAL", "Lid_Assembly"]);
+
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "properties": {"Num": null}}));
+    shown(&mut s, ["C2600102", "Lid_Assembly"]);
+    in_the_model(&mut s, "component.rename", json!({"component": component, "name": "Unsplit"}));
+    shown(&mut s, ["", ""]);
+    in_the_model(&mut s, "edit.undo", json!({}));
+    shown(&mut s, ["C2600102", "Lid_Assembly"]);
+    in_the_model(&mut s, "component.metadata.set", json!({"component": component, "name_split": null}));
+    shown(&mut s, ["", ""]);
 }
 
 /// The window's sheet never waits for the search for a font to fall back to: a title block text in
@@ -7404,8 +7462,10 @@ fn centre_line_gaps_follow_dimension_edits_and_survive_svg_export() {
     let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
     let Item::Stroke { path, .. } = &cut.items[0] else { panic!("expected stroke") };
     let x = path[0].start().x;
-    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis.
-    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.82"), (format!("M{x} 131L{x} 112"), "3.22")] {
+    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis. The pieces start 0.82 mm and
+    // 3.22 mm into the pattern. Under the round caps each dash is stroked a line width (0.18 mm)
+    // shorter about its middle, so the offsets written are 0.09 mm less: 0.73 and 3.13.
+    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.73"), (format!("M{x} 131L{x} 112"), "3.13")] {
         assert!(
             xml.split("<path ")
                 .filter_map(|path| path.split_once('>'))
@@ -7530,7 +7590,9 @@ fn automatic_centre_mark_gaps_follow_dimension_and_export_the_same_pattern() {
     let marker = format!("<g data-object=\"{front}\" data-kind=\"centre_mark\">");
     let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
     assert!(xml.contains("M150 152L150 146") && xml.contains("M150 144L150 142"), "{xml}");
-    assert!(xml.contains("stroke-dashoffset=\"1.66\"") && xml.contains("stroke-dashoffset=\"4.8\""), "{xml}");
+    // Under the round caps each dash is stroked a line width (0.18 mm) shorter about its middle, so
+    // the offsets written are 0.09 mm less than the pattern's 1.66 and 4.8.
+    assert!(xml.contains("stroke-dashoffset=\"1.57\"") && xml.contains("stroke-dashoffset=\"4.71\""), "{xml}");
     run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-4.0}}));
     let moved = settled(&mut s, sheet);
     assert_ne!(automatic_scene_groups(&moved.scene, front), groups);
@@ -8314,4 +8376,37 @@ fn a_detail_views_region_and_what_it_refuses() {
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(first), "set": {"visual_style": "shaded"}}));
     let status = built(&s, sheet).views.into_iter().find(|v| v.view == first).map(|v| v.status);
     assert_eq!(status, Some(Status::Failed("not supported yet: a shaded detail view".into())));
+}
+
+/// One part with two bodies (#22107), the way woodwork makes a cabinet's boards: Carcass, 100 x 50 x
+/// 20 mm along X, Y and Z from the origin, and Door, a 20 mm cube from (200, 0, 0), a body of its own.
+pub(crate) fn carcass_and_door() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Carcass"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [200, 0, 0], "body_name": "Door", "operation": "new"}));
+    s
+}
+
+/// A view's `hide_bodies` leaves out one body of a part (#22107): from the front at 1:1 both bodies'
+/// outlines are 320 mm of line across 220 mm; with the door hidden, the carcass's 240 mm across 100,
+/// its middle on the view's centre. The provider redraws the view as for any other setting.
+#[test]
+fn a_view_leaves_out_a_hidden_body_of_a_part() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:1", "position_mm": [200, 150]}));
+    let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let across = |scene: &Scene| {
+        let group = scene.groups.iter().find(|g| g.object == view && g.kind == ObjectKind::View).unwrap();
+        let (lo, hi, length) = reach(group);
+        (lo.x, hi.x, length)
+    };
+    let (lo, hi, length) = across(&settled(&mut s, sheet).scene);
+    assert!((hi - lo - 220.0).abs() < 1e-6 && (length - 320.0).abs() < 1e-6, "{lo} {hi} {length}");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"hide_bodies": [{"body": "Door"}]}}));
+    let one = settled(&mut s, sheet);
+    let (lo, hi, length) = across(&one.scene);
+    assert!((lo - 150.0).abs() < 1e-6 && (hi - 250.0).abs() < 1e-6 && (length - 240.0).abs() < 1e-6, "{lo} {hi} {length}");
+    assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
 }

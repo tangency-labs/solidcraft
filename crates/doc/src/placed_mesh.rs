@@ -10,6 +10,17 @@ use solidcraft_kernel::{self as kernel, Body};
 
 use super::ModelBody;
 
+impl ModelBody {
+    /// [`ModelBody::mesh`] without keeping a placement's moved copy with the body: for a one-off
+    /// reader (a thumbnail), which must not leave every placed part's triangles in memory.
+    pub fn mesh_uncached(&self) -> Arc<Mesh> {
+        match (self.mesh.get(), self.mesh_placement.as_deref()) {
+            (None, Some(placed)) => placed.mesh(),
+            _ => self.mesh(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct PlacedMesh {
     body: Body,

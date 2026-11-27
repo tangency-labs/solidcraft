@@ -50,7 +50,7 @@ fn a_drawing_starts_from_a_template() {
     run(&mut s, "drawing.close", json!({}));
     let made = run(&mut s, "drawing.create", json!({"template": "iso-a4-assembly", "projection": "first", "language": "de"}));
     let sheet = &made["sheets"][0];
-    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")), "the one named wins");
+    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([297.0, 210.0]), &json!("landscape")), "the one named wins");
     assert_eq!((&made["projection"], &made["language"], tolerances(&made)), (&json!("first"), &json!("de"), json!(template::ASSEMBLY_NOTE)));
     assert_eq!(open_one(&s).sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()), "the built-in block");
     run(&mut s, "drawing.close", json!({}));
@@ -2054,6 +2054,7 @@ fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspect
         end: "1".into(),
         variable_unit: solidcraft_sketch::VariableUnit::Number,
         tolerance: 0.01,
+        radians_trig: false,
     });
     let before = s.doc.clone();
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
