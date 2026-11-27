@@ -53,6 +53,7 @@ pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
+mod dialog_drag_undo;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -84,6 +85,7 @@ pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -452,6 +454,10 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
@@ -2026,6 +2032,10 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some("edit.undo" | "edit.redo") if r.is_ok() => {
+                self.agent_chat.clear_model_changes();
+                r
+            }
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
@@ -3893,13 +3903,14 @@ impl SolveApp {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
-    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
         v.extend(agent_chat::hovered_chip(self).iter().cloned());
+        v.extend(agent_chat::model_changes_targets(self));
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
@@ -5121,6 +5132,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {

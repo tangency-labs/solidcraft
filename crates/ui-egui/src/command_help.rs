@@ -370,6 +370,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "weld.create",
 ];
 
 /// The example pictures, by command id (sorted): original SVGs on the icon grid in

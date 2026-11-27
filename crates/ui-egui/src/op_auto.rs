@@ -14,7 +14,8 @@
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
 //!   the feature's `targets` ([`scope_targets`]). Pipe, Thicken and an Emboss with no Target
-//!   Face don't choose, but this holds for them too.
+//!   Face don't choose, but this holds for them too, and for a saved New Body feature that an
+//!   edit changes to Join, Cut or Intersect.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
@@ -330,10 +331,17 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 /// The shown bodies as the `targets` of a new feature's Join, Cut or Intersect that names none,
 /// when some bodies are hidden: a hidden body is left alone. An Emboss or Deboss joins or cuts
 /// with no `operation`, so it is scoped the same way. With none shown, such a feature has
-/// nothing to change.
+/// nothing to change. An edit is scoped the same way only when the saved feature was a New Body,
+/// which has no bodies of its own to keep; any other edit keeps what it was saved with.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if !scoped(&d.kind) || d.editing.is_some() {
+    if !scoped(&d.kind) {
         return Ok(());
+    }
+    if let Some((id, _)) = d.editing {
+        let saved = app.session.doc.feature(id).and_then(solidcraft_engine::doc::feature_operation);
+        if saved != Some(solidcraft_engine::doc::Operation::NewBody) {
+            return Ok(());
+        }
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
     for (_, p) in cmds {

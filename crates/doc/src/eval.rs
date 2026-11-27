@@ -843,7 +843,8 @@ pub struct SketchCopy {
 /// large for the geometry around them is reduced where it doesn't fit, to the largest that works
 /// for each group of edges sharing a face; the radius per edge is returned. With
 /// [`FilletFit::Taper`](crate::FilletFit::Taper) it tapers along each edge it doesn't fit. With
-/// the exact fit a radius too large is refused, naming the largest that fits ([`with_largest_fit`]).
+/// the exact fit a radius too large is refused directly with the largest size SMLib reports
+/// without searching by retrying builds (#10849).
 /// Also the picks whose edges a round overflowing its faces removed whole ([`kernel::fillet_removing`]).
 fn fillet_fitted(
     body: &kernel::Body,
@@ -856,22 +857,10 @@ fn fillet_fitted(
     cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
-        // A refusal the kernel could not size names no radius to try, and the search for the
-        // largest radius that fits cannot be guided by it: it then halves the radius from the
-        // middle down and blends every edge again for each of the sizes it tries. On the design
-        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
-        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
-        // found nothing: the round fails at any radius there. The refusal is reported as the
-        // kernel stated it, less a size it names that no round can have ([`without_unusable_fit`]).
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
-            Err(kernel::KernelError::TooLarge(without_unusable_fit(&why)))
-        }
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
-            let hint = kernel::named_fit(&why);
-            #[cfg(test)]
-            cost_tests::count(|c| c.fit_searches += 1);
-            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
-        }),
+        // SMLib's refusal already computes the largest fitting radius from the cause's own
+        // geometry (never by retrying builds): return it directly instead of running a search,
+        // dropping any unusable 0 mm fit note (#10849, #4282, #20685).
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err(kernel::KernelError::TooLarge(without_unusable_fit(&why))),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used), Vec::new())),
@@ -1208,6 +1197,11 @@ impl OriginFrames {
     /// How many origins have been resolved from the bodies, not taken from what was kept.
     pub(crate) fn resolved(&self) -> usize {
         self.resolved.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares(&self, other: &OriginFrames) -> bool {
+        Arc::ptr_eq(&self.found, &other.found) && Arc::ptr_eq(&self.resolved, &other.resolved)
     }
 }
 
@@ -2047,6 +2041,13 @@ pub struct FeatureResult {
     unkept: bool,
     #[serde(skip)]
     pub state: Arc<ModelState>,
+}
+
+impl FeatureResult {
+    /// The largest fitting size reported by a blend refusal on this feature, if any.
+    pub fn largest_fit(&self) -> Option<kernel::BlendFit> {
+        self.error.as_deref().and_then(kernel::named_blend_fit)
+    }
 }
 
 /// Incremental evaluator: holds the state after every feature.
@@ -5870,8 +5871,8 @@ impl Model {
         let FeatureKind::Sketch { plane, sketch } = &f.kind else { return None };
         let mut next = (*self.state_before(id)).clone();
         let vals = evaluation_values(doc).0;
-        let mut step_doc_owned = init_capture_step_doc(doc, &vals);
-        if step_doc_owned.is_some() {
+        let mut stepper = CaptureStepper::new(doc, &vals);
+        if let Some(stepper) = stepper.as_mut() {
             let mut resolved_joints = BTreeMap::new();
             let marker = doc.marker.unwrap_or(usize::MAX);
             let mut prev_state = self.empty.clone();
@@ -5879,16 +5880,18 @@ impl Model {
                 if feat.id == id {
                     break;
                 }
+                stepper.flush_for_feature(feat, &prev_state);
                 if i < marker
                     && !feat.suppressed
                     && let Some(r) = self.results.get(i).filter(|r| r.id == feat.id && !r.skipped && r.error.is_none())
                 {
-                    advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, feat, &r.state, bodies_changed(&prev_state, &r.state));
+                    stepper.advance(&mut resolved_joints, &vals, feat, &prev_state, &r.state);
                     prev_state = r.state.clone();
                 }
             }
+            stepper.flush(&prev_state);
         }
-        let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+        let eval_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
         let mut warning = None;
         let built = kernel::guard(&f.name, || {
             let _frames = ToolFrames::install(eval_doc, f, &next);
@@ -5972,16 +5975,21 @@ impl Model {
         let steps = ImportDigests::of(doc, &self.import_digests, self.heals());
         let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let mut step_doc_owned = init_capture_step_doc(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints = BTreeMap::new();
         let mut prev_state = self.empty.clone();
-        if step_doc_owned.is_some() {
+        if stepper.is_some() {
             for (i, f) in doc.features.iter().enumerate().take(first) {
+                if let Some(s) = stepper.as_mut() {
+                    s.flush_for_feature(f, &prev_state);
+                }
                 if i < marker
                     && !f.suppressed
                     && let Some(r) = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && r.error.is_none())
                 {
-                    advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &r.state, bodies_changed(&prev_state, &r.state));
+                    if let Some(s) = stepper.as_mut() {
+                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    }
                     prev_state = r.state.clone();
                 }
             }
@@ -5989,12 +5997,17 @@ impl Model {
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
             let before = self.state_before(f.id);
-            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+            if let Some(s) = stepper.as_mut() {
+                s.flush_for_feature(f, &before);
+            }
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.fingerprint = prev_fp;
-                if step_doc_owned.is_some() && i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
-                    advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &r.state, bodies_changed(&prev_state, &r.state));
+                if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
+                    if let Some(s) = stepper.as_mut() {
+                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    }
                     prev_state = r.state.clone();
                 }
             }
@@ -6050,19 +6063,24 @@ impl Model {
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
         let mut state = self.empty.clone();
-        let mut step_doc_owned = init_capture_step_doc(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints = BTreeMap::new();
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
-            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+            if let Some(s) = stepper.as_mut() {
+                s.flush_for_feature(f, &state);
+            }
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &steps, Some(&state), &constructions);
             let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(eval_doc, f, Some(&state)));
             if !r.skipped {
-                if step_doc_owned.is_some() && r.error.is_none() && i < marker && !f.suppressed {
-                    let changed = bodies_changed(&state, &r.state);
-                    state = r.state.clone();
-                    advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &state, changed);
-                } else {
-                    state = r.state.clone();
+                let prev_state = state.clone();
+                state = r.state.clone();
+                if r.error.is_none()
+                    && i < marker
+                    && !f.suppressed
+                    && let Some(s) = stepper.as_mut()
+                {
+                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &state);
                 }
             }
             r.id == f.id && r.fingerprint == prev && posed
@@ -6241,7 +6259,7 @@ impl Model {
         let mut checks = overlap::Checks::new(validation);
         let has_capture = doc.has_capture_position_timeline();
         self.placement_local &= !has_capture;
-        let mut step_doc_owned = init_capture_step_doc(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints: BTreeMap<u64, crate::CapturedJoint> = BTreeMap::new();
         let mut start = 0;
         let mut back: Option<overlap::Refused> = None;
@@ -6261,18 +6279,8 @@ impl Model {
                 moved = s.moved;
                 failed = s.failed;
                 rolled_results = s.rolled_results;
-                if let Some(d) = step_doc_owned.as_mut() {
-                    if let Some(transforms) = s.occurrence_transforms {
-                        for (o, t) in d.occurrences.iter_mut().zip(transforms) {
-                            o.transform = t;
-                        }
-                    }
-                    if let Some(joint_states) = s.joint_states {
-                        for (j, (values, exprs)) in d.assembly.joints.iter_mut().zip(joint_states) {
-                            j.values = values;
-                            j.exprs.values = exprs;
-                        }
-                    }
+                if let Some(stepper) = stepper.as_mut() {
+                    stepper.restore(s.occurrence_transforms, s.joint_states, s.joints_dirty, s.all_joints_resolved);
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
@@ -6282,7 +6290,10 @@ impl Model {
                     back = Some(refused);
                     continue 'pass;
                 }
-                let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+                if let Some(s) = stepper.as_mut() {
+                    s.flush_for_feature(f, &state);
+                }
+                let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
@@ -6332,7 +6343,7 @@ impl Model {
                         .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, feature_component))
                         .filter(|old| old.skipped || legacy_current(eval_doc, f, &state, &old.state))
                 {
-                    let before_reuse = step_doc_owned.is_some().then(|| state.clone());
+                    let before_reuse = stepper.is_some().then(|| state.clone());
                     if let Some(&k) = self.component_keys.get(&f.id) {
                         component_keys.insert(f.id, k);
                     }
@@ -6347,11 +6358,11 @@ impl Model {
                         }
                         out.push(FeatureResult { state: state.clone(), ..old.clone() });
                     }
-                    if let Some(before_reuse) = before_reuse
-                        && !old.skipped
+                    if !old.skipped
                         && old.error.is_none()
+                        && let (Some(s), Some(before_reuse)) = (stepper.as_mut(), before_reuse.as_ref())
                     {
-                        advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &state, bodies_changed(&before_reuse, &state));
+                        s.advance(&mut resolved_joints, &vals, f, before_reuse, &state);
                     }
                     continue;
                 }
@@ -6435,7 +6446,7 @@ impl Model {
                         k.put(key.whole, &c);
                     }
                     restored += 1;
-                    let before_cache = step_doc_owned.is_some().then(|| state.clone());
+                    let before_cache = stepper.is_some().then(|| state.clone());
                     if c.error.is_none() {
                         state = c.state.clone();
                     }
@@ -6470,10 +6481,8 @@ impl Model {
                         unkept: false,
                         state: state.clone(),
                     });
-                    if let Some(before_cache) = before_cache
-                        && ok
-                    {
-                        advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &state, bodies_changed(&before_cache, &state));
+                    if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
+                        s.advance(&mut resolved_joints, &vals, f, before_cache, &state);
                     }
                     continue;
                 }
@@ -6497,7 +6506,7 @@ impl Model {
                 {
                     restored += 1;
                     component_keys.insert(f.id, key.reached);
-                    let before_rolled = step_doc_owned.is_some().then(|| state.clone());
+                    let before_rolled = stepper.is_some().then(|| state.clone());
                     if r.error.is_none() {
                         state = r.state.clone();
                     }
@@ -6505,10 +6514,8 @@ impl Model {
                     let ok = r.error.is_none();
                     let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
                     out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
-                    if let Some(before_rolled) = before_rolled
-                        && ok
-                    {
-                        advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &state, bodies_changed(&before_rolled, &state));
+                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
+                        s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
                     }
                     continue;
                 }
@@ -6681,10 +6688,10 @@ impl Model {
                         moved: moved.clone(),
                         failed: failed.clone(),
                         rolled_results: rolled_results.clone(),
-                        occurrence_transforms: step_doc_owned.as_ref().map(|d| d.occurrences.iter().map(|o| o.transform).collect()),
-                        joint_states: step_doc_owned
-                            .as_ref()
-                            .map(|d| d.assembly.joints.iter().map(|j| (j.values.clone(), j.exprs.values.clone())).collect()),
+                        occurrence_transforms: stepper.as_ref().map(CaptureStepper::occurrence_transforms),
+                        joint_states: stepper.as_ref().map(CaptureStepper::joint_states),
+                        joints_dirty: stepper.as_ref().is_some_and(CaptureStepper::joints_dirty),
+                        all_joints_resolved: stepper.as_ref().is_some_and(CaptureStepper::all_joints_resolved),
                         resolved_joints: resolved_joints.clone(),
                     };
                     let failure = overlap::Failure {
@@ -6779,11 +6786,17 @@ impl Model {
                             }
                         }
                         state = Arc::new(next);
-                        // A window opening the design can show what is built so far.
-                        watched.offer(i + 1, eval_doc, &state);
-                        if step_doc_owned.is_some() {
-                            advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &state, bodies_changed(&before, &state));
+                        if let Some(s) = stepper.as_mut() {
+                            s.advance(&mut resolved_joints, &vals, f, &before, &state);
                         }
+                        // A window opening the design can show what is built so far.
+                        watched.offer_with(i + 1, || {
+                            if let Some(s) = stepper.as_mut() {
+                                s.flush(&state);
+                            }
+                            let preview_doc = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+                            crate::world_state(preview_doc, &state).ok().map(Arc::new)
+                        });
                         None
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
@@ -6869,7 +6882,7 @@ impl Model {
         self.last_recomputed = recomputed;
         self.recomputed += recomputed;
         self.last_restored = restored;
-        self.resolved_occurrences = step_doc_owned.map(|d| d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()).unwrap_or_default();
+        self.resolved_occurrences = stepper.map(|s| s.into_resolved_occurrences(&state)).unwrap_or_default();
         self.resolved_joints = resolved_joints;
     }
 
@@ -6893,101 +6906,409 @@ fn bodies_changed(a: &ModelState, b: &ModelState) -> bool {
             .any(|(x, y)| x.name != y.name || x.component != y.component || !std::ptr::eq(x.body.record(), y.body.record()))
 }
 
-fn solve_step_joints(d: &mut Document, state: &ModelState) {
+fn solve_step_joints_with(d: &mut Document, state: &ModelState, has_base_joints: bool, moved_occs: &std::collections::BTreeSet<u64>) -> bool {
     if !d.assembly.joints.iter().any(|j| !j.suppressed) {
-        return;
+        return true;
     }
-    let has_base_joints = d.assembly.joints.iter().any(|j| !j.suppressed && j.base_values.is_some());
+    #[cfg(test)]
+    cost_tests::count(|c| c.step_joint_solves += 1);
     let mut sol = crate::joints::solve_holding_with_analysis(d, state, &BTreeMap::new(), crate::joints::Analysis::Placement);
+    let all_resolved = sol.errors.is_empty();
     if !has_base_joints {
-        let moved_occs: std::collections::BTreeSet<u64> = d
-            .features
-            .iter()
-            .filter_map(|f| match &f.kind {
-                FeatureKind::CapturePosition { moves, .. } => Some(moves.iter().map(|m| m.occurrence)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
         sol.world.retain(|occ, _| !moved_occs.contains(occ));
     }
     if !sol.world.is_empty() || !sol.values.is_empty() {
         d.apply_joint_solution(&sol);
     }
+    all_resolved
 }
 
-fn init_capture_step_doc(doc: &Document, vals: &BTreeMap<String, Value>) -> Option<Document> {
-    doc.has_capture_position_timeline().then(|| {
-        let mut d = doc.clone();
-        for o in &mut d.occurrences {
-            if let Some(base) = o.base_transform {
-                o.transform = base;
-            }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JointInputChange {
+    None,
+    Added,
+    Modified,
+}
+
+impl JointInputChange {
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Modified, _) | (_, Self::Modified) => Self::Modified,
+            (Self::Added, _) | (_, Self::Added) => Self::Added,
+            (Self::None, Self::None) => Self::None,
         }
-        for j in &mut d.assembly.joints {
-            if j.kind == crate::joints::JointKind::Rigid {
-                continue;
+    }
+}
+
+fn diff_iter<'a, T: 'a>(mut ai: impl Iterator<Item = &'a T>, mut bi: impl Iterator<Item = &'a T>, same: impl Fn(&T, &T) -> bool) -> JointInputChange {
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return JointInputChange::None,
+            (None, Some(_)) => return JointInputChange::Added,
+            (Some(x), Some(y)) if same(x, y) => {}
+            _ => return JointInputChange::Modified,
+        }
+    }
+}
+
+/// Whether `doc`'s active joints and rigid groups form a kinematic loop (a cycle in the
+/// occurrence graph with root `0` and grounded occurrences contracted into a single fixed ground
+/// vertex). Tree-only assemblies never run `close_loops`, so adding new geometry in jointed
+/// components can coalesce into one solve without altering joint values.
+fn has_joint_loops(doc: &Document) -> bool {
+    let grounded: std::collections::HashSet<u64> = doc.occurrences.iter().filter(|o| o.grounded).map(|o| o.id).collect();
+    let mut parent: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
+    let find = |parent: &std::collections::HashMap<u64, u64>, mut x: u64| -> u64 {
+        while let Some(&p) = parent.get(&x) {
+            x = p;
+        }
+        x
+    };
+    let node = |occ: u64| if occ == 0 || grounded.contains(&occ) { 0 } else { occ };
+    let rigid_groups = doc.rigid_group_joints();
+    for j in doc.assembly.joints.iter().filter(|j| !j.suppressed).chain(&rigid_groups) {
+        let a = find(&parent, node(j.a.occurrence));
+        let b = find(&parent, node(j.b.occurrence));
+        if a == b {
+            return true;
+        }
+        parent.insert(a, b);
+    }
+    false
+}
+
+/// Tracks per-step occurrence transforms and joint values along a timeline with `CapturePosition`
+/// or `Occurrence::base_transform`, deferring `solve_step_joints_with` until a feature or caller
+/// actually observes `doc.occurrences` and skipping solves when edits only touch geometry that no
+/// active joint references.
+pub(super) struct CaptureStepper {
+    doc: Document,
+    has_active_joints: bool,
+    has_base_joints: bool,
+    has_joint_loops: bool,
+    moved_occs: std::collections::BTreeSet<u64>,
+    joint_components: std::collections::HashSet<u64>,
+    joint_sketches: std::collections::HashSet<u64>,
+    joint_construct: std::collections::HashSet<u64>,
+    any_component_dirty: bool,
+    any_sketch_dirty: bool,
+    any_construct_dirty: bool,
+    feature_component: std::collections::HashMap<u64, u64>,
+    joints_dirty: bool,
+    all_joints_resolved: bool,
+}
+
+impl CaptureStepper {
+    pub(super) fn new(doc: &Document, vals: &BTreeMap<String, Value>) -> Option<Self> {
+        doc.has_capture_position_timeline().then(|| {
+            let mut d = doc.clone();
+            for o in &mut d.occurrences {
+                if let Some(base) = o.base_transform {
+                    o.transform = base;
+                }
             }
-            if let Some(base) = &j.base_values {
-                let dofs = j.kind.dofs().len();
-                let mut q = base.clone();
-                q.resize(dofs, 0.0);
-                for i in 0..dofs {
-                    let expr = j.base_exprs.get(i).and_then(|e| e.clone());
-                    if let Some(e) = &expr {
-                        let kind = if j.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
-                        if let Ok(v) = crate::eval::val(vals, e, kind)
-                            && v.is_finite()
-                            && v.abs() < 1e9
-                            && let Some(slot) = q.get_mut(i)
-                        {
-                            *slot = v;
+            for j in &mut d.assembly.joints {
+                if j.kind == crate::joints::JointKind::Rigid {
+                    continue;
+                }
+                if let Some(base) = &j.base_values {
+                    let dofs = j.kind.dofs().len();
+                    let mut q = base.clone();
+                    q.resize(dofs, 0.0);
+                    for i in 0..dofs {
+                        let expr = j.base_exprs.get(i).and_then(|e| e.clone());
+                        if let Some(e) = &expr {
+                            let kind = if j.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
+                            if let Ok(v) = crate::eval::val(vals, e, kind)
+                                && v.is_finite()
+                                && v.abs() < 1e9
+                                && let Some(slot) = q.get_mut(i)
+                            {
+                                *slot = v;
+                            }
+                        }
+                        j.exprs.set_value(i, expr);
+                    }
+                    crate::joints::clamp(j, &mut q);
+                    j.values = q;
+                }
+            }
+            let has_active_joints = d.assembly.joints.iter().any(|j| !j.suppressed);
+            let has_base_joints = has_active_joints && d.assembly.joints.iter().any(|j| !j.suppressed && j.base_values.is_some());
+            let has_joint_loops = has_active_joints && has_joint_loops(&d);
+            let moved_occs = if has_active_joints && !has_base_joints {
+                d.features
+                    .iter()
+                    .filter_map(|f| match &f.kind {
+                        FeatureKind::CapturePosition { moves, .. } => Some(moves.iter().map(|m| m.occurrence)),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect()
+            } else {
+                std::collections::BTreeSet::new()
+            };
+            let mut joint_components = std::collections::HashSet::new();
+            let mut joint_sketches = std::collections::HashSet::new();
+            let mut joint_construct = std::collections::HashSet::new();
+            let mut any_component_dirty = false;
+            let mut any_sketch_dirty = false;
+            let mut any_construct_dirty = false;
+            if has_active_joints {
+                for j in d.assembly.joints.iter().filter(|j| !j.suppressed) {
+                    for o in [&j.a, &j.b] {
+                        let part = o.part();
+                        let comp = if part == 0 { Some(0) } else { d.occurrences.iter().find(|x| x.id == part).map(|x| x.component) };
+                        let note_comp = |joint_components: &mut std::collections::HashSet<u64>, any_component_dirty: &mut bool| match comp {
+                            Some(0) | None => *any_component_dirty = true,
+                            Some(c) => {
+                                joint_components.insert(c);
+                            }
+                        };
+                        let x_ref = match &o.snap {
+                            crate::joints::Snap::FaceCenter { x, .. }
+                            | crate::joints::Snap::CircleCenter { x, .. }
+                            | crate::joints::Snap::Plane { x, .. }
+                            | crate::joints::Snap::Axis { x, .. }
+                            | crate::joints::Snap::SketchPoint { x, .. } => x.as_ref(),
+                            _ => None,
+                        };
+                        if let Some(crate::joints::XRef::Reference { reference, .. }) = x_ref {
+                            match reference {
+                                crate::joints::AlignmentRef::SketchLine { sketch, .. } => {
+                                    joint_sketches.insert(*sketch);
+                                }
+                                crate::joints::AlignmentRef::Construction { feature }
+                                | crate::joints::AlignmentRef::ConstructionPlane { feature } => {
+                                    joint_construct.insert(*feature);
+                                }
+                                _ => {}
+                            }
+                        }
+                        match &o.snap {
+                            crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
+                            crate::joints::Snap::FaceCenter { .. } | crate::joints::Snap::CircleCenter { .. } | crate::joints::Snap::Edge { .. } => {
+                                note_comp(&mut joint_components, &mut any_component_dirty);
+                            }
+                            crate::joints::Snap::SketchPoint { sketch, x, .. } => {
+                                joint_sketches.insert(*sketch);
+                                if x.is_some() {
+                                    note_comp(&mut joint_components, &mut any_component_dirty);
+                                }
+                            }
+                            crate::joints::Snap::Plane { .. } | crate::joints::Snap::Axis { .. } => {
+                                any_component_dirty = true;
+                                any_sketch_dirty = true;
+                                any_construct_dirty = true;
+                            }
                         }
                     }
-                    j.exprs.set_value(i, expr);
                 }
-                crate::joints::clamp(j, &mut q);
-                j.values = q;
             }
-        }
-        solve_step_joints(&mut d, &ModelState::default());
-        d
-    })
-}
+            let feature_component = d.features.iter().rev().map(|f| (f.id, f.component)).collect();
+            CaptureStepper {
+                doc: d,
+                has_active_joints,
+                has_base_joints,
+                has_joint_loops,
+                moved_occs,
+                joint_components,
+                joint_sketches,
+                joint_construct,
+                any_component_dirty,
+                any_sketch_dirty,
+                any_construct_dirty,
+                feature_component,
+                joints_dirty: has_active_joints,
+                all_joints_resolved: !has_active_joints,
+            }
+        })
+    }
 
-fn advance_capture_step(
-    step_doc: &mut Option<Document>,
-    resolved_joints: &mut BTreeMap<u64, crate::CapturedJoint>,
-    vals: &BTreeMap<String, Value>,
-    f: &Feature,
-    state: &ModelState,
-    solve_joints_now: bool,
-) {
-    let Some(d) = step_doc.as_mut() else { return };
-    let is_capture = if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
-        let _ = d.apply_capture_position_step(vals, moves);
-        for cj in joints {
-            let resolved = crate::assembly::eval_captured_joint(d, vals, cj).unwrap_or_else(|_| cj.clone());
-            if let Some(j) = d.assembly.joints.iter_mut().find(|j| j.id == resolved.joint)
-                && j.kind != crate::joints::JointKind::Rigid
-            {
-                let dofs = j.kind.dofs().len();
-                let mut q = resolved.values.clone();
-                q.resize(dofs, 0.0);
-                crate::joints::clamp(j, &mut q);
-                j.values = q;
-                for i in 0..dofs {
-                    j.exprs.set_value(i, resolved.exprs.get(i).and_then(|e| e.clone()));
+    pub(super) fn doc(&self) -> &Document {
+        &self.doc
+    }
+
+    pub(super) fn flush(&mut self, state: &ModelState) {
+        if !self.joints_dirty {
+            return;
+        }
+        self.joints_dirty = false;
+        self.all_joints_resolved = solve_step_joints_with(&mut self.doc, state, self.has_base_joints, &self.moved_occs);
+    }
+
+    pub(super) fn flush_for_feature(&mut self, f: &Feature, state: &ModelState) {
+        if self.joints_dirty && self.feature_reads_placements(f, state) {
+            self.flush(state);
+        }
+    }
+
+    pub(super) fn advance(
+        &mut self,
+        resolved_joints: &mut BTreeMap<u64, crate::CapturedJoint>,
+        vals: &BTreeMap<String, Value>,
+        f: &Feature,
+        before: &ModelState,
+        state: &ModelState,
+    ) {
+        if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
+            // `apply_capture_position_step` composes deltas onto `doc.occurrences`, so any
+            // pending joint solve from earlier geometry must land before applying the capture.
+            self.flush(before);
+            let _ = self.doc.apply_capture_position_step(vals, moves);
+            for cj in joints {
+                let resolved = crate::assembly::eval_captured_joint(&self.doc, vals, cj).unwrap_or_else(|_| cj.clone());
+                if let Some(j) = self.doc.assembly.joints.iter_mut().find(|j| j.id == resolved.joint)
+                    && j.kind != crate::joints::JointKind::Rigid
+                {
+                    let dofs = j.kind.dofs().len();
+                    let mut q = resolved.values.clone();
+                    q.resize(dofs, 0.0);
+                    crate::joints::clamp(j, &mut q);
+                    j.values = q;
+                    for i in 0..dofs {
+                        j.exprs.set_value(i, resolved.exprs.get(i).and_then(|e| e.clone()));
+                    }
+                }
+                resolved_joints.insert(resolved.joint, resolved);
+            }
+            if self.has_active_joints {
+                self.joints_dirty = true;
+            }
+        } else if self.has_active_joints {
+            match self.joint_inputs_change(before, state) {
+                JointInputChange::None => {}
+                JointInputChange::Added => {
+                    if self.has_joint_loops && self.joints_dirty {
+                        self.flush(before);
+                    }
+                    self.joints_dirty = true;
+                }
+                JointInputChange::Modified => {
+                    // Keep a solve boundary before modifying or removing geometry that a pending
+                    // joint solve may depend on, so the last valid pose and solver seed match
+                    // eager step-by-step solving.
+                    if self.joints_dirty {
+                        self.flush(before);
+                    }
+                    self.joints_dirty = true;
                 }
             }
-            resolved_joints.insert(resolved.joint, resolved);
         }
-        true
-    } else {
-        false
-    };
-    if is_capture || solve_joints_now {
-        solve_step_joints(d, state);
+    }
+
+    pub(super) fn into_resolved_occurrences(mut self, state: &ModelState) -> BTreeMap<u64, Mat> {
+        self.flush(state);
+        self.doc.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()
+    }
+
+    fn occurrence_transforms(&self) -> Vec<Mat> {
+        self.doc.occurrences.iter().map(|o| o.transform).collect()
+    }
+
+    fn joint_states(&self) -> Vec<(Vec<f64>, Vec<Option<String>>)> {
+        self.doc.assembly.joints.iter().map(|j| (j.values.clone(), j.exprs.values.clone())).collect()
+    }
+
+    fn joints_dirty(&self) -> bool {
+        self.joints_dirty
+    }
+
+    fn all_joints_resolved(&self) -> bool {
+        self.all_joints_resolved
+    }
+
+    fn restore(
+        &mut self,
+        occurrence_transforms: Option<Vec<Mat>>,
+        joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
+        joints_dirty: bool,
+        all_joints_resolved: bool,
+    ) {
+        if let Some(transforms) = occurrence_transforms {
+            for (o, t) in self.doc.occurrences.iter_mut().zip(transforms) {
+                o.transform = t;
+            }
+        }
+        if let Some(joint_states) = joint_states {
+            for (j, (values, exprs)) in self.doc.assembly.joints.iter_mut().zip(joint_states) {
+                j.values = values;
+                j.exprs.values = exprs;
+            }
+        }
+        self.joints_dirty = joints_dirty;
+        self.all_joints_resolved = all_joints_resolved;
+    }
+
+    fn body_component(&self, b: &ModelBody) -> u64 {
+        if b.transferred || b.source_name.is_some() {
+            b.component
+        } else {
+            self.doc.body_components.get(&b.name).copied().unwrap_or_else(|| self.feature_component.get(&b.feature).copied().unwrap_or(0))
+        }
+    }
+
+    fn joint_inputs_change(&self, a: &ModelState, b: &ModelState) -> JointInputChange {
+        let mut change = JointInputChange::None;
+        if bodies_changed(a, b) {
+            let same_body =
+                |x: &ModelBody, y: &ModelBody| x.name == y.name && x.component == y.component && std::ptr::eq(x.body.record(), y.body.record());
+            let mut body_change = if self.any_component_dirty {
+                diff_iter(a.bodies.iter(), b.bodies.iter(), same_body)
+            } else if !self.joint_components.is_empty() {
+                let ai = a.bodies.iter().filter(|x| self.joint_components.contains(&self.body_component(x)));
+                let bi = b.bodies.iter().filter(|y| self.joint_components.contains(&self.body_component(y)));
+                diff_iter(ai, bi, same_body)
+            } else {
+                JointInputChange::None
+            };
+            if body_change == JointInputChange::None && !self.all_joints_resolved && a.bodies.len() != b.bodies.len() {
+                body_change = JointInputChange::Added;
+            }
+            change = change.merge(body_change);
+        }
+        if self.any_sketch_dirty || !self.joint_sketches.is_empty() {
+            let same_sketch = |x: &Arc<SolvedSketch>, y: &Arc<SolvedSketch>| x.feature == y.feature && Arc::ptr_eq(x, y);
+            let sketch_change = if self.any_sketch_dirty {
+                diff_iter(a.sketches.iter(), b.sketches.iter(), same_sketch)
+            } else {
+                let ai = a.sketches.iter().filter(|s| self.joint_sketches.contains(&s.feature));
+                let bi = b.sketches.iter().filter(|s| self.joint_sketches.contains(&s.feature));
+                diff_iter(ai, bi, same_sketch)
+            };
+            change = change.merge(sketch_change);
+        }
+        if self.any_construct_dirty || !self.joint_construct.is_empty() {
+            let same_construct = |x: &crate::construct::Construct, y: &crate::construct::Construct| x == y;
+            let construct_change = if self.any_construct_dirty {
+                diff_iter(a.construct.iter(), b.construct.iter(), same_construct)
+            } else {
+                let ai = a.construct.iter().filter(|c| self.joint_construct.contains(&c.feature));
+                let bi = b.construct.iter().filter(|c| self.joint_construct.contains(&c.feature));
+                diff_iter(ai, bi, same_construct)
+            };
+            change = change.merge(construct_change);
+        }
+        change
+    }
+
+    fn feature_reads_placements(&self, f: &Feature, st: &ModelState) -> bool {
+        if placement_digest(&self.doc, f, Some(st)) != 0 {
+            return true;
+        }
+        // Kinds that can read placements during evaluation even when `placement_digest` returns 0.
+        match &f.kind {
+            FeatureKind::Align { .. }
+            | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. }
+            | FeatureKind::SurfaceRevolve { axis: AxisRef::Model { .. }, .. }
+            | FeatureKind::SheetConvert { .. }
+            | FeatureKind::SheetSurfaceConvert { .. }
+            | FeatureKind::SheetRecognize { .. }
+            | FeatureKind::SheetFold { .. } => true,
+            FeatureKind::ReplaceFace { target, .. } => crate::face_anchor::plane_face_anchor(target).is_some() || plane_reads_geometry(target),
+            FeatureKind::Mirror { placements, .. } => !placements.is_empty(),
+            _ => f.profile_frame.is_some(),
+        }
     }
 }
 
@@ -7259,13 +7580,18 @@ impl Model {
         let (vals, _) = evaluation_values(doc);
         let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let mut step_doc_owned = init_capture_step_doc(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints = BTreeMap::new();
-        if step_doc_owned.is_some() {
+        if stepper.is_some() {
             let mut prev_state = self.empty.clone();
             for (i, (r, f)) in self.results.iter().zip(&doc.features).enumerate().take(start) {
+                if let Some(s) = stepper.as_mut() {
+                    s.flush_for_feature(f, &prev_state);
+                }
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
-                    advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &r.state, bodies_changed(&prev_state, &r.state));
+                    if let Some(s) = stepper.as_mut() {
+                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    }
                     prev_state = r.state.clone();
                 }
             }
@@ -7275,15 +7601,21 @@ impl Model {
         // Each feature's fingerprint reads the model it starts from, as evaluating does.
         let mut before = last.map_or_else(|| Arc::new(ModelState::default()), |r| r.state.clone());
         for (i, (r, f)) in self.results.iter_mut().zip(&doc.features).enumerate().skip(start) {
-            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+            if let Some(s) = stepper.as_mut() {
+                s.flush_for_feature(f, &before);
+            }
+            let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
             r.fingerprint = prev;
-            if step_doc_owned.is_some() && i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
-                let changed = bodies_changed(&before, &r.state);
-                before = r.state.clone();
-                advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &r.state, changed);
-            } else {
-                before = r.state.clone();
+            let prev_state = before;
+            before = r.state.clone();
+            if i < marker
+                && !f.suppressed
+                && !r.skipped
+                && r.error.is_none()
+                && let Some(s) = stepper.as_mut()
+            {
+                s.advance(&mut resolved_joints, &vals, f, &prev_state, &before);
             }
         }
     }
@@ -14573,7 +14905,8 @@ fn no_face_from_tools(mb: &ModelBody) -> bool {
 
 /// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
 /// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
-/// any other surface (a spline) by its exact definition in the record. A cut that removes
+/// a spline or blend surface by its control net within the same tolerance, and any other surface
+/// by its exact definition in the record. A cut that removes
 /// material usually leaves such a face (a wall of the pocket); one that only splits faces where
 /// its tool touches them (#18825) leaves none. It is a quick test, not a proof: a cut whose new
 /// faces all lie on surfaces the body had already (a thin wall cut away between two pockets)
@@ -14591,12 +14924,15 @@ fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     let region = bounds(old).union(&bounds(new));
     let same = |a: &S, b: &S| kernel::same_surface(a, b, tol, &region);
     let (old_rec, new_rec) = (old.record(), new.record());
-    let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
-        (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();
+    let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Face>)> =
+        (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi))).collect();
     (0..new.face_count())
         .map(|fi| match kernel::face_surface(new, fi) {
             Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
-            None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
+            None => new_rec
+                .faces
+                .get(fi)
+                .is_some_and(|f| !olds.iter().any(|(_, o)| o.as_ref().is_some_and(|&o| kernel::same_face_record_surface(o, f, tol)))),
         })
         .collect()
 }
@@ -15600,9 +15936,8 @@ fn replay(
             // meets every body where its sketch's frame shows it (#17655).
             let shown = targets_as_shown(st, src, &["*".to_string()])?;
             for (k, m) in mats.iter().enumerate() {
-                for body in more::rib_tools(vals, &shown, src, Some(m))? {
+                for t in more::rib_tools(vals, &shown, src, Some(m))? {
                     // Each copy's faces are named as the rib's, with the instance.
-                    let t = Traced::unnamed(body);
                     copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
                 }
             }
@@ -16666,27 +17001,23 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
 
 /// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
 /// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
-/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
-/// between two samples crosses one of its loops (a profile narrower than the steps).
+/// make: their exact curves, sampled finely, meet a region where they run through its inside, so
+/// also across a profile narrower than the steps between the samples, not where they only run
+/// along its outline or through one of its corners (#7330); the kernel answers that from the
+/// samples and the outline's polylines.
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let tol = (b.body.size() * 1e-4).max(1e-4);
     let Ok(edges) = b.body.edges(tol) else { return true };
     let own = kernel::face_edge_indices(&b.body, fi);
-    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
-    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
-        return true;
-    }
-    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
-}
-
-/// Whether segments `p`-`q` and `a`-`b` cross or touch.
-fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
-    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
-    let (d1, d2) = (side(a, b, p), side(a, b, q));
-    let (d3, d4) = (side(p, q, a), side(p, q, b));
-    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
+    let xy = |q: Vec2| [q.x, q.y];
+    let curves: Vec<Vec<[f64; 2]>> =
+        own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| xy(plane.to_local(*q))).collect()).collect();
+    let regions: Vec<Vec<Vec<[f64; 2]>>> =
+        regions.iter().map(|r| r.loops().map(|l| l.polyline(1e-3).into_vec().into_iter().map(xy).collect()).collect()).collect();
+    // Off the outline is farther than the wall's samples (`tol`) and the outline's (1e-3) can
+    // stray from each other: a round wall flush with a round profile crosses its chords.
+    curves.iter().any(|c| kernel::planar::path_runs_inside(c, &regions, tol + 1e-3))
 }
 
 /// The body at `p` when the face there is not planar.

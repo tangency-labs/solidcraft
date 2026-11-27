@@ -854,16 +854,21 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     for (body, feat, _) in &body_owners {
         if removed.features.contains(feat) {
             d.materials.remove(body);
+            d.appearances.bodies.remove(body);
+            d.appearances.faces.retain(|face| face.body != *body);
         }
     }
     for (feature, made, skipped) in imported {
-        // A body an outside Import keeps building only drops its material when it is one of the
-        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        // A body an outside Import keeps building only drops its material and appearances when it
+        // is one of the skipped (deleted) parts; a surviving feature's body keeps what it was
+        // assigned.
         if let Some(f) = d.feature(feature) {
             let slots = f.body_name_slots(made.len());
             for (slot, name) in slots.iter().zip(&made) {
                 if skipped.contains(&(*slot as u64)) {
                     d.materials.remove(name);
+                    d.appearances.bodies.remove(name);
+                    d.appearances.faces.retain(|face| face.body != *name);
                 }
             }
         }

@@ -100,12 +100,21 @@ macro_rules! navigation_preferences {
             radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
             /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+            /// A key that, held when a mouse orbit drag starts, makes that drag roll the view about
+            /// the line of sight through the orbit point instead, as far as the pointer goes around
+            /// that point, like a dial (#22691). `none` (default), `alt` or `ctrl`; while it is the same
+            /// key as `free_orbit_key`, that one wins and this does nothing. A key the mouse mapping
+            /// already needs for that orbit does nothing.
+            roll_key: String = "none".into(), PAGE_NAVIGATION;
             /// Spread discrete wheel input across frames (off: apply each event immediately).
             smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
             /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
             touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
             /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
             trackpad_pan: bool = true, PAGE_NAVIGATION;
+            /// With the two-finger twist on, it rolls the view about the line of sight through the
+            /// Orbit around point instead of turning it about the up axis, so it rolls in every view (#22691).
+            trackpad_twist_rolls: bool = false, PAGE_NAVIGATION => check_id_help("prefs.trackpad_twist_rolls", "prefs.trackpad_twist_rolls_tip");
             /// A two-finger twist on the trackpad turns the view about the world's up axis (#6286). Off
             /// by default: the twist does nothing, as before.
             trackpad_twist_turns: bool = false, PAGE_NAVIGATION => check_id_help("prefs.trackpad_twist_turns", "prefs.trackpad_twist_turns_tip");
