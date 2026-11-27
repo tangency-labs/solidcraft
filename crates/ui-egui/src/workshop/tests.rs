@@ -556,9 +556,31 @@ fn lasting_index() -> Value {
 }
 
 fn read_with(answer: Signed, seen: Option<&Path>, app: &semver::Version) -> Result<(index::Index, Vec<solidcraft_engine::workshop::Item>), Refusal> {
+    read_floor(answer, seen, 0, app)
+}
+
+/// [`read_with`] for a window that already holds the sequence `floor`.
+fn read_floor(
+    answer: Signed,
+    seen: Option<&Path>,
+    floor: u64,
+    app: &semver::Version,
+) -> Result<(index::Index, Vec<solidcraft_engine::workshop::Item>), Refusal> {
     let keys = keys();
     let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-    browser::read(&keys, &|_| Ok(answer.clone()), seen, NOW, app)
+    browser::read(&keys, &|_| Ok(answer.clone()), seen, floor, NOW, app)
+}
+
+/// Wait for the window's background read to finish, and give the catalog it left.
+fn wait_settled(shared: &Arc<std::sync::Mutex<browser::Shared>>) -> solidcraft_engine::workshop::Catalog {
+    for _ in 0..500 {
+        let catalog = browser::lock(shared).catalog.clone();
+        if catalog.state != solidcraft_engine::workshop::State::Loading {
+            return catalog;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the read never settled");
 }
 
 fn nightly() -> semver::Version {
@@ -645,7 +667,7 @@ fn a_bad_or_replayed_index_keeps_the_last_good_list() {
     let offline = {
         let keys = keys();
         let keys: Vec<(&str, &str)> = keys.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-        browser::read(&keys, &|_| Err("offline".into()), None, NOW, &nightly())
+        browser::read(&keys, &|_| Err("offline".into()), None, 0, NOW, &nightly())
     };
     assert_eq!(offline.err(), Some(Refusal::Unreachable("offline".into())));
     let _ = std::fs::remove_dir_all(&dir);
@@ -775,4 +797,136 @@ fn the_window_draws_the_list_and_searches_it() {
         assert!(parts.contains("Fasteners") && !parts.contains("Gears 1.2.0"), "{parts}");
         assert!(h.app.workshop.browser.open);
     }
+}
+
+/// With no sequence file (no data folder, or one that can't be read) a refresh may not go below
+/// the list already in memory: an older, still valid index fails and the newer list stays.
+#[test]
+fn a_refresh_without_the_sequence_file_never_goes_back() {
+    use solidcraft_engine::workshop::State;
+    let mut shared = browser::Shared::default();
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert_eq!(shared.catalog.sequence, 42);
+    let mut older = lasting_index();
+    older["sequence"] = json!(41);
+    let outcome = read_floor(signed(&older), None, shared.catalog.sequence, &nightly());
+    assert_eq!(outcome.as_ref().err(), Some(&Refusal::Replayed { seen: 42, got: 41 }));
+    browser::settle(&mut shared, outcome);
+    assert_eq!(shared.catalog.state, State::Failed);
+    assert!(shared.catalog.error.as_deref().is_some_and(|e| !e.is_empty()));
+    assert_eq!((shared.catalog.sequence, shared.catalog.items.len()), (42, 3), "the newer list stays");
+    // The same sequence, or a newer one, is read.
+    assert!(read_floor(signed(&lasting_index()), None, 42, &nightly()).is_ok());
+}
+
+/// An item chosen from a list read more than five minutes ago isn't asked about: the list is read
+/// again first, so a block published since can't be missed. A fresh list asks as before.
+#[test]
+fn choosing_from_an_old_list_reads_it_again_first() {
+    use solidcraft_engine::workshop::{Kind as K, State};
+    let mut h = crate::scenario::Harness::new();
+    browser::settle(&mut browser::lock(&h.app.workshop.browser.shared), read_with(signed(&lasting_index()), None, &nightly()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = calls.clone();
+    h.app.services.workshop_get = Some(Arc::new(move |_: &str| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("offline".to_string())
+    }));
+    browser::lock(&h.app.workshop.browser.shared).fetched_at = Some(unix_now() - 301);
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert!(h.app.workshop.ask.is_none(), "an old list asks nothing");
+    assert!(h.app.status.is_some(), "and says why");
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "the list was read again");
+    assert_eq!((catalog.state, catalog.items.len()), (State::Failed, 3), "the failed read keeps the old list");
+    // Still old: it can't be asked about even though the read failed.
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert!(h.app.workshop.ask.is_none());
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    // Read just now: the question.
+    browser::lock(&h.app.workshop.browser.shared).fetched_at = Some(unix_now());
+    browser::choose(&mut h.app, K::Plugin, "gears");
+    assert_eq!(h.app.workshop.ask.as_ref().map(|a| a.id.as_str()), Some("gears"));
+}
+
+/// The window's filtering is worked out once per query, kind or list, and gives what the filter
+/// keeps (any case, every word).
+#[test]
+fn the_window_filters_once_per_change() {
+    let mut shared = browser::Shared::default();
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert_eq!(*shared.kept("", 0), [0, 1, 2]);
+    assert_eq!(*shared.kept("SHELF", 0), [1]);
+    assert_eq!(*shared.kept("maker helical", 1), [0]);
+    assert_eq!(*shared.kept("", 3), [2]);
+    assert!(shared.kept("shelf", 1).is_empty());
+    let first = shared.kept("gear", 0);
+    assert!(Arc::ptr_eq(&first, &shared.kept("gear", 0)), "the same answer is reused");
+    browser::settle(&mut shared, read_with(signed(&lasting_index()), None, &nightly()));
+    assert!(!Arc::ptr_eq(&first, &shared.kept("gear", 0)), "a new list is filtered again");
+}
+
+/// A panic in the background read settles it as failed: the window isn't left loading, and the
+/// next refresh runs.
+#[test]
+fn a_panic_in_the_read_does_not_leave_the_window_loading() {
+    use solidcraft_engine::workshop::State;
+    let mut h = crate::scenario::Harness::new();
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| -> Result<Signed, String> { panic!("the fetch broke") }));
+    browser::refresh(&mut h.app);
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(catalog.state, State::Failed);
+    assert!(catalog.error.as_deref().is_some_and(|e| !e.is_empty()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = calls.clone();
+    h.app.services.workshop_get = Some(Arc::new(move |_: &str| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("offline".to_string())
+    }));
+    browser::refresh(&mut h.app);
+    let _ = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "a new read started");
+}
+
+/// Opening the window on an empty list starts the read on a worker (here one that can't reach
+/// the Workshop), and an old failure doesn't show while a new read runs.
+#[test]
+fn opening_the_window_on_an_empty_list_starts_the_read() {
+    use solidcraft_engine::workshop::State;
+    let mut h = crate::scenario::Harness::new();
+    h.app.services.workshop_get = Some(Arc::new(|_: &str| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Err("offline".to_string())
+    }));
+    h.app.services.http_download =
+        Some(Arc::new(|_: &str, _: &Path, _: &dyn Fn(u64, Option<u64>) -> bool| Err(crate::update::FetchError::Failed("offline".into()))));
+    if !browser::offered(&h.app) {
+        return;
+    }
+    let opened = browser::control(&mut h.app, &json!({"open": true})).unwrap();
+    assert_eq!(opened["open"], true);
+    assert_eq!(opened["state"], "loading", "the read started");
+    assert!(opened["error"].is_null());
+    let catalog = wait_settled(&h.app.workshop.browser.shared);
+    assert_eq!(catalog.state, State::Failed);
+    assert!(catalog.error.is_some());
+    let again = browser::control(&mut h.app, &json!({"open": true})).unwrap();
+    assert_eq!(again["state"], "failed", "a failed list isn't read again just by opening");
+}
+
+/// Names, summaries, authors and warnings from the index are cut to a sane length, on a
+/// character boundary.
+#[test]
+fn long_texts_from_the_index_are_cut() {
+    let mut value = lasting_index();
+    value["items"][0]["name"] = json!("é".repeat(500));
+    value["items"][0]["summary"] = json!("s".repeat(3000));
+    value["items"][0]["author"] = json!({"handle": "maker", "name": "n".repeat(500)});
+    value["revoked"][1]["reason"] = json!("ü".repeat(900));
+    let (_, items) = read_with(signed(&value), None, &nightly()).unwrap();
+    let gears = &items[0];
+    assert_eq!(gears.name.chars().count(), 200);
+    assert_eq!(gears.summary.chars().count(), 2000);
+    assert_eq!(gears.author.chars().count(), 200);
+    assert_eq!(gears.warning.as_ref().map(|w| w.chars().count()), Some(500));
 }

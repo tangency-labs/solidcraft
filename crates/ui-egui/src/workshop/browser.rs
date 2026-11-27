@@ -24,6 +24,15 @@ use crate::{SolveApp, ui_kit};
 pub(crate) const MAX_ITEMS: usize = 5000;
 /// The most rows the window draws at once; the search narrows the rest.
 const MAX_ROWS: usize = 200;
+/// How old the list may be, in seconds, when an item is chosen from it: a revocation published
+/// since then wouldn't show in it, so an older list is read again first.
+const STALE_SECS: u64 = 300;
+/// The longest name, summary, author and warning kept from the index, in characters: a hostile
+/// index can't make the window lay out a megabyte of text.
+const MAX_NAME: usize = 200;
+const MAX_SUMMARY: usize = 2000;
+const MAX_AUTHOR: usize = 200;
+const MAX_WARNING: usize = 500;
 
 /// The window's state, and the list the worker fills.
 pub(crate) struct Browser {
@@ -47,8 +56,57 @@ pub(crate) struct Shared {
     /// The index the list came from, for resolving the chosen item.
     pub(crate) index: Option<Arc<index::Index>>,
     loading: bool,
+    /// When the list was last read, in Unix seconds.
+    pub(crate) fetched_at: Option<i64>,
+    /// Each item's lowercase search text, in the list's order ([`Filter::haystack`]).
+    haystacks: Vec<String>,
+    /// The last filtering, kept until the query, the kind or the list changes.
+    kept: Option<Kept>,
     /// The window's context, to repaint it when a read finishes.
     ctx: Option<egui::Context>,
+}
+
+/// A filtering's answer and what it was for.
+struct Kept {
+    query: String,
+    kind: usize,
+    sequence: u64,
+    len: usize,
+    rows: Arc<Vec<usize>>,
+}
+
+impl Shared {
+    /// The positions in the list that `query` and `kind` (0 is every kind) keep, in order. Worked
+    /// out once per change of query, kind or list, not per frame.
+    pub(crate) fn kept(&mut self, query: &str, kind: usize) -> Arc<Vec<usize>> {
+        let (sequence, len) = (self.catalog.sequence, self.catalog.items.len());
+        if let Some(k) = &self.kept
+            && k.query == query
+            && k.kind == kind
+            && k.sequence == sequence
+            && k.len == len
+        {
+            return k.rows.clone();
+        }
+        if self.haystacks.len() != len {
+            self.haystacks = self.catalog.items.iter().map(Filter::haystack).collect();
+        }
+        let kind_filter = kind.checked_sub(1).and_then(|k| catalog::Kind::ALL.get(k).copied());
+        let lowered = query.to_lowercase();
+        let words: Vec<&str> = lowered.split_whitespace().take(32).collect();
+        let rows: Arc<Vec<usize>> = Arc::new(
+            self.catalog
+                .items
+                .iter()
+                .zip(&self.haystacks)
+                .enumerate()
+                .filter(|(_, (item, haystack))| kind_filter.is_none_or(|k| k == item.kind) && words.iter().all(|w| haystack.contains(w)))
+                .map(|(at, _)| at)
+                .collect(),
+        );
+        self.kept = Some(Kept { query: query.to_string(), kind, sequence, len, rows: rows.clone() });
+        rows
+    }
 }
 
 pub(crate) fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
@@ -129,9 +187,9 @@ pub(crate) fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde
         choose(app, kind, id);
     }
     let browser = &app.workshop.browser;
-    let s = lock(&browser.shared);
-    let filter = filter_of(browser);
-    let shown: Vec<&str> = filter.apply(&s.catalog.items).take(MAX_ROWS).map(|i| i.id.as_str()).collect();
+    let mut s = lock(&browser.shared);
+    let kept = s.kept(&browser.query, browser.kind);
+    let shown: Vec<&str> = kept.iter().filter_map(|at| s.catalog.items.get(*at)).take(MAX_ROWS).map(|i| i.id.as_str()).collect();
     Ok(serde_json::json!({
         "open": browser.open,
         "query": browser.query,
@@ -141,11 +199,6 @@ pub(crate) fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde
         "shown": shown,
         "asking": app.workshop.ask.as_ref().map(|a| a.id.clone()),
     }))
-}
-
-/// What the window's search and kind filter keep.
-fn filter_of(browser: &Browser) -> Filter {
-    Filter { kind: browser.kind.checked_sub(1).and_then(|k| catalog::Kind::ALL.get(k).copied()), tier: None, query: browser.query.clone() }
 }
 
 /// Read the list again in the background.
@@ -158,6 +211,9 @@ pub(crate) fn refresh(app: &mut SolveApp) {
 
 /// Start a read on a worker unless one is running.
 fn start(shared: &Arc<Mutex<Shared>>, get: HttpGet) -> Result<(), String> {
+    // The sequence the list in memory has: the read may not go below it, with or without the
+    // file that remembers the highest one seen.
+    let floor;
     {
         let mut s = lock(shared);
         if s.loading {
@@ -165,22 +221,51 @@ fn start(shared: &Arc<Mutex<Shared>>, get: HttpGet) -> Result<(), String> {
         }
         s.loading = true;
         s.catalog.state = catalog::State::Loading;
+        // An old failure isn't this read's.
+        s.catalog.error = None;
+        floor = s.catalog.sequence;
     }
-    let worker = shared.clone();
+    let worker = Settling { shared: shared.clone(), done: false };
     let seen = super::sequence_file();
     let spawned = std::thread::Builder::new().name("workshop-index".into()).spawn(move || {
-        let outcome = read(index::KEYS, &|url: &str| get(url), seen.as_deref(), super::unix_now(), &app_version());
-        let mut s = lock(&worker);
-        settle(&mut s, outcome);
-        if let Some(ctx) = &s.ctx {
-            ctx.request_repaint();
-        }
+        let outcome = read(index::KEYS, &|url: &str| get(url), seen.as_deref(), floor, super::unix_now(), &app_version());
+        worker.finish(outcome);
     });
     match spawned {
         Ok(_) => Ok(()),
         Err(error) => {
             settle(&mut lock(shared), Err(Refusal::Unreachable(error.to_string())));
             Err(error.to_string())
+        }
+    }
+}
+
+/// Settles the read its worker runs. A worker that ends without an outcome (a panic in the fetch
+/// or the check) settles it as failed when this drops, so the window never waits on it forever.
+struct Settling {
+    shared: Arc<Mutex<Shared>>,
+    done: bool,
+}
+
+impl Settling {
+    fn finish(mut self, outcome: Result<(index::Index, Vec<catalog::Item>), Refusal>) {
+        self.done = true;
+        self.settle(outcome);
+    }
+
+    fn settle(&self, outcome: Result<(index::Index, Vec<catalog::Item>), Refusal>) {
+        let mut s = lock(&self.shared);
+        settle(&mut s, outcome);
+        if let Some(ctx) = &s.ctx {
+            ctx.request_repaint();
+        }
+    }
+}
+
+impl Drop for Settling {
+    fn drop(&mut self) {
+        if !self.done {
+            self.settle(Err(Refusal::Unreachable("the read stopped unexpectedly".into())));
         }
     }
 }
@@ -194,10 +279,11 @@ pub(crate) fn read(
     keys: &[(&str, &str)],
     get: &dyn Fn(&str) -> Result<super::Signed, String>,
     seen: Option<&std::path::Path>,
+    floor: u64,
     now: i64,
     app_version: &semver::Version,
 ) -> Result<(index::Index, Vec<catalog::Item>), Refusal> {
-    let index = super::fetch_index(keys, get, seen, now)?;
+    let index = super::fetch_index(keys, get, seen, floor, now)?;
     let items = items(&index, app_version);
     Ok((index, items))
 }
@@ -217,6 +303,9 @@ pub(crate) fn settle(s: &mut Shared, outcome: Result<(index::Index, Vec<catalog:
                 items,
             };
             s.index = Some(Arc::new(index));
+            s.fetched_at = Some(super::unix_now());
+            s.haystacks = s.catalog.items.iter().map(Filter::haystack).collect();
+            s.kept = None;
         }
         Err(refusal) => {
             s.catalog.state = catalog::State::Failed;
@@ -251,6 +340,11 @@ fn page_url(kind: catalog::Kind, owner: &str, slug: &str) -> String {
     }
 }
 
+/// `text` cut to at most `max` characters (never inside one).
+fn cap(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
 /// What the index lists that this SolidCraft could open or install, in the index's order: the
 /// newest version that runs here (the one a link without a version gets), or, when every
 /// version needs a newer SolidCraft, no version and the one it needs. Delisted items, items
@@ -270,10 +364,10 @@ pub(crate) fn items(index: &index::Index, app_version: &semver::Version) -> Vec<
             kind,
             owner: item.owner.clone(),
             slug: item.slug.clone(),
-            name: item.name.clone(),
-            summary: item.summary.clone(),
+            name: cap(&item.name, MAX_NAME),
+            summary: cap(&item.summary, MAX_SUMMARY),
             tier: catalog_tier(index::Tier::from_index(&item.tier)),
-            author: index::author_of(item),
+            author: cap(&index::author_of(item), MAX_AUTHOR),
             licence: item.licence.clone(),
             version: None,
             needs_app: None,
@@ -287,7 +381,7 @@ pub(crate) fn items(index: &index::Index, app_version: &semver::Version) -> Vec<
                 listed.version = Some(resolved.version.to_string());
                 listed.permissions = resolved.permissions;
                 listed.size = resolved.file.size;
-                listed.warning = resolved.warning;
+                listed.warning = resolved.warning.map(|w| cap(&w, MAX_WARNING));
             }
             Err(Refusal::NeedsNewerApp(version)) => listed.needs_app = Some(version),
             Err(_) => continue,
@@ -304,10 +398,20 @@ pub(crate) fn choose(app: &mut SolveApp, kind: catalog::Kind, id: &str) {
         app.set_status(tr("workshop.busy").to_string(), true);
         return;
     }
-    let Some(index) = lock(&app.workshop.browser.shared).index.clone() else {
+    let (index, fetched_at) = {
+        let s = lock(&app.workshop.browser.shared);
+        (s.index.clone(), s.fetched_at)
+    };
+    let Some(index) = index else {
         super::refuse(app, &Refusal::NotListed(id.to_string()));
         return;
     };
+    // A list read a while ago can't show what was blocked since: read it again, ask after.
+    if fetched_at.is_none_or(|at| super::unix_now().abs_diff(at) > STALE_SECS) {
+        app.set_status(tr("workshop.stale").to_string(), false);
+        refresh(app);
+        return;
+    }
     let link = Link { kind: link_kind(kind), target: Target::Id(id.to_string()), version: None };
     match index::check_fresh(&index, None, super::unix_now()).and_then(|()| index::resolve(&index, &link, &app_version())) {
         Ok(item) => app.workshop.ask = Some(item),
@@ -355,7 +459,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         s.ctx = Some(ctx.clone());
     }
     let browser = &mut app.workshop.browser;
-    let filter = filter_of(browser);
+    let kept = s.kept(&browser.query, browser.kind);
     let kinds = [tr("workshop.all"), tr("workshop.plugins"), tr("workshop.models"), tr("workshop.parts")];
     let mut chosen = None;
     let mut reread = false;
@@ -387,12 +491,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::status_line(ui, &format("workshop.count", &[("count", &count)]), ui_kit::StatusTone::Dim)
                 }
             };
-            let kept: Vec<&catalog::Item> = filter.apply(&s.catalog.items).collect();
             if kept.is_empty() && !s.catalog.items.is_empty() {
                 ui_kit::text(ui, tr("workshop.no_match"), ui_kit::Text::Hint("workshop_no_match"));
             }
             egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.55).auto_shrink([false, true]).show(ui, |ui| {
-                for (i, item) in kept.iter().take(MAX_ROWS).enumerate() {
+                for (i, item) in kept.iter().filter_map(|at| s.catalog.items.get(*at)).take(MAX_ROWS).enumerate() {
                     ui.push_id(("workshop_item", i), |ui| {
                         let heading = match &item.version {
                             Some(version) => std::format!("{} {version}", item.name),

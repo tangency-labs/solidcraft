@@ -126,22 +126,25 @@ pub(crate) fn lookup(
     now: i64,
     app_version: &semver::Version,
 ) -> Result<Resolved, Refusal> {
-    let index = fetch_index(keys, get, seen, now)?;
+    let index = fetch_index(keys, get, seen, 0, now)?;
     index::resolve(&index, link, app_version)
 }
 
 /// Fetch the index and check its signature and freshness, keeping the highest sequence verified
-/// in `seen`. A link's lookup and the Workshop window (`browser`) read it the same way.
+/// in `seen`. A link's lookup and the Workshop window (`browser`) read it the same way. `floor` is
+/// a sequence the caller already holds (the window's list in memory): an index below the higher
+/// of it and `seen` is refused, so a missing or unreadable `seen` can't roll the list back.
 pub(crate) fn fetch_index(
     keys: &[(&str, &str)],
     get: &dyn Fn(&str) -> Result<Signed, String>,
     seen: Option<&Path>,
+    floor: u64,
     now: i64,
 ) -> Result<index::Index, Refusal> {
     let answer = get(index::INDEX_URL).map_err(Refusal::Unreachable)?;
     let index = index::verify_with(keys, &answer.body, answer.signature.as_deref(), answer.key_id.as_deref())?;
     let highest = seen.and_then(|path| std::fs::read_to_string(path).ok()).and_then(|s| s.trim().parse::<u64>().ok());
-    index::check_fresh(&index, highest, now)?;
+    index::check_fresh(&index, highest.max(Some(floor)), now)?;
     if let Some(path) = seen
         && highest.is_none_or(|h| index.sequence > h)
     {

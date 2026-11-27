@@ -141,16 +141,18 @@ pub struct Filter {
 }
 
 impl Filter {
+    /// The text a search word is looked for in: the item's name, summary, owner, author, slug and
+    /// id, lowercase. A caller that filters often keeps it per item.
+    pub fn haystack(item: &Item) -> String {
+        [&item.name, &item.summary, &item.owner, &item.author, &item.slug, &item.id].iter().map(|s| s.to_lowercase()).collect::<Vec<_>>().join("\n")
+    }
+
     /// Whether `item` is kept.
     pub fn keeps(&self, item: &Item) -> bool {
         if self.kind.is_some_and(|k| k != item.kind) || self.tier.is_some_and(|t| t != item.tier) {
             return false;
         }
-        let haystack = [&item.name, &item.summary, &item.owner, &item.author, &item.slug, &item.id]
-            .iter()
-            .map(|s| s.to_lowercase())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let haystack = Self::haystack(item);
         self.query.split_whitespace().take(32).all(|word| haystack.contains(&word.to_lowercase()))
     }
 
