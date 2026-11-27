@@ -2935,9 +2935,15 @@ impl FilletBrep {
         // the fillet radius along each filleted edge from the common vertex.
         let mut uv = [Point3::new(0.0, 0.0, 0.0); 2];
         let mut ends: [Option<(EdgeId, f64, bool)>; 2] = [None, None];
+        let mut leavings: [Option<Vec3>; 2] = [None, None];
         let mut past_end = false;
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
-        for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
+        for (((slot, end), leaving), (fs, index)) in uv
+            .iter_mut()
+            .zip(ends.iter_mut())
+            .zip(leavings.iter_mut())
+            .zip(pairs)
+        {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
@@ -2951,6 +2957,7 @@ impl FilletBrep {
             let orient = eu1::orientation(target, eu)?;
             let from_min = (pv == cp_vertex && orient == OrientType::Same)
                 || (pv != cp_vertex && orient == OrientType::Opposite);
+            let vertex_param = if from_min { ivl.min() } else { ivl.max() };
             let offset_param = if from_min {
                 arc_length_param(
                     k,
@@ -2972,7 +2979,13 @@ impl FilletBrep {
             };
             // Not upstream (#17511): whether twice the radius runs past the edge's far end
             past_end |= offset_param < ivl.min() || offset_param > ivl.max();
-            *end = Some((e, if from_min { ivl.min() } else { ivl.max() }, from_min));
+            *end = Some((e, vertex_param, from_min));
+            if let Some(d1) = ignore_status(curve.evaluate(k, vertex_param, 1, from_min, true))?
+                .and_then(|pv| pv.get(1).copied())
+                .and_then(|d| d.unitize().ok())
+            {
+                *leaving = Some(if from_min { d1 } else { -d1 });
+            }
             let fetch = get_or_create_uv_trim_curve(k, target, eu, false, false, true)?;
             fetch.status?;
             let trim_curve = eu1::uv_trim_curve(target, eu)?
@@ -2987,7 +3000,16 @@ impl FilletBrep {
         // (a round of 8 on a quarter circle of radius 10: the midpoint lay by the arc's far
         // end and the solve found the rails' other crossing, a ball past the arc's end);
         // there the guess is where the rails cross to second order at the vertex
-        // ([`rails_crossing`]).
+        // ([`rails_crossing`]). Likewise where the two edges meet nearly tangentially (within
+        // ~5 degrees of straight): the two 2*offset steps nearly cancel, leaving curvature
+        // asymmetry to bias the midpoint onto the spurious second branch of a line-circle
+        // rail crossing rather than the true corner branch.
+        let near_tangent = matches!(leavings, [Some(a), Some(b)] if a.dot(b) <= -0.996);
+        let mid_guess = || {
+            let [uv0, uv1] = uv;
+            let mid_uv = (uv0 + uv1) * 0.5;
+            Point2::new(mid_uv.x, mid_uv.y)
+        };
         let uv_guess = if past_end {
             second_order_rail_guess(
                 k,
@@ -2996,10 +3018,17 @@ impl FilletBrep {
                 [(fs1, rail_index1), (fs2, rail_index2)],
                 ends,
             )?
+        } else if near_tangent {
+            ignore_status(second_order_rail_guess(
+                k,
+                target,
+                face,
+                [(fs1, rail_index1), (fs2, rail_index2)],
+                ends,
+            ))?
+            .unwrap_or_else(mid_guess)
         } else {
-            let [uv0, uv1] = uv;
-            let mid_uv = (uv0 + uv1) * 0.5;
-            Point2::new(mid_uv.x, mid_uv.y)
+            mid_guess()
         };
 
         // Get the TsectPnts and call the solver.

@@ -1056,7 +1056,11 @@ mod tests {
         let p0 = c.curve_3d.evaluate_point(&k, ivl.min()).unwrap();
         let p1 = c.curve_3d.evaluate_point(&k, ivl.max()).unwrap();
         assert!(p0.distance(start) <= 1.0e-10, "{p0:?}");
-        assert!(p1.distance(end) <= 1.0e-10, "{p1:?}");
+        // `onto_plane_nearest` projects the boundary drop `(0, 1, 0)` orthogonally onto
+        // `x + 1e-5 y = 0`, shifting `v` by `-1e-10 / (1 + 1e-10)` (which rounds slightly
+        // above `1e-10` in f64 at `y = 1`).
+        assert!(p1.distance(end) <= 1.0e-9, "{p1:?}");
+        assert!((p1.x + 1.0e-5 * p1.y).abs() <= 1.0e-12, "{p1:?}");
         for i in 0..=20 {
             let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20.0;
             let p = c.curve_3d.evaluate_point(&k, t).unwrap();
