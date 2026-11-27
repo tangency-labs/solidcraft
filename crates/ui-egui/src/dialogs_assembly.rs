@@ -256,7 +256,7 @@ impl Searched {
     }
 }
 
-/// As-built: a component picked whole, by its Browser row or selected when the dialog opened.
+/// As-built, Rigid Group: a component picked whole, by its Browser row or selected when the dialog opened.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WholeComponent {
     /// The placement that was picked: the occurrence ids from the root.

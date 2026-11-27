@@ -2876,6 +2876,27 @@ fn rigid_group_takes_a_component_with_a_sub_component_as_one() {
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
     click_row(&mut h, other);
     assert_eq!(group(&h), want([inner, other]), "Outer's body taken out");
+
+    // Outer with no body of its own: its row alone is one component, and its row and Inner's,
+    // which hold the same body, are two, in the order clicked.
+    let (mut h, outer, _, other) = outer_inner_other_with(false);
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    assert_eq!(group(&h), select, "Outer with no body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([outer, other]), "Outer with no body, then Other");
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other_with(false);
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's one body (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "Outer with no body and Inner (Outer first {outer_first})");
+    }
 }
 
 /// Two top faces mate face to face: B ends up upside down on A, not inside it;
