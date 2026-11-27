@@ -831,6 +831,11 @@ fn the_update_chip_matches_the_link_chips_in_both_layouts() {
                 .filter_map(|name| crate::scenario::rect_of(name).map(|r| (name, r)))
                 .collect();
             assert!(chips.iter().any(|(n, _)| *n == "titlebar:update"), "{layout} {width}: Update is on the bar");
+            if width == 1920.0 {
+                for name in ["titlebar:kofi", "titlebar:discord"] {
+                    assert!(chips.iter().any(|(n, _)| *n == name), "{layout} {width}: {name} is on the bar");
+                }
+            }
             for (name, r) in &chips {
                 assert_eq!(r.height(), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{layout} {width}: {name} {r:?}");
                 for (other, o) in &chips {
