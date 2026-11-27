@@ -282,9 +282,9 @@ fn a_zip64_archive_behind_a_decoy_record_is_refused() {
     assert!(open_archive(std::io::Cursor::new(decoy)).is_none(), "a decoy record hides a ZIP64 archive");
 }
 
-/// A well-formed container whose directory holds more than [`MAX_DIRECTORY`] bytes: its three
-/// parts and 130 empty entries named with 65,000 bytes each.
-pub(crate) fn large_directory() -> Vec<u8> {
+/// A well-formed container with its three parts and `extra` empty entries named with 65,000 bytes
+/// each: 129 or more make its directory larger than [`MAX_DIRECTORY`].
+pub(crate) fn large_directory(extra: usize) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let picture = png(240, 150);
     for (name, bytes) in [("container.json", CONTAINER), ("document.json", DOCUMENT), ("cache/thumbnail.png", picture.as_slice())] {
@@ -292,7 +292,7 @@ pub(crate) fn large_directory() -> Vec<u8> {
         writer.write_all(bytes).unwrap();
     }
     let long = "x".repeat(65_000);
-    for i in 0..130 {
+    for i in 0..extra {
         writer.start_file(format!("pad/{i:03}/{long}"), SimpleFileOptions::default()).unwrap();
     }
     writer.finish().unwrap().into_inner()
@@ -300,7 +300,7 @@ pub(crate) fn large_directory() -> Vec<u8> {
 
 #[test]
 fn a_directory_larger_than_its_record_says_is_refused() {
-    let bytes = large_directory();
+    let bytes = large_directory(130);
     let at = record(&bytes);
     let size = u32::from_le_bytes(bytes[at + 12..at + 16].try_into().unwrap());
     assert!(u64::from(size) > MAX_DIRECTORY);
@@ -309,4 +309,9 @@ fn a_directory_larger_than_its_record_says_is_refused() {
     let understated = with_field(&bytes, 12, &46_u32.to_le_bytes());
     assert_eq!(zip::ZipArchive::new(std::io::Cursor::new(understated.clone())).map(|a| a.len()).ok(), Some(133));
     assert!(open_archive(std::io::Cursor::new(understated)).is_none(), "the zip crate parsed more than 8 MiB of directory");
+    // A directory just within the bound still opens, read in full.
+    let largest = large_directory(128);
+    let at = record(&largest);
+    assert!(u64::from(u32::from_le_bytes(largest[at + 12..at + 16].try_into().unwrap())) > MAX_DIRECTORY - (64 << 10));
+    assert_eq!(open_archive(std::io::Cursor::new(largest)).map(|a| a.len()), Some(131));
 }

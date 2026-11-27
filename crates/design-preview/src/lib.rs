@@ -16,9 +16,11 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::cell::Cell;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::rc::Rc;
 
 use serde::Deserialize;
 
@@ -85,7 +87,7 @@ impl Picture {
 }
 
 /// The ZIP container at `path`, after its size and what [`open_archive`] checks.
-fn open(path: &Path) -> Option<zip::ZipArchive<File>> {
+fn open(path: &Path) -> Option<zip::ZipArchive<Budgeted<File>>> {
     let file = File::open(path).ok()?;
     let meta = file.metadata().ok()?;
     if !meta.is_file() || meta.len() > MAX_FILE {
@@ -96,19 +98,52 @@ fn open(path: &Path) -> Option<zip::ZipArchive<File>> {
 
 /// The ZIP container `source` holds, read from its start whatever its position, after its size,
 /// its end-of-directory record, its entry count and `container.json` are checked.
-fn open_archive<R: Read + Seek>(mut source: R) -> Option<zip::ZipArchive<R>> {
+fn open_archive<R: Read + Seek>(mut source: R) -> Option<zip::ZipArchive<Budgeted<R>>> {
     let len = source.seek(SeekFrom::End(0)).ok()?;
     if len > MAX_FILE {
         return None;
     }
     directory_fits(&mut source, len)?;
     source.seek(SeekFrom::Start(0)).ok()?;
-    let mut archive = zip::ZipArchive::new(source).ok()?;
+    // The zip crate reads as many headers as the record counts, wherever they end: the budget
+    // holds it to the directory's bound whatever the record claims, then the parts' own caps apply.
+    let left = Rc::new(Cell::new(OPEN_BUDGET));
+    let mut archive = zip::ZipArchive::new(Budgeted { inner: source, left: Rc::clone(&left) }).ok()?;
+    left.set(u64::MAX);
     if archive.len() > MAX_ENTRIES {
         return None;
     }
     let container: Container = serde_json::from_slice(&part(&mut archive, "container.json", MAX_CONTAINER_JSON)?).ok()?;
     CONTAINERS.contains(&container.format.as_str()).then_some(archive)
+}
+
+/// What the `zip` crate may read while it opens an archive: the directory's bound, plus its
+/// search for the end record (at most [`DIRECTORY_TAIL`]) with room to spare.
+const OPEN_BUDGET: u64 = MAX_DIRECTORY + (256 << 10);
+
+/// A source whose reads stop with an error once `left` bytes have been read; seeks are free.
+struct Budgeted<R> {
+    inner: R,
+    left: Rc<Cell<u64>>,
+}
+
+impl<R: Read> Read for Budgeted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.left.get();
+        if left == 0 && !buf.is_empty() {
+            return Err(io::Error::other("the archive's directory is larger than its bound"));
+        }
+        let want = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
+        let n = self.inner.read(buf.get_mut(..want).unwrap_or_default())?;
+        self.left.set(left.saturating_sub(n as u64));
+        Ok(n)
+    }
+}
+
+impl<R: Seek> Seek for Budgeted<R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
 }
 
 /// The end of a file that holds every end-of-central-directory record the `zip` crate may take
