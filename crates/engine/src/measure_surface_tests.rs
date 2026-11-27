@@ -380,3 +380,28 @@ fn model_faces_lists_a_sliced_spheres_faces_at_their_exact_areas() {
     let want = curved + std::f64::consts::PI * (2500.0 - 156.25) + std::f64::consts::PI * 2500.0;
     assert!((total - want).abs() <= want * 1e-6, "the faces add up to {want}: {r}");
 }
+
+/// #2666: extend a cylindrical strip around its circumference, rather than along its
+/// axis or into a tangent run-off. The extra 5 mm of arc subtends 0.5 rad at radius 10.
+#[test]
+fn natural_extension_around_a_cylinder_preserves_its_radius_and_height() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Arc"}));
+    let a = 10.0 / 2.0_f64.sqrt();
+    run(&mut s, "sketch.arc.three_point", json!({"start": [10, 0], "end": [0, 10], "through": [a, a]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Arc", "curves": ["a1"], "distance": 20, "body_name": "Strip"}));
+    run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [[0, 10, 10]], "distance": 5, "mode": "natural"}));
+    let r = run(&mut s, "inspect.measure", json!({}));
+    let b = &r["bodies"][0];
+    assert_eq!(r["body_count"], 1, "{r}");
+    assert_eq!(b["closed"], false, "{r}");
+    assert_eq!(b["face_types"]["cylinder"], 1, "{r}");
+    assert!(close(&b["area_mm2"], (10.0 * TAU / 4.0 + 5.0) * 20.0, 1e-5), "{r}");
+    assert!(close(&b["bbox"]["min"][0], -10.0 * 0.5_f64.sin(), 1e-6), "{r}");
+    assert!(close(&b["bbox"]["min"][2], 0.0, 1e-6), "{r}");
+    assert!(close(&b["bbox"]["max"][2], 20.0, 1e-6), "{r}");
+    let face = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Cylinder { radius, .. } if (radius - 10.0).abs() < 1e-6));
+    let r = measure(&mut s, vec![face]);
+    assert!(close(&r["items"][0]["radius"], 10.0, 1e-6), "{r}");
+}
