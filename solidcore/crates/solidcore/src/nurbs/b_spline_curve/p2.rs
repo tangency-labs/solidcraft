@@ -1872,9 +1872,11 @@ impl BSplineCurve {
                 if !ivl.contains_value(param, tol) {
                     match self.create_extended_curve(param, ContinuityType::CInfinity, true) {
                         Ok(Some(ext)) if ext.nurb.is_some() => self.nurb = ext.nurb,
-                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                            return Err(e)
-                        }
+                        Err(
+                            e @ (SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }),
+                        ) => return Err(e),
                         _ => {}
                     }
                 }

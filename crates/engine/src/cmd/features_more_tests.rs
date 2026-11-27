@@ -667,6 +667,62 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn projected_emboss_on_a_full_revolve_changes_only_the_sketch_side() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    // The flat top keeps the spline wall clear of the revolve axis. The mark is 6 by 4 mm.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points":[[20,0],[20,20],[10,30],[5,30]]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Dome"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,8],"p1":[3,12]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // At z = 10 the cubic has radius 19.08248 mm. Offsetting its meridian by 1 mm along
+    // the outward unit normal gives radius 20.10069 mm at the same height.
+    let points = [Vec3::new(0.0, -20.08, 10.0), Vec3::new(0.0, 19.5, 10.0), Vec3::new(0.0, -20.12, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Dome").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 3]);
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({"sketch":"Mark","depth":1,"face":[12.790737518975714,-14.613635681307521,7.741993784911808],"targets":"Dome"}),
+    );
+    assert_eq!(classes(&s), [PointClass::Inside, PointClass::Outside, PointClass::Outside]);
+    assert_eq!(s.model.state().body("Dome").unwrap().body.shell_count(), 1);
+}
+
+#[test]
+fn projected_emboss_keeps_a_tilted_profile_that_already_fit() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[10,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Cone"}));
+    let root = 17.0_f64.sqrt();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,-1.0/root,4.0/root]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,-11],"p1":[3,-8]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // The tilt takes the mark over the lower rim on the picked side, but it fully crosses
+    // the far wall. The whole slab separates the prism, so emboss already built both patches.
+    // Both witnesses are between the original radius 20 - z/3 and its 1 mm normal offset.
+    let points = [Vec3::new(0.0, -20.6, 0.4), Vec3::new(0.0, 17.0, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Cone").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 2]);
+    run(&mut s, "solid.emboss", json!({"sketch":"Mark","depth":1,"face":[0,-52.0/3.0,8],"targets":"Cone"}));
+    assert_eq!(classes(&s), [PointClass::Inside; 2]);
+    assert_eq!(s.model.state().body("Cone").unwrap().body.shell_count(), 1);
+}
+
+#[test]
 fn overlapping_text_glyphs_deboss_and_emboss() {
     // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
     // polynomial spline edges across sequential profile booleans. Both with and without an explicit
@@ -3143,19 +3199,19 @@ fn a_square_ended_coil_refuses_turns_that_overlap() {
     run(&mut s, "solid.coil", coil(2.002));
 }
 
-fn clockwise_coil_bbox(clockwise: bool) -> Value {
+fn clockwise_coil_bbox(clockwise: bool, reversed: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 0.25, "pitch": 8, "clockwise": clockwise, "reversed": reversed}));
     measure(&mut s)["bodies"][0]["bbox"].clone()
 }
 
 #[test]
 fn a_sketch_coil_clockwise_is_the_mirror_image() {
-    let right = clockwise_coil_bbox(false);
-    let left = clockwise_coil_bbox(true);
+    let right = clockwise_coil_bbox(false, false);
+    let left = clockwise_coil_bbox(true, false);
     let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
     assert!((at(&right, "min", 0) + at(&left, "max", 0)).abs() < 1e-6, "{right} {left}");
     assert!((at(&right, "max", 0) + at(&left, "min", 0)).abs() < 1e-6, "{right} {left}");
@@ -3163,6 +3219,158 @@ fn a_sketch_coil_clockwise_is_the_mirror_image() {
         assert!((at(&right, "min", i) - at(&left, "min", i)).abs() < 1e-6, "{right} {left}");
         assert!((at(&right, "max", i) - at(&left, "max", i)).abs() < 1e-6, "{right} {left}");
     }
+}
+
+/// Reversed keeps the coil's hand: the reversed quarter turn from a profile on +Y is the forward
+/// one turned half a turn about Y (x and z negated, y kept), a rotation and not a mirror. A
+/// mirror in XY (z negated alone) would change the hand.
+#[test]
+fn coil_reverse_keeps_the_hand_and_grows_the_other_way() {
+    let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
+    for clockwise in [false, true] {
+        let forward = clockwise_coil_bbox(clockwise, false);
+        let backward = clockwise_coil_bbox(clockwise, true);
+        for i in [0, 2] {
+            assert!((at(&forward, "min", i) + at(&backward, "max", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+            assert!((at(&forward, "max", i) + at(&backward, "min", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+        }
+        for key in ["min", "max"] {
+            assert!((at(&forward, key, 1) - at(&backward, key, 1)).abs() < 1e-5, "{forward} {backward}");
+        }
+        assert!(at(&forward, "max", 0) - at(&forward, "min", 0) > 1.0, "the quarter turn spans x, so x tells the hand: {forward}");
+    }
+}
+
+#[test]
+fn coil_reverse_changes_propagation_independently_of_clockwise() {
+    for sketch in [false, true] {
+        for clockwise in [false, true] {
+            for reversed in [false, true] {
+                let mut s = Session::default();
+                let mut params = json!({"axis":"Z","revolutions":1,"pitch":8,"clockwise":clockwise,"reversed":reversed});
+                if sketch {
+                    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Section"}));
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    params["sketch"] = json!("Section");
+                } else {
+                    params["diameter"] = json!(20);
+                    params["section_size"] = json!(1);
+                }
+                run(&mut s, "solid.coil", params);
+                let bbox = measure(&mut s)["bodies"][0]["bbox"].clone();
+                let expected = if reversed { [-8.5, 0.5] } else { [-0.5, 8.5] };
+                for (key, want) in ["min", "max"].into_iter().zip(expected) {
+                    assert!(
+                        (bbox[key][2].as_f64().unwrap() - want).abs() < 1e-5,
+                        "sketch={sketch}, clockwise={clockwise}, reversed={reversed}: {bbox}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn coil_accepts_the_same_axis_reference_forms_as_revolve() {
+    for (axis, kind) in [
+        (json!({"type":"world","axis":"Z"}), "world"),
+        (json!({"origin":[30,0,0],"dir":[0,0,1]}), "line"),
+        (json!({"sketch":"Centerline","curve":"l1"}), "sketch_line"),
+        (json!({"face":[34,0,3]}), "model"),
+        (json!({"edge":[34,0,0]}), "model"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":6,"base":[30,0,0],"body_name":"Stock"}));
+        run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Centerline"}));
+        run(&mut s, "sketch.line", json!({"points":[[30,0],[30,10]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.coil", json!({"axis":axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"name":"Spring"}));
+        let saved = serde_json::to_value(&s.doc.find_feature("Spring").unwrap().kind).unwrap();
+        assert_eq!(saved["axis_ref"]["type"], kind);
+    }
+}
+
+/// Two moved components: A's box is placed where B's box is drawn, so B's unplaced edge passes
+/// through the world point picked on A's placed edge. The Coil names its pick in the world, where
+/// it finds it, so it winds about A's edge, not B's placed edge far away.
+#[test]
+fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":name}));
+        if base != 0 {
+            run(&mut s, "solid.move", json!({"bodies":[name],"translate":[base,0,0]}));
+        }
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[shift,0,0]}));
+    }
+    let bbox = |s: &mut Session, name: &str| {
+        let m = measure(s);
+        let body = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{name}: {m}")).clone();
+        let read = |key: &str, i: usize| body["bbox"][key][i].as_f64().unwrap();
+        ([read("min", 0), read("min", 1)], [read("max", 0), read("max", 1)])
+    };
+    let (a_min, _) = bbox(&mut s, "A");
+    let (b_min, _) = bbox(&mut s, "B");
+    // B's unplaced box is where A's placed box is: the pick is on both, B's placed box is 100 away.
+    assert!((b_min[0] - a_min[0] - 100.0).abs() < 1e-6, "{a_min:?} {b_min:?}");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[a_min[0], a_min[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Winding"}),
+    );
+    let (min, max) = bbox(&mut s, "Winding");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - a_min[0]).abs() < 0.5 && (centre[1] - a_min[1]).abs() < 0.5, "the Coil winds about A's edge: {centre:?}, {a_min:?}");
+
+    // A second placement of A has the same edge names: the pick on it finds that placement's edge.
+    let a = s.doc.find_component("A").unwrap();
+    let copy = run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
+    let second = [a_min[0] + 30.0, a_min[1]];
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[second[0], second[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Second"}),
+    );
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0]).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil winds about A's second placement: {centre:?}");
+
+    // Moved off the picked point, the second placement keeps its Coil: the pick names its placement.
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[12,0,0]}));
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0] - 12.0).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil follows the moved placement: {centre:?}");
+}
+
+#[test]
+fn a_coil_follows_its_named_axis_after_redefinition_and_save() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    let axis = |x| json!({"a":{"point":[x,0,0]},"b":{"point":[x,0,10]},"name":"Spin"});
+    run(&mut s, "construct.axis.two_points", axis(30));
+    run(&mut s, "solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true,"name":"Spring"}));
+    let bounds = |s: &mut Session| measure(s)["bodies"][0]["bbox"].clone();
+    let before = bounds(&mut s);
+    run(&mut s, "timeline.redefine", json!({"feature":"Spin","command":"construct.axis.two_points","params":axis(40)}));
+    let after = bounds(&mut s);
+    for key in ["min", "max"] {
+        assert!((after[key][0].as_f64().unwrap() - before[key][0].as_f64().unwrap() - 10.0).abs() < 1e-5);
+    }
+    run(&mut s, "timeline.rename", json!({"feature":"Spin","name":"RenamedSpin"}));
+    let value = serde_json::to_value(&s.doc).unwrap();
+    let loaded: solidcraft_doc::Document = serde_json::from_value(value).unwrap();
+    match &loaded.find_feature("Spring").unwrap().kind {
+        FeatureKind::Coil { axis_ref, reversed, .. } => {
+            assert!(matches!(axis_ref, Some(solidcraft_doc::AxisRef::Construction { name }) if name.as_ref() == "RenamedSpin"));
+            assert!(*reversed);
+        }
+        other => panic!("expected coil: {other:?}"),
+    }
+    assert!(s.execute("solid.coil", &json!({"axis":"Missing","diameter":20,"section_size":1,"revolutions":1,"pitch":8})).is_err());
 }
 
 #[test]
@@ -4048,6 +4256,62 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// #19532: a dome on a box top adds two thirds of its base times its height, and it is kept when
+/// the design is saved and read back.
+#[test]
+fn a_dome_on_a_box_top_adds_two_thirds_of_its_base_times_its_height_and_survives_a_save() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5,"name":"Cap"}));
+    let want = 1000.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!((body_volume(&loaded, "Stock") - want).abs() < 1e-3, "{}", body_volume(&loaded, "Stock"));
+}
+
+/// #19532: the dome's face is the box top whatever the box's height is, so changing the height
+/// parameter rebuilds the dome on the new top.
+#[test]
+fn a_dome_follows_its_face_when_the_box_height_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"box_h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":"box_h","body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5}));
+    run(&mut s, "parameters.change", json!({"name":"box_h","expression":"20 mm"}));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let want = 10.0 * 10.0 * 20.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+}
+
+/// #19532: every refusal of a dome comes back as the command's error, and the design stays as it
+/// was.
+#[test]
+fn every_dome_refusal_is_a_command_error_and_changes_nothing() {
+    let box_cases = [
+        (json!({"face":[5,5,10],"height":0}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":-2}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":5,"shape":"spherical"}), "a spherical dome needs a circular face"),
+        (json!({"face":[5,5,10],"height":5,"reverse":true}), "not supported yet"),
+        (json!({"face":[5,5,10],"height":5,"shape":"cone"}), "unknown shape `cone`"),
+        (json!({"height":5}), "`face` must be a point"),
+    ];
+    for (params, message) in box_cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+        let e = s.execute("solid.dome", &params);
+        assert!(e.as_ref().is_err_and(|e| e.to_string().contains(message)), "{params}: {e:?}");
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{params}");
+    }
+    let mut ball = Session::default();
+    run(&mut ball, "solid.sphere", json!({"radius":5,"center":[0,0,0],"operation":"new","body_name":"Ball"}));
+    let e = ball.execute("solid.dome", &json!({"face":[0,0,5],"height":2}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("the face is not planar")), "{e:?}");
+    assert!(ball.model.results.iter().all(|f| f.error.is_none()), "{:?}", ball.model.results);
 }
 
 /// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the

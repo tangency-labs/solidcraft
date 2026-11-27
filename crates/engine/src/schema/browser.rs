@@ -1017,14 +1017,25 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
-/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+/// `browser.isolate`: no parameters isolates the selection; `clear: true` ends the Isolate in
+/// effect instead, as the viewport's status pill does (#8120).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserIsolateParams {
+    /// End the Isolate in effect, as `browser.unisolate` does.
+    #[serde(default)]
+    pub clear: Option<bool>,
+}
+
+/// `browser.toggle_planes`, `browser.toggle_reference` and `browser.unisolate` take no
+/// parameters: an empty object.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserToggleParams {}
 
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
-/// change; the camera is not. With `isolate`, everything else is hidden.
+/// change; the camera is not. With `isolate`, everything else is hidden; `unisolate` undoes that.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = visible_required)]
 pub struct BrowserVisibilityParams {
@@ -1065,6 +1076,11 @@ pub struct BrowserVisibilityParams {
     /// everything else, other placements as placements. Default: false.
     #[serde(default)]
     pub isolate: Option<bool>,
+    /// With `visible: true` and no target: put back what the Isolates since the last Unisolate
+    /// hid, leaving changes made since alone; with none in effect, show everything. Default:
+    /// false.
+    #[serde(default)]
+    pub unisolate: Option<bool>,
 }
 
 /// What the browser hides and shows, as the design saves it.
@@ -1423,6 +1439,30 @@ pub struct ViewDeleteParams {
 pub struct ViewDeleted {
     /// The name of the view that is gone.
     pub deleted: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Set the size a construction plane is drawn at. Display only: the plane itself does not
+/// change.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneSizeParams {
+    /// The construction plane, by name.
+    pub plane: String,
+    /// `[x0, y0, x1, y1]` in mm, in the plane's own x and y about its origin (x1 > x0, y1 > y0,
+    /// within 10 km), or null: back to a size that follows the zoom.
+    pub extent: Option<[f64; 4]>,
+}
+
+/// What `view.plane_size` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlaneSized {
+    /// The plane, by name.
+    pub plane: String,
+    /// Its drawn rectangle now; null: a square that follows the zoom.
+    pub extent: Option<[f64; 4]>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

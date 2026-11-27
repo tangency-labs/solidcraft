@@ -116,6 +116,7 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
                     offsets[0].abs()
                 }
                 solidcore_record::brep::blend::RadiusRecord::Law(_)
+                | solidcore_record::brep::blend::RadiusRecord::Edge
                 | solidcore_record::brep::blend::RadiusRecord::EqualSetback => continue,
             },
             solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
@@ -311,6 +312,132 @@ fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
     );
 }
 
+/// The area two discs of radii `big` and `r`, centres `d` apart, share.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
+    if d >= big + r {
+        return 0.0;
+    }
+    if d <= (big - r).abs() {
+        return PI * big.min(r).powi(2);
+    }
+    let a = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+    let b = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+    let c = 0.5 * ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt();
+    a + b - c
+}
+
+/// A frustum about +Z, r 100 at z = 0 to r 100 - 200 tan 18° at z = 200 (its side 18° off the
+/// axis), with a hole of r 5 from z = 150 up through the top, its axis 32 out at 85° from +X:
+/// it reaches r 37, past the rim's 35.02, so it breaks out through the side near the top. The
+/// hole's wall is one periodic face whose seam, at +X from its axis, is 85° round from the
+/// hole's outermost line. Shelled 2 in, open at the bottom.
+///
+/// The edge where the side meets the hole's wall is a U from the top down to z ~ 194 and back.
+/// Its offset, where the side's offset meets the wall's (r 7), runs from the top's offset
+/// (z = 198) at 83° either way round the hole from its outermost line, down to z ~ 181; on the
+/// extended surfaces it goes on up past the top's offset and crosses the wall's seam at 85°,
+/// z ~ 198.7. The seam cuts the intersection there into the whole U and a short piece beyond the
+/// seam, above the top's offset, whose middle lies nearer the edge's middle than the U's. No
+/// neighbour's offset cuts that piece: its ends are the edge's vertices dropped onto it. Taken
+/// for the edge, it left the loops of the side's and the wall's offsets open (`LoopGapUncertified`).
+///
+/// Every edge but the open bottom's moves with its faces, so the cavity is bounded by the
+/// faces' offsets alone: inside the side's offset, r 100 - z tan 18° - 2 / cos 18°, from the
+/// bottom up to z = 198, less, from z = 148, the r 7 disc 32 off the axis. The shell takes
+/// away the integral over z of that section's area.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
+fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form() {
+    crate::test_corpus::rig_fixes();
+    let t18 = 18.0_f64.to_radians().tan();
+    let top = 100.0 - 200.0 * t18;
+    let (c, s) = (85.0_f64.to_radians().cos(), 85.0_f64.to_radians().sin());
+    let cone = crate::make_cone([0.0; 3], 100.0, top, 200.0).unwrap();
+    let hole = make_cylinder([32.0 * c, 32.0 * s, 150.0], 5.0, 51.0).unwrap();
+    let body = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -2.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let inside = |z: f64| 100.0 - z * t18 - 2.0 / 18.0_f64.to_radians().cos();
+    // the r 7 disc leaves the side's offset where 32 + 7 = inside(z), z ~ 181.3: split there
+    let out = (100.0 - 2.0 / 18.0_f64.to_radians().cos() - 39.0) / t18;
+    let section = |z: f64| PI * inside(z).powi(2);
+    let notch = |z: f64| discs_overlap(inside(z), 7.0, 32.0);
+    let cavity =
+        integral(0.0, 198.0, section) - integral(148.0, out, notch) - integral(out, 198.0, notch);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
+/// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
+/// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
+/// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
+/// between the wall's line and the side's circle (r 7 there): 0.2 across at x = 0, its two
+/// vertices the only places the side, the wall and the ceiling meet. The side meets the wall
+/// along a hyperbola.
+fn slotted_frustum() -> Body {
+    let frustum = crate::make_cone([0.0; 3], 10.0, 4.0, 20.0).unwrap();
+    let slot = make_box([-20.0, 6.8, -1.0], [40.0, 20.0, 11.0]).unwrap();
+    crate::boolean::boolean(frustum, slot, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-1's notch ceiling where it breaks out through the torus, on a frustum: the slotted
+/// frustum shelled closed. The void is the core: the frustum with its side moved in t along
+/// its normal (its radius at z is 10 - 0.3 z - t sqrt(1.09)) between z = t and 20 - t, less the
+/// slot grown by t (its wall at y = 6.8 - t, its ceiling at 10 + t). At t = 1 the side and the
+/// wall no longer meet on the ceiling's plane, z = 11 (the side is there at 10 - 3.3 - 1.044 =
+/// 5.656, the wall at 5.8): the lens's offset is empty (the offset eliminates it), and the
+/// wall meets the side directly up to z* = (10 - 1.044 - 5.8) / 0.3 = 10.52, where they part.
+/// At t = 0.1 the lens's offset is still there (the wall at 6.7 against the side at 6.866 on
+/// z = 10.1). The shell is the body less the core, each a frustum less its slot: at each
+/// height z the slot takes the disc's segment beyond the wall (`disc_segment`), up to the
+/// ceiling or to where the side and the wall part, whichever comes first.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_lens_whose_offset_is_empty_leaves_the_shell() {
+    crate::test_corpus::rig_fixes();
+    // the frustum moved in by `t` less its slot moved out by `t`
+    let core = |t: f64| {
+        let radius = |z: f64| 10.0 - 0.3 * z - t * 1.09_f64.sqrt();
+        let (bottom, top) = (radius(t), radius(20.0 - t));
+        let wall = 6.8 - t;
+        let parts = (10.0 - t * 1.09_f64.sqrt() - wall) / 0.3;
+        PI / 3.0 * (20.0 - 2.0 * t) * (bottom * bottom + bottom * top + top * top)
+            - integral(t, (10.0 + t).min(parts), |z| disc_segment(radius(z), wall))
+    };
+    let body_volume = core(0.0);
+    for t in [1.0, 0.1] {
+        let body = slotted_frustum();
+        assert!(
+            rel(volume(&body), body_volume) < 1e-9,
+            "body {}",
+            volume(&body)
+        );
+        shell(&body, &order(&body), &[], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let want = body_volume - core(t);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, want) < 1e-9,
+            "t {t}: shell volume {actual:.17}, want {want:.17}"
+        );
+    }
+}
+
 /// The same incidence graph before the seam disappears: the outer rim is
 /// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
 #[test]
@@ -445,6 +572,30 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
         .unwrap();
     shell(&b, &order(&b), &[], -1.2).unwrap();
     let want = ABC + 12.0 - 27.6 * 17.6 * 7.6;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// The stress corpus's cut spheres and tori with a thin feature (S6226, S2226): a pin r 2,
+/// 10 high, on the cut ball's cap, shelled closed with a 3 wall. The cap is the cutting box's
+/// bottom, so its surface normal points into the ball, and only its other face use faces out
+/// of the material. Read from the side along the normal, every edge of the cap read the
+/// wrong way round: the pin's foot convex and the rim concave. So the walks from the ball and
+/// from the cap both took the pin in, no feature was found, and the pin's collapse refused the
+/// shell.
+///
+/// The hollow is the cut ball's: the ball r 47 below z = 27, V = pi (R + h)² (2R - h) / 3 for
+/// R 50, h 30 less R 47, h 27, with the pin, pi 2² 10, solid on it.
+#[test]
+fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
+    all_fixes();
+    let pin = make_cylinder([0.0, 0.0, 30.0], 2.0, 10.0).unwrap();
+    let b = crate::boolean::boolean(cut_ball(), pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -3.0).unwrap();
+    let want = PI * 6400.0 * 70.0 / 3.0 + PI * 4.0 * 10.0 - PI * 5476.0 * 67.0 / 3.0;
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);

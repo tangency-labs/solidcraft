@@ -42,7 +42,11 @@ quantity and press Enter: four holes, evenly round the tube.
 
 **6. Change it.** Double-click **Extrude1** on the timeline: the model rolls back to it and its
 dialog opens. Type 20 and press Enter. Everything after it (shell, fillet, hole and pattern)
-rebuilds on the taller block.
+rebuilds on the taller block. The Extrude window's **Name** row (the first one) shows what the
+feature is called, the name it will get while you make it: type another to name it yourself, or
+change it when editing (the rename is a step of its own to undo; a name another feature has is
+refused). Left blank it keeps the default name. Right-click › Rename (F2) on the timeline does
+the same for any feature.
 
 <video src="../media/features/edit.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Double-clicking Extrude1 on the timeline, changing its distance to 20: the shell, fillet, hole and pattern rebuild"></video>
 
@@ -61,6 +65,13 @@ what they measure: an edge's length (Ø and R for a round one), a face's area an
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
 (I) does more.
 
+**Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
+bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
+number (1, 2 or 5 times a power of ten) in the design's units, and it changes as you zoom. In an
+orthographic view the scale is the same everywhere. In a perspective view, nearer things look
+larger, so the bar gives the scale at the centre of the view, and its label says so. The control
+channel and assistants turn it on with the `view.scale_bar` command, `{"enabled": true}`.
+
 Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
 operation from what their material does, until you pick one: **Join** when it makes one body with
 a body it touches (a block against a wall, a ring round a hole, a boss meeting only part of a
@@ -78,6 +89,18 @@ A Join you pick whose material touches none of its target bodies still joins it,
 one as a separate piece, and the feature's warning says so: "`Body1` is now in 2 separate
 pieces". Combine joins the bodies it is given without that warning. Changing the default does not
 alter operations already saved in a design.
+
+**A clearance round a Combine cut.** Parts that fit into each other, such as a pin in a hole
+or a slider in a slot, need a small gap. With the operation Cut, Combine's **Offset** grows each
+tool by that much before it cuts; the tool bodies themselves do not change. A negative offset
+shrinks the tools instead, for a press fit. **Faces** chooses All (every face of every tool moves)
+or Selected (only the faces picked under **Faces to Offset** move; a tool with none of them cuts
+as it is). **Round Edges** rounds each edge between two moved faces; **Round Radius** sets the
+radius, by default the offset itself, so the gap is the same all round.
+
+```json
+{"command": "solid.combine", "params": {"target": "Block", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "offset": "gap", "offset_edges": "round"}}
+```
 
 **A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
 an origin or construction plane while **Profiles** is still empty) opens a sketch while the
@@ -344,6 +367,13 @@ Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds 
 plane ids, `folder: false` and `folder: true` hide and show the Analysis folder, and `clear: true`
 removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
+
+A design can keep several named sections and switch between them. In the Section Analysis
+dialog, **Saved sections** lists them: click one to show it in place of the section on show,
+type a name and press **Save as…** to keep the section on show, **Rename** or **×** to rename or
+delete one. They are saved with the design. Scripts use `inspect.section.save` (`name`),
+`inspect.section.show` and `inspect.section.delete` (each by `section`),
+`inspect.section.rename` (`section` and the new `name`) and `inspect.section.list`.
 
 ## Comparing two bodies
 

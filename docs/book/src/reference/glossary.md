@@ -181,6 +181,32 @@ Variation of refractive index with wavelength that can separate colours along re
 
 - **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
+### centre line
+
+A patterned line that shows a feature's centre or axis in a drawing view.
+
+The initial command joins two named model points and extends beyond each end by a distance in
+paper millimetres. This selection and extent interface is proposed in issue #9419.
+
+- **In SolidCraft:** `drawing.center_line.add`, `drawing.center_line.inspect`, and the drawing's
+  `centre_lines` records.
+- **Don't use:** construction line (for this drawing annotation).
+- **Elsewhere:** centerline, centreline.
+- **For translators:** not a sketch construction entity and not an axis in the model.
+
+### centre mark
+
+Two crossing patterned lines that show the centre of a circular feature in a drawing view.
+
+A manual mark follows a named model edge. Its extension beyond the circle is measured in paper
+millimetres, so changing the view scale does not change that extension.
+
+- **In SolidCraft:** `drawing.center_mark.add`, `drawing.center_mark.inspect`, and the drawing's
+  `centre_marks` records.
+- **Don't use:** crosshair (for this saved drawing annotation).
+- **Elsewhere:** center mark, centermark.
+- **For translators:** a mark printed on the drawing, not the mouse pointer.
+
 ### component
 
 A named container of bodies, sketches, construction geometry and other components that can be
@@ -471,6 +497,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### motion model
+
+What a 3D mouse's cap moves: the model, or a camera that looks at the point the view turns about.
+
+With **Object** the model goes the way the cap is pushed, tilted or twisted. With **Target camera**
+the camera goes that way, so the model goes the other way along every axis.
+
+- **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
+  Preferences › Input › 3D mouse › Motion model.
+- **Don't use:** navigation mode (the mouse mappings), camera mode.
+- **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
+- **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
 
 ### movable corridor
 
@@ -852,6 +891,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |

@@ -252,3 +252,65 @@ fn every_continuation_of_a_plane_is_the_same() {
     assert_eq!(record(Continuation::Tangent), natural);
     assert_eq!(record(Continuation::Curvature), natural);
 }
+
+/// The box of a one-plane-face record's vertices in its plane's parameters.
+fn plane_box(r: &Brep) -> [[f64; 2]; 2] {
+    let Surface::Plane {
+        origin,
+        u_axis,
+        v_axis,
+    } = r.faces[0].surface
+    else {
+        panic!("{:?}", r.faces[0].surface)
+    };
+    let mut uv = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for v in &r.vertices {
+        let d = [
+            v.point[0] - origin[0],
+            v.point[1] - origin[1],
+            v.point[2] - origin[2],
+        ];
+        for (i, a) in [u_axis, v_axis].into_iter().enumerate() {
+            // the plane's parameter along an axis of any length
+            let t = (a[0] * d[0] + a[1] * d[1] + a[2] * d[2])
+                / (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            uv[i] = [uv[i][0].min(t), uv[i][1].max(t)];
+        }
+    }
+    uv
+}
+
+/// A plane face that is its plane's whole box grows its plane, as any face grows its surface:
+/// the result is again one plane face that is its plane's whole box, 5 mm further on the picked
+/// side, the same for every continuation. (A trimmed plane face grows its trim, above.)
+#[test]
+fn a_plane_face_that_is_its_whole_box_grows_its_plane() {
+    // the flat skin's record, its plane's box made the face's
+    let (flat, _) = flat_skin();
+    let (mut record, _) = flat.to_record().unwrap();
+    record.faces[0].domain = plane_box(&record);
+    let (body, order) = Body::from_record(&record, true).unwrap();
+    let edge = edge_through(&body, &order, [9.0, 4.0, 0.0]);
+    let grown = |how| {
+        extend_sheet(&body, &order, edge, 5.0, how)
+            .unwrap()
+            .to_record()
+            .unwrap()
+            .0
+    };
+    let natural = grown(Continuation::Natural);
+    assert_eq!(natural.faces.len(), 1);
+    assert!(
+        matches!(natural.faces[0].surface, Surface::Plane { .. }),
+        "{:?}",
+        natural.faces[0].surface
+    );
+    let (got, want) = (natural.faces[0].domain, plane_box(&natural));
+    assert!(
+        (0..2).all(|i| (0..2).all(|j| (got[i][j] - want[i][j]).abs() < 1e-9)),
+        "the face's box {got:?} is not its plane's {want:?}"
+    );
+    assert!(near(bounds(&natural), [[0.0, 0.0, 0.0], [14.0, 8.0, 0.0]]));
+    assert_eq!(grown(Continuation::Tangent), natural);
+    assert_eq!(grown(Continuation::Curvature), natural);
+}

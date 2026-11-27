@@ -63,6 +63,7 @@
 
 mod bead;
 mod chart;
+mod contour;
 mod flat;
 mod fold;
 pub mod hermite;
@@ -79,6 +80,7 @@ pub use bead::{
     BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
     MIN_BEND_RISE,
 };
+pub use contour::{offset_contour, ContourRefusal};
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
 pub use layout::{crossings, curve_through, develop};

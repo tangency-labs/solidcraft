@@ -398,6 +398,43 @@ fn f2_on_several_selected_bodies_renames_them_all() {
     assert_eq!(names, ["Test", "Test (2)", "Test (3)"], "status {:?}", h.app.status);
 }
 
+/// #8120: Isolate on a body or component menu toggles to Unisolate and restores the rest.
+#[test]
+fn isolate_on_body_and_component_menus_toggles_unisolate() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    let kept = body(&app);
+    let t = Target::Body { name: kept.clone() };
+    // #3504: each entry shows its key.
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == "Ctrl+I"));
+    act(&mut app, &t, "Isolate");
+    assert!(!app.session.visibility.hidden_bodies.is_empty());
+    let after = context_menu::items(&app, &t);
+    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Exit Isolation");
+    // On what is already all that shows, Isolate would change nothing: Exit Isolation alone.
+    assert!(!after.iter().any(|i| i.label == "Isolate"), "only Exit Isolation on the isolated body");
+    let other = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).unwrap();
+    app.run("browser.visibility", json!({"items": [kept.clone(), other], "visible": true, "isolate": true})).unwrap();
+    let wider = context_menu::items(&app, &t);
+    assert!(
+        wider.iter().any(|i| i.label == "Isolate") && wider.iter().any(|i| i.label == "Exit Isolation"),
+        "inside a wider isolation Isolate narrows it"
+    );
+    act(&mut app, &t, "Exit Isolation");
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");
+
+    let made = app.run("component.from_bodies", json!({"bodies": [kept.clone()]})).unwrap();
+    let component = made["components"][0]["component"].as_u64().unwrap();
+    let other =
+        app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).expect("root still has the second body");
+    let ct = Target::Component { id: component };
+    act(&mut app, &ct, "Isolate");
+    assert!(app.session.visibility.hidden_bodies.contains(&other));
+    assert!(context_menu::items(&app, &ct).iter().any(|i| i.label == "Exit Isolation"));
+    act(&mut app, &ct, "Exit Isolation");
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+}
+
 #[test]
 fn properties_measure_the_body() {
     let mut app = sample_app();
@@ -1394,7 +1431,7 @@ fn menus_follow_fusion_order() {
     assert!(["XY", "XZ", "YZ"].iter().all(|p| app.session.visibility.hidden_origin.iter().any(|h| h == p)));
     app.run("select.clear", json!({})).unwrap();
     let empty = context_menu::items(&app, &Target::Viewport);
-    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
+    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Exit Isolation", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
 }
@@ -1851,6 +1888,37 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     assert!(h.app.session.model.state().body("Base").is_some());
 }
 
+/// A command's menu opens Preferences › Keyboard Shortcuts on that command, waiting for the new key.
+#[test]
+fn a_commands_menu_changes_its_keyboard_shortcut() {
+    let mut app = sample_app();
+    app.ui.tab = "MODEL".into();
+    let items = crate::toolbar_custom::command_items(&app, "solid.extrude");
+    assert!(items.iter().any(|i| i.label == "Change Keyboard Shortcut…"), "{:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
+    act(&mut app, &Target::ToolbarCommand { id: "solid.extrude".into() }, "Change Keyboard Shortcut…");
+    assert!(app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS, "the Keyboard Shortcuts page is open");
+    assert!(crate::keymap::capturing(&app), "waiting for the new key");
+}
+
+/// A drop-down row's ⋯ opens the command's menu, and the drop-down stays open under it.
+#[test]
+fn a_dropdown_rows_more_button_opens_its_menu_over_the_open_dropdown() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.tab = "MODEL".into();
+    h.frames(4);
+    h.step(&serde_json::json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+    h.frames(3);
+    h.step(&serde_json::json!({"move":{"handle":"dropdown:solid.extrude"}})).unwrap();
+    h.frames(2);
+    h.step(&serde_json::json!({"click":{"handle":"dropdown_more:solid.extrude"}})).expect("a ⋯ on the Extrude row");
+    h.frames(2);
+    assert!(h.app.viewport.context_menu.is_some(), "the row's menu is open");
+    assert_eq!(h.app.menu.target, Target::ToolbarCommand { id: "solid.extrude".into() });
+    let open = h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
+    assert!(open.is_some(), "the drop-down stays open under the menu");
+}
+
 #[test]
 fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     use crate::toolbar_custom as tc;
@@ -1947,7 +2015,9 @@ fn construction_plane_row_opens_its_menu() {
     assert_eq!(menu["open"], true, "{menu}");
     assert_eq!(menu["target"], json!({"type": "plane", "id": id}), "{menu}");
     let labels: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).filter(|l| !l.is_empty()).collect();
-    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Zoom to Selection", "Find in Timeline"]);
+    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Reset Size", "Delete", "Rename", "Show/Hide", "Zoom to Selection", "Find in Timeline"]);
+    let reset = menu["items"].as_array().unwrap().iter().find(|i| i["label"] == "Reset Size").unwrap();
+    assert_eq!(reset["enabled"], false, "a plane never resized has no size to reset: {reset}");
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "Cut".into() }], "the right-click picks the plane");
     context_menu::close(&mut h.app);
 
@@ -3035,6 +3105,75 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     }
     h.frames(2);
     assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
+}
+
+#[test]
+fn control_polygon_menu_makes_the_spline_sides_pickable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let spline =
+        h.app.run("sketch.spline.control_point", json!({"points":[[0,0],[0,60],[80,60],[80,0]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: spline.clone(), sketch: None }];
+    let item = context_menu::items(&h.app, &Target::Viewport)
+        .into_iter()
+        .find(|item| item.id == "sketch.spline.control_polygon")
+        .expect("the spline offers Add Control Polygon");
+    context_menu::run_item(&mut h.app, &item, pos2(400.0, 300.0));
+    let st = h.app.session.model.state();
+    let side = st
+        .sketch(sketch)
+        .unwrap()
+        .sketch
+        .curves
+        .iter()
+        .filter(|curve| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str()))
+        .nth(1)
+        .unwrap()
+        .id
+        .clone();
+    h.app.session.selection.clear();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.step(&json!({"click":{"sketch":[25,60]}})).unwrap();
+    assert!(
+        h.app.session.selection.iter().any(|item| matches!(item, solidcraft_engine::Sel::SketchCurve { id, .. } if id == &side)),
+        "{:?}",
+        h.app.session.selection
+    );
+}
+
+#[test]
+fn drawn_control_polygon_uses_the_palette_checkbox() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"snap":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.spline.control_point"})).unwrap();
+    for point in [[0, 0], [0, 30], [40, 30], [40, 0]] {
+        h.step(&json!({"click":{"sketch":point}})).unwrap();
+    }
+    h.step(&json!({"click":{"sketch":[40,0]},"button":"right"})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    let check = |h: &crate::scenario::Harness, shown: bool| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let guides: Vec<_> = (0..sk.curves.len()).filter(|&index| sk.is_control_polygon_segment(index)).collect();
+        assert_eq!(guides.len(), 3);
+        assert_eq!(!sk.view.hide_control_polygons, shown);
+        assert!(guides.iter().all(|&index| solidcraft_engine::view::sketch_curve_visible(sk, index) == shown));
+    };
+    check(&h, true);
+    h.step(&json!({"click":{"handle":"sketch_palette:options_fold"}})).unwrap();
+    h.settle();
+    for shown in [false, true] {
+        h.step(&json!({"click":{"handle":"sketch_palette:toggle:show_control_polygons"}})).unwrap();
+        h.settle();
+        check(&h, shown);
+    }
 }
 
 /// A right-click menu taller than the window (a spline with stored tangent handles in a short

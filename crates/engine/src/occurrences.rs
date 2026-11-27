@@ -386,7 +386,10 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() {
+        // The bodies Unisolate will hide again follow renames too (#8120).
+        let before_isolate = self.visibility.before_isolate.as_ref().map_or(&[][..], |before| before.hidden_bodies.as_slice());
+        let shown_before = self.visibility.before_isolate.as_ref().map(|before| &before.shown_bodies);
+        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && shown_before.is_none_or(|s| s.is_empty()) && selected.is_empty() {
             return;
         }
         if rename.is_none() {
@@ -404,7 +407,8 @@ impl Session {
                 body.name = new.to_string();
             }
         }
-        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        let hidden: std::collections::BTreeSet<_> =
+            self.visibility.hidden_bodies.iter().chain(before_isolate).chain(shown_before.into_iter().flatten()).map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
@@ -421,7 +425,7 @@ impl Session {
                 }
             }
         }
-        self.visibility.hidden_bodies.retain_mut(|hidden| {
+        let remap = |hidden: &mut String| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
                 true
@@ -430,7 +434,14 @@ impl Session {
                 // body's hide follows into that name; a stale entry must not hide it.
                 !destinations.contains(hidden)
             }
-        });
+        };
+        self.visibility.hidden_bodies.retain_mut(remap);
+        if let Some(before) = self.visibility.before_isolate.as_mut() {
+            before.hidden_bodies.retain_mut(remap);
+            let mut shown: Vec<String> = std::mem::take(&mut before.shown_bodies).into_iter().collect();
+            shown.retain_mut(remap);
+            before.shown_bodies = shown.into_iter().collect();
+        }
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,
@@ -961,7 +972,7 @@ impl Session {
 
     /// The placement a sketch or construction feature is drawn at: the active one while its
     /// component is being edited, else the component's first (empty for the design's own).
-    fn feature_path(&self, component: u64) -> Vec<u64> {
+    pub fn feature_path(&self, component: u64) -> Vec<u64> {
         match &self.active_occurrence_path {
             _ if component == 0 => Vec::new(),
             Some(p) if self.active_component == component => p.clone(),
@@ -985,7 +996,17 @@ impl Session {
             return false;
         }
         let component = self.doc.feature(id).map_or(0, |f| f.component);
-        self.item_folder_hidden(&Self::folder_scope(&self.feature_path(component)), component, folder, &id.to_string())
+        self.feature_folder_hidden_at(id, &self.feature_path(component), folder)
+    }
+
+    /// [`Self::feature_folder_hidden`] at the placement `path` of the feature's component: a
+    /// part placed more than once has a folder of its own under each copy.
+    pub fn feature_folder_hidden_at(&self, id: u64, path: &[u64], folder: &str) -> bool {
+        if self.visibility.hidden_folders.is_empty() {
+            return false;
+        }
+        let component = self.doc.feature(id).map_or(0, |f| f.component);
+        self.item_folder_hidden(&Self::folder_scope(path), component, folder, &id.to_string())
     }
 
     /// Is construction geometry or an origin item (by name) shown: not hidden itself, nor by

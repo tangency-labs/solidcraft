@@ -160,8 +160,12 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
         let label = app.tr("ui.3d_mouse_orbit");
         let help = app.tr("ui.3d_mouse_orbit_tip");
-        let width = ui_kit::ContentWidth::label(ui, label) + Tokens::get().space_16 + Tokens::get().space_4;
+        let motion_label = app.tr("ui.3d_mouse_motion_model").to_owned();
+        let width = [label, motion_label.as_str()].into_iter().map(|l| ui_kit::ContentWidth::label(ui, l)).fold(0.0, f32::max)
+            + Tokens::get().space_16
+            + Tokens::get().space_4;
         ui_kit::settings_form(ui, width, |ui| {
+            motion(app, ui, &motion_label);
             ui_kit::settings_row_help(ui, label, help, |ui| {
                 crate::ui_kit::settings_search::note_choices(ui, &orbits.each_ref().map(String::as_str));
                 let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
@@ -193,6 +197,40 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
             setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
         });
+    });
+}
+
+/// The Motion model row: what the cap moves, the model (Object) or the camera (Target camera).
+fn motion(app: &mut SolveApp, ui: &mut egui::Ui, label: &str) {
+    use crate::prefs::SpaceMouseMotion;
+    let models = [app.tr("ui.3d_mouse_motion_model_object").to_owned(), app.tr("ui.3d_mouse_motion_model_target_camera").to_owned()];
+    let help = app.tr("ui.3d_mouse_motion_model_tip").to_owned();
+    ui_kit::settings_row_help(ui, label, &help, |ui| {
+        crate::ui_kit::settings_search::note_choices(ui, &models.each_ref().map(String::as_str));
+        let mut selected = SpaceMouseMotion::ALL.iter().position(|m| *m == app.preferences.space_mouse_motion).unwrap_or(0);
+        let response = ui.scope(|ui| {
+            ui_kit::segmented(
+                ui,
+                &mut selected,
+                &models.each_ref().map(String::as_str),
+                ui_kit::Segments {
+                    intrinsic: true,
+                    targets: &["prefs:3d_mouse_motion_model_object", "prefs:3d_mouse_motion_model_target_camera"],
+                    ..Default::default()
+                },
+            )
+        });
+        if response.inner {
+            app.preferences.space_mouse_motion = SpaceMouseMotion::ALL.get(selected).copied().unwrap_or_default();
+        }
+        if !crate::ui_kit::settings_search::texts_hit(ui, &[label]) {
+            for option in &models {
+                if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{label}:{option}")) {
+                    crate::ui_kit::settings_search::remember(ui, option, rect);
+                    crate::ui_kit::settings_search::follow(ui, option, rect);
+                }
+            }
+        }
     });
 }
 
@@ -295,22 +333,36 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "space_mouse_advanced", app.tr("Advanced"), |ui| {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-            // Only where the reader has seen the choice: Linux, with spacenavd and the device both there.
-            if let Some(present) = app.space_mouse.drivers.filter(|present| present.spacenavd || (present.direct && !present.denied)) {
+            // Only where the reader has seen the choice: Linux, with two of smed, spacenavd and the device there.
+            if let Some(present) = app.space_mouse.drivers.filter(|present| present.smed || present.spacenavd || (present.direct && !present.denied))
+            {
                 let [label, auto, direct, only_spacenavd, only_direct] =
                     ["driver", "driver_auto", "driver_direct", "driver_only_spacenavd", "driver_only_direct"]
                         .map(|key| app.tr(&format!("ui.3d_mouse_{key}")).to_owned());
                 let driver = &mut app.preferences.space_mouse_driver;
-                ui_kit::row(ui, &label, |ui| match (present.spacenavd, present.direct) {
-                    (true, true) => {
+                let there = |choice| match choice {
+                    SpaceMouseDriver::Automatic => true,
+                    SpaceMouseDriver::Smed => present.smed,
+                    SpaceMouseDriver::Spacenavd => present.spacenavd,
+                    SpaceMouseDriver::Direct => present.direct,
+                };
+                let readers = usize::from(present.smed) + usize::from(present.spacenavd) + usize::from(present.direct);
+                // A choice to make: two readers or more, or smed there while the saved choice is not
+                // (Direct or spacenavd saved, smed the only reader), so it can be switched to smed, or
+                // smed saved while it does not run, so it can be switched away from smed.
+                let choice = readers >= 2 || (present.smed && !there(*driver)) || (*driver == SpaceMouseDriver::Smed && !present.smed);
+                ui_kit::row(ui, &label, |ui| match (choice, present.smed, present.spacenavd) {
+                    (true, _, _) => {
                         let name = |driver| match driver {
                             SpaceMouseDriver::Automatic => auto.as_str(),
+                            SpaceMouseDriver::Smed => "smed",
                             SpaceMouseDriver::Spacenavd => "spacenavd",
                             SpaceMouseDriver::Direct => direct.as_str(),
                         };
                         ui_kit::settings_control_width(ui, Tokens::get().space_24 * 8.0 + Tokens::get().space_8, |ui| {
                             ui_kit::dropdown_menu(ui, "sc_space_mouse_driver", name(*driver), |ui| {
-                                for choice in SpaceMouseDriver::ALL {
+                                let current = *driver;
+                                for choice in SpaceMouseDriver::ALL.into_iter().filter(|&choice| there(choice) || current == choice) {
                                     if ui_kit::list_picker(ui, name(choice), name(choice), *driver == choice).clicked() {
                                         *driver = choice;
                                     }
@@ -318,10 +370,13 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
                             });
                         });
                     }
-                    (true, false) => {
+                    (_, true, _) => {
+                        ui_kit::text(ui, "smed", ui_kit::Text::Hint("space_mouse_driver"));
+                    }
+                    (_, false, true) => {
                         ui_kit::text(ui, &only_spacenavd, ui_kit::Text::Hint("space_mouse_driver"));
                     }
-                    (false, _) => {
+                    (_, false, false) => {
                         ui_kit::text(ui, &only_direct, ui_kit::Text::Hint("space_mouse_driver"));
                     }
                 });

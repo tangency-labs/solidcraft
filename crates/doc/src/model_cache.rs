@@ -251,7 +251,15 @@ impl Writer {
             return *i;
         }
         let names = crate::naming::names(b);
-        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified, i.synonyms])).collect();
+        // A Split Face piece's former name follows (only then, so other records read as before).
+        let info: Vec<Json> = names
+            .info
+            .iter()
+            .map(|i| match &i.former {
+                Some(former) => json!([i.aliases, i.bounds, i.verified, i.synonyms, former]),
+                None => json!([i.aliases, i.bounds, i.verified, i.synonyms]),
+            })
+            .collect();
         self.names.push(json!({"faces": *names.faces, "info": info}));
         self.names_index.insert(id, self.names.len() - 1);
         self.names.len() - 1
@@ -543,6 +551,11 @@ impl PendingChecks {
     }
 }
 
+/// A face's [`FaceInfo`] as the model cache keeps it: its aliases, bounds, whether exact, its
+/// synonyms and, for a Split Face piece, the name it had before (absent in records without one).
+#[derive(serde::Deserialize)]
+struct SavedFaceInfo(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>, #[serde(default)] Option<String>);
+
 impl SavedModel {
     /// The states the records hold, every record checked.
     fn states(&self) -> Result<Vec<Arc<ModelState>>> {
@@ -558,12 +571,14 @@ impl SavedModel {
         let mut names = Vec::new();
         for n in list("names")? {
             let faces: Vec<String> = serde_json::from_value(parse(n.get("faces"))?).map_err(|_| bad("saved model: names"))?;
-            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>)> =
-                serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
+            let info: Vec<SavedFaceInfo> = serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
             if info.len() != faces.len() {
                 return Err(bad("saved model: names"));
             }
-            let info = info.into_iter().map(|(aliases, bounds, verified, synonyms)| FaceInfo { aliases, synonyms, bounds, verified }).collect();
+            let info = info
+                .into_iter()
+                .map(|SavedFaceInfo(aliases, bounds, verified, synonyms, former)| FaceInfo { aliases, synonyms, bounds, verified, former })
+                .collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
         let mut sketches = Vec::new();
@@ -774,6 +789,8 @@ impl SavedModel {
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
+                // A world state's alone: a model's own state has none.
+                sketch_copies: BTreeMap::new(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
                 reserved_body_names: s
                     .get("reserved_body_names")
@@ -1250,7 +1267,7 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, 0);
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,
@@ -1263,27 +1280,19 @@ impl Model {
                 };
                 // And what it changed, by what it read, as an evaluation keeps it: the first edit
                 // after opening then evaluates only the features that read what the edit changed,
-                // as every later edit does, not every feature after the edit. An import's key also
-                // digests the features before it, so an import is left out (evaluated as before),
-                // as is a feature that names its pieces as later features pick them. So is one
-                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // as every later edit does, not every feature after the edit. Features that name
+                // their pieces as later features pick them are left out, as is any feature whose
+                // bodies were not stamped with this key (saved by a version that keyed them
                 // otherwise, or stamped by the whole model): `stamp` would work their names out
                 // afresh, with no lineage to work them from. It is evaluated again instead.
                 if let Some((k, read)) = &key.reads
-                    && !matches!(f.kind, FeatureKind::Import { .. })
                     && !f.shell_piece_order
                     && let Some(change) = r.state.change_from(&before, f, read)
                 {
                     // A change that holds whatever the bodies it did not read was stamped with the
                     // key without them; one saved before that key, with the other.
-                    let stamped = |k: &u64| {
-                        change.bodies.iter().all(|b| match b {
-                            Changed::Made(b) => b.key == made_body_key(*k, &b.name),
-                            Changed::Kept(_) => true,
-                        })
-                    };
-                    let relative = key.relative.filter(|_| change.relative.is_some());
-                    if let Some(k) = relative.into_iter().chain([*k]).find(stamped) {
+                    let relative = key.relative.filter(|_| change.relative().is_some());
+                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
                         let bytes = change.retained_bytes();
                         cache.changes.put(k, whole.with(change), bytes, r.ms);
                     }

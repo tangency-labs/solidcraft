@@ -517,6 +517,8 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
+        plane_extents,
         notes,
         visibility,
         plugin_data,

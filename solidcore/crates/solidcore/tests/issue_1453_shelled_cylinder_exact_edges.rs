@@ -3,7 +3,8 @@
 //! tangent (G1R) B-spline extensions, so every new inner edge between two analytic
 //! faces is marched: the floor circle and the seam line are B-splines, the rim was split
 //! at an extra vertex while the marched edges' tolerances were doubled (#18162), and the
-//! volume is 3.5e-7 over the closed form.
+//! volume is 3.5e-7 over the closed form. The exact analytic mate (WR-495) is the only
+//! path: the floor and rim are the exact circles.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -95,7 +96,6 @@ struct Shelled {
 /// volume only when `want` is given: integrating a marched cone takes minutes).
 fn shelled(
     label: &str,
-    fixed: bool,
     part: impl Fn(&mut Kernel) -> Brep,
     open_z: f64,
     distance: f64,
@@ -103,7 +103,6 @@ fn shelled(
     want: Option<f64>,
 ) -> Shelled {
     let mut k = Kernel::default();
-    k.fixes.offset_analytic_mate_edges = fixed;
     let part = part(&mut k);
     let open = planar_faces_at(&k, &part, 2, open_z);
     assert_eq!(open.len(), 1, "one open face");
@@ -121,7 +120,7 @@ fn shelled(
         volume,
     };
     eprintln!(
-        "PROBE {label} fixed={fixed}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?} largest tolerance={:e}",
+        "PROBE {label}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?} largest tolerance={:e}",
         r.edges,
         r.vertices,
         r.largest_tolerance
@@ -137,49 +136,16 @@ fn on_cylinder(p: Point3) -> f64 {
     p.x.hypot(p.y) - 4.0
 }
 
-/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Without the fix
-/// (upstream) `MateEdges` marches the new inner edges; the seam stays marched after the
-/// shell's last step, `make_edges_on_analytics_exact` (WR-545). Upstream split the rim at an extra vertex
-/// (7 edges and 5 vertices) because each replaced edge's tolerance was doubled to 2e-5
-/// (#18009: the edge tolerance passed as the trim's distance, which `SetUVTrimCurve`
-/// doubles); with the raise at the trims' proved distance (#18162) the march closes the rim
-/// as one edge: 6 edges and 4 vertices, the minimal topology of the shelled cylinder, the
-/// same as the fixed path's, and no edge's tolerance is above upstream's 2e-5. Its volume
-/// read 3.5e-7 over until `brep_volume` closed the marched edges' gaps (#16735): that was
-/// the integrator's leak through them, and the marched solid's volume is pi 25 10 -
-/// pi 16 9 to 1e-9 too (1.1e-12 measured). With the fix: the floor and rim are exact
-/// circles, 6 edges and 4 vertices, and the volume is that closed form to 1e-9.
+/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Upstream marched
+/// the new inner edges and split the rim at an extra vertex (7 edges and 5 vertices). The
+/// floor and rim are exact circles, 6 edges and 4 vertices (the minimal topology of the
+/// shelled cylinder), no edge's tolerance is above upstream's 2e-5, and the volume is
+/// pi 25 10 - pi 16 9 to 1e-9.
 #[test]
 fn issue_1453_shelled_cylinder_edges_are_exact() {
     let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
-    let stock = shelled(
-        "issue_1453 cylinder",
-        false,
-        cylinder,
-        10.0,
-        -1.0,
-        on_cylinder,
-        Some(want),
-    );
-    assert_eq!(
-        (stock.edges, stock.vertices),
-        (6, 4),
-        "the marched rim one closed edge"
-    );
-    assert!(
-        stock.largest_tolerance <= 2e-5,
-        "no edge looser than upstream's doubled 2e-5: {}",
-        stock.largest_tolerance
-    );
-    assert!(stock.exact < stock.inner, "a marched inner edge");
-    let over = stock.volume.unwrap() - want;
-    assert!(
-        over.abs() <= 1e-9 * want,
-        "the marched solid's volume: {over}"
-    );
     let fixed = shelled(
         "issue_1453 cylinder",
-        true,
         cylinder,
         10.0,
         -1.0,
@@ -187,6 +153,11 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
         Some(want),
     );
     assert_eq!((fixed.edges, fixed.vertices), (6, 4), "no extra rim vertex");
+    assert!(
+        fixed.largest_tolerance <= 2e-5,
+        "no edge looser than upstream's doubled 2e-5: {}",
+        fixed.largest_tolerance
+    );
     assert_eq!(fixed.inner, 3, "floor circle, seam, rim circle");
     // The floor and rim circles are exact. The seam, where the inner wall meets
     // itself, has no exact intersection of two analytic copies (one cylinder twice),
@@ -210,43 +181,11 @@ fn on_frustum(p: Point3) -> f64 {
     p.x.hypot(p.y) - frustum_inner_radius(p.z)
 }
 
-/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. `MateEdges` marches its
-/// floor and rim without `offset_analytic_mate_edges`, and the shell's last step,
-/// `make_edges_on_analytics_exact` (WR-545, every shell since its flag was retired), makes
-/// each one the exact circle its plane meets the inner cone on (main pinned them marched,
-/// 0 exact, while that step was off by default). With the fix `MateEdges` makes them
-/// circles itself. Either way the seam, the inner cone against itself, stays marched.
+/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. Upstream marched its floor
+/// and rim; they are exact circles on the inner cone.
 #[test]
 fn issue_1453_shelled_cone_edges_are_exact() {
-    let stock = shelled(
-        "issue_1453 cone",
-        false,
-        frustum,
-        10.0,
-        -1.0,
-        on_frustum,
-        None,
-    );
-    assert_eq!((stock.edges, stock.vertices), (6, 4));
-    assert_eq!(stock.inner, 3, "floor circle, seam, rim circle");
-    assert_eq!(
-        stock.exact, 2,
-        "the shell's last step makes floor and rim circles"
-    );
-    assert!(
-        stock.worst <= 1e-12,
-        "inner edges on the inner cone: {}",
-        stock.worst
-    );
-    let fixed = shelled(
-        "issue_1453 cone",
-        true,
-        frustum,
-        10.0,
-        -1.0,
-        on_frustum,
-        None,
-    );
+    let fixed = shelled("issue_1453 cone", frustum, 10.0, -1.0, on_frustum, None);
     assert_eq!((fixed.edges, fixed.vertices), (6, 4));
     assert_eq!(fixed.exact, 2, "floor and rim are circles");
     assert!(
@@ -256,7 +195,7 @@ fn issue_1453_shelled_cone_edges_are_exact() {
     );
 }
 
-/// The fixed frustum shell's volume is the closed form to 1e-9 (2.2e-14 measured;
+/// The frustum shell's volume is the closed form to 1e-9 (2.2e-14 measured;
 /// upstream's is 1.9e-7 over). Ignored by default: integrating the cone faces takes
 /// about four minutes.
 #[test]
@@ -267,7 +206,6 @@ fn issue_1453_shelled_cone_volume_is_exact() {
     let want = outer - PI * 9.0 / 3.0 * (r1 * r1 + r1 * r2 + r2 * r2);
     let fixed = shelled(
         "issue_1453 cone",
-        true,
         frustum,
         10.0,
         -1.0,
@@ -279,9 +217,9 @@ fn issue_1453_shelled_cone_volume_is_exact() {
 }
 
 /// #1130's dome (a sphere r20 above z = 0) shelled 2 inward, its base open: the rim
-/// between the inner sphere and the base plane is the circle r18 with or without the
-/// fix (the port does not march it, plan/findings/offset.offset_geometry_creation--issue-1130-not-reproduced-in-port.md);
-/// the fix keeps it so.
+/// between the inner sphere and the base plane is the circle r18 (the port never marched
+/// it, plan/findings/offset.offset_geometry_creation--issue-1130-not-reproduced-in-port.md),
+/// and the exact analytic mate keeps it so.
 #[test]
 fn issue_1453_shelled_dome_rim_stays_exact() {
     let dome = |k: &mut Kernel| {
@@ -290,22 +228,23 @@ fn issue_1453_shelled_dome_rim_stays_exact() {
         boolean_difference(k, ball, below).unwrap()
     };
     let on = |p: Point3| (p.distance(Point3::new(0.0, 0.0, 0.0)) - 18.0).abs() + p.z.abs();
-    let stock = shelled("issue_1453 dome", false, dome, 0.0, -2.0, on, None);
-    let fixed = shelled("issue_1453 dome", true, dome, 0.0, -2.0, on, None);
+    let fixed = shelled("issue_1453 dome", dome, 0.0, -2.0, on, None);
     assert!(
         fixed.inner >= 1 && fixed.exact == fixed.inner,
         "the rim a circle"
     );
     assert!(fixed.worst <= 1e-12, "rim on r 18: {}", fixed.worst);
-    assert_eq!((fixed.edges, fixed.vertices), (stock.edges, stock.vertices));
 }
 
 /// WR-671 on the issue's cylinder with its B-rep tolerance set to 1e-6 under its edges'
 /// and vertices' own 1e-5 (golden `api_shell_cylinder_r5_top_open_tol_1e6`). The offset
 /// edges and vertices keep the cylinder's own tolerances rather than the B-rep's 1e-6,
 /// so the shell is the one the cylinder at its default B-rep tolerance gives
-/// ([`issue_1453_shelled_cylinder_edges_are_exact`]'s upstream shell): 7 edges and 5
-/// vertices, the rim split at an extra vertex. It checks clean at level 2, no edge or
+/// ([`issue_1453_shelled_cylinder_edges_are_exact`]): the floor and rim exact circles, 6
+/// edges and 4 vertices (upstream's marched rim was split at an extra vertex: 7 and 5).
+/// 6 and 4 is the minimal topology of the shelled cylinder: the outer rim and floor, the
+/// inner rim and floor, each a closed edge on one vertex, and the outer and inner seams
+/// (the same count `issue_1453_shelled_cylinder_edges_are_exact` holds). It checks clean at level 2, no edge or
 /// vertex is tighter than the cylinder's, and its volume is pi 25 10 - pi 16 9 to 1e-9.
 #[test]
 fn wr_671_shell_at_a_tighter_brep_tolerance_keeps_the_cylinders_tolerances() {
@@ -328,7 +267,7 @@ fn wr_671_shell_at_a_tighter_brep_tolerance_keeps_the_cylinders_tolerances() {
     assert_eq!(source, 1e-5, "the cylinder's own tolerances");
     let open = planar_faces_at(&k, &part, 2, 10.0);
     let mut b = shell(&mut k, part, -1.0, &open).unwrap();
-    assert_eq!((b.edge_list().len(), b.vertex_list().len()), (7, 5));
+    assert_eq!((b.edge_list().len(), b.vertex_list().len()), (6, 4));
     for e in p1::edges(&b, None).unwrap() {
         let t = b.edge(e).unwrap().tolerance;
         assert!(t >= source, "edge {e:?} tolerance {t}");

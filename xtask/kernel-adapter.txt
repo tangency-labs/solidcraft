@@ -1,0 +1,9 @@
+# SolidCraft crates other than the kernel adapter (crates/kernel, crates/smlib) that still depend on
+# a solidcore crate beyond solidcore-record, one a line: `<crate path> -> <solidcore crate>  <reason,
+# naming the step of docs/design/kernel-layer.md §12 that removes it>`. `cargo xtask layers`
+# (xtask/src/layers.rs, adapter_check) fails on a use this list does not name, and on a listed use
+# that is gone: remove its line in the same pull request. Never add a line: take solidcore's
+# services from solidcraft_kernel::services and its operations from solidcraft_kernel.
+crates/geom -> solidcore-tess  geom is below the kernel; its display plan and plan evaluator (solidcore_tess::eval) stay on tess with the shared display crates until the adapter split (§12, step 10)
+crates/viewport -> solidcore-tess  shared display crate, kept on solidcore-tess display types (§13, question 2)
+crates/viewport-gpu -> solidcore-tess  shared display crate, kept on solidcore-tess display types (§13, question 2)

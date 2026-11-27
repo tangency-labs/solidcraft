@@ -97,6 +97,8 @@ pub enum LineRole {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layout {
     pub lines: Vec<(LineRole, Vec<Vec2>)>,
+    /// Painted dimension lines after arrowhead trimming, in the same local coordinates.
+    pub painted_dimension_lines: Vec<Vec<Vec2>>,
     /// Each arrowhead's tip and the unit direction it points in.
     pub arrows: Vec<(Vec2, Vec2)>,
     /// Each set text's box: its cap height and measured width, as the arrows fit by, its corners
@@ -182,6 +184,8 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
     }
+    laid.painted_dimension_lines =
+        laid.lines.iter().zip(&lines).filter(|((role, _), _)| *role == LineRole::Dimension).map(|(_, line)| line.clone()).collect();
     let mut items: Vec<Item> = lines.iter().filter_map(|line| stroke(line, line_mm)).collect();
     for (tip, dir) in &arrows {
         items.extend(ARROW.place(*tip, *tip - *dir, line_mm).ok()?.0);

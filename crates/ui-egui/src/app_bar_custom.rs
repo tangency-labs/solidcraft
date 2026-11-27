@@ -371,7 +371,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         return (app.tr_command(c.id, c.label).into(), c.info(&app.session).icon.into());
     }
     let (key, icon) = match id {
-        "documents" => ("app_bar.documents", "document_browser"),
+        "documents" => ("parts_library.title", "document_browser"),
         "separator" => ("app_bar.separator", "help"),
         "space" => ("app_bar.space", "help"),
         "file" => ("ui.file", "new"),

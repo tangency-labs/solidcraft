@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use solidcore_record::{Region2, hatch};
+use solidcore_record::Region2;
+use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_doc::drawing::{Drawing, FillPaint, FillRegionStatus, PatternSnapshot, ResolvedSketchFill, SketchFill};
 use solidcraft_doc::ids;
 
@@ -246,8 +247,8 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         )
         .map_err(|error| bad(cmd, error.to_string()))?,
         contract::PatternImport::Builtin { pattern } => vec![match pattern {
-            contract::Builtin::Lines45 => hatch::Pattern::lines_45(),
-            contract::Builtin::CrossHatch => hatch::Pattern::cross_hatch(),
+            contract::Builtin::Lines45 => Pattern::lines_45(),
+            contract::Builtin::CrossHatch => Pattern::cross_hatch(),
         }],
     };
     let drawing = s.drawing(cmd)?.clone();
