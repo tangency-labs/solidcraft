@@ -1229,8 +1229,8 @@ fn planar_loft_section(doc: &Document, raw: &SolvedSketch, f: &Feature, sec: &Sh
     Ok((ss, chain))
 }
 
-/// A multi-section blend: every section as frames, the body ones read off the face their edge
-/// chain bounds, and the first and last leaving with `continuity` where the caller asks for it.
+/// A multi-section blend: every section as frames, a body's end held past G0 read off the face its
+/// edge chain bounds, and the first and last leaving with `continuity` where the caller asks for it.
 fn loft_blend(
     st: &mut ModelState,
     f: &Feature,
