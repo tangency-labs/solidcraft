@@ -5874,7 +5874,7 @@ struct MoveRigid<'a> {
     axis: Vec3,
     angle: f64,
     matrix: solidcraft_engine::doc::Mat,
-    bodies: &'a [String],
+    bodies: &'a [solidcraft_engine::doc::BodyName],
 }
 
 /// Evaluates the rigid transform of a non-copy `Move` feature whose axis is explicit (no

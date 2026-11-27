@@ -391,7 +391,7 @@ fn legacy_collapsed_key(app: &SolveApp) -> u64 {
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let mut count = 0usize;
-    for key in app.tree.collapsed.range::<str, _>("timeline_group:".."timeline_group;") {
+    for key in app.tree.collapsed.range::<str, _>((std::ops::Bound::Included("timeline_group:"), std::ops::Bound::Excluded("timeline_group;"))) {
         key.hash(&mut h);
         count += 1;
     }
