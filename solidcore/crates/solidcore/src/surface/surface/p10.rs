@@ -91,7 +91,8 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{Branch, GlobalSolve, SolverOperation};
 use crate::geom::pseudo_box::LineHit as PseudoHit;
 use crate::geom::solution_array::{
-    SideRecord, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
+    Contact, SideRecord, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
+    SortKey,
 };
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::{AuxDataType, NodeId, Tree};
@@ -1846,9 +1847,13 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 } else {
                     last_sol
                 };
-                // (not upstream) the point kept stands for both
+                // (not upstream) the point kept stands for both, and keeps a unique box only
+                // as a crossing (the box is the certified root's it carries)
                 kept.contact = last_sol.contact.merged(curr.contact);
                 kept.shared_contact = None;
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
+                }
                 solutions.set_at(last_slot, &kept)?;
             }
         } else {
@@ -2161,7 +2166,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::solution_array::{Contact, ObjectKind};
+    use crate::geom::solution_array::ObjectKind;
     use crate::math::Vec3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -2241,6 +2246,69 @@ mod tests {
         let first = sols.get_at(0).unwrap();
         assert_eq!(first.end.parameters[0], 0.110);
         assert_eq!(sols.get_at(1).unwrap().start.parameters[0], 0.500);
+    }
+
+    /// Two points of one contact (the same line parameter, a line through the plane square
+    /// to it) combine into the better one, which takes the merged contact of both: a boxed
+    /// crossing and a touching point, or two boxed crossings, give an undecided point with
+    /// no unique box (it carries no certified root any more), whichever of the two is kept.
+    #[test]
+    fn points_combined_into_one_keep_no_box_unless_a_crossing() {
+        let k = Kernel::default();
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.3, 0.5, -1.0, NOW),
+                CPoint::new(0.3, 0.5, 1.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let across = Curve::from(BSplineCurve::from_nurb(n, 3, false));
+        let point = |value: f64, contact: Contact, unique: Option<[[f64; 2]; 2]>| {
+            let mut s: Solution<H> = Solution::new();
+            s.solution_type = SolutionType::SingleValue;
+            s.num_variables = 3;
+            s.start.solution_value = value;
+            s.start.parameters[..3].copy_from_slice(&[0.5, 0.3, 0.5]);
+            s.contact = contact;
+            s.unique = unique;
+            s
+        };
+        let boxed = Some([[0.25, 0.35], [0.45, 0.55]]);
+        for (first, second) in [
+            (
+                (1e-9, Contact::Crossing, boxed),
+                (2e-9, Contact::Touching, None),
+            ),
+            (
+                (2e-9, Contact::Crossing, boxed),
+                (1e-9, Contact::Touching, None),
+            ),
+            (
+                (1e-9, Contact::Crossing, boxed),
+                (2e-9, Contact::Crossing, boxed),
+            ),
+        ] {
+            let mut sols = SolutionArray::new();
+            sols.add(&point(first.0, first.1, first.2));
+            sols.add(&point(second.0, second.1, second.2));
+            global_curve_intersect_combine_solutions(
+                &k,
+                &plane(),
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                &across,
+                &Extent1d::from_min_max(0.0, 1.0),
+                1e-6,
+                &CombineContext::default(),
+                &mut sols,
+            )
+            .unwrap();
+            assert_eq!(sols.len(), 1, "{:?}", sols.as_slice());
+            let kept = sols.get_at(0).unwrap();
+            assert_eq!(kept.solution_type, SolutionType::SingleValue);
+            assert_eq!((kept.contact, kept.unique), (Contact::Undecided, None));
+        }
     }
 
     #[test]

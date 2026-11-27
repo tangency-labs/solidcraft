@@ -779,7 +779,7 @@ impl AppPanelRuntime {
         self.drop_fit = bootstrap;
         let Some(outer) = landing else { return };
         let title = self.runtime.instance_presentation(&instance).map(|presentation| presentation.title).unwrap_or_default();
-        let (viewport, builder) = desktop.drop_window(&instance, title, outer);
+        let (viewport, builder) = desktop.drop_window(ctx, &instance, title, outer);
         // Drawing needs the OS window: until it exists, nothing is shown.
         if !desktop.drop_ready(ctx, &builder).unwrap_or(false) {
             return;
@@ -1463,6 +1463,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             // The open search box holds the magnifier.
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
+            host.set_float_on_empty_drop(true);
         }
         let result = (|| {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1635,6 +1636,7 @@ pub(crate) fn prepare_pop_out_panels(
             host.note_egui_context(ui.ctx(), force_opaque);
             host.set_gap(gap)?;
             host.set_live_drag(app.preferences.live_panel_drag_preview);
+            host.set_float_on_empty_drop(true);
         }
         runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
         if let Some(workspace) = workspace

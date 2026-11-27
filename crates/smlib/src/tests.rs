@@ -131,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 16] = [
+const NO_KERNEL: [&str; 17] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -148,6 +148,7 @@ const NO_KERNEL: [&str; 16] = [
     "in_call",
     "hold_a_kernel",
     "start",
+    "write_kernel_profiles",
 ];
 
 const ANSWERING: &[&str] = &[
@@ -188,6 +189,7 @@ const ANSWERING: &[&str] = &[
     "split_body",
     "split_body_by_sheet",
     "trim_sheet",
+    "split_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
@@ -336,6 +338,7 @@ fn every_entry_point_answers() {
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
     says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
+    says("split_sheet", a.split_sheet(&sheet));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
