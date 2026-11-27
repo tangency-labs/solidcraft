@@ -35,6 +35,15 @@ Both examples are in SolidCraft's source, in `docs/book/plugin-examples`, and ar
 the current WIT with every change to it (`cargo xtask plugin-examples`), so the code here
 compiles.
 
+## Start from a template
+
+The community-maintained [SolidCraft plugin template](https://github.com/AlpDmr/solidcraft-plugin-template)
+provides a working Rust command plugin, test cases, build scripts for Linux, macOS and Windows,
+and a GitHub Actions release workflow. Choose **Use this template**, set your plugin's id, name,
+description and `updates.github` repository in `plugin.json`, then follow its build instructions.
+Check the SolidCraft and WIT versions against the version you target. The steps below explain
+the same package structure if you prefer to start from an empty folder.
+
 ## What you need
 
 1. Rust, with the WebAssembly target: `rustup target add wasm32-unknown-unknown`.
@@ -302,6 +311,31 @@ The confirmation screen shows what the plugin asks for; **Install** approves it.
 in the Plugins menu and the Model tab at once. A program installs it with `plugin.install`, which
 never opens a dialog: send `"dry_run": true` first to review what it asks for (see
 [Installing](../../../plugins.md#installing)).
+
+## Check every push and publish releases
+
+In your repository's CI, build the component against the WIT from the SolidCraft version you
+support. Run these checks on the built package folder before making its installation archive:
+
+```sh
+solidcraft-cli plugin check plate-maker
+solidcraft-cli plugin test plate-maker --require-cases
+```
+
+Use a CLI release matching the WIT you build against. The second command fails if an entry
+has no test case. Package the manifest, component and any required assets, leaving tests in
+the source repository. For release automation:
+
+1. Set `updates.github` in the manifest to your repository's `owner/name`.
+2. Bump `version` to a new `major.minor.patch` version and tag the commit with that version
+   (for example, `v0.2.0`).
+3. Run the build and checks above, then publish a stable GitHub release with the checked
+   archive attached as `<id>.zip` or `<id>-<version>.zip`. Check the archive with
+   `solidcraft-cli plugin check` before publication.
+4. Verify the release asset has a SHA-256 digest listed by GitHub. SolidCraft uses this digest
+   to verify downloads.
+
+See [Updates](../../../plugins.md#updates) for version and archive requirements.
 
 ## Permissions
 
