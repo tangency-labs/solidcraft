@@ -879,12 +879,12 @@ impl OffsetExecutive {
         f: FaceId,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
-        // (not upstream, #22806) in a local operation, a kept offset face retains its
-        // original surface and every edge and vertex unchanged, so its loops are the
-        // input's own and cannot cross; `extend_result_faces_prefix` skips it too, leaving
-        // its copied trims as `make_face_with_curves` built them until `restore_kept_edges`
-        // puts the original edges and trims back.
-        if self.is_kept_offset_face(f) {
+        // (not upstream, #22806) in a local operation, when `extend_result_faces_prefix`
+        // restored a kept offset face to its original surface after `TrimPastExtension`,
+        // its UV trims were removed and its loops are unchanged from the input, so skip
+        // crossing-loop resolution until `restore_kept_edges` restores the original edges
+        // and trims.
+        if self.is_kept_extension_restored(f) {
             return Ok(());
         }
         // (the face's tolerance model: SmTol::GetZoneTol3d reads the surface's face)
@@ -2435,11 +2435,11 @@ mod tests {
     }
 
     /// #22806: in a local operation, `resolve_crossing_loops_of_face` skips a kept offset
-    /// face immediately (its loops are unchanged from the input, and
-    /// `extend_result_faces_prefix` left its copied trims untouched until
-    /// `restore_kept_edges` restores the original edges and trims).
+    /// face only when `extend_result_faces_prefix` restored its original surface after
+    /// `TrimPastExtension` (leaving it without UV trims until `restore_kept_edges` restores
+    /// the original edges and trims). Kept faces whose extension succeeded run normally.
     #[test]
-    fn crossing_loops_skip_kept_faces_of_a_local_operation() {
+    fn crossing_loops_skip_only_kept_faces_restored_after_trim_past_extension() {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
         use crate::geom::object::ObjectRef;
         use crate::topology::{FaceuseId, RegionId};
@@ -2474,19 +2474,7 @@ mod tests {
         exec.relate_faceuse(source_fu, face_id);
         exec.kept_faceuses.insert(source_fu);
 
-        assert_eq!(
-            exec.resolve_crossing_loops_of_face(
-                &mut kernel,
-                &mut original,
-                &mut offset,
-                face_id,
-                &mut notifications,
-            ),
-            Ok(())
-        );
-
-        // Once the face is no longer kept (e.g. inverted), resolution proceeds normally.
-        exec.inverted_faces.insert(face_id);
+        // A kept face whose extension succeeded is not skipped.
         assert!(matches!(
             exec.resolve_crossing_loops_of_face(
                 &mut kernel,
@@ -2500,5 +2488,18 @@ mod tests {
                 ..
             }) if id == face_id
         ));
+
+        // Once recorded in `kept_extension_restored`, crossing-loop resolution skips it.
+        exec.kept_extension_restored.insert(face_id);
+        assert_eq!(
+            exec.resolve_crossing_loops_of_face(
+                &mut kernel,
+                &mut original,
+                &mut offset,
+                face_id,
+                &mut notifications,
+            ),
+            Ok(())
+        );
     }
 }

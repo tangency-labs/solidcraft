@@ -256,6 +256,11 @@ pub struct OffsetExecutive {
     /// Not upstream: the original face uses of a local operation whose face keeps its
     /// surface and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]).
     pub(super) kept_faceuses: BTreeSet<FaceuseId>,
+    /// Not upstream (#22806): the kept offset faces of a local operation whose
+    /// `extend_result_faces_prefix` extension exceeded the extended domain and restored
+    /// the original surface (with UV trims removed), so `resolve_crossing_loops_of_face`
+    /// skips them until `restore_kept_edges` puts the original edges and trims back.
+    pub(super) kept_extension_restored: BTreeSet<FaceId>,
     /// Not upstream: the uses of the original edges of a local operation where the two new
     /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
     crossing_edgeuses: BTreeSet<EdgeuseId>,
@@ -347,6 +352,7 @@ impl OffsetExecutive {
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
             kept_faceuses: BTreeSet::new(),
+            kept_extension_restored: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
@@ -497,6 +503,7 @@ impl OffsetExecutive {
         self.kept_edges.clear();
         self.kept_edgeuses.clear();
         self.kept_faceuses.clear();
+        self.kept_extension_restored.clear();
         if self.operation != OffsetOperation::LocalOperation {
             return Ok(());
         }
@@ -551,8 +558,8 @@ impl OffsetExecutive {
 
     /// Not upstream: whether offset face `face` came wholly from original faces that keep
     /// their surfaces and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]),
-    /// so its surface and loops are already the original's and need no extension or
-    /// crossing-loop resolution.
+    /// so its original surface and edges are restored if extension fails with
+    /// [`OffsetFailure::TrimPastExtension`].
     pub(super) fn is_kept_offset_face(&self, face: FaceId) -> bool {
         if self.operation != OffsetOperation::LocalOperation || self.inverted_faces.contains(&face)
         {
@@ -560,6 +567,12 @@ impl OffsetExecutive {
         }
         let sources = self.faceuse_to_faces.firsts(face);
         !sources.is_empty() && sources.iter().all(|fu| self.kept_faceuses.contains(fu))
+    }
+
+    /// Not upstream (#22806): whether `extend_result_faces_prefix` restored kept offset
+    /// face `face` to its original surface after [`OffsetFailure::TrimPastExtension`].
+    pub(super) fn is_kept_extension_restored(&self, face: FaceId) -> bool {
+        self.kept_extension_restored.contains(&face)
     }
 
     /// Not upstream: whether the new surfaces of a local operation cross along the edge of
@@ -757,6 +770,7 @@ impl OffsetExecutive {
         self.mated_edgeuses.clear();
         self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
+        self.kept_extension_restored.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
