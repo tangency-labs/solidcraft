@@ -1597,6 +1597,152 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     assert_eq!(token.polls(), Some(n + 1));
 }
 
+/// tangency-labs/solidcraft#22578: a rod along x (0 to 72, radius 4, chamfered ends, relief
+/// grooves of radius 3.25 at x 25 to 25.5 and 46.5 to 47) and a thread cut of pitch 1.25 and
+/// 21.25 turns from x = -1.25 along +x, a 60 degree V with a rounded root, its top on the rod's
+/// radius, so the coil's outer wall is a cylinder on the rod's own. The cut was refused by the
+/// check (a loop's edges one whole period apart in u) where its twin, the same cut from
+/// x = 73.25 along -x, builds. The twin is this design turned half a turn about the vertical
+/// line through x = 36, which maps the rod, its seam half-plane (y 0, z above the axis), the
+/// coil's profile and its half turns onto themselves: both cuts are one valid solid with the
+/// same face, edge and vertex counts. The coil comes to the cut through its record, as
+/// SolidCraft's does: its walls are their certified nets, without the screw definitions the
+/// record has no field for (built and cut in memory, with them, it built before too).
+///
+/// The volume is the rod's (Pappus over its polygon) less the thread's part inside it,
+/// integrated over the screw motion (volume element r dr du dphi; the chord of the profile at
+/// each radius, an exact integral along x, adaptive in r): 3430.968886633128 mm³, to 1e-12.
+/// The coil's walls lie within the sweep's tolerance of their screw surfaces, so the cut's
+/// volume is within the coil's area times that tolerance of it. Both end discs of the rod stay
+/// whole (the cut lost the one at x = 0).
+#[test]
+fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
+    use solidcore_ops::sweep::screw_sweep;
+    all_fixes();
+    let rod = [
+        [0.0, 0.0],
+        [72.0, 0.0],
+        [72.0, 3.375],
+        [71.375, 4.0],
+        [47.75, 4.0],
+        [46.99999999999999, 3.2500000000000027],
+        [46.49999999999999, 3.250000000000003],
+        [45.750000000000014, 4.0],
+        [26.25, 4.0],
+        [25.500000000000004, 3.2500000000000013],
+        [25.0, 3.2500000000000013],
+        [24.250000000000007, 4.0],
+        [0.6250000000000021, 4.0],
+        [0.0, 3.375],
+    ];
+    // (x, z) to (x, 0, z); `flip` turns it half a turn about the line x = 36 along z, which
+    // leaves the rod as it is (its polygon is its own image, to the last bits as sketched)
+    let at = |[x, z]: [f64; 2], flip: bool| {
+        if flip {
+            [72.0 - x, 0.0, z]
+        } else {
+            [x, 0.0, z]
+        }
+    };
+    let (pitch, turns, tolerance) = (1.25, 21.25, 1.25e-4);
+    let exact = 3_430.968_886_633_128;
+    let cut = |flip: bool| {
+        let n = rod.len();
+        let profile: Vec<Curve> = (0..n)
+            .map(|i| Curve::Line {
+                start: at(rod[i], false),
+                end: at(rod[(i + 1) % n], false),
+            })
+            .collect();
+        let stock = revolve(&profile, [0.0; 3], [1.0, 0.0, 0.0], TAU, true).unwrap();
+        // the V: its root an arc of radius 0.1 about (-1.25, 3.475), its flanks up to radius 4
+        let root = (-1.250_000_000_000_000_2, 3.474_999_999_999_999_6);
+        let (a, b) = (
+            [-1.336_602_540_378_443_4, 3.425],
+            [-1.163_397_459_621_557, 3.425],
+        );
+        let (c, d) = (
+            [-0.831_421_054_837_520_5, 4.0],
+            [-1.668_578_945_162_48, 4.0],
+        );
+        // the arc counter-clockwise about -y from a to b, angle 0 along +x (both turned too)
+        let s = if flip { -1.0 } else { 1.0 };
+        let section = vec![
+            Curve::Arc {
+                center: at([root.0, root.1], flip),
+                axis: [0.0, -s, 0.0],
+                reference: [s, 0.0, 0.0],
+                radius: 0.099_999_999_999_999_31,
+                start: -2.617_993_877_991_492_6,
+                end: -0.523_598_775_598_300_9,
+            },
+            Curve::Line {
+                start: at(b, flip),
+                end: at(c, flip),
+            },
+            Curve::Line {
+                start: at(c, flip),
+                end: at(d, flip),
+            },
+            Curve::Line {
+                start: at(d, flip),
+                end: at(a, flip),
+            },
+        ];
+        let origin = at([root.0, 0.0], flip);
+        let swept = screw_sweep(
+            &section,
+            origin,
+            [s, 0.0, 0.0],
+            pitch,
+            turns,
+            None,
+            tolerance,
+        );
+        // as SolidCraft hands it to the cut: through its record, its walls their nets alone
+        let coil = Body::from_record(&swept.unwrap().to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        // only the coil's walls stray from their surfaces, by the tolerance at most, and the
+        // cut keeps no more of them than the coil has
+        let bound = coil.area(1e-8).unwrap() * tolerance;
+        let r = boolean(stock, coil, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("flip {flip}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        let v = volume(&r);
+        let counts = r.counts().unwrap();
+        eprintln!(
+            "flip {flip}: volume {v} bound {bound} counts {counts:?} {}",
+            report.text
+        );
+        assert!(report.is_valid(), "flip {flip}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "flip {flip}");
+        assert!((v - exact).abs() <= bound, "flip {flip}: {v} vs {exact}");
+        // the rod's end discs, both whole: the coil's caps lie outside the rod (the start
+        // cap past its end, the end cap over the groove, whose radius is under the root's)
+        let (record, order) = r.to_record().unwrap();
+        let discs: Vec<(f64, f64)> = (0..record.faces.len())
+            .filter_map(|i| match &record.faces[i].surface {
+                Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                    Some((origin[0], r.face_area(&order, i, 1e-10).unwrap()))
+                }
+                _ => None,
+            })
+            .collect();
+        let disc = PI * 3.375 * 3.375;
+        assert_eq!(discs.len(), 2, "flip {flip}: {discs:?}");
+        for (x, a) in &discs {
+            assert!(*x == 0.0 || *x == 72.0, "flip {flip}: {discs:?}");
+            assert!((a - disc).abs() <= 1e-9 * disc, "flip {flip}: {discs:?}");
+        }
+        counts
+    };
+    // the twin first: it built before this change too
+    let twin = cut(true);
+    assert_eq!(cut(false), twin);
+}
+
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
 /// cut by a circle of radius 4.717 sketched on the plane at 45 degrees through that edge and
 /// extruded into the bar. The sketch puts the circle's centre 7.9e-6 off the edge, so the cut
