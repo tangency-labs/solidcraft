@@ -85,9 +85,9 @@ impl Geometry {
 /// Crossings of exact free-form spans. The record keeps each Bézier or rational conic bounded
 /// to its own knot domain, so crossings on another span's continuation are excluded.
 fn recorded(seg: &Seg2, cmd: &str) -> Result<solidcore_record::brep::Curve> {
-    let curve =
-        solidcraft_kernel::services::sweep::Curve::from_seg2(seg, &solidcore_record::Plane::XY).ok_or_else(|| bad(cmd, "invalid curve span"))?;
-    curve.to_record().map(|record| record.curve).map_err(|error| bad(cmd, error.to_string()))
+    solidcraft_kernel::curves::seg_curve(seg, &solidcore_record::Plane::XY)
+        .map_err(|error| bad(cmd, error.to_string()))?
+        .ok_or_else(|| bad(cmd, "invalid curve span"))
 }
 
 /// Exact intersections of a free-form curve and an analytic sketch curve.

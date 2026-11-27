@@ -73,9 +73,15 @@ hole_countersink
 hole_references
   moves: direction[0], direction[2], position[0], position[1], position[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
   face points: [0, 0, 0]
+hole_hardware
+  moves: direction[0], direction[2], position[0], position[1], position[2]
+  face points: [0, 0, 0]
 thread
   moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
+shaft_spline
+  moves: bore[0], bore[1], bore[2], bore_start[0], bore_start[1], bore_start[2], shaft[0], shaft[1], shaft[2], shaft_start[0], shaft_start[1], shaft_start[2]
+  face points: [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
 loft
   profiles: 4 all, 5 all
 sweep

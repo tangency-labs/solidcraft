@@ -10,13 +10,27 @@ use std::collections::HashMap;
 /// Colours a GIF palette holds.
 const PALETTE: usize = 256;
 
+/// How long each of `frames` frames shows, in the hundredths of a second a GIF counts in, so that
+/// they play at `fps` on average. A rate that is not a whole number of hundredths a frame, such
+/// as 24 or 30, mixes two lengths (4 and 5 for 24: 24 frames last exactly 1 s), where one rounded
+/// length would play at 25 or 33. No frame is shorter than 2, which viewers slow down, nor longer
+/// than 1 s. Empty for a rate that is not a number above 0.
+pub fn delays(frames: usize, fps: f64) -> Vec<u16> {
+    if !fps.is_finite() || fps <= 0.0 {
+        return Vec::new();
+    }
+    let at = |k: usize| (k as f64 * 100.0 / fps).round();
+    (0..frames).map(|k| (at(k + 1) - at(k)).clamp(2.0, 100.0) as u16).collect()
+}
+
 /// Frames (straight RGBA, `width × height`, rows top to bottom; alpha is ignored) as a GIF that
-/// loops forever and shows each frame for `delay` hundredths of a second. `None` without frames,
-/// for a frame of the wrong size, or a side GIF can't store (above 65535).
-pub fn gif(width: usize, height: usize, frames: &[Vec<u8>], delay: u16) -> Option<Vec<u8>> {
+/// loops forever and shows each frame for its `delays` hundredths of a second ([`delays`]).
+/// `None` without frames, for a frame of the wrong size, without a delay for each frame, or a
+/// side GIF can't store (above 65535).
+pub fn gif(width: usize, height: usize, frames: &[Vec<u8>], delays: &[u16]) -> Option<Vec<u8>> {
     let (w, h) = (u16::try_from(width).ok().filter(|w| *w > 0)?, u16::try_from(height).ok().filter(|h| *h > 0)?);
     let bytes = width.checked_mul(height)?.checked_mul(4)?;
-    if frames.is_empty() || frames.iter().any(|f| f.len() != bytes) {
+    if frames.is_empty() || frames.len() != delays.len() || frames.iter().any(|f| f.len() != bytes) {
         return None;
     }
     let (palette, index) = palette(frames);
@@ -34,7 +48,7 @@ pub fn gif(width: usize, height: usize, frames: &[Vec<u8>], delay: u16) -> Optio
     out.extend_from_slice(b"NETSCAPE2.0");
     out.extend_from_slice(&[0x03, 0x01, 0x00, 0x00, 0x00]);
     let mut previous: Option<Vec<u8>> = None;
-    for frame in frames {
+    for (frame, delay) in frames.iter().zip(delays) {
         let now = indices(frame, &index);
         let (x0, y0, x1, y1) = previous.as_deref().map_or(Some((0, 0, width - 1, height - 1)), |p| changed(p, &now, width)).unwrap_or((0, 0, 0, 0));
         let mut rect = Vec::with_capacity((x1 - x0 + 1) * (y1 - y0 + 1));
@@ -280,7 +294,7 @@ mod tests {
                 [220, 224, 230]
             }
         });
-        let bytes = gif(w, h, &[a.clone(), b.clone(), b.clone()], 5).unwrap();
+        let bytes = gif(w, h, &[a.clone(), b.clone(), b.clone()], &[5, 5, 5]).unwrap();
         let (dw, dh, frames, delays) = decode(&bytes);
         assert_eq!((dw, dh, delays), (w, h, vec![5, 5, 5]));
         assert_eq!(frames, vec![a, b.clone(), b]);
@@ -300,7 +314,7 @@ mod tests {
                 [g, g.saturating_add((y / 4) as u8), g.saturating_add(10)]
             }
         });
-        let (_, _, frames, _) = decode(&gif(w, h, std::slice::from_ref(&f), 4).unwrap());
+        let (_, _, frames, _) = decode(&gif(w, h, std::slice::from_ref(&f), &[4]).unwrap());
         let px = |img: &[u8], x: usize, y: usize| img[(y * w + x) * 4..(y * w + x) * 4 + 3].to_vec();
         assert_eq!(px(&frames[0], 150, 100), vec![30, 220, 40], "the line keeps its colour");
         let red = px(&frames[0], 60, 60);
@@ -312,10 +326,34 @@ mod tests {
 
     #[test]
     fn bad_input_is_none_not_a_crash() {
-        assert!(gif(4, 4, &[], 5).is_none());
-        assert!(gif(4, 4, &[vec![0; 63]], 5).is_none());
-        assert!(gif(0, 4, &[vec![]], 5).is_none());
-        assert!(gif(70_000, 1, &[vec![0; 280_000]], 5).is_none());
-        assert!(gif(usize::MAX, 2, &[vec![0; 8]], 5).is_none());
+        assert!(gif(4, 4, &[], &[]).is_none());
+        assert!(gif(4, 4, &[vec![0; 63]], &[5]).is_none());
+        assert!(gif(0, 4, &[vec![]], &[5]).is_none());
+        assert!(gif(70_000, 1, &[vec![0; 280_000]], &[5]).is_none());
+        assert!(gif(usize::MAX, 2, &[vec![0; 8]], &[5]).is_none());
+        // A delay missing, or one too many.
+        assert!(gif(4, 4, &[vec![0; 64], vec![0; 64]], &[5]).is_none());
+        assert!(gif(4, 4, &[vec![0; 64]], &[5, 5]).is_none());
+        for fps in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(delays(3, fps).is_empty(), "{fps}");
+        }
+    }
+
+    /// A GIF counts in hundredths of a second: 30 or 24 frames a second can't be one length.
+    /// Rounded to one, they played at 33 and 25; mixed, a second of frames lasts a second.
+    #[test]
+    fn frames_play_at_the_rate_asked_for_on_average() {
+        assert_eq!(delays(6, 30.0), vec![3, 4, 3, 3, 4, 3]);
+        assert_eq!(delays(6, 24.0), vec![4, 4, 5, 4, 4, 4]);
+        for fps in [1.0_f64, 7.0, 12.0, 20.0, 24.0, 25.0, 29.97, 30.0, 33.0, 45.0, 50.0] {
+            let d = delays(fps.round() as usize * 3, fps);
+            let total: u32 = d.iter().map(|&x| u32::from(x)).sum();
+            assert!((f64::from(total) - (d.len() as f64 * 100.0 / fps)).abs() <= 0.5, "{fps}: {d:?}");
+            assert!(d.iter().all(|x| (2..=100).contains(x)), "{fps}: {d:?}");
+        }
+        // Each frame is written with its own delay.
+        let f = vec![0u8; 4 * 4 * 4];
+        let (_, _, _, written) = decode(&gif(4, 4, &[f.clone(), f.clone(), f], &[3, 4, 3]).unwrap());
+        assert_eq!(written, vec![3, 4, 3]);
     }
 }

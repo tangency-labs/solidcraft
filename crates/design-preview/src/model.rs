@@ -191,17 +191,20 @@ struct Entry {
 }
 
 /// How a file browser looks at a model: turned with the pointer as a ball under it (an arcball),
-/// then zoomed, with an orthographic projection as the app's default camera. It starts at the
-/// app's isometric Home view, Z up.
+/// panned across the view and zoomed, with an orthographic projection as the app's default camera.
+/// It starts at the app's isometric Home view, Z up.
 ///
 /// A drag turns the model about every axis: from the middle of the view it tips the model the way
 /// the pointer goes, near the edge it turns it about the line of sight. The turn depends only on
 /// where the drag started and where the pointer is now, so going back to the start of a drag
-/// brings the model back to where it was.
+/// brings the model back to where it was. Panning shifts the point at the middle of the view in
+/// model space, so zooming and orbiting afterwards stay centred on the region the user panned to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Orbit {
     /// The view's right, up and back (towards the eye) directions in model space, orthonormal.
     pub axes: [[f32; 3]; 3],
+    /// The point in model space at the middle of the view, in units of the model's radius.
+    pub target: [f32; 3],
     /// 1 fits the model in the view; larger is closer.
     pub zoom: f32,
 }
@@ -213,6 +216,13 @@ pub struct Grab {
     from: [f32; 3],
 }
 
+/// Where a pan drag started: the target then, and the pointer's place in the view.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pan {
+    target: [f32; 3],
+    from: [f32; 2],
+}
+
 impl Default for Orbit {
     /// The isometric view, as the saved picture and the app's Home view.
     fn default() -> Self {
@@ -221,7 +231,7 @@ impl Default for Orbit {
         let (sp, cp) = pitch.sin_cos();
         let back = [-sy * cp, -cy * cp, sp];
         let right = [cy, -sy, 0.0];
-        Orbit { axes: [right, ball::cross(back, right), back], zoom: 1.0 }
+        Orbit { axes: [right, ball::cross(back, right), back], target: [0.0; 3], zoom: 1.0 }
     }
 }
 
@@ -269,6 +279,8 @@ pub struct Matrices {
 
 /// How much more the model turns than the ball under the pointer would.
 const TURN_GAIN: f32 = 2.0;
+/// How far `target` may move from the model's middle, in units of the model's radius.
+const MAX_PAN: f32 = 2.0;
 
 impl Orbit {
     /// Start a drag at view point `x`, `y` (points from the bottom left) of a view `width` by
@@ -315,6 +327,37 @@ impl Orbit {
         self.axes = [right, ball::cross(back, right), back];
     }
 
+    /// Start panning at view point `x`, `y` (points from the bottom left) of a view `width` by
+    /// `height`. `None` for a point or size that isn't one.
+    pub fn pan_start(&self, x: f32, y: f32, width: f32, height: f32) -> Option<Pan> {
+        let valid_size = width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0;
+        if !(valid_size && x.is_finite() && y.is_finite() && self.target.iter().all(|v| v.is_finite())) {
+            return None;
+        }
+        Some(Pan { target: self.target, from: [x, y] })
+    }
+
+    /// Shift the view so the point under the pointer at the start of `pan` stays under `x`, `y`.
+    pub fn pan_to(&mut self, pan: &Pan, x: f32, y: f32, width: f32, height: f32) {
+        let valid_size = width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0;
+        if !(valid_size && x.is_finite() && y.is_finite() && self.zoom.is_finite() && self.zoom > 0.0) {
+            return;
+        }
+        // The visible span along the shorter side is 2 * 1.1 / zoom model radii.
+        let scale = 2.2 / (self.zoom * width.min(height));
+        if !scale.is_finite() {
+            return;
+        }
+        let (dx, dy) = (x - pan.from[0], y - pan.from[1]);
+        let [right, up, _] = self.axes;
+        let raw: [f32; 3] = std::array::from_fn(|i| pan.target[i] - (right[i] * dx + up[i] * dy) * scale);
+        let length = ball::dot(raw, raw).sqrt();
+        if !length.is_finite() {
+            return;
+        }
+        self.target = if length > MAX_PAN { raw.map(|v| v * (MAX_PAN / length)) } else { raw };
+    }
+
     /// Zoom by `factor` (above 1 is closer), within 1/20 and 50 times the fitted view.
     pub fn zoom_by(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
@@ -322,13 +365,20 @@ impl Orbit {
         }
     }
 
+    /// Return to the starting isometric view, centred and fitted.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     /// The matrices for a model of `radius` in a view `aspect` (width / height) wide.
     pub fn matrices(&self, radius: f32, aspect: f32) -> Matrices {
         let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
         let radius = if radius.is_finite() && radius > 0.0 { radius } else { 1.0 };
+        let zoom = if self.zoom.is_finite() && self.zoom > 0.0 { self.zoom } else { 1.0 };
+        let target = if self.target.iter().all(|v| v.is_finite()) { self.target } else { [0.0; 3] };
         let [right, up, back] = self.axes;
         // Half the visible height: the model's sphere fits the shorter side, with a margin.
-        let half = radius * 1.1 / (self.zoom * aspect.min(1.0));
+        let half = radius * 1.1 / (zoom * aspect.min(1.0));
         let (x, y) = (1.0 / (half * aspect), 1.0 / half);
         let depth = 1.0 / (radius * 2.2);
         let rows = [right.map(|v| v * x), up.map(|v| v * y), back.map(|v| -v * depth)];
@@ -340,6 +390,9 @@ impl Orbit {
                 view[col * 4 + row] = axis[col];
             }
         }
+        // Keep depth centred on the model's origin so panning never clips against near or far.
+        clip[12] = -ball::dot(rows[0], target) * radius;
+        clip[13] = -ball::dot(rows[1], target) * radius;
         clip[14] = 0.5;
         clip[15] = 1.0;
         view[15] = 1.0;
