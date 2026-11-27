@@ -1,0 +1,136 @@
+# One-off, by-hand test build: the Windows app with solidcraft-kernel's opt-in `backend-occt`
+# feature on (vendor/occt-capi/README.md). Never a release, never on pull requests. It lives only
+# on the throwaway branch below (deleted after the run), and a dispatch needs the file on main, so
+# a push to that one branch is the trigger.
+name: OCCT Windows test build
+
+on:
+  push:
+    branches: [owner/occt-windows-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  windows:
+    name: Windows x64 with OCCT
+    runs-on: blacksmith-8vcpu-windows-2025
+    timeout-minutes: 120
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      # Short paths: OCCT's Visual Studio build trips MAX_PATH under a deep target directory.
+      OCCT_OUT: C:\occt
+      OCCT_BUILD_JOBS: "8"
+      OCCT_CAPI_LIB_DIR: C:\occt\lib
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: x86_64-pc-windows-msvc
+      # Restores the release build's cache; never saves.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-windows-x64
+          save-if: false
+
+      - name: Build the OCCT module (OCCT 8.0.1, pinned SHA-256)
+        shell: pwsh
+        run: |
+          cmake --version
+          cmake "-DOUT_DIR=$env:OCCT_OUT" -P vendor/occt-capi/capi/build.cmake
+          if ($LASTEXITCODE -ne 0) { throw "build.cmake failed ($LASTEXITCODE)" }
+          Get-ChildItem $env:OCCT_CAPI_LIB_DIR | Format-Table Name, Length
+
+      - name: Build the app with backend-occt
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p solidcraft --features solidcraft-kernel/backend-occt --target $env:TARGET
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
+
+      - name: Bundle and check imports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -property installationPath
+          $dumpbin = (Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') | Select-Object -Last 1).FullName
+          function Deps([string] $p) {
+            & $dumpbin /nologo /dependents $p | Select-String '^\s+(\S+\.dll)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value.ToLower() }
+          }
+          $out = 'dist\SolidCraft-OCCT-test'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item "target\$env:TARGET\release\solidcraft.exe" $out
+          Copy-Item "$env:OCCT_CAPI_LIB_DIR\occt_capi.dll" $out
+          # The module is built with MSVC's default dynamic C++ runtime: ship it app-local.
+          $redist = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') -Directory | Sort-Object FullName | Select-Object -Last 1
+          Write-Output "VC redist: $($redist.FullName)"
+          foreach ($d in (Deps "$out\occt_capi.dll")) {
+            $src = Join-Path $redist.FullName $d
+            if (Test-Path $src) { Copy-Item $src $out }
+          }
+          New-Item -ItemType Directory -Force "$out\licenses" | Out-Null
+          Copy-Item vendor/occt-capi/licenses/* "$out\licenses"
+          Copy-Item LICENSE* "$out\licenses" -ErrorAction SilentlyContinue
+          @"
+          SolidCraft test build with the Open CASCADE (OCCT 8.0.1) kernel adapter on (backend-occt).
+          Built from tangency-labs/solidcraft $env:GITHUB_SHA. Unsigned, not a release.
+
+          Primitives, booleans and fillets try OCCT first and fall back to solidcore.
+          Set SOLIDCRAFT_KERNEL=solidcore to keep everything on solidcore.
+
+          This software makes use of Open CASCADE Technology (https://dev.opencascade.org).
+          OCCT is LGPL-2.1-only WITH OCCT-exception-1.0 (licenses/). It lives in occt_capi.dll, a
+          separate, replaceable library; its source and build files are OCCT 8.0.1 plus
+          vendor/occt-capi in the commit above.
+          "@ | Set-Content "$out\README.txt"
+
+          # Every DLL the exe and the bundled DLLs load must be in the bundle or part of Windows.
+          # The VC++ runtime counts as missing unless bundled (not every PC has it).
+          $bundled = Get-ChildItem $out -Filter *.dll | ForEach-Object { $_.Name.ToLower() }
+          $bad = @()
+          foreach ($f in @('solidcraft.exe') + $bundled) {
+            $deps = @(Deps (Join-Path $out $f))
+            Write-Output "== $f imports: $($deps -join ', ')"
+            foreach ($d in $deps) {
+              if ($bundled -contains $d) { continue }
+              if ($d -match '^(msvcp|vcruntime|concrt|vccorlib)') { $bad += "$f -> $d (VC runtime, not bundled)"; continue }
+              if ($d -like 'api-ms-win-*' -or $d -like 'ext-ms-*') { continue }
+              if (Test-Path (Join-Path $env:SystemRoot "System32\$d")) { continue }
+              $bad += "$f -> $d"
+            }
+          }
+          if ($bad) { throw "missing DLLs:`n$($bad -join "`n")" }
+          if ((Deps "$out\solidcraft.exe") -notcontains 'occt_capi.dll') { throw 'solidcraft.exe does not import occt_capi.dll: the feature is off' }
+
+          # The loader resolves every import (0xC0000135 otherwise), and the exe runs.
+          $p = Start-Process -FilePath "$out\solidcraft.exe" -ArgumentList '--version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput ver.txt
+          Write-Output "solidcraft --version exit $($p.ExitCode): $(Get-Content ver.txt)"
+          if ($p.ExitCode -ne 0) { throw "solidcraft.exe --version exited $($p.ExitCode)" }
+
+          Compress-Archive -Path "$out\*" -DestinationPath dist\SolidCraft-OCCT-test-windows-x64.zip
+          Get-Item dist\SolidCraft-OCCT-test-windows-x64.zip | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-occt-windows-x64
+          path: dist/SolidCraft-OCCT-test-windows-x64.zip
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+
+      # OCCT really runs on Windows: the measurement matrix through the router on both kernels.
+      - name: OCCT matrix (box, cylinder, sphere, torus, boolean, fillet)
+        continue-on-error: true
+        timeout-minutes: 30
+        shell: pwsh
+        run: |
+          cargo run --release --locked -p solidcraft-kernel --features backend-occt --example occt_matrix --target $env:TARGET
+          if ($LASTEXITCODE -ne 0) { throw "occt_matrix failed ($LASTEXITCODE)" }
