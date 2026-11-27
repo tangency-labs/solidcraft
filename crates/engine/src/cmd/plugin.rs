@@ -200,6 +200,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
         repository: source.as_ref().map(|(source, _)| source.repository.clone()),
         source: source.as_ref().map(|(source, _)| source.display()),
+        workspaces: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.workspaces.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
         archive: plugin.archive.clone(),
         id: manifest.id.clone(),
