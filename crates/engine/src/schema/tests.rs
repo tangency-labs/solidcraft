@@ -1418,7 +1418,14 @@ fn step_and_component_link_schema_keys_and_replies() {
             "component.update_links",
             json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
         ),
-        ("component.break_link", json!({"component": 1, "path": "part.step"})),
+        (
+            "component.break_link",
+            json!({"component": 1, "path": "part.step", "history": false, "features": [], "components": 0, "parameters": [], "renamed_parameters": [], "nested_links": [], "notices": ["Part has no history"], "warnings": []}),
+        ),
+        (
+            "component.break_link",
+            json!({"component": 1, "path": "plate.sc", "history": true, "features": ["Box1"], "components": 0, "parameters": ["w_2"], "renamed_parameters": [{"from": "w", "to": "w_2"}], "nested_links": [], "notices": [], "warnings": []}),
+        ),
         ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
         (
             "file.insert_step",

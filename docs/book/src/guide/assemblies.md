@@ -586,8 +586,13 @@ opens, so there `component.update_links` is the way to bring in changed parts.
 
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
-**Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
-`component.links` lists the links, whether their files are found, and whether they changed since
+**Break Link** (`component.break_link`) brings the linked design's history in: its features,
+sketches, subcomponents, joints, looks and the user parameters they use become the component's
+own (a parameter whose name the assembly already has comes in as `w_2`), and the file is
+forgotten. The component keeps its name, every placement, the joints on it and the looks given in
+the assembly; links inside the linked design are broken the same way, so nothing stays linked.
+When the file can't be read, the component keeps its bodies without history and a warning names
+the file. One undo step. `component.links` lists the links, whether their files are found, and whether they changed since
 the assembly last read them (`changed`). When a file can't be reached it also gives a
 `state` (`missing`, `unreadable` or `not_allowed`) and a `reason`. A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend

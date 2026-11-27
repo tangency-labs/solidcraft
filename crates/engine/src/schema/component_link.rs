@@ -550,7 +550,9 @@ pub struct JointDiagnostic {
     pub why: String,
 }
 
-/// Forget a component's link to its design file and keep its bodies as they are. One undo step.
+/// Break a component's link to its design file: the design's history comes in and becomes the
+/// component's own (a STEP or importer link, or a design that can't be read, keeps its bodies as
+/// they are, without history, and says why). One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = component_required)]
 pub struct BreakLinkParams {
@@ -568,9 +570,36 @@ pub struct BreakLinkResult {
     pub component: u64,
     /// The file it was linked to, as the link stored it.
     pub path: String,
+    /// Whether the linked design's history came in. False: the component keeps the bodies it had,
+    /// without history, and `warnings` or `notices` say why.
+    pub history: bool,
+    /// The features that came in, by name, in timeline order.
+    pub features: Vec<String>,
+    /// How many subcomponents of the linked design came in with them.
+    pub components: usize,
+    /// The user parameters that came in, by the name they have here.
+    pub parameters: Vec<String>,
+    /// Those of them renamed because this design already had their name.
+    pub renamed_parameters: Vec<RenamedParameter>,
+    /// The links inside the linked design that were broken the same way, by file.
+    pub nested_links: Vec<String>,
+    /// What stayed behind or came in as it was: joints to the linked design's own bodies, STEP
+    /// links that have no history.
+    pub notices: Vec<String>,
+    /// What went wrong: a linked file that could not be read, so its history did not come in.
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A user parameter Break Link brought in under another name.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenamedParameter {
+    /// Its name in the linked design.
+    pub from: String,
+    /// Its name here.
+    pub to: String,
 }
 
 /// `component.links` takes no parameters.

@@ -71,12 +71,18 @@ fn material_probe_matches(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, 
 }
 
 fn cloned_path(source: &Document, path: &[u64], root: u64, destination: &[u64], occurrences: &BTreeMap<u64, u64>) -> Result<Vec<u64>> {
-    let start = path
-        .iter()
-        .position(|id| source.occurrences.iter().any(|o| o.id == *id && o.component == root))
-        .ok_or_else(|| bad(CMD, "copied Emboss placement is outside the copied component tree"))?;
+    // The design's own root (Break Link copies a whole design) has no placement: a path in it
+    // starts inside the copy.
+    let start = if root == 0 {
+        0
+    } else {
+        path.iter()
+            .position(|id| source.occurrences.iter().any(|o| o.id == *id && o.component == root))
+            .ok_or_else(|| bad(CMD, "copied Emboss placement is outside the copied component tree"))?
+            + 1
+    };
     let mut mapped = destination.to_vec();
-    for id in path.iter().skip(start + 1) {
+    for id in path.iter().skip(start) {
         mapped.push(*occurrences.get(id).ok_or_else(|| bad(CMD, "copied Emboss path has an external descendant"))?);
     }
     if mapped.len() > 64 {
@@ -111,8 +117,9 @@ pub(super) fn named_by(stored: &[String], built: &[String]) -> bool {
         })
 }
 
+/// The definitions under `root` (0: the whole design), parents before children.
 fn graph(doc: &Document, root: u64) -> Result<Vec<u64>> {
-    let definitions: BTreeSet<_> = doc.components.iter().map(|c| c.id).collect();
+    let definitions: BTreeSet<_> = doc.components.iter().map(|c| c.id).chain((root == 0).then_some(0)).collect();
     let mut children: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     for occurrence in &doc.occurrences {
         children.entry(occurrence.parent).or_default().push(occurrence.component);
@@ -210,6 +217,19 @@ impl<'a> Source<'a> {
     }
 }
 
+/// Where a copy goes: a new component under a parent, or into a component that is already there
+/// (Break Link), which keeps its identity, name, placements and looks.
+enum Destination {
+    New { parent: u64, parent_path: Option<Vec<u64>> },
+    Into { component: u64, path: Vec<u64> },
+}
+
+/// What a copy made besides its reply: the names the user parameters it brought got, by their
+/// names in the source.
+pub(super) struct Copied {
+    pub parameters: BTreeMap<String, String>,
+}
+
 /// An independent copy of `component` (and what it holds), from the session's own design, into
 /// `parent`.
 pub(super) fn paste(
@@ -239,6 +259,34 @@ pub(super) fn build(
     parent_path: Option<Vec<u64>>,
     params: &Value,
 ) -> Result<(Session, Value)> {
+    build_to(s, origin, component, source_occurrence, transform, Destination::New { parent, parent_path }, params).map(|(s, out, _)| (s, out))
+}
+
+/// [`build`] of the contents of `component` of another design (0: the whole design) into
+/// `into`, a component of `s` placed at `path`: its features, sketches, subcomponents, joints,
+/// looks and the user parameters they use become `into`'s, in its own coordinates. `into` keeps
+/// its name, part properties, placements and looks. For Break Link, which brings a linked
+/// design's history in.
+pub(super) fn build_into(s: &Session, origin: &Source<'_>, component: u64, into: u64, path: Vec<u64>) -> Result<(Session, Value, Copied)> {
+    build_to(s, origin, component, None, solidcraft_doc::IDENTITY, Destination::Into { component: into, path }, &Value::Null)
+}
+
+fn build_to(
+    s: &Session,
+    origin: &Source<'_>,
+    component: u64,
+    source_occurrence: Option<Occurrence>,
+    transform: Mat,
+    destination: Destination,
+    params: &Value,
+) -> Result<(Session, Value, Copied)> {
+    let (parent, into) = match &destination {
+        Destination::New { parent, .. } => (*parent, None),
+        Destination::Into { component, .. } => (0, Some(*component)),
+    };
+    if component == 0 && into.is_none() {
+        return Err(bad(CMD, "component graph has a missing definition"));
+    }
     let source = origin.doc;
     let source_parameters: BTreeMap<_, _> = source.params.iter().map(|p| (p.name.as_str(), p)).collect();
     let generated_parameters: BTreeSet<_> = source
@@ -290,6 +338,12 @@ pub(super) fn build(
     let mut frozen = Vec::new();
     // Allocate definitions, discarding their automatic placeholder occurrence except root.
     for old in &definitions {
+        if *old == component
+            && let Some(into) = into
+        {
+            components.insert(*old, into);
+            continue;
+        }
         let c = definition_records.get(old).ok_or_else(|| bad(CMD, "missing definition"))?;
         let mapped_parent = if *old == component {
             parent
@@ -312,27 +366,38 @@ pub(super) fn build(
         }
     }
     let root = *components.get(&component).ok_or_else(|| bad(CMD, "missing clone root"))?;
-    let root_occurrence = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
-    let mut clone_path = if let Some(path) = parent_path {
-        path
-    } else if let Some(o) = source_occurrence.as_ref().filter(|o| o.parent == parent) {
-        // Into the source placement's own parent: through the parent placement it was picked in.
-        // Into another parent, that path leads elsewhere, so the parent's own path is used.
-        let mut path = super::component::occurrence_path(s, params, o.id, CMD)?;
-        path.pop();
-        path
-    } else {
-        s.doc.first_path(parent)
+    let (root_occurrence, clone_path) = match destination {
+        Destination::Into { path, .. } => (*path.last().ok_or_else(|| bad(CMD, "missing cloned placement"))?, path),
+        Destination::New { parent_path, .. } => {
+            let root_occurrence = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
+            let mut clone_path = if let Some(path) = parent_path {
+                path
+            } else if let Some(o) = source_occurrence.as_ref().filter(|o| o.parent == parent) {
+                // Into the source placement's own parent: through the parent placement it was picked in.
+                // Into another parent, that path leads elsewhere, so the parent's own path is used.
+                let mut path = super::component::occurrence_path(s, params, o.id, CMD)?;
+                path.pop();
+                path
+            } else {
+                s.doc.first_path(parent)
+            };
+            clone_path.push(root_occurrence);
+            if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
+                o.transform = transform;
+                // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
+                o.grounded = false;
+                o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
+            }
+            (root_occurrence, clone_path)
+        }
     };
-    clone_path.push(root_occurrence);
-    if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
-        o.transform = transform;
-        // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
-        o.grounded = false;
-        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
-    }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
+    }
+    // A whole design copied into a component: what its joints hold to the design itself (its
+    // root, placement 0) they hold to the component's placement.
+    if component == 0 && into.is_some() {
+        occurrences.insert(0, root_occurrence);
     }
     for old in source.occurrences.iter().filter(|o| selected.contains(&o.parent)) {
         let child = *components.get(&old.component).ok_or_else(|| bad(CMD, "missing child definition"))?;
@@ -644,6 +709,10 @@ pub(super) fn build(
         }
     }
     for (old, new) in &components {
+        // A component copied into keeps its own part record and look.
+        if into == Some(*new) {
+            continue;
+        }
         if let Some(part) = source.parts.get(old) {
             scratch.doc_mut().parts.insert(*new, part.clone());
         }
@@ -848,7 +917,7 @@ pub(super) fn build(
         if !outside.is_empty() {
             outside.sort();
             outside.dedup();
-            let name = definition_records.get(&component).map(|c| c.name.clone()).unwrap_or_default();
+            let name = definition_records.get(&component).map_or_else(|| source.name.clone(), |c| c.name.clone());
             return Err(bad(CMD, format!("{name} uses what isn't in it, so it can't be pasted into another design: {}", outside.join("; "))));
         }
     }
@@ -901,7 +970,16 @@ pub(super) fn build(
     let mut proof_work = 0usize;
     let expected_count = state.bodies.iter().filter(|b| selected.contains(&source.model_body_component(b))).count();
     let copied_components: BTreeSet<_> = components.values().copied().collect();
-    let actual_count = copied.bodies.iter().filter(|b| copied_components.contains(&scratch.doc.model_body_component(b))).count();
+    // A component copied into may have features of its own: only what the copy built counts.
+    let own_features: BTreeSet<u64> = if into.is_some() { s.doc.features.iter().map(|f| f.id).collect() } else { BTreeSet::new() };
+    let actual_count = copied
+        .bodies
+        .iter()
+        .filter(|b| {
+            let c = scratch.doc.model_body_component(b);
+            copied_components.contains(&c) && (into != Some(c) || !own_features.contains(&b.feature))
+        })
+        .count();
     if actual_count != expected_count {
         return Err(bad(CMD, "copy produced an incomplete or unexpected set of bodies"));
     }
@@ -971,7 +1049,8 @@ pub(super) fn build(
         notices,
         param_warnings: Vec::new(),
     })?;
-    Ok((scratch, out))
+    let parameters = parameters.into_iter().filter(|(old, _)| source_parameters.get(old.as_str()).is_some_and(|p| !p.model)).collect();
+    Ok((scratch, out, Copied { parameters }))
 }
 
 /// A copied body transfer moves its bodies between the copies of its components; one from

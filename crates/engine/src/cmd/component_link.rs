@@ -4,7 +4,7 @@
 //! join a new component through an Import feature (exact B-rep, kept in this design so it opens
 //! without the part file). The link remembers the absolute file in a session and a path relative
 //! to the design's folder on disk; Update Links reads it again and replaces the Import feature's
-//! bodies, and Break Link keeps the bodies and forgets the file. The bodies' faces are named after the names
+//! bodies, and Break Link brings the design's history in and forgets the file. The bodies' faces are named after the names
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
 
@@ -87,7 +87,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("break")
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
-        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file, and the importer that read it"),
+        .params(
+        "component: id or name of a linked component — its design's history comes in and becomes the component's own, as one \
+         undo step: features, sketches, subcomponents and their joints and motion, looks, and the user parameters they use \
+         (renamed `w_2` when this design has a `w`); the component keeps its id, name, placements (all of them stay placements \
+         of this one component), joints and the looks given here; links inside that design are broken the same way, so nothing \
+         stays linked. A design that can't be read (missing, unreadable, not allowed) or whose history can't come in keeps its \
+         bodies as they are, without history, and warnings say which file and why; a STEP file or a file an importer read has \
+         no history and keeps its bodies. Returns path, history (whether it came in), features, components, parameters, \
+         renamed_parameters [{from, to}], nested_links, notices and warnings",
+    ),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)
@@ -4439,9 +4448,10 @@ fn relink_placement(
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
     let comp = component_key(s, p, "component", cmd)?;
-    let link = s.doc_mut().links.remove(&comp).ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
     let path = stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path));
-    reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
+    let brought = extract::break_link(s, comp, &link)?;
+    reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new(), ..brought })
 }
 
 /// What reads `link`'s file: the built-in STEP reader, an importer, or (for a design) nothing

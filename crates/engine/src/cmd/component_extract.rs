@@ -24,7 +24,7 @@ use super::{
     absolute, component_key, file_sha256, inherit_properties, link_mesh_feature, link_refused, link_target, reply, resolve, session_bodies, stored,
 };
 use crate::params::{bad, str_};
-use crate::schema::component_link::{CopiesResult, CopyInfo, ExtractResult, ReplaceWithLinkResult};
+use crate::schema::component_link::{BreakLinkResult, CopiesResult, CopyInfo, ExtractResult, RenamedParameter, ReplaceWithLinkResult};
 use crate::{EngineError, Result, Session};
 
 const CMD: &str = "component.extract";
@@ -197,9 +197,14 @@ fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Opti
 /// Joints on the placements `own` name faces of features that are gone: give them the names of
 /// the same faces of the linked bodies (Import feature `import`).
 pub(super) fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTreeSet<u64>) {
+    rename_joint_faces_on(s, old, &|b| b.feature == import, own);
+}
+
+/// [`rename_joint_faces`] onto the bodies `new` picks.
+fn rename_joint_faces_on(s: &mut Session, old: &ModelState, new: &dyn Fn(&ModelBody) -> bool, own: &BTreeSet<u64>) {
     use solidcraft_doc::joints::{Coupling, JointOrigin, Size, Snap, cam::CamProfile};
     let state = s.model.state();
-    let linked: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == import).collect();
+    let linked: Vec<&ModelBody> = state.bodies.iter().filter(|b| new(b)).collect();
     let rename = |name: &mut String, near: Vec3| {
         if let Some(new) = renamed(old, &linked, name, near) {
             *name = new;
@@ -921,6 +926,238 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ReplaceWithLinkResult { component: linked, name: lname, replaced, warnings, param_warnings: Vec::new() })
 }
 
+/// How deep Break Link follows links inside linked designs.
+const MAX_LINK_DEPTH: usize = 16;
+
+/// Break the link of `comp` (its record `link`): the linked design's history becomes the
+/// component's own ([`bring_history`]), or, when it can't, the component keeps the bodies it has
+/// and the reply says why. The reply's `component` and `path` are the caller's to fill in.
+pub(super) fn break_link(s: &mut Session, comp: u64, link: &DesignLink) -> Result<BreakLinkResult> {
+    let cmd = "component.break_link";
+    let mut out = BreakLinkResult { component: comp, ..empty_reply() };
+    let name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    if !link.is_design() {
+        s.doc_mut().links.remove(&comp);
+        out.notices.push(format!(
+            "{name} was linked to a file a STEP reader or an importer read, which has no history: it keeps its bodies as imported bodies"
+        ));
+        return Ok(out);
+    }
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
+        return Err(bad(cmd, "move the timeline marker to the end before Break Link"));
+    }
+    let mut stack: Vec<std::path::PathBuf> = s.path.iter().map(|own| absolute(Path::new(own))).collect();
+    match bring_history(s, comp, link, &mut stack, &mut out) {
+        Ok(next) => {
+            s.accept_computed(next)?;
+            out.history = true;
+        }
+        Err(why) => {
+            s.doc_mut().links.remove(&comp);
+            out.warnings.push(format!("the history of {name} couldn't be brought in, so it keeps its bodies as they are, without history: {why}"));
+        }
+    }
+    Ok(out)
+}
+
+/// The linked design of `comp` in `s`, opened on its own in the configuration the link selects,
+/// with its own links broken the same way (`stack`: the files being read, which a link back to
+/// one of them would loop through).
+fn open_linked(
+    s: &Session,
+    link: &DesignLink,
+    stack: &mut Vec<std::path::PathBuf>,
+    out: &mut BreakLinkResult,
+) -> std::result::Result<Session, String> {
+    if link.path.is_empty() {
+        return Err("it was linked from a design open in the session that has no file, so there is no history to read".into());
+    }
+    let file = resolve(s.path.as_deref(), &link.path);
+    let shown = file.display().to_string();
+    if stack.iter().any(|f| super::same_file(f, &file)) {
+        return Err(format!("{shown} links back to a design it is linked into"));
+    }
+    if stack.len() > MAX_LINK_DEPTH {
+        return Err(format!("{shown}: links inside linked designs go more than {MAX_LINK_DEPTH} deep"));
+    }
+    let bytes = super::read_linked_file(&file, s.path.as_deref(), false).map_err(|p| p.reason)?;
+    let (doc, saved) = super::parse_design_bytes(&super::Source::File(file.clone()), &bytes).map_err(|e| e.to_string())?;
+    let mut part = Session::opened_at_validating(doc, saved.as_ref(), Some(&shown), s.validation());
+    if let Some(row) = link.configuration {
+        if part.doc.configs.row_identity(row) != link.configuration_identity {
+            return Err(format!("{shown}: configuration `{row}` was replaced; select a configuration again"));
+        }
+        part.execute("config.activate", &json!({"row": row})).map_err(|e| format!("{shown}: {e}"))?;
+    }
+    stack.push(absolute(&file));
+    let nested: Vec<(u64, DesignLink)> = part.doc.links.iter().map(|(c, l)| (*c, l.clone())).collect();
+    for (c, inner) in nested {
+        let name = part.doc.components.iter().find(|x| x.id == c).map(|x| x.name.clone()).unwrap_or_default();
+        let inner_file = resolve(part.path.as_deref(), &inner.path).display().to_string();
+        if !inner.is_design() {
+            part.doc_mut().links.remove(&c);
+            out.notices.push(format!("{name} in {shown} was linked to {inner_file}, which has no history: it comes in as imported bodies"));
+            continue;
+        }
+        let mut inner_out = empty_reply();
+        match bring_history(&part, c, &inner, stack, &mut inner_out) {
+            Ok(next) => {
+                part = next;
+                out.nested_links.push(inner_file);
+            }
+            Err(why) => {
+                part.doc_mut().links.remove(&c);
+                out.warnings
+                    .push(format!("the history of {name} in {shown} couldn't be brought in, so it comes in as its bodies, without history: {why}"));
+            }
+        }
+        out.nested_links.extend(inner_out.nested_links);
+        out.notices.extend(inner_out.notices);
+        out.warnings.extend(inner_out.warnings);
+    }
+    stack.pop();
+    if let Some(e) = part.model.results.iter().find_map(|r| r.error.as_ref()) {
+        return Err(format!("{shown} has a feature that fails ({e})"));
+    }
+    Ok(part)
+}
+
+/// A Break Link reply with nothing in it yet.
+fn empty_reply() -> BreakLinkResult {
+    BreakLinkResult {
+        component: 0,
+        path: String::new(),
+        history: false,
+        features: Vec::new(),
+        components: 0,
+        parameters: Vec::new(),
+        renamed_parameters: Vec::new(),
+        nested_links: Vec::new(),
+        notices: Vec::new(),
+        warnings: Vec::new(),
+        param_warnings: Vec::new(),
+    }
+}
+
+/// `s` with the history of the design `comp` is linked to (`link`) in place of the linked
+/// bodies, as Paste from Another Design copies a design's components
+/// (`component_clone::build_into`): at the Import feature's place in the timeline, the bodies
+/// keeping the names they have here, joints on their faces kept on the same faces, and the
+/// looks and materials given here kept. The design has to look as it did before, or nothing
+/// changes and the error says why.
+fn bring_history(
+    s: &Session,
+    comp: u64,
+    link: &DesignLink,
+    stack: &mut Vec<std::path::PathBuf>,
+    out: &mut BreakLinkResult,
+) -> std::result::Result<Session, String> {
+    let part = open_linked(s, link, stack, out)?;
+    let cmd = "component.break_link";
+    let text = |e: EngineError| match e {
+        EngineError::BadParams { msg, .. } => msg,
+        other => other.to_string(),
+    };
+    let name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    let old_state = s.model.state();
+    let mesh = link_mesh_feature(s, comp, link.feature).map(|(f, _)| f);
+    let linked = |b: &ModelBody| b.feature == link.feature || Some(b.feature) == mesh;
+    let old_bodies: Vec<&ModelBody> = old_state.bodies.iter().filter(|b| linked(b)).collect();
+    if s.doc.feature(link.feature).is_some_and(|f| f.inserted) {
+        return Err("its Import feature holds a component tree of its own".into());
+    }
+    let before = Before::take(s).map_err(text)?;
+    let mut t = s.scratch();
+    t.doc_mut().links.remove(&comp);
+    let at = t.doc.feature_index(link.feature).unwrap_or(t.doc.features.len());
+    for id in [Some(link.feature), mesh].into_iter().flatten() {
+        t.doc_mut().delete_feature(id).map_err(|e| e.to_string())?;
+    }
+    t.refresh();
+    let path = t.doc.first_path(comp);
+    let origin =
+        crate::cmd::component_clone::Source { doc: &part.doc, model: &part.model, pending_moves: part.uncaptured_moves(), other_design: true };
+    let (mut next, copy, copied) = crate::cmd::component_clone::build_into(&t, &origin, 0, comp, path).map_err(text)?;
+    let new_ids: Vec<u64> = copy["features"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+    super::move_features_to(next.doc_mut(), &new_ids, at);
+    next.refresh();
+    // The bodies keep the names they have here: those the copy named otherwise (renamed here, or
+    // numbered apart from another body) are found by their shape and renamed.
+    let state = next.model.state();
+    let built: Vec<&ModelBody> = state.bodies.iter().filter(|b| new_ids.contains(&b.feature)).collect();
+    let mut renames = Vec::new();
+    let mut free: Vec<&ModelBody> = built.iter().copied().filter(|b| !old_bodies.iter().any(|o| o.name == b.name)).collect();
+    for old in old_bodies.iter().filter(|o| !built.iter().any(|b| b.name == o.name)) {
+        let offset = s.doc.model_body_offset(old).copied().unwrap_or(solidcraft_doc::IDENTITY);
+        let mut found = None;
+        for (i, b) in free.iter().enumerate() {
+            let theirs = next.doc.model_body_offset(b).copied().unwrap_or(solidcraft_doc::IDENTITY);
+            if same_shape(old, &offset, b, &theirs).map_err(text)? {
+                found = Some(i);
+                break;
+            }
+        }
+        match found {
+            Some(i) => renames.push((free.swap_remove(i).name.clone(), old.name.clone())),
+            None => return Err(format!("the history doesn't build body {} as this design has it", old.name)),
+        }
+    }
+    drop(state);
+    for (from, to) in renames {
+        next.execute("body.rename", &json!({"body": from, "name": to})).map_err(text)?;
+    }
+    // This design's looks and materials of the linked bodies stay, over the design's own.
+    {
+        let d = next.doc_mut();
+        for old in &old_bodies {
+            match s.doc.appearances.bodies.get(&old.name) {
+                Some(look) => d.appearances.bodies.insert(old.name.clone(), look.clone()),
+                None => d.appearances.bodies.remove(&old.name),
+            };
+            match s.doc.materials.get(&old.name) {
+                Some(m) => d.materials.insert(old.name.clone(), m.clone()),
+                None => d.materials.remove(&old.name),
+            };
+        }
+        // The face looks given here are found again where they are; the design's own copies of
+        // them go.
+        let ours = s.doc.appearances.faces.len();
+        let names: BTreeSet<&str> = old_bodies.iter().map(|b| b.name.as_str()).collect();
+        let mut index = 0;
+        d.appearances.faces.retain(|f| {
+            index += 1;
+            index <= ours || !names.contains(f.body.as_str())
+        });
+    }
+    next.refresh();
+    let state = next.model.state();
+    let now: Vec<&ModelBody> = state.bodies.iter().filter(|b| new_ids.contains(&b.feature)).collect();
+    let mut faces = next.doc.appearances.faces.clone();
+    for f in faces.iter_mut().filter(|f| old_bodies.iter().any(|b| b.name == f.body)) {
+        if let Some(name) = f.name.as_mut()
+            && let Some(new) = renamed(&old_state, &now, name, f.point)
+        {
+            *name = new;
+            f.certificate = None;
+        }
+    }
+    drop(state);
+    next.doc_mut().appearances.faces = faces;
+    next.refresh();
+    let own: BTreeSet<u64> = next.doc.occurrences.iter().filter(|o| o.component == comp).map(|o| o.id).collect();
+    let ids: BTreeSet<u64> = new_ids.iter().copied().collect();
+    rename_joint_faces_on(&mut next, &old_state, &|b| ids.contains(&b.feature), &own);
+    next.refresh();
+    out.warnings.extend(before.check(&next, cmd, &name).map_err(text)?);
+    out.features = next.doc.features.iter().filter(|f| ids.contains(&f.id)).map(|f| f.name.clone()).collect();
+    out.components = copy["components"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
+    out.parameters = copied.parameters.values().cloned().collect();
+    out.renamed_parameters =
+        copied.parameters.iter().filter(|(from, to)| from != to).map(|(from, to)| RenamedParameter { from: from.clone(), to: to.clone() }).collect();
+    out.notices.extend(copy["notices"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string));
+    Ok(next)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -1152,6 +1389,146 @@ mod tests {
         assert_eq!(joint["joints"][0]["errors"], json!([]), "{joint}");
         run(&mut s, "joint.solve", json!({}));
         assert_eq!(centroids(&s), cen);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A part design: a box sized by a parameter `w`, saved at `path`.
+    fn save_part(path: &Path, w: &str) {
+        let mut part = Session::default();
+        run(&mut part, "parameters.add", json!({"name": "w", "expression": w}));
+        run(&mut part, "solid.box", json!({"length": 10, "width": "w", "height": 5, "body_name": "Plate"}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+
+    fn total_volume(s: &Session) -> f64 {
+        s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
+    }
+
+    #[test]
+    fn break_link_brings_the_history_in_and_keeps_one_component_for_all_placements() {
+        let dir = folder("break-history");
+        let file = dir.join("plate.sc");
+        save_part(&file, "20 mm");
+        let mut s = Session::default();
+        // This design has a `w` of its own: the part's comes in as `w_2`.
+        run(&mut s, "parameters.add", json!({"name": "w", "expression": "7 mm"}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path": file}));
+        let comp = inserted["component"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [50, 0, 0]}));
+        let placements = |s: &Session| s.doc.occurrences.iter().filter(|o| o.component == comp).count();
+        assert_eq!(placements(&s), 2);
+        let components = s.doc.components.len();
+        assert!((total_volume(&s) - 2000.0).abs() < 1e-6);
+        let undo = s.undo.len();
+        let out = run(&mut s, "component.break_link", json!({"component": comp}));
+        assert_eq!(out["history"], true, "{out}");
+        assert_eq!(out["warnings"], json!([]), "{out}");
+        assert_eq!(out["renamed_parameters"], json!([{"from": "w", "to": "w_2"}]), "{out}");
+        assert_eq!(out["parameters"], json!(["w_2"]), "{out}");
+        assert!(!out["features"].as_array().unwrap().is_empty(), "{out}");
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        assert!(s.doc.links.is_empty());
+        // The same component, still placed twice, now builds its bodies from its own history.
+        assert_eq!(s.doc.components.len(), components);
+        assert_eq!(placements(&s), 2);
+        assert_eq!(s.doc.components.iter().find(|c| c.id == comp).unwrap().name, "plate");
+        assert!(s.doc.features.iter().filter(|f| f.component == comp).all(|f| !matches!(f.kind, FeatureKind::Import { .. })));
+        assert!(s.model.state().body("Plate").is_some());
+        assert!((total_volume(&s) - 2000.0).abs() < 1e-6, "{}", total_volume(&s));
+        // The history is editable here, and both placements follow it.
+        run(&mut s, "parameters.change", json!({"name": "w_2", "expression": "30 mm"}));
+        assert!((total_volume(&s) - 3000.0).abs() < 1e-6, "{}", total_volume(&s));
+        // Undo brings the link back as it was.
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.links.contains_key(&comp));
+        assert!(s.doc.params.iter().all(|p| p.name != "w_2"));
+        assert!((total_volume(&s) - 2000.0).abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn break_link_after_extract_brings_the_subcomponents_and_keeps_the_joints() {
+        let dir = folder("break-joints");
+        let (mut s, plate, other) = assembly();
+        let plate_occ = s.doc.occurrence_of(plate).map(|o| o.id).unwrap();
+        let other_occ = s.doc.occurrence_of(other).map(|o| o.id).unwrap();
+        let face = |s: &Session, body: &str, top: bool| {
+            let w = s.world_state().unwrap();
+            let m = solidcraft_kernel::measure(&w.body(body).unwrap().body).unwrap();
+            [(m.bbox.min.x + m.bbox.max.x) / 2.0, (m.bbox.min.y + m.bbox.max.y) / 2.0, if top { m.bbox.max.z } else { m.bbox.min.z }]
+        };
+        let (top, bottom) = (face(&s, "PlateBody", true), face(&s, "OtherBody", false));
+        run(
+            &mut s,
+            "joint.create",
+            json!({"name": "Stack", "type": "rigid", "a": {"occurrence": plate_occ, "face": top}, "b": {"occurrence": other_occ, "face": bottom}}),
+        );
+        let cen = centroids(&s);
+        run(&mut s, "component.extract", json!({"component": "Plate", "path": dir.join("plate.solidcraft")}));
+        assert!(s.doc.links.contains_key(&plate));
+        let out = run(&mut s, "component.break_link", json!({"component": "Plate"}));
+        assert_eq!((&out["history"], &out["warnings"]), (&json!(true), &json!([])), "{out}");
+        assert_eq!(out["components"], 1, "the Pin comes back: {out}");
+        assert!(s.doc.links.is_empty());
+        // The Pin is Plate's subcomponent again, held by the joint that went to the file.
+        let pin = s.doc.components.iter().find(|c| c.name == "Pin").unwrap();
+        assert_eq!(pin.parent, plate);
+        assert!(s.doc.assembly.joints.iter().any(|j| j.name == "PinHold"), "{:?}", s.doc.assembly.joints);
+        // The plate's height comes back as a parameter (renamed when this design kept a `plate_h`).
+        let height = out["parameters"][0].as_str().unwrap().to_string();
+        assert!(height.starts_with("plate_h"), "{out}");
+        // The joint on the linked face stays on the same face.
+        let joint = run(&mut s, "joint.inspect", json!({"joint": "Stack"}));
+        assert_eq!(joint["joints"][0]["a"]["resolves"], true, "{joint}");
+        assert_eq!(joint["joints"][0]["errors"], json!([]), "{joint}");
+        run(&mut s, "joint.solve", json!({}));
+        assert_eq!(centroids(&s), cen);
+        run(&mut s, "parameters.change", json!({"name": height, "expression": "20 mm"}));
+        assert_eq!(volumes(&s)["PlateBody"], 40 * 30 * 20 * 1000);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn break_link_breaks_the_links_inside_the_linked_design_too() {
+        let dir = folder("break-nested");
+        let (inner, outer) = (dir.join("inner.sc"), dir.join("outer.sc"));
+        save_part(&inner, "20 mm");
+        let mut middle = Session::default();
+        run(&mut middle, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Cube"}));
+        run(&mut middle, "component.insert_design", json!({"path": inner, "translate": [20, 0, 0]}));
+        run(&mut middle, "file.save", json!({"path": outer}));
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": outer}));
+        let before = shapes(&s);
+        let out = run(&mut s, "component.break_link", json!({"component": "outer"}));
+        assert_eq!((&out["history"], &out["warnings"]), (&json!(true), &json!([])), "{out}");
+        assert_eq!(out["nested_links"], json!([inner.display().to_string()]), "{out}");
+        assert!(s.doc.links.is_empty(), "nothing stays linked");
+        assert_eq!(shapes(&s), before);
+        // The inner part's history came along: its parameter drives its plate here.
+        assert_eq!(out["parameters"], json!(["w"]), "{out}");
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "30 mm"}));
+        assert!((total_volume(&s) - (64.0 + 1500.0)).abs() < 1e-6, "{}", total_volume(&s));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn break_link_of_a_missing_design_keeps_the_bodies_and_says_so() {
+        let dir = folder("break-missing");
+        let file = dir.join("plate.sc");
+        save_part(&file, "20 mm");
+        let mut s = Session::default();
+        let comp = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+        std::fs::remove_file(&file).unwrap();
+        let before = shapes(&s);
+        let out = run(&mut s, "component.break_link", json!({"component": comp}));
+        assert_eq!(out["history"], false, "{out}");
+        let warning = out["warnings"][0].as_str().unwrap();
+        assert!(warning.contains("plate.sc") && warning.contains("history"), "{warning}");
+        assert!(s.doc.links.is_empty());
+        assert_eq!(shapes(&s), before);
+        assert!(s.doc.features.iter().any(|f| f.component == comp && matches!(f.kind, FeatureKind::Import { .. })));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
