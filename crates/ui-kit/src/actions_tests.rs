@@ -250,3 +250,44 @@ fn a_ghost_button_has_no_frame_at_rest_and_highlights_on_hover() {
     }
     assert!(hovered > 0, "a hovered ghost button still highlights");
 }
+
+/// An automatically sized ghost button keeps its layout when its border becomes visible.
+#[test]
+fn a_native_sized_ghost_button_keeps_its_size_on_hover() {
+    use egui::{Event, Pos2, RawInput, Rect, pos2, vec2};
+
+    let ctx = crate::test_support::context();
+    solidcraft_theme::apply(&ctx);
+    let frame = |pointer| {
+        let mut button_rect = Rect::NOTHING;
+        let mut neighbor_rect = Rect::NOTHING;
+        let mut hovered = false;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(260.0, 120.0))),
+            events: vec![Event::PointerMoved(pointer)],
+            ..Default::default()
+        };
+        raw_frame(&ctx, input, |ui| {
+            let widgets = &mut ui.style_mut().visuals.widgets;
+            widgets.noninteractive.bg_stroke.width = 1.0;
+            widgets.inactive.bg_stroke.width = 1.0;
+            widgets.hovered.bg_stroke.width = 1.0;
+            ui.horizontal(|ui| {
+                let response = button(ui, "Secondary action", Button::Ghost);
+                button_rect = response.rect;
+                hovered = response.hovered();
+                neighbor_rect = ui.label("Neighbor").rect;
+            });
+        });
+        (button_rect, neighbor_rect, hovered)
+    };
+
+    frame(pos2(250.0, 110.0));
+    let (rest, neighbor_at_rest, hovered) = frame(pos2(250.0, 110.0));
+    assert!(!hovered);
+    frame(rest.center());
+    let (on_hover, neighbor_on_hover, hovered) = frame(rest.center());
+    assert!(hovered);
+    assert_eq!(rest.size(), on_hover.size());
+    assert_eq!(neighbor_at_rest, neighbor_on_hover);
+}
