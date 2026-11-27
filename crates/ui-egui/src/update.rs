@@ -233,10 +233,14 @@ pub fn detect(p: &Probe) -> InstallKind {
         }
         "windows" => {
             let under = |k: &str| env(k).is_some_and(|dir| starts_with_ci(&exe, Path::new(&dir)));
-            let installed = p.msi_dir.as_deref().is_some_and(|dir| starts_with_ci(&exe, dir));
-            if !installed && p.msi_user_dir.as_deref().is_some_and(|dir| starts_with_ci(&exe, dir)) {
+            // The recorded folder holding the executable; when both do (one inside the other), the
+            // deeper one is the install it belongs to.
+            let holds = |dir: Option<&Path>| dir.filter(|d| starts_with_ci(&exe, d)).map(|d| d.to_string_lossy().trim_end_matches(['\\', '/']).len());
+            let (machine, user) = (holds(p.msi_dir.as_deref()), holds(p.msi_user_dir.as_deref()));
+            if user.is_some_and(|u| machine.is_none_or(|m| u > m)) {
                 return InstallKind::WindowsMsiPerUser;
             }
+            let installed = machine.is_some();
             if installed || under("ProgramFiles") || under("ProgramW6432") || under("ProgramFiles(x86)") {
                 return InstallKind::WindowsMsi;
             }

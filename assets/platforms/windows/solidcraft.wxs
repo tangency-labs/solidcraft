@@ -4,7 +4,7 @@
 
     wix build solidcraft.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
       -culture en-US -loc solidcraft.en-us.wxl -d Version=1.2.3 -d DisplayVersion=1.2.3-rc.1
-      -d BinDir=... -d IconPath=... -o out.msi
+      -d SortableVersion=00001.00002.00003 -d BinDir=... -d IconPath=... -o out.msi
 
   A setup wizard: Welcome, who to install for (all users, the default, or just me), install folder
   (Program Files\SolidCraft, or %LocalAppData%\Programs\SolidCraft just for me; an update keeps
@@ -89,6 +89,9 @@
     <Property Id="SOLIDCRAFTUSERDIR">
       <RegistrySearch Id="PreviousUserInstallFolder" Root="HKCU" Key="Software\SolidCraft" Name="InstallDir" Type="raw" />
     </Property>
+    <Property Id="SOLIDCRAFTUSERVERSION">
+      <RegistrySearch Id="PreviousUserVersion" Root="HKCU" Key="Software\SolidCraft" Name="SortableVersion" Type="raw" />
+    </Property>
     <Property Id="SOLIDCRAFTUSERPRODUCT">
       <RegistrySearch Id="PreviousUserProductCode" Root="HKCU" Key="Software\SolidCraft" Name="ProductCode" Type="raw" />
     </Property>
@@ -116,7 +119,12 @@
          can't see a per-user install, and the install reuses the wizard's result. So the wizard
          names the per-user version to replace itself, from the ProductCode it recorded. -->
     <SetProperty Id="SolidcraftUserUpgrade" Action="SetSolidcraftUserUpgrade" Value="1" After="SetSolidcraftScopeFixed" Sequence="ui"
-        Condition="SOLIDCRAFTUSEREXE AND SOLIDCRAFTUSERPRODUCT AND NOT SOLIDCRAFTMACHINEDIR AND NOT WIX_UPGRADE_DETECTED AND NOT SolidcraftScopeFixed" />
+        Condition="SOLIDCRAFTUSEREXE AND SOLIDCRAFTUSERPRODUCT AND NOT SOLIDCRAFTMACHINEDIR AND NOT WIX_UPGRADE_DETECTED AND NOT SolidcraftScopeFixed AND NOT (SOLIDCRAFTUSERVERSION &gt; &quot;$(var.SortableVersion)&quot;)" />
+    <!-- MajorUpgrade's downgrade check can't see that install either: refuse an older version
+         here (SortableVersion is zero-padded, so strings compare as versions). -->
+    <SetProperty Id="SolidcraftUserDowngrade" Action="SetSolidcraftUserDowngrade" Value="1" After="SetSolidcraftUserUpgrade" Sequence="ui"
+        Condition="SOLIDCRAFTUSEREXE AND NOT SOLIDCRAFTMACHINEDIR AND NOT WIX_UPGRADE_DETECTED AND NOT SolidcraftScopeFixed AND SOLIDCRAFTUSERVERSION &gt; &quot;$(var.SortableVersion)&quot;" />
+    <Launch Condition="NOT SolidcraftUserDowngrade" Message="A newer version of SolidCraft is already installed." />
     <SetProperty Id="ALLUSERS" Action="SetPerUserUpgradeAllUsers" Value="2" After="SetSolidcraftUserUpgrade" Sequence="ui"
         Condition="SolidcraftUserUpgrade" />
     <SetProperty Id="MSIINSTALLPERUSER" Action="SetPerUserUpgradeInstall" Value="1" After="SetPerUserUpgradeAllUsers" Sequence="ui"
@@ -239,6 +247,7 @@
              per-user install, from the user's own Start menu only. -->
         <!-- Which version is installed, for the wizard's per-user update (SetPerUserUpgradeProduct). -->
         <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="ProductCode" Value="[ProductCode]" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="SortableVersion" Value="$(var.SortableVersion)" Type="string" />
         <RemoveFile Id="RemoveUserStartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft.lnk" On="uninstall" />
       </Component>
 

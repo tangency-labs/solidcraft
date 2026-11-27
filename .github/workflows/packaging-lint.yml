@@ -100,9 +100,12 @@ jobs:
         shell: pwsh
         run: |
           git fetch --depth=1 origin main
-          New-Item -ItemType Directory -Force target/msi-scopes | Out-Null
-          git show FETCH_HEAD:assets/platforms/windows/solidcraft.wxs | Set-Content target/msi-scopes/main.wxs
-          ./packaging/windows/check-msi-scopes.ps1 -Out target/msi-scopes -BaselineWxs target/msi-scopes/main.wxs -FromRelease -Ui
+          # main's installer sources side by side, so its includes resolve.
+          New-Item -ItemType Directory -Force target/msi-scopes/main | Out-Null
+          foreach ($f in git ls-tree --name-only FETCH_HEAD assets/platforms/windows/) {
+            git show "FETCH_HEAD:$f" | Set-Content (Join-Path target/msi-scopes/main (Split-Path -Leaf $f))
+          }
+          ./packaging/windows/check-msi-scopes.ps1 -Out target/msi-scopes -BaselineWxs target/msi-scopes/main/solidcraft.wxs -FromRelease -Ui
       - name: Upload logs and wizard screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

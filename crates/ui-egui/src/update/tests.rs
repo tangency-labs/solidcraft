@@ -167,6 +167,9 @@ fn per_user_msi_install_is_told_apart() {
     assert_eq!(kind(None, Some(here)), InstallKind::WindowsMsiPerUser);
     assert_eq!(kind(Some(r"C:\Program Files\SolidCraft\"), Some(here)), InstallKind::WindowsMsiPerUser, "an all-users install elsewhere");
     assert_eq!(kind(Some(here), Some(here)), InstallKind::WindowsMsi);
+    // One recorded folder inside the other: the deeper one is the install.
+    assert_eq!(kind(Some(r"C:\Users\a b\AppData\Local\Programs\"), Some(here)), InstallKind::WindowsMsiPerUser);
+    assert_eq!(kind(Some(here), Some(r"C:\Users\a b\AppData\Local\Programs")), InstallKind::WindowsMsi);
     assert_eq!(kind(None, None), InstallKind::WindowsPortable);
     assert_eq!(asset_name(&InstallKind::WindowsMsiPerUser, "x86_64", "0.51.0").as_deref(), Some("solidcraft-windows-x64.msi"));
 }

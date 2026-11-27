@@ -54,9 +54,10 @@ $Icon = Join-Path $Root 'assets/icons/app/windows/exports/solidcraft.ico'
 
 function Build-Msi([string] $Version, [string] $Wxs, [string] $Name) {
   $msi = Join-Path $Out $Name
+  $sortable = (($Version -split '\.') | ForEach-Object { $_.PadLeft(5, '0') }) -join '.'
   & wix build $Wxs -arch $Arch -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
     -culture en-US -loc (Join-Path $Root 'assets/platforms/windows/solidcraft.en-us.wxl') `
-    -d "Version=$Version" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$Icon" -o $msi 2>&1 | Out-Host
+    -d "Version=$Version" -d "DisplayVersion=$Version" -d "SortableVersion=$sortable" -d "BinDir=$Stage" -d "IconPath=$Icon" -o $msi 2>&1 | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "wix build $Name failed ($LASTEXITCODE)" }
   return $msi
 }
@@ -71,10 +72,14 @@ $V5 = Build-Msi '99.0.5' $Wxs 'v5.msi'
 function Get-IceFindings([string] $Msi, [string] $Name) {
   Write-Host "==> wix msi validate $Name (all ICEs)"
   $lines = @(& wix msi validate $Msi -intermediateFolder (Join-Path $Out "validate-$Name") 2>&1 | ForEach-Object { "$_" })
+  $exit = $LASTEXITCODE
   $lines | Set-Content (Join-Path $Out "validate-$Name.txt")
   $lines | ForEach-Object { Write-Host "  $_" }
   # "file(line) : error WIX0204: ICE57: Component 'X' has ..." -> "error ICE57: Component 'X' has ..."
-  return @($lines | ForEach-Object { if ($_ -match ' : (error|warning) WIX\d+: (ICE\d+: .*)$') { "$($Matches[1]) $($Matches[2])" } } | Sort-Object -Unique)
+  $found = @($lines | ForEach-Object { if ($_ -match ' : (error|warning) WIX\d+: (ICE\d+: .*)$') { "$($Matches[1]) $($Matches[2])" } } | Sort-Object -Unique)
+  # ICE errors make it exit non-zero; any other failure means validation didn't run.
+  if ($exit -ne 0 -and -not ($found | Where-Object { $_ -like 'error *' })) { throw "wix msi validate $Name failed ($exit) without ICE findings" }
+  return $found
 }
 $Findings = Get-IceFindings $V1 'this'
 if ($BaselineWxs) {
@@ -276,16 +281,22 @@ $p = Start-Process msiexec -ArgumentList '/i', 'C:\sc-scope-test\v1.msi', '/qn',
 $r.perMachineExit = $p.ExitCode
 $r | ConvertTo-Json | Set-Content 'C:\sc-scope-test\result.json'
 '@ | Set-Content $userScript
-$name = 'scstd'
+# A new account each run (sc + 8 hex digits, within the 20-character limit), removed afterwards
+# together with the policy change, whatever happens in between.
+$name = 'sc' + [guid]::NewGuid().ToString('N').Substring(0, 8)
 $password = 'Sc!' + [guid]::NewGuid().ToString('N').Substring(0, 20) + 'a1'
 $secure = ConvertTo-SecureString $password -AsPlainText -Force
-if (-not (Get-LocalUser -Name $name -ErrorAction SilentlyContinue)) {
+try {
   New-LocalUser -Name $name -Password $secure -AccountNeverExpires -PasswordNeverExpires | Out-Null
   Add-LocalGroupMember -Group 'Users' -Member $name -ErrorAction SilentlyContinue
+  $cred = [Management.Automation.PSCredential]::new($name, $secure)
+  $p = Start-Process powershell -Credential $cred -LoadUserProfile -WorkingDirectory $Shared -Wait -PassThru `
+    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $userScript
+} finally {
+  Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
+  if ($null -ne $DisableMsi) { Set-ItemProperty $InstallerPolicy -Name DisableMsi -Value $DisableMsi }
+  elseif ($HadPolicy) { Remove-ItemProperty $InstallerPolicy -Name DisableMsi } else { Remove-Item $InstallerPolicy }
 }
-$cred = [Management.Automation.PSCredential]::new($name, $secure)
-$p = Start-Process powershell -Credential $cred -LoadUserProfile -WorkingDirectory $Shared -Wait -PassThru `
-  -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $userScript
 $resultFile = Join-Path $Shared 'result.json'
 if (Test-Path $resultFile) {
   $r = Get-Content $resultFile -Raw | ConvertFrom-Json
@@ -298,8 +309,6 @@ if (Test-Path $resultFile) {
 } else {
   Check $false "the standard-user run wrote no result (powershell exit $($p.ExitCode))"
 }
-if ($null -ne $DisableMsi) { Set-ItemProperty $InstallerPolicy -Name DisableMsi -Value $DisableMsi }
-elseif ($HadPolicy) { Remove-ItemProperty $InstallerPolicy -Name DisableMsi } else { Remove-Item $InstallerPolicy }
 foreach ($f in 'user-install.log', 'user-machine.log') { Copy-Item (Join-Path $Shared $f) $Out -ErrorAction SilentlyContinue }
 
 # ---- the latest release, then this MSI over it ------------------------------------------------
