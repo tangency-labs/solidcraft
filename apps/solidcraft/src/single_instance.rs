@@ -13,6 +13,11 @@
 //! only when it names an existing file, then queues it for the same open the File menu uses; nothing
 //! it receives is run or interpreted beyond that.
 //!
+//! Workshop links (`solidcraft://workshop/…`, docs/workshop-links.md) travel the same way, under
+//! `links`, answered `ok links`. An instance from before them refuses such a request (`no files`)
+//! and the launch opens the link itself. The running instance only passes on text that looks like
+//! a Workshop link; the window parses it strictly and asks before it opens or installs anything.
+//!
 //! A launch that gets no answer within [`ANSWER_WITHIN`] (a stale socket, a window that hangs) starts
 //! normally, so the channel can never keep SolidCraft from opening. `--new-instance` skips the hand-off.
 
@@ -39,6 +44,27 @@ const MAX_CONNECTIONS: usize = 8;
 const OK: &str = "ok";
 /// The reply to an accepted read-only request: an instance from before `--read-only` never sends it.
 const OK_READ_ONLY: &str = "ok read-only";
+/// The reply to accepted Workshop links: an instance from before them never sends it.
+const OK_LINKS: &str = "ok links";
+
+/// What a request hands over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Handed {
+    /// Files to open, and whether they open read-only.
+    Files(Vec<String>, bool),
+    /// `solidcraft://` links for the window to look up and ask about.
+    Links(Vec<String>),
+}
+
+impl Handed {
+    fn reply(&self) -> &'static str {
+        match self {
+            Handed::Files(_, false) => OK,
+            Handed::Files(_, true) => OK_READ_ONLY,
+            Handed::Links(_) => OK_LINKS,
+        }
+    }
+}
 
 /// Where the running instance listens and the token it expects.
 #[derive(Debug, Clone)]
@@ -95,26 +121,43 @@ pub fn valid_files(paths: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// A request line: the token, the files, and whether they open read-only (`read_only_files` in
-/// place of `files`). `Err` says why it is refused.
-pub fn parse_request(line: &str, token: &str) -> Result<(Vec<String>, bool), &'static str> {
+/// The Workshop links of a request that could be links at all; anything else is dropped. The
+/// window parses each one strictly before it does anything with it.
+pub fn valid_links(links: &[String]) -> Vec<String> {
+    links
+        .iter()
+        .take(MAX_FILES)
+        .filter(|l| solidcraft_ui_egui::workshop::link::looks_like_link(l) && !l.chars().any(char::is_control))
+        .cloned()
+        .collect()
+}
+
+/// A request line: the token and the files, and whether they open read-only (`read_only_files` in
+/// place of `files`), or Workshop links (`links`). `Err` says why it is refused.
+pub fn parse_request(line: &str, token: &str) -> Result<Handed, &'static str> {
     let value: Value = serde_json::from_str(line).map_err(|_| "not a request")?;
     let given = value.get("token").and_then(Value::as_str).ok_or("no token")?;
     if !solidcraft_control::auth::tokens_match(given, token) {
         return Err("wrong token");
     }
-    let (files, read_only) = match (value.get("files"), value.get("read_only_files")) {
-        (Some(files), None) => (files, false),
-        (None, Some(files)) => (files, true),
-        (Some(_), Some(_)) => return Err("files and read-only files together"),
-        (None, None) => return Err("no files"),
+    let (files, kind) = match (value.get("files"), value.get("read_only_files"), value.get("links")) {
+        (Some(files), None, None) => (files, 0),
+        (None, Some(files), None) => (files, 1),
+        (None, None, Some(links)) => (links, 2),
+        (None, None, None) => return Err("no files"),
+        (_, _, Some(_)) => return Err("files and links together"),
+        _ => return Err("files and read-only files together"),
     };
     let files = files.as_array().ok_or("no files")?;
     if files.len() > MAX_FILES {
         return Err("too many files");
     }
     let files = files.iter().map(|f| f.as_str().map(str::to_string).ok_or("a file is not text")).collect::<Result<Vec<_>, _>>()?;
-    Ok((files, read_only))
+    Ok(match kind {
+        0 => Handed::Files(files, false),
+        1 => Handed::Files(files, true),
+        _ => Handed::Links(files),
+    })
 }
 
 /// Make a relative path absolute against the working directory, as the second launch sees it.
@@ -130,40 +173,52 @@ pub fn absolute(path: &str) -> String {
 /// should end. `false`: nobody answered in time, or it refused; start normally. No files only asks
 /// whether an instance is there.
 pub fn forward(endpoint: &Endpoint, files: &[String]) -> bool {
-    send(endpoint, files, false)
+    send(endpoint, Handed::Files(files.to_vec(), false))
 }
 
 /// [`forward`] for files that open read-only (`solidcraft --read-only`). `true` only when the
 /// instance answered that it opens them read-only; an older one refuses, and this launch starts.
 pub fn forward_read_only(endpoint: &Endpoint, files: &[String]) -> bool {
-    send(endpoint, files, true)
+    send(endpoint, Handed::Files(files.to_vec(), true))
 }
 
-fn send(endpoint: &Endpoint, files: &[String], read_only: bool) -> bool {
+/// Hand Workshop links to the running instance. `true` only when it answered that it takes
+/// links; an older one refuses, and this launch starts and opens them itself.
+pub fn forward_links(endpoint: &Endpoint, links: &[String]) -> bool {
+    send(endpoint, Handed::Links(links.to_vec()))
+}
+
+fn send(endpoint: &Endpoint, handed: Handed) -> bool {
     let Ok(token) = std::fs::read_to_string(&endpoint.token) else { return false };
-    let request = request_line(token.trim(), files, read_only);
+    let request = request_line(token.trim(), &handed);
+    let expected = handed.reply();
     let endpoint = endpoint.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     // A thread so that an instance that accepts and never answers cannot hold this launch.
     let spawned = std::thread::Builder::new().name("single-instance-forward".into()).spawn(move || {
-        let _ = tx.send(ask(&endpoint, &request, read_only));
+        let _ = tx.send(ask(&endpoint, &request, expected));
     });
     spawned.is_ok() && rx.recv_timeout(ANSWER_WITHIN).unwrap_or(false)
 }
 
-/// The request line. Read-only files go under `read_only_files`, which an instance from before
-/// `--read-only` does not read: it refuses (`no files`) instead of opening them for writing.
-fn request_line(token: &str, files: &[String], read_only: bool) -> String {
-    if read_only { json!({ "token": token, "read_only_files": files }).to_string() } else { json!({ "token": token, "files": files }).to_string() }
+/// The request line. Read-only files go under `read_only_files` and links under `links`, which an
+/// instance from before them does not read: it refuses (`no files`) instead of opening them some
+/// other way.
+fn request_line(token: &str, handed: &Handed) -> String {
+    match handed {
+        Handed::Files(files, false) => json!({ "token": token, "files": files }),
+        Handed::Files(files, true) => json!({ "token": token, "read_only_files": files }),
+        Handed::Links(links) => json!({ "token": token, "links": links }),
+    }
+    .to_string()
 }
 
-/// Whether `reply` accepts the request: a read-only one needs [`OK_READ_ONLY`].
-fn accepted(reply: &str, read_only: bool) -> bool {
-    let expected = if read_only { OK_READ_ONLY } else { OK };
+/// Whether `reply` accepts the request: the answer for its kind ([`Handed::reply`]).
+fn accepted(reply: &str, expected: &str) -> bool {
     reply.trim() == expected
 }
 
-fn ask(endpoint: &Endpoint, request: &str, read_only: bool) -> bool {
+fn ask(endpoint: &Endpoint, request: &str, expected: &str) -> bool {
     let Ok(name) = endpoint.name() else { return false };
     let Ok(stream) = Stream::connect(name) else { return false };
     let mut stream = BufReader::new(stream);
@@ -171,11 +226,11 @@ fn ask(endpoint: &Endpoint, request: &str, read_only: bool) -> bool {
         return false;
     }
     let mut reply = String::new();
-    stream.read_line(&mut reply).is_ok() && accepted(&reply, read_only)
+    stream.read_line(&mut reply).is_ok() && accepted(&reply, expected)
 }
 
-/// What the listener does with accepted files, and whether they open read-only.
-pub type Sink = Arc<dyn Fn(Vec<String>, bool) + Send + Sync>;
+/// What the listener does with what a request hands over.
+pub type Sink = Arc<dyn Fn(Handed) + Send + Sync>;
 
 /// Listen at `endpoint` on a thread of its own, handing the files of each valid request to `sink`.
 /// Does nothing (`false`) when another instance already answers there, so a `--new-instance` run
@@ -251,12 +306,15 @@ fn serve(stream: Stream, token: &str, sink: &Sink, open: &AtomicBool) {
     let reply = match read {
         _ if !open.load(Ordering::SeqCst) => "refused: closing".to_string(),
         Ok(n) if n > 0 && line.ends_with('\n') => match parse_request(&line, token) {
-            Ok((files, read_only)) => {
-                let files = valid_files(&files);
-                if !files.is_empty() {
-                    sink(files, read_only);
+            Ok(handed) => {
+                let answer = handed.reply();
+                let handed = match handed {
+                    Handed::Files(files, read_only) => Handed::Files(valid_files(&files), read_only),
+                    Handed::Links(links) => Handed::Links(valid_links(&links)),
+                };
+                if !matches!(&handed, Handed::Files(list, _) | Handed::Links(list) if list.is_empty()) {
+                    sink(handed);
                 }
-                let answer = if read_only { OK_READ_ONLY } else { OK };
                 answer.to_string()
             }
             Err(why) => format!("refused: {why}"),
@@ -287,6 +345,8 @@ pub fn cleanup(endpoint: &Endpoint) {
 
 /// Files that arrived and have not been opened yet.
 static PENDING: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+/// Workshop links that arrived (or were named at launch) and have not been looked up yet.
+static PENDING_LINKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// The endpoint this instance listens at, for [`stop`].
 static LISTENING: OnceLock<(Endpoint, Arc<AtomicBool>)> = OnceLock::new();
 
@@ -295,12 +355,26 @@ fn hold(files: Vec<String>, read_only: bool) {
     PENDING.lock().unwrap_or_else(PoisonError::into_inner).extend(files.into_iter().map(|f| (f, read_only)));
 }
 
+/// Keep Workshop links until the window looks them up ([`take_links`]): links named on this
+/// launch's command line, or handed over by a later launch.
+pub fn hold_links(links: Vec<String>) {
+    PENDING_LINKS.lock().unwrap_or_else(PoisonError::into_inner).extend(links);
+}
+
+/// The Workshop links that arrived since the last call.
+pub fn take_links() -> Vec<String> {
+    std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
 /// Start listening for files other launches hand over; the window comes forward and opens them.
 pub fn start(settings: Option<&Path>, ctx: &egui::Context) {
     let Some(endpoint) = settings.and_then(Endpoint::in_settings) else { return };
     let ctx = ctx.clone();
-    let sink: Sink = Arc::new(move |files: Vec<String>, read_only: bool| {
-        hold(files, read_only);
+    let sink: Sink = Arc::new(move |handed: Handed| {
+        match handed {
+            Handed::Files(files, read_only) => hold(files, read_only),
+            Handed::Links(links) => hold_links(links),
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         ctx.request_repaint();
@@ -340,7 +414,14 @@ mod tests {
     fn collecting() -> (Sink, Arc<Mutex<Vec<String>>>) {
         let got = Arc::new(Mutex::new(Vec::new()));
         let sink = got.clone();
-        (Arc::new(move |files: Vec<String>, _read_only: bool| sink.lock().unwrap().extend(files)), got)
+        (
+            Arc::new(move |handed: Handed| {
+                if let Handed::Files(files, _) = handed {
+                    sink.lock().unwrap().extend(files)
+                }
+            }),
+            got,
+        )
     }
 
     fn wait_for(got: &Arc<Mutex<Vec<String>>>, count: usize) -> Vec<String> {
@@ -355,7 +436,7 @@ mod tests {
 
     #[test]
     fn request_needs_the_token_and_text_files() {
-        assert_eq!(parse_request(r#"{"token":"t","files":["/a.sc","/b.sc"]}"#, "t"), Ok((vec!["/a.sc".into(), "/b.sc".into()], false)));
+        assert_eq!(parse_request(r#"{"token":"t","files":["/a.sc","/b.sc"]}"#, "t"), Ok(Handed::Files(vec!["/a.sc".into(), "/b.sc".into()], false)));
         assert_eq!(parse_request(r#"{"token":"x","files":["/a.sc"]}"#, "t"), Err("wrong token"));
         assert_eq!(parse_request(r#"{"files":["/a.sc"]}"#, "t"), Err("no token"));
         assert_eq!(parse_request(r#"{"token":"t"}"#, "t"), Err("no files"));
@@ -469,7 +550,7 @@ mod tests {
         let file = dir.join("part.sc");
         std::fs::write(&file, b"x").unwrap();
         let request = json!({ "token": "guess", "files": [file.to_string_lossy()] }).to_string();
-        assert!(!ask(&endpoint, &request, false));
+        assert!(!ask(&endpoint, &request, OK));
         std::thread::sleep(Duration::from_millis(100));
         assert!(got.lock().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
@@ -486,7 +567,7 @@ mod tests {
         let token = std::fs::read_to_string(&endpoint.token).unwrap();
         stop();
         let request = json!({ "token": token.trim(), "files": [file.to_string_lossy()] }).to_string();
-        assert!(!ask(&endpoint, &request, false), "a stopped instance took a hand-off");
+        assert!(!ask(&endpoint, &request, OK), "a stopped instance took a hand-off");
         std::thread::sleep(Duration::from_millis(100));
         assert!(take().is_empty());
         std::fs::write(&endpoint.token, "next launch").unwrap();
@@ -498,26 +579,28 @@ mod tests {
     #[test]
     fn a_read_only_request_names_its_files_apart() {
         let files = vec!["/a.sc".to_string()];
-        assert_eq!(parse_request(r#"{"token":"t","read_only_files":["/a.sc"]}"#, "t"), Ok((vec!["/a.sc".into()], true)));
+        assert_eq!(parse_request(r#"{"token":"t","read_only_files":["/a.sc"]}"#, "t"), Ok(Handed::Files(vec!["/a.sc".into()], true)));
         assert_eq!(parse_request(r#"{"token":"t","files":["/a.sc"],"read_only_files":["/a.sc"]}"#, "t"), Err("files and read-only files together"));
         assert_eq!(parse_request(r#"{"token":"t","read_only_files":[1]}"#, "t"), Err("a file is not text"));
         let many = format!(r#"{{"token":"t","read_only_files":[{}]}}"#, vec!["\"/a\""; MAX_FILES + 1].join(","));
         assert_eq!(parse_request(&many, "t"), Err("too many files"));
-        let plain: Value = serde_json::from_str(&request_line("t", &files, false)).unwrap();
+        let plain: Value = serde_json::from_str(&request_line("t", &Handed::Files(files.clone(), false))).unwrap();
         assert_eq!(plain, json!({"token": "t", "files": ["/a.sc"]}));
-        let read_only: Value = serde_json::from_str(&request_line("t", &files, true)).unwrap();
+        let read_only: Value = serde_json::from_str(&request_line("t", &Handed::Files(files.clone(), true))).unwrap();
         assert_eq!(read_only, json!({"token": "t", "read_only_files": ["/a.sc"]}));
         assert!(read_only.get("files").is_none());
-        assert_eq!(parse_request(&request_line("t", &files, true), "t"), Ok((files, true)));
+        assert_eq!(parse_request(&request_line("t", &Handed::Files(files.clone(), true)), "t"), Ok(Handed::Files(files, true)));
     }
 
     #[test]
     fn only_the_read_only_answer_takes_a_read_only_request() {
-        assert!(accepted("ok\n", false));
-        assert!(accepted("ok read-only\n", true));
-        assert!(!accepted("ok\n", true));
-        assert!(!accepted("ok read-only\n", false));
-        assert!(!accepted("refused: no files\n", true));
+        assert!(accepted("ok\n", OK));
+        assert!(accepted("ok read-only\n", OK_READ_ONLY));
+        assert!(!accepted("ok\n", OK_READ_ONLY));
+        assert!(!accepted("ok read-only\n", OK));
+        assert!(!accepted("refused: no files\n", OK_READ_ONLY));
+        assert!(accepted("ok links\n", OK_LINKS));
+        assert!(!accepted("ok\n", OK_LINKS));
     }
 
     #[test]
@@ -563,7 +646,7 @@ mod tests {
                 let request: Value = serde_json::from_str(&line).unwrap_or_default();
                 let reply = match request.get("files").and_then(Value::as_array) {
                     Some(files) => {
-                        sink(files.iter().filter_map(Value::as_str).map(str::to_string).collect(), false);
+                        sink(Handed::Files(files.iter().filter_map(Value::as_str).map(str::to_string).collect(), false));
                         OK.to_string()
                     }
                     None => "refused: no files".to_string(),
@@ -587,8 +670,10 @@ mod tests {
         let endpoint = Endpoint::in_settings(&dir).unwrap();
         let got: Arc<Mutex<Vec<(String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_got = got.clone();
-        let sink: Sink = Arc::new(move |files: Vec<String>, read_only: bool| {
-            sink_got.lock().unwrap().extend(files.into_iter().map(|f| (f, read_only)));
+        let sink: Sink = Arc::new(move |handed: Handed| {
+            if let Handed::Files(files, read_only) = handed {
+                sink_got.lock().unwrap().extend(files.into_iter().map(|f| (f, read_only)));
+            }
         });
         assert!(listen(&endpoint, sink));
         let file = dir.join("part.sc");
@@ -612,6 +697,58 @@ mod tests {
         hold(vec!["/b.sc".into(), "/c.sc".into()], true);
         assert_eq!(take(), vec![("/a.sc".to_string(), false), ("/b.sc".to_string(), true), ("/c.sc".to_string(), true)]);
         assert!(take().is_empty());
+    }
+
+    #[test]
+    fn a_workshop_link_reaches_the_running_instance() {
+        let dir = temp("links");
+        let endpoint = Endpoint::in_settings(&dir).unwrap();
+        let got: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_got = got.clone();
+        let sink: Sink = Arc::new(move |handed: Handed| match handed {
+            Handed::Links(links) => sink_got.lock().unwrap().extend(links),
+            Handed::Files(..) => panic!("a link arrived as a file"),
+        });
+        assert!(listen(&endpoint, sink));
+        let link = "solidcraft://workshop/model/bherbruck/wall-mount-shelf-bracket@1.2.0".to_string();
+        assert!(forward_links(&endpoint, &[link.clone(), "/etc/passwd".into(), "solidcraft://workshop/x\u{7}".into()]));
+        assert_eq!(wait_for(&got, 1), vec![link.clone()]);
+        assert_eq!(
+            parse_request(r#"{"token":"t","links":["solidcraft://workshop/plugin/maker/gears"]}"#, "t"),
+            Ok(Handed::Links(vec!["solidcraft://workshop/plugin/maker/gears".into()]))
+        );
+        assert_eq!(parse_request(r#"{"token":"t","links":["a"],"files":["/a.sc"]}"#, "t"), Err("files and links together"));
+        assert_eq!(valid_links(&[link.clone(), "https://workshop.solidcraft.io/model/a/b".into()]), vec![link]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_instance_from_before_links_leaves_the_link_to_this_launch() {
+        use interprocess::local_socket::{ListenerOptions, prelude::*};
+        // `serve` as it was before links: no `files`, so it refuses and opens nothing.
+        let dir = temp("before-links");
+        let endpoint = Endpoint::in_settings(&dir).unwrap();
+        std::fs::write(&endpoint.token, "t").unwrap();
+        let listener = ListenerOptions::new().name(endpoint.name().unwrap()).try_overwrite(true).create_sync().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let request: Value = serde_json::from_str(&line).unwrap_or_default();
+                let reply = if request.get("files").is_some() { OK } else { "refused: no files" };
+                let _ = writeln!(reader.get_mut(), "{reply}");
+            }
+        });
+        assert!(!forward_links(&endpoint, &["solidcraft://workshop/plugin/maker/gears".into()]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn held_links_wait_for_the_window() {
+        hold_links(vec!["solidcraft://workshop/plugin/maker/gears".into()]);
+        assert_eq!(take_links(), vec!["solidcraft://workshop/plugin/maker/gears".to_string()]);
+        assert!(take_links().is_empty());
     }
 
     #[test]

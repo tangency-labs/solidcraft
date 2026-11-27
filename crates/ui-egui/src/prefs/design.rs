@@ -314,6 +314,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        ui_kit::settings_section(ui, "weld_symbol_standard", app.tr("ui.weld.standard"), |ui| {
+            let ids = solidcraft_engine::doc::weld::SYMBOL_STANDARDS;
+            let labels = [app.tr("ui.weld.standard.iso_a"), app.tr("ui.weld.standard.iso_b"), app.tr("ui.weld.standard.aws")];
+            let mut selected = ids.iter().position(|id| *id == app.preferences.weld_symbol_standard).unwrap_or(0);
+            let locked = app.policy.locks("weld_symbol_standard");
+            crate::policy::row(ui, locked, |ui| ui_kit::choice_row(ui, app.tr("ui.weld.standard"), "weld_symbol_standard", &mut selected, &labels));
+            if let Some(id) = ids.get(selected) {
+                app.preferences.weld_symbol_standard = (*id).into();
+            }
+            ui_kit::text(ui, app.tr("ui.weld.standard.help"), ui_kit::Text::Hint("weld_symbol_standard"));
+            for id in ["ui.weld.standard.jis", "ui.weld.standard.gb", "ui.weld.standard.gost"] {
+                ui.add_enabled_ui(false, |ui| ui_kit::text(ui, app.tr(id), ui_kit::Text::Inline));
+            }
+        });
     });
 }
 

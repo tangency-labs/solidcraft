@@ -19,6 +19,10 @@
 //! Not upstream (WR-404, tangency-labs/solidcore#411): the curve sweep's caps
 //! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
 //! and last `count` side faces.
+//! Not upstream (T-2272): the curve sweep joins each run of a profile's consecutive
+//! collinear lines into one line before joining the profile (`join_collinear_lines`), so
+//! the face swept from the run has one knot span across it, not one per line with the
+//! parameter speed jumping between them.
 //! Not upstream (tangency-labs/solidcore#2192, WR-675): a sweep along a closed path
 //! whose end sections lie on its start sections (`sweep_ends_coincide`) is not capped,
 //! so the stitch joins its side faces' end edges to their start edges.
@@ -962,7 +966,9 @@ impl PrimitiveCreation {
             let mut closed_sections = options.cap_ends
                 && !composites.composites.is_empty()
                 && path_leaves_its_start(&prepared.path, a.brep(brep)?.tolerance())?;
-            for (index, mut composite) in composites.composites.into_iter().enumerate() {
+            let tolerance = a.brep(brep)?.tolerance();
+            for (index, composite) in composites.composites.into_iter().enumerate() {
+                let mut composite = join_collinear_lines(composite, tolerance)?;
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
                 // (not upstream) an upright sweep's up direction, turned into the space the
@@ -1064,6 +1070,110 @@ impl PrimitiveCreation {
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
     }
+}
+
+/// The ends of segment `s` as it runs in its composite (its sense applied) when its curve is
+/// a straight line: a non-rational degree-1 B-spline with two control points. `None` for any
+/// other curve.
+fn straight_segment(
+    s: &crate::curve::composite_curve::CompositeCurveSegment,
+) -> Result<Option<(Point3, Point3)>> {
+    let crate::curve::curve::CurveKind::BSpline(b) = s.curve.kind() else {
+        return Ok(None);
+    };
+    if b.degree()? != 1 || b.is_rational()? {
+        return Ok(None);
+    }
+    let [p, q] = b.control_points()? else {
+        return Ok(None);
+    };
+    let (p, q) = (Point3::new(p.x, p.y, p.z), Point3::new(q.x, q.y, q.z));
+    Ok(Some(if s.same_sense { (p, q) } else { (q, p) }))
+}
+
+/// Whether the line from `start` to `end` passes within `tol` of every point of `joints`,
+/// each lying strictly between the two ends along it: the polyline through them is that line
+/// to `tol`, running one way.
+fn joints_on_line(start: Point3, end: Point3, joints: &[Point3], tol: f64) -> bool {
+    let d = end - start;
+    let len2 = d.dot(d);
+    if !(len2.is_finite() && len2 > 0.0) {
+        return false;
+    }
+    joints.iter().all(|&j| {
+        let along = (j - start).dot(d);
+        let off = (j - start) - d * (along / len2);
+        along > 0.0 && along < len2 && off.length() <= tol
+    })
+}
+
+/// (not upstream, T-2272) `composite` with each run of consecutive straight segments that
+/// lie on one line (every joint within `tol` of the line through the run's ends, the run
+/// going one way) replaced by that one line segment. The joined profile
+/// ([`CompositeCurve::make_composite_nurb`]) gives every segment one knot span whatever its
+/// length, and the sweep makes a face only where the profile turns a corner, so a run of
+/// collinear lines would be one face whose parameter speed jumps at every hidden knot: smooth
+/// in space, creased in its own UV, and a trim crossing a crease is fitted with a near-kink.
+/// One line has one span and no crease. The shape is the same to `tol` (the joints are the
+/// polyline's only departure from the line). A run is not joined across a closed composite's
+/// seam. The composite is returned as it was when nothing joins.
+///
+/// # Errors
+///
+/// Those of the segments' B-spline queries, the line construction and
+/// [`CompositeCurve::with_curves`].
+fn join_collinear_lines(composite: CompositeCurve, tol: f64) -> Result<CompositeCurve> {
+    let segments = composite.segments();
+    let mut straight = Vec::new();
+    for s in segments {
+        straight.push(straight_segment(s)?);
+    }
+    // runs[i]: the segments from i up to (not including) the run's end
+    let mut curves = Vec::new();
+    let mut senses = Vec::new();
+    let mut gaps = Vec::new();
+    let mut joined_any = false;
+    let mut i = 0;
+    while let Some(first) = segments.get(i) {
+        let mut end = i + 1;
+        if let Some(Some((start, mut last))) = straight.get(i).copied() {
+            let mut joints = Vec::new();
+            while let Some(Some((next_start, next_end))) = straight.get(end).copied() {
+                let mut trial = joints.clone();
+                trial.push(last);
+                if next_start.distance(last) > tol || !joints_on_line(start, next_end, &trial, tol)
+                {
+                    break;
+                }
+                joints = trial;
+                last = next_end;
+                end += 1;
+            }
+            if end > i + 1 {
+                joined_any = true;
+                let line = BSplineCurve::create_line_segment(composite.dim(), start, last)?;
+                curves.push(Curve::from(line));
+                senses.push(true);
+                gaps.push(segments.get(end - 1).map_or(0.0, |s| s.gap_end));
+                i = end;
+                continue;
+            }
+        }
+        curves.push(first.curve.clone());
+        senses.push(first.same_sense);
+        gaps.push(first.gap_end);
+        i = end;
+    }
+    if !joined_any {
+        return Ok(composite);
+    }
+    CompositeCurve::with_curves(
+        composite.dim(),
+        curves,
+        composite.is_closed(),
+        Some(&senses),
+        Some(&gaps),
+    )
 }
 
 /// The rigid motions carrying the profile as given onto the sweep's sections placed

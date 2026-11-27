@@ -372,6 +372,9 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     if extent.through_all || extent.through_all2 || extent.to2.is_some() || extent.from.is_some() {
         return Err(bad(cmd, "not supported yet: through all, a second side through all or to an object, or from an object"));
     }
+    if extent.to_ref.is_some() {
+        return Err(bad(cmd, "not supported yet: `to` as a plane or a construction point; give a point [x, y, z]"));
+    }
     if to_next && extent.direction == solidcraft_doc::Direction::Symmetric {
         return Err(bad(cmd, "not supported yet: `to_next` to both sides (`direction: symmetric`)"));
     }
@@ -2319,6 +2322,80 @@ mod tests {
         );
         assert_eq!(topology(&s, "Tangent"), (1, 4, 4, 1));
         close(area(&s, "Tangent"), 30.0 * 1700f64.sqrt());
+    }
+
+    /// Surface Loft from a body's edge to a line of a planar sketch (#7383): the line drawn one
+    /// way and the other gives the same flat 10 × 30 and 10 × 40 strip, the edge chain turned to
+    /// run as the line does, as it is for a 3D sketch line; a strip lofted from an edge to a line
+    /// running the other way would cross itself halfway, with a smaller area.
+    #[test]
+    fn surface_loft_from_a_body_edge_to_a_planar_sketch_line_drawn_either_way() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Lid"}));
+        run(&mut s, "sketch.create", json!({"plane": "Lid", "name": "Flat"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, -30], [10, -30]], "ids": ["along"]}));
+        run(&mut s, "sketch.line", json!({"points": [[10, -40], [0, -40]], "ids": ["back"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        for (line, gap, name) in [("along", 30.0, "ToBox"), ("back", 40.0, "ToBoxBack")] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": [{"sketch": "Flat", "curves": [line]}, {"body": "Box", "edges": [[5, 0, 10]]}], "body_name": name}),
+            );
+            let got = area(&s, name);
+            assert!((got - 10.0 * gap).abs() < 10.0 * gap * 1e-6, "{name}: area {got} vs a flat strip's {}", 10.0 * gap);
+        }
+    }
+
+    /// The same for a fit-point spline (#7383): a box edge lofted to a spline listed one way and
+    /// the other way round gives the same surface, not one that crosses itself.
+    #[test]
+    fn surface_loft_from_a_body_edge_to_a_spline_listed_either_way() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Box"}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Lid"}));
+        let points = [[0, -30], [15, -22], [30, -38], [40, -30]];
+        let mut back = points;
+        back.reverse();
+        let mut areas = Vec::new();
+        for (sketch, pts) in [("Fwd", points), ("Rev", back)] {
+            run(&mut s, "sketch.create", json!({"plane": "Lid", "name": sketch}));
+            run(&mut s, "sketch.spline.fit_point", json!({"points": pts}));
+            run(&mut s, "sketch.finish", json!({}));
+            let name = format!("To{sketch}");
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": [{"body": "Box", "edges": [[20, 0, 10]]}, {"sketch": sketch, "curves": ["s1"]}], "body_name": name}),
+            );
+            areas.push(area(&s, &name));
+        }
+        assert!((areas[0] - areas[1]).abs() < areas[0] * 1e-6, "spline one way {} vs the other {}", areas[0], areas[1]);
+    }
+
+    /// Two planar sketch lines lofted G1 at both ends (#7383), drawn the same way or opposite
+    /// ways: each gives the flat 10 wide strip between the two lines, not one that crosses itself.
+    #[test]
+    fn surface_loft_g1_between_planar_lines_drawn_either_way() {
+        let mut s = Session::default();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Lid"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Low"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "Lid", "name": "High"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 30], [10, 30]], "ids": ["same"]}));
+        run(&mut s, "sketch.line", json!({"points": [[10, 40], [0, 40]], "ids": ["other"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        for (line, gap) in [("same", 30.0f64), ("other", 40.0)] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": [{"sketch": "Low", "curves": ["a"]}, {"sketch": "High", "curves": [line]}], "continuity": ["g1", "g1"], "body_name": line}),
+            );
+            let (got, want) = (area(&s, line), 10.0 * gap.hypot(10.0));
+            assert!((got - want).abs() < want * 1e-6, "{line}: area {got} vs a flat strip's {want}");
+        }
     }
 
     /// Each wall of a surface built from sketch curves is named after the curve it comes from,

@@ -1318,6 +1318,20 @@ fn live_corner_vertices_geom(
         };
         crate::blend::blend_corner::ball::place_ball_contacts(k, target, pseudo, corner, &lookup)?;
     }
+    // Not the fork's (#19089): the support change's vertices at its balls' contacts, after
+    // the base's vertex geometry
+    if corner
+        .blend
+        .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+    {
+        let lookup = SweptSessionSolvers {
+            solvers: &*solvers,
+            executive: None,
+        };
+        crate::blend::blend_corner::support_ball::place_support_ball_vertices(
+            k, pseudo, corner, &lookup,
+        )?;
+    }
     // WR-716: the chamfer event's vertices at their exact points
     if corner
         .blend
@@ -2608,6 +2622,43 @@ impl<'target> FilletSession<'target> {
                         Ok(_) => {}
                     }
                 }
+                // Not the fork's (#19089): a 4x3 vertex whose edge not blended is a tangent
+                // seam from a plane into a cylinder, the ball of the round beside the seam
+                // rolling on across it onto the cylinder (a torus) to the ball touching the
+                // cylinder and the other two rounds' faces (a sphere): the support change.
+                // The rails beside the seam on the common face run apart there, so the 4x3
+                // corner's crossing does not exist.
+                if corner.blend.is_none()
+                    && corner.kind == FilletCornerKind::FourByThree
+                    && !corner.chamfer
+                {
+                    let lookup = SweptSessionSolvers {
+                        solvers: solvers.as_slice(),
+                        executive: Some(executive),
+                    };
+                    let all_eus = corner.all_eus.clone().unwrap_or_default();
+                    let solver_eus = corner.solver_eus.clone().unwrap_or_default();
+                    let classified =
+                        crate::blend::blend_corner::support_ball::classify_support_ball(
+                            k,
+                            target,
+                            vertex,
+                            &solver_eus,
+                            &all_eus,
+                            corner.tangency_tol_radians,
+                            &lookup,
+                        );
+                    match classified {
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
+                        Ok(Some((ring, geometry))) => {
+                            corner =
+                                crate::blend::blend_corner::support_ball::support_ball_corner_of(
+                                    &corner, ring, &geometry,
+                                );
+                        }
+                        Ok(None) => {}
+                    }
+                }
                 // The fork's (smlib#104 61547af): a corner where every edge is blended,
                 // three or more, that the blend corner sets back and fills
                 // (SmBlendCorner::ClassifySetBack, in SmFilletCorner::Create's NxN case,
@@ -3576,6 +3627,16 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             };
             crate::blend::blend_corner::ball::ball_corner_edge_geom(
                 k, target, pseudo, corner, &lookup,
+            )?;
+        }
+        // Not the fork's (#19089): the support change's torus, its sphere's patch and the
+        // edges on them, before the edges' own kinds compute their curves
+        if corner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+        {
+            crate::blend::blend_corner::support_ball::support_ball_edge_geom(
+                k, target, pseudo, corner,
             )?;
         }
         // WR-716: the chamfer event's edges as exact lines and its facet's plane, before
@@ -5586,6 +5647,24 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                         note_face_error: &mut no_note,
                     };
                     return crate::blend::blend_corner::ball::create_ball_patch(corner, &mut env);
+                }
+                // Not the fork's (#19089): the support change's two faces
+                if corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+                {
+                    let mut no_note = |_: &FilletCorner| {};
+                    let mut env = CornerPatchEnv {
+                        k,
+                        target,
+                        pseudo,
+                        solvers: &store,
+                        fillet: Some(&mut fillet),
+                        note_face_error: &mut no_note,
+                    };
+                    return crate::blend::blend_corner::support_ball::create_support_ball_patches(
+                        corner, &mut env,
+                    );
                 }
                 // The fork's (61547af, smlib#104): a Setback's patches are its fill's
                 // (SmBlendCorner::CreateSetBackPatches)
@@ -8221,6 +8300,16 @@ impl SessionObjects<'_> {
         {
             return self.make_ball_corner_topology(k, id, executive);
         }
+        // Not the fork's (#19089): the support change builds its own topology, with the
+        // solvers its classification found
+        if self
+            .corners
+            .get(id.0 as usize)
+            .and_then(|corner| corner.blend)
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+        {
+            return self.make_support_ball_corner_topology(k, id);
+        }
         // The fork's (61547af, smlib#104): SmBlendCorner::MakeCornerTopology builds a
         // Setback its own way (MakeSetBackTopology)
         if self
@@ -8309,6 +8398,43 @@ impl SessionObjects<'_> {
             corner: id,
             solvers,
         })
+    }
+    /// The support change's topology (#19089) with the solvers of its three rounds, as its
+    /// classification found them.
+    fn make_support_ball_corner_topology(&mut self, k: &Kernel, id: FilletCornerId) -> Result<()> {
+        let SessionObjects {
+            target,
+            pseudo,
+            solvers,
+            corners,
+            ..
+        } = self;
+        let ids = corners
+            .get(id.0 as usize)
+            .and_then(|corner| corner.support_ball.as_ref())
+            .map(|sb| sb.ring.solvers)
+            .ok_or_else(|| invalid("support change corner without its ring"))?;
+        let live = |solver: FilletSolverId| {
+            solvers
+                .get(solver.0 as usize)
+                .and_then(Option::as_ref)
+                .map(SolverObject::base)
+                .ok_or_else(|| invalid("corner solver is not live"))
+        };
+        let [s_w, s_g, s_y] = ids;
+        let solvers = [live(s_w)?, live(s_g)?, live(s_y)?];
+        let corner = corners
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("corner is not live"))?;
+        corner.make_support_ball_topology(
+            crate::blend::blend_corner::support_ball::SupportBallTopologyEnv {
+                k,
+                target,
+                pseudo,
+                corner: id,
+                solvers,
+            },
+        )
     }
     /// The fork's `SmBlendCorner::MakeBallTopology` (WR-697) with the solver of each of
     /// the corner's ring edge uses, else of its mate (`GetFilletSolverOfEdgeuse`).
