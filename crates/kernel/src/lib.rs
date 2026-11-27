@@ -483,6 +483,7 @@ pub use route::mesh;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::plan_sketch_cell_grid;
 pub use route::planar;
 pub use route::points;
 pub use route::profiles;
