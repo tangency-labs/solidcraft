@@ -282,3 +282,131 @@ fn wr_671_shell_at_a_tighter_brep_tolerance_keeps_the_cylinders_tolerances() {
     let got = volume_at(&k, &mut b, 1e-12).unwrap();
     assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
 }
+
+/// The volume of a hole of radius `r` drilled along a radius of a cylinder of radius `big`
+/// about Z, from `depth` off the axis out through the cylinder's side: over the hole's
+/// disk, `y = r sin t`, the length from `depth` to the side `sqrt(big² - y²)`; Gauss-free
+/// midpoint quadrature in `t`, whose integrand is smooth and periodic, so 4096 points give
+/// it to rounding.
+fn radial_hole(big: f64, r: f64, depth: f64) -> f64 {
+    let n = 4096;
+    let h = PI / f64::from(n);
+    (0..n)
+        .map(|i| {
+            let t = -0.5 * PI + (f64::from(i) + 0.5) * h;
+            let y = r * t.sin();
+            2.0 * r * r * t.cos() * t.cos() * ((big * big - y * y).sqrt() - depth)
+        })
+        .sum::<f64>()
+        * h
+}
+
+/// The angle of `p` about Z, in degrees in `[0, 360)`.
+fn angle_deg(p: Point3) -> f64 {
+    p.y.atan2(p.x).to_degrees().rem_euclid(360.0)
+}
+
+/// The seam angles (degrees) of the faces of `b` on the cylinder of radius `radius` about Z:
+/// the angle of each seam edge's start vertex.
+fn seam_angles(k: &Kernel, b: &mut Brep, radius: f64) -> Vec<f64> {
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    use solidcore::topology::edge;
+    let mut out = Vec::new();
+    for f in b.face_list().to_vec() {
+        let on = matches!(
+            b.face(f).unwrap().surface.as_ref().map(Surface::kind),
+            Some(SurfaceKind::Cone(c)) if c.is_cylinder() && (c.radius(0.0) - radius).abs() < 1e-9
+        );
+        if !on {
+            continue;
+        }
+        for e in solidcore::topology::face::p4::edges(b, f, None, false, None).unwrap() {
+            if edge::faces(b, e, None).unwrap().as_slice() == [f] && edge::is_seam(k, b, e).unwrap()
+            {
+                let v = edge::start_end_vertices(b, e).unwrap().0.unwrap();
+                out.push(angle_deg(b.vertex(v).unwrap().point));
+            }
+        }
+    }
+    out
+}
+
+/// solidcore#3353 (acid-8 stage 5): a Ø100 × 120 drum with one Ø6 radial blind hole 20 deep
+/// at Z = 20, its axis 5° round from the drum's seam, closed-shelled 2 inward. The hole's
+/// rim covers 3.44° either side of its axis, clear of the seam; inset by 2 the hole is r 5 in
+/// a drum of r 48, so its offset covers asin(5 / 48) = 5.98° either side and crosses the seam
+/// its rim did not reach. The offset faces keep the input's loops, so that offset rim was
+/// refused ("an offset edge could not be split where a loop gap or a step corner needs it").
+/// The seam is the cylinder's parameterisation only: turned clear of the hole for the shell,
+/// the shell builds, and the drum's outside gets its seam back where it was.
+///
+/// Closed form: the drum less its hole, less the cavity, the drum r 48 from Z = 2 to 118 less
+/// the hole's offset (r 5, from 28 off the axis out through the cavity's side), the holes'
+/// volumes by [`radial_hole`]: 103844.0029879396.
+#[test]
+fn a_closed_shell_whose_hole_offset_crosses_the_seam_builds() {
+    use solidcore::offset::offset_executive::p2::{
+        shell_brep_simple_reporting, OffsetOptions, ShellOptions,
+    };
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    let mut k = Kernel::default();
+    let drum = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 50.0, 120.0).unwrap();
+    let mut probe = drum.clone_standing_for_self().unwrap();
+    let seam = seam_angles(&k, &mut probe, 50.0);
+    assert_eq!(seam.len(), 1, "one seam on the drum's side: {seam:?}");
+    // the drill along +X from 30 off the axis out past the side, turned 5° past the seam
+    let mut drill = create_cylinder(&mut k, Point3::new(30.0, 0.0, 20.0), 3.0, 25.0).unwrap();
+    let z = solidcore::math::Vec3::new(0.0, 0.0, 1.0);
+    let y = solidcore::math::Vec3::new(0.0, 1.0, 0.0);
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        Point3::new(30.0, 0.0, 20.0),
+        y,
+        90.0,
+    )
+    .unwrap();
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        Point3::new(0.0, 0.0, 0.0),
+        z,
+        seam[0] + 5.0,
+    )
+    .unwrap();
+    let mut part = boolean_difference(&mut k, drum, drill).unwrap();
+    part.refresh_cached_topology();
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -2.0,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let made = shell_brep_simple_reporting(&mut k, &part, options, &[]).unwrap();
+    // every seam turned and turned back: no turn failed
+    assert!(
+        made.seams.not_cleared.is_empty() && made.seams.not_restored.is_empty(),
+        "{:?}",
+        made.seams
+    );
+    let mut b = made.shell;
+    let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(c.is_valid(), "{:?}", c.lines());
+    // the drum's two sides, its two caps, the hole's and its offset's walls and ends
+    assert_eq!(b.face_list().len(), 10);
+    let want = PI * 50.0 * 50.0 * 120.0
+        - radial_hole(50.0, 3.0, 30.0)
+        - (PI * 48.0 * 48.0 * 116.0 - radial_hole(48.0, 5.0, 28.0));
+    assert!((want - 103_844.002_987_939_6).abs() < 1e-6, "{want}");
+    let got = volume_at(&k, &mut b, 1e-9).unwrap();
+    assert!((got - want).abs() <= 1e-7 * want, "{got} vs {want}");
+    // the outside's seam is the input's
+    let outside = seam_angles(&k, &mut b, 50.0);
+    assert_eq!(outside.len(), 1, "{outside:?}");
+    let off = (outside[0] - seam[0]).rem_euclid(360.0);
+    assert!(off.min(360.0 - off) < 1e-9, "{outside:?} vs {seam:?}");
+}

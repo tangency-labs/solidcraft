@@ -1665,6 +1665,27 @@ pub struct Distance {
     pub bound: f64,
 }
 
+/// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
+/// `max` (in any order), each side counting `share` of the box's size beyond it
+/// ([`Extent3d::meets_line`]). Never for a zero `dir`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a coordinate, or a `share`, that is not finite.
+pub fn line_meets_box(
+    min: Point3,
+    max: Point3,
+    origin: Point3,
+    dir: Vec3,
+    share: f64,
+) -> Result<bool> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if ![min, max, origin, dir].into_iter().all(finite) || !share.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite line or box"));
+    }
+    Ok(Extent3d::from_points(min, max).meets_line(origin, dir, share))
+}
+
 /// The distance between `a` and `b` with a proved bound on its rounding (not
 /// upstream). The value is `a.distance(b)` bit for bit; the bound comes from the same
 /// sum of squares in rounded interval arithmetic
@@ -2426,25 +2447,27 @@ pub fn vertex_match_tolerance(largest_tolerance: f64, size: f64) -> f64 {
     largest_tolerance.max(size * 1e-9) * 10.0
 }
 
-/// The part along the unit direction `along` of edge use `eu`'s binormal (pointing into its
-/// face) at the fraction `fraction` of its edge's interval ([`evaluate_binormal`], 3D only).
-/// Not upstream (whether a face runs on along a direction across one of its edges).
+/// The part of edge use `eu`'s binormal (pointing into its face) that leads away from `foot`, at
+/// the fraction `fraction` of its edge's interval: along the unit direction from `foot` to the
+/// edge's point there ([`evaluate_binormal`], 3D only). `None` where that point is `foot`, so
+/// nothing leads away from it. Not upstream (whether a face runs on away from a point across one
+/// of its edges).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for an `along` that is not a unit direction ([`unit_direction`]
-/// makes one), or a `fraction` or binormal that is not finite; those of [`evaluate_binormal`].
-pub fn edgeuse_binormal_along(
+/// [`SolidError::InvalidInput`] for a `fraction` or `foot` that is not finite, or a binormal that
+/// is not; those of [`evaluate_binormal`].
+pub fn edgeuse_binormal_away_from(
     k: &Kernel,
     brep: &mut Brep,
     eu: EdgeuseId,
     fraction: f64,
-    along: Vec3,
-) -> Result<f64> {
-    if !(fraction.is_finite() && is_unit_direction(along)) {
+    foot: Point3,
+) -> Result<Option<f64>> {
+    if !(fraction.is_finite() && [foot.x, foot.y, foot.z].iter().all(|c| c.is_finite())) {
         return Err(SolidError::invalid_input(
             OP,
-            "a fraction that is not finite or a direction that is not unit",
+            "a fraction or point that is not finite",
         ));
     }
     let e = brep
@@ -2453,11 +2476,14 @@ pub fn edgeuse_binormal_along(
         .ok_or_else(|| SolidError::invalid_input(OP, "edge use without an edge"))?;
     let t = brep.edge(e)?.interval.evaluate(fraction);
     let at = evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?;
-    let part = at.binormal.dot(along);
+    let Ok(away) = unit_direction(at.point - foot) else {
+        return Ok(None);
+    };
+    let part = at.binormal.dot(away);
     if !part.is_finite() {
         return Err(SolidError::invalid_input(OP, "binormal not finite"));
     }
-    Ok(part)
+    Ok(Some(part))
 }
 
 #[cfg(test)]

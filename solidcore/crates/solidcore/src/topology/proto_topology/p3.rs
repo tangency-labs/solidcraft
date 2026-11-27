@@ -2992,8 +2992,9 @@ fn crossing_sine<O: ClassObject>(
 /// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
 /// where those two edges touch when they are circles in one plane that the contact rule
 /// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
-/// as the edge/curve intersections of the boolean read them), and the touching point lies
-/// on both edges within their intersection tolerance. Any other pair is left as it is.
+/// as the edge/curve intersections of the boolean read them), or (#15049) a circle and a
+/// line in its plane a hair inside it ([`line_touch`]), and the touching point lies on both
+/// edges within their intersection tolerance. Any other pair is left as it is.
 ///
 /// # Errors
 ///
@@ -3007,25 +3008,16 @@ fn touch_of_edges<O: ClassObject>(
     if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
         return Ok(());
     }
-    // an edge's circle: centre, unit normal, radius
-    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+    // an edge's curve and interval
+    let edge_curve = |pc: &PointClassification<O>| -> Result<Option<(&Curve, Extent1d)>> {
         let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
         else {
             return Ok(None);
         };
-        let Some(curve) = b.edge(e)?.curve.as_ref() else {
-            return Ok(None);
-        };
-        let CurveKind::Ellipse(c) = curve.kind() else {
-            return Ok(None);
-        };
-        if !c.is_circle() {
-            return Ok(None);
-        }
-        let place = c.position();
-        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+        let rec = b.edge(e)?;
+        Ok(rec.curve.as_ref().map(|c| (c, rec.interval)))
     };
-    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+    let (Some((curve1, ivl1)), Some((curve2, ivl2))) = (edge_curve(pc1)?, edge_curve(pc2)?) else {
         return Ok(());
     };
     let tol = xsect_tol_3d_from_zones(
@@ -3033,15 +3025,47 @@ fn touch_of_edges<O: ClassObject>(
         pc1.obj_zone_tol_3d(k, geometry)?,
         pc2.obj_zone_tol_3d(k, geometry)?,
     );
-    // one plane: parallel normals (the angle test of the circles' own intersection) and
-    // the second centre on the first plane within the tolerance
-    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
-        return Ok(());
-    }
-    let CircleCircle::Tangent(touch) =
-        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
-    else {
-        return Ok(());
+    let touch = match (curve1.kind(), curve2.kind()) {
+        (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) if a.is_circle() && b.is_circle() => {
+            let (pa, pb) = (a.position(), b.position());
+            let (c1, n1, r1) = (pa.origin(), pa.z_axis(), a.x_radius());
+            let (c2, n2, r2) = (pb.origin(), pb.z_axis(), b.x_radius());
+            // one plane: parallel normals (the angle test of the circles' own intersection)
+            // and the second centre on the first plane within the tolerance
+            if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+                return Ok(());
+            }
+            let CircleCircle::Tangent(touch) = circle_coplanar_circle_intersect_in_contact(
+                n1,
+                c1,
+                r1,
+                c2,
+                r2,
+                tol,
+                contact_tol_3d(k),
+            )?
+            else {
+                return Ok(());
+            };
+            touch
+        }
+        // Not upstream (#15049): a circle and a line in its plane, the line a hair inside
+        // the circle, touch at one point (`Ellipse::intersect_with_line` at the contact
+        // tolerance, the point moved to an end of either on the stretch between upstream's
+        // two crossings), as the edge/curve intersections of the boolean read them.
+        (CurveKind::Ellipse(c), CurveKind::Line(l)) if c.is_circle() => {
+            match line_touch(k, (curve1, c, &ivl1), (l, &ivl2), tol)? {
+                Some(p) => p,
+                None => return Ok(()),
+            }
+        }
+        (CurveKind::Line(l), CurveKind::Ellipse(c)) if c.is_circle() => {
+            match line_touch(k, (curve2, c, &ivl2), (l, &ivl1), tol)? {
+                Some(p) => p,
+                None => return Ok(()),
+            }
+        }
+        _ => return Ok(()),
     };
     // the touching point on both edges' arcs: dropped onto each edge's interval within
     // their tolerance (a drop that fails leaves the point where it was)
@@ -3056,6 +3080,54 @@ fn touch_of_edges<O: ClassObject>(
     *pc1 = q1;
     *pc2 = q2;
     Ok(())
+}
+
+/// Not upstream (#15049): where the arc of `circle` over `circle_ivl` and the line `line`
+/// over `line_ivl` touch by the contact rule: their one meeting at [`contact_tol_3d`]
+/// (`Ellipse::intersect_with_line`, which takes a line a hair inside the circle for a touch
+/// and moves it to an end of the arc or the line on the stretch between the two crossings),
+/// where at zero contact they do not meet at that point (the contact rule made it). `None`
+/// for a plain crossing, a line out of the circle's plane, or anything but one meeting.
+///
+/// # Errors
+///
+/// Those of the intersections and the evaluation.
+fn line_touch(
+    k: &Kernel,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line, line_ivl): (&crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let in_contact = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [touch] = in_contact.solutions[..] else {
+        return Ok(None);
+    };
+    if touch.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    // the contact rule made it: at zero contact the two cross elsewhere, twice or not at all
+    let point = circle_curve.evaluate_point(k, touch.start.param(0)?)?;
+    let plain =
+        circle.intersect_with_line::<()>(k, circle_ivl, line, line_ivl, tol, 0.0, None, None)?;
+    if let [crossing] = plain.solutions[..] {
+        if circle_curve
+            .evaluate_point(k, crossing.start.param(0)?)?
+            .distance(point)
+            <= tol
+        {
+            return Ok(None);
+        }
+    }
+    Ok(Some(point))
 }
 
 #[cfg(test)]

@@ -1309,6 +1309,18 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let top = ui.cursor().top();
+    if let Some(stage) = chat.current_stage() {
+        let t = Tokens::get();
+        let label = trf("ui.agent_chat_current_stage", &[("step", stage)]);
+        inset(ui, |ui| {
+            let line = ui
+                .add(egui::Label::new(RichText::new(&label).color(t.text_dim).size(t.font_small)).truncate().selectable(false))
+                .backing_on_hover_text(&label);
+            solidcraft_ui_registry::publish_rect("agent_chat:current_stage", line.rect);
+        });
+    }
+    let stage_height = ui.cursor().top() - top;
     let margin = Tokens::get().space_12 as i8;
     let height = ui.available_height();
     // The height inside the margins, less a point so rounding never shows a scroll bar.
@@ -1328,7 +1340,7 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
             scroll_while_selecting(ui);
         });
     solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    conversation.content_size.y
+    stage_height + conversation.content_size.y
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2250,20 +2262,36 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal(|ui| {
+                        let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {

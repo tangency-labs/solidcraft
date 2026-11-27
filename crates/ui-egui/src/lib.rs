@@ -56,6 +56,8 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -74,6 +76,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
@@ -776,6 +779,11 @@ pub struct SolveApp {
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
     drawing_job: Option<drawing_jobs::Drawing>,
+    /// A drawing being read for the Insert SVG/DXF window, on a worker (see
+    /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
+    pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1201,6 +1209,8 @@ impl SolveApp {
             host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
+            insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -1712,6 +1722,12 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
+        // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
+        if v.pointer("/preferences/navigator_style").and_then(Value::as_str) == Some("cube") {
+            let note = self.tr("ui.navigator.cube_removed").to_string();
+            self.set_status(note, false);
+        }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         crate::plugins::sync_policy(self);
@@ -2065,7 +2081,9 @@ impl SolveApp {
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
-                "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
+                "view.ground_shadow" if v.get("mode").is_none() => {
+                    self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow);
+                }
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
@@ -2198,6 +2216,17 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.ground_shadow" {
+                match v.get("mode").and_then(Value::as_str) {
+                    Some("off") => self.ui.ground_shadow = false,
+                    Some(mode) => {
+                        self.ui.ground_shadow = true;
+                        self.preferences.ground_shadow_style =
+                            if mode == "projected" { prefs::GroundShadowStyle::Projected } else { prefs::GroundShadowStyle::Ellipse };
+                    }
+                    None => {}
+                }
+            }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
@@ -2311,6 +2340,9 @@ impl SolveApp {
                     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
                 }
+                if matches!(id, "joint.create" | "joint.as_built" | "joint.edit" | "assembly.constraint.create" | "assembly.constraint.edit") {
+                    joint_conflict_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -2356,6 +2388,7 @@ impl SolveApp {
                         // an earlier signature is in the file but does not cover this save.
                         let signature = v.get("signature").and_then(Value::as_object);
                         let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let shown = display_user_path(&p);
                         let saved = match signature {
                             Some(signature) => {
                                 let key = signature
@@ -2363,10 +2396,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                self.tr("ui.design_saved_signed").replace("{path}", shown).replace("{key}", key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", shown),
+                            None => self.tr("ui.design_saved").replace("{path}", shown),
                         };
                         self.set_status(saved, false);
                     }
@@ -2964,6 +2997,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         if id == "doc.open" {
             self.file_load.home_at_start = self.home.open;
         }
@@ -2991,7 +3028,7 @@ impl SolveApp {
             let command = id.to_string();
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_drawing::open(app, &command, path);
+                    dialogs_insert_drawing::start(app, &command, path);
                 }
             });
             return;
@@ -3364,8 +3401,19 @@ impl SolveApp {
     }
 
     /// Does starting `id` open a tool or a dialog?
-    fn interactive(&self, id: &str) -> bool {
+    pub(crate) fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// Does `start` do something of its own with `id`, rather than run it with no values: open a
+    /// tool or a dialog, go to its settings in the Render workspace, or give it its values (a
+    /// toggle's new state, the selection)? Command search lists such a command (#9734).
+    pub(crate) fn starts_its_own_way(&self, id: &str) -> bool {
+        STARTED_WITH_VALUES.contains(&id)
+            || STARTED_BY_PREFIX.iter().any(|prefix| id.starts_with(prefix))
+            || toolbar::file_menu_row(id).is_some()
+            || render_workspace::ribbon_starts(id)
+            || self.interactive(id)
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -3532,6 +3580,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -3773,9 +3822,22 @@ impl SolveApp {
     }
 
     /// Is the browser's Origin folder shown? The design keeps it once it is toggled; until then
-    /// the Hide Origin by Default preference decides.
+    /// the Origin visibility preference decides. Automatic follows the model as shown, so it saves
+    /// nothing in the design: undoing the first body, or rolling back before it, shows the Origin
+    /// again. While a dialog edits a feature it follows the design from before that edit's own
+    /// rollback, so editing the first body leaves the Origin hidden.
     pub fn origin_shown(&self) -> bool {
-        !self.session.visibility.origin_hidden.unwrap_or(self.preferences.hide_origin)
+        if let Some(hidden) = self.session.visibility.origin_hidden {
+            return !hidden;
+        }
+        match self.preferences.hide_origin {
+            prefs::OriginDisplay::Shown => true,
+            prefs::OriginDisplay::Automatic => {
+                let session = self.editing_state.as_ref().map_or(&self.session, |editing| &editing.original);
+                session.model.state().bodies.is_empty()
+            }
+            prefs::OriginDisplay::Hidden => false,
+        }
     }
 
     /// Show or hide the browser's Origin folder (saved with the design).
@@ -4346,10 +4408,10 @@ impl SolveApp {
         }
         let (_, up, back) = animation.from.basis();
         let (_, to_up, to_back) = animation.to.basis();
-        if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
+        if !matches!(solidcraft_kernel::points::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             return animation.around_screen_up(None);
         }
-        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        let angle = solidcraft_kernel::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
         animation.around_screen_up(angle)
     }
 
@@ -4406,17 +4468,6 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
-    /// in place, or frames the whole model from the new direction when Preferences › Navigation
-    /// asks for it (`navigator_fit`, #10091).
-    pub fn animate_turn(&mut self, to: Camera) {
-        if self.preferences.navigator_fit {
-            self.animate_to_fitted(to);
-        } else {
-            self.animate_to(to);
-        }
-    }
-
     /// Animated view changes for the axis view and navigation bar.
     pub fn animate_view(&mut self, v: &str) {
         if drawing_workspace::active(self) && !dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
@@ -4455,6 +4506,12 @@ impl SolveApp {
         // The sheet page: Fit and Home both show the whole sheet.
         if drawing_workspace::active(self) {
             drawing_sheet_page::fit(self);
+            return;
+        }
+        // The design's own Home view: its camera as it was set, not fitted again (#19972).
+        if home && let Some(to) = solidcraft_engine::view::home_view(&self.session) {
+            self.pending_fit = None;
+            self.animate_to(to);
             return;
         }
         if render_workspace::active(self) {
@@ -4589,6 +4646,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         parts_library::tick(self, ctx);
         file_load::tick(self, ctx);
+        dialogs_insert_drawing::tick(self);
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
@@ -4599,7 +4657,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() || self.insert_read.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -4670,6 +4728,9 @@ impl SolveApp {
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
@@ -4824,7 +4885,7 @@ impl SolveApp {
     fn apply_look(&mut self, ctx: &egui::Context) {
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
         solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background_colours());
         if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
             solidcraft_theme::set_dark(self.ui.dark);
             solidcraft_theme::set_vision(self.preferences.color_vision);
@@ -5094,7 +5155,7 @@ impl SolveApp {
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
-            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
@@ -5306,6 +5367,35 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
     }
 }
 
+/// A joint just made or changed that doesn't hold says why in Messages, as an error: the joint
+/// is kept, but nothing moved (#12867). Between two grounded parts, or a grounded part and the
+/// root, it says so, and how to let it place one; any other conflict gives the solver's reason.
+fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    let Some(id) = v.get("joint").and_then(Value::as_u64) else { return };
+    let Some(conflict) =
+        v.get("conflicts").and_then(Value::as_array).into_iter().flatten().find(|c| c.get("joint").and_then(Value::as_u64) == Some(id))
+    else {
+        return;
+    };
+    let doc = &app.session.doc;
+    let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == id) else { return };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded).map(|x| language.given_name(&x.name));
+    let name = language.given_name(&joint.name);
+    let (a, b) = (joint.a.occurrence, joint.b.occurrence);
+    let msg = match (grounded(a), grounded(b)) {
+        (Some(ga), Some(gb)) if a != b => language.format("joint.moves_neither", &[("joint", &name), ("a", &ga), ("b", &gb)]),
+        // The root's own bodies never move: a grounded part joined to them is held the same way.
+        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => language.format("joint.moves_neither_root", &[("joint", &name), ("occurrence", &g)]),
+        _ => {
+            let reason = conflict.get("why").and_then(Value::as_str).unwrap_or_default();
+            language.format("joint.does_not_hold", &[("joint", &name), ("reason", &language.diagnostic(reason))])
+        }
+    };
+    app.set_status(msg, true);
+}
+
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.
 fn with_queued(mut result: Value, queued: bool) -> Value {
     if queued && let Some(o) = result.as_object_mut() {
@@ -5317,6 +5407,31 @@ fn with_queued(mut result: Value, queued: bool) -> Value {
 /// A command's name as people see it (its label), for the status bar.
 pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
+}
+
+/// Format a file path for user-facing notices and labels.
+///
+/// Native OS paths are returned unchanged. Browser virtual-filesystem mount
+/// prefixes (`/disk/<id>/...`, `/opfs/...`, `/downloads/...`, `/upload/...`)
+/// are stripped so internal mount tokens never appear in save or export toasts.
+pub fn display_user_path(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix("/disk/")
+        && let Some((id, tail)) = rest.split_once('/')
+        && !id.is_empty()
+        && !tail.is_empty()
+        && !tail.starts_with('/')
+    {
+        return tail;
+    }
+    for prefix in ["/opfs/", "/downloads/", "/upload/"] {
+        if let Some(tail) = path.strip_prefix(prefix)
+            && !tail.is_empty()
+            && !tail.starts_with('/')
+        {
+            return tail;
+        }
+    }
+    path
 }
 
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".
@@ -5338,3 +5453,34 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// Commands that `SolveApp::start` runs with values it works out itself (a toggle's new state,
+/// the selected component or body), or offers a menu of (the selection filter's mode), although
+/// their schema requires them. Command search lists
+/// them (#9734); `start_special_cases_stay_in_command_search` keeps this list in step with
+/// `start`.
+const STARTED_WITH_VALUES: &[&str] = &[
+    "body.print_face",
+    "browser.visibility",
+    "component.move_features",
+    "component.relink",
+    "drawing.sketch.create",
+    "occurrence.properties",
+    "select.filter",
+    "select.mode",
+    "sketch.toggle_diameter",
+    "sketch.toggle_driven",
+    "tab.view.move_to_window",
+    "view.ambient_occlusion",
+    "view.angle_readout",
+    "view.layout",
+    "view.origin_axes_across_view",
+    "view.perspective",
+    "view.render_focus",
+    "view.scale_bar",
+    "view.shots_strip",
+];
+
+/// Command id prefixes `SolveApp::start` handles as a group (Settings profiles open Preferences
+/// on their page), so command search lists their commands too (#9734).
+const STARTED_BY_PREFIX: &[&str] = &["settings.profile."];

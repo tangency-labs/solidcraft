@@ -11,7 +11,7 @@ use egui::Stroke;
 use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
-use solidcraft_kernel::services::sketch_arc as arcs;
+use solidcraft_kernel::planar as arcs;
 
 use crate::SolveApp;
 use crate::viewport::Proj;

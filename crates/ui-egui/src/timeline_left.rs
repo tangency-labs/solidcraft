@@ -160,7 +160,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
         *drag = Some(Drag::Marker);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
     rect.center().y
@@ -991,8 +991,9 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
     crate::dialogs_assembly::timeline_joints_vertical(app, ui);
 
     let mut drag = rows.drag.take();
-    if drag.is_some() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // The marker moves up and down, so it keeps its arrows; dragged rows show the closed hand.
+    if let Some(active) = &drag {
+        ui.ctx().set_cursor_icon(if matches!(active, Drag::Marker) { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::Grabbing });
     }
     // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(active), Some(pointer)) = (drag.as_ref(), pointer)
@@ -1265,7 +1266,19 @@ fn feature_row_body(
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
+            && rule
+                .one_row(|on| {
+                    let row = crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on);
+                    // The sketch it opens, on hover (#20405); a reason it is off takes its place.
+                    match crate::timeline::profile_sketch_tip(app, sketch.0).filter(|_| on) {
+                        Some(tip) => {
+                            use crate::ui_kit::BackingTooltipExt as _;
+                            row.backing_on_hover_text(tip)
+                        }
+                        None => row,
+                    }
+                })
+                .clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
