@@ -2254,8 +2254,14 @@ mod tests {
             fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
             // A change outside what computes models keeps the commit's digest, as a commit of it does.
             write(&root, "solidcore/docs/reference.md", "# changed\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() { edited }\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() { edited }\n");
             write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
-            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the interface and the notes compute no model");
+            assert_eq!(
+                build_script::evaluation_source(&root).as_deref(),
+                Some(clean.as_str()),
+                "the interface, notes, tests and goldens compute no model"
+            );
             let _ = fs::remove_dir_all(&root);
         }
 
