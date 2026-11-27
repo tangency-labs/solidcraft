@@ -35,6 +35,13 @@
 //!   and crowded turn left the swept surface creased across its closure (its normal
 //!   turning by about a degree there along a line swept round a closed 3D spline), so its
 //!   offsets did not meet there.
+//! - Not upstream: a short interior linear piece whose chord tangent is tilted by endpoint
+//!   rounding relative to its longer neighbours' nearly matching tangents (lateral offset
+//!   within the sweep tolerance, while the profile's reach times the kink threatens to fold
+//!   the net) blends its sweep frame tangent smoothly between the two neighbours' tangents
+//!   across the piece instead of jumping onto the tilted chord. This keeps the boundary
+//!   sections identical on both sides of each joint so `join` does not average mismatched
+//!   rows across a short bridge and fold the control net back on itself.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -86,9 +93,9 @@ use crate::nurbs::srf_tool::p3::join;
 
 use super::p1::cross_boundary_derivs_vector_field;
 use super::p4::{
-    approx_cross_boundary_derivs, create_b_vectors_closing, create_coons_boundary_crvs,
-    create_cross_boundary_deriv_crv, rotation_rate_of_change, sweep_cross_tangent_crv,
-    CoonsBoundary, Mat3, ZSource,
+    approx_cross_boundary_derivs, create_b_vectors_closing, create_b_vectors_closing_with,
+    create_coons_boundary_crvs, create_cross_boundary_deriv_crv, rotation_rate_of_change,
+    sweep_cross_tangent_crv, CoonsBoundary, Mat3, ZSource,
 };
 use super::p5::{create_skin_srf_boundary_continuity, BoundaryContinuity, SkinBoundaryOptions};
 
@@ -101,6 +108,127 @@ const MAXPTS: usize = 1000;
 /// Not upstream: the least sine of the angle between an upright sweep's trajectory and its up
 /// direction (the controlled sweep's convention, `sweep::stations`' `min_across`).
 pub const MIN_UP_ACROSS: f64 = 1e-3;
+/// Minimum cosine between adjacent tangents for a short interior linear bridge to be
+/// treated as nearly tangent (never a genuine corner).
+const MIN_BRIDGE_DOT: f64 = 0.999;
+
+/// Euclidean length of `c`'s control polygon (exact for a line, strictly positive for any
+/// non-degenerate curved piece including closed arcs).
+fn control_polygon_length(c: &Curve) -> f64 {
+    c.cpts()
+        .windows(2)
+        .map(|w| match w {
+            [a, b] => (b.to_euclid() - a.to_euclid()).length(),
+            _ => 0.0,
+        })
+        .sum()
+}
+
+/// Largest distance of any Euclidean control point of `cur_c` from the origin.
+fn profile_reach(cur_c: &Curve) -> f64 {
+    cur_c
+        .cpts()
+        .iter()
+        .map(|cp| cp.to_euclid().length())
+        .fold(0.0_f64, f64::max)
+}
+
+/// For each trajectory piece, `Some((t_prev, t_next))` when it is a short interior linear
+/// bridge whose chord direction is perturbed by endpoint rounding relative to its longer
+/// neighbours' tangents enough to fold the swept control net across the piece.
+///
+/// When two tangent 3D curves (for example two circular arcs in different planes) nearly
+/// meet and leave a short straight bridge of length `L`, endpoint rounding `eps` tilts the
+/// chord by `ang ~ eps / L`. Placing sections perpendicular to that tilted chord swings a
+/// profile of reach `R` axially by `R * ang`; once `R * ang` approaches `L`, both the
+/// frame jump at the piece ends and `join`'s boundary-row averaging fold the control net
+/// back on itself (`SmBSplineSurface` test #5), even though the bridge stays within `tol`
+/// of the neighbours' common tangent. Blending the frame tangent smoothly from `t_prev` to
+/// `t_next` across the bridge keeps the boundary sections identical on both sides of each
+/// joint and keeps every control column monotone, while leaving curved pieces (including
+/// genuine tight bends) and normal-length segments untouched.
+fn short_linear_bridges(
+    segs: &[Curve],
+    seg_pbnds: &[LinearSeg],
+    cur_c: &Curve,
+    tol: f64,
+) -> Result<Vec<Option<(Vec3, Vec3)>>> {
+    let mut bridges = vec![None; segs.len()];
+    if segs.len() < 3 {
+        return Ok(bridges);
+    }
+    let reach = profile_reach(cur_c);
+    if !reach.is_finite() || reach <= 0.0 {
+        return Ok(bridges);
+    }
+    let lengths: Vec<f64> = segs.iter().map(control_polygon_length).collect();
+    let lat_tol = tol.max(MODEL_TOL);
+    for ii in 1..segs.len() - 1 {
+        let bounds = rf(seg_pbnds, ii, OP_SWEEP)?;
+        if !bounds.linear {
+            continue;
+        }
+        let len = at(&lengths, ii, OP_SWEEP)?;
+        let prev_len = at(&lengths, ii - 1, OP_SWEEP)?;
+        let next_len = at(&lengths, ii + 1, OP_SWEEP)?;
+        // Strict local minimum of length: both neighbours are longer (so their tangents
+        // are better conditioned), and no two adjacent pieces can both be bridged.
+        if !len.is_finite() || len <= 0.0 || prev_len <= len || next_len <= len {
+            continue;
+        }
+        let prev_bounds = rf(seg_pbnds, ii - 1, OP_SWEEP)?;
+        let next_bounds = rf(seg_pbnds, ii + 1, OP_SWEEP)?;
+        let (_, t_prev) = rf(segs, ii - 1, OP_SWEEP)?.eval_tangent(prev_bounds.end, Side::Left)?;
+        let (_, t_l) = rf(segs, ii, OP_SWEEP)?.eval_tangent(bounds.start, Side::Left)?;
+        let (_, t_next) =
+            rf(segs, ii + 1, OP_SWEEP)?.eval_tangent(next_bounds.start, Side::Left)?;
+        if t_prev.dot(t_l) <= MIN_BRIDGE_DOT
+            || t_l.dot(t_next) <= MIN_BRIDGE_DOT
+            || t_prev.dot(t_next) <= MIN_BRIDGE_DOT
+        {
+            continue;
+        }
+        let sin_prev = t_prev.cross(t_l).length();
+        let sin_next = t_l.cross(t_next).length();
+        let sin_span = t_prev.cross(t_next).length();
+        let kink = sin_prev.max(sin_next);
+        if reach * kink < 0.05 * len
+            || len * kink > lat_tol
+            || sin_span >= kink
+            || reach * sin_span >= 0.8 * len
+        {
+            continue;
+        }
+        if let Some(slot) = bridges.get_mut(ii) {
+            *slot = Some((t_prev, t_next));
+        }
+    }
+    Ok(bridges)
+}
+
+/// Unit tangent along a bridged linear piece at fraction `u` in `[0, 1]`.
+fn bridge_tangent(t_prev: Vec3, t_next: Vec3, u: f64) -> Result<Vec3> {
+    if u <= 0.0 {
+        return Ok(t_prev);
+    }
+    if u >= 1.0 {
+        return Ok(t_next);
+    }
+    Ok(normalize(combine2_pts(1.0 - u, t_prev, u, t_next))?.0)
+}
+
+/// Rate of change `[x' | y' | z']` of the bridged rotation-minimizing frame across a linear
+/// piece of parameter length `span`.
+fn bridge_rotation_rate(t_prev: Vec3, t_next: Vec3, span: f64, xl: Vec3, zl: Vec3) -> Mat3 {
+    if !span.is_finite() || span <= 0.0 {
+        return [[0.0; 3]; 3];
+    }
+    let raw_dx = (t_next - t_prev) * (1.0 / span);
+    let dx = raw_dx - xl * raw_dx.dot(xl);
+    let dz = xl * -zl.dot(dx);
+    let dy = dz.cross(xl) + zl.cross(dx);
+    [[dx.x, dy.x, dz.x], [dx.y, dy.y, dz.y], [dx.z, dy.z, dz.z]]
+}
 
 /// Not upstream: the frame's z of an upright sweep at the unit tangent `x`: `up` (unit) made
 /// square to `x`, refused where `x` comes within [`MIN_UP_ACROSS`] of it.
@@ -463,6 +591,16 @@ fn sweep_scale(
         }
     }
 
+    // Short interior linear bridges whose chord tangent is perturbed by endpoint rounding
+    // enough to fold the swept control net blend their frame tangent between their longer
+    // neighbours' tangents so boundary sections match on both sides of each joint.
+    let bridges = if cur_z.is_none() && up.is_none() && cur_s.is_none() && !tflg {
+        short_linear_bridges(&segs, &seg_pbnds, cur_c, e)?
+    } else {
+        vec![None; segs.len()]
+    };
+    let any_bridge = bridges.iter().any(Option::is_some);
+
     // Frame z vectors at (sub-sampled) parameters when curZ is not given.
     let mut tt: Vec<f64> = Vec::new();
     let mut zl_vecs: Vec<Vec3> = Vec::new();
@@ -489,7 +627,28 @@ fn sweep_scale(
                 }
             }
         }
-        let (vecs, corrected) = create_b_vectors_closing(cur_t, z0, &tt)?;
+        let (vecs, corrected) = if any_bridge {
+            let mut piece_idx = 0usize;
+            create_b_vectors_closing_with(cur_t, z0, &tt, |par| {
+                while piece_idx + 1 < seg_pbnds.len() && rf(&seg_pbnds, piece_idx, OP)?.end <= par {
+                    piece_idx += 1;
+                }
+                if let Some((t_prev, t_next)) = *rf(&bridges, piece_idx, OP)? {
+                    let piece = rf(&seg_pbnds, piece_idx, OP)?;
+                    let span = piece.end - piece.start;
+                    let u = if span > 0.0 {
+                        ((par - piece.start) / span).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    bridge_tangent(t_prev, t_next, u)
+                } else {
+                    Ok(cur_t.eval_tangent(par, Side::Left)?.1)
+                }
+            })?
+        } else {
+            create_b_vectors_closing(cur_t, z0, &tt)?
+        };
         zl_vecs = vecs;
         closing = corrected;
         if let Some(trace) = trace.as_mut() {
@@ -608,7 +767,20 @@ fn sweep_scale(
                 }
             }
 
-            let (ol, xl) = seg.eval_tangent(par, Side::Left)?;
+            let bridge = *rf(&bridges, ii, OP)?;
+            let (ol, xl) = if let Some((t_prev, t_next)) = bridge {
+                let ol = seg.eval(par, Side::Left)?;
+                let piece = rf(&seg_pbnds, ii, OP)?;
+                let span = piece.end - piece.start;
+                let u = if span > 0.0 {
+                    ((par - piece.start) / span).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                (ol, bridge_tangent(t_prev, t_next, u)?)
+            } else {
+                seg.eval_tangent(par, Side::Left)?
+            };
 
             let zl = if let Some(up) = up {
                 upright_z(up, xl)?
@@ -687,12 +859,17 @@ fn sweep_scale(
                     (None, None) if across => ZSource::RotationMinimizing(zl),
                     (None, None) => ZSource::Samples { z: zl, prev, next },
                 };
+                let drma = if let Some((t_prev, t_next)) = bridge {
+                    bridge_rotation_rate(t_prev, t_next, piece.end - piece.start, xl, zl)
+                } else {
+                    rotation_rate_of_change(seg, par, zsrc)?
+                };
                 if jj == 0 {
                     rma1 = frame_matrix(xl, yl, zl);
-                    drma1 = rotation_rate_of_change(seg, par, zsrc)?;
+                    drma1 = drma;
                 } else {
                     rma2 = frame_matrix(xl, yl, zl);
-                    drma2 = rotation_rate_of_change(seg, par, zsrc)?;
+                    drma2 = drma;
                 }
             }
 

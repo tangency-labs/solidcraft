@@ -876,6 +876,79 @@ fn loft_and_sweep() {
 }
 
 #[test]
+fn sweep_pipe_along_contiguous_tangent_3d_arcs_in_different_planes() {
+    let round6 = |v: Vec3| Vec3::new((v.x * 1e6).round() / 1e6, (v.y * 1e6).round() / 1e6, (v.z * 1e6).round() / 1e6);
+    let arc_from_3 = |a: Vec3, mid: Vec3, b: Vec3| -> PathSeg {
+        let (vb, vc) = (mid - a, b - a);
+        let n = vb.cross(vc);
+        let axis = n.normalized().unwrap();
+        let center = a + (n.cross(vb) * vc.len2() + vc.cross(n) * vb.len2()) * (0.5 / n.len2());
+        let (u, v) = (a - center, b - center);
+        let mut angle = u.cross(v).dot(axis).atan2(u.dot(v));
+        if angle <= 0.0 {
+            angle += std::f64::consts::TAU;
+        }
+        PathSeg::Arc { a, center, axis, angle }
+    };
+
+    let bend_r = 50.0_f64;
+    let pipe_r = 3.0_f64;
+    let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, pipe_r), holes: vec![] };
+    let plane = Plane { origin: Vec3::ZERO, x: Vec3::Y, y: Vec3::Z };
+    let ang1 = 53.0_f64.to_radians();
+    let ang2 = 60.0_f64.to_radians();
+    let ang3 = 45.0_f64.to_radians();
+
+    // Case 1: three directly contiguous exact tangent 3D arcs in perpendicular planes.
+    let p1_end = Vec3::new(bend_r * ang1.sin(), bend_r * (1.0 - ang1.cos()), 0.0);
+    let t1 = Vec3::new(ang1.cos(), ang1.sin(), 0.0);
+    let n2 = Vec3::Z;
+    let axis2 = t1.cross(n2);
+    let p2_end = p1_end + t1 * (bend_r * ang2.sin()) + n2 * (bend_r * (1.0 - ang2.cos()));
+    let t2 = t1 * ang2.cos() + n2 * ang2.sin();
+    let n3 = Vec3::new(-ang1.sin(), ang1.cos(), 0.0);
+    let axis3 = t2.cross(n3);
+    let exact_arcs = [
+        PathSeg::Arc { a: Vec3::ZERO, center: Vec3::new(0.0, bend_r, 0.0), axis: Vec3::Z, angle: ang1 },
+        PathSeg::Arc { a: p1_end, center: p1_end + n2 * bend_r, axis: axis2, angle: ang2 },
+        PathSeg::Arc { a: p2_end, center: p2_end + n3 * bend_r, axis: axis3, angle: ang3 },
+    ];
+    let exact_body = sweep(&plane, &disc, &exact_arcs).unwrap();
+    let exact_vol = PI * pipe_r * pipe_r * bend_r * (ang1 + ang2 + ang3);
+    assert!(rel(measure(&exact_body).unwrap().volume, exact_vol) < 1e-3, "{} vs {exact_vol}", measure(&exact_body).unwrap().volume);
+
+    // Case 2: lead-in + two tangent 3D arcs in perpendicular planes separated by a 0.0009 mm
+    // 6-decimal rounded bridge + a directly contiguous third arc + lead-out (exercises the
+    // fitted curve-sweep path where a rounding-tilted short bridge previously folded the net).
+    let lead = 20.0_f64;
+    let bridge_len = 0.0009_f64;
+    let q1_start = Vec3::new(lead, 0.0, 0.0);
+    let q1_mid = Vec3::new(lead + bend_r * (ang1 * 0.5).sin(), bend_r * (1.0 - (ang1 * 0.5).cos()), 0.0);
+    let q1_end = Vec3::new(lead + bend_r * ang1.sin(), bend_r * (1.0 - ang1.cos()), 0.0);
+    let q2_start = q1_end + t1 * bridge_len;
+    let q2_mid = q2_start + t1 * (bend_r * (ang2 * 0.5).sin()) + n2 * (bend_r * (1.0 - (ang2 * 0.5).cos()));
+    let q2_end = q2_start + t1 * (bend_r * ang2.sin()) + n2 * (bend_r * (1.0 - ang2.cos()));
+    let q3_mid = q2_end + t2 * (bend_r * (ang3 * 0.5).sin()) + n3 * (bend_r * (1.0 - (ang3 * 0.5).cos()));
+    let q3_end = q2_end + t2 * (bend_r * ang3.sin()) + n3 * (bend_r * (1.0 - ang3.cos()));
+    let t3 = t2 * ang3.cos() + n3 * ang3.sin();
+    let q_out = q3_end + t3 * lead;
+    let (a1, m1, b1) = (round6(q1_start), round6(q1_mid), round6(q1_end));
+    let (a2, m2, b2) = (round6(q2_start), round6(q2_mid), round6(q2_end));
+    let (m3, b3) = (round6(q3_mid), round6(q3_end));
+    let bridged = [
+        PathSeg::Line { a: Vec3::ZERO, b: a1 },
+        arc_from_3(a1, m1, b1),
+        PathSeg::Line { a: b1, b: a2 },
+        arc_from_3(a2, m2, b2),
+        arc_from_3(b2, m3, b3),
+        PathSeg::Line { a: b3, b: round6(q_out) },
+    ];
+    let bridged_body = sweep(&plane, &disc, &bridged).unwrap();
+    let bridged_vol = PI * pipe_r * pipe_r * (2.0 * lead + bridge_len + bend_r * (ang1 + ang2 + ang3));
+    assert!(rel(measure(&bridged_body).unwrap().volume, bridged_vol) < 1e-3, "{} vs {bridged_vol}", measure(&bridged_body).unwrap().volume);
+}
+
+#[test]
 fn sweep_round_a_sharp_corner_is_mitred() {
     // A 2 × 2 square centred on an L of two 10 mm lines: lines alone would slide the profile
     // along the second leg within its own plane (an empty, inside-out body). Mitred, the
