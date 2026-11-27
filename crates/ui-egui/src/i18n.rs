@@ -1771,7 +1771,7 @@ mod tests {
 
     /// The kit functions that translate a label or text for display or announcement, read off
     /// `crates/ui-egui/src/ui_kit/`. Not here: the painters that expect an already translated
-    /// string (`caption`, `summary_row`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
+    /// string (`caption`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
     /// `tool_choices`), `segmented` (it measures its options with `tr_label` but paints the raw
     /// option, so a catalog entry could not translate it — a wiring gap of its own) and the
     /// measurement helpers (`metrics::label_width`, `ContentWidth::*`). The `hint` arguments of
