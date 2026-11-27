@@ -210,7 +210,7 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        (meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+        (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()).hash(&mut h);
     }
     Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
 }
@@ -1343,6 +1343,33 @@ mod tests {
         assert_ne!(ctime(&path), first, "the change time never moved");
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn library_cache_identity_distinguishes_atomic_replacements() {
+        use std::os::unix::fs::MetadataExt;
+
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("replaced.sc");
+        let replacement = h.dir.join("replacement.sc");
+        std::fs::write(&path, b"old").unwrap();
+        let original = std::fs::metadata(&path).unwrap();
+        let before = cache_path(path.to_str().unwrap()).unwrap();
+        // Keep both files alive until rename, so their inodes cannot be reused.
+        std::fs::write(&replacement, b"new").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(original.modified().unwrap()))
+            .unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!(original.len(), after.len());
+        assert_eq!(original.modified().unwrap(), after.modified().unwrap());
+        assert_ne!((original.dev(), original.ino()), (after.dev(), after.ino()));
+        assert_ne!(before, cache_path(path.to_str().unwrap()).unwrap());
     }
 
     #[test]
