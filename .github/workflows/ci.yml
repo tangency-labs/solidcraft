@@ -816,6 +816,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
+      # The standard hosted runner has 16 GiB RAM and 14 GiB disk. This archive and the
+      # native test job can exhaust it when four rustc processes and a 20 GiB cache run.
+      - name: Bound compilation and cache on the standard hosted runner
+        if: vars.CI_RUNNER == 'ubuntu-24.04'
+        run: |
+          echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=2G' >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
@@ -908,6 +915,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
+      - name: Bound compilation and cache on the standard hosted runner
+        if: vars.CI_RUNNER == 'ubuntu-24.04'
+        run: |
+          echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=2G' >> "$GITHUB_ENV"
+          echo 'RAYON_NUM_THREADS=2' >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
@@ -2020,6 +2033,9 @@ jobs:
       - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
+      - name: Bound compilation on the standard hosted runner
+        if: vars.CI_RUNNER == 'ubuntu-24.04'
+        run: echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
       # Main saves the cache; every other run restores it, read-only.
       # target/ from main's last build (see WARM_TARGET); only main commits it.
       - name: Mount the build directory
