@@ -28,6 +28,8 @@ pub mod backend;
 pub mod context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod discover;
+#[cfg(not(target_arch = "wasm32"))]
+mod export;
 pub mod gate;
 mod markdown;
 mod markdown_view;
@@ -42,6 +44,7 @@ pub mod settings;
 pub mod summary;
 mod times;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -53,9 +56,13 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::finish_native_window;
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
 pub(crate) use panel::prepare_shared;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::request_export;
 pub(crate) use panel::request_new_chat;
 pub(crate) use panel::shared_content;
 pub use panel::show;
@@ -79,6 +86,8 @@ const VIEW_IMAGE: (u32, u32) = (960, 600);
 const MAX_PICTURE_BYTES: usize = 4 << 20;
 /// A tool call's arguments kept for its card, at most this big (as JSON text).
 const MAX_TOOL_INPUT: usize = 64 << 10;
+/// Most characters from a plan step shown above the conversation.
+const MAX_STAGE_CHARS: usize = 240;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -315,10 +324,13 @@ pub enum Item {
         tool: String,
         answer: Option<bool>,
     },
-    /// A message's changes, merged into one undo step; `revision`: the design right after it,
-    /// `history`: the undo history right after it ([`UndoMark::revision`]).
+    /// A message's changes, merged into one undo step; `summary`: concise diff lines against the
+    /// design before the turn, `revision`: the design right after it, `history`: the undo history
+    /// right after it ([`UndoMark::revision`]).
     Changes {
         steps: usize,
+        summary: Vec<String>,
+        features: Vec<u64>,
         revision: Revision,
         history: Revision,
         undone: bool,
@@ -387,6 +399,8 @@ struct Turn {
     /// The design and the undo history ([`UndoMark::revision`]) before it.
     start: Revision,
     start_undo: Revision,
+    /// The latest feature definitions written by admitted tools on the named design.
+    feature_changes: (String, HashMap<u64, solidcraft_engine::doc::Feature>),
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
     requests: u32,
@@ -399,6 +413,8 @@ struct Turn {
     /// When it was sent, and when the agent last said or did something (ms since the epoch).
     began: f64,
     heard: f64,
+    /// The first running step from this turn's latest plan update.
+    current_stage: Option<String>,
 }
 
 /// A message typed while the agent works: shown in the transcript as "Queued" until it is sent.
@@ -466,6 +482,13 @@ struct ModelRevert {
     saved: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+struct ServiceTierChoice {
+    agent_id: String,
+    endpoint: String,
+    tier: agents::ServiceTier,
+}
+
 /// A switch that starts on (`#[derive(Default)]` would start it off). Read and set it through `*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OnByDefault(pub bool);
@@ -517,6 +540,8 @@ pub struct AgentChat {
     selected_count: Option<(Vec<solidcraft_engine::Sel>, usize, usize)>,
     /// What the chip under the pointer stands for, lit up in the model while the pointer is on it.
     pub hover: Vec<solidcraft_engine::Sel>,
+    /// The completion card whose changes are shown, and the design revision at the click.
+    model_changes_shown: Option<(usize, solidcraft_engine::plugin::DesignToken)>,
     /// The pill or chip the pointer is on, as the panel saw it while drawing; the host lights what
     /// it stands for after the draw ([`light_hovered`]).
     pub hovered: Option<panel::Hovered>,
@@ -560,6 +585,9 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// The export dialog is open, with this choice for including tool details.
+    #[cfg(not(target_arch = "wasm32"))]
+    export_tools: Option<bool>,
     /// What the panel recorded this frame, run after it is drawn (`panel::run`).
     pub actions: Vec<panel::PanelAction>,
     /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
@@ -615,6 +643,9 @@ pub struct AgentChat {
     typed_model: Option<String>,
     pub config_options: Option<Vec<acp::ConfigOption>>,
     pub config_pending: bool,
+    /// An endpoint's tier override for this conversation.
+    #[cfg(not(target_arch = "wasm32"))]
+    api_service_tier: Option<ServiceTierChoice>,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
     models_cache: std::collections::HashMap<String, Vec<acp::ModelInfo>>,
     /// The running API agent's endpoint (empty for other agents).
@@ -707,6 +738,14 @@ impl AgentChat {
             None => !self.running_endpoint.is_empty() || !self.models.is_empty(),
         }
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn service_tier(&self, entry: &agents::Entry) -> agents::ServiceTier {
+        self.api_service_tier
+            .as_ref()
+            .filter(|choice| choice.agent_id == entry.id && choice.endpoint == entry.base_url && entry.service_tiers().contains(&choice.tier))
+            .map_or(agents::ServiceTier::Default, |choice| choice.tier)
+    }
 }
 
 impl AgentChat {
@@ -732,6 +771,8 @@ impl AgentChat {
         self.keyboard_owned = false;
         self.all_selected = false;
         self.drop_rect = None;
+        self.model_changes_shown = None;
+        other.model_changes_shown = None;
     }
 
     pub(crate) fn disconnect_document(&mut self, session: &mut solidcraft_engine::Session, wait: bool) {
@@ -741,6 +782,10 @@ impl AgentChat {
         if self.state.is_some() {
             self.state = Some(State::Off);
         }
+    }
+
+    pub(crate) fn clear_model_changes(&mut self) {
+        self.model_changes_shown = None;
     }
 
     pub(crate) fn disconnect_endpoint(&mut self, session: &mut solidcraft_engine::Session, id: &str) {
@@ -879,6 +924,9 @@ impl AgentChat {
     /// While the agent works on a message: when it last said or did something.
     pub(crate) fn heard_at(&self) -> Option<f64> {
         self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
+    }
+    fn current_stage(&self) -> Option<&str> {
+        self.turn.as_ref().filter(|_| self.state() == State::Busy && !self.stopped && !self.steering).and_then(|turn| turn.current_stage.as_deref())
     }
     /// Keep the picture just sent with the message at `at` in the conversation (the user can open
     /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
@@ -1031,6 +1079,15 @@ impl AgentChat {
                 }
             }
             Event::Plan(entries) => {
+                if let Some(turn) = self.turn.as_mut() {
+                    turn.current_stage = entries
+                        .iter()
+                        .filter(|(_, status)| status == "in_progress")
+                        .flat_map(|(content, _)| content.lines())
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .map(|line| line.chars().take(MAX_STAGE_CHARS).collect());
+                }
                 // A plan is replaced whole: update this turn's plan where it is.
                 let turn = self.items.iter().rposition(|i| matches!(i, Item::User { .. })).unwrap_or(0);
                 if let Some(Item::Plan(p)) = self.items.iter_mut().skip(turn).rev().find(|i| matches!(i, Item::Plan(_))) {
@@ -1361,6 +1418,10 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     match started {
         Ok(mut b) => {
             b.set_instructions(&app.preferences.agent_instructions);
+            let tier = chat.service_tier(&entry);
+            if tier != agents::ServiceTier::Default {
+                b.set_service_tier(tier);
+            }
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
             chat.argv = entry.argv.clone();
@@ -1464,17 +1525,31 @@ pub(crate) fn with_tool_request<T>(
     });
     // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
     // original undo boundary when that happens, including edits made before the batch.
-    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (Revision::of(&app.session.doc), t.start.clone(), t.start_undo.clone()));
+    let before = app
+        .agent_chat
+        .turn
+        .as_ref()
+        .filter(|_| own)
+        .map(|t| (app.session.doc.clone(), app.session.document_id.clone(), t.start.clone(), t.start_undo.clone()));
     let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
     let result = run(app);
     app.agent_chat.following_document = previous;
-    if let Some((doc, start, start_undo)) = before
-        && doc.is(&app.session.doc)
+    if let Some((doc, document, start, start_undo)) = before
         && let Some(turn) = app.agent_chat.turn.as_mut()
         && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
     {
-        turn.start = start;
-        turn.start_undo = start_undo;
+        if Arc::ptr_eq(&doc, &app.session.doc) {
+            turn.start = start;
+            turn.start_undo = start_undo;
+        } else if document == app.session.document_id {
+            record_feature_changes(turn, &document, &doc, &app.session.doc);
+        } else if !turn.start.same(&start)
+            && let Some(new_start) = turn.start.get::<solidcraft_engine::doc::Document>()
+        {
+            // A batch can start a new design and make edits in it. The new design's
+            // initial features came from the file, so compare only the steps since it opened.
+            record_feature_changes(turn, &app.session.document_id, &new_start, &app.session.doc);
+        }
     }
     result
 }
@@ -1482,6 +1557,7 @@ pub(crate) fn with_tool_request<T>(
 /// The agent's replacement succeeded. Keep its backend, transcript, queue, limits and validity
 /// flag; subsequent edits undo in this design and picked geometry belongs to the old one.
 pub(crate) fn continue_in_document(app: &mut SolveApp) {
+    app.agent_chat.model_changes_shown = None;
     if let Some(turn) = app.agent_chat.turn.as_mut() {
         turn.start = Revision::of(&app.session.doc);
         turn.start_undo = UndoMark::revision(&app.session.undo);
@@ -1507,12 +1583,8 @@ pub(crate) fn merge_active_turn_for_switch(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_ref() {
         let steps = merge_turn(&mut app.session.undo, turn);
         if steps > 0 {
-            app.agent_chat.push(Item::Changes {
-                steps,
-                revision: Revision::of(&app.session.doc),
-                history: UndoMark::revision(&app.session.undo),
-                undone: false,
-            });
+            let item = change_item(&app.session, turn, steps);
+            app.agent_chat.push(item);
         }
     }
 }
@@ -1571,18 +1643,143 @@ const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
 const CONTINUE_NOTE: &str = "[The previous attempt was cut short before it finished. Continue the task from where it stopped.]";
 /// Most names one list of [`changed_note`] carries; the rest are counted.
 const CHANGED_ITEMS: usize = 12;
+/// Most diff lines shown on one Undo card; extra changes fold into a trailing "+N more" line.
+const MAX_CHANGES_SUMMARY: usize = 8;
+
+/// Structured diff between two [`solidcraft_engine::doc::Document`] snapshots, shared by
+/// [`changed_note`] (for telling the agent about manual edits) and [`turn_diff_summary`] (for the
+/// per-turn Undo card).
+#[derive(Debug, Default)]
+struct DocumentDiff {
+    params: Vec<ParamChange>,
+    features: Vec<FeatureChange>,
+    marker: Option<MarkerChange>,
+}
+
+#[derive(Debug)]
+enum ParamChange {
+    Added { name: String, expr: String, model: bool },
+    Edited { name: String, old: String, new: String },
+    Removed { name: String, model: bool },
+}
+
+#[derive(Debug)]
+enum FeatureChange {
+    Added { name: String, kind: &'static str },
+    Edited { name: String, kind: &'static str },
+    Removed { name: String, kind: &'static str },
+}
+
+#[derive(Debug)]
+enum MarkerChange {
+    Before(String),
+    End,
+}
+
+fn diff_documents(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> DocumentDiff {
+    use solidcraft_engine::doc::Feature;
+    use std::collections::HashMap;
+    if seen == now {
+        return DocumentDiff::default();
+    }
+    let clip = |s: &str| s.chars().take(60).collect::<String>();
+    let before_params: HashMap<&str, &str> = seen.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let after_params: HashMap<&str, &str> = now.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let params = now
+        .params
+        .iter()
+        .filter_map(|p| match before_params.get(p.name.as_str()) {
+            Some(old) if *old == p.expr => None,
+            Some(old) => Some(ParamChange::Edited { name: clip(&p.name), old: clip(old), new: clip(&p.expr) }),
+            None => Some(ParamChange::Added { name: clip(&p.name), expr: clip(&p.expr), model: p.model }),
+        })
+        .chain(
+            seen.params
+                .iter()
+                .filter(|p| !after_params.contains_key(p.name.as_str()))
+                .map(|p| ParamChange::Removed { name: clip(&p.name), model: p.model }),
+        )
+        .collect();
+    let feature_name = |f: &Feature| if f.name.is_empty() { format!("#{}", f.id) } else { clip(&f.name) };
+    let before_features: HashMap<u64, &Feature> = seen.features.iter().map(|f| (f.id, f)).collect();
+    let after_features: HashMap<u64, &Feature> = now.features.iter().map(|f| (f.id, f)).collect();
+    let features = now
+        .features
+        .iter()
+        .filter_map(|f| match before_features.get(&f.id) {
+            Some(old) if *old == f => None,
+            Some(_) => Some(FeatureChange::Edited { name: feature_name(f), kind: f.kind.base_name() }),
+            None => Some(FeatureChange::Added { name: feature_name(f), kind: f.kind.base_name() }),
+        })
+        .chain(
+            seen.features
+                .iter()
+                .filter(|f| !after_features.contains_key(&f.id))
+                .map(|f| FeatureChange::Removed { name: feature_name(f), kind: f.kind.base_name() }),
+        )
+        .collect();
+    let marker = (seen.marker != now.marker).then(|| match now.marker.and_then(|i| now.features.get(i)) {
+        Some(f) => MarkerChange::Before(feature_name(f)),
+        None => MarkerChange::End,
+    });
+    DocumentDiff { params, features, marker }
+}
+
+/// Feature name with its kind appended when the name does not already start with the kind
+/// (e.g. `MainPlate (Box)`, while `Box1` stays `Box1`).
+fn feature_label(name: &str, kind: &str) -> String {
+    let redundant = !kind.is_empty() && name.strip_prefix(kind).is_some_and(|rest| rest.chars().next().is_none_or(|c| !c.is_ascii_alphabetic()));
+    if kind.is_empty() || redundant { name.to_string() } else { format!("{name} ({kind})") }
+}
+
+/// Concise, bounded per-turn design diff lines for the Undo card: added/edited/removed features,
+/// parameter changes (skipping auto-generated model parameters added or removed alongside features),
+/// and History marker movement.
+fn turn_diff_summary(before: &solidcraft_engine::doc::Document, after: &solidcraft_engine::doc::Document) -> Vec<String> {
+    let diff = diff_documents(before, after);
+    let mut lines = Vec::new();
+    for feature in diff.features {
+        lines.push(match feature {
+            FeatureChange::Added { name, kind } => format!("+ {}", feature_label(&name, kind)),
+            FeatureChange::Edited { name, kind } => format!("~ {}", feature_label(&name, kind)),
+            FeatureChange::Removed { name, kind } => format!("- {}", feature_label(&name, kind)),
+        });
+    }
+    for param in diff.params {
+        match param {
+            ParamChange::Added { name, expr, model: false } => lines.push(format!("+ {name} = {expr}")),
+            ParamChange::Edited { name, old, new } => lines.push(format!("~ {name}: {old} -> {new}")),
+            ParamChange::Removed { name, model: false } => lines.push(format!("- {name}")),
+            ParamChange::Added { model: true, .. } | ParamChange::Removed { model: true, .. } => {}
+        }
+    }
+    if let Some(marker) = diff.marker {
+        lines.push(match marker {
+            MarkerChange::Before(name) => format!("~ History marker before {name}"),
+            MarkerChange::End => "~ History marker at end".into(),
+        });
+    }
+    if lines.len() > MAX_CHANGES_SUMMARY {
+        let kept = MAX_CHANGES_SUMMARY.saturating_sub(1);
+        let more = lines.len() - kept;
+        lines.truncate(kept);
+        lines.push(trf("ui.agent_chat_ctx_more", &[("n", &more.to_string())]));
+    }
+    lines
+}
+
+fn turn_summary(turn: &Turn, now: &solidcraft_engine::doc::Document) -> Vec<String> {
+    turn.start.get::<solidcraft_engine::doc::Document>().map_or_else(Vec::new, |before| turn_diff_summary(&before, now))
+}
 
 /// Said to the agent before a message when the design is not the one its last turn left: the user
 /// changed it by hand in between (#10854). Names the parameters and features that changed and
 /// where the History marker went, so the agent reads the design again instead of reusing
 /// positions and picks from before.
 fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> Option<String> {
-    use solidcraft_engine::doc::Feature;
-    use std::collections::HashMap;
     if seen == now {
         return None;
     }
-    let clip = |s: &str| s.chars().take(60).collect::<String>();
     let list = |items: Vec<String>| {
         let more = items.len().saturating_sub(CHANGED_ITEMS);
         let mut text = items.into_iter().take(CHANGED_ITEMS).collect::<Vec<_>>().join(", ");
@@ -1591,42 +1788,36 @@ fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine
         }
         text
     };
+    let diff = diff_documents(seen, now);
     let mut parts = Vec::new();
-    let before: HashMap<&str, &str> = seen.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
-    let after: HashMap<&str, &str> = now.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
-    let params: Vec<String> = now
+    let params: Vec<String> = diff
         .params
-        .iter()
-        .filter_map(|p| match before.get(p.name.as_str()) {
-            Some(old) if *old == p.expr => None,
-            Some(old) => Some(format!("{} {} -> {}", clip(&p.name), clip(old), clip(&p.expr))),
-            None => Some(format!("{} = {} (new)", clip(&p.name), clip(&p.expr))),
+        .into_iter()
+        .map(|p| match p {
+            ParamChange::Edited { name, old, new } => format!("{name} {old} -> {new}"),
+            ParamChange::Added { name, expr, .. } => format!("{name} = {expr} (new)"),
+            ParamChange::Removed { name, .. } => format!("{name} (removed)"),
         })
-        .chain(seen.params.iter().filter(|p| !after.contains_key(p.name.as_str())).map(|p| format!("{} (removed)", clip(&p.name))))
         .collect();
     if !params.is_empty() {
         parts.push(format!("parameters: {}", list(params)));
     }
-    let name = |f: &Feature| if f.name.is_empty() { format!("#{}", f.id) } else { clip(&f.name) };
-    let before: HashMap<u64, &Feature> = seen.features.iter().map(|f| (f.id, f)).collect();
-    let after: HashMap<u64, &Feature> = now.features.iter().map(|f| (f.id, f)).collect();
-    let features: Vec<String> = now
+    let features: Vec<String> = diff
         .features
-        .iter()
-        .filter_map(|f| match before.get(&f.id) {
-            Some(old) if *old == f => None,
-            Some(_) => Some(format!("{} (edited)", name(f))),
-            None => Some(format!("{} (new)", name(f))),
+        .into_iter()
+        .map(|f| match f {
+            FeatureChange::Edited { name, .. } => format!("{name} (edited)"),
+            FeatureChange::Added { name, .. } => format!("{name} (new)"),
+            FeatureChange::Removed { name, .. } => format!("{name} (removed)"),
         })
-        .chain(seen.features.iter().filter(|f| !after.contains_key(&f.id)).map(|f| format!("{} (removed)", name(f))))
         .collect();
     if !features.is_empty() {
         parts.push(format!("features: {}", list(features)));
     }
-    if seen.marker != now.marker {
-        parts.push(match now.marker.and_then(|i| now.features.get(i)) {
-            Some(f) => format!("the History marker is now before {}, so it and the features after it are rolled back", name(f)),
-            None => "the History marker is now at the end".into(),
+    if let Some(marker) = diff.marker {
+        parts.push(match marker {
+            MarkerChange::Before(name) => format!("the History marker is now before {name}, so it and the features after it are rolled back"),
+            MarkerChange::End => "the History marker is now at the end".into(),
         });
     }
     let what = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join("; ")) };
@@ -1973,7 +2164,12 @@ pub fn new_chat(app: &mut SolveApp) {
     end_turn(app);
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chat.export_tools = None;
+    }
     chat.items.clear();
+    chat.model_changes_shown = None;
     chat.all_selected = false;
     chat.times.clear();
     chat.turn_warning = None;
@@ -1993,6 +2189,14 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.seen_design = None;
     chat.discard_end |= running;
     chat.model_revert = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The running endpoint can still hold a tier after its saved URL changes.
+        chat.api_service_tier = None;
+        if let Some(b) = chat.backend.as_mut() {
+            b.set_service_tier(agents::ServiceTier::Default);
+        }
+    }
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
@@ -2092,6 +2296,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start: Revision::of(&app.session.doc),
         start_undo: UndoMark::revision(&app.session.undo),
+        feature_changes: (app.session.document_id.clone(), HashMap::new()),
         changes: 0,
         requests: 0,
         limit_told: false,
@@ -2102,6 +2307,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         edit_requested: requests_edit(&text),
         began: now,
         heard: now,
+        current_stage: None,
     });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.unfinished = None;
@@ -2369,7 +2575,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         chat.notice(warning, false);
     }
     if steps > 0 {
-        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false });
+        chat.push(change_item(session, &turn, steps));
     }
     // How long the answer took, under its last item ("Answered in 23 min").
     let answered = chat.ended.as_deref().is_some_and(|r| !matches!(r, "cancelled" | "error" | "auth")) && !chat.stopped;
@@ -2378,6 +2584,56 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         && let Some(stamp) = chat.times.last_mut()
     {
         stamp.took = Some((took, answered));
+    }
+}
+
+/// Collect only the features written by this request. Human edits that happened while the
+/// command computed are already part of `before`, taken on the window thread at commit time.
+fn record_feature_changes(turn: &mut Turn, document: &str, before: &solidcraft_engine::doc::Document, after: &solidcraft_engine::doc::Document) {
+    let (recorded_document, features) = &mut turn.feature_changes;
+    if recorded_document != document {
+        recorded_document.clear();
+        recorded_document.push_str(document);
+        features.clear();
+    }
+    let before: HashMap<_, _> = before.features.iter().map(|feature| (feature.id, feature)).collect();
+    let present: HashSet<_> = after.features.iter().map(|feature| feature.id).collect();
+    features.retain(|id, _| present.contains(id));
+    for feature in &after.features {
+        if before.get(&feature.id).is_none_or(|old| *old != feature) {
+            features.insert(feature.id, feature.clone());
+        }
+    }
+}
+
+/// The card's model targets are still present and evaluated at the end of the message.
+fn change_item(session: &solidcraft_engine::Session, turn: &Turn, steps: usize) -> Item {
+    let (document, changed) = &turn.feature_changes;
+    let mut features = Vec::new();
+    if document == &session.document_id && !changed.is_empty() {
+        let start = turn.start.get::<solidcraft_engine::doc::Document>();
+        let before: HashMap<_, _> = start.iter().flat_map(|doc| &doc.features).map(|feature| (feature.id, feature)).collect();
+        let evaluated: HashSet<_> = session
+            .model
+            .results
+            .iter()
+            .filter(|result| !result.skipped && !result.stale && result.error.is_none())
+            .map(|result| result.id)
+            .collect();
+        features.extend(session.doc.features.iter().filter_map(|feature| {
+            (changed.get(&feature.id) == Some(feature)
+                && evaluated.contains(&feature.id)
+                && before.get(&feature.id).is_none_or(|old| *old != feature))
+            .then_some(feature.id)
+        }));
+    }
+    Item::Changes {
+        steps,
+        summary: turn_summary(turn, &session.doc),
+        features,
+        revision: Revision::of(&session.doc),
+        history: UndoMark::revision(&session.undo),
+        undone: false,
     }
 }
 
@@ -2439,7 +2695,47 @@ pub fn undo_changes(app: &mut SolveApp, index: usize) {
         && let Some(Item::Changes { undone, .. }) = app.agent_chat.items.get_mut(index)
     {
         *undone = true;
+        app.agent_chat.model_changes_shown = None;
     }
+}
+
+fn model_changes_view_visible(app: &SolveApp) -> bool {
+    !app.home.open
+        && app.docs.views.active().kind == solidcraft_views::ViewKind::Model
+        && !crate::drawing_workspace::active(app)
+        && !crate::render_workspace::active(app)
+}
+
+fn current_model_changes(app: &SolveApp, index: usize) -> Option<&[u64]> {
+    if !model_changes_view_visible(app) {
+        return None;
+    }
+    let Item::Changes { features, revision, history, undone: false, .. } = app.agent_chat.items.get(index)? else { return None };
+    (!features.is_empty() && revision.is(&app.session.doc) && UndoMark::reached(history, &app.session.undo)).then_some(features)
+}
+
+fn active_model_changes(app: &SolveApp) -> Option<(usize, &[u64])> {
+    let (index, revision) = app.agent_chat.model_changes_shown.as_ref()?;
+    if shown(app) && app.agent_chat.open && *revision == app.session.design_token() {
+        return Some((*index, current_model_changes(app, *index)?));
+    }
+    None
+}
+
+pub(crate) fn model_changes_index(app: &SolveApp) -> Option<usize> {
+    active_model_changes(app).map(|(index, _)| index)
+}
+
+pub(crate) fn model_changes_targets(app: &SolveApp) -> impl Iterator<Item = solidcraft_engine::Sel> + '_ {
+    active_model_changes(app).map(|(_, features)| features).into_iter().flatten().map(|&id| solidcraft_engine::Sel::Feature { id })
+}
+
+fn toggle_model_changes(app: &mut SolveApp, index: usize) {
+    app.agent_chat.model_changes_shown = if model_changes_index(app) != Some(index) && current_model_changes(app, index).is_some() {
+        Some((index, app.session.design_token()))
+    } else {
+        None
+    };
 }
 
 /// The requests the agent's tools sent through the chat's endpoint: each one passes the gate.
@@ -2945,6 +3241,24 @@ pub fn set_config_option(app: &mut SolveApp, id: &str, value: &str) {
     set_config_option_checked(app, id, value, true);
 }
 
+/// Set the tier for the selected endpoint's next turn. A disconnected chat applies it on connect.
+#[cfg(not(target_arch = "wasm32"))]
+fn set_service_tier(app: &mut SolveApp, tier: agents::ServiceTier) {
+    let Some(entry) = agents::current(app) else { return };
+    if !entry.service_tiers().contains(&tier) {
+        return;
+    }
+    let chat = &mut app.agent_chat;
+    if chat.running_id == entry.id
+        && chat.running_endpoint == entry.base_url
+        && let Some(b) = chat.backend.as_mut()
+    {
+        b.set_service_tier(tier);
+    }
+    chat.api_service_tier =
+        (tier != agents::ServiceTier::Default).then_some(ServiceTierChoice { agent_id: entry.id, endpoint: entry.base_url, tier });
+}
+
 /// [`set_config_option`], with a choice the agent did not list (`listed_only` false: a typed
 /// model, which the agent may refuse). Returns whether it was sent.
 fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_only: bool) -> bool {
@@ -2973,6 +3287,9 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Value, String> {
     if let Some(e) = p.get("features").and_then(Value::as_bool) {
         app.preferences.ai_features = e;
+        if !e {
+            app.agent_chat.clear_model_changes();
+        }
     }
     if let Some(b) = p.get("toolbar_button").and_then(Value::as_bool) {
         app.preferences.ai_toolbar_button = b;
@@ -3086,6 +3403,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(o) = p.get("open").and_then(Value::as_bool) {
         app.agent_chat.open = o;
+        if !o {
+            app.agent_chat.clear_model_changes();
+        }
     }
     if p.get("toggle").and_then(Value::as_bool) == Some(true) {
         toggle(app);
@@ -3192,7 +3512,9 @@ pub fn status(app: &SolveApp) -> Value {
                 json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer})
             }
             Item::Approval { title, answer, .. } => json!({"approval": title, "answer": answer}),
-            Item::Changes { steps, undone, .. } => json!({"changes": steps, "undone": undone}),
+            Item::Changes { steps, summary, features, undone, .. } => {
+                json!({"changes": steps, "summary": summary, "features": features.len(), "undone": undone})
+            }
             Item::Notice { text, error } => json!({"notice": text, "error": error}),
         })
         .collect();

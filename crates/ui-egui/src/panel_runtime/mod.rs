@@ -1,30 +1,16 @@
 //! Opt-in common panel runtime and retained production content bindings.
 //! Model/commands, controller state, presentation and layout have separate owners.
 mod app;
-mod drag_paint;
 mod fixtures;
-mod host;
-mod interaction;
-mod layout;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod native;
-#[cfg(not(target_arch = "wasm32"))]
-mod native_ui;
 mod plugin;
 mod preferences;
 mod production;
-mod runtime;
 mod specimen;
-mod surfaces;
-mod workspace;
 
 pub use app::*;
 pub use fixtures::*;
-pub use host::*;
-pub use interaction::*;
-pub use layout::*;
-#[cfg(not(target_arch = "wasm32"))]
-pub use native::NativeMonitor;
+#[cfg(test)]
+pub(crate) use plugin::instance_for as plugin_instance;
 pub(crate) use plugin::queue_selection;
 pub(crate) use preferences::PanelLayoutSnapshot;
 pub(crate) use preferences::panel_layout_matches;
@@ -39,10 +25,10 @@ pub(crate) use production::report_content_composer_height;
 pub(crate) use production::report_content_extent;
 pub(crate) use production::shared_content_composer_height;
 pub(crate) use production::shared_content_measurement;
-pub use runtime::*;
+#[cfg(test)]
+pub(crate) use production::timeline_tall;
+pub use solidcraft_ui_kit::panel_runtime::*;
 pub use specimen::*;
-pub use surfaces::*;
-pub use workspace::*;
 
 #[cfg(test)]
 mod tests;

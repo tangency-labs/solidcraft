@@ -667,7 +667,7 @@ fn hostile_manifest_fields_return_errors() {
         |value: &mut Value| value["runtime"]["entries"] = json!(["make", "make"]),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":0,"memory_mib":64,"deadline_ms":1}),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":4097,"deadline_ms":1}),
-        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":30001}),
+        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":0}),
         |value: &mut Value| value["runtime"]["entries"] = json!([{"name":"make","input_schema":true}]),
     ] {
         let mut value = manifest();
@@ -729,6 +729,38 @@ fn larger_manifests_fit_without_removing_input_descriptions() {
 }
 
 #[test]
+fn call_and_deadline_requests_are_host_policy() {
+    let mut value = manifest();
+    value["runtime"]["limits"] = json!({"fuel":1000000,"memory_mib":64,"host_calls":300,"deadline_ms":80000});
+    let requested = parse(&value).unwrap().runtime.unwrap().limits;
+    assert_eq!((requested.host_calls, requested.deadline_ms), (300, 80000));
+    let defaults = HostLimits::default();
+    assert_eq!((defaults.max_host_calls, defaults.max_deadline_ms), (256, 30000));
+    assert_eq!(parse(&manifest()).unwrap().runtime.unwrap().limits.host_calls, 256);
+    assert_eq!(defaults.check(&requested), Err(HostError::OverCeiling { limit: "host_calls".into(), requested: 300, allowed: 256 }));
+    let raised_calls = HostLimits { max_host_calls: 300, ..defaults };
+    assert_eq!(raised_calls.check(&requested), Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 80000, allowed: 30000 }));
+    assert!(HostLimits { max_deadline_ms: 80000, ..raised_calls }.check(&requested).is_ok());
+    // Importers keep their existing native-import count and ten-minute ceiling.
+    assert!(defaults.check_importer(&Limits { deadline_ms: 600000, host_calls: 1 << 20, ..Limits::default() }).is_ok());
+    assert_eq!(
+        defaults.check_importer(&Limits { deadline_ms: 600001, ..Limits::default() }),
+        Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 600001, allowed: 600000 })
+    );
+    let maximum = Limits { fuel: u64::MAX, deadline_ms: u64::MAX, host_calls: u64::MAX, ..Limits::default() };
+    assert!(HostLimits { max_fuel: u64::MAX, max_host_calls: u64::MAX, max_deadline_ms: u64::MAX, ..defaults }.check(&maximum).is_ok());
+    for field in ["host_calls", "deadline_ms"] {
+        for invalid in [json!(0), json!(-1), json!(1.5)] {
+            value["runtime"]["limits"][field] = invalid;
+            assert!(parse(&value).is_err(), "{field}");
+            value["runtime"]["limits"][field] = json!(80000);
+        }
+    }
+    assert!(HostLimits { max_host_calls: 0, ..defaults }.validate().is_err());
+    assert!(HostLimits { max_deadline_ms: 0, ..defaults }.validate().is_err());
+}
+
+#[test]
 fn entries_share_field_definitions_through_defs_and_ref() {
     let place = json!({"type":"string","title":"Place","default":"auto","enum":["auto","origin"]});
     let units = json!({"type":"string","enum":["mm","in"]});
@@ -775,6 +807,55 @@ fn entries_share_field_definitions_through_defs_and_ref() {
 }
 
 #[test]
+fn dialog_layout_annotations_are_checked_at_load() {
+    let with = |root: Value, extra: Value| {
+        let mut schema = json!({"type":"object","properties":{
+            "units":{"type":"string","enum":["mm","in"]},
+            "width":{"type":"number"}
+        }});
+        for (key, value) in root.as_object().unwrap() {
+            schema[key] = value.clone();
+        }
+        for (key, value) in extra.as_object().unwrap() {
+            schema["properties"]["width"][key] = value.clone();
+        }
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+        parse(&value)
+    };
+    let ok = json!({"x-solidcraft-section":"Size","x-solidcraft-unit-from":"units","x-solidcraft-help":"https://example.com/size"});
+    let entry = with(json!({"x-solidcraft-sections":"collapsible"}), ok).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(entry.input_schema["properties"]["width"]["x-solidcraft-unit-from"], "units", "annotations reach the dialog unchanged");
+    assert!(with(json!({}), json!({"x-solidcraft-section":""})).is_ok(), "an empty heading is a divider");
+    let refused =
+        |root: Value, extra: Value, key: &str| matches!(with(root, extra), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(key));
+    assert!(refused(json!({"x-solidcraft-sections":"tabs"}), json!({}), "x-solidcraft-sections"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":7}), "x-solidcraft-section"));
+    assert!(refused(json!({}), json!({"x-solidcraft-section":"x".repeat(81)}), "x-solidcraft-section"));
+    for source in [json!("missing"), json!("width"), json!(1)] {
+        assert!(refused(json!({}), json!({"x-solidcraft-unit-from":source}), "x-solidcraft-unit-from"), "{source}");
+    }
+    for url in ["https://example.com/docs#x", "https://docs.example.com:8443/a?b=1"] {
+        assert!(layout::help_url(url), "{url}");
+    }
+    // Documentation links name a domain: IP literals are refused by design.
+    for url in [
+        "https://[not-an-ip]/",
+        "https://[::1]/",
+        "https://127.0.0.1/",
+        "https://user@#topic",
+        "https://:443/",
+        "https://#topic",
+        "https://",
+        "http://example.com",
+        "https://example.com/a b",
+        "javascript:alert(1)",
+    ] {
+        assert!(refused(json!({}), json!({"x-solidcraft-help":url}), "x-solidcraft-help"), "{url}");
+    }
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
@@ -799,7 +880,10 @@ fn host_limits_have_typed_failures() {
     let stopped = |limit: &str, allowed| HostError::Exhausted { limit: limit.into(), allowed }.to_string();
     assert_eq!(stopped("fuel", 1000), "used all 1000 fuel it asks for and was stopped");
     assert_eq!(stopped("memory_mib", 64), "needed more than the 64 MiB of memory it asks for and was stopped");
-    assert_eq!(stopped("deadline_ms", 5000), "ran longer than its time limit of 5000 ms and was stopped");
+    assert_eq!(
+        stopped("deadline_ms", 5000),
+        "ran longer than its time limit of 5000 ms and was stopped; raise runtime.limits.deadline_ms and, if needed, Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+    );
     assert_eq!(stopped("design_mib", 256), "made a design larger than 256 MiB, the most an importer may hand over");
     assert_eq!(HostError::Unsupported { reason: "no solids".into() }.to_string(), "not supported: no solids");
 }
@@ -1316,7 +1400,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     let mut evaluating = importer();
     evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
     assert!(parse(&evaluating).is_ok());
-    // A command claims no extension, reads no input folder and still finishes within 30 s.
+    // A command claims no extension and reads no input folder.
     let command = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = manifest();
         change(&mut value);
@@ -1326,7 +1410,6 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","effect":"open"}]), "effect");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
     command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
-    command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
 fn exporter() -> Value {
@@ -1902,6 +1985,140 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         schema[keyword][0]["additionalProperties"] = json!(false);
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
+}
+
+fn workspace_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make"}, {"name":"enter", "effect":"read"}, {"name":"leave", "effect":"read"}]);
+    value["runtime"]["ui"] = json!({
+        "ui_version": 1,
+        "panels": [{"id":"tools", "title":"Tools", "zones":["left","right"], "layout":{
+            "root":0, "nodes":[
+                {"widget":{"group":[1,2]}},
+                {"widget":{"text":"Choose a tool"}},
+                {"widget":{"button":{"label":"Make", "icon":null, "entry":"make"}}}
+            ]
+        }}],
+        "workspaces": [{"id":"cam", "name":"Manufacture", "icon":"gear", "applies_to":["part","assembly"],
+            "ribbon":[{"name":"Tools", "groups":[{"name":"Setup", "entries":["make"]}]}],
+            "panels":[["left",["tools"]]], "builtin_panels":["browser"], "on_enter":"enter", "on_exit":"leave"
+        }]
+    });
+    value
+}
+
+#[test]
+fn workspace_declarations_validate_and_round_trip() {
+    let parsed = parse(&workspace_manifest()).unwrap();
+    let declarations = parsed.runtime.unwrap().ui.unwrap();
+    assert_eq!(declarations.ui_version, 1);
+    assert_eq!(declarations.workspaces[0].applies_to, vec![ui::DesignKind::Part, ui::DesignKind::Assembly]);
+    assert_eq!(declarations.workspaces[0].panels, vec![(ui::DockZone::Left, vec!["tools".into()])]);
+    assert_eq!(declarations.workspaces[0].on_enter.as_deref(), Some("enter"));
+    assert_eq!(declarations.workspaces[0].on_exit.as_deref(), Some("leave"));
+    let encoded = serde_json::to_value(&declarations).unwrap();
+    assert_eq!(serde_json::from_value::<ui::Declarations>(encoded).unwrap(), declarations);
+    assert_eq!(ui::WORKSPACE_HOOK_DEADLINE_MS, 1000);
+}
+
+#[test]
+fn workspace_declarations_require_the_ui_capability_and_a_command_runtime() {
+    let mut missing_capability = workspace_manifest();
+    missing_capability["capabilities"] = json!(["commands@0.2"]);
+    assert!(matches!(parse(&missing_capability), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.ui"));
+
+    let mut importer_value = importer();
+    importer_value["capabilities"] = json!(["formats@0.2", "ui@0.1"]);
+    importer_value["runtime"]["ui"] = workspace_manifest()["runtime"]["ui"].clone();
+    assert!(parse(&importer_value).is_err());
+}
+
+#[test]
+fn workspace_hooks_and_ribbon_only_reference_declared_entries() {
+    for bad_hook in ["make", "missing"] {
+        for field in ["on_enter", "on_exit"] {
+            let mut value = workspace_manifest();
+            value["runtime"]["ui"]["workspaces"][0][field] = json!(bad_hook);
+            assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("hooks")));
+        }
+    }
+    let mut value = workspace_manifest();
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(["other.make"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("ribbon")));
+    value = workspace_manifest();
+    value["runtime"]["ui"]["panels"][0]["layout"]["nodes"][2]["widget"]["button"]["entry"] = json!("missing");
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_panel_placements_require_allowed_zones_and_unique_ids() {
+    for panels in [
+        json!([["bottom", ["tools"]]]),
+        json!([["left", ["missing"]]]),
+        json!([["left", ["tools"]], ["right", ["tools"]]]),
+        json!([["left", []], ["left", ["tools"]]]),
+    ] {
+        let mut value = workspace_manifest();
+        value["runtime"]["ui"]["workspaces"][0]["panels"] = panels;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("panels")));
+    }
+    let mut value = workspace_manifest();
+    let duplicate = value["runtime"]["ui"]["panels"][0].clone();
+    value["runtime"]["ui"]["panels"].as_array_mut().unwrap().push(duplicate);
+    assert!(parse(&value).is_err());
+    value = workspace_manifest();
+    value["runtime"]["ui"]["workspaces"][0]["applies_to"] = json!(["part", "part"]);
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_ribbon_limits_allow_boundaries_and_refuse_excess() {
+    let mut value = workspace_manifest();
+    let tabs = (0..6).map(|i| json!({"name":format!("Tab {i}"), "groups":[{"name":"Tools", "entries":vec!["make"; 10]}]})).collect::<Vec<_>>();
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"] = json!(tabs);
+    assert!(parse(&value).is_ok());
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 11]);
+    assert!(parse(&value).is_err());
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 10]);
+    value["runtime"]["ui"]["workspaces"][0]["ribbon"].as_array_mut().unwrap().push(json!({"name":"Extra", "groups":[]}));
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_count_limit_allows_the_boundary_and_refuses_excess() {
+    let mut value = workspace_manifest();
+    let mut workspace = value["runtime"]["ui"]["workspaces"][0].clone();
+    workspace["id"] = json!("inspection");
+    value["runtime"]["ui"]["workspaces"].as_array_mut().unwrap().push(workspace.clone());
+    assert!(parse(&value).is_ok());
+    workspace["id"] = json!("extra");
+    value["runtime"]["ui"]["workspaces"].as_array_mut().unwrap().push(workspace);
+    assert!(matches!(parse(&value), Err(HostError::LimitExceeded { .. })));
+}
+
+#[test]
+fn slot_declarations_support_custom_labels_and_model_group_flags() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([
+        {
+            "name": "feature",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식"}],
+            "model_group": false
+        },
+        {
+            "name": "height",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": true}]
+        }
+    ]);
+    let parsed = parse(&value).expect("valid manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("형상인식".into()), model_group: None });
+    assert_eq!(entries[0].model_group, Some(false));
+    assert_eq!(entries[1].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("높이측정".into()), model_group: Some(true) });
 }
 
 #[test]

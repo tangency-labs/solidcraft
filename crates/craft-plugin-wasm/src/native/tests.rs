@@ -798,9 +798,9 @@ fn capability_query_obeys_cancellation_and_host_call_limits() {
     let mut state = state(App::default());
     state.granted_capabilities = vec!["commands@0.1".into()];
     assert_eq!(capabilities::Host::granted(&mut state), ["commands@0.1"]);
-    state.calls = MAX_CALLS;
+    state.calls = state.max_calls;
     assert!(capabilities::Host::granted(&mut state).is_empty());
-    assert_eq!(state.failed, Some(limit("host call count")));
+    assert_eq!(state.failed, Some(HostError::Exhausted { limit: "host_calls".into(), allowed: state.max_calls }));
     let mut state = self::state(App { cancelled: true, ..App::default() });
     assert!(capabilities::Host::granted(&mut state).is_empty());
     assert_eq!(state.failed, Some(HostError::Cancelled));
@@ -826,7 +826,7 @@ fn dialog_hook_uses_its_own_fuel_ceiling_and_stops_memory_growth() {
         &bytes,
         "make",
         &json!({}),
-        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1 },
+        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1, ..craft_plugin::HostLimits::default() },
     );
     assert_eq!(result.unwrap_err(), HostError::Exhausted { limit: "fuel".into(), allowed: 77 });
     let bytes = dialog_component("0.2.0", "i32.const 10000 memory.grow drop", "{}");
@@ -851,6 +851,82 @@ fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     run(&mut app, &manifest(), &component("call $box"), "make", &json!({})).unwrap();
     assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (3, 3, 2, 1));
 }
+#[test]
+fn raised_host_call_budget_commits_three_hundred_calls_and_exhaustion_rolls_back() {
+    let bytes = component(&"call $box ".repeat(300));
+    for version in ["0.1.0", "0.2.0"] {
+        let bytes = if version == "0.1.0" { component_for(version, &"call $box ".repeat(300)) } else { bytes.clone() };
+        let mut request = manifest();
+        let mut app = App { value: 7, ..Default::default() };
+        assert_eq!(
+            run(&mut app, &request, &bytes, "make", &json!({})).unwrap_err(),
+            HostError::Exhausted { limit: "host_calls".into(), allowed: 256 }
+        );
+        assert_eq!((app.value, app.commits, app.rollbacks), (7, 0, 1));
+        request.runtime.as_mut().unwrap().limits.host_calls = 300;
+        run(&mut app, &request, &bytes, "make", &json!({})).unwrap();
+        assert_eq!((app.value, app.commits, app.rollbacks), (307, 1, 1));
+    }
+}
+
+#[test]
+fn native_host_time_does_not_consume_guest_deadline() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let mut deadline = GuestDeadline::new(5000);
+    deadline.transition(CallHook::CallingWasm, at(0));
+    deadline.transition(CallHook::CallingHost, at(1000));
+    assert!(!deadline.expired(at(81000)), "80 seconds of native work must not consume guest time");
+    // A native host can invoke a guest callback; count that guest interval too.
+    deadline.transition(CallHook::CallingWasm, at(81000));
+    deadline.transition(CallHook::ReturningFromWasm, at(82000));
+    assert!(!deadline.expired(at(162000)));
+    deadline.transition(CallHook::ReturningFromHost, at(162000));
+    assert!(!deadline.expired(at(164999)));
+    assert!(deadline.expired(at(165000)));
+    deadline.transition(CallHook::ReturningFromWasm, at(165000));
+    assert!(deadline.expired(at(165000)), "completion and post-return are charged");
+    let mut maximum = GuestDeadline::new(u64::MAX);
+    maximum.transition(CallHook::CallingWasm, start);
+    assert!(!maximum.expired(at(165000)));
+}
+
+#[test]
+fn guest_deadline_stops_a_loop_without_host_calls() {
+    let mut request = manifest();
+    let limits = &mut request.runtime.as_mut().unwrap().limits;
+    limits.fuel = u64::MAX;
+    limits.deadline_ms = 1;
+    let mut app = App::default();
+    assert_eq!(
+        run(&mut app, &request, &component("(loop br 0)"), "make", &json!({})).unwrap_err(),
+        HostError::Exhausted { limit: "deadline_ms".into(), allowed: 1 }
+    );
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+}
+
+#[test]
+fn host_call_counter_exhausts_at_u64_max_without_wrapping() {
+    let mut state = state(App::default());
+    state.calls = u64::MAX - 1;
+    state.max_calls = u64::MAX;
+    state.check().unwrap();
+    assert_eq!(state.calls, u64::MAX);
+    assert!(state.check().is_err());
+    assert_eq!(state.failed, Some(HostError::Exhausted { limit: "host_calls".into(), allowed: u64::MAX }));
+}
+
+#[test]
+fn importer_host_call_count_keeps_its_separate_fixed_budget() {
+    let mut state = state(App::default());
+    state.effect = Effect::Open;
+    state.max_calls = MAX_IMPORT_CALLS;
+    state.calls = MAX_IMPORT_CALLS - 1;
+    state.check().unwrap();
+    assert!(state.check().is_err());
+    assert_eq!(state.failed, Some(HostError::LimitExceeded { limit: "host call count".into() }));
+}
+
 #[test]
 fn traps_runaway_loops_memory_and_swallowed_failures_rollback() {
     for (code, diagnostic) in [
@@ -1142,9 +1218,9 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls: Limits::default().host_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_secs(5),
+        deadline: GuestDeadline::new(5000),
         import: None,
         panels: None,
     }
@@ -1237,6 +1313,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -1275,7 +1377,7 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
     let engine = wasmtime::Engine::new(&config).unwrap();
     let module = wasmtime::Module::from_binary(&engine, &wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap()).unwrap();
     let mut store = wasmtime::Store::new(&engine, ());
-    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, stack_kib: None };
+    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, ..Limits::default() };
     store.set_fuel(limits.fuel).unwrap();
     store.set_epoch_deadline(1);
     let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
@@ -2326,6 +2428,36 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     assert_eq!(allowed.resolve("library".into(), "part.bin".into()).unwrap(), Some("Part.BIN".into()));
     assert_eq!(allowed.resolve("library".into(), "".into()).unwrap(), Some("".into()));
     assert_eq!(allowed.resolve("library".into(), "absent".into()).unwrap(), None);
+    assert_eq!(allowed.resolve("library".into(), "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(allowed.resolve("library".into(), "PARTS".into()).unwrap(), None);
+    // One free place in the file budget: the typed spelling takes it. Where the disk opens the file
+    // under that spelling it stays the answer and the run goes on; elsewhere the folder's spelling
+    // does not fit.
+    let mut edge = make();
+    edge.folder_files = (1..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
+    let answer = edge.resolve("library".into(), "part.bin".into());
+    if root.join("part.bin").is_file() {
+        assert_eq!(answer.unwrap(), Some("part.bin".into()));
+        assert_eq!(edge.size("library".into(), "part.bin".into()).unwrap(), Some(6));
+    } else {
+        assert!(answer.is_err());
+    }
+    let mut importing = make();
+    importing.import = Some(ImportState {
+        dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+        dialog: None,
+        name: "Part.BIN".into(),
+        input_folder: true,
+        read_bytes: 0,
+        files: Default::default(),
+        design: Vec::new(),
+        evaluate: false,
+        scratch: Vec::new(),
+        evaluating: false,
+    });
+    assert_eq!(source::Host::resolve(&mut importing, "part.bin".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "absent".into()).unwrap(), None);
     for path in ["../outside", "/outside", ".secret", "parts/../../outside", "C:\\outside", "parts\\..\\outside"] {
         assert!(make().read("library".into(), path.into(), 0, 1).is_err(), "{path}");
     }
@@ -2533,6 +2665,39 @@ fn file_aware_hooks_read_optional_user_settings_without_publishing_or_writing() 
 }
 
 #[test]
+fn parallel_dialog_tests_do_not_share_prefix_read_slots() {
+    let reads = prefix_reads();
+    let mut releases = Vec::new();
+    let mut replies = Vec::new();
+    for _ in 0..MAX_PREFIX_READS {
+        let (release, blocked) = mpsc::channel();
+        let reply = start_prefix_read(prefix_reads(), move || {
+            blocked.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        releases.push(release);
+        replies.push(reply);
+    }
+    // Repeated calls on this thread still share the limit.
+    assert_eq!(reads.load(Ordering::Acquire), MAX_PREFIX_READS);
+    let refused = start_prefix_read(prefix_reads(), || Ok(()));
+    assert!(matches!(refused, Err(HostError::LimitExceeded { .. })));
+
+    // Another test can read while every permit on this thread is occupied.
+    let other = std::thread::spawn(|| {
+        start_prefix_read(prefix_reads(), || Ok(7_u8)).and_then(|reply| wait_prefix(&reply, Instant::now() + Duration::from_secs(5)))
+    })
+    .join();
+    for (release, reply) in releases.into_iter().zip(replies) {
+        release.send(()).unwrap();
+        reply.recv().unwrap().unwrap();
+    }
+    assert_eq!(reads.load(Ordering::Acquire), 0);
+    assert_eq!(other.unwrap().unwrap(), 7);
+}
+
+#[test]
 fn a_blocked_prefix_read_expires_and_late_reads_keep_the_global_slots_until_finished() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut releases = Vec::new();
@@ -2589,7 +2754,7 @@ fn a_long_job_runs_under_the_job_deadline_instead_of_the_command_limits() {
          i32.const 4000 i32.load i32.const 300 i32.lt_u br_if $more)",
     );
     let mut app = App::default();
-    assert!(run(&mut app, &job(false), &many, "make", &json!({})).unwrap_err().to_string().contains("host call count"));
+    assert_eq!(run(&mut app, &job(false), &many, "make", &json!({})).unwrap_err(), HostError::Exhausted { limit: "host_calls".into(), allowed: 256 });
     assert_eq!(app.value, 0, "the command's calls are rolled back");
     run(&mut app, &job(true), &many, "make", &json!({})).unwrap();
     assert_eq!(app.value, 300);

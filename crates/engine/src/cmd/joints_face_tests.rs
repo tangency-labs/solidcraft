@@ -1169,3 +1169,499 @@ fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
     // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
     assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
 }
+
+/// Plate spanning x in [PX, PX + 5], y in [0, 100], z in [0, 100] with an X-axis Ø6 through-hole
+/// at (y = 50, z = 50), plus a washer component with an X-axis Ø6 bore (x in [0, 2]).
+fn plate_and_washer() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "PX", "expression": "1015 mm"}));
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": ["PX", 0, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": ["PX - 5 mm", 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    let plate = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// Adding a chamfer to a through-hole entry keeps an existing `insert` joint on the plate's
+/// planar face instead of shifting inward to the recessed cylinder-cone rim, while still
+/// following the plate face when the plate translates (#22049).
+#[test]
+fn insert_joint_on_hole_rim_stays_on_plate_face_after_chamfer_and_follows_plate_translation() {
+    let mut s = plate_and_washer();
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    // Add a 0.5 x 45 deg chamfer to the hole entry on the plate.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer must stay on plate face x = 1015, not shift inward: {seat:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "WasherSeat"}));
+    let oa = &inspected["joints"][0]["a"]["frame"]["origin"];
+    let za = &inspected["joints"][0]["a"]["frame"]["z"];
+    assert!(near(Vec3::new(oa[0].as_f64().unwrap(), oa[1].as_f64().unwrap(), oa[2].as_f64().unwrap()), Vec3::new(1015.0, 50.0, 50.0)), "{inspected}");
+    assert!(near(Vec3::new(za[0].as_f64().unwrap(), za[1].as_f64().unwrap(), za[2].as_f64().unwrap()), -Vec3::X), "{inspected}");
+
+    // Translating the plate still moves the washer with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1025 mm"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let moved = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(moved, Vec3::new(1025.0, 50.0, 50.0)), "washer must follow translated plate face to x = 1025: {moved:?}");
+
+    // Chamfering the opposite end of the hole as well leaves the origin on the x = 1025 face.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1030, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let both_chamfered = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(both_chamfered, Vec3::new(1025.0, 50.0, 50.0)), "{both_chamfered:?}");
+
+    // Explicit `circle` (cylinder wall) + `end` (planar plate face across the chamfer) is
+    // accepted by both `joint.origin` and `joint.edit`, while an unrelated side face is refused.
+    let wall = face_name(&mut s, "Plate", Vec3::new(1027.5, 53.0, 50.0));
+    let front = face_name(&mut s, "Plate", Vec3::new(1025.0, 10.0, 10.0));
+    let side = face_name(&mut s, "Plate", Vec3::new(1027.5, 0.0, 50.0));
+    assert!(!wall.is_empty() && !front.is_empty() && !side.is_empty());
+    run(&mut s, "joint.origin", json!({"name": "WallOnFront", "occurrence": "Plate", "circle": wall, "end": front}));
+    let (pt, z) = origin_frame(&s, "WallOnFront").unwrap();
+    assert!(near(pt, Vec3::new(1025.0, 50.0, 50.0)) && near(z, -Vec3::X), "{pt:?} {z:?}");
+    let edited = run(&mut s, "joint.edit", json!({"joint": "WasherSeat", "a": {"occurrence": "Plate", "circle": wall, "end": front}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1025.0, 50.0, 50.0)));
+    assert!(s.execute("joint.origin", &json!({"name": "BadEnd", "occurrence": "Plate", "circle": wall, "end": side})).is_err());
+}
+
+/// Picking `circle` on the outer circular rim (edge or centre) of a chamfered or countersunk
+/// hole succeeds and places the origin on the planar face along the cone's axis (#22049).
+#[test]
+fn circle_origin_accepts_chamfer_and_countersink_outer_rim() {
+    let mut s = plate_and_washer();
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Outer chamfer rim edge is at x = 1015, radius = 3.5 -> point [1015, 53.5, 50].
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "OnChamferRim",
+            "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let snap = origin(&s, "OnChamferRim", true);
+    assert!(matches!(&snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "outer rim keeps cone face and planar end: {snap:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // joint.edit with `circle` on the chamfer outer rim also succeeds.
+    let edited = run(&mut s, "joint.edit", json!({"joint": "OnChamferRim", "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // Picking the chamfer outer rim by its centre (with and without z, as the UI sends) keeps a
+    // persistent CircleCenter origin rather than falling back to a static Point.
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenter", "occurrence": "Plate", "circle": [1015, 50, 50]}));
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenterZ", "occurrence": "Plate", "circle": [1015, 50, 50], "z": [-1, 0, 0]}));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let jo = s.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1015.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Translating the plate moves all chamfer-rim origins with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1030 mm"}));
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1030.0, 50.0, 50.0)));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1030.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Countersunk hole outer rim (Ø10 countersink on Ø6 bore at z = 10 -> outer rim radius 5).
+    let mut cs = Session::default();
+    run(&mut cs, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(
+        &mut cs,
+        "solid.hole",
+        json!({"position": [20, 20, 10], "diameter": 6, "depth": 10, "type": "countersink", "cs_diameter": 10, "cs_angle": "90 deg"}),
+    );
+    run(&mut cs, "joint.origin", json!({"name": "CsRim", "occurrence": 0, "circle": [25, 20, 10]}));
+    run(&mut cs, "joint.origin", json!({"name": "CsCenter", "occurrence": 0, "circle": [20, 20, 10], "z": [0, 0, 1]}));
+    for name in ["CsRim", "CsCenter"] {
+        let jo = cs.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&cs, name).unwrap();
+        assert!(near(pt, Vec3::new(20.0, 20.0, 10.0)) && near(z, Vec3::Z), "{name}: {pt:?} {z:?}");
+    }
+}
+
+/// Adding a chamfer to a linked plate part and running `component.update_links` keeps an
+/// existing `insert` joint on the plate's planar face (#22049).
+#[test]
+fn linked_plate_chamfer_keeps_insert_joint_on_plate_face_through_update_links() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chamfer-link-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let plate_path = dir.join("plate.solidcraft");
+
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": [1015, 0, 0], "body_name": "Plate"}));
+    run(&mut plate, "solid.cylinder", json!({"base": [1010, 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    run(&mut plate, "file.save", json!({"path": plate_path}));
+
+    let mut asm = Session::default();
+    run(&mut asm, "component.insert_design", json!({"path": plate_path, "name": "Plate"}));
+    let plate_occ = occ(&asm, "Plate");
+    run(&mut asm, "occurrence.ground", json!({"occurrence": plate_occ, "grounded": true}));
+    run(&mut asm, "component.create", json!({"name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut asm, "component.activate", json!({"component": "root"}));
+
+    let r = run(
+        &mut asm,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    run(&mut plate, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut plate, "file.save", json!({}));
+
+    let update = run(&mut asm, "component.update_links", json!({}));
+    assert_eq!(update["updated"], json!(["Plate"]), "{update}");
+    let solved = run(&mut asm, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer shifted inward after linked chamfer update: {seat:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn joint_create_and_edit_face_on_cylinder_hole_resolves_axis_on_identity_and_rotated_occurrences() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    // A plate with a vertical through-hole of radius 4.5 at (200, -100), z in [-20.0, -5.5], plus
+    // an arm extending 380 mm in +Y whose +X planar face lies on x = 204.5 (coplanar with the pick
+    // on the hole's +X wall, ~210 mm away) so a planar-face fallback would jump there with normal
+    // (1, 0, 0).
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 14.5, "corner": [170, -120, -20.0]}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 381, "height": 14.5, "corner": [174.5, -81, -20.0], "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"base": [200, -100, -25], "axis": [0, 0, 1], "radius": 4.5, "height": 30, "operation": "cut"}));
+    let plate1 = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate1, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate2 = run(&mut s, "occurrence.copy", json!({"occurrence": plate1, "translate": [0, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": plate2, "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [200, 0, 0]}),
+    );
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate2, "grounded": true}));
+    run(&mut s, "component.create", json!({"name": "Pin", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 4.5, "height": 30}));
+    let pin = occ(&s, "Pin");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let local_pick = Vec3::new(204.5, -100.0, -12.75);
+    let hole_wall = face_name(&mut s, "Plate", local_pick);
+    let pin_wall = face_name(&mut s, "Pin", Vec3::new(4.5, 0.0, 15.0));
+    assert!(!hole_wall.is_empty() && !pin_wall.is_empty());
+
+    let vec = |v: &Value| Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap());
+    let assert_side_on_hole = |s: &mut Session, occ_id: u64| {
+        let info = run(s, "joint.inspect", json!({"joint": "Cyl"}));
+        let j = &info["joints"][0];
+        assert_eq!(j["errors"], json!([]), "{info}");
+        assert_eq!(j["conflicts"], json!([]), "{info}");
+        let side = &j["a"];
+        assert_eq!(side["occurrence"].as_u64(), Some(occ_id), "{side}");
+        assert_eq!(side["resolves"], json!(true), "{side}");
+        assert_eq!(side["snap"]["type"], json!("circle_center"), "{side}");
+        assert_eq!(side["snap"]["face"].as_str(), Some(hole_wall.as_str()), "{side}");
+        assert!(side["snap"]["end"].as_str().is_some_and(|e| !e.is_empty()), "{side}");
+        let t = solidcraft_doc::joints::occurrence_world(&s.doc, occ_id);
+        let axis_dir = solidcraft_doc::apply_vector(&t, Vec3::Z).normalized().unwrap();
+        let axis_lo = solidcraft_doc::apply_point(&t, Vec3::new(200.0, -100.0, -20.0));
+        let axis_hi = solidcraft_doc::apply_point(&t, Vec3::new(200.0, -100.0, -5.5));
+        let origin = vec(&side["frame"]["origin"]);
+        let z = vec(&side["frame"]["z"]);
+        let rel = origin - axis_lo;
+        let along = rel.dot(axis_dir);
+        let radial = (rel - axis_dir * along).len();
+        let span = (axis_hi - axis_lo).dot(axis_dir);
+        assert!(radial < 1e-6, "origin {origin:?} is {radial} mm off cylinder axis ({axis_lo:?}..{axis_hi:?})");
+        assert!(along >= -1e-6 && along <= span + 1e-6, "origin {origin:?} outside axial span [0, {span}]: {along}");
+        assert!(z.dot(axis_dir).abs() > 1.0 - 1e-9, "z {z:?} not parallel to cylinder axis {axis_dir:?}");
+    };
+
+    // 1. joint.create with `face: [x, y, z]` on cylindrical walls (identity occurrence).
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "cylindrical",
+            "name": "Cyl",
+            "a": {"occurrence": plate1, "face": [local_pick.x, local_pick.y, local_pick.z]},
+            "b": {"occurrence": pin, "face": [4.5, 0.0, 15.0]}
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert_side_on_hole(&mut s, plate1);
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "Cyl"}));
+    assert_eq!(inspected["joints"][0]["b"]["snap"]["type"], json!("circle_center"), "{inspected}");
+    assert_eq!(inspected["joints"][0]["b"]["snap"]["face"].as_str(), Some(pin_wall.as_str()), "{inspected}");
+
+    // 2. joint.edit onto the 180-degree-rotated second occurrence via `face: [x, y, z]`.
+    let t2 = solidcraft_doc::joints::occurrence_world(&s.doc, plate2);
+    let pick2 = solidcraft_doc::apply_point(&t2, local_pick);
+    let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": plate2, "face": [pick2.x, pick2.y, pick2.z]}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert_side_on_hole(&mut s, plate2);
+
+    // 3. joint.edit with `face: "<cylinder_face_name>"` on both occurrences.
+    for occ_id in [plate1, plate2] {
+        let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": occ_id, "face": hole_wall}}));
+        assert_eq!(r["errors"], json!([]), "{r}");
+        assert_side_on_hole(&mut s, occ_id);
+    }
+
+    // 4. joint.edit with `face: [x, y, z]` on a planar face still produces `face_center` with its plane normal.
+    let r = run(&mut s, "joint.edit", json!({"joint": "Cyl", "a": {"occurrence": plate1, "face": [185.0, -100.0, -5.5]}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let info = run(&mut s, "joint.inspect", json!({"joint": "Cyl"}));
+    assert_eq!(info["joints"][0]["a"]["snap"]["type"], json!("face_center"), "{info}");
+    assert!(near(vec(&info["joints"][0]["a"]["frame"]["z"]), Vec3::Z), "{info}");
+
+    // 5. Legacy saved `Snap::FaceCenter` naming a cylinder resolves to the cylinder axis, not the distant plane.
+    let legacy = solidcraft_doc::joints::JointOrigin::new(plate1, Snap::FaceCenter { pick: local_pick, face: Some(hole_wall.clone()), x: None });
+    let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &legacy).unwrap();
+    let legacy_origin = Vec3::new(m[3][0], m[3][1], m[3][2]);
+    let legacy_z = Vec3::new(m[2][0], m[2][1], m[2][2]);
+    assert!(
+        (legacy_origin.x - 200.0).abs() < 1e-6
+            && (legacy_origin.y + 100.0).abs() < 1e-6
+            && legacy_origin.z >= -20.0 - 1e-6
+            && legacy_origin.z <= -5.5 + 1e-6,
+        "legacy origin {legacy_origin:?} off hole axis"
+    );
+    assert!(legacy_z.dot(Vec3::Z).abs() > 1.0 - 1e-9, "legacy z {legacy_z:?}");
+
+    // 6. A non-planar, non-round face (sphere) given as `face` is refused rather than jumping to a plane.
+    run(&mut s, "component.create", json!({"name": "Orb"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "solid.sphere", json!({"center": [10, 10, 20], "radius": 8, "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let err = s
+        .execute("joint.origin", &json!({"occurrence": "Orb", "face": [18, 10, 20], "name": "OnBall"}))
+        .expect_err("sphere face must not silently snap to box plane")
+        .to_string();
+    assert!(err.contains("not planar or round"), "{err}");
+}
+
+/// A 20 mm slot between two walls (inner faces x = 10 and x = 30) in a grounded Slot component.
+fn slot() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Slot"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 10, "corner": [30, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let slot = occ(&s, "Slot");
+    run(&mut s, "occurrence.ground", json!({"occurrence": slot, "grounded": true}));
+    s
+}
+
+/// [`slot`] plus a 12 mm slider, symmetric about its own YZ, in a Slider component.
+fn slot_and_slider() -> Session {
+    let mut s = slot();
+    run(&mut s, "component.create", json!({"name": "Slider"}));
+    run(&mut s, "solid.box", json!({"length": 12, "width": 8, "height": 6, "corner": [-6, -4, 2]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// The Center rule between the slot's walls and the slider's own YZ datum.
+fn center() -> Value {
+    json!({
+        "type": "center",
+        "a": {"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5]]},
+        "b": {"occurrence": "Slider:1", "plane": "YZ"},
+    })
+}
+
+/// The Center rule places the slider midway between the slot's walls (4 mm either side in a
+/// 20 mm slot holding a 12 mm slider) and leaves it free to slide along them (#6061).
+#[test]
+fn center_rule_places_a_slider_midway_between_slot_walls() {
+    let mut s = slot_and_slider();
+    let r = run(&mut s, "assembly.constraint.create", center());
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert_eq!(r["name"], json!("Center1"));
+    assert!(near(place(&s, "Slider", Vec3::new(6.0, 0.0, 0.0)), Vec3::new(26.0, 0.0, 0.0)));
+    assert!(near(place(&s, "Slider", Vec3::new(-6.0, 0.0, 0.0)), Vec3::new(14.0, 0.0, 0.0)));
+    // The rule holds the midpoint only: the slider keeps the planar pair's three freedoms.
+    let dof = r["dof"].as_array().unwrap().iter().find(|d| d["occurrence"] == json!(occ(&s, "Slider")));
+    assert_eq!(dof.unwrap()["dof"], json!(3), "{r}");
+    // Saved as an ordinary planar joint tagged with the rule.
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["joints"][0]["constraint"], json!("center"), "{listed}");
+    let inspected = run(&mut s, "joint.inspect", json!({}));
+    let schema = serde_json::to_value(crate::schema::output_schema_for::<crate::schema::joints::InspectJointResult>()).unwrap();
+    assert!(crate::schema::tests::conforms(&schema, &schema, &inspected), "{inspected}");
+    assert_eq!(inspected["joints"][0]["a"]["references"].as_array().map(Vec::len), Some(2));
+}
+
+/// Wall order cannot change a centered slider's orientation or signed gap.
+#[test]
+fn center_rule_keeps_the_same_pose_when_the_wall_order_is_reversed() {
+    for flip in [false, true] {
+        let mut pose = None;
+        for reverse in [false, true] {
+            let mut s = slot_and_slider();
+            let mut p = center();
+            p["offset"] = json!(2);
+            p["flip"] = json!(flip);
+            if reverse {
+                p["a"]["faces"].as_array_mut().unwrap().reverse();
+            }
+            let r = run(&mut s, "assembly.constraint.create", p);
+            assert_eq!(r["errors"], json!([]), "{r}");
+            let at = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z].map(|p| place(&s, "Slider", p));
+            assert!(((at[0].x - 20.0).abs() - 2.0).abs() < 1e-6);
+            if !flip {
+                for (i, dir) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
+                    assert!(near(at[i + 1] - at[0], dir), "{at:?}");
+                }
+            }
+            if let Some(first) = pose.replace(at) {
+                assert!(at.into_iter().zip(first).all(|(a, b)| near(a, b)), "{at:?} != {first:?}");
+            }
+        }
+    }
+}
+
+/// A wall that moves re-centers the slider: the between-faces reference follows the face by name.
+#[test]
+fn center_rule_recenters_when_a_wall_moves() {
+    let mut s = slot_and_slider();
+    run(&mut s, "assembly.constraint.create", center());
+    // The slot widens to 25: the second wall moves from x = 30 to x = 35.
+    let wall = s.doc.find_feature("Box2").map(|f| f.id).unwrap();
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": wall, "command": "solid.box", "params": {"length": 5, "width": 20, "height": 10, "corner": [35, 0, 0]}}),
+    );
+    assert!(near(place(&s, "Slider", Vec3::new(6.0, 0.0, 0.0)), Vec3::new(28.5, 0.0, 0.0)));
+    assert!(near(place(&s, "Slider", Vec3::new(-6.0, 0.0, 0.0)), Vec3::new(16.5, 0.0, 0.0)));
+}
+
+/// The whole slot moving carries the centered slider with it.
+#[test]
+fn center_rule_follows_the_whole_part_moving() {
+    let mut s = slot_and_slider();
+    run(&mut s, "assembly.constraint.create", center());
+    let slot = occ(&s, "Slot");
+    run(&mut s, "occurrence.move", json!({"occurrence": slot, "translate": [5, 0, 0], "move_grounded": true}));
+    assert!(near(place(&s, "Slider", Vec3::new(6.0, 0.0, 0.0)), Vec3::new(31.0, 0.0, 0.0)));
+    assert!(near(place(&s, "Slider", Vec3::new(-6.0, 0.0, 0.0)), Vec3::new(19.0, 0.0, 0.0)));
+}
+
+/// A round part centers by its axis: the between-faces reference in a line-on-plane relation,
+/// the three-face form (two walls and the pin's one round face).
+#[test]
+fn center_rule_centers_a_round_part_by_its_axis() {
+    let mut s = slot();
+    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [100, 10, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "line_on_plane",
+            "a": {"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5]]},
+            "b": {"occurrence": "Pin:1", "circle": [103, 10, 5]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Pin", Vec3::new(100.0, 10.0, 5.0)), Vec3::new(20.0, 10.0, 5.0)));
+}
+
+/// What the rule does not take is refused, with the design left as it was.
+#[test]
+fn center_rule_refuses_what_it_does_not_take() {
+    let mut s = slot_and_slider();
+    let before = s.doc.clone();
+    for (a, message) in [
+        (json!({"occurrence": "Slot:1", "face": [10, 10, 5]}), "between-faces reference"),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [-6, 0, 5]]}), "two faces of one part"),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [10, 10, 8]]}), "two different faces"),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [5, 10, 10]]}), "two parallel faces"),
+        (json!({"occurrence": "Slot:1", "faces": [[10, 10, 5], [30, 10, 5], [50, 10, 5]]}), "two points"),
+    ] {
+        let p = json!({"type": "center", "a": a, "b": {"occurrence": "Slider:1", "plane": "YZ"}});
+        let e = s.execute("assembly.constraint.create", &p).expect_err("refused").to_string();
+        assert!(e.contains(message), "{}: {e}", p["a"]);
+        assert_eq!(s.doc, before, "a refusal changed the design: {p}");
+    }
+}
+
+#[test]
+fn center_rule_cannot_lose_its_face_pair_through_joint_edit() {
+    let mut s = slot_and_slider();
+    let r = run(&mut s, "assembly.constraint.create", center());
+    let before = s.doc.clone();
+    let e = s
+        .execute("joint.edit", &json!({"joint": r["joint"], "a": {"occurrence": "Slot:1", "plane": "YZ"}}))
+        .expect_err("Center must keep at least one pair of faces");
+    assert!(e.to_string().contains("between-faces reference"), "{e}");
+    assert_eq!(s.doc, before);
+}
+
+/// One undo takes the rule back, and the saved rule reopens and re-solves.
+#[test]
+fn center_rule_is_one_undo_step_and_reopens() {
+    let mut s = slot_and_slider();
+    run(&mut s, "assembly.constraint.create", center());
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let solved = run(&mut reopened, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    assert!(near(place(&reopened, "Slider", Vec3::new(6.0, 0.0, 0.0)), Vec3::new(26.0, 0.0, 0.0)));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.assembly.joints.len(), 0);
+}

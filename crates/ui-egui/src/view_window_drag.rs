@@ -885,7 +885,7 @@ fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: R
     }
     let body = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
     if body.is_positive() && detail > 0.03 {
-        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_middle, t.viewport_bottom);
         paint_kind(painter, body.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(body.height()));
         if form == Form::Window && body.height() > 65.0 {
             let name = painter.layout_no_wrap(view.name.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text);

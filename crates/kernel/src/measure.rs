@@ -92,19 +92,98 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
     })
 }
 
+/// Maximum worker threads used by [`measure_many`] and [`measure_mass_many`].
+const MEASURE_THREADS: usize = 16;
+
 /// [`measure`]'s volume, area, centre and box alone (for callers that need no topology counts,
-/// such as an interference check).
+/// such as an interference check). SMLib's `(volume, area, centroid)` integration is cached per
+/// record so repeated measurements (such as `assembly.bom` followed by `component.properties`)
+/// reuse it without re-integrating.
 pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
     let _span = solidcraft_profile::span("kernel", "measure_mass");
-    if b.triangle_mesh().is_some() {
-        let m = measure(b)?;
-        return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
+    if let Some(mb) = &b.mesh {
+        let (mm, bbox) = mb.measure();
+        return Ok(MassMeasure { volume: mm.volume, area: mm.area, centroid: mm.centroid, bbox, measured_by: "mesh", notes: Vec::new() });
     }
-    let m = crate::guard("SMLib mass properties", || {
-        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
-    })?;
-    let [x, y, z] = m.centroid;
-    Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
+    let (volume, area, centroid) = {
+        // Held while integrating so callers on other threads wait for this measurement instead of
+        // duplicating SMLib work on clones of the same body.
+        let mut slot = b.mass.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(cached) = *slot {
+            cached
+        } else {
+            let m = crate::guard("SMLib mass properties", || {
+                b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
+            })?;
+            let [x, y, z] = m.centroid;
+            let computed = (m.volume, m.area, Vec3::new(x, y, z));
+            *slot = Some(computed);
+            computed
+        }
+    };
+    if let Some(cell) = &b.volume
+        && let Ok(mut vslot) = cell.lock()
+        && vslot.is_none()
+    {
+        *vslot = Some((0, volume));
+    }
+    Ok(MassMeasure { volume, area, centroid, bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
+}
+
+/// Measure every body in `bodies` in parallel on desktop (serially in the browser build or for a
+/// single body), returning results in the exact input order. Each body is measured identically to
+/// [`measure`], so results are bit-for-bit identical to measuring sequentially.
+///
+/// Respects cooperative cancellation via [`crate::watch`]: if cancelled before starting a body,
+/// that body returns a cancelled error without starting new kernel work.
+pub fn measure_many(bodies: &[&Body]) -> Vec<Result<BodyMeasure>> {
+    let _span = solidcraft_profile::span("kernel", "measure_many");
+    if bodies.is_empty() {
+        return Vec::new();
+    }
+    if let [body] = bodies {
+        if crate::watch::cancelled() {
+            return vec![Err(crate::watch::cancelled_error("measure"))];
+        }
+        return vec![measure(body)];
+    }
+    crate::par::map_on_threads(bodies, MEASURE_THREADS, |&b| {
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("measure"));
+        }
+        measure(b)
+    })
+    .into_iter()
+    .map(|r| r.unwrap_or_else(|| Err(crate::KernelError::Internal("parallel measure worker failed".into()))))
+    .collect()
+}
+
+/// Mass properties (`volume`, `area`, `centroid`, `bbox`) of every body in `bodies` in parallel
+/// on desktop (serially in the browser build or for a single body), returning results in the exact
+/// input order. Each body is measured identically to [`measure_mass`], so results are bit-for-bit
+/// identical to measuring sequentially.
+///
+/// Respects cooperative cancellation via [`crate::watch`].
+pub fn measure_mass_many(bodies: &[&Body]) -> Vec<Result<MassMeasure>> {
+    let _span = solidcraft_profile::span("kernel", "measure_mass_many");
+    if bodies.is_empty() {
+        return Vec::new();
+    }
+    if let [body] = bodies {
+        if crate::watch::cancelled() {
+            return vec![Err(crate::watch::cancelled_error("measure"))];
+        }
+        return vec![measure_mass(body)];
+    }
+    crate::par::map_on_threads(bodies, MEASURE_THREADS, |&b| {
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("measure"));
+        }
+        measure_mass(b)
+    })
+    .into_iter()
+    .map(|r| r.unwrap_or_else(|| Err(crate::KernelError::Internal("parallel measure worker failed".into()))))
+    .collect()
 }
 
 /// How far `b` reaches along `plane`'s normal, measured from the plane: the least and greatest
@@ -122,11 +201,48 @@ pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2
         .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
+/// Whether the endless line through `o` along `d` meets the box `b`, its sides included (never an
+/// empty box, never a zero direction or a coordinate that is not finite). Each side counts a
+/// millionth of the box's size beyond it, so a line read back from a body's own face still meets
+/// its box (solidcore-ops' `measure::line_meets_box`).
+pub fn line_meets_box(b: &Aabb3, o: Vec3, d: Vec3) -> bool {
+    let k = |v: Vec3| [v.x, v.y, v.z];
+    !b.is_empty() && solidcore_ops::measure::line_meets_box(k(b.min), k(b.max), k(o), k(d), 1e-6).unwrap_or(false)
+}
+
+/// How far `b` runs past `end` along `toward` (mm), its greatest level above the plane through
+/// `end` square to `toward`, as solidcore-ops measures it
+/// ([`solidcore_ops::section_corners::reach_past`]); 0 when none of it lies past. A mesh body has
+/// no solidcore form and is refused.
+pub fn reach_past(b: &Body, end: solidcore_record::Vec3, toward: solidcore_record::Vec3) -> Result<f64> {
+    let Some(form) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("how far the body runs past its end: the body has no solidcore form".into()));
+    };
+    let (ops, _) = &*form;
+    solidcore_ops::section_corners::reach_past(ops, end, toward)
+        .map_err(|e| crate::KernelError::Invalid(format!("how far the body runs past its end can't be measured: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
+
+    /// A line meets a box when it passes through it or along a side, never when it passes by, and
+    /// never an empty box or a zero direction.
+    #[test]
+    fn a_line_meets_a_box_it_passes_through() {
+        let b = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(20.0, 20.0, 20.0) };
+        assert!(super::line_meets_box(&b, Vec3::new(10.0, 10.0, -50.0), Vec3::Z), "upright through the middle");
+        assert!(super::line_meets_box(&b, Vec3::new(-5.0, 10.0, 10.0), Vec3::new(1.0, 1.0, 0.0)), "slanted through");
+        assert!(super::line_meets_box(&b, Vec3::new(20.0, 10.0, 0.0), Vec3::Z), "along a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(30.0, 10.0, 0.0), Vec3::Z), "beside it");
+        // A millionth of the box's size beyond a side still counts, a ten-thousandth does not.
+        assert!(super::line_meets_box(&b, Vec3::new(20.00001, 10.0, 0.0), Vec3::Z), "just past a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(20.002, 10.0, 0.0), Vec3::Z), "clear of a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(10.0, 10.0, 0.0), Vec3::ZERO) && !super::line_meets_box(&Aabb3::EMPTY, Vec3::ZERO, Vec3::Z));
+    }
 
     #[test]
     fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
@@ -247,6 +363,38 @@ mod tests {
         let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
         assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
         assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
+    }
+
+    /// Overlapping cylinders whose only vertices lie on distant seams are still rejected by
+    /// `union_apart` using their analytic circle edges, without measuring any exact box.
+    #[test]
+    fn overlapping_cylinders_are_not_joined_apart_without_measuring() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+        let b = cylinder(Vec3::new(6.0, 0.0, 0.0), Vec3::Z, 5.0, 10.0).unwrap();
+        assert!(crate::union_apart(&[a.clone(), b.clone()]).unwrap().is_none());
+        assert_eq!(*a.bounds.lock().unwrap(), None);
+        assert_eq!(*b.bounds.lock().unwrap(), None);
+    }
+
+    /// Contact tests reject clearly apart bodies from their exact boxes without meshing either,
+    /// while pairs within the contact-mesh chord margin (`gap + 2 * tol`) still run the mesh test.
+    #[test]
+    fn meets_rejects_apart_bodies_without_meshing() {
+        let a = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        let far = crate::box_solid(Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        // Size is ~17.32, so `tol = size * 1e-4 ≈ 0.00173`, `gap = 2 * tol ≈ 0.00346`, and
+        // `gap + 2 * tol ≈ 0.00693`. A 0.005 gap sits past `gap` yet inside the chord margin, so
+        // the exact-box prefilter must not skip meshing it.
+        let near_chord = crate::box_solid(Vec3::new(10.005, 0.0, 0.0), Vec3::new(20.005, 10.0, 10.0)).unwrap().keeping_meshes();
+        let touching = crate::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        assert!(!a.meets(&far).unwrap());
+        assert_eq!(a.meets_each(std::slice::from_ref(&far)).unwrap(), vec![false]);
+        assert_eq!(a.cached_mesh_count(), 0);
+        assert_eq!(far.cached_mesh_count(), 0);
+        assert!(!a.meets(&near_chord).unwrap());
+        assert!(a.cached_mesh_count() > 0, "pair inside chord margin must not be skipped by exact-box prefilter");
+        assert!(a.meets(&touching).unwrap());
+        assert_eq!(a.meets_each(&[far, touching]).unwrap(), vec![false, true]);
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
@@ -426,5 +574,151 @@ mod tests {
         assert!(rel(m.volume, l * w * h) < bow, "volume {}", m.volume);
         let off = m.centroid - Vec3::new(l / 2.0, w / 2.0, h / 2.0);
         assert!(off.len() < bow, "centre of mass {:?}, off by {off:?}", m.centroid);
+    }
+
+    /// Parallel [`measure_many`] matches sequential [`measure`] bit-for-bit on empty, single,
+    /// and multi-body mixes of B-rep solids and mesh bodies, preserving exact input order.
+    #[test]
+    fn measure_many_matches_sequential_bit_for_bit() {
+        assert!(measure_many(&[]).is_empty());
+
+        let single = crate::box_solid(Vec3::ZERO, Vec3::new(3.0, 4.0, 5.0)).unwrap();
+        let single_seq = measure(&single).unwrap();
+        let single_par = measure_many(&[&single]).pop().unwrap().unwrap();
+        assert_eq!(single_seq.volume.to_bits(), single_par.volume.to_bits());
+        assert_eq!(single_seq.area.to_bits(), single_par.area.to_bits());
+
+        // Build two independent sets of fresh (uncached) bodies so neither set warms the other.
+        let build_set = || -> Vec<Body> {
+            let mut out = Vec::new();
+            for i in 0..6 {
+                let d = f64::from(i + 1);
+                out.push(crate::box_solid(Vec3::new(d * 10.0, d, 0.0), Vec3::new(d * 10.0 + d + 2.0, d + 3.0, d + 1.0)).unwrap());
+            }
+            for i in 0..5 {
+                let d = f64::from(i + 1);
+                out.push(cylinder(Vec3::new(0.0, d * 15.0, 0.0), Vec3::Z, 1.5 + 0.5 * d, 4.0 + d).unwrap());
+            }
+            out.push(torus(Vec3::new(50.0, -20.0, 5.0), 8.0, 2.0).unwrap());
+            let mesh_pts = [
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(4.0, 3.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(0.0, 0.0, 2.0),
+                Vec3::new(4.0, 0.0, 2.0),
+                Vec3::new(4.0, 3.0, 2.0),
+                Vec3::new(0.0, 3.0, 2.0),
+            ];
+            let mesh_tris =
+                [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [2, 3, 7], [2, 7, 6], [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5]];
+            out.push(crate::mesh_body(&mesh_pts, &mesh_tris).unwrap());
+            out
+        };
+        let seq_bodies = build_set();
+        let par_bodies = build_set();
+        let seq: Vec<BodyMeasure> = seq_bodies.iter().map(|b| measure(b).unwrap()).collect();
+        let par_refs: Vec<&Body> = par_bodies.iter().collect();
+        let par: Vec<BodyMeasure> = measure_many(&par_refs).into_iter().map(Result::unwrap).collect();
+        assert_eq!(seq.len(), par.len());
+        for (i, (a, b)) in seq.iter().zip(&par).enumerate() {
+            assert_eq!(a.volume.to_bits(), b.volume.to_bits(), "volume mismatch at {i}");
+            assert_eq!(a.area.to_bits(), b.area.to_bits(), "area mismatch at {i}");
+            assert_eq!(
+                (a.centroid.x.to_bits(), a.centroid.y.to_bits(), a.centroid.z.to_bits()),
+                (b.centroid.x.to_bits(), b.centroid.y.to_bits(), b.centroid.z.to_bits()),
+                "centroid mismatch at {i}"
+            );
+            assert_eq!(
+                (a.bbox.min.x.to_bits(), a.bbox.min.y.to_bits(), a.bbox.min.z.to_bits()),
+                (b.bbox.min.x.to_bits(), b.bbox.min.y.to_bits(), b.bbox.min.z.to_bits()),
+                "bbox.min mismatch at {i}"
+            );
+            assert_eq!(
+                (a.bbox.max.x.to_bits(), a.bbox.max.y.to_bits(), a.bbox.max.z.to_bits()),
+                (b.bbox.max.x.to_bits(), b.bbox.max.y.to_bits(), b.bbox.max.z.to_bits()),
+                "bbox.max mismatch at {i}"
+            );
+            assert_eq!((a.faces, a.edges, a.vertices, a.shells), (b.faces, b.edges, b.vertices, b.shells), "counts mismatch at {i}");
+            assert_eq!(a.merged, b.merged, "merged counts mismatch at {i}");
+            assert_eq!(a.measured_by, b.measured_by, "measured_by mismatch at {i}");
+            assert_eq!(a.notes, b.notes, "notes mismatch at {i}");
+        }
+    }
+
+    /// Parallel [`measure_mass_many`] matches sequential [`measure_mass`] bit-for-bit, propagates
+    /// per-body errors at their exact indices without disrupting sibling bodies, and honours
+    /// cooperative watch cancellation.
+    #[test]
+    fn measure_mass_many_matches_sequential_bit_for_bit_and_propagates_errors() {
+        assert!(measure_mass_many(&[]).is_empty());
+
+        let one = cylinder(Vec3::ZERO, Vec3::Z, 3.0, 8.0).unwrap();
+        let one_seq = measure_mass(&one).unwrap();
+        let one_par = measure_mass_many(&[&one]).pop().unwrap().unwrap();
+        assert_eq!(one_seq.volume.to_bits(), one_par.volume.to_bits());
+        assert_eq!(one_seq.area.to_bits(), one_par.area.to_bits());
+
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0)], &[[0, 1, 2]]).unwrap();
+        let mut broken = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        broken.smlib = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(crate::Refusal {
+            face: None,
+            surface: None,
+            why: "simulated refusal".into(),
+            internal: false,
+        }));
+        let ok_a = crate::box_solid(Vec3::ZERO, Vec3::new(5.0, 6.0, 7.0)).unwrap();
+        let ok_b = cylinder(Vec3::new(10.0, 0.0, 0.0), Vec3::Z, 2.5, 9.0).unwrap();
+        let refs = [&ok_a, &broken, &mesh, &ok_b];
+        let seq: Vec<Result<MassMeasure>> = refs.iter().map(|b| measure_mass(b)).collect();
+        // Fresh uncached clones for the parallel run.
+        let ok_a2 = crate::box_solid(Vec3::ZERO, Vec3::new(5.0, 6.0, 7.0)).unwrap();
+        let ok_b2 = cylinder(Vec3::new(10.0, 0.0, 0.0), Vec3::Z, 2.5, 9.0).unwrap();
+        let par = measure_mass_many(&[&ok_a2, &broken, &mesh, &ok_b2]);
+        assert_eq!(par.len(), 4);
+        assert!(par[1].is_err(), "error body must stay an error at index 1");
+        for i in [0, 2, 3] {
+            let a = seq[i].as_ref().unwrap();
+            let b = par[i].as_ref().unwrap();
+            assert_eq!(a.volume.to_bits(), b.volume.to_bits(), "volume mismatch at {i}");
+            assert_eq!(a.area.to_bits(), b.area.to_bits(), "area mismatch at {i}");
+            assert_eq!(
+                (a.centroid.x.to_bits(), a.centroid.y.to_bits(), a.centroid.z.to_bits()),
+                (b.centroid.x.to_bits(), b.centroid.y.to_bits(), b.centroid.z.to_bits()),
+                "centroid mismatch at {i}"
+            );
+            assert_eq!((a.bbox.min, a.bbox.max), (b.bbox.min, b.bbox.max), "bbox mismatch at {i}");
+            assert_eq!(a.measured_by, b.measured_by);
+        }
+
+        // Watch cancellation stops measurement cleanly.
+        struct Cancelled;
+        impl crate::watch::Watch for Cancelled {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _stage: &'static str, _done: usize, _total: usize) {}
+        }
+        let cancelled = crate::watch::watching(std::sync::Arc::new(Cancelled), || measure_mass_many(&[&ok_a2, &ok_b2]));
+        assert!(cancelled.iter().all(|r| matches!(r, Err(crate::KernelError::Failed(m)) if m.contains("cancelled"))));
+    }
+
+    /// Mass properties are cached per record and shared by clones, while a rigid transform clears
+    /// the cached mass properties so the moved body reports its new centroid.
+    #[test]
+    fn mass_properties_are_cached_per_record_and_reset_on_move() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap();
+        let clone = post.clone();
+        assert!(post.mass.lock().unwrap().is_none());
+        let first = measure_mass(&post).unwrap();
+        assert!(clone.mass.lock().unwrap().is_some());
+        let second = measure_mass(&clone).unwrap();
+        assert_eq!(first.volume.to_bits(), second.volume.to_bits());
+        assert_eq!(first.area.to_bits(), second.area.to_bits());
+        assert_eq!(first.centroid, second.centroid);
+        let moved = transform(&post, Vec3::new(12.0, -4.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+        assert!(moved.mass.lock().unwrap().is_none(), "moved body must compute its own centroid");
+        let m = measure_mass(&moved).unwrap();
+        assert!((m.centroid - (first.centroid + Vec3::new(12.0, -4.0, 3.0))).len() < 1e-9);
     }
 }

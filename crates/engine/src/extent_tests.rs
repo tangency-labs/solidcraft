@@ -577,6 +577,74 @@ fn join_to_a_round_the_profile_overhangs_ends_at_its_extended_surface() {
     assert!((added - want).abs() < want * 1e-3, "added {added}, want {want}");
 }
 
+/// #23158: a Join To Object down to the round of a shell's cavity ends on that round. A cylinder
+/// r 20, 20 tall, its bottom rim rounded r 5 and shelled 2 in from the top: the cavity's round is
+/// the torus of major radius 15 and tube radius 3 about (0, 0, 5), z = 5 - sqrt(9 - u^2) at
+/// rho = 15 + u. The ring r 16 to 17 on the top plane, joined down to it, adds the tube between
+/// z = 20 and the round: 2 pi times the integral of (15 + sqrt(9 - u^2)) (15 + u) over u in
+/// [1, 2]. The round keeps its definition, which a split tool can't evaluate: the extrude was
+/// refused ("a blend's label"), and designs from 0.45 that ended on such a round stopped
+/// rebuilding in 0.47. A New Body from below up to the outer round (tube radius 5) of the
+/// cylinder, not shelled, was refused the same way: it holds 2 pi times the integral of
+/// (15 - sqrt(25 - u^2)) (15 + u) over u in [1, 2], from z = -10.
+#[test]
+fn extrude_to_a_round_along_a_curved_edge_ends_on_it_shelled_or_not() {
+    // The integrals of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2), over u in [1, 2].
+    let f = |r: f64| {
+        let p = |u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        p(2.0) - p(1.0)
+    };
+    let g = |r: f64| ((r * r - 1.0).powf(1.5) - (r * r - 4.0).powf(1.5)) / 3.0;
+    // The integral of 15 + u over u in [1, 2].
+    let ring = 16.5;
+    let cup = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Cup"}));
+        run(s, "solid.fillet", json!({"body": "Cup", "edges": [[20, 0, 0]], "radius": 5}));
+    };
+    let ring_sketch = |s: &mut Session, z: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Ring"}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 16}));
+        run(s, "sketch.circle.center", json!({"center": [0, 0], "radius": 17}));
+        run(s, "sketch.finish", json!({}));
+    };
+    // A point of the torus of tube radius r about the axis at 45 degrees, half way round its arc.
+    let on_round = |r: f64| {
+        let (rho, z) = (15.0 + r / 2f64.sqrt(), 5.0 - r / 2f64.sqrt());
+        [rho / 2f64.sqrt(), rho / 2f64.sqrt(), z]
+    };
+
+    let mut s = Session::default();
+    cup(&mut s);
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": 2}));
+    let before = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0);
+    ring_sketch(&mut s, 20.0);
+    let to = on_round(3.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "negative", "to": to, "operation": "join"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert_eq!(s.model.state().bodies.len(), 1, "the post joins the cup");
+    let added = body(&mut s, "Cup")["volume_mm3"].as_f64().unwrap_or(0.0) - before;
+    let want = 2.0 * PI * (15.0 * ring + g(3.0) + 15.0 * f(3.0));
+    assert!((added - want).abs() < want * EXACT, "added {added}, want {want}");
+
+    let mut s = Session::default();
+    cup(&mut s);
+    ring_sketch(&mut s, -10.0);
+    let to = on_round(5.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring", "profiles": [{"point": [16.5, 0]}], "direction": "positive", "to": to, "operation": "new_body", "body_name": "Post"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let got = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let want = 2.0 * PI * (15.0 * ring - g(5.0) - 15.0 * f(5.0));
+    assert!((got - want).abs() < want * EXACT, "post {got}, want {want}");
+}
+
 /// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
 /// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
 /// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the
@@ -829,4 +897,370 @@ fn the_faces_of_an_extrude_with_a_taper_of_zero_and_a_start_offset_take_a_sketch
             }
         }
     }
+}
+
+/// A revolved shell (cone, cylinder or torus) under a small block's sketch at z = 0, and a
+/// join extrude of that sketch To the shell's inner face with `extra` params. Returns the session
+/// and the body's name.
+fn shell_and_post(shell: &str, profile: [[f64; 2]; 2], to: [f64; 3], extra: Value) -> Session {
+    let mut p = json!({"operation": "join"});
+    if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
+    shell_and_post_with(shell, profile, to, p)
+}
+
+/// [`shell_and_post`] with the extrude's own params (its sketch, direction and To are set here).
+fn shell_and_post_with(shell: &str, profile: [[f64; 2]; 2], to: [f64; 3], extra: Value) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+    match shell {
+        "cone" => run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true})),
+        "cylinder" => run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [5, 10], [4, 10]], "closed": true})),
+        // A ring of radius 2 whose centre is 8 from the axis and 8 below the sketch plane.
+        _ => run(&mut s, "sketch.circle.center", json!({"center": [8, 8], "radius": 2})),
+    };
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+    let [[x0, y0], [x1, y1]] = profile;
+    run(&mut s, "sketch.line", json!({"points": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"sketch": "SketchR", "exact_regions": true, "direction": "negative", "to": to});
+    if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
+    run(&mut s, "solid.extrude", p);
+    s
+}
+
+fn z_max_and_volume(s: &mut Session) -> (f64, f64) {
+    let m = body(s, "Body1");
+    let z = m["bbox"]["max"][2].as_f64().or_else(|| m["bounds"]["max"][2].as_f64()).unwrap_or(f64::NAN);
+    (z, m["volume_mm3"].as_f64().unwrap_or(f64::NAN))
+}
+
+/// Side two of a two-sided extrude is built to its own distance whatever kind of face side
+/// one ends To: a cone, a cylinder and a torus, with side two alone and with both sides.
+#[test]
+fn two_sided_extrude_to_a_curved_face_builds_side_two() {
+    // (shell, profile, To point on the face's inside, profile's reach to the face)
+    let cases = [
+        ("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]),
+        ("cylinder", [[4.2, 0.0], [4.8, 1.0]], [4.5, 0.5, -5.0]),
+        ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0]),
+    ];
+    for (shell, profile, to) in cases {
+        let mut one = shell_and_post(shell, profile, to, json!({}));
+        let mut two = shell_and_post(shell, profile, to, json!({"distance2": "5 mm"}));
+        let (z1, v1) = z_max_and_volume(&mut one);
+        let (z2, v2) = z_max_and_volume(&mut two);
+        let area = (profile[1][0] - profile[0][0]) * (profile[1][1] - profile[0][1]);
+        assert!(z1.abs() < 1e-6, "{shell}: side one only reaches z {z1}");
+        assert!(v1.is_finite() && v1 > 0.0, "{shell}: side one only has volume {v1}");
+        assert!((z2 - 5.0).abs() < 1e-6, "{shell}: side two must reach z 5, got {z2}");
+        assert!((v2 - v1 - 5.0 * area).abs() < 1e-6 * v1.max(1.0), "{shell}: side two adds {} want {}", v2 - v1, 5.0 * area);
+    }
+}
+
+/// Undo and redo of a two-sided extrude To a cone face keep side two, and so does a
+/// save and reload.
+#[test]
+fn two_sided_extrude_to_a_cone_survives_undo_redo_and_reload() {
+    let mut s = shell_and_post("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196], json!({"distance2": "5 mm"}));
+    let (z, v) = z_max_and_volume(&mut s);
+    assert!((z - 5.0).abs() < 1e-6, "z {z}");
+    run(&mut s, "edit.undo", json!({}));
+    let (z_undone, v_undone) = z_max_and_volume(&mut s);
+    assert!(z_undone.abs() < 1e-6 && v_undone < v, "undone: z {z_undone}, volume {v_undone} against {v}");
+    run(&mut s, "edit.redo", json!({}));
+    let (z_redone, v_redone) = z_max_and_volume(&mut s);
+    assert!((z_redone - 5.0).abs() < 1e-6 && (v_redone - v).abs() < 1e-6, "redone: z {z_redone}, volume {v_redone} against {v}");
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(doc);
+    let (z_cold, v_cold) = z_max_and_volume(&mut cold);
+    assert!((z_cold - 5.0).abs() < 1e-6 && (v_cold - v).abs() < 1e-6, "reloaded: z {z_cold}, volume {v_cold} against {v}");
+}
+
+/// A profile that only partly lies over a cone To face is refused by name, with a second
+/// side or without one: x 3 to 4 of it lies over the cone's hole (its inner face starts at x 4).
+#[test]
+fn two_sided_extrude_to_a_cone_the_profile_partly_misses_is_refused() {
+    for extra in [json!({}), json!({"distance2": "20 mm"})] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Sketch1"}));
+        run(&mut s, "sketch.line", json!({"points": [[4, 0], [5, 0], [15, 17.32], [14, 17.32]], "closed": true}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true, "ids": ["axis1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "axis1", "angle": "360 deg", "operation": "new", "body_name": "Body1"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchR"}));
+        run(&mut s, "sketch.line", json!({"points": [[3, 0], [8, 0], [8, 1], [3, 1]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "SketchR", "exact_regions": true, "operation": "join", "direction": "negative", "to": [7.5, 0.5, -5.196]});
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        let err = s.execute("solid.extrude", &p).expect_err("refused");
+        assert!(err.to_string().contains("reaches past the To face"), "{extra}: {err}");
+    }
+}
+
+/// A new-body two-sided extrude To a cone, cylinder or torus face is one body whose two
+/// sides share the sketch plane's face, with the volume of side one plus 5 times the section.
+#[test]
+fn two_sided_new_body_extrude_to_a_curved_face_is_one_body() {
+    let cases = [
+        ("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]),
+        ("cylinder", [[4.2, 0.0], [4.8, 1.0]], [4.5, 0.5, -5.0]),
+        ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0]),
+    ];
+    for (shell, profile, to) in cases {
+        let area = (profile[1][0] - profile[0][0]) * (profile[1][1] - profile[0][1]);
+        let post = |extra: Value| {
+            let mut p = json!({"operation": "new", "body_name": "Post"});
+            if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+                p.extend(e.clone());
+            }
+            shell_and_post_with(shell, profile, to, p)
+        };
+        let mut one = post(json!({}));
+        let mut two = post(json!({"distance2": "5 mm"}));
+        let v1 = body(&mut one, "Post")["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let bodies = |s: &Session| s.model.state().bodies.iter().filter(|b| b.name.starts_with("Post")).count();
+        assert_eq!(bodies(&two), 1, "{shell}: side two came out as a body of its own");
+        let b = body(&mut two, "Post");
+        let v2 = b["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        assert!((v2 - v1 - 5.0 * area).abs() < 1e-6 * v2, "{shell}: {v2} against {v1} + {}", 5.0 * area);
+        assert!((b["bbox"]["max"][2].as_f64().unwrap_or(f64::NAN) - 5.0).abs() < 1e-6, "{shell}: {b}");
+    }
+}
+
+/// A second distance too thin for the kernel to build (1e-6 mm) is refused by name on a cone
+/// or a torus To face, not with a bare kernel status.
+#[test]
+fn two_sided_extrude_to_a_curved_face_with_a_second_distance_too_thin_is_refused_by_name() {
+    for (shell, profile, to) in [("cone", [[6.0, 0.0], [7.0, 1.0]], [7.0, 0.5, -5.196]), ("torus", [[7.0, 0.0], [8.0, 1.0]], [7.5, 0.5, -6.0])] {
+        let built = std::panic::catch_unwind(|| shell_and_post_with(shell, profile, to, json!({"operation": "join", "distance2": "0.000001 mm"})));
+        let msg = built.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+        assert!(msg.contains("too thin"), "{shell}: {msg}");
+    }
+}
+
+/// A block with a text parameter `lbl` cut 1 mm into its top by a whole-sketch text, and a post
+/// extruded From the top at (35, 35), away from the text. `lbl` starts as `first`.
+fn labelled_block_with_post(first: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "lbl", "unit": "text", "expression": first}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "label"}));
+    run(&mut s, "sketch.text", json!({"text_expression": "lbl", "at": [5, 15], "height": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "label", "operation": "cut", "direction": "negative", "distance": 1}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20, "name": "post"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [35, 35], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "post", "operation": "join", "from": [35, 35, 10], "distance": 3, "name": "post"}));
+    s
+}
+
+/// A letter with a closed hole (`0`, `8`) leaves an island of the top face inside it, so the
+/// top face a post starts From becomes two pieces. The saved From point lies on one of them:
+/// the post still starts there, as on a block built with those words from the start (#22281).
+#[test]
+fn extrude_from_a_face_a_letters_island_splits_starts_on_the_piece_under_its_point() {
+    for words in ["30", "8"] {
+        let mut s = labelled_block_with_post("22");
+        run(&mut s, "parameters.change", json!({"name": "lbl", "expression": words}));
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{words}: {}: {:?}", r.name, r.error);
+        }
+        let changed = body(&mut s, "Block")["volume_mm3"].as_f64().unwrap();
+        let mut fresh = labelled_block_with_post(words);
+        let built = body(&mut fresh, "Block")["volume_mm3"].as_f64().unwrap();
+        assert!((changed - built).abs() < 1e-3, "{words}: {changed} after the change, {built} built so");
+        let top = body(&mut s, "Block")["bbox"]["max"][2].as_f64().unwrap();
+        assert!((top - 13.0).abs() < 1e-6, "{words}: the post ends at {top}");
+    }
+}
+
+/// A 20 × 10 mm rectangle on XY, from the origin, in a sketch named `Base`, and the parameter
+/// `H` = 25 mm.
+fn base_rectangle() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "25 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn volume_and_z(s: &mut Session, b: &str) -> (f64, f64, f64) {
+    let b = body(s, b);
+    let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    (num(&b["volume_mm3"]), num(&b["bbox"]["min"][2]), num(&b["bbox"]["max"][2]))
+}
+
+fn assert_block(s: &mut Session, b: &str, (volume, lo, hi): (f64, f64, f64)) {
+    let got = volume_and_z(s, b);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((got.0 - volume).abs() < 1e-6 * volume, "volume {}, want {volume}", got.0);
+    assert!((got.1 - lo).abs() < 1e-6 && (got.2 - hi).abs() < 1e-6, "z {}..{}, want {lo}..{hi}", got.1, got.2);
+}
+
+/// To Object on a construction plane keeps the plane, so the extrusion follows it when a
+/// parameter moves it, also after a save and reload (#8527).
+#[test]
+fn extrude_to_a_construction_plane_follows_it() {
+    for to in [json!({"plane": "Target"}), json!("Target")] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": to, "body_name": "Post"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut cold = Session::new(doc);
+        for current in [&mut s, &mut cold] {
+            run(current, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+            assert_block(current, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+        }
+    }
+}
+
+/// To Object on a construction point ends at the plane through the point, parallel to the
+/// sketch, wherever the point lies beside the profile, and follows the point (#8527).
+#[test]
+fn extrude_to_a_construction_point_follows_it() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 50, "name": "PX"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 50, "name": "PY"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "PZ"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "PX", "b": "PY", "c": "PZ", "name": "End"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"construct_point": "End"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// From Object on one construction plane and To Object on another: the extrusion runs between
+/// them and follows both (#8527).
+#[test]
+fn extrude_from_a_construction_plane_to_another_runs_between_them() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Floor"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 20.0, 5.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 35.0, 5.0, 40.0));
+}
+
+/// To Object on a construction plane at a slant cuts the end along the plane, as on a slanted
+/// body face. The plane z = 20 + x / 2 over the 20 × 10 rectangle leaves
+/// 10 × ∫₀²⁰ (20 + x / 2) dx = 5000 mm³, from z 0 to 30 (#8527).
+#[test]
+fn extrude_to_a_slanted_construction_plane_cuts_the_end_along_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Slope"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (5000.0, 0.0, 30.0));
+}
+
+/// A plane the extrusion runs along gives no end, so To Object on it is refused with that
+/// reason (#8527).
+#[test]
+fn extrude_to_a_plane_along_the_extrusion_is_refused() {
+    let mut s = base_rectangle();
+    let e = s.execute("solid.extrude", &json!({"sketch": "Base", "to": {"plane": "YZ"}})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("gives no end"), "{e}");
+}
+
+/// From Object on a construction plane at a slant starts on the plane, as on a slanted body face.
+/// From z = x / 2 to z = 25 over the 20 × 10 rectangle: 10 × ∫₀²⁰ (25 − x / 2) dx = 4000 mm³
+/// (#8527).
+#[test]
+fn extrude_from_a_slanted_construction_plane_starts_on_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 0]}, "b": {"point": [20, 0, 10]}, "c": {"point": [0, 10, 0]}, "name": "Slope"}),
+    );
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Slope"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (4000.0, 0.0, 25.0));
+}
+
+/// Renaming the construction plane an extrude runs to keeps the extrude on it (#8527).
+#[test]
+fn extrude_to_a_renamed_construction_plane_still_follows_it() {
+    let mut s = base_rectangle();
+    let plane = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}))["feature"].clone();
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}));
+    run(&mut s, "timeline.rename", json!({"feature": plane, "name": "Shelf"}));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// `operation: auto` reads where a To plane ends the extrude: from the top of a block down to a
+/// plane inside it, the extrude cuts (#8527).
+#[test]
+fn an_automatic_extrude_down_to_a_construction_plane_inside_a_block_cuts() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 10, "height": 30, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Floor"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 2], "p1": [15, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Top", "to": {"plane": "Floor"}, "operation": "auto"}));
+    assert_block(&mut s, "Block", (20.0 * 10.0 * 30.0 - 10.0 * 6.0 * 10.0, 0.0, 30.0));
+}
+
+/// The Extrude dialog reopens a To plane as the point stored with it and sends that point back.
+/// An edit that sends the same point keeps the plane, so the extrude still follows it; an edit
+/// that sends another point ends there instead (#8527).
+#[test]
+fn an_edit_that_sends_the_stored_to_point_keeps_the_plane() {
+    for (to, top) in [([0.0, 0.0, 25.0], 40.0), ([0.0, 0.0, 30.0], 30.0)] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        let params = json!({"sketch": "Base", "to": to, "body_name": "Post"});
+        run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.extrude", "params": params}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// `timeline.edit` merges what it sets into the stored extrude: a new To point ends the extrude
+/// there, and an edit that clears the reference keeps the stored point, not the plane (#8527).
+#[test]
+fn an_edit_that_sets_another_to_point_or_clears_the_plane_ends_at_the_point() {
+    for (set, top) in [(json!({"extent.to_offset": "0 mm"}), 40.0), (json!({"extent.to": [0, 0, 30]}), 30.0), (json!({"extent.to_ref": null}), 25.0)]
+    {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": set}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// The run between a slanted To plane and the start has no second side: two sides are refused,
+/// not dropped (#8527).
+#[test]
+fn two_sides_to_a_slanted_construction_plane_are_refused() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    let p = json!({"sketch": "Base", "to": {"plane": "Slope"}, "distance2": 5});
+    let e = s.execute("solid.extrude", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("two sides with a plane at a slant"), "{e}");
 }

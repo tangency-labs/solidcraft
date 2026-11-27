@@ -52,7 +52,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if m.trace {
-                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("trace_hint"));
+                ui_kit::text(ui, &hint_text(&m), ui_kit::Text::Note("trace_hint"));
                 ui_kit::row(ui, solidcraft_ui_text::tr("browser.trace_tolerance"), |ui| {
                     ui_kit::slider(ui, &mut m.tolerance, 0.0..=100.0, Default::default())
                 });
@@ -161,7 +161,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.canvas_panel = Some(m);
             return;
         }
-        match app.run("canvas.to_sketch", json!({ "canvas": c.id, "at": m.a, "tolerance": m.tolerance })) {
+        match app.run("canvas.to_sketch", json!({ "canvas": c.id, "at": m.points, "tolerance": m.tolerance })) {
             Ok(_) => app.tree.canvas_panel = None,
             Err(e) => {
                 app.set_status(e, true);
@@ -184,6 +184,17 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
 
+/// The most regions one trace takes: the most points `canvas.to_sketch` accepts in `at`.
+const MAX_TRACE_POINTS: usize = 64;
+
+/// The card's hint as shown: the message of `hint`, with the number of shapes picked in Trace Region.
+pub(crate) fn hint_text(panel: &crate::browser::CanvasPanel) -> String {
+    if panel.trace && panel.picked_both {
+        return solidcraft_ui_text::format(hint(panel), &[("count", &panel.points.len().to_string())]);
+    }
+    solidcraft_ui_text::tr(hint(panel)).to_string()
+}
+
 /// The message id of the card's hint (and the status line) for what the user does next.
 pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
     if panel.trace {
@@ -199,7 +210,7 @@ pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
 }
 
 /// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
-pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
+pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2, add: bool) -> bool {
     let Some(mut panel) = app.tree.canvas_panel.clone() else {
         return false;
     };
@@ -237,6 +248,16 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     }
     let point = [local.x, local.y];
     if panel.trace {
+        // Ctrl+click adds one more region (up to what `canvas.to_sketch` takes); a plain click picks
+        // that one alone.
+        if add && panel.picked_both && panel.points.len() >= MAX_TRACE_POINTS {
+            app.set_status(solidcraft_ui_text::format("browser.trace_limit", &[("max", &MAX_TRACE_POINTS.to_string())]), true);
+            return true;
+        }
+        if !add || !panel.picked_both {
+            panel.points.clear();
+        }
+        panel.points.push(point);
         panel.a = point;
         panel.picked_both = true;
     } else if panel.next == 0 {
@@ -248,7 +269,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         panel.next = 0;
         panel.picked_both = true;
     }
-    app.set_status(solidcraft_ui_text::tr(hint(&panel)), false);
+    app.set_status(hint_text(&panel), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
@@ -280,24 +301,28 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
             painter.line_segment([a, b], Stroke::new(1.5, t.accent));
         }
     }
+    if panel.trace {
+        // A ring on every region picked, the last one the accent.
+        for (i, point) in panel.points.iter().enumerate() {
+            let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
+                continue;
+            };
+            let last = i + 1 == panel.points.len();
+            let stroke = Stroke::new(if last { 2.0 } else { 1.5 }, if last { t.accent } else { t.sel_edge });
+            painter.circle_stroke(screen, 7.0, stroke);
+            painter.circle_filled(screen, 2.5, if last { t.accent } else { t.sel_vertex });
+        }
+        return;
+    }
     for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
         let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
             continue;
         };
-        if panel.trace && (i == 1 || !panel.picked_both) {
-            continue;
-        }
         let active = panel.next as usize == i;
         let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
         painter.circle_stroke(screen, 7.0, stroke);
         painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
-        let label = if panel.trace {
-            ""
-        } else if i == 0 {
-            "A"
-        } else {
-            "B"
-        };
+        let label = if i == 0 { "A" } else { "B" };
         painter.text(
             screen + vec2(10.0, -10.0),
             egui::Align2::LEFT_BOTTOM,
@@ -344,6 +369,50 @@ mod tests {
         assert_eq!(super::hint(&panel), "browser.trace_click");
         panel.picked_both = true;
         assert_eq!(super::hint(&panel), "browser.trace_picked");
+        // Several regions picked (Ctrl+click): the hint counts them, Trace sends them all.
+        panel.points = vec![[1.0, 2.0], [3.0, 4.0]];
+        assert!(super::hint_text(&panel).contains("2"), "{}", super::hint_text(&panel));
+    }
+
+    /// Trace Region: a click picks one region, Ctrl+click adds another, a plain click starts over (#20798).
+    #[test]
+    fn trace_region_ctrl_click_adds_a_region() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(&h.app, id));
+        h.frames(6);
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+        let points = |h: &crate::scenario::Harness| h.app.tree.canvas_panel.as_ref().unwrap().points.clone();
+        let (a, b, d) = ((c.center.x - 20.0, c.center.y), (c.center.x + 20.0, c.center.y), (c.center.x, c.center.y + 10.0));
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), false));
+        assert_eq!(points(&h).len(), 1);
+        // Ctrl+click adds, in the order picked; the card's hint counts them.
+        assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), true));
+        assert!(super::click(&mut h.app, &proj, screen(d.0, d.1), true));
+        let picked = points(&h);
+        assert_eq!(picked.len(), 3, "{picked:?}");
+        assert!((picked[0][0] - a.0).abs() < 1e-3 && (picked[1][0] - b.0).abs() < 1e-3 && (picked[2][1] - d.1).abs() < 1e-3, "{picked:?}");
+        assert!(super::hint_text(h.app.tree.canvas_panel.as_ref().unwrap()).contains('3'));
+        // A plain click replaces them all.
+        assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), false));
+        let picked = points(&h);
+        assert!(picked.len() == 1 && (picked[0][0] - b.0).abs() < 1e-3, "{picked:?}");
+        // At the limit, Ctrl+click is refused with the selection kept; a plain click still replaces it.
+        h.app.tree.canvas_panel.as_mut().unwrap().points = vec![[0.0, 0.0]; super::MAX_TRACE_POINTS];
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), true));
+        assert_eq!(points(&h).len(), super::MAX_TRACE_POINTS);
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), false));
+        assert_eq!(points(&h).len(), 1);
+        // A click off the image adds nothing, even with Ctrl.
+        assert!(!super::click(&mut h.app, &proj, screen(c.center.x + 500.0, c.center.y), true));
+        assert_eq!(points(&h).len(), 1);
     }
 
     #[test]
@@ -409,10 +478,10 @@ mod tests {
         let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
-        assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0), false));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
         assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
-        assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0), false));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
         assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
@@ -460,18 +529,18 @@ mod tests {
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
         let sb = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(bx, c.center.y))).expect("point B on screen");
-        assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
+        assert!(super::click(&mut h.app, &proj, sa, false), "first click sets A");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 1);
         assert!((panel.a[0] - ax).abs() < 0.5, "{:?}", panel.a);
-        assert!(super::click(&mut h.app, &proj, sb), "second click sets B");
+        assert!(super::click(&mut h.app, &proj, sb, false), "second click sets B");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 0);
         assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
         let before = panel.a;
         let miss = plane.to_world(solidcore_record::Vec2::new(c.center.x + 500.0, c.center.y));
         if let Some(sm) = proj.to_screen(miss) {
-            assert!(!super::click(&mut h.app, &proj, sm));
+            assert!(!super::click(&mut h.app, &proj, sm, false));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
     }

@@ -1,6 +1,6 @@
 //! The UI kit: tokenised dense controls (rows, fields, menus, panels, windows) and the components
 //! built from them (the ribbon, app bar, history bar, navigation bar, Browser, view compass,
-//! preferences window, start page, window chrome and theme files). Everything is drawn from plain data the host
+//! preferences window, start page, window chrome, panel runtime and theme files). Everything is drawn from plain data the host
 //! passes or installs (its icon set, glyphs, tab table, text and built-in themes) and returns what
 //! the user chose; nothing here reads an app's state.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
@@ -17,6 +17,7 @@ pub mod history_bar;
 pub mod nav_bar;
 pub mod nav_bar_layout;
 pub mod navigation_bar;
+pub mod panel_runtime;
 pub mod prefs_window;
 pub mod ribbon;
 pub mod start_page;
@@ -47,6 +48,7 @@ mod details;
 mod disclosure;
 mod drag;
 mod fields;
+mod file_preview;
 pub mod file_view;
 mod framing;
 mod grid;
@@ -54,6 +56,10 @@ mod grid_tsv;
 mod history;
 mod history_group;
 pub mod icons;
+/// 3D mouse input independent of how the device is opened: HID report descriptors and reports,
+/// buttons and calibration (`solidcraft-space-mouse`), here so every host that draws with the kit
+/// reads devices the same way (#23205).
+pub use solidcraft_space_mouse as space_mouse;
 mod keyboard_focus;
 mod layout;
 mod look_chain;
@@ -63,6 +69,7 @@ mod name_list;
 mod navigation;
 mod navigation_menu;
 mod navigation_settings;
+mod page_switch;
 pub mod panel;
 mod panel_host;
 mod part_card;
@@ -84,6 +91,7 @@ mod reports;
 pub mod reveal;
 mod review;
 mod search;
+mod selection_bar;
 pub mod settings_search;
 mod shortcuts;
 mod sphere;
@@ -139,6 +147,7 @@ pub use fields::cell_editor;
 pub use fields::install_expressions;
 pub use fields::wide_cell_editor;
 pub use fields::*;
+pub use file_preview::{PreviewArt, PreviewImage, PreviewShadow, PreviewTextures, file_preview};
 pub use file_view::FileView;
 pub use file_view::Icon;
 pub use file_view::RecentRow;
@@ -185,6 +194,7 @@ pub use navigation::NavigationSize;
 pub use navigation::*;
 pub use navigation_menu::*;
 pub use navigation_settings::*;
+pub use page_switch::PageSwitch;
 pub use panel::ComputeStatus;
 pub use panel::DialogButtons;
 pub use panel::FeatureOptions;
@@ -205,7 +215,7 @@ pub use panel::inspector_header;
 pub use panel::panel_header_hover;
 pub use panel::within;
 pub use panel_host::*;
-pub use part_card::{PartCard, PartCardSize, PartFace, fitted, folder_button, part_card, part_row};
+pub use part_card::{PartCard, PartCardSize, PartFace, folder_button, part_card, part_row};
 pub use preferences::*;
 pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -237,6 +247,7 @@ pub use review::ReviewAndApply;
 pub use search::CommandSearch;
 pub use search::SearchBadge;
 pub use search::SearchFieldGeometry;
+pub use selection_bar::{SelectionAction, SelectionBar, SelectionBarResponse};
 pub use shortcuts::*;
 pub use sphere::FinishKind;
 pub use sphere::Sphere;
