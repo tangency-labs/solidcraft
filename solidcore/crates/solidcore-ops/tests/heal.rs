@@ -1597,3 +1597,22 @@ fn the_healer_squeezes_an_edge_within_its_tolerance_and_re_ends_its_neighbours()
         assert!(t <= vertex_tol[&v], "{v:?}: {t} from {}", vertex_tol[&v]);
     }
 }
+
+/// The check names the edge each failed test is about, so a body's bad edge can be found (#22929):
+/// each line of the zero-length spline span's three failures ends with the kernel edge's index.
+#[test]
+fn the_check_names_the_edge_of_each_failed_test() {
+    let rec = box_with_a_collapsed_spline_span(TOLS);
+    let bad = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Spline { .. }))
+        .unwrap();
+    let (body, order) = Body::from_record(&rec, true).unwrap();
+    let report = body.check(CheckLevel::All).unwrap();
+    assert_eq!(report.failed_tests(), [15, 15, 15]);
+    let named = format!("[edge {}]", order.edges[bad].index());
+    for line in report.text.lines() {
+        assert!(line.ends_with(&named), "{line}");
+    }
+}

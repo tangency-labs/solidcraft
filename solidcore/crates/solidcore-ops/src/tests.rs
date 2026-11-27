@@ -251,7 +251,7 @@ fn a_local_check_tests_the_gaps_of_the_edges_it_is_given() {
     assert!(!local.is_valid(), "{local}");
     let pass = |test: u32| {
         local.text.lines().any(|l| {
-            l.starts_with(&format!("SmBrep::Test #{test} ")) && l.ends_with("[owner SmEdgeuse]")
+            l.starts_with(&format!("SmBrep::Test #{test} ")) && l.contains("[owner SmEdgeuse]")
         })
     };
     assert!(pass(4), "the edge/face gap: {local}");
