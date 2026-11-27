@@ -1429,12 +1429,9 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
     }
     if (newer_container || unknown_parts) && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
-        let says = if newer_container {
-            container.get("format").and_then(Value::as_str).unwrap_or("a later container")
-        } else {
-            "unknown container parts"
-        }
-        .to_string();
+        let says =
+            if newer_container { container.get("format").and_then(Value::as_str).unwrap_or("a later container") } else { "unknown container parts" }
+                .to_string();
         let file = solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
             format: current,
             reads_up_to: current,
@@ -1925,6 +1922,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -2774,6 +2772,7 @@ mod tests {
             colors: Colors::default(),
             source_points: count as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3798,6 +3797,7 @@ mod tests {
             colors: Colors::default(),
             source_points: 3,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3886,8 +3886,9 @@ mod tests {
     fn portable_thumbnail_is_keyed_bounded_and_does_not_read_sources() {
         // IO validates an opaque PNG header/hash; UI tests exercise real PNG decoding.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        png.extend(240u32.to_be_bytes());
-        png.extend(150u32.to_be_bytes());
+        for side in crate::THUMBNAIL_SIZE {
+            png.extend((side as u32).to_be_bytes());
+        }
         let mut doc = Document::from_json(&document().to_json()).unwrap();
         if let FeatureKind::Import { step, .. } = &mut doc.features[0].kind {
             *step = "source data".repeat(250_000).into();
@@ -3899,7 +3900,7 @@ mod tests {
         assert!(count.get() < 256 * 1024);
         assert_eq!(reader.read_document().unwrap(), doc);
         let original = parts(&bytes);
-        for field in ["format", "app", "document", "payload"] {
+        for field in ["format", "document", "payload"] {
             let mut entries = original.clone();
             let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
             key[field] = json!("mismatch");
@@ -3908,6 +3909,12 @@ mod tests {
             assert!(read_design_thumbnail(&changed).is_none());
             assert_eq!(crate::read_design(&changed).unwrap(), doc);
         }
+        // A picture another version saved is still the design's picture: an update hides none.
+        let mut entries = original.clone();
+        let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
+        key["app"] = json!("0.0.1");
+        entries.insert("cache/thumbnail.json".into(), serde_json::to_vec(&key).unwrap());
+        assert_eq!(read_design_thumbnail(&package(&entries)), Some(png.clone()));
         let mut entries = original.clone();
         let source = entries.keys().find(|k| k.ends_with(".step")).unwrap().clone();
         entries.insert(source, b"corrupt source".to_vec());
@@ -4103,10 +4110,7 @@ mod tests {
     fn generator_metadata_round_trips_without_a_newer_file_warning() {
         let original = Document::new("Generated");
         let mut entries = parts(&write_design_container(&original).unwrap());
-        for generator in [
-            json!("ExampleTool 1.2.3"),
-            json!({"name": "ExampleTool", "version": "1.2.3", "source": {"id": 7, "tags": ["example"]}}),
-        ] {
+        for generator in [json!("ExampleTool 1.2.3"), json!({"name": "ExampleTool", "version": "1.2.3", "source": {"id": 7, "tags": ["example"]}})] {
             let header = json!({"format": VERSION, "generator": generator});
             entries.insert("container.json".into(), serde_json::to_vec(&header).unwrap());
             let mut opened = crate::read_design(&package(&entries)).unwrap();
@@ -4360,7 +4364,10 @@ mod tests {
                 legacy.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
                 legacy.write_all(&data).unwrap();
             }
-            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), doc);
+            // Its features keep the order of the pieces they split bodies into (#21552).
+            let mut upgraded = doc.clone();
+            upgraded.features.iter_mut().for_each(|f| f.least_face_piece_order = true);
+            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), upgraded);
         }
     }
 

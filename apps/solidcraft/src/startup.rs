@@ -754,6 +754,9 @@ pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 /// - `preference` (`graphics.json`'s `backend`: `dx12`, `vulkan`, `gl` or a comma list; `auto`
 ///   or empty for the order above): those backends, on any system, crashed or not.
 /// - Elsewhere than Windows: `None` (with crashed APIs, every backend but those).
+/// - On Windows an AMD adapter on the OpenGL backend does not count as hardware - the scene
+///   draws nothing there ([`counts_as_hardware`]) - so the automatic order ends at the
+///   software renderer on such a machine.
 pub fn choose_backends(
     windows: bool,
     env_set: bool,
@@ -1021,6 +1024,23 @@ pub const TIMESTAMP_QUERY: eframe::wgpu::Features = eframe::wgpu::Features::TIME
 /// The order backends are tried in on Windows.
 pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::GL];
 
+/// Whether an adapter counts as usable hardware for the automatic Windows backend order.
+///
+/// On Windows, an AMD adapter that wgpu offers on the OpenGL backend starts a device, but
+/// its scene passes draw nothing: the view shows only the egui-drawn origin dot, and the
+/// screen flashes black on every repaint (#11357, #11834, #12994, #16453). Such an adapter
+/// does not count as hardware, so the automatic order falls through to the next backend and
+/// ends at the software renderer, which draws everything (`--safe-mode` showed the planes,
+/// axes and grid on the reporters' machines). AMD is identified by its PCI vendor id, not by
+/// name: substrings like "ati" also appear in "Workstation" or "Generation". An explicit
+/// `WGPU_BACKEND` or a `graphics.json` `backend` preference is never second-guessed; other
+/// backends and other systems are untouched.
+pub fn counts_as_hardware(windows: bool, backend: eframe::wgpu::Backend, vendor: u32) -> bool {
+    // AMD's PCI vendor id; wgpu fills it in on GL too.
+    const AMD_VENDOR: u32 = 0x1002;
+    !(windows && backend == eframe::wgpu::Backend::Gl && vendor == AMD_VENDOR)
+}
+
 /// Whether `backends` (started on their own, nothing else) have a hardware adapter. The crash
 /// guard names them on disk before this loads their driver.
 pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
@@ -1032,7 +1052,10 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
     log::info!("graphics: {backends:?} adapters: {found:?}");
-    adapters.iter().any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu)
+    let windows = cfg!(target_os = "windows");
+    adapters
+        .iter()
+        .any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu && counts_as_hardware(windows, a.get_info().backend, a.get_info().vendor))
 }
 
 /// The environment variable that switches wgpu's indirect-call validation on or off.
@@ -1126,6 +1149,14 @@ pub fn relaunch_with_version_compat() -> Result<bool, String> {
 pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool {
     use eframe::wgpu::Backends;
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
+}
+
+/// Windows with OpenGL, decided once the window is open: the adapter wgpu picked draws with
+/// `backend`. The standard GPU startup ([`crate::gpu_startup`]) starts every backend, so
+/// [`system_title_bar`] can't tell beforehand that the window ends up on OpenGL; such a window
+/// then switches to the system title bar (#22530), as an OpenGL-only start gets it.
+pub fn system_title_bar_for_adapter(windows: bool, backend: eframe::wgpu::Backend) -> bool {
+    windows && backend == eframe::wgpu::Backend::Gl
 }
 
 /// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
@@ -2382,6 +2413,21 @@ full"
         }
     }
 
+    /// #22530: the standard startup starts every backend, and the adapter it then picks on an
+    /// older Intel GPU is OpenGL; that window gets the system title bar too.
+    #[test]
+    fn an_opengl_adapter_picked_among_all_backends_gets_the_system_title_bar() {
+        use eframe::wgpu::{Backend, Backends};
+        assert!(!system_title_bar(true, Backends::all()), "decided only once the adapter is known");
+        assert!(system_title_bar_for_adapter(true, Backend::Gl));
+        for b in [Backend::Dx12, Backend::Vulkan, Backend::Metal, Backend::BrowserWebGpu, Backend::Noop] {
+            assert!(!system_title_bar_for_adapter(true, b), "{b:?}");
+        }
+        for b in [Backend::Gl, Backend::Vulkan, Backend::Metal] {
+            assert!(!system_title_bar_for_adapter(false, b), "{b:?}");
+        }
+    }
+
     #[test]
     fn wgpu_backend_the_preference_and_the_software_renderer_override_the_order() {
         use eframe::wgpu::Backends;
@@ -2422,6 +2468,43 @@ full"
             choose_backends(false, false, false, Some("auto"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty(), |_| true),
             None
         );
+    }
+
+    #[test]
+    fn an_amd_opengl_adapter_on_windows_is_not_usable_hardware() {
+        use eframe::wgpu::{Backend, Backends};
+        // The reporters' cards: the device starts, but the scene draws nothing (#11357,
+        // #11834, #12994, #16453).
+        for name in ["AMD Radeon HD 5450", "AMD Radeon HD 7500 Series", "AMD Radeon HD 5700 Series", "ATI Radeon HD 2600 XT"] {
+            assert!(!counts_as_hardware(true, Backend::Gl, 0x1002), "{name}");
+        }
+        // Other backends draw fine, and other systems never had the fault.
+        assert!(counts_as_hardware(true, Backend::Dx12, 0x1002));
+        assert!(counts_as_hardware(true, Backend::Vulkan, 0x1002));
+        assert!(counts_as_hardware(false, Backend::Gl, 0x1002));
+        // Non-AMD OpenGL adapters are untouched, by vendor id rather than name: a name like
+        // "Workstation" or "Virtualization" contains "ati" without being an AMD adapter.
+        assert!(counts_as_hardware(true, Backend::Gl, 0x8086));
+        assert!(counts_as_hardware(true, Backend::Gl, 0x10DE));
+        assert!(counts_as_hardware(true, Backend::Gl, 0x10DE), "NVIDIA RTX A5000 (Workstation)");
+        // The automatic order on such a machine ends at the software renderer: the only
+        // hardware adapter it could enumerate is the AMD one on GL, the filter passes it over,
+        // and no backend with a usable GPU is left. The probe models that machine: GL alone
+        // enumerates hardware, and the filter is applied to it, so GL is probed but not taken.
+        let probe = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, 0x1002);
+        assert_eq!(choose_backends(true, false, false, None, Backends::empty(), Backends::empty(), probe), Some(Backends::DX12));
+        // Without the filter the same machine would have started on GL and drawn nothing.
+        let unfiltered = |b: Backends| b == Backends::GL;
+        assert_eq!(choose_backends(true, false, false, None, Backends::empty(), Backends::empty(), unfiltered), Some(Backends::GL));
+        // The name-based filter excludes every AMD adapter on GL, modern cards included.
+        // That is safe: a machine where GL alone enumerates hardware has no working D3D12 or
+        // Vulkan device, which is exactly the TeraScale-class situation where the GL scene
+        // draws nothing. A modern AMD card's D3D12 or Vulkan wins first, so GL is never asked
+        // for; the filter only changes anything on machines where GL was the broken last
+        // resort. The old start is kept behind WGPU_BACKEND and the backend preference.
+        assert!(!counts_as_hardware(true, Backend::Gl, 0x1002));
+        let amd_gl_only = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, 0x1002);
+        assert_eq!(choose_backends(true, false, false, None, Backends::empty(), Backends::empty(), amd_gl_only), Some(Backends::DX12));
     }
 
     #[test]

@@ -102,7 +102,7 @@ fn check_arc_sweep(solved: &SolvedSheetSketch, curve: &Curve) -> Result<()> {
     let point = |index| solved.sketch.point(index).ok_or_else(|| error(solved, Some(&curve.id), "arc references an unknown point"));
     let (center, start, end) = (point(c)?, point(a)?, point(b)?);
     if start != end {
-        let sweep = solidcraft_kernel::services::prism::counterclockwise_sweep(center, start, end)
+        let sweep = solidcraft_kernel::affine::counterclockwise_sweep(center, start, end)
             .ok_or_else(|| error(solved, Some(&curve.id), "arc has no finite nonzero radial directions"))?;
         // Sketch::segs adds a full turn at this cutoff, including across atan2's branch seam.
         if sweep <= 1e-12 {

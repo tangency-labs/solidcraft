@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="820" height="792" viewBox="0 0 820 792">
+  <title>fig</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="820" height="792" fill="#ffffff"/>
+    <polygon points="60,630 310,630 311.96,629.9 313.9,629.62 315.81,629.14 317.65,628.48 319.43,627.64 321.11,626.63 322.69,625.46 324.14,624.14 325.46,622.69 326.63,621.11 327.64,619.43 328.48,617.65 329.14,615.81 329.62,613.9 329.9,611.96 330,610 330,510 390,510 390,610 390.1,611.96 390.38,613.9 390.86,615.81 391.52,617.65 392.36,619.43 393.37,621.11 394.54,622.69 395.86,624.14 397.31,625.46 398.89,626.63 400.57,627.64 402.35,628.48 404.19,629.14 406.1,629.62 408.04,629.9 410,630 660,630 660,230 400,230 400,130 320,130 320,230 80,230 78.04,230.1 76.1,230.38 74.19,230.86 72.35,231.52 70.57,232.36 68.89,233.37 67.31,234.54 65.86,235.86 64.54,237.31 63.37,238.89 62.36,240.57 61.52,242.35 60.86,244.19 60.38,246.1 60.1,248.04 60,250" fill="#f0f0f0" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <polyline points="310,630 311.96,629.9 313.9,629.62 315.81,629.14 317.65,628.48 319.43,627.64 321.11,626.63 322.69,625.46 324.14,624.14 325.46,622.69 326.63,621.11 327.64,619.43 328.48,617.65 329.14,615.81 329.62,613.9 329.9,611.96 330,610" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polyline points="390,610 390.1,611.96 390.38,613.9 390.86,615.81 391.52,617.65 392.36,619.43 393.37,621.11 394.54,622.69 395.86,624.14 397.31,625.46 398.89,626.63 400.57,627.64 402.35,628.48 404.19,629.14 406.1,629.62 408.04,629.9 410,630" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polyline points="80,230 78.04,230.1 76.1,230.38 74.19,230.86 72.35,231.52 70.57,232.36 68.89,233.37 67.31,234.54 65.86,235.86 64.54,237.31 63.37,238.89 62.36,240.57 61.52,242.35 60.86,244.19 60.38,246.1 60.1,248.04 60,250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="320" y1="230" x2="320" y2="690" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line x1="400" y1="230" x2="400" y2="690" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle cx="320" cy="627.32" r="5" fill="#000000"/>
+    <circle cx="400" cy="627.32" r="5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">One fillet, two chains: the boss&apos;s continued walls meet the other chain&apos;s round</tspan></text>
+    <text transform="matrix(1 0 0 1 412 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">boss on the top face</tspan></text>
+    <text transform="matrix(1 0 0 1 412 430)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the boss&apos;s walls continued down</tspan></text>
+    <text transform="matrix(1 0 0 1 412 448)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">through the body, past the sheet</tspan></text>
+    <line x1="410" y1="426" x2="401" y2="450" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 450 662)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">chain 2: the hole rim&apos;s round, on the</tspan></text>
+    <text transform="matrix(1 0 0 1 450 680)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">bottom face and the hole&apos;s wall</tspan></text>
+    <line x1="448" y1="658" x2="408" y2="629" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 312 662)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">creases</tspan></text>
+    <line x1="314" y1="658" x2="316" y2="631.32" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 360 560)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555" text-anchor="middle"><tspan x="0" y="0">hole</tspan></text>
+    <text transform="matrix(1 0 0 1 40 720)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Section at x = 20. Before, keep features cut the sheet at the creases as if the boss stood</tspan></text>
+    <text transform="matrix(1 0 0 1 40 738)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">in chain 2&apos;s band, and the trimmed sheet did not sew in (status 1001). Now a feature is cut</tspan></text>
+    <text transform="matrix(1 0 0 1 40 756)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">only against the rounds that roll on its face: chain 2 rolls on no face the boss stands on.</tspan></text>
+    <text transform="matrix(1 0 0 1 92 188)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">chain 1: the front round,</tspan></text>
+    <text transform="matrix(1 0 0 1 92 206)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">on the top and front faces</tspan></text>
+    <line x1="78" y1="226" x2="90" y2="202" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+  </g>
+</svg>

@@ -584,9 +584,10 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_viewport::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
-    // The view's own background colour (#7688).
-    if let Some([r, g, b]) = app.preferences.viewport_background {
-        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r, g, b));
+    // The view's own background, one colour (#7688) or a gradient (#9230).
+    if let Some(solidcraft_theme::ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = app.preferences.viewport_background_colours() {
+        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r2, g2, b2));
+        palette.background_middle = middle.map(|[r, g, b]| solidcraft_viewport::Rgb(r, g, b));
     }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
@@ -1382,10 +1383,14 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
     app.cancel_view_animation();
     match v {
         "fit" => app.fit_view(),
-        "home" => {
-            app.cam.set_view(StandardView::Iso);
-            app.fit_view();
-        }
+        // The design's own Home view as it was set (#19972), else the iso view fitted.
+        "home" => match solidcraft_engine::view::home_view(&app.session) {
+            Some(home) => app.cam = home,
+            None => {
+                app.cam.set_view(StandardView::Iso);
+                app.fit_view();
+            }
+        },
         v => {
             if let Some(sv) = StandardView::parse(v) {
                 app.cam.set_view(sv);
@@ -4497,7 +4502,7 @@ pub(crate) mod tests {
         }
         s.execute("component.activate", &json!({"component": "root"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         h.frames(2);
         let before = h.app.cam;
         // Reading during an animated view change leaves it running (no frames run between).
@@ -4599,7 +4604,7 @@ pub(crate) mod tests {
         s.execute("joint.create", &json!({"type": "revolute", "a": at("A", 25), "b": at("B", 25), "flip": true, "name": "Hinge"})).unwrap();
         s.execute("joint.create", &json!({"type": "slider", "a": at("B", 55), "b": at("C", 55), "flip": true, "name": "Rail"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let before = h.app.session.doc.clone();
         let drive = |h: &crate::scenario::Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
             Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { joint, values, .. })) => {
@@ -4634,7 +4639,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let r = h.call("ui.start", json!({"command": "solid.fillet"}));
         let d = &r["result"]["dialog"];
         assert_eq!((&d["command"], &d["title"], &d["editing"]), (&json!("solid.fillet"), &json!("FILLET"), &Value::Null), "{r}");

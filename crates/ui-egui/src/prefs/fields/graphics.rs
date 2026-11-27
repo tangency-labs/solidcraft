@@ -33,6 +33,7 @@ macro_rules! graphics_preferences {
             graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
             /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
             ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
+            ground_shadow_style: GroundShadowStyle = GroundShadowStyle::Ellipse, PAGE_GRAPHICS;
             /// Joint badges draw quiet unless the joint lets its parts move, which shows what a
             /// construction has fully constrained. Off: every joint draws alike. The ring and axis
             /// style draws every joint alike either way.
