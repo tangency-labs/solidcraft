@@ -74,6 +74,10 @@ fn failure(app: &SolveApp) -> Option<String> {
 
 fn start(app: &mut SolveApp, ctx: &egui::Context, r: &Request) {
     let ask = ask_of(r);
+    if !app.policy.allows("problem_reports") {
+        status(&ask.id, "failed", "The organization's policy turns problem reports off on this computer: nothing was sent.", json!({}));
+        return;
+    }
     let title: String = r.params.get("title").and_then(Value::as_str).unwrap_or_default().trim().chars().take(payload::MAX_TITLE).collect();
     let description: String =
         r.params.get("description").and_then(Value::as_str).unwrap_or_default().chars().take(payload::MAX_DESCRIPTION).collect();
@@ -132,6 +136,15 @@ fn report_progress(app: &mut SolveApp) {
     match app.tickets.outcome.clone() {
         Some(Outcome::Opened(url)) => {
             status(&id, "opened", "The report is open in the person's browser: they sign in there and click File ticket.", json!({ "url": url }));
+            app.tickets.agent = None;
+        }
+        Some(Outcome::AlreadySent(url)) => {
+            status(
+                &id,
+                "opened",
+                "The same report was sent in the last 30 minutes, so nothing new was sent: its page is offered to the person again.",
+                json!({ "url": url, "already_sent": true }),
+            );
             app.tickets.agent = None;
         }
         Some(Outcome::Queued(why)) => {

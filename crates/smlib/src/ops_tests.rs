@@ -495,7 +495,8 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
     let out = c.draft(&side, 0.1, [0.0; 3], up, up, -5.0 * deg).unwrap();
     assert!((out.volume(ACC).unwrap() - (8000.0 + wedge)).abs() < 1e-6);
     // The top isn't parallel to the pull.
-    assert_eq!(c.draft(&[[10.0, 10.0, 20.0]], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Unsupported);
+    let across = Error::Refused(solidcore_ops::Error::Unsupported("a drafted plane is not parallel to the pull"));
+    assert_eq!(c.draft(&[[10.0, 10.0, 20.0]], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), across);
     assert_eq!(c.draft(&side, 0.1, [0.0; 3], up, up, 0.0).unwrap_err(), Error::Argument);
     assert_eq!(c.draft(&[], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Argument);
     assert_untouched(&c, 8000.0, [6, 12, 8]);

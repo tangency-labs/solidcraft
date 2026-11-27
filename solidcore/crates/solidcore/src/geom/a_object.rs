@@ -1074,7 +1074,11 @@ pub fn get_or_create_object_cache(
     };
     match made {
         Ok(cache) => Ok(cache),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         // a failing CacheMakeOrValidate: no cache
         Err(_) => Ok(None),
     }

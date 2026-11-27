@@ -112,7 +112,7 @@ pub fn is_outward_primitive(k: &mut Kernel, b: &mut Brep, t: &Template) -> Resul
         return Ok(false);
     }
     let c = super::validation::check_brep(k, b, super::validation::CheckLevel::Level0)?;
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid != Some(true) {
+    if !c.pointers.is_passed() || c.assert_valid != Some(true) {
         return Ok(false);
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;

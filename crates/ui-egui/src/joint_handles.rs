@@ -461,7 +461,7 @@ fn polar(proj: &Proj, p: Pos2, a: &joints::MotionAxis) -> Option<(f64, f64)> {
 
 pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some(axis) = hit(app, proj, p) else { return false };
-    let initial = joints::joint_values(&app.session.doc.assembly).get(&axis.joint).and_then(|q| q.get(axis.index)).copied();
+    let initial = joints::joint_values(&app.session.doc.active_assembly().assembly).get(&axis.joint).and_then(|q| q.get(axis.index)).copied();
     let Some(initial) = initial else { return false };
     let start = if axis.angular { polar(proj, p, &axis).map(|q| q.0) } else { along(proj, p, &axis) };
     let (Some(start), Some(radius)) = (start, radius(app, proj, &axis)) else { return false };
@@ -529,7 +529,7 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         along(proj, p, &d.axis).map(|v| v - d.start)
     };
     if let Some(amount) = amount.filter(|v| v.is_finite() && v.abs() < 1e8) {
-        let current = joints::joint_values(&app.session.doc.assembly);
+        let current = joints::joint_values(&app.session.doc.active_assembly().assembly);
         if let (Some(joint), Some(values)) =
             (app.session.doc.assembly.joints.iter().find(|j| j.id == d.axis.joint), current.get(&d.axis.joint).cloned())
         {

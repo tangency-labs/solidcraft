@@ -214,6 +214,36 @@ fn a_sketchs_icon_takes_its_states_colour_in_both_histories_and_the_browser() {
     }
 }
 
+/// With the History docked in the browser, a sketch's row in its History folder takes the state's
+/// colour and names the state in its tooltip, as the sketch's Sketches folder row does (#22185).
+#[test]
+fn a_sketchs_row_in_the_browsers_history_folder_takes_its_states_colour() {
+    let mut h = sketch_states_design();
+    h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+    assert!(h.app.preferences.history_in_browser);
+    h.app.tree.expanded.insert("c0/features".into());
+    let t = solidcraft_theme::Tokens::get();
+    let want = [("Guide", t.sketch), ("Fixed", t.sketch_fixed), ("Reach", t.error)];
+    let row = |h: &crate::scenario::Harness, name: &str| format!("row:browser-feature:c0:{}", h.app.session.doc.find_feature(name).unwrap().id);
+    let (shapes, textures) = fresh_frame(&mut h);
+    for (name, colour) in want {
+        let at = crate::scenario::handle_at(&row(&h, name)).unwrap_or_else(|| panic!("{name}: no History folder row"));
+        assert_eq!(icon_colours(&shapes, &textures, at, 15.5..=16.5), vec![colour.to_array()], "{name}: History folder");
+    }
+    let fixed = row(&h, "Fixed");
+    h.step(&json!({"move": {"handle": fixed}})).unwrap();
+    h.frames(60);
+    let texts = painted_texts(&mut h);
+    assert!(texts.iter().any(|t| t.contains("Fully constrained")), "no `Fully constrained` in {texts:?}");
+    // Preference off: the rows keep the sketch artwork, all alike.
+    h.app.preferences.sketch_state_icons = false;
+    let (shapes, textures) = fresh_frame(&mut h);
+    let icons: Vec<_> =
+        want.iter().map(|(name, _)| icon_colours(&shapes, &textures, crate::scenario::handle_at(&row(&h, name)).unwrap(), 15.5..=16.5)).collect();
+    assert!(icons.iter().all(|colours| colours.len() > 1), "the sketch artwork, not one ink: {icons:?}");
+    assert!(icons.windows(2).all(|w| w[0] == w[1]), "every sketch's icon alike");
+}
+
 /// Every text one frame paints.
 fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
     h.frame();

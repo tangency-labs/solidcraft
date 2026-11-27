@@ -27,7 +27,7 @@ pub enum FindingKind {
     Unmeasurable,
     /// One whose reference is on a suppressed feature.
     Suppressed,
-    /// A dimension or a view that can't be worked out.
+    /// A dimension, centre annotation or view that can't be worked out.
     Failed,
     /// A dimension whose text hides its value, or a title block cell whose typed text hides one.
     Overridden,
@@ -69,6 +69,8 @@ pub enum CheckedKind {
     Sketch,
     Fill,
     Dimension,
+    CentreLine,
+    CentreMark,
     Balloon,
     Note,
     Table,

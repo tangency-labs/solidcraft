@@ -154,10 +154,11 @@ pub fn set_override(bytes: Option<u64>) -> Result<(), String> {
     Ok(())
 }
 
-/// Tell the STEP parser the limit now in force: the size check here lets a file through, and
-/// the parser has its own cap, which must not refuse it again (#13329).
+/// Tell the STEP and IGES parsers the limit now in force: the size check here lets a file through, and
+/// the parsers have their own caps, which must not refuse it again (#13329, #20304).
 fn sync_parser() {
     solidcraft_kernel::set_step_max_bytes(max_step_bytes());
+    solidcraft_kernel::set_iges_max_bytes(max_step_bytes());
 }
 
 /// The `--max-file-size` this run started with, in bytes.
@@ -184,6 +185,10 @@ fn resolve(adjustable: bool, preferred: FileLimits, flag: u64) -> FileLimits {
 
 /// The largest STEP or import file read now.
 pub fn max_step_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().step).unwrap_or(usize::MAX)
 }
 
@@ -196,7 +201,7 @@ pub fn max_design_bytes() -> usize {
     usize::try_from(effective().design).unwrap_or(usize::MAX)
 }
 
-/// A design file limit below the smallest the app allows, for this test's thread only, so a test
+/// A file limit for this test's thread only, so a test
 /// can pass the limit with a small design.
 #[cfg(test)]
 pub(crate) mod test_cap {

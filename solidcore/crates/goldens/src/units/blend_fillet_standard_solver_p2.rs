@@ -446,8 +446,9 @@ fn rust_edgeuse_body(
     dist: f64,
     fu: f64,
     fv: f64,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -507,10 +508,22 @@ fn rust_edgeuse_body(
     put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
+    for slot in fs.solver.surfaces.iter().flatten() {
+        seen(&k, &slot.surface);
+    }
     Ok(v)
 }
 
 fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
+    rust_edgeuse_seen(i, &mut |_, _| {})
+}
+
+/// [`rust_edgeuse`], showing `seen` each rail's offset (with the extension it holds) once
+/// the op has run, where its record is written.
+fn rust_edgeuse_seen(
+    i: &Inputs,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Output, HarnessError> {
     let Inputs::CdEu {
         brep,
         eu,
@@ -544,7 +557,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
             }
         }
     }
-    match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *dist, *fu, *fv) {
+    match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *dist, *fu, *fv, seen) {
         Ok(body) => Ok(eu_output(&body)),
         Err(e) => {
             if let Some(o) = Output::unported(&e) {
@@ -573,8 +586,9 @@ fn rust_cr_eu_body(
     fu: f64,
     fv: f64,
     ext: f64,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -650,10 +664,22 @@ fn rust_cr_eu_body(
     v.push(guess.len() as f64);
     v.extend_from_slice(&guess);
     v.extend(offsets(&fs));
+    for slot in fs.solver.surfaces.iter().flatten() {
+        seen(&k, &slot.surface);
+    }
     Ok(v)
 }
 
 fn rust_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
+    rust_cr_eu_seen(i, &mut |_, _| {})
+}
+
+/// [`rust_cr_eu`], showing `seen` each rail's offset (with the extension it holds) once
+/// the op has run, where its record is written.
+fn rust_cr_eu_seen(
+    i: &Inputs,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Output, HarnessError> {
     let Inputs::CrEu {
         brep,
         eu,
@@ -700,6 +726,7 @@ fn rust_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
         *fu,
         *fv,
         *ext,
+        seen,
     ) {
         Ok(body) => Ok(eu_output(&body)),
         Err(e) => {
@@ -928,6 +955,15 @@ fn solver_of(k: &Kernel, s: &SolverIn) -> Result<BuiltSolver, HarnessError> {
 
 /// The shim's `put_offsets`: per rail `offset umin vmin umax vmax has_extension`
 /// (`GetNaturalUVDomain`, `GetExtendedBaseSurface() != NULL`) after the op.
+/// Shows `seen` each rail's offset of `fs`.
+fn show(k: &Kernel, fs: &ConstantRadiusFs, seen: &mut dyn FnMut(&Kernel, &OffsetSurface)) {
+    for i in 0..2 {
+        if let Ok(s) = fs.surface(i) {
+            seen(k, s);
+        }
+    }
+}
+
 fn offsets(fs: &ConstantRadiusFs) -> Vec<f64> {
     offset_state(|i| fs.surface(i).ok())
 }
@@ -986,7 +1022,16 @@ fn push_types(o: &mut Vec<f64>, code: i64, is_kind_of: impl Fn(i64) -> bool, kin
 
 #[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    rust_record_seen(i, &mut |_, _| {})
+}
+
+/// [`rust_record`], showing `seen` each rail's offset (with the extension it holds) once
+/// the case's call has returned, where its record is written.
+fn rust_record_seen(
+    i: &Inputs,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Rec, HarnessError> {
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::CrInit {
@@ -1043,6 +1088,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             o.extend(per.iter().map(|&b| flag(b)));
             o.push(guess.len() as f64);
             o.extend_from_slice(&guess);
+            show(&k, b.solver.cr(), seen);
             o.extend(offsets(b.solver.cr()));
         }
         Inputs::Guess { solver, plane } | Inputs::Plane { solver, plane } => {
@@ -1097,6 +1143,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                     Err(out) => return Ok(Err(out)),
                 },
             }
+            show(&k, &fs, seen);
             o.extend(offsets(&fs));
         }
         Inputs::Ss {
@@ -1165,6 +1212,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 o.push(fs.base.fillet_radius(i).map_err(|e| he(&e))?);
             }
             o.extend(fs.base.solver.orientations);
+            show(&k, &fs.base, seen);
             o.extend(offsets(&fs.base));
             for g in fs.uv_guesses {
                 o.extend([g.x, g.y]);
@@ -1265,6 +1313,14 @@ fn put_vu_tsect(o: &mut Vec<f64>, rm: &RustModel, eu: EdgeuseId) -> Result<(), H
 }
 
 fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
+    rust_recalc_seen(ri, &mut |_, _| {})
+}
+
+/// [`rust_recalc`], showing `seen` each rail's offset once `ReCalcFilletGeom` returns.
+fn rust_recalc_seen(
+    ri: &RecalcIn,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Output, HarnessError> {
     let mut rm = RustModel::build(&ri.model)?;
     for t in &ri.tsects {
         let eu = rm.edgeuse(t.e, t.which)?;
@@ -1282,7 +1338,7 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
         *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
         *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let a = gp1_surface_of(&ri.a)?;
     let b = gp1_surface_of(&ri.b)?;
     let center = Curve::from(curve_of(&ri.center)?);
@@ -1332,6 +1388,9 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
         law_interval,
     };
     let res = vr.re_calc_fillet_geom(&k, &mut rm.fb, false, None, reference.as_ref());
+    for slot in vr.curve_based.solver.surfaces.iter().flatten() {
+        seen(&k, &slot.surface);
+    }
     let st = match res {
         Ok(()) => 0.0,
         Err(e) => {
@@ -1380,7 +1439,7 @@ fn rust_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
             .and_then(IntersectionPointType::from_code)
             .ok_or_else(|| harness("point type"))?;
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let bases = [gp1_surface_of(&ri.a)?, gp1_surface_of(&ri.b)?];
     let ids = [SurfaceId::Free(0), SurfaceId::Free(1)];
     let [a, b] = bases.clone();
@@ -2282,7 +2341,7 @@ mod tests {
         let Inputs::Guess { solver, plane } = input else {
             panic!("guess case");
         };
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let built = solver_of(&k, &solver).unwrap();
         let Solver::Cr(mut fs) = built.solver else {
             panic!("assisted solver");
@@ -2337,4 +2396,213 @@ mod tests {
             .with_extended_base_surface(|s| s.is_some()));
     }
 
+}
+
+/// #21383: the 1 row the G1R change moved. A solver point outside a mate's domain is
+/// computed on the mate's offset's G1R extension; the row's own case is run, and every
+/// extension its rails' offsets hold is replayed bit for bit by certified G1R steps
+/// ([`crate::g1r_cert::ExtensionWatch`]), with at least one mixed-ratio step (the new
+/// row): PROVEN on the real row, up to the rounding the certificate's header bounds.
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 1] = ["gen0181"];
+
+    /// Each moved row's case run as its output is (`rust_recalc`, `rust_record`), and the extension
+    /// each rail's offset then holds certified by [`ExtensionWatch`] (replayed bit for
+    /// bit from its base by certified G1 steps), with at least one mixed-ratio step (the
+    /// new row): PROVEN on the real row, up to the rounding the certificate's header
+    /// bounds.
+    #[test]
+    fn each_moved_row_solves_on_certified_g1_extensions() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i = c.parse::<Inputs>().unwrap();
+            let (mut growths, mut mixed, mut err) = (0, 0, None);
+            let mut look = |k: &Kernel, s: &OffsetSurface| {
+                let mut w = ExtensionWatch::default();
+                match w.observe(k, &s.surface) {
+                    Ok(()) => {
+                        growths += w.growths;
+                        mixed += w.mixed;
+                    }
+                    Err(e) => err = Some(e),
+                }
+            };
+            match &i {
+                Inputs::Recalc(ri) => {
+                    rust_recalc_seen(ri, &mut look).map(|_| ())
+                }
+                _ => rust_record_seen(&i, &mut look).map(|_| ()),
+            }
+            .unwrap_or_else(|e| panic!("{}: {e:?}", c.name));
+            if let Some(e) = err {
+                panic!("{}: {e}", c.name);
+            }
+            eprintln!("{}: {growths} extensions, {mixed} mixed steps", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+            assert!(mixed > 0, "{}: no step with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}
+
+/// WR-458, WR-633 and WR-650 (#18921): the 100 rows the offset surface's extension from
+/// its base moves. A solver point outside a mate's domain is computed on the mate's
+/// offset's extension; each row's own case is run as its output is (`rust_recalc`,
+/// `rust_record`), and every extension its rails' offsets then hold is certified
+/// ([`crate::g1r_cert::ExtensionWatch`]: bit for bit the extension a fresh evaluation from
+/// the base's NURB builds, each step certified G1). Every row holds at least one extension:
+/// the moved values are taken on certified extensions from the base (PROVEN, up to the
+/// rounding the certificate's header bounds).
+#[cfg(test)]
+mod wr458_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 100] = [
+        "fx_a",
+        "fx_b_ext05",
+        "fx_d_guess",
+        "fx_e_r03",
+        "gen0005",
+        "gen0009",
+        "gen0010",
+        "gen0012",
+        "gen0015",
+        "gen0022",
+        "gen0025",
+        "gen0033",
+        "gen0038",
+        "gen0040",
+        "gen0042",
+        "gen0043",
+        "gen0047",
+        "gen0049",
+        "gen0053",
+        "gen0054",
+        "gen0062",
+        "gen0064",
+        "gen0067",
+        "gen0068",
+        "gen0080",
+        "gen0084",
+        "gen0085",
+        "gen0088",
+        "gen0094",
+        "gen0099",
+        "gen0104",
+        "gen0105",
+        "gen0109",
+        "gen0111",
+        "gen0112",
+        "gen0113",
+        "gen0119",
+        "gen0120",
+        "gen0123",
+        "gen0131",
+        "gen0133",
+        "gen0136",
+        "gen0141",
+        "gen0143",
+        "gen0146",
+        "gen0155",
+        "gen0157",
+        "gen0162",
+        "gen0165",
+        "gen0170",
+        "gen0176",
+        "gen0180",
+        "gen0184",
+        "gen0187",
+        "gen0196",
+        "gen0208",
+        "gen0211",
+        "gen0212",
+        "gen0215",
+        "gen0216",
+        "gen0218",
+        "gen0231",
+        "gen0236",
+        "gen0244",
+        "gen0245",
+        "gen0249",
+        "gen0253",
+        "gen0255",
+        "gen0259",
+        "gen0263",
+        "gen0265",
+        "gen0274",
+        "gen0282",
+        "gen0286",
+        "gen0291",
+        "gen0293",
+        "gen0301",
+        "gen0307",
+        "gen0310",
+        "gen0315",
+        "gen0320",
+        "gen0327",
+        "gen0333",
+        "gen0334",
+        "gen0336",
+        "gen0340",
+        "gen0342",
+        "gen0350",
+        "gen0362",
+        "gen0365",
+        "gen0367",
+        "gen0368",
+        "gen0369",
+        "gen0376",
+        "gen0377",
+        "gen0383",
+        "gen0387",
+        "gen0393",
+        "gen0395",
+        "gen0396",
+    ];
+
+    #[test]
+    fn each_moved_row_runs_on_certified_extensions_from_its_base() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i = c.parse::<Inputs>().unwrap();
+            let (mut growths, mut err) = (0, None);
+            let mut look = |k: &Kernel, s: &OffsetSurface| {
+                let mut w = ExtensionWatch::default();
+                match w.observe(k, &s.surface) {
+                    Ok(()) => growths += w.growths,
+                    Err(e) => {
+                        err.get_or_insert(e);
+                    }
+                }
+            };
+            match &i {
+                Inputs::Recalc(ri) => rust_recalc_seen(ri, &mut look).map(|_| ()),
+                Inputs::CrEu { .. } => rust_cr_eu_seen(&i, &mut look).map(|_| ()),
+                Inputs::CdEu { .. } => rust_edgeuse_seen(&i, &mut look).map(|_| ()),
+                _ => rust_record_seen(&i, &mut look).map(|_| ()),
+            }
+            .unwrap_or_else(|e| panic!("{}: {e:?}", c.name));
+            if let Some(e) = err {
+                panic!("{}: {e}", c.name);
+            }
+            eprintln!("{}: {growths} extensions", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
 }
