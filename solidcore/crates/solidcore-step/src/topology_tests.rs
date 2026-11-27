@@ -4942,12 +4942,10 @@ fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
 /// pcurve. Each side is affine along its iso-line, so its exact pcurve is the same spline over
 /// (x / 10, y / 10); the kernel's are those moved 1e-4 along u, about 1e-3 mm off, far past the
 /// 1e-5 mm the file states, so the reader alone raises the tolerance.
-#[test]
-fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
+fn shifted_trims_patch(shift: f64) -> (Result<crate::assembly::Solid, String>, usize) {
     use crate::assembly::{Assembly, Bound, Kind};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    const SHIFT: f64 = 1e-4;
-    struct Shifted(AtomicUsize);
+    struct Shifted(AtomicUsize, f64);
     impl Trims for Shifted {
         fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
             let mut out = Vec::new();
@@ -4961,7 +4959,7 @@ fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
                     self.0.fetch_add(1, Ordering::Relaxed);
                     let e = face.edges.get(u.edge as usize).ok_or("edge")?;
                     let BCurve::Spline { knots, points } = e.curve else { return Err(format!("{:?}", e.curve)) };
-                    let points = points.iter().map(|p| [p[0] / 10.0 + SHIFT, p[1] / 10.0]).collect();
+                    let points = points.iter().map(|p| [p[0] / 10.0 + self.1, p[1] / 10.0]).collect();
                     pcs.push(Curve2::Spline { knots: knots.clone(), points });
                 }
                 out.push(pcs);
@@ -4969,7 +4967,7 @@ fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
             Ok(out)
         }
     }
-    let trims = Shifted(AtomicUsize::new(0));
+    let trims = Shifted(AtomicUsize::new(0), shift);
     let mut a = Assembly::new(1e-5, Some(&trims));
     let points = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 1.0], [0.0, 10.0, 0.0]];
     let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
@@ -4987,8 +4985,15 @@ fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
         points: vec![vec![points[0], points[3]], vec![points[1], points[2]]],
     };
     let f = a.add_face(1, patch, vec![Bound::Edges(edges)], Some(0), true).unwrap();
-    let s = a.finish(1, "shifted trims".into(), vec![vec![(f, true)]], Kind::Model).unwrap();
-    assert_eq!(trims.0.load(Ordering::Relaxed), 4, "the kernel makes every pcurve");
+    let s = a.finish(1, "shifted trims".into(), vec![vec![(f, true)]], Kind::Model);
+    (s, trims.0.load(Ordering::Relaxed))
+}
+
+#[test]
+fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
+    let (s, made) = shifted_trims_patch(1e-4);
+    let s = s.unwrap();
+    assert_eq!(made, 4, "the kernel makes every pcurve");
     let f = &s.brep.faces[0];
     let surface = SurfaceEval::new(f.parameters()).unwrap();
     let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
@@ -5008,6 +5013,19 @@ fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
     let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
     let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
+}
+
+/// solidcore#3388: a gap past a third of [`MAX_TOLERANCE`](crate::assembly::MAX_TOLERANCE), which
+/// the full margin would take past it, still reads, with the margin it had: the same patch with
+/// its kernel-made pcurves 0.04 along u, about 0.4 mm off.
+#[test]
+fn an_edge_gap_the_full_margin_would_refuse_still_reads() {
+    let (s, made) = shifted_trims_patch(0.04);
+    let s = s.unwrap();
+    assert_eq!(made, 4, "the kernel makes every pcurve");
+    for e in &s.brep.edges {
+        assert!(e.tolerance > 0.39 * 1.5 && e.tolerance <= 1.0, "1.5 times the gap: {}", e.tolerance);
+    }
 }
 
 /// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
