@@ -328,7 +328,12 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   round meeting itself at an angle is split in two at the corner and its ends are mitred the same
   way: the mitre runs from where its rail crosses the side edge to where it meets itself on the
   face the ends share. Two equal cylinders meet in a planar conic on the bisector plane, built
-  exactly. The seam is G0 by construction and graded G0.
+  exactly. The seam is G0 by construction and graded G0. Two rounds whose edges share no vertex
+  but end on one face beyond (the top edges of a block whose corners a sphere trims) are mitred
+  where their rails, run on past those ends, cross on the face they share: the band check notes
+  such a pair (`FilletSession::bands_crossing_past_ends`) where it is all that refuses, and ops
+  builds the rounds in turns, so the later one runs on into the earlier one's face and the two are
+  trimmed on their crossing, a mitre that ends on the face beyond (SolidCraft #22798).
 - **Swept.** Each round ends on its own section in the plane through the side edge square to its
   edge; the section is revolved about the side edge through the corner's turn. Between planes at a
   straight side edge this is an exact torus segment (a horn torus touching the axis at the side
