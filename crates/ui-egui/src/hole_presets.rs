@@ -256,7 +256,7 @@ impl Preset {
                     size: opts.clearance_size.trim().into(),
                     fit: crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| f.1).into(),
                     diameter: opts.clearance_diameter.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
-                    head: crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1).map(Into::into),
+                    head: crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1).filter(|_| *kind == 1).map(Into::into),
                 })
             } else {
                 None

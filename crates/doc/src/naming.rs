@@ -200,6 +200,11 @@ impl NameCell {
     pub(crate) fn id(&self) -> usize {
         Arc::as_ptr(&self.names) as usize
     }
+    /// Weak reference to the lazy names cell, for O(1) cache identity checks without computing
+    /// or retaining names.
+    pub(crate) fn names_cell(&self) -> std::sync::Weak<OnceLock<Arc<Names>>> {
+        Arc::downgrade(&self.names)
+    }
     /// The same origin, lineage and depth with nothing worked out yet: for a body given a new
     /// name, whose faces' names may be made from it. Names with nothing to work them out from
     /// again (a saved model's) are kept, only those made from the old name following it (#21192).
