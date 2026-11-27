@@ -21,7 +21,7 @@ use crate::schema::features::{
     OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams,
     TorusParams,
 };
-use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
+use crate::schema::features::{PatternCircularParams, PatternFaceParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::features::{ThreadFeatureResult, ThreadParams};
 use crate::schema::inspect::ModelThread;
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
@@ -49,6 +49,7 @@ const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new()
 const PATTERN_CIRCULAR_CONTRACT: TypedContract<PatternCircularParams> = TypedContract::new();
 const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = TypedContract::new();
 const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
+const PATTERN_FACE_CONTRACT: TypedContract<PatternFaceParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
@@ -288,6 +289,30 @@ pub static COMMANDS: &[CommandSpec] = &[
             "alignment?: left|center|right (default right; original stays fixed); ",
             "reversed?: bool (Flip; selects the extra side for even centered counts); ",
             "join?: bool (join the bodies copied from and their copies where they touch or overlap; copies that touch nothing stay bodies of their own; default false)",
+        )),
+    CommandSpec::new("solid.pattern.face", "Pattern on Face", crate::checked!("solid.pattern.face", pattern_face)).begins_edit()
+        .at("SOLID", "CREATE")
+        .icon("pattern_face")
+        .contract(&PATTERN_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(concat!(
+            "bodies: [names]; ",
+            "face: {face: [x,y,z]} (any face; followed as the model changes); ",
+            "faces?: [{face: [x,y,z]}] (more faces of the same body, or all of them without `face`: one region, copies across the edges they share, counts shared by area); ",
+            "count1, count2 (grid cells across and along the face: round and along a cylinder) | random: {count, seed?: whole number, noise?: white|blue|pink|brown} (instances at random places, even over the face's area: white independent, blue evenly spread, pink loose clusters, brown large clusters) | layout: {type: spacing, spacing, row_spacing?} (rows a distance apart along the surface, as many in each as fit: round a sphere, its circles of latitude) | {type: spiral, count} (a Fibonacci spiral, even over the area) | {type: fill, count} (relaxed until evenly spread, round holes and across the faces) | {type: geodesic, frequency: 1..9} (a geodesic sphere's vertices on faces of one sphere; angle turns it); ",
+            "fit_edges?: bool (the outer copies flush with the face's edges, or their centres on them with overhang, the margin moving them in; default false: grid copies at their cells' centres); ",
+            "staggered?: bool (every other column half a cell along); ",
+            "angle?: expr (turns the grid); ",
+            "margin?: expr (the edge margin: no copy nearer the face's edges, round its holes too, measured from the copy itself; at 0, none hanging over them); ",
+            "overhang?: bool (copies may hang over the edges: only each centre must be on the face, and the margin is measured from it); ",
+            "avoid?: {geometry?: [refs: points, vertices, faces], bodies?: [names], margin?: expr} (no copy within the margin of these, measured from the copy itself; with no margin, none touching or overlapping them); ",
+            "flip?: bool (the other side of the face); ",
+            "anchor?: [x,y,z] (the point of the bodies that lands on the face, default the centre of the bottom of their bounding box; their +Z stands along the face's normal, their X along the grid); ",
+            "group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); ",
+            "scale?: expr (every copy's scale about its anchor, default 1); ",
+            "offset?: expr (every copy moved out along the face's normal, negative into it, default 0); ",
+            "rotate?: expr (every copy turned about the face's normal, default 0); ",
+            "attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, rotate_near?, rotate_far?, cutoff?, falloff?: linear|smooth} (near/far modifiers: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0; a near or far value left out is the pattern's scale, offset or rotate)",
         )),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
@@ -4080,6 +4105,298 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         follow_frame: true,
     };
     finish_pattern(s, p, features, pattern, bodies)
+}
+
+fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.pattern.face";
+    let bodies = string_list(cmd, p, "bodies")?;
+    if bodies.is_empty() {
+        return Err(bad(cmd, "`bodies` must list the bodies to copy"));
+    }
+    if let Some(b) = bodies.iter().find(|b| s.model.state().body(b).is_none()) {
+        return Err(bad(cmd, format!("no body `{b}`")));
+    }
+    // The faces: `face`, then `faces`; the first is the pattern's `face`.
+    let mut all = Vec::new();
+    if p.get("face").is_some_and(|v| !v.is_null()) {
+        all.push(super::construct::geo(s, p.get("face"), cmd, "face")?);
+    }
+    match p.get("faces") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(l)) if l.len() <= solidcraft_kernel::MAX_FACES => {
+            for v in l {
+                all.push(super::construct::geo(s, Some(v), cmd, "faces")?);
+            }
+        }
+        Some(_) => return Err(bad(cmd, format!("`faces` must list at most {} faces", solidcraft_kernel::MAX_FACES))),
+    }
+    if all.len() > solidcraft_kernel::MAX_FACES {
+        return Err(bad(cmd, format!("at most {} faces", solidcraft_kernel::MAX_FACES)));
+    }
+    if all.iter().any(|g| !matches!(g, solidcraft_doc::construct::GeoRef::Face { .. })) {
+        return Err(bad(cmd, "`face` and `faces` must be faces: {\"face\": [x, y, z]} on each"));
+    }
+    let mut all = all.into_iter();
+    let face = all.next().ok_or_else(|| bad(cmd, "`face` is required (or list the faces in `faces`)"))?;
+    let more_faces: Vec<_> = all.collect();
+    // A layout spaced by distance on the surface, in place of the grid and `random`.
+    let layout = match p.get("layout") {
+        None | Some(Value::Null) => None,
+        Some(l) => Some(face_layout_param(s, l, cmd)?),
+    };
+    // A random placement: how many, the seed, and the noise that spreads them. The grid's
+    // counts are then not needed.
+    let random = match p.get("random") {
+        None | Some(Value::Null) => None,
+        Some(r) => {
+            let count = req_expr(cmd, r, "count").map_err(|_| bad(cmd, "`random.count` is required"))?;
+            check_count(s, &count, cmd, "random.count")?;
+            let seed = match r.get("seed") {
+                None | Some(Value::Null) => 0,
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| bad(cmd, "`random.seed` must be a whole number from 0 to 4294967295"))?,
+            };
+            let noise = match str_(r, "noise") {
+                None | Some("white") => solidcraft_doc::Noise::White,
+                Some("blue") => solidcraft_doc::Noise::Blue,
+                Some("pink") => solidcraft_doc::Noise::Pink,
+                Some("brown") => solidcraft_doc::Noise::Brown,
+                Some(other) => return Err(bad(cmd, format!("unknown noise `{other}` (white, blue, pink or brown)"))),
+            };
+            Some(solidcraft_doc::RandomPlacement { count, seed, noise })
+        }
+    };
+    if layout.is_some() && random.is_some() {
+        return Err(bad(cmd, "give `layout` or `random`, not both"));
+    }
+    let grid_count = |key: &str| -> Result<solidcraft_doc::Expr> {
+        match (expr(p, key), random.is_some() || layout.is_some()) {
+            (Some(c), _) => {
+                check_count(s, &c, cmd, key)?;
+                Ok(c)
+            }
+            (None, true) => Ok("1".into()),
+            (None, false) => Err(bad(cmd, format!("`{key}` is required (or give `layout` or `random`)"))),
+        }
+    };
+    let count1 = grid_count("count1")?;
+    let count2 = grid_count("count2")?;
+    let angle = expr(p, "angle");
+    if let Some(a) = &angle {
+        check_expr(s, a, Kind::Angle, cmd, "angle")?;
+    }
+    let margin = expr(p, "margin");
+    if let Some(m) = &margin {
+        check_expr(s, m, Kind::Length, cmd, "margin")?;
+    }
+    let avoid = match p.get("avoid") {
+        None | Some(Value::Null) => None,
+        Some(a) => Some(Box::new(avoid_param(s, a, cmd)?)),
+    };
+    let anchor = point_param(s, p, "anchor", cmd)?;
+    // Every copy's scale, offset and rotation, and the attractors' values where they give none.
+    let own = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+        let e = expr(p, key);
+        if let Some(e) = &e {
+            check_expr(s, e, kind, cmd, key)?;
+        }
+        Ok(e)
+    };
+    let scale = own("scale", Kind::Unitless)?;
+    if let Some(e) = &scale
+        && s.doc.eval(e, Kind::Unitless).is_ok_and(|k| !(k > 0.0))
+    {
+        return Err(bad(cmd, "`scale` must be above zero"));
+    }
+    let offset = own("offset", Kind::Length)?;
+    let rotate = own("rotate", Kind::Angle)?;
+    let attract = match p.get("attract") {
+        None | Some(Value::Null) => None,
+        Some(a) => Some(Box::new(attract_param(s, a, cmd)?)),
+    };
+    let pattern = solidcraft_doc::PatternKind::Face {
+        face,
+        more_faces,
+        layout,
+        fit_edges: bool_(p, "fit_edges").unwrap_or(false),
+        count1,
+        count2,
+        staggered: bool_(p, "staggered").unwrap_or(false),
+        random,
+        angle,
+        margin,
+        overhang: bool_(p, "overhang").unwrap_or(false),
+        avoid,
+        flip: bool_(p, "flip").unwrap_or(false),
+        anchor,
+        scale,
+        offset,
+        rotate,
+        attract,
+    };
+    let reply = finish_pattern(s, p, Vec::new(), pattern, ResolvedBodies { bodies, placements: Vec::new(), warning: None })?;
+    // The copies go into a group of the browser's Bodies folder, named after the feature, unless
+    // `group` is false. Done in this command, so it is the same undo step. A redefinition, whose
+    // copies are in a group already, makes no second one.
+    if bool_(p, "group").unwrap_or(true) {
+        let copies: Vec<String> =
+            reply.get("created_bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        let group_of =
+            |name: &String| s.doc.browser_groups.iter().find(|g| g.items.contains(&solidcraft_doc::BrowserEntry::item(name))).map(|g| g.id);
+        let loose: Vec<String> = copies.iter().filter(|c| group_of(c).is_none()).cloned().collect();
+        match copies.iter().find_map(group_of) {
+            // Edited: copies it makes now join the group the others are in.
+            Some(id) if !loose.is_empty() => {
+                if let Some(g) = s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id) {
+                    g.items.extend(loose.iter().map(|c| solidcraft_doc::BrowserEntry::item(c)));
+                }
+            }
+            Some(_) => {}
+            None if !copies.is_empty() => {
+                let name = reply.get("name").and_then(Value::as_str).unwrap_or("Pattern on Face").to_string();
+                super::browser::group(s, &json!({"folder": "bodies", "component": s.active_component, "name": name, "items": copies}))?;
+            }
+            None => {}
+        }
+    }
+    Ok(reply)
+}
+
+/// A face pattern's layout spaced by distance on the surface (`layout`): its type and its numbers,
+/// each checked as the kind it is.
+fn face_layout_param(s: &Session, l: &Value, cmd: &str) -> Result<solidcraft_doc::FaceLayout> {
+    let need = |key: &str| expr(l, key).ok_or_else(|| bad(cmd, format!("`layout.{key}` is required")));
+    let length = |key: &str, e: &solidcraft_doc::Expr| -> Result<()> {
+        check_expr(s, e, Kind::Length, cmd, &format!("layout.{key}"))?;
+        if s.doc.eval(e, Kind::Length).is_ok_and(|v| !(v > 0.0)) {
+            return Err(bad(cmd, format!("`layout.{key}` must be above zero")));
+        }
+        Ok(())
+    };
+    Ok(match str_(l, "type") {
+        Some("spacing") => {
+            let spacing = need("spacing")?;
+            length("spacing", &spacing)?;
+            let row_spacing = expr(l, "row_spacing");
+            if let Some(r) = &row_spacing {
+                length("row_spacing", r)?;
+            }
+            solidcraft_doc::FaceLayout::Spacing { spacing, row_spacing }
+        }
+        Some(kind @ ("spiral" | "fill")) => {
+            let count = need("count")?;
+            check_count(s, &count, cmd, "layout.count")?;
+            if kind == "spiral" { solidcraft_doc::FaceLayout::Spiral { count } } else { solidcraft_doc::FaceLayout::Fill { count } }
+        }
+        Some("geodesic") => {
+            let frequency = need("frequency")?;
+            check_expr(s, &frequency, Kind::Unitless, cmd, "layout.frequency")?;
+            let most = solidcraft_kernel::MAX_GEODESIC_FREQUENCY as f64;
+            if s.doc.eval(&frequency, Kind::Unitless).is_ok_and(|f| !(1.0..=most).contains(&f) || f.fract() != 0.0) {
+                return Err(bad(cmd, format!("`layout.frequency` must be a whole number from 1 to {most}")));
+            }
+            solidcraft_doc::FaceLayout::Geodesic { frequency }
+        }
+        Some(other) => return Err(bad(cmd, format!("unknown layout `{other}` (spacing, spiral, fill or geodesic)"))),
+        None => return Err(bad(cmd, "`layout.type` is required (spacing, spiral, fill or geodesic)")),
+    })
+}
+
+/// What a face pattern keeps its copies away from (`avoid`): points, vertices, sketch and
+/// construction points, faces and bodies, and the margin round them.
+fn avoid_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::Avoid> {
+    let list = match a.get("geometry") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(l)) if l.len() <= 64 => l.clone(),
+        Some(_) => return Err(bad(cmd, "`avoid.geometry` must list at most 64 points or faces")),
+    };
+    let geometry = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, "avoid.geometry")).collect::<Result<Vec<_>>>()?;
+    if geometry.iter().any(|g| matches!(g, solidcraft_doc::construct::GeoRef::Edge { .. })) {
+        return Err(bad(cmd, "`avoid.geometry`: an edge can't be avoided; give the faces along it"));
+    }
+    let names = string_list(cmd, a, "bodies")?;
+    if names.len() > 64 {
+        return Err(bad(cmd, "`avoid.bodies` must list at most 64 bodies"));
+    }
+    if let Some(n) = names.iter().find(|n| s.model.state().body(n).is_none()) {
+        return Err(bad(cmd, format!("`avoid.bodies`: no body `{n}`")));
+    }
+    if geometry.is_empty() && names.is_empty() {
+        return Err(bad(cmd, "`avoid` needs `geometry` (points or faces) or `bodies`"));
+    }
+    let margin = expr(a, "margin");
+    if let Some(m) = &margin {
+        check_expr(s, m, Kind::Length, cmd, "avoid.margin")?;
+        if s.doc.eval(m, Kind::Length).is_ok_and(|v| v < 0.0) {
+            return Err(bad(cmd, "`avoid.margin` must not be negative"));
+        }
+    }
+    Ok(solidcraft_doc::Avoid { geometry, bodies: names.into_iter().map(BodyName).collect(), margin })
+}
+
+/// A face pattern's attractors (`attract`): the points and the values at the near and far
+/// distances, each checked as the kind it is.
+fn attract_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::Attract> {
+    // One set of attractors: geometry (points, vertices, edges, faces) and bodies by name.
+    let set = |geo_key: &str, body_key: &str| -> Result<(Vec<solidcraft_doc::construct::GeoRef>, Vec<BodyName>)> {
+        let list = match a.get(geo_key) {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(l)) if l.len() <= 64 => l.clone(),
+            Some(_) => return Err(bad(cmd, format!("`attract.{geo_key}` must list at most 64 points, edges or faces"))),
+        };
+        let geometry = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, &format!("attract.{geo_key}"))).collect::<Result<Vec<_>>>()?;
+        let names = string_list(cmd, a, body_key)?;
+        if names.len() > 64 {
+            return Err(bad(cmd, format!("`attract.{body_key}` must list at most 64 bodies")));
+        }
+        if let Some(n) = names.iter().find(|n| s.model.state().body(n).is_none()) {
+            return Err(bad(cmd, format!("`attract.{body_key}`: no body `{n}`")));
+        }
+        Ok((geometry, names.into_iter().map(BodyName).collect()))
+    };
+    let (geometry, bodies) = set("geometry", "bodies")?;
+    if geometry.is_empty() && bodies.is_empty() {
+        return Err(bad(cmd, "`attract` needs `geometry` (points, edges or faces) or `bodies`"));
+    }
+    let (far_geometry, far_bodies) = set("far_geometry", "far_bodies")?;
+    let field = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+        let e = expr(a, key);
+        if let Some(e) = &e {
+            check_expr(s, e, kind, cmd, &format!("attract.{key}"))?;
+        }
+        Ok(e)
+    };
+    // Scales must stay above zero wherever a copy lands between them.
+    for key in ["scale_near", "scale_far"] {
+        if let Some(e) = expr(a, key)
+            && s.doc.eval(&e, Kind::Unitless).is_ok_and(|k| !(k > 0.0))
+        {
+            return Err(bad(cmd, format!("`attract.{key}` must be above zero")));
+        }
+    }
+    let falloff = match str_(a, "falloff") {
+        None | Some("linear") => solidcraft_doc::Falloff::Linear,
+        Some("smooth") => solidcraft_doc::Falloff::Smooth,
+        Some(other) => return Err(bad(cmd, format!("unknown falloff `{other}` (linear or smooth)"))),
+    };
+    Ok(solidcraft_doc::Attract {
+        geometry,
+        bodies,
+        far_geometry,
+        far_bodies,
+        near: field("near", Kind::Length)?,
+        far: field("far", Kind::Length)?,
+        scale_near: field("scale_near", Kind::Unitless)?,
+        scale_far: field("scale_far", Kind::Unitless)?,
+        offset_near: field("offset_near", Kind::Length)?,
+        offset_far: field("offset_far", Kind::Length)?,
+        rotate_near: field("rotate_near", Kind::Angle)?,
+        rotate_far: field("rotate_far", Kind::Angle)?,
+        cutoff: field("cutoff", Kind::Length)?,
+        falloff,
+    })
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {

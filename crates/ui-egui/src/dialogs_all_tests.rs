@@ -524,6 +524,9 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
             continue;
         }
+        if input.label == "Avoid" {
+            continue;
+        }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
         let point = if index == 1 && command != "surface.ruled" { Vec3::new(30.0, 0.0, 5.0) } else { Vec3::new(0.0, 0.0, 5.0) };
         input.items = if command == "construct.point.along_path" {
@@ -660,6 +663,7 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
         "frame.member" => &["All Lines", "Mirror"],
         "solid.pattern.path" => &["Flip direction"],
         "construct.plane.at_angle" => &["Use axis direction only"],
+        "solid.pattern.face" => &["Flip", "Group Instances"],
         _ => &[],
     };
     for label in checks {
@@ -711,6 +715,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
+        // Segmented buttons, labelled by each choice: Grid | Staggered | Random, and the noises.
+        "Layout" | "Noise" if command == "solid.pattern.face" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
@@ -1503,6 +1509,151 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
+form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Edge margin"]);
+
+/// Pattern on Face's attractors are in its Blend section: with no Measure from or Blend to objects picked,
+/// the dialog sends a plain pattern with the main section's scale, rotation and offset; with them,
+/// it sends them as attractors, the near and far values left empty taking the main section's.
+/// Measure from and Blend to take points, edges, faces
+/// and bodies. Two opposite edges of the face, one in each, make the values ramp between them.
+#[test]
+fn face_pattern_attractors_come_from_the_near_far_modifiers() {
+    use crate::dialogs_face_pattern::{ATTRACTORS, FAR_ATTRACTORS, set_attractor_inputs};
+    let h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    assert!(!d.inputs.iter().any(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS), "no near or far picks until the section opens");
+    // Opened, as the Blend section does as it unfolds.
+    set_attractor_inputs(&mut d, true);
+    for label in [ATTRACTORS, FAR_ATTRACTORS] {
+        let pick = d.inputs.iter().find(|i| i.label == label).expect("the near and far picks");
+        assert!(pick.multi && pick.accept & EDGES != 0 && pick.accept & BODIES != 0, "{label}: {:?}", pick.accept);
+    }
+    let (command, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.pattern.face");
+    assert!(plain.get("attract").is_none() && plain.get("group").is_none(), "{plain}");
+    assert!(plain.get("scale").is_none() && plain.get("rotate").is_none() && plain.get("offset").is_none(), "{plain}");
+    assert_eq!(plain["bodies"], json!(["Body1"]));
+    assert!(plain["face"]["face"].is_array(), "{plain}");
+    // The main section's scale, rotation and offset, sent for every instance.
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.scale = "1.5".into();
+        f.rotate = "10 deg".into();
+        f.offset = "1 mm".into();
+    }
+    let (_, own) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!((&own["scale"], &own["rotate"], &own["offset"]), (&json!("1.5"), &json!("10 deg"), &json!("1 mm")), "{own}");
+    // Blend to alone is refused: the values blend from the Measure from objects.
+    let far = edge_sel(&h.app.session, Vec3::new(-10.0, 0.0, 5.0)).unwrap();
+    d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far.clone()];
+    assert!(apply_commands(&h.app, &d).is_err(), "Blend to needs Measure from");
+    // Two opposite edges of the face, and a body; Scale far left empty takes the main scale.
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.scale_near = "2".into();
+        f.falloff = 1;
+        f.group = false;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
+    }
+    let near = edge_sel(&h.app.session, Vec3::new(10.0, 0.0, 5.0)).unwrap();
+    d.inputs.iter_mut().find(|i| i.label == ATTRACTORS).unwrap().items = vec![near, Sel::Body { name: "Body2".into() }];
+    d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far];
+    let (_, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    let a = &params["attract"];
+    assert_eq!(a["scale_near"], json!("2"), "{params}");
+    assert!(a.get("scale_far").is_none() && params["scale"] == json!("1.5"), "{params}");
+    assert_eq!(a["falloff"], json!("smooth"));
+    assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{params}");
+    assert_eq!(a["bodies"], json!(["Body2"]));
+    assert_eq!(params["group"], json!(false));
+    let mut h = h;
+    let reply = h.app.run(&command, params).unwrap();
+    assert!(reply["created_bodies"].as_array().is_some_and(|b| !b.is_empty()), "{reply}");
+    // Edited again: the face and both attractor sets come back as picks, and the dialog sends
+    // the same pattern back.
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let picks = |label: &str| edit.inputs.iter().find(|i| i.label == label).map(|i| i.items.clone()).unwrap_or_default();
+    assert!(matches!(picks("Face").as_slice(), [Sel::Face { .. }]), "{:?}", picks("Face"));
+    let near = picks(ATTRACTORS);
+    assert!(near.iter().any(|p| matches!(p, Sel::Edge { .. })) && near.contains(&Sel::Body { name: "Body2".into() }), "{near:?}");
+    assert!(matches!(picks(FAR_ATTRACTORS).as_slice(), [Sel::Edge { .. }]), "{:?}", picks(FAR_ATTRACTORS));
+    // An edit redefines the feature: the pattern's parameters are nested in the redefinition.
+    let (redefine, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(redefine, "timeline.redefine");
+    assert_eq!(again["command"], json!("solid.pattern.face"));
+    let a = &again["params"]["attract"];
+    assert_eq!(a["bodies"], json!(["Body2"]), "{again}");
+    assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
+    assert_eq!(again["params"]["scale"], json!("1.5"), "{again}");
+    // Clearing the near and far picks takes the attractors away.
+    let mut cleared = edit.clone();
+    for i in cleared.inputs.iter_mut().filter(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS) {
+        i.items.clear();
+    }
+    let (_, plain_again) = apply_commands(&h.app, &cleared).unwrap().remove(0);
+    assert!(plain_again["params"].get("attract").is_none(), "{plain_again}");
+    h.app.run(&redefine, again).unwrap();
+}
+
+/// Pattern on Face's Avoid pick takes bodies and points but not edges; with picks, the dialog sends
+/// them with the avoid margin, and an edit brings them back as picks. Allow overhang goes and
+/// comes back with them.
+#[test]
+fn face_pattern_avoid_sends_its_picks_and_margin_and_restores_them() {
+    use crate::dialogs_face_pattern::AVOID;
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    let avoid = d.inputs.iter().find(|i| i.label == AVOID).expect("an Avoid pick");
+    assert!(avoid.multi && avoid.accept & BODIES != 0 && avoid.accept & EDGES == 0, "{:?}", avoid.accept);
+    let (_, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert!(plain.get("avoid").is_none(), "nothing avoided until picked: {plain}");
+    assert!(plain.get("overhang").is_none(), "no overhang by default: {plain}");
+    d.inputs.iter_mut().find(|i| i.label == AVOID).unwrap().items = vec![Sel::Body { name: "Body2".into() }];
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.margin = "1 mm".into();
+        f.avoid_margin = "2 mm".into();
+        f.overhang = true;
+    }
+    let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(params["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{params}");
+    assert_eq!((&params["margin"], &params["overhang"]), (&json!("1 mm"), &json!(true)), "{params}");
+    let reply = h.app.run(&command, params).unwrap();
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let picks = edit.inputs.iter().find(|i| i.label == AVOID).map(|i| i.items.clone()).unwrap_or_default();
+    assert_eq!(picks, vec![Sel::Body { name: "Body2".into() }]);
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.margin.as_str(), f.avoid_margin.as_str(), f.overhang), ("1 mm", "2 mm", true));
+    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(again["params"]["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{again}");
+}
+
+/// Pattern on Face's Random layout sends a count, a seed and a noise colour in place of the grid,
+/// and an edit brings them back.
+#[test]
+fn face_pattern_random_layout_sends_and_restores_its_noise() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.layout = 2;
+        f.random_count = "7".into();
+        f.seed = "42".into();
+        f.noise = 3;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
+    }
+    let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(params["random"], json!({"count": "7", "seed": 42, "noise": "brown"}), "{params}");
+    assert!(params.get("count1").is_none() && params.get("angle").is_none(), "{params}");
+    let reply = h.app.run(&command, params).unwrap();
+    assert_eq!(reply["created_bodies"].as_array().map(Vec::len), Some(7), "{reply}");
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.layout, f.random_count.as_str(), f.seed.as_str(), f.noise), (2, "7", "42", 3));
+    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(again["params"]["random"], json!({"count": "7", "seed": 42, "noise": "brown"}), "{again}");
+}
 form_case!(pipe, "solid.pipe", ["Diameter", "Type", "Wall", "Operation"]);
 
 /// #18344: the Pipe window has a Type row, and the Wall row stays where it was: a thickness typed
@@ -3961,4 +4112,42 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     // Two more placements of each (a quantity of 3), and no new bodies.
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
+}
+
+/// Pattern on Face's layouts spaced by distance send their type and numbers in place of the
+/// grid, a new pattern fitted to the face's edges, and an edit brings them back.
+#[test]
+fn face_pattern_spaced_layouts_send_and_restore() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    let (_, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(plain["fit_edges"], json!(true), "{plain}");
+    for (layout, want) in [
+        (4, json!({"type": "spiral", "count": "50"})),
+        (5, json!({"type": "fill", "count": "50"})),
+        (6, json!({"type": "geodesic", "frequency": "3"})),
+    ] {
+        if let Kind::FacePattern(f) = &mut d.kind {
+            f.layout = layout;
+        }
+        let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+        assert_eq!(p["layout"], want, "{p}");
+        assert!(p.get("count1").is_none() && p.get("random").is_none(), "{p}");
+    }
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.layout = 3;
+        f.spacing = "4".into();
+        f.row_spacing = "5".into();
+        f.staggered_rows = true;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
+    }
+    let (command, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["layout"], json!({"type": "spacing", "spacing": "4", "row_spacing": "5"}), "{p}");
+    assert_eq!(p["staggered"], json!(true));
+    let reply = h.app.run(&command, p).unwrap();
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.layout, f.spacing.as_str(), f.row_spacing.as_str(), f.staggered_rows, f.fit_edges), (3, "4", "5", true, true));
 }

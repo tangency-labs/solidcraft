@@ -66,6 +66,7 @@ pub mod dxf;
 pub mod error;
 pub mod extend;
 pub mod face_pair;
+pub mod face_pattern;
 pub mod face_surface;
 pub mod faceted;
 pub mod facing_trough;

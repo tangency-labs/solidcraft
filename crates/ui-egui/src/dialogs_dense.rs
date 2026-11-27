@@ -61,6 +61,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Align { .. } => Some("solid.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
+        Kind::FacePattern(_) => Some("solid.pattern.face"),
         Kind::Combine { .. } => Some("solid.combine"),
         Kind::FingerJoint { .. } => Some("solid.finger_joint"),
         Kind::Rib { web, .. } => Some(if *web { "solid.web" } else { "solid.rib" }),
@@ -327,7 +328,7 @@ fn expr_row_positive_if(ui: &mut egui::Ui, label: &str, value: &mut String, posi
 
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
-fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
+pub(crate) fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
     count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
 }
 
@@ -533,6 +534,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
+    } else if matches!(d.kind, Kind::FacePattern(_)) {
+        // Measure from and Blend to show in Pattern on Face's Blend section.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, crate::dialogs_face_pattern::TOP_INPUTS);
+        crate::command_sketch::offer_row(app, d, ui);
     } else if matches!(d.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. })) && d.inputs.len() > 5 {
         // More than four rails: the rail rows share one list that scrolls, about four in view (#12185).
         let rail_list_height = Tokens::get().control_height * 4.5;
@@ -1497,6 +1502,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
+        }
+        Kind::FacePattern(_) => {
+            enter |= crate::dialogs_face_pattern::draw(app, d, ui);
         }
         Kind::PathPattern { count, spacing, start, fraction } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);

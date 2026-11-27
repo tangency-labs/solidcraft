@@ -63,6 +63,7 @@ pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
+pub mod dialogs_face_pattern;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
 pub mod dialogs_gusset;

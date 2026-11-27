@@ -101,6 +101,11 @@ impl<'a> Query<'a> {
         self.record
     }
 
+    /// The kernel's query on the record, for the families built on it.
+    pub(crate) fn kernel(&self) -> &k::Query {
+        &self.inner
+    }
+
     /// Edge `e`'s point and derivative at `t` on its parameter. `None` for a traced
     /// intersection curve (its tangent is not held).
     #[must_use]

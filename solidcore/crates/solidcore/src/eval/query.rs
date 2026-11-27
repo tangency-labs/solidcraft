@@ -53,6 +53,10 @@ const MAX_KNOTS: usize = 1 << 14;
 /// to be read.
 const MAX_COORDINATE: f64 = 1e12;
 
+/// Points along each Bézier piece of a face's pcurves that [`Query::trim_extent`] takes the box
+/// of, past the piece's start.
+const TRIM_EXTENT_SAMPLES: usize = 64;
+
 /// A homogeneous control point `[x w, y w, z w, w]`.
 type Hom = [f64; 4];
 
@@ -239,7 +243,17 @@ impl Query {
     /// [`Query::edge_points`] and Newton's method on the curve itself.
     #[must_use]
     pub fn edge_distance(&self, e: usize, p: Vec3, sag: f64) -> Option<f64> {
-        let points = self.edge_points(e, sag)?;
+        self.edge_distance_from(e, p, &self.edge_points(e, sag)?)
+    }
+
+    /// [`Query::edge_distance`] from `points`, edge `e`'s [`Query::edge_points`] taken once for
+    /// any number of points `p`.
+    pub(crate) fn edge_distance_from(
+        &self,
+        e: usize,
+        p: Vec3,
+        points: &[(f64, Vec3)],
+    ) -> Option<f64> {
         let [t0, t1] = self.edge_interval(e)?;
         let (mut t, mut best) = points
             .iter()
@@ -305,6 +319,47 @@ impl Query {
         } else {
             -n
         })
+    }
+
+    /// Face `f`'s surface, ready to evaluate (`None` where it could not be read).
+    pub(crate) fn surface(&self, f: usize) -> Option<&SurfaceEval> {
+        self.surfaces.get(f)?.as_ref()
+    }
+
+    /// Whether `uv` lies inside face `f`'s loops, decided exactly (see [`Query::inside`]).
+    pub(crate) fn holds(&self, f: usize, uv: [f64; 2]) -> Option<bool> {
+        self.inside(f, uv)
+    }
+
+    /// The box in face `f`'s parameters round its edge loops, `[[u0, u1], [v0, v1]]`, within its
+    /// domain: the box of [`TRIM_EXTENT_SAMPLES`] points along each Bézier piece of its pcurves,
+    /// ends included. Its domain where it has no edge loop. `None` where a pcurve can't be read.
+    pub(crate) fn trim_extent(&self, f: usize) -> Option<[[f64; 2]; 2]> {
+        let face = self.record.faces.get(f)?;
+        let loops = self
+            .trims
+            .get(f)?
+            .get_or_init(|| self.trim_loops(f))
+            .as_ref()?;
+        let mut b = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+        for piece in loops.iter().flatten() {
+            for i in 0..=TRIM_EXTENT_SAMPLES {
+                let q = bezier_point(piece, i as f64 / TRIM_EXTENT_SAMPLES as f64)?;
+                for (k, x) in [q.x, q.y].into_iter().enumerate() {
+                    if let Some(slot) = b.get_mut(k) {
+                        *slot = [slot[0].min(x), slot[1].max(x)];
+                    }
+                }
+            }
+        }
+        let [[u0, u1], [v0, v1]] = face.domain;
+        if !(b[0][0] <= b[0][1]) {
+            return Some(face.domain);
+        }
+        Some([
+            [b[0][0].max(u0), b[0][1].min(u1)],
+            [b[1][0].max(v0), b[1][1].min(v1)],
+        ])
     }
 
     /// Whether `p` lies on face `f`: within `accept` mm of its surface, and inside its loops
@@ -668,6 +723,27 @@ fn halves(c: &[Hom]) -> (Vec<Hom>, Vec<Hom>) {
     }
     right.reverse();
     (left, right)
+}
+
+/// The point at `t` in [0, 1] of the Bézier piece `c` (homogeneous): de Casteljau's steps on
+/// its coefficients, then the weight divided out ([`point_of`]).
+fn bezier_point(c: &[Hom], t: f64) -> Option<Vec3> {
+    let mut q = c.to_vec();
+    while q.len() > 1 {
+        q = q
+            .iter()
+            .zip(q.iter().skip(1))
+            .map(|(a, b)| {
+                [
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                    a[3] + (b[3] - a[3]) * t,
+                ]
+            })
+            .collect();
+    }
+    point_of(*q.first()?)
 }
 
 /// The point of a homogeneous control point, where its weight can be divided by and the point

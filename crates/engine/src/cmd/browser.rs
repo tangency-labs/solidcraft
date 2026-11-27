@@ -337,7 +337,7 @@ fn take_out(d: &mut solidcraft_doc::Document, component: u64, folder: &str, gone
     }
 }
 
-fn group(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.group";
     let parent = optional_group(s, p, "parent", cmd)?;
     let (mut component, mut folder) = (None, None);

@@ -345,6 +345,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FingerJoint { .. } => "finger_joint",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Rectangular { .. }, .. } => "pattern_rect",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Path { .. }, .. } => "pattern_path",
+        FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Face { .. }, .. } => "pattern_face",
         FeatureKind::Pattern { .. } => "pattern_circ",
         FeatureKind::Mirror { .. } => "mirror",
         FeatureKind::ConstructionPlane { plane } => construction_plane_icon(plane),

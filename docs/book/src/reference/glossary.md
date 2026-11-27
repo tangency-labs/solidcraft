@@ -90,6 +90,27 @@ The part of the 2D Timeline that lists a design's joints in order, with a row fo
 - **Elsewhere:** joint track.
 - **For translators:** not an assembly, which is a design with several components.
 
+### attractor
+
+A point, edge, face or body whose distance from each copy of a pattern sets how that copy is
+scaled, raised and rotated.
+
+Each value goes from its near setting at the near distance to its far setting at the far distance;
+copies nearer or farther than those take the end values. A copy takes the distance to the nearest
+attractor, measured on the exact geometry. With *far attractors* as well, the values blend between
+the two sets instead: the near setting on the near attractors, the far one on the far attractors.
+Two opposite edges of a face, one in each set, make the values run straight across it. The near
+and far distances are then hold zones: within them of their set, a copy takes that set's values
+in full. A near or far value left unset is the pattern's own scale, rotation or offset.
+
+- **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
+  `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,
+  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Measure from and Blend to picks of Pattern on
+  Face's Blend section.
+- **Don't use:** magnet, driver, influence point.
+- **Elsewhere:** attractor point, attractor curve.
+- **For translators:** what draws an effect towards it, not a physical force or a magnet.
+
 ### base feature
 
 A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
@@ -509,6 +530,29 @@ The predominant pattern or direction of marks left on a manufactured surface.
 - **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
 - **For translators:** use the manufacturing sense of direction and pattern.
 
+### layout (pattern)
+
+How Pattern on Face lays its copies out on the faces it is given.
+
+The *grid* divides each face's parameters into rows and columns, and *staggered* moves every other
+column half a cell along; *random* places them by a [noise](#noise-pattern). The other layouts
+space the copies by distance on the surface, so they stay even where a face's parameters crowd, as
+round a sphere's poles: *spacing* lays rows a distance apart with as many copies in each as fit
+its length (round a sphere, its circles of latitude); *spiral* puts a count of them on a Fibonacci
+spiral, even over the area; *even fill* relaxes them until they are evenly spread, round holes
+and across the edges between faces; *geodesic* stands them on the vertices of a geodesic sphere,
+its *frequency* how often each triangle of the icosahedron is divided, on faces of one sphere.
+Several faces of one body make one region: the edges they share are not edges of it, and a count
+is shared over them by area. Fitted to the edges, the grid's and the spaced rows' outer copies
+sit flush with the face's edges and the edge margin moves them in.
+
+- **In SolidCraft:** `solid.pattern.face`'s `layout` (`type`: `spacing`, `spiral`, `fill`,
+  `geodesic`), `faces` and `fit_edges`; the Layout choice of Pattern on Face.
+- **Don't use:** distribution, arrangement mode.
+- **Elsewhere:** Fibonacci lattice, golden-angle spiral, centroidal Voronoi layout (for even fill),
+  geodesic dome.
+- **For translators:** the way the copies are set out, not a page or screen layout.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -545,6 +589,26 @@ its provenance, not its place.
 - **Don't use:** source (that is where the data came from), location, path.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
+
+### margin (pattern)
+
+How near a copy of Pattern on Face may come to something before it is left out, measured from the
+copy itself, not its centre.
+
+The *edge margin* keeps copies away from the face's edges, round its holes and the foot of a boss
+too; even at 0, no copy hangs over them. Where the layout is fitted to the edges, the margin also
+moves its outer copies in from them by that much. With *Allow overhang* on, only each copy's centre has to
+be on the face, and the edge margin is measured from that centre. The *avoid margin* keeps
+them away from what the Avoid pick holds: points, faces and bodies. With no avoid margin, a copy is
+left out only when it touches or overlaps one of those, or one holds the other. Distances are
+measured on the exact geometry.
+
+- **In SolidCraft:** `solid.pattern.face`'s `margin`, `overhang` and `avoid` (`geometry`, `bodies`,
+  `margin`); the Edge margin and Avoid margin fields, Allow overhang and the Avoid pick of Pattern
+  on Face.
+- **Don't use:** clearance (Inspect's Clearance measures the gaps between bodies), offset, gap.
+- **Elsewhere:** keep-out distance, border, edge distance.
+- **For translators:** a distance kept free round something, not a page margin.
 
 ### master spline
 
@@ -649,6 +713,21 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Don't use:** cope (one kind of cut it makes), trim on its own.
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
+
+### noise (pattern)
+
+How a random pattern spreads its instances over a face, named by the colour of the noise that
+places them.
+
+*White* noise places each instance independently, equally likely anywhere on the face's area.
+*Blue* noise is random but evenly spread, with no clumps and no gaps. *Pink* and *brown* noise
+cluster the instances, brown in larger clusters with bare patches between them.
+
+- **In SolidCraft:** `solid.pattern.face`'s `random` (`count`, `seed`, `noise`: `white`, `blue`,
+  `pink`, `brown`); the Random layout of Pattern on Face.
+- **Don't use:** jitter, scatter type.
+- **Elsewhere:** random distribution, Poisson-disk sampling (for blue noise).
+- **For translators:** the colours name noise spectra, not appearance colours.
 
 ### note
 
