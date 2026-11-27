@@ -38,12 +38,6 @@ macro_rules! graphics_preferences {
             /// construction has fully constrained. Off: every joint draws alike. The ring and axis
             /// style draws every joint alike either way.
             highlight_moving_joints: bool = true, PAGE_GRAPHICS => check_id("prefs.highlight_moving_joints");
-            /// The colour the edge under the pointer is drawn in, the edge a click would take, or
-            /// `None` for the theme's hover colour (#22042). Selected edges keep their own colour.
-            hover_edge_colour: Option<[u8; 3]> = None, PAGE_GRAPHICS;
-            /// How wide the edge under the pointer is drawn, in points (#22042): 2, the default, as
-            /// before; up to 6 to make it easier to see.
-            hover_edge_width: f32 = 2.0, PAGE_GRAPHICS, accept(HOVER_EDGE_WIDTH);
             /// How the view shows what an Isolate hid: not at all (the default), see-through, or as
             /// edges (#8120). Chosen on the Isolation pill or the bar's Isolate slot.
             isolate_others: solidcraft_engine::schema::view_navigation::IsolateShow = Default::default(), PAGE_GRAPHICS;
