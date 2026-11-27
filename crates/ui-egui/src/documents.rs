@@ -44,6 +44,7 @@ pub struct DocSlot {
     cam: Camera,
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
+    sketch_last_views: crate::SketchLastViews,
     pre_sketch_component: Option<crate::PreSketchComponent>,
     pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
@@ -196,6 +197,7 @@ impl DocSlot {
             cam: Camera::default(),
             pending_feature_edit: None,
             pre_sketch_cam: None,
+            sketch_last_views: Default::default(),
             pre_sketch_component: None,
             pre_edit_component: None,
             view: DocView::default(),
@@ -590,6 +592,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         cam: std::mem::replace(&mut app.cam, slot.cam),
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
+        sketch_last_views: std::mem::replace(&mut app.sketch_last_views, slot.sketch_last_views),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
@@ -2057,6 +2060,7 @@ pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
+        app.sketch_last_views = Default::default();
         give_up_renames_of_other_designs(app);
         reset_chat(app);
         // Another design in the tab: what waits for the blank one's tab no longer does.
@@ -2393,6 +2397,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.bom = None;
         app.session.replace_design(Session::default());
+        app.sketch_last_views = Default::default();
         give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
@@ -3763,11 +3768,11 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                                 if name.clicked() {
                                                     show_tab = Some(*index);
                                                 }
-                                                let path = ui_kit::text(
-                                                    ui,
-                                                    session.path.as_deref().unwrap_or(solidcraft_ui_text::tr("document.not_saved_yet")),
-                                                    ui_kit::Text::Note("save_path"),
-                                                );
+                                                let shown = session
+                                                    .path
+                                                    .as_deref()
+                                                    .map_or_else(|| solidcraft_ui_text::tr("document.not_saved_yet"), crate::display_user_path);
+                                                let path = ui_kit::text(ui, shown, ui_kit::Text::Note("save_path"));
                                                 crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
                                             });
                                         });

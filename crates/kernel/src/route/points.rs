@@ -5,7 +5,7 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{OpKind, Points};
 
-pub use solidcraft_kernel_api::points::{Distance, PointSetSummary, PointsRefused};
+pub use solidcraft_kernel_api::points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, PointsRefused, UnitNormal};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -71,6 +71,15 @@ pub fn flush_contact_points(target: &Body, tool: &Body) -> Option<Vec<[f64; 3]>>
     }
 }
 
+/// `direction` made unit, however short it is: only a direction that is exactly zero or not finite
+/// has none.
+#[must_use]
+pub fn unit_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.unit_direction(direction),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +99,9 @@ mod tests {
         let k = measure::centroid_and_mean_radius(&pts).unwrap();
         assert_eq!((s.centroid, s.mean_distance), (k.centroid, k.mean_distance));
         assert_eq!(polyline_2d_closest_point([1.0, 1.0], &pts).unwrap(), measure::polyline_2d_closest_point([1.0, 1.0], &pts).unwrap());
+        for v in [[3.0, 4.0, 0.0], [1e-300, 0.0, 0.0], [0.0; 3], [f64::NAN, 1.0, 0.0]] {
+            assert_eq!(unit_direction(v), measure::unit_direction(v));
+        }
         // a refusal carries solidcore's words whole
         let words = measure::point_distance([f64::NAN, 0.0, 0.0], [0.0; 3]).unwrap_err().to_string();
         assert_eq!(point_distance([f64::NAN, 0.0, 0.0], [0.0; 3]), Err(PointsRefused(words)));

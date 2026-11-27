@@ -198,8 +198,20 @@ fn a_profile_names_the_feature_and_step_part_of_each_span() {
     let bodies: Vec<_> = spans.iter().filter(|e| e["name"] == "step.body").collect();
     assert!(!bodies.is_empty(), "{trace}");
     assert!(bodies.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{bodies:?}");
+    let reads: Vec<_> = spans.iter().filter(|e| e["name"] == "step.read_solid").collect();
+    assert!(!reads.is_empty(), "{trace}");
+    assert!(reads.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{reads:?}");
+    let meshes: Vec<_> = spans.iter().filter(|e| e["name"] == "step.mesh_check").collect();
+    assert!(!meshes.is_empty(), "{trace}");
+    assert!(meshes.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{meshes:?}");
     for check in spans.iter().filter(|e| e["name"] == "step.check") {
         assert!(check["args"]["part"].is_string(), "{check}");
+    }
+    for heal in spans.iter().filter(|e| e["name"] == "step.heal") {
+        assert!(heal["args"]["item"].as_str().is_some_and(|item| item.starts_with('#')), "{heal}");
+    }
+    for refused in spans.iter().filter(|e| e["name"] == "step.refused_surfaces") {
+        assert!(refused["args"]["item"].as_str().is_some_and(|item| item.starts_with('#')), "{refused}");
     }
 }
 
@@ -1255,6 +1267,92 @@ fn run_param_overrides_the_design_given_with_in_before_the_script_runs() {
     .unwrap();
     let out = json_output(cli().arg("run").arg(&script).arg("--in").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
     assert!((volume(&out) - 1501.0).abs() < 1e-6, "{out}");
+}
+
+/// #22309: a plain JSON command script is the template. `--param` (and `--params-file`) give a
+/// parameter the script adds itself, so the script runs with that value instead of its own, on
+/// every path `run` takes and in `eval`, and the script file is left as it was.
+#[test]
+fn run_param_sets_a_parameter_the_script_adds_itself() {
+    let scratch = Scratch::new();
+    let template = scratch.0.join("template.json");
+    let text = json!({"commands": [
+        {"command": "parameters.add", "params": {"name": "width", "expression": "20 mm"}},
+        {"command": "parameters.add", "params": {"name": "depth", "value": "10 mm"}},
+        {"command": "solid.box", "params": {"length": "width", "width": "depth", "height": 5}}
+    ]})
+    .to_string();
+    std::fs::write(&template, &text).unwrap();
+    let run = |extra: &[&str]| json_output(cli().arg("run").arg(&template).args(extra).output().unwrap());
+    assert!((volume(&run(&[])) - 1000.0).abs() < 1e-6);
+    let wider = run(&["--param", "width=30mm"]);
+    assert!((volume(&wider) - 1500.0).abs() < 1e-6, "{wider}");
+    // A `value` in the script is replaced too, and a later override of one name wins.
+    let both = run(&["--param", "depth=20mm", "--param", "width=30mm", "--param", "width=40mm"]);
+    assert!((volume(&both) - 4000.0).abs() < 1e-6, "{both}");
+    let evaluated = json_output(cli().arg("eval").arg(&template).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&evaluated) - 1500.0).abs() < 1e-6, "{evaluated}");
+    // With --results, the script's own step reports the value given.
+    let results = run(&["--results", "--param", "width=30mm"]);
+    assert!((results[0]["value"].as_f64().unwrap() - 30.0).abs() < 1e-9, "{results}");
+    let file = scratch.0.join("sizes.json");
+    std::fs::write(&file, json!({"width": "30 mm", "depth": 20}).to_string()).unwrap();
+    let from_file = json_output(cli().arg("run").arg(&template).arg("--params-file").arg(&file).output().unwrap());
+    assert!((volume(&from_file) - 3000.0).abs() < 1e-6, "{from_file}");
+    // A design saved from it carries the value given.
+    let saved = scratch.0.join("cabinet.sc");
+    let made = cli().arg("run").arg(&template).args(["--param", "width=30mm", "--quiet", "--save"]).arg(&saved).output().unwrap();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert!((volume(&json_output(cli().arg("run").arg(&saved).output().unwrap())) - 1500.0).abs() < 1e-6);
+    assert_eq!(std::fs::read_to_string(&template).unwrap(), text);
+}
+
+/// #22309: `--param` replaces the value a script starts a parameter with, at the first step that
+/// sets it; a `parameters.change` later in the script still changes it, as without the override.
+#[test]
+fn run_param_leaves_a_later_change_in_the_script_alone() {
+    let scratch = Scratch::new();
+    let template = scratch.0.join("template.json");
+    let text = json!({"commands": [
+        {"command": "parameters.add", "params": {"name": "width", "expression": "20 mm"}},
+        {"command": "solid.box", "params": {"length": "width", "width": 10, "height": 5}},
+        {"command": "parameters.change", "params": {"name": "width", "expression": "30 mm"}}
+    ]})
+    .to_string();
+    std::fs::write(&template, &text).unwrap();
+    let values = |extra: &[&str]| {
+        let results = json_output(cli().arg("run").arg(&template).arg("--results").args(extra).output().unwrap());
+        (results[0]["value"].as_f64().unwrap(), results[2]["value"].as_f64().unwrap())
+    };
+    let (first, last) = values(&[]);
+    assert!((first - 20.0).abs() < 1e-9 && (last - 30.0).abs() < 1e-9, "{first} {last}");
+    let (first, last) = values(&["--param", "width=100mm"]);
+    assert!((first - 100.0).abs() < 1e-9 && (last - 30.0).abs() < 1e-9, "{first} {last}");
+}
+
+/// #22309: with `--in DESIGN`, an override the design has is set on it before the script runs,
+/// and one only the script adds is given to the script; a name neither has fails, naming it.
+#[test]
+fn run_param_splits_overrides_between_the_design_and_the_script_on_top() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let script = scratch.0.join("lid.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [
+            {"command": "parameters.add", "params": {"name": "lid", "expression": "1 mm"}},
+            {"command": "solid.box", "params": {"length": "lid", "width": 1, "height": 1, "corner": [100, 0, 0]}}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let run = |extra: &[&str]| cli().arg("run").arg(&script).arg("--in").arg(&design).args(extra).output().unwrap();
+    let out = json_output(run(&["--param", "width=30mm", "--param", "lid=3mm"]));
+    assert!((volume(&out) - 1503.0).abs() < 1e-6, "{out}");
+    let typo = run(&["--param", "lidd=3mm"]);
+    assert!(!typo.status.success());
+    let words = String::from_utf8_lossy(&typo.stderr);
+    assert!(words.contains("lidd") && words.contains("the design has no parameter"), "{words}");
 }
 
 #[test]
