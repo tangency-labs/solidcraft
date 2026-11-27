@@ -230,12 +230,26 @@ pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
         {
             return reverse;
         }
-        let rebuilt = (|| {
+        let rebuilt_reverse = (|| {
             let cb = read_locked(b, |b| rebuild_native(k, b))?;
             let ca = read_locked(a, |a| rebuild_native(k, a))?;
             union_pair(k, cb, ca, expect, Contract::Proved)
         })();
-        match rebuilt {
+        if matches!(
+            rebuilt_reverse,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ) || rebuilt_reverse
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return rebuilt_reverse;
+        }
+        let rebuilt_forward = (|| {
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            union_pair(k, ca, cb, expect, Contract::Proved)
+        })();
+        match rebuilt_forward {
             done @ (Ok(Done::Body(..))
             | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => done,
             Err(e) if e.root_cause().is_not_certified() => Err(e),

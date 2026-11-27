@@ -1445,6 +1445,24 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         )
     }
 
+    fn find_region_of_other_face_with_void(
+        &mut self,
+        k: &Kernel,
+        primary: &mut Brep,
+        other: &mut Brep,
+        faceuse: FaceuseId,
+        required_void: Option<bool>,
+    ) -> Result<Option<RegionId>> {
+        p1::find_brep_region_of_other_face_with_void(
+            k,
+            primary,
+            other,
+            faceuse,
+            self.merge.intersector.edges.other_to_primary(),
+            required_void,
+        )
+    }
+
     fn propagate_regions(
         &mut self,
         kernels: &mut BooleanKernels<'_>,
