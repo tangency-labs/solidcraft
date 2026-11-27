@@ -682,7 +682,7 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
             restore(path);
             return;
         }
-        app.set_status(format!("{path} is no longer there"), true);
+        app.set_status(format!("{} is no longer there", crate::display_user_path(path)), true);
         return;
     }
     app.open_chosen_file(path);
@@ -1076,8 +1076,9 @@ fn texture(textures: Option<&PreviewTextures>) -> Option<crate::ui_kit::PreviewA
 
 /// Abbreviate only an actual home-directory ancestor; the source path is kept for actions.
 pub(crate) fn friendly_path(path: &str) -> String {
+    let shown = crate::display_user_path(path);
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    abbreviated_path(path, home.as_deref().map(std::path::Path::new))
+    abbreviated_path(shown, home.as_deref().map(std::path::Path::new))
 }
 
 fn abbreviated_path(path: &str, home: Option<&std::path::Path>) -> String {

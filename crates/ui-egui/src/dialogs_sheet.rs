@@ -1169,8 +1169,9 @@ fn export_flat_with_profile(app: &mut SolveApp, body: &str, dxf: Option<DxfExpor
             }
             match app.run(command, params) {
                 Ok(_) => {
-                    app.set_status(format!("Exported {path}"), false);
-                    format!("Saved {path}")
+                    let shown = crate::display_user_path(&path);
+                    app.set_status(format!("Exported {shown}"), false);
+                    format!("Saved {shown}")
                 }
                 Err(e) => e,
             }
