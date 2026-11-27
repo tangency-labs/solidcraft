@@ -155,15 +155,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           $cli = 'dist\SolidCraft-OCCT-test\solidcraft-cli.exe'
+          $vol = @{}
           foreach ($k in 'occt', 'solidcore') {
             $env:SOLIDCRAFT_KERNEL = $k
-            & $cli eval examples/bracket.json --json-out "eval-$k.json"
-            if ($LASTEXITCODE -ne 0) { throw "eval on $k exited $LASTEXITCODE" }
-            $txt = Get-Content "eval-$k.json" -Raw
-            $vols = [regex]::Matches($txt, '"volume[a-z_]*"\s*:\s*(-?[0-9.eE+-]+)') | ForEach-Object { $_.Value }
-            Write-Output "SMOKE kernel=$k $($vols -join ' ')"
-            if (-not $vols) { Write-Output ($txt.Substring(0, [Math]::Min(3000, $txt.Length))); throw "no volume in eval output ($k)" }
+            $env:RUST_LOG = 'debug'
+            & $cli eval examples/bracket.json --json-out "eval-$k.json" 2> "eval-$k.log"
+            if ($LASTEXITCODE -ne 0) { Get-Content "eval-$k.log" -Tail 40; throw "eval on $k exited $LASTEXITCODE" }
+            $m = [regex]::Match((Get-Content "eval-$k.json" -Raw), '"volume[A-Za-z0-9_]*"\s*:\s*(-?[0-9.eE+-]+)')
+            if (-not $m.Success) { throw "no volume in eval output ($k)" }
+            $vol[$k] = [double]$m.Groups[1].Value
+            # The router logs each operation OCCT didn't take ("... solidcore runs it").
+            $fell = @(Select-String -Path "eval-$k.log" -Pattern 'solidcore runs it' | ForEach-Object { $_.Line })
+            Write-Output ("SMOKE kernel={0} volume_mm3={1:R} fell_back_to_solidcore={2}" -f $k, $vol[$k], $fell.Count)
+            $fell | Select-Object -First 10 | ForEach-Object { Write-Output "  $_" }
           }
+          $diff = $vol['occt'] - $vol['solidcore']
+          Write-Output ("SMOKE occt - solidcore = {0:R} mm3" -f $diff)
+          if ([Math]::Abs($diff) -gt 1e-6 * [Math]::Abs($vol['solidcore'])) { throw "OCCT and solidcore volumes disagree" }
 
       # OCCT really runs on Windows: the measurement matrix through the router on both kernels.
       - name: OCCT matrix (box, cylinder, sphere, torus, boolean, fillet)
