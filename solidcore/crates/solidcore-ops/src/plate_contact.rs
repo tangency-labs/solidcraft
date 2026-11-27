@@ -1156,7 +1156,7 @@ mod tests {
     /// The two clearances differ: clearance 0.1 along the edge, 0.4 across the thickness. Wall on
     /// Bottom, count 2, 10 wide tabs in the 6 thick Wall: each slot is 10.2 x 6.8 through S's 6.
     #[test]
-    fn the_slot_takes_the_clearance_along_and_the_thickness_clearance_across() {
+    fn the_tab_slot_takes_the_clearance_along_and_the_thickness_clearance_across() {
         let (s, p) = bottom();
         let spec = TabSlotSpec {
             layout: Layout::Count(2),
