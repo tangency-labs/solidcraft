@@ -622,8 +622,13 @@ impl BackendGuard {
         (Self { marker, version: version.into() }, SkippedBackends { crashed, failed: eframe::wgpu::Backends::empty() })
     }
 
-    /// `backends` are about to be started: say so on disk first, flushed.
+    /// `backends` are about to be started: say so on disk first, flushed. It takes the place of
+    /// an attempt named only while the instance started ([`Self::attempt_while_the_instance_starts`]),
+    /// which the adapter's choice then leaves alone.
     pub fn attempt(&self, backends: eframe::wgpu::Backends) {
+        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock() {
+            instance.take();
+        }
         let text = attempt_text(backends, &self.version);
         if let Err(reason) = solidcraft_engine::io::safe_write::write_atomic_no_follow(&self.marker, text.as_bytes()) {
             log::warn!("graphics: attempt not saved: {reason}");
@@ -637,7 +642,18 @@ impl BackendGuard {
     /// wgpu's default set also lists Metal and D3D12 on Linux, which are never loaded.
     pub fn attempt_when_the_instance_starts(&self, backends: eframe::wgpu::Backends) {
         if let Ok(mut waiting) = ATTEMPT_AT_INSTANCE.lock() {
-            *waiting = Some((self.clone(), backends & native_backends()));
+            *waiting = Some((self.clone(), backends & native_backends(), false));
+        }
+    }
+
+    /// [`Self::attempt_when_the_instance_starts`] for standard startup's OpenGL guard
+    /// (`gpu_startup::guards_instance_creation`, #22917): `backends` are named on disk when
+    /// egui-wgpu creates its instance and no longer once the window's adapter is chosen
+    /// ([`adapter_chosen`]), when the instance and its adapters are up. A crash in a device
+    /// created later is not theirs.
+    pub fn attempt_while_the_instance_starts(&self, backends: eframe::wgpu::Backends) {
+        if let Ok(mut waiting) = ATTEMPT_AT_INSTANCE.lock() {
+            *waiting = Some((self.clone(), backends & native_backends(), true));
         }
     }
 
@@ -656,8 +672,12 @@ impl BackendGuard {
     }
 }
 
-/// What [`BackendGuard::attempt_when_the_instance_starts`] keeps for [`instance_starting`].
-static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends)>> = Mutex::new(None);
+/// What [`BackendGuard::attempt_when_the_instance_starts`] keeps for [`instance_starting`]; `true`
+/// when the name goes again once the adapter is chosen
+/// ([`BackendGuard::attempt_while_the_instance_starts`]).
+static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends, bool)>> = Mutex::new(None);
+/// The attempt [`instance_starting`] named that [`adapter_chosen`] takes away again.
+static INSTANCE_ATTEMPT: Mutex<Option<BackendGuard>> = Mutex::new(None);
 
 /// egui-wgpu is about to create the window's graphics instance, which loads the API's driver: the
 /// first moment the window's own start can crash inside one. Names the APIs kept by
@@ -665,8 +685,21 @@ static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends)>
 /// agent chat, say) goes through the same step, after the first frame removed the file.
 pub fn instance_starting() {
     let waiting = ATTEMPT_AT_INSTANCE.lock().ok().and_then(|mut waiting| waiting.take());
-    if let Some((guard, backends)) = waiting {
+    if let Some((guard, backends, until_adapter)) = waiting {
         guard.attempt(backends);
+        if until_adapter && let Ok(mut instance) = INSTANCE_ATTEMPT.lock() {
+            *instance = Some(guard);
+        }
+    }
+}
+
+/// egui-wgpu chose the window's adapter: the instance and its adapters came up without a crash,
+/// so an attempt named only while the instance started
+/// ([`BackendGuard::attempt_while_the_instance_starts`]) goes. Any other attempt stays.
+pub fn adapter_chosen() {
+    let named = INSTANCE_ATTEMPT.lock().ok().and_then(|mut instance| instance.take());
+    if let Some(guard) = named {
+        guard.clear();
     }
 }
 
@@ -1529,6 +1562,56 @@ mod tests {
         // removed the file, and must not name the API again.
         crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
         assert!(!attempt.exists(), "a later window names nothing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #22917: standard startup's OpenGL guard names OpenGL only from the instance's creation until
+    /// the adapter is chosen. A crash in between makes the next launch of this version skip
+    /// OpenGL; a start that got to its adapter leaves nothing behind, and an attempt named after
+    /// the instance (Intel's Vulkan device, #22110) stays for its device.
+    #[test]
+    fn opengl_is_named_only_while_the_instance_starts() {
+        use eframe::wgpu::Backends;
+        let _one_at_a_time = INSTANCE_ATTEMPT_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let v = "0.50.1";
+        let dir = scratch("backend-guard-gl-instance");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4}"#).unwrap();
+        let attempt = dir.join(GRAPHICS_ATTEMPT);
+        let (guard, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends::default());
+        // A clean start: named while the instance and its adapters come up, then gone.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        assert!(!attempt.exists(), "nothing before the instance");
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        assert!(attempt.is_file(), "named before the OpenGL driver loads");
+        crate::startup_step(eframe::egui_wgpu::STEP_SURFACE, "");
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER, "");
+        assert!(attempt.is_file(), "the adapters are listed with the driver loaded");
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "Vulkan NVIDIA (DiscreteGpu)");
+        assert!(!attempt.exists(), "the instance came up: nothing is left");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends::default(), "a clean start skips nothing");
+        assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4}), "graphics.json untouched");
+        // Intel's Vulkan device guard names Vulkan in the adapter choice: it outlives the step.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        guard.attempt(Backends::VULKAN);
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "Vulkan Intel (IntegratedGpu)");
+        assert!(attempt.is_file(), "Vulkan stays named while its device is created");
+        guard.clear();
+        // The process dies while the instance starts: OpenGL is skipped by this version.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends { crashed: Backends::GL, failed: Backends::empty() });
+        assert!(!attempt.exists(), "the leftover is read once");
+        // A later choice of adapter in this process finds nothing to take away.
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped.crashed, Backends::GL, "skipped from then on");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.51.0");
+        assert_eq!(skipped, SkippedBackends::default(), "a new version tries OpenGL once more");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
