@@ -2004,6 +2004,8 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["Seed".into()],
                 placements: Vec::new(),
@@ -2081,6 +2083,8 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["A".into(), "B".into()],
                 placements: Vec::new(),
@@ -3451,7 +3455,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
 fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
     let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
-    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    use solidcraft_kernel::mesh::ReconstructionKind::{Analytic, Faceted};
     for (kind, digest) in [
         (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
         (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
@@ -4429,6 +4433,8 @@ fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sk
                 origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
                 angle: Some("90 deg".into()),
                 copy: false,
+                carry: Vec::new(),
+                leave: Vec::new(),
                 copy_frames: Vec::new(),
             },
             Some("MoveAbout"),
@@ -5041,6 +5047,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["BodyB".into()],
                 placements: vec![vec![occ_b]],

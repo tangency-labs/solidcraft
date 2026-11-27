@@ -3207,6 +3207,48 @@ mod native {
         panic!("the run did not finish");
     }
 
+    /// #22032: a form a docked panel's action asks for with `forms.open` opens once the run has
+    /// succeeded, as a Plugins-menu entry's does, against the design the action ran on. A reply
+    /// that comes while another design is in front waits for its own design.
+    #[test]
+    fn a_form_a_panel_action_asks_for_opens_after_the_run() {
+        let root = package("panel-form");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let asks = json!({"ok":true,"result":{"forms":[{"plugin":"boxes","entry":"make","params":{"length":7}}],"result":{}}});
+        let opened = |h: &crate::scenario::Harness| h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").map(|d| d.form_guard.clone());
+        // The action is dispatched on this design: its reply opens the form.
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        request.reply.send(asks.clone()).unwrap();
+        poll(&mut h.app);
+        let guard = opened(&h).expect("the requested form opens").expect("against the action's design");
+        assert_eq!(guard.document_id, h.app.session.document_id);
+        checked_prefill(&h.app);
+        let dialog = h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").unwrap();
+        assert_eq!(dialog.ready(&h.app).unwrap(), json!({"length":7.0,"width":10.0,"height":3.0}));
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        h.app.plugin_menu.dialogs.clear();
+        // Another design comes to the front before the reply: the form waits for its own design.
+        let first = h.app.docs.current_tab();
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        request.reply.send(asks).unwrap();
+        poll(&mut h.app);
+        assert!(opened(&h).is_none(), "not over another design");
+        assert_eq!(h.app.plugin_menu.panel_runs.len(), 1, "held for its own design");
+        assert!(crate::documents::select_tab(&mut h.app, first));
+        poll(&mut h.app);
+        assert!(opened(&h).is_some(), "opens when its design is back in front");
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn interactive_guest_import_opens_the_same_prefilled_form_after_success() {
         let root = package("guest-form");
@@ -4568,4 +4610,16 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     std::fs::write(&outside, b"private").unwrap();
     assert!(scope.check(&outside.to_string_lossy()).is_err());
     h.app.file_load.cancel();
+}
+
+/// Every message the plugin dialog names is in the English catalog, so no button or line shows
+/// its key instead of text (#22652).
+#[test]
+fn every_plugin_dialog_message_has_text() {
+    crate::i18n::install();
+    let mut missing: Vec<&str> =
+        include_str!("plugin_menu.rs").split('"').filter(|s| s.starts_with("ui.plugin_dialog_") && solidcraft_ui_text::tr(s) == *s).collect();
+    missing.sort_unstable();
+    missing.dedup();
+    assert!(missing.is_empty(), "no text for {missing:?}");
 }
