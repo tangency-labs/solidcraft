@@ -2593,7 +2593,7 @@ fn wgpu_options(
         // the GPU time the frame-rate readout shows, wherever the adapter has them.
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
-            let mut d = base(adapter);
+            let mut d = solidcraft_viewport_gpu::window_device_request(adapter, base(adapter));
             d.required_features |=
                 adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS | startup::TIMESTAMP_QUERY);
             d
@@ -2624,6 +2624,9 @@ fn safe_wgpu_options(
         let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
         setup.instance_descriptor.flags = startup::window_instance_flags(setup.instance_descriptor.flags, intel_mac, indirect.as_deref());
         setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
+        // The adapter's own texture size and limits, as in the standard mode.
+        let base = setup.device_descriptor.clone();
+        setup.device_descriptor = std::sync::Arc::new(move |adapter| solidcraft_viewport_gpu::window_device_request(adapter, base(adapter)));
         if cpu {
             startup::configure_adapter(setup, true, None, None);
         }

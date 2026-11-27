@@ -137,16 +137,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
   depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
   device without it failed pipeline validation, a panic at start.
-- `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
-  the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
-  guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
-- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
-  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
-  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
-  defaults refused the device, so no window opened. An adapter at or above the defaults gets
-  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which

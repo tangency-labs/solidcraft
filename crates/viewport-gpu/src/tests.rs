@@ -185,3 +185,30 @@ fn plan_validation_matches_the_packing_refusals() {
         }
     }
 }
+
+/// The window device's request (egui-wgpu's stock one with `window_device_request` on top)
+/// never asks for more than the adapter offers, asks for its largest texture (at least
+/// egui-wgpu's 8192), and the device opens with it.
+#[test]
+fn the_window_device_request_fits_the_adapter_and_opens() {
+    let Ok((adapter, _, _)) = open_headless(test_env::policy()) else { return };
+    let offered = adapter.limits();
+    // egui-wgpu 0.37's own default request for this adapter.
+    let base_limits =
+        if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+    let base = wgpu::DeviceDescriptor {
+        label: Some("egui wgpu device"),
+        required_limits: wgpu::Limits { max_texture_dimension_2d: 8192, ..base_limits },
+        ..Default::default()
+    };
+    let request = window_device_request(&adapter, base);
+    assert_eq!(request.label, Some("egui wgpu device"));
+    assert_eq!(request.required_limits.max_texture_dimension_2d, offered.max_texture_dimension_2d);
+    assert!(request.required_limits.check_limits(&offered), "asks for no more than the adapter offers");
+    assert!(adapter.features().contains(request.required_features));
+    assert_eq!(
+        request.required_features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+        adapter.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+    );
+    ok(pollster::block_on(adapter.request_device(&request)));
+}
