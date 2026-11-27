@@ -2046,7 +2046,7 @@ pub(super) fn surface_prism_cut(
                         Err(_) => return Ok(Vec::new()),
                     }
                 }
-                // A footprint across several unfolded pieces is read across the flat.
+                // A footprint across several pieces of an unfolded sheet is left to the body's cut.
                 if (sk.unfolded && !found.is_empty()) || found.iter().any(|(other, ..)| other == p) {
                     return Ok(Vec::new());
                 }
