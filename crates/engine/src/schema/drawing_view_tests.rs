@@ -22,6 +22,7 @@ fn schemas_and_the_key_check_agree() {
         "scale",
         "scene",
         "sheet",
+        "shows",
         "source",
         "tangent_edges",
         "units",
@@ -41,6 +42,7 @@ fn schemas_and_the_key_check_agree() {
         "reference_style",
         "scale",
         "sheet",
+        "shows",
         "source",
         "tangent_edges",
         "view",
@@ -68,6 +70,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         occurrences: Some(Vec::new().into()),
         hide: Some(Vec::new().into()),
         hide_bodies: Some(Vec::new().into()),
+        shows: Some(Default::default()),
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
@@ -93,9 +96,9 @@ fn the_contract_lists_the_view_settings() {
     let settings = serde_json::to_value(ViewSettings { scale: "1:2".parse().ok(), ..ViewSettings::default() }).unwrap_or_default();
     let mut theirs: Vec<String> = settings.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     // Beside a view's settings, the request's own: where it goes, its page, its lines' chord and
-    // accuracy check, whether it wants the paper scene, what it draws, and what it reads.
+    // accuracy check, whether it wants the paper scene, what it draws (and whether it follows the design's eyes), and what it reads.
     theirs.extend(
-        ["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "hide_bodies", "measure", "units", "decimals"]
+        ["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "hide_bodies", "shows", "measure", "units", "decimals"]
             .map(String::from),
     );
     theirs.sort();

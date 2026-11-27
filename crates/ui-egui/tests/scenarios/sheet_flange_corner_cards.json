@@ -1,0 +1,13 @@
+[
+  {"note": "Two edge flanges produce a corner card. Set it to overlap and swap which flange is on top."},
+  {"call": "ui.set", "params": {"tab": "SHEET METAL"}},
+  {"call": "ui.resize", "params": {"width": 1600, "height": 2200}},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 100, "width": 60, "height": 2, "body_name": "Plate"}}},
+  {"call": "engine.execute", "params": {"command": "sheet.convert", "params": {"body": "Plate", "face": [50, 30, 2]}}},
+  {"call": "ui.view", "params": {"view": "iso"}},
+  {"call": "engine.execute", "params": {"command": "sheet.flange", "params": {"edges": [[50, 0, 2], [100, 30, 2]], "height": 20, "name": "Corner Flange"}}},
+  {"call": "ui.editFeature", "params": {"feature": "Corner Flange"}},
+  {"until": {"shown_handles": ["dialog:ui.surface_corner_type:Overlap"]}},
+  {"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}},
+  {"click": {"handle": "dialog:corner_swap"}}
+]

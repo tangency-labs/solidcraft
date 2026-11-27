@@ -509,6 +509,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         materials,
         print_faces,
         collision_shapes,
+        edgeless_bodies,
         user_materials,
         appearances,
         body_components,
@@ -521,6 +522,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         saved_sections,
         plane_extents,
         notes,
+        welds,
         visibility,
         plugin_data,
     )

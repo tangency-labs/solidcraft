@@ -134,6 +134,33 @@ impl RecordCell {
         }
     }
 
+    /// Hashable keys implied by [`RecordCell::same`], without materializing a lazy move:
+    /// - `ready`: the `Arc<Brep>` address for a ready record or an already-materialized lazy move,
+    ///   so a materialized `Moved` record and the `Ready` record sharing its `Arc<Brep>` collide.
+    /// - `moved`: a hash of `(source_ptr, motion)` for a `Moved` record, so two distinct `Moved`
+    ///   wrappers sharing a source record and rigid motion collide.
+    pub(crate) fn shape_keys(&self) -> (Option<usize>, Option<u64>) {
+        match self {
+            RecordCell::Ready(r) => (Some(std::sync::Arc::as_ptr(r) as usize), None),
+            RecordCell::Moved(m) => {
+                use std::hash::{Hash, Hasher};
+                let ready = m.made.get().map(|r| std::sync::Arc::as_ptr(r) as usize);
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (std::sync::Arc::as_ptr(&m.source) as usize).hash(&mut h);
+                let canon = |x: f64| if x == 0.0 { 0.0f64.to_bits() } else { x.to_bits() };
+                for row in m.motion.rotation {
+                    for v in row {
+                        canon(v).hash(&mut h);
+                    }
+                }
+                for v in m.motion.translation {
+                    canon(v).hash(&mut h);
+                }
+                (ready, Some(h.finish()))
+            }
+        }
+    }
+
     /// Whether the record is moved lazily and not moved yet.
     pub(crate) fn lazy(&self) -> Option<&LazyMove> {
         match self {
@@ -232,6 +259,14 @@ pub struct Body {
 
 /// A body's record as solidcore-ops' body, with the order of its entities ([`Body::ops_body`]).
 pub(crate) type OpsForm = std::sync::Arc<(solidcore_ops::Body, solidcore_ops::Order)>;
+
+/// Which kernel forms (`smlib`, `ops`) a [`Body`] held at a point in time, returned by
+/// [`Body::kernel_forms_snapshot`] and consumed by [`Body::release_kernel_forms_since`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KernelFormMask {
+    smlib: bool,
+    ops: bool,
+}
 
 /// A body's kernel forms ([`Body::kernel_forms`]) without the body: what lets them go once the
 /// body is only kept somewhere to find its result again. It keeps neither the body nor its forms.
@@ -882,6 +917,22 @@ impl Body {
         self.ops.release();
     }
 
+    /// Snapshot of which kernel forms (`smlib`, `ops`) this body currently holds, for pairing with
+    /// [`Body::release_kernel_forms_since`] to release only transient forms created during a query.
+    pub fn kernel_forms_snapshot(&self) -> KernelFormMask {
+        KernelFormMask { smlib: self.smlib.holds(), ops: self.ops.holds() }
+    }
+
+    /// Releases whichever kernel forms were not already held when `before` was taken.
+    pub fn release_kernel_forms_since(&self, before: KernelFormMask) {
+        if !before.smlib {
+            self.smlib.release();
+        }
+        if !before.ops {
+            self.ops.release();
+        }
+    }
+
     /// The body's kernel forms, to let go later without keeping the body ([`KernelForms`]).
     pub fn kernel_forms(&self) -> KernelForms {
         KernelForms { smlib: std::sync::Arc::downgrade(&self.smlib), ops: std::sync::Arc::downgrade(&self.ops) }
@@ -892,6 +943,13 @@ impl Body {
     #[doc(hidden)]
     pub fn holds_kernel_form(&self) -> bool {
         self.smlib.holds() || self.ops.holds()
+    }
+
+    /// For tests: whether this body is a lazily placed copy whose moved B-rep record has not yet
+    /// been materialized.
+    #[doc(hidden)]
+    pub fn has_pending_lazy_record(&self) -> bool {
+        self.record.pending()
     }
 
     /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
@@ -1612,6 +1670,20 @@ impl Body {
     /// share it.
     pub fn solid_id(&self) -> usize {
         self.record.key()
+    }
+
+    /// Hashable keys implied by [`Body::same_shape`], without materializing a lazy move: any two
+    /// bodies for which `a.same_shape(b)` is true share at least one key (`ready` or `moved`).
+    pub fn shape_keys(&self) -> (Option<usize>, Option<u64>) {
+        self.record.shape_keys()
+    }
+
+    /// Clone this body with a ready record sharing its materialized `Arc<Brep>` (tests).
+    #[doc(hidden)]
+    pub fn into_ready_for_tests(&self) -> Body {
+        let mut out = self.clone();
+        out.record = RecordCell::Ready(self.record.arc().clone());
+        out
     }
 
     pub fn with_split_lines(mut self, s: Option<std::sync::Arc<Vec<Vec<Vec3>>>>) -> Body {
