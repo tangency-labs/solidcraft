@@ -732,7 +732,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         .enumerate()
         .map(|(i, path)| {
             let missing = !crate::home::available(app, path);
-            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+            let shown = crate::display_user_path(path);
+            button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
     recent.push(FileRow::Separator);
@@ -1097,7 +1098,8 @@ pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
         let text = crate::i18n::tr_diagnostic(warning);
         app.messages.push(&text, false, crate::now_ms());
     }
-    let mut line = format!("Exported {path}");
+    let shown = crate::display_user_path(path);
+    let mut line = format!("Exported {shown}");
     if let Some(first) = warnings.first() {
         line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
     }
