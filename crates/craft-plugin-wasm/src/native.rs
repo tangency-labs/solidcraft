@@ -1907,7 +1907,13 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         }
         let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
+        if !dialog {
+            host.importer_stage(&manifest.name, true);
+        }
         let (engine, component) = compile(bytes, stack)?;
+        if !dialog {
+            host.importer_stage(&manifest.name, false);
+        }
         check_dialog_export(manifest, &engine, &component)?;
         // Compilation is cached and happens outside the execution budget. Every source I/O
         // operation and guest execution share one deadline, including open/stat on a slow mount.

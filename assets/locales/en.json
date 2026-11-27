@@ -2420,6 +2420,8 @@
   "file_load.opened_behind": "{name} opened in a new tab",
   "file_load.opened_in_tab": "Opened {name} in a new tab",
   "file_load.opening": "Opening design",
+  "file_load.plugin_importing": "Importing with {plugin}...",
+  "file_load.plugin_preparing": "Preparing the {plugin} importer (first use may take a while)...",
   "file_load.preparing_thumbnail": "Preparing the thumbnail...",
   "file_load.preparing_view": "Preparing the view...",
   "file_load.preview_note": "Saved preview. Geometry is being checked before editing.",
