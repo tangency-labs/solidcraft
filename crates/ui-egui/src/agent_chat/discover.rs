@@ -58,14 +58,14 @@ pub const KNOWN: &[Known] = &[
         retired: false,
         reports_version: true,
     },
-    // Google's `agy` command line has no ACP mode; its ACP server is a separate download that the
-    // ACP registry lists (`agy_acp_server.par`, `agy_acp_server.exe` on Windows).
+    // Google's `agy` CLI supports ACP with `agy acp` (#22487); its standalone ACP server is also
+    // supported (`agy_acp_server.par`, `agy_acp_server.exe` on Windows).
     Known {
         id: "antigravity",
         name: "Google Antigravity",
-        programs: &["agy_acp_server.par", "agy_acp_server"],
+        programs: &["agy_acp_server.par", "agy_acp_server", "agy"],
         args: &[],
-        install: "download the Antigravity ACP server for your system (see agentclientprotocol.com/registry), unzip it and put agy_acp_server.par on your PATH",
+        install: "download the Antigravity ACP server for your system (see agentclientprotocol.com/registry), unzip it and put agy_acp_server.par on your PATH, or install the agy CLI",
         credentials: Some(".gemini/antigravity-acp/acp_token.json"),
         config_dir_var: None,
         key_vars: &["GEMINI_API_KEY"],
@@ -464,8 +464,16 @@ fn login_of(k: &Known, home: Option<&Path>) -> Login {
         None => k.credentials.zip(home).map(|(rel, h)| h.join(rel)),
     };
     let key = || k.key_vars.iter().any(|v| std::env::var_os(v).is_some_and(|x| !x.is_empty()));
+    if file.as_ref().is_some_and(|f| f.is_file()) {
+        return Login::LooksLoggedIn;
+    }
+    if k.id == "antigravity"
+        && let Some(h) = home
+        && h.join(".gemini/antigravity-cli/antigravity-oauth-token").is_file()
+    {
+        return Login::LooksLoggedIn;
+    }
     match file {
-        Some(f) if f.is_file() => Login::LooksLoggedIn,
         _ if key() => Login::KeyInEnvironment,
         // Claude Code keeps its login in the keychain on macOS: the file says nothing there.
         _ if cfg!(target_os = "macos") && k.id == "claude" => Login::Unknown,
@@ -492,6 +500,9 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         let login = login_of(k, home);
         let mut argv = vec![path.to_string_lossy().into_owned()];
         argv.extend(k.args.iter().map(|a| a.to_string()));
+        if k.id == "antigravity" && path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("agy")) {
+            argv.push("acp".into());
+        }
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
             result.problem = Some(solidcraft_ui_text::format("ui.agent_chat_node_too_old", &[("version", version)]));
@@ -819,6 +830,37 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn antigravity_cli_is_found_and_starts_with_acp_subcommand() -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("sc-agent-agy-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("sc-agent-agy-home-{}", std::process::id()));
+        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(home.join(".gemini/antigravity-cli"))?;
+        let agy = root.join("agy");
+        std::fs::write(&agy, "#!/bin/sh\necho 1.5.16\n")?;
+        std::fs::set_permissions(&agy, std::fs::Permissions::from_mode(0o755))?;
+
+        let d = detect_in(std::slice::from_ref(&root), Some(&home), PROBE_LIMIT);
+        let Some(found) = d.found.iter().find(|f| f.id == "antigravity") else {
+            return Err("antigravity not found in first detection".into());
+        };
+        assert_eq!(found.argv, vec![agy.to_string_lossy().into_owned(), "acp".into()]);
+        assert_eq!(found.login, Login::NotLoggedIn);
+
+        std::fs::write(home.join(".gemini/antigravity-cli/antigravity-oauth-token"), "token")?;
+        let d2 = detect_in(std::slice::from_ref(&root), Some(&home), PROBE_LIMIT);
+        let Some(found2) = d2.found.iter().find(|f| f.id == "antigravity") else {
+            return Err("antigravity not found in second detection".into());
+        };
+        assert_eq!(found2.login, Login::LooksLoggedIn);
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(home);
+        Ok(())
+    }
+
+    #[test]
     fn every_known_agent_has_a_program_and_an_install_hint() {
         for k in KNOWN {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
@@ -830,7 +872,9 @@ mod tests {
     fn vibe_is_offered_for_install_and_discovered_as_an_acp_executable() {
         let root = std::env::temp_dir().join(format!("sc-agent-vibe-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let detect = || detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
+        // A generous limit, as the other probes here: a whole test run can keep the shell from
+        // starting within the app's three seconds, and a probe that runs out reports no version.
+        let detect = || detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
         let uninstalled = detect();
         let missing = uninstalled.missing.iter().find(|agent| agent.id == "vibe").unwrap();
         assert_eq!(missing.install, "uv tool install mistral-vibe");

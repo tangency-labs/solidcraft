@@ -18,6 +18,8 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     ghost: true,
     tint_new: true,
     cut_tint: true,
+    replaced_ghost: true,
+    glass_new: false,
 };
 
 /// A grounded plate (100 x 100 x 10, top at z 10) and a 20 mm block above it at (30, 40, 50).
@@ -244,7 +246,7 @@ fn a_new_pick_after_loading_makes_a_new_rule() {
 #[test]
 fn apply_keeps_the_pair_and_starts_the_next_rule_fresh() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     {
         let f = form(&mut h.app);
@@ -353,7 +355,7 @@ fn a_gap_edit_keeps_a_flipped_mate_flipped() {
 #[test]
 fn a_refused_apply_keeps_the_picks() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     form(&mut h.app).offset = "no such length".into();
     h.frames(3);

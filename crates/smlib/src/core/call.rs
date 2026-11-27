@@ -54,17 +54,22 @@ pub(crate) fn ops_as<T>(
     }
     let _span = solidcraft_profile::span("solidcore", call);
     let in_flight = super::dump::in_flight(call);
-    // an older failure's words are not this call's
+    // an older failure's words and code are not this call's
     drop(solidcore_ops::session::take_failure_detail());
+    let _ = solidcore_ops::session::take_failure_code();
     let r = match &stop {
         Some(token) => solidcore_ops::cancel::within(token, f),
         None => f(),
     };
     drop(in_flight);
-    r.map_err(|e| {
-        let e = kind(call, e, solidcore_ops::session::take_failure_detail());
+    r.map_err(|ops| {
+        // the session's code for the call that failed; for an error solidcore-ops gave before
+        // any kernel call, ops' own code of it on this crate's call
+        let code = solidcore_ops::session::take_failure_code().unwrap_or_else(|| solidcore_ops::FailureCode::of_ops(call, &ops));
+        let e = kind(call, ops, solidcore_ops::session::take_failure_detail());
         // Stopped, it is no failure to look into.
         if !matches!(e, Error::Cancelled(_)) {
+            crate::failure::failed(code, &e);
             super::dump::failed_ops(call, &e.to_string(), inputs);
         }
         e
@@ -78,11 +83,17 @@ pub(crate) fn ops_as<T>(
 /// crate runs itself reads; else it is solidcore-ops' statement of its error.
 pub(crate) fn error(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
+    // A body whose solid test is named is the same refusal to this crate's callers. The
+    // variant is `#[non_exhaustive]`, so its field is read through the method.
+    if e.not_solid_test().is_some() {
+        return Error::NotSolid;
+    }
     match e {
         Ops::Argument => Error::Argument,
         Ops::Empty => Error::Empty,
         Ops::NotSolid => Error::NotSolid,
         Ops::Exception => Error::Exception,
+        Ops::NotOneFoot { found } => Error::NotOneFoot { found },
         Ops::Cancelled => Error::Cancelled(call),
         Ops::Internal(what) => Error::Internal(what),
         e => Error::Solidcore(match detail {

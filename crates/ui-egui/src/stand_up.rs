@@ -221,13 +221,19 @@ fn estimate_in(world: &solidcraft_engine::doc::ModelState, bodies: &[String]) ->
     upright(z_down, y_down.max(y_up), size)
 }
 
+/// Files offered to be stood up after they are in: STEP and IGES, and the FreeCAD and Rhino files
+/// read as STEP. Their import options leave out the up axis (`crate::import_options`); any other
+/// format with an `up` option (glTF) asks it before the import instead.
+pub fn offered_for(path: &str) -> bool {
+    solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_iges_path(path)
+}
+
 /// The bodies a just-opened file brought (`before`: body names before it opened, none for a
 /// new design), and the import's component placement from the command's `result`: offer to
-/// stand them up.
+/// stand them up. Only files [`offered_for`] names get the offer.
 pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&serde_json::Value>) {
     clear_offer(app);
-    let io = &solidcraft_engine::io::is_step_path;
-    if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || app.preferences.up_axis != "z" {
+    if !offered_for(path) || app.preferences.up_axis != "z" {
         return;
     }
     let text = |k: &str| result.and_then(|r| r.get(k)).and_then(serde_json::Value::as_str);
@@ -338,6 +344,8 @@ pub(crate) struct Later {
 /// Each frame: start the estimate of an offer that waits for one, and make the offer when it is
 /// done. A design changed before then (an edit, another file) gets no offer.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    #[cfg(test)]
+    let meshing = crate::open_meshing::active(app);
     let Some(later) = app.stand_up_later.as_mut() else { return };
     if later.revision != app.session.revision {
         app.stand_up_later = None;
@@ -359,6 +367,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     Err(_) => estimate_in(&world, &later.asked.bodies),
                 }
             }
+            #[cfg(test)]
+            Some(_) if HELD_FRAMES.with(|h| if meshing { h.get() > 0 } else { h.replace(h.get().saturating_sub(1)) > 0 }) => return,
             Some(worker) => match worker.poll() {
                 Poll::Running => return,
                 Poll::Done(upright) => upright,
@@ -380,6 +390,19 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             later.asked.offer(app, Some(upright));
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Frames the estimate still reads as running once the bodies are meshed ([`hold_estimate`]).
+    static HELD_FRAMES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Make an estimate on this thread read as still running while the open's meshing is, and for
+/// `frames` frames after it is done, as on a busy machine whose estimate thread waits for a turn.
+#[cfg(test)]
+pub(crate) fn hold_estimate(frames: usize) {
+    HELD_FRAMES.with(|h| h.set(frames));
 }
 
 /// Turn the offered bodies a quarter turn about X (Y up becomes Z up).

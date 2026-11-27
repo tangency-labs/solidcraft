@@ -17,8 +17,8 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::coverage::{is_cap, made_by};
 use solidcraft_doc::drawing::dimension::{CornerPick, Dimension, DimensionKind, EdgePick, ModelDimension, ModelFace, Status};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SolvedSketch, ids, naming};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Constraint, ConstraintKind, CurveKind};
 
@@ -44,6 +44,7 @@ const EXTRUDE_DISTANCE: &str = "Distance";
 
 pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new(FROM_MODEL, "Model Dimensions", crate::checked!("drawing.dimension.from_model", from_model))
+        .begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -57,7 +58,8 @@ pub static COMMANDS: &[CommandSpec] =
              drawing.dimension.add places one (they can overlap: nothing is laid out). from is {kind: sketch, sketch, constraint} or \
              {kind: feature, feature, param}. A sketch's Length, Distance, DistanceX, DistanceY, Radius, Diameter and Angle come in on a \
              view that sees the sketch face on, found at the sketch's points on the model; an extrude's Distance comes in as the \
-             distance between its two caps. Each is kept only when it reads the model dimension's value. reason is one \
+             distance between its two caps, a box's Length, Width and Height as the distance between its two faces along x, y or z, a \
+             fillet's Radius and a hole's Diameter as the radial dimension of a circular edge of that size on a face it made. Each is kept only when it reads the model dimension's value. reason is one \
              of a closed list: already_shown (a dimension of the drawing shows it: shown_as), not_supported, driven (a driven sketch \
              dimension), not_face_on, not_found (no edge, corner or face, or several, at its points), not_drawn (the view doesn't \
              draw its body), unmeasurable, value_differs (what was found reads another value), in_component (a sketch or feature \
@@ -208,6 +210,9 @@ fn candidates(s: &Session, request: &FromModelParams, basis: &Plane) -> Result<V
                 let plan = match &f.kind {
                     _ if f.component != 0 => Err(in_component()),
                     FeatureKind::Extrude { .. } if label == EXTRUDE_DISTANCE => extrude_distance(s, &state, f),
+                    FeatureKind::Box { .. } => box_size(s, &state, f, label),
+                    FeatureKind::Fillet { .. } if label == "Radius" => round_size(s, &state, f, label, false),
+                    FeatureKind::Hole { .. } if label == "Diameter" => round_size(s, &state, f, label, true),
                     _ => Err((SkipReason::NotSupported, format!("not supported yet: a feature's {label}"))),
                 };
                 out.push(Candidate { from, model: ModelDimension::Feature { feature: f.id, param: label.into() }, plan });
@@ -331,6 +336,49 @@ fn extrude_distance(s: &Session, state: &ModelState, f: &Feature) -> std::result
     let face = |name: &String| ModelFace { body: body.name.clone(), origin_feature: body.feature, name: name.clone(), path: Vec::new() };
     let [a, b] = &names;
     Ok(Measure { kind: DimensionKind::Faces { a: face(a), b: face(b), direction: LinearDirection::Aligned }, expected, angle: false })
+}
+
+/// Box `f`'s length, width or height: between its two faces along x, y or z, the names
+/// `F<id>:-x` and `F<id>:+x` (and the like) give them, each one whole face of one body.
+fn box_size(s: &Session, state: &ModelState, f: &Feature, label: &str) -> std::result::Result<Measure, (SkipReason, String)> {
+    let axis = match label {
+        "Length" => 'x',
+        "Width" => 'y',
+        "Height" => 'z',
+        _ => return Err((SkipReason::NotSupported, format!("not supported yet: a feature's {label}"))),
+    };
+    let expected = s.doc.length_input(f.id, label).ok_or((SkipReason::NotFound, format!("its {label} doesn't evaluate")))?;
+    let ends = [format!("F{}:-{axis}", f.id), format!("F{}:+{axis}", f.id)];
+    let found = state.bodies.iter().find(|b| {
+        let names = naming::face_names(b);
+        ends.iter().all(|end| names.iter().filter(|name| *name == end).count() == 1)
+    });
+    let body = found.ok_or((SkipReason::NotFound, "its two faces aren't each one face of one body".to_string()))?;
+    let face = |name: &String| ModelFace { body: body.name.clone(), origin_feature: body.feature, name: name.clone(), path: Vec::new() };
+    let [a, b] = &ends;
+    Ok(Measure { kind: DimensionKind::Faces { a: face(a), b: face(b), direction: LinearDirection::Aligned }, expected, angle: false })
+}
+
+/// A fillet's radius or a hole's diameter: a circular edge of that radius on a face the feature
+/// made, found on the body's exact record, as a radial dimension of that edge.
+fn round_size(s: &Session, state: &ModelState, f: &Feature, label: &str, diameter: bool) -> std::result::Result<Measure, (SkipReason, String)> {
+    let expected = s.doc.length_input(f.id, label).ok_or((SkipReason::NotFound, format!("its {label} doesn't evaluate")))?;
+    let radius = if diameter { expected / 2.0 } else { expected };
+    let near = |r: f64| (r - radius).abs() <= AGREES * radius.abs().max(1.0);
+    for body in state.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let names = naming::face_names(body);
+        let made = |face: u32| usize::try_from(face).ok().and_then(|i| names.get(i)).is_some_and(|name| made_by(name) == Some(f.id));
+        let record = body.body.record();
+        let found = record.edges.iter().position(|e| {
+            matches!(e.curve, solidcore_record::brep::Curve::Circle { radius: r, .. } if near(r)) && e.uses.iter().any(|u| made(u.face))
+        });
+        if let Some(index) = found {
+            let pick = EdgePick::Index { body: body.name.clone(), index };
+            let edge = s.doc.edge_reference(&s.model, &pick, &[]).map_err(|e| (SkipReason::NotFound, e.to_string()))?;
+            return Ok(Measure { kind: DimensionKind::Radial { edge, diameter }, expected, angle: false });
+        }
+    }
+    Err((SkipReason::NotFound, format!("no circular edge of that size on a face it made: its {label} isn't found on the model")))
 }
 
 #[cfg(test)]

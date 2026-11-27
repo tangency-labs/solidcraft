@@ -208,7 +208,7 @@ fn same_pair(faces: &Faces, a: &[usize], b: &[usize]) -> bool {
 /// The exact area of face `f` (SMLib's integration); infinite when the kernel cannot tell, so
 /// such a face is counted rather than dropped.
 fn face_area_exact(b: &Body, f: usize) -> f64 {
-    b.ops_body().and_then(|(ops, order)| ops.face_area(order, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
+    b.ops_body().and_then(|form| form.0.face_area(&form.1, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
 }
 
 /// The area of the polygon through face `f`'s record vertices: cheap, and a face whose corners
@@ -486,6 +486,77 @@ pub fn cylinder_face(b: &Body, mesh: &Mesh, face: usize) -> Option<CylinderFace>
     let crate::FaceSurface::Cylinder { origin, axis, radius } = crate::face_surface(b, face)? else { return None };
     let c = cylinder_extent(mesh, u32::try_from(face).ok()?, axis, origin, radius);
     (c.start.is_finite() && c.end.is_finite()).then_some(c)
+}
+
+/// Face `face` of a body as a cone from exact B-rep topology: its apex (`axis_point`), unit axis
+/// into the cone (`axis`), extent along the axis (`start`, `end`), larger-end radius (`radius`),
+/// side (`internal`), and half-angle in radians. `None` when the face is not a cone, is a mesh
+/// body, has a degenerate angle, or has no boundary points.
+pub fn cone_face(b: &Body, face: usize) -> Option<(CylinderFace, f64)> {
+    if b.is_mesh() {
+        return None;
+    }
+    let record = b.record();
+    let Surf::Cone { v: apex, a, half: half_angle, convex } = surf_of(record, face)? else { return None };
+    if !(half_angle.is_finite() && half_angle > 1e-6 && half_angle < std::f64::consts::FRAC_PI_2 - 1e-6) {
+        return None;
+    }
+    let axis = a.unit()?;
+    let cos_h = half_angle.cos();
+    let tol = (b.size() * 1e-4).max(1e-3);
+    let (mut start, mut end) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut note = |s: f64| {
+        if s.is_finite() {
+            start = start.min(s);
+            end = end.max(s);
+        }
+    };
+    for edge in crate::face_edge_indices(b, face) {
+        if let Some(ec) = crate::edge_circle(b, edge) {
+            let s = ec.center.dist(apex);
+            if (apex + axis * s).dist(ec.center) <= tol {
+                note(s);
+                continue;
+            }
+        }
+        if let Some(e) = record.edges.get(edge)
+            && let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters())
+        {
+            let [t0, t1] = e.interval;
+            for k in 0..=4 {
+                let t = t0 + (t1 - t0) * (f64::from(k) / 4.0);
+                if let Some(p) = eval.point(t) {
+                    note(p.dist(apex) * cos_h);
+                }
+            }
+        }
+    }
+    if let Some(f) = record.faces.get(face) {
+        for lp in &f.loops {
+            match lp {
+                Loop::Vertex { vertex } => {
+                    if let Some(v) = record.vertices.get(*vertex as usize) {
+                        note(Vec3::from(v.point).dist(apex) * cos_h);
+                    }
+                }
+                Loop::Edges { edges } => {
+                    for u in edges {
+                        let Some(e) = record.edges.get(u.edge as usize) else { continue };
+                        for v in e.vertices {
+                            if let Some(v) = record.vertices.get(v as usize) {
+                                note(Vec3::from(v.point).dist(apex) * cos_h);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !(start.is_finite() && end.is_finite() && end > 1e-9) {
+        return None;
+    }
+    let radius = end * half_angle.tan();
+    (radius.is_finite() && radius > 1e-9).then_some((CylinderFace { axis_point: apex, axis, radius, start, end, internal: !convex }, half_angle))
 }
 
 impl CylinderFace {

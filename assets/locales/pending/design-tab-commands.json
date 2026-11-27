@@ -1,0 +1,38 @@
+{
+  "ar": {
+    "cmd.document.activate": "عرض التصميم",
+    "cmd.document.list": "سرد التصاميم"
+  },
+  "de": {
+    "cmd.document.activate": "Design anzeigen",
+    "cmd.document.list": "Designs auflisten"
+  },
+  "en": {
+    "cmd.document.activate": "Show Design",
+    "cmd.document.list": "List Designs"
+  },
+  "he": {
+    "cmd.document.activate": "הצג תכן",
+    "cmd.document.list": "רשימת תכנים"
+  },
+  "ja": {
+    "cmd.document.activate": "デザインを表示",
+    "cmd.document.list": "デザインを一覧表示"
+  },
+  "ko": {
+    "cmd.document.activate": "디자인 표시",
+    "cmd.document.list": "디자인 목록"
+  },
+  "vi": {
+    "cmd.document.activate": "Hiển thị thiết kế",
+    "cmd.document.list": "Liệt kê thiết kế"
+  },
+  "zh": {
+    "cmd.document.activate": "显示设计",
+    "cmd.document.list": "列出设计"
+  },
+  "fr": {
+    "cmd.document.activate": "Afficher la conception",
+    "cmd.document.list": "Lister les conceptions"
+  }
+}

@@ -1,9 +1,9 @@
-Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped holes along a rail, or a grid of vent slots. You pick what to copy, the direction, how many and the spacing.
+Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped holes along a rail, or a grid of vent slots. You pick what to copy, the direction, and two of how many, the spacing and the extent (first copy to last), or how many and a list of spacings.
 
 #### Before you start
 
 - Make one of the thing you want to repeat first, such as one hole in the corner of the grid.
-- Choose what to copy with Object Type. Bodies copies whole solid bodies. Features repeats a step from the History, such as a Hole or a cut Extrude, on the same body.
+- Choose what to copy with Object Type. Bodies copies whole solid bodies. Features repeats a step from the History, such as a Hole or a cut Extrude, on the same body. Components places a whole component again, such as a part in an assembly.
 - A sketch is neither. To repeat sketch curves, use the sketch's own Rectangular Pattern, or extrude the sketch first.
 - You need a direction for each row: an origin axis, a sketch line or a straight edge of the part.
 
@@ -12,14 +12,17 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Type | Rectangular, Circular or Path. The same dialog makes all three patterns. | Rectangular for rows and grids. |
-| Object Type | Bodies copies whole bodies. Features repeats History steps. | Features for holes in one plate. |
+| Object Type | Bodies copies whole bodies. Features repeats History steps. Components places whole components again. If the bodies you pick make up a whole component, the dialog says so and offers a Pattern Components button that switches to Components for you. | Features for holes in one plate. Components for parts in an assembly, such as a row of clamps on a fixture plate. |
 | Objects or Features | What to repeat. With Features, pick the step in the History. | The Hole feature for the first hole. |
 | Direction | The way the first row runs. | The X axis, or the long edge of the plate. |
-| Quantity | How many along the first direction, counting the original. | 5 holes in the row. |
-| Spacing | Centre-to-centre distance between neighbours in the first direction. | 1 in pitch. |
+| Distance Type | Which values set the first direction: Quantity and Spacing, Quantity and Extent, Spacing and Extent (the third is worked out), or Quantity and List. | Quantity and Extent to spread 5 holes over a known length. |
+| Quantity | How many along the first direction, counting the original. Not shown with Spacing and Extent. | 5 holes in the row. |
+| Spacing | Centre-to-centre distance between neighbours in the first direction. Not shown with Quantity and Extent or Quantity and List. | 1 in pitch. |
+| Extent | Distance from the first copy to the last in the first direction. With Quantity and Extent the spacing is Extent ÷ (Quantity − 1). With Spacing and Extent you get as many copies as fit, with none past the end. With Center, the extent is the whole width: half of it on each side of the original. | 80 mm at 15 mm spacing: 6 copies, the last at 75 mm. |
+| Spacing List | Quantity and List only: the distances from each copy to the next, separated by semicolons. They are used in turn, then from the start again. With Center, the list runs out from the original on both sides. | `10 mm; 20 mm; 30 mm` with Quantity 5: copies at 10, 30, 60 and 70 mm. |
+| Copy at the end | Spacing and Extent only: one more copy exactly at the end of the extent when the spacing doesn't divide it, so only the last gap is shorter. | 80 mm at 15 mm spacing: 7 copies, the last at 80 mm. |
 | Direction 2 | The way the second row runs. Leave it empty for a single row. | The Y axis for a grid. |
-| Quantity 2 | How many along the second direction, counting the original. 1 means a single row. | 3 rows. |
-| Spacing 2 | Centre-to-centre distance in the second direction. | 0.75 in. |
+| Distance Type 2, Quantity 2, Spacing 2, Extent 2, Spacing List 2, Copy at the end 2 | The same for the second direction, chosen on their own. Quantity 2 at 1 means a single row. | 3 rows, 0.75 in apart. |
 | Alignment and Alignment 2 (Features only) | Flip direction runs the copies the other way. Center puts copies on both sides of the original: an odd Quantity splits evenly, an even Quantity puts one extra copy on one side, and Flip moves the extra copy to the other side. Quantity 4 with Center gives copies at 0, +1, −1 and +2 spacings. | Flip when the row runs off the end of the part. |
 
 #### Try it: a 5 × 3 grid of holes
@@ -33,8 +36,9 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 
 #### Tips and common mistakes
 
+- **Do** click Pattern Components when the dialog offers it and you want the component placed again. That is much faster and uses far less memory than copying every body in it. Leave Object Type on Bodies when you want separate body copies instead.
 - **Do** count the original in Quantity. Five holes in a row is Quantity 5, not 4.
-- **Do** read Spacing as hole-to-hole pitch, the way the print dimensions it, not the total length of the row.
+- **Do** read Spacing as hole-to-hole pitch, the way the print dimensions it. When the print gives the total length of the row, choose a Distance Type with Extent instead. When the gaps change in a repeating rhythm, use Quantity and List.
 - **Do** pattern the Hole feature rather than the body when the holes are all in one part. Change the hole size once and every copy follows.
 - **Don't** forget to check Alignment if the copies land off the part. Flip direction or Center left on from an earlier pattern moves the whole grid.
 - **Don't** leave Quantity 2 at 1 and expect a grid. With Quantity 2 at 1 you get a single row even if Direction 2 is picked.

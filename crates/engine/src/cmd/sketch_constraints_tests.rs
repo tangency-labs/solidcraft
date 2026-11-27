@@ -202,6 +202,67 @@ fn curvature_polygon_arc_length_linear_diameter() {
     assert!((dist - 15.0).abs() < 1e-6, "{rim:?} {dist}");
 }
 
+/// #20660: a distance from a point to a construction line switches to a diameter (twice the
+/// distance, the point staying put), types as a diameter, and goes back; a distance between two
+/// ordinary lines has no diameter.
+#[test]
+fn a_distance_from_a_construction_line_toggles_to_a_diameter() {
+    use solidcraft_sketch::ConstraintKind;
+    let mut s = new_sketch();
+    let axis = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 40]], "construction": true}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [5, 10], "id": "rim"}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["rim", axis], "type": "distance"}));
+    let param = d["param"].as_str().unwrap().to_string();
+    let find = |s: &Session| sketch(s).constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap().clone();
+    let cid = find(&s).id;
+    assert!(matches!(find(&s).kind, ConstraintKind::PointLineDistance { value, .. } if (value - 5.0).abs() < 1e-9));
+    let r = run(&mut s, "sketch.toggle_diameter", json!({"constraint": cid}));
+    assert_eq!(r["diameter"], true, "{r}");
+    assert!(matches!(find(&s).kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9), "{:?}", find(&s).kind);
+    assert_eq!(s.doc.param(&param).unwrap().expr, "10 mm", "the parameter holds the shown (diameter) value");
+    // The point's distance from the (infinite) axis line. The axis is free, so the solver may tilt
+    // or move it; only the perpendicular distance is fixed, not the x difference.
+    let x = |s: &Session| {
+        let sk = sketch(s);
+        let p = sk.point(sk.point_index("rim").unwrap()).unwrap();
+        let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[sk.curve_index(&axis).unwrap()].kind else { panic!("the axis is a line") };
+        let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        ((p.x - a.x) * dy - (p.y - a.y) * dx).abs() / dx.hypot(dy)
+    };
+    assert!((x(&s) - 5.0).abs() < 1e-6, "the point stays put");
+    // Saved and reopened, it is still a diameter.
+    // The reopened session edits no sketch: it is read by its feature id.
+    let sid = s.active_sketch.unwrap();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(
+        reopened
+            .model
+            .state()
+            .sketch(sid)
+            .unwrap()
+            .sketch
+            .constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9)),
+        "the diameter survives save and reopen"
+    );
+    // Typing 12 moves the point to 6 mm.
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "12 mm"}));
+    assert!((x(&s).abs() - 6.0).abs() < 1e-6, "{}", x(&s));
+    // And back to the distance, the point still 6 mm out.
+    run(&mut s, "sketch.toggle_diameter", json!({"constraint": cid, "diameter": false}));
+    assert!(matches!(find(&s).kind, ConstraintKind::PointLineDistance { value, .. } if (value - 6.0).abs() < 1e-9));
+
+    // Two ordinary lines have no diameter to switch to.
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[30, 0], [30, 40]]}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 40]]}))["curves"])[0].clone();
+    let d2 = run(&mut s, "sketch.dimension", json!({"entities": [l1, l2], "type": "distance"}));
+    let p2 = d2["param"].as_str().unwrap().to_string();
+    let id2 = sketch(&s).constraints.iter().find(|c| c.param.as_deref() == Some(p2.as_str())).unwrap().id.clone();
+    assert!(s.execute("sketch.toggle_diameter", &json!({"constraint": id2})).is_err());
+}
+
 #[test]
 fn glyphs_and_snaps() {
     let mut s = new_sketch();
@@ -1524,7 +1585,7 @@ fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
     }
     let before = sketch(&s);
     let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
-    assert!(e.contains("shrink") && e.contains("to a point"), "{e}");
+    assert!(e.contains("conflicts with k2, k5"), "{e}");
     assert_eq!(sketch(&s), before);
 }
 
@@ -2033,4 +2094,391 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
     assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
+}
+
+/// An arc's centre and radius, as the sketch holds them.
+fn round_of(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, f64) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, .. } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    (sk.point(c).unwrap(), sk.radius(i).unwrap())
+}
+
+/// Where the point halfway along an arc lies, from the arc as the sketch holds it, and the middle
+/// of its chord.
+fn arc_middles(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, Vec2) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    let (centre, start, end) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    let mut sweep = (end - centre).angle() - (start - centre).angle();
+    while sweep <= 0.0 {
+        sweep += std::f64::consts::TAU;
+    }
+    let half = (start - centre).angle() + sweep / 2.0;
+    let radius = centre.dist(start);
+    (centre + Vec2::new(radius * half.cos(), radius * half.sin()), (start + end) * 0.5)
+}
+
+/// MidPoint on an arc: the point goes halfway along the arc, which is not the middle of its
+/// chord, from a point and an arc picked either way round or given as `point` and `line`; it
+/// stays there when the arc's radius is dimensioned afterwards (#16860).
+#[test]
+fn midpoint_holds_a_point_halfway_along_an_arc() {
+    for form in 0..3 {
+        let mut s = new_sketch();
+        let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+        run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+        let params = match form {
+            0 => json!({"point": "m", "line": arc}),
+            1 => json!({"a": "m", "b": arc}),
+            _ => json!({"a": arc, "b": "m"}),
+        };
+        let made = run(&mut s, "sketch.constraint.midpoint", params);
+        assert_eq!(made["sketch"]["solved"], true, "form {form}: {made}");
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (middle, chord) = arc_middles(&sk, &arc);
+        assert!(m.dist(middle) < 1e-5, "form {form}: {m:?} should be halfway along the arc, at {middle:?}");
+        // The arc stays and the point comes to it, whichever way it was named: halfway along the
+        // arc, not at the middle of its chord (5, 5).
+        let r = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+        assert!(m.dist(Vec2::new(r, r)) < 1e-5, "form {form}: {m:?}");
+        assert!(m.dist(chord) > 1.0, "form {form}: not the middle of the chord {chord:?}: {m:?}");
+        run(&mut s, "sketch.dimension", json!({"entities": [arc], "value": 20}));
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (centre, radius) = round_of(&sk, &arc);
+        assert!((radius - 20.0).abs() < 1e-6, "form {form}: radius {radius}");
+        assert!(m.dist(arc_middles(&sk, &arc).0) < 1e-5, "form {form}: still halfway along the arc: {m:?} (centre {centre:?})");
+    }
+}
+
+/// What MidPoint on an arc refuses: a circle, which has no middle, and one of the arc's own
+/// ends, which would shrink the arc to a point.
+#[test]
+fn midpoint_refuses_a_circle_and_an_end_of_the_arc() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 0], "radius": 5}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": "m", "b": circle})).unwrap_err().to_string();
+    assert!(e.contains("a point and a line or an arc"), "{e}");
+    let end = sketch(&s).curves.iter().find_map(|c| (c.id == arc).then(|| c.kind.ends())).flatten().unwrap().0;
+    let end = sketch(&s).points[end].id.clone();
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": end, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("an arc's own end"), "{e}");
+}
+
+/// A menu or toolbar offers MidPoint for a point picked with an arc, but not with a circle, which
+/// has no ends (#16860).
+#[test]
+fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let midpoint = crate::find_command("sketch.constraint.midpoint").unwrap();
+    let pick = |curve: &str| vec![crate::Sel::SketchPoint { id: "m".into() }, crate::Sel::SketchCurve { id: curve.into(), sketch: None }];
+    s.selection = pick(&arc);
+    assert!(midpoint.for_selection(&s).is_some(), "a point and an arc");
+    s.selection = pick(&circle);
+    assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
+}
+
+#[test]
+fn detach_point_uses_real_curve_arc_length_and_propagates_mirror_symmetry() {
+    let mut s = new_sketch();
+    // Quarter arc of radius 10 from (10, 0) to (0, 10) meeting a line at (10, 0).
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 0]]}))["curves"])[0].clone();
+    let a1 = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let shared_id = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{l1}.start")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{a1}.start")));
+        sk.points[p].id.clone()
+    };
+    // Detach arc by 5 mm along the real arc: endpoint must stay exactly on radius 10 at angle 0.5 rad.
+    let res = run(&mut s, "sketch.detach_point", json!({"curve": a1, "point": shared_id, "distance": 5.0}));
+    let new_pt_id = res["point"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let new_pos = sk.point(sk.resolve_point(&new_pt_id).unwrap()).unwrap();
+    let want = Vec2::new(10.0 * 0.5_f64.cos(), 10.0 * 0.5_f64.sin());
+    assert!(new_pos.dist(want) < 1e-4, "detached arc point {new_pos:?} vs exact {want:?}");
+
+    // Mirror detachment: two symmetric shared corners stay symmetric when one branch detaches.
+    let mut s = new_sketch();
+    let ax = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 20]], "construction": true, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [ax]}));
+    let l_a = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-20, 10]], "infer": false}))["curves"])[0].clone();
+    let l_base = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-10, -10]], "infer": false}))["curves"])[0].clone();
+    let r_a = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 10]], "infer": false}))["curves"])[0].clone();
+    let r_base = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, -10]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.start"), "b": format!("{r_a}.start"), "line": ax}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.end"), "b": format!("{r_a}.end"), "line": ax}));
+    let p_left = sketch(&s).points[sketch(&s).resolve_point(&format!("{l_a}.start")).unwrap()].id.clone();
+    run(&mut s, "sketch.detach_point", json!({"curve": l_a, "point": p_left, "distance": 3.0}));
+    let sk = sketch(&s);
+    let la_start = sk.curves[sk.curve_index(&l_a).unwrap()].kind.ends().unwrap().0;
+    let lbase_start = sk.curves[sk.curve_index(&l_base).unwrap()].kind.ends().unwrap().0;
+    let ra_start = sk.curves[sk.curve_index(&r_a).unwrap()].kind.ends().unwrap().0;
+    let rbase_start = sk.curves[sk.curve_index(&r_base).unwrap()].kind.ends().unwrap().0;
+    assert_ne!(la_start, lbase_start);
+    assert_ne!(ra_start, rbase_start, "mirrored curve also detached");
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::Symmetric { p, q, .. } if (p, q) == (la_start, ra_start) || (p, q) == (ra_start, la_start))),
+        "detached mirrored ends gained a replacement symmetry constraint"
+    );
+}
+
+#[test]
+fn point_merge_protects_expression_referenced_points_and_remaps_draw_point_reply() {
+    let mut s = new_sketch();
+    let p1 = run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "A"}))["point"].as_str().unwrap().to_string();
+    // Second plain point on A merges and returns the surviving point id, never empty.
+    let p2 = run(&mut s, "sketch.point", json!({"point": [10, 0]}))["point"].as_str().unwrap().to_string();
+    assert_eq!(p2, p1, "merged sketch.point returns surviving point id");
+
+    // A point named by another point's expression is protected and keeps a Coincident instead of being deleted.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "B"}));
+    run(&mut s, "sketch.point", json!({"point": ["B.x + 5", "0"], "id": "C"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 0], "id": "D"}));
+    let r = run(&mut s, "sketch.constraint.coincident", json!({"a": "D", "b": "B"}));
+    assert!(r.get("constraint").is_some(), "expression-referenced point stays protected: {r}");
+    assert!(sketch(&s).resolve_point("B").is_some(), "point B still exists for C's expression");
+}
+
+#[test]
+fn saved_sketch_with_coincident_constraints_replays_unchanged() {
+    let mut s = new_sketch();
+    let sid = s.active_sketch.unwrap();
+    // Construct a legacy-style closed triangle whose three corners use separate endpoints tied by
+    // explicit Coincident constraints (as saved by designs created before point merging).
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, 15]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l3 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 15], [0, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let mut doc = (*s.doc).clone();
+    {
+        let sk = doc.sketch_mut(sid).unwrap();
+        let (a0, a1) = sk.curves[sk.curve_index(&l1).unwrap()].kind.ends().unwrap();
+        let (b0, b1) = sk.curves[sk.curve_index(&l2).unwrap()].kind.ends().unwrap();
+        let (c0, c1) = sk.curves[sk.curve_index(&l3).unwrap()].kind.ends().unwrap();
+        assert_ne!(a1, b0);
+        assert_ne!(b1, c0);
+        assert_ne!(c1, a0);
+        for (id, p, q) in [("k_legacy_1", a1, b0), ("k_legacy_2", b1, c0), ("k_legacy_3", c1, a0)] {
+            sk.constraints.push(solidcraft_sketch::Constraint {
+                id: id.into(),
+                kind: ConstraintKind::Coincident { p, q },
+                param: None,
+                driven: false,
+                text: None,
+            });
+        }
+    }
+    s.set_doc(doc);
+    s.refresh();
+    let saved = s.doc.to_json();
+    let before = sketch(&s);
+    let before_coinc: Vec<String> =
+        before.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Coincident { .. })).map(|c| c.id.clone()).collect();
+    assert_eq!(before_coinc, vec!["k_legacy_1", "k_legacy_2", "k_legacy_3"]);
+
+    // Reload the saved design into a cold session and replay from scratch.
+    let mut cold = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), ..Default::default() };
+    cold.refresh();
+    assert_eq!(cold.doc.to_json(), saved, "saved design JSON replays without mutation");
+    let state = cold.model.state();
+    let replayed = state.sketch(sid).unwrap();
+    assert!(replayed.report.ok(), "replayed legacy sketch solves cleanly: {:?}", replayed.report);
+    assert_eq!(replayed.sketch.points.len(), before.points.len(), "legacy points are not retroactively merged on load");
+    for (p_after, p_before) in replayed.sketch.points.iter().zip(before.points.iter()) {
+        assert_eq!(p_after.id, p_before.id);
+        assert!(p_after.pos.dist(p_before.pos) < 1e-12, "point {} moved: {:?} vs {:?}", p_before.id, p_after.pos, p_before.pos);
+    }
+    assert_eq!(replayed.sketch.curves, before.curves, "curve endpoint indices stay identical");
+    assert_eq!(replayed.sketch.constraints, before.constraints, "legacy Coincident constraints stay intact");
+    let total_area: f64 = replayed.profiles.iter().map(|p| p.area.abs()).sum();
+    assert!((total_area - 75.0).abs() < 1e-6, "replayed triangle profile area unchanged: {total_area}");
+}
+
+#[test]
+fn detach_point_on_circle_centre_respects_distance_and_explicit_offset() {
+    let mut s = new_sketch();
+    let c1 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 5}))["curves"])[0].clone();
+    let c2 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_zero = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c1}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c2}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c2, "point": shared_zero, "distance": 0.0}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c1}.center")), sk.resolve_point(&format!("{c2}.center")));
+    assert!(sk.point(sk.resolve_point(&format!("{c2}.center")).unwrap()).unwrap().dist(Vec2::new(10.0, 0.0)) < 1e-9);
+
+    let c3 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 5}))["curves"])[0].clone();
+    let c4 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_dist = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c3}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c4}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c4, "point": shared_dist, "distance": 3.0}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c3}.center")), sk.resolve_point(&format!("{c4}.center")));
+    assert!(
+        sk.point(sk.resolve_point(&format!("{c4}.center")).unwrap()).unwrap().dist(Vec2::new(30.0, 0.0)) < 1e-9,
+        "non-zero distance on a circle centre must not jump along its circumference"
+    );
+
+    let c5 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
+    let c6 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_off = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c5}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c6}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c6, "point": shared_off, "offset": [2.0, -1.0]}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c5}.center")), sk.resolve_point(&format!("{c6}.center")));
+    assert!(sk.point(sk.resolve_point(&format!("{c6}.center")).unwrap()).unwrap().dist(Vec2::new(52.0, -1.0)) < 1e-9);
+}
+
+#[test]
+fn unlink_curve_group_removes_one_curve_and_relinks_the_rest() {
+    let mut s = new_sketch();
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 5], [15, 5]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l3 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 10], [20, 10]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.equal", json!({"a": l1, "b": l2}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": l2, "b": l3}));
+
+    let unlinked_eq = run(&mut s, "sketch.unlink_curve_group", json!({"curve": l2, "kind": "equal"}));
+    assert_eq!(ids(&unlinked_eq["removed"]).len(), 2, "{unlinked_eq}");
+    assert_eq!(ids(&unlinked_eq["added"]).len(), 1, "{unlinked_eq}");
+    let sk = sketch(&s);
+    let (i1, i2, i3) = (sk.curve_index(&l1).unwrap(), sk.curve_index(&l2).unwrap(), sk.curve_index(&l3).unwrap());
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { a, b } if a == i2 || b == i2)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { a, b } if (a, b) == (i1, i3) || (a, b) == (i3, i1))));
+
+    run(&mut s, "sketch.constraint.parallel", json!({"a": l1, "b": l2}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": l2, "b": l3}));
+    let unlinked_par = run(&mut s, "sketch.unlink_curve_group", json!({"curve": l2, "kind": "parallel"}));
+    assert_eq!(ids(&unlinked_par["removed"]).len(), 2, "{unlinked_par}");
+    assert_eq!(ids(&unlinked_par["added"]).len(), 1, "{unlinked_par}");
+    let sk = sketch(&s);
+    let (i1, i2, i3) = (sk.curve_index(&l1).unwrap(), sk.curve_index(&l2).unwrap(), sk.curve_index(&l3).unwrap());
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { a, b } if a == i2 || b == i2)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { a, b } if (a, b) == (i1, i3) || (a, b) == (i3, i1))));
+}
+
+/// Horizontal and Vertical on their own go the way they say, not the nearer way that
+/// Horizontal/Vertical picks: a line drawn nearly vertical can be made horizontal, and two points
+/// nearly level can be put one above the other. Their length and first end stay where they were.
+#[test]
+fn horizontal_and_vertical_go_the_way_they_say() {
+    for (id, from, to) in [("sketch.constraint.horizontal", [10.0, 10.0], [13.0, 40.0]), ("sketch.constraint.vertical", [10.0, 10.0], [40.0, 13.0])] {
+        let horizontal = id.ends_with(".horizontal");
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [from, to], "infer": false, "connect": false}));
+        run(&mut s, id, json!({"line": "l1"}));
+        let sk = sketch(&s);
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. }) == horizontal
+                && matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })),
+            "{id}"
+        );
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let d = b - a;
+        if horizontal {
+            assert!(d.y.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        } else {
+            assert!(d.x.abs() < 1e-6, "{id}: {a:?} {b:?}");
+        }
+        // A mode the combined command would read is not one these take: the command decides.
+        let mut s = new_sketch();
+        run(&mut s, "sketch.point", json!({"point": [0, 20], "id": "p", "connect": false}));
+        run(&mut s, "sketch.point", json!({"point": [30, 21], "id": "q", "connect": false}));
+        run(&mut s, id, json!({"points": ["p", "q"]}));
+        let sk = sketch(&s);
+        let (p, q) = (sk.point(sk.resolve_point("p").unwrap()).unwrap(), sk.point(sk.resolve_point("q").unwrap()).unwrap());
+        let kind = &sk.constraints.last().unwrap().kind;
+        if horizontal {
+            assert!(matches!(kind, ConstraintKind::HorizontalPoints { .. }) && (p.y - q.y).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        } else {
+            assert!(matches!(kind, ConstraintKind::VerticalPoints { .. }) && (p.x - q.x).abs() < 1e-6, "{id}: {p:?} {q:?}");
+        }
+    }
+}
+
+/// Horizontal on a line running the other way, exactly vertical or nearly, and Vertical on one
+/// lying flat, turn the line keeping its length (it would otherwise shrink to its short extent,
+/// or to nothing): about its middle when both ends are free, about a fixed end when one is.
+#[test]
+fn horizontal_and_vertical_turn_a_line_running_the_other_way_keeping_its_length() {
+    for (id, to) in [
+        ("sketch.constraint.horizontal", [10.0, 40.0]),
+        ("sketch.constraint.horizontal", [13.0, 40.0]),
+        ("sketch.constraint.vertical", [40.0, 10.0]),
+        ("sketch.constraint.vertical", [40.0, 13.0]),
+    ] {
+        for fixed_start in [false, true] {
+            let horizontal = id.ends_with(".horizontal");
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points": [[10.0, 10.0], to], "infer": false, "connect": false}));
+            if fixed_start {
+                run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.start"}));
+            }
+            let length = (Vec2::new(to[0], to[1]) - Vec2::new(10.0, 10.0)).len();
+            run(&mut s, id, json!({"line": "l1"}));
+            let sk = sketch(&s);
+            let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+            let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+            let d = b - a;
+            let case = format!("{id} to {to:?}, fixed start {fixed_start}: {a:?} {b:?}");
+            assert!((d.len() - length).abs() < 1e-6, "{case}: length {} not {length}", d.len());
+            assert!(if horizontal { d.y.abs() < 1e-6 && d.x > 0.0 } else { d.x.abs() < 1e-6 && d.y > 0.0 }, "{case}");
+            if fixed_start {
+                assert!((a - Vec2::new(10.0, 10.0)).len() < 1e-9, "{case}: the fixed end stays");
+            } else {
+                let middle = (Vec2::new(to[0], to[1]) + Vec2::new(10.0, 10.0)) * 0.5;
+                assert!(((a + b) * 0.5 - middle).len() < 1e-6, "{case}: turned about its middle");
+            }
+        }
+    }
+}
+
+/// A selection the combined tool takes, Horizontal and Vertical take too, without a `mode`: one
+/// line, two points, or a point and a line (aligned with the line's middle).
+#[test]
+fn horizontal_and_vertical_take_the_selection_without_a_mode() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 10]], "infer": false, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [5, 30], "id": "p", "connect": false}));
+    let line = crate::Sel::SketchCurve { id: "l1".into(), sketch: None };
+    let point = crate::Sel::SketchPoint { id: "p".into() };
+    for id in ["sketch.constraint.horizontal", "sketch.constraint.vertical"] {
+        let spec = crate::find_command(id).unwrap();
+        s.selection = vec![line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"line": "l1"})), "{id}");
+        s.selection = vec![point.clone(), line.clone()];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", {"midpoint": "l1"}]})), "{id}");
+        s.selection = vec![point.clone(), crate::Sel::SketchPoint { id: "l1.start".into() }];
+        assert_eq!(spec.for_selection(&s), Some(json!({"points": ["p", "l1.start"]})), "{id}");
+    }
+    // The vertical one runs on the point and line: the point goes above the line's middle.
+    s.selection = vec![point, line];
+    let p = crate::find_command("sketch.constraint.vertical").unwrap().for_selection(&s).unwrap();
+    run(&mut s, "sketch.constraint.vertical", p);
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point("p").unwrap()).unwrap();
+    let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+    let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+    assert!((at.x - (a.x + b.x) / 2.0).abs() < 1e-6, "{at:?} {a:?} {b:?}");
 }
