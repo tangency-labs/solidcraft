@@ -23,7 +23,7 @@ use solidcore_record::brep::Brep;
 use solidcore_record::{Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
-    Support, Taper,
+    SplitTool, Support, Taper, TrimKeep,
 };
 
 use crate::body::Body;
@@ -208,6 +208,30 @@ impl Modelling for Occt {
 
     fn offset_faces(&self, _body: &Shape, _at: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
         unsupported("an offset")
+    }
+
+    fn draft(&self, _body: &Shape, _faces: &[Vec3], _neutral: &Plane, _pull: Vec3, _angle: f64) -> Result<Shape, BackendError> {
+        unsupported("a draft")
+    }
+
+    fn split_faces(&self, _body: &Shape, _faces: &[usize], _tool: &SplitTool<'_, Shape>) -> Result<(Shape, Vec<usize>), BackendError> {
+        unsupported("a face split")
+    }
+
+    fn split_body(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_faces(&self, _body: &Shape, _sheet: &Shape, _face: usize, _faces: &[usize]) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_sheet_where_it_cuts(&self, _body: &Shape, _sheet: &Shape, _face: usize) -> Result<Option<Vec<Shape>>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
+        unsupported("a trim")
     }
 }
 
