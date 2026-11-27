@@ -3737,7 +3737,9 @@ pub fn cleanup_noise(uv: Point2) -> Point2 {
 /// does not (reversed when the surfaces run in opposite directions; end points only
 /// when the rows differ in length) and rebuilds the adjusted surface's rails as its
 /// iso-curves. Only cubic-or-higher B-spline fillet surfaces are examined; nothing is
-/// done when neither surface needs adjusting.
+/// done when neither surface needs adjusting. Not upstream (#23151): a round kept as its
+/// definition needs none either where both vertices lie on it within `dist_tol`, inside
+/// its domain: the shared section then runs across it.
 ///
 /// # Errors
 ///
@@ -3858,16 +3860,45 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         let mut start_dist = start_pnt.distance(pnt1);
         let dist2 = start_pnt.distance(pnt2);
         let end_dist;
+        // the corner of the end row each vertex is matched with
+        let (start_uv, end_uv);
         if start_dist < dist2 {
             end_dist = end_pnt.distance(pnt2);
+            (start_uv, end_uv) = (uv1, uv2);
         } else {
             start_dist = dist2;
             end_dist = end_pnt.distance(pnt1);
             *orient_i = OrientType::Opposite;
+            (start_uv, end_uv) = (uv2, uv1);
         }
 
         if start_dist < dist_tol && end_dist < dist_tol {
             *adjust = false;
+        } else if matches!(surface.kind(), SurfaceKind::ProceduralBlend(_)) {
+            // Not upstream (#23151): a round by its definition that holds both vertices is
+            // not adjusted either. Two rounds meeting at a slight angle `a` share the first
+            // one's section (a Join over the second, `blend_corner::join_gap`): the second
+            // round's own end row stands its reach times `sin a` from that section along
+            // its rail on the face they share, while the section lies on its surface to
+            // second order in `a`. The section is then a curve across the round, which the
+            // cross section's drop makes of its two vertices; moving the end row onto it
+            // would move the round off its definition by the first-order distance.
+            let mut held = true;
+            for (pnt, uv, dist) in [
+                (start_pnt, start_uv, start_dist),
+                (end_pnt, end_uv, end_dist),
+            ] {
+                held = held
+                    && (dist < dist_tol
+                        || crate::blend::blend_corner::foot_on_surface(k, surface, pnt, uv)?
+                            .filter(|&foot| domain.contains_point(foot, 0.0))
+                            .map(|foot| surface.evaluate_point(k, foot))
+                            .transpose()?
+                            .is_some_and(|on| pnt.distance(on) < dist_tol));
+            }
+            if held {
+                *adjust = false;
+            }
         }
     }
 
