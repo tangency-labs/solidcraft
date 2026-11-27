@@ -9,16 +9,16 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::object::Shape;
 use solidcore::geom::tol::{
-    SmallTopoType, brep_zone_tol_3d, context_xsect_tol_3d, tol_mul, xsect_tol_3d_from_zones,
-    zone_tol3d,
+    brep_zone_tol_3d, context_xsect_tol_3d, tol_mul, xsect_tol_3d_from_zones, zone_tol3d,
+    SmallTopoType,
 };
 use solidcore::heal::gap::GapFunction;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::mass::integrator::properties::{
-    AreaAbout, EstimatedMassProperties, MassPropertyRequest, PropertyAttributes, brep_area_about,
-    brep_area_about_prepared, brep_mass_properties_estimated,
+    brep_area_about, brep_area_about_prepared, brep_mass_properties_estimated,
     brep_mass_properties_estimated_prepared, edge_length, face_area, face_area_prepared,
-    face_centroid, face_centroid_prepared, region_material,
+    face_centroid, face_centroid_prepared, region_material, AreaAbout, EstimatedMassProperties,
+    MassPropertyRequest, PropertyAttributes,
 };
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
@@ -36,8 +36,8 @@ use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::loopuse::loop_edges;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
-use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use solidcore::topology::{edge, face, vertex};
+use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use solidcore::{Kernel, Point3, Vec3};
 
 use crate::blend::middle;
@@ -45,8 +45,8 @@ use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{
-    Answer, Note, answer, measure_body, note, note_back, read_body, read_else_edit, run_on,
-    with_body,
+    answer, measure_body, note, note_back, read_body, read_else_edit, run_on, with_body, Answer,
+    Note,
 };
 use crate::split::copies_of;
 use crate::{Error, Result};
@@ -3055,10 +3055,9 @@ pub(crate) mod tests {
         }
         // each edge lies on the planes of its two faces (and of no other)
         assert_eq!(on, 24);
-        assert!(
-            b.edge_face_gap_samples(&index, index.edges.len(), 0)
-                .is_err()
-        );
+        assert!(b
+            .edge_face_gap_samples(&index, index.edges.len(), 0)
+            .is_err());
         // the nearest point of each edge to a far point, and the vertex distances
         for e in 0..index.edges.len() {
             let c = b
@@ -3127,14 +3126,12 @@ pub(crate) mod tests {
         for (g, w) in got.iter().zip(want) {
             assert!((g * g - w).abs() <= 1e-9 * w, "{got:?}");
         }
-        assert!(
-            b.face_distances(&index, index.faces.len(), &[above])
-                .is_err()
-        );
-        assert!(
-            b.face_distances(&index, 0, &[[f64::NAN, 0.0, 0.0]])
-                .is_err()
-        );
+        assert!(b
+            .face_distances(&index, index.faces.len(), &[above])
+            .is_err());
+        assert!(b
+            .face_distances(&index, 0, &[[f64::NAN, 0.0, 0.0]])
+            .is_err());
     }
 
     /// Picks are record indices: the same face and edge named through an order that is not the
@@ -3342,14 +3339,12 @@ pub(crate) mod tests {
                     }
                 }
             }
-            assert!(
-                b.face_normal_at_point(&order, usize::MAX, [0., 0., 0.])
-                    .is_err()
-            );
-            assert!(
-                b.face_normal_at_point(&order, 0, [f64::NAN, 0., 0.])
-                    .is_err()
-            );
+            assert!(b
+                .face_normal_at_point(&order, usize::MAX, [0., 0., 0.])
+                .is_err());
+            assert!(b
+                .face_normal_at_point(&order, 0, [f64::NAN, 0., 0.])
+                .is_err());
         }
     }
 
@@ -4285,10 +4280,9 @@ pub(crate) mod tests {
             assert!(matches!(normal, Err(Error::Argument)), "{normal:?}");
         }
         // a normal of no direction is the kernel's refusal
-        assert!(
-            b.outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0; 3])
-                .is_err()
-        );
+        assert!(b
+            .outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0; 3])
+            .is_err());
     }
 
     #[test]
