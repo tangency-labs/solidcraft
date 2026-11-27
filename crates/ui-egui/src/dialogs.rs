@@ -2132,6 +2132,17 @@ impl Dialog {
         })
     }
 
+    /// Whether a click that would take `face` into the active input takes a profile behind it
+    /// instead: an input taking profiles takes the closed region of a shown sketch under the
+    /// pointer even where a body's face hides it, as where a sketch on a plane runs through a
+    /// part. Before, only a click right beside the sketch's lines reached it there. A face that
+    /// is Extrude's automatic To Object stays the target; Select Other still offers the face.
+    pub(crate) fn profile_behind(&self, s: &Session, face: &Hit, picked: &Sel) -> bool {
+        self.active_input().is_some_and(|i| i.accept & selection::PROFILES != 0)
+            && matches!((face, picked), (Hit::Face { .. }, Sel::Face { .. }))
+            && self.extrude_target(s, face).is_none()
+    }
+
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
     /// or a parallel plane, is the target rather than another profile. An explicitly active
     /// To Object or From Object input accepts parallel planes regardless of the automatic
