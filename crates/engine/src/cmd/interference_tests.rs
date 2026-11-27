@@ -650,3 +650,26 @@ fn measure_overlap_stops_when_deadline_expires() {
     let active = super::check_pair(&a, &b, &names, a.size(), false, || false);
     assert!(matches!(active, super::Outcome::Hit(h) if (h.volume_mm3 - 500.0).abs() < 1e-6), "active deadline must find the 500 mm³ overlap");
 }
+
+/// #2665: the overlap of an eccentric pin and its bore is a circular crescent.
+/// Opening the bore with a slot removes the entire crescent, even though the bodies'
+/// bounding boxes still overlap. The pin must not be reported as interfering.
+#[test]
+fn a_slot_through_the_bore_clears_an_eccentric_pin() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 5, "corner": [-10, -10, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 9, "base": [0, 0, -2], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 9, "base": [0.1, 0, -2], "operation": "new", "body_name": "Pin"}));
+    let r = run(&mut s, "inspect.interference", json!({"bodies": ["Plate", "Pin"]}));
+    let (radius, d): (f64, f64) = (3.0, 0.1);
+    let lens = 2.0 * radius * radius * (d / (2.0 * radius)).acos() - d / 2.0 * (4.0 * radius * radius - d * d).sqrt();
+    let want = 5.0 * (std::f64::consts::PI * radius * radius - lens);
+    assert_eq!(r["count"], 1, "{r}");
+    assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(0), "{r}");
+    assert!((f(&r["interferences"][0]["volume_mm3"]) - want).abs() < 1e-4, "{r}: expected {want}");
+    // Every point in the crescent has x > d/2, so the slot covers it completely.
+    run(&mut s, "solid.box", json!({"length": 4, "width": 8, "height": 7, "corner": [0, -4, -1], "operation": "cut", "targets": ["Plate"]}));
+    let r = run(&mut s, "inspect.interference", json!({"bodies": ["Plate", "Pin"]}));
+    assert_eq!(r["count"], 0, "{r}");
+    assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(0), "{r}");
+}
