@@ -5873,7 +5873,7 @@ fn bridged_pending_wait_emits_progress_notifications_when_progress_token_supplie
         Some("engine.execute") => running(),
         Some("control.pending") => {
             let n = polls.fetch_add(1, Ordering::SeqCst);
-            if n < 2 || (n >= 3 && n < 5) {
+            if n < 2 || (3..5).contains(&n) {
                 json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}})
             } else {
                 json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": true, "reply": {"ok": true, "result": {"filleted": true}}}})
